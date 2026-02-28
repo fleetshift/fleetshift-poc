@@ -1,0 +1,3 @@
+- "context engineering" built in
+- policy as input to placement
+- is there more we need to look at / be ready for in terms of reconciliation / updates over time? think use cases. i think this is addon driven, primarily?
