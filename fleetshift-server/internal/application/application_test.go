@@ -10,6 +10,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/syncworkflow"
 )
 
 type testHarness struct {
@@ -31,12 +32,20 @@ func setup(t *testing.T) testHarness {
 		Now:     func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
 	}
 
-	orchestration := &application.OrchestrationService{
-		Targets:     targetRepo,
+	wf := &domain.OrchestrationWorkflow{
 		Deployments: deploymentRepo,
+		Targets:     targetRepo,
 		Delivery:    deliverySvc,
 		Strategies:  domain.DefaultStrategyFactory{},
 	}
+
+	engine := &syncworkflow.Engine{}
+	runner, err := engine.OrchestrationRunner(wf)
+	if err != nil {
+		t.Fatalf("OrchestrationRunner: %v", err)
+	}
+
+	orchestration := &application.OrchestrationService{Workflow: runner}
 
 	return testHarness{
 		targets: &application.TargetService{Targets: targetRepo},

@@ -2,33 +2,33 @@ package domain
 
 import "context"
 
-// WorkflowStep is a durable step with a stable name, typed input, and
-// typed output. Implementations must be safe for at-least-once invocation.
-type WorkflowStep[I any, O any] interface {
+// Activity is a named, typed, idempotent operation. Implementations must
+// be safe for at-least-once invocation.
+type Activity[I any, O any] interface {
 	Name() string
 	Run(ctx context.Context, in I) (O, error)
 }
 
-// WorkflowDefinition defines the orchestration of steps. Its [Run] method
-// must be deterministic: no I/O, no randomness, no wall-clock reads. All
-// side effects go through [WorkflowRun.Step].
-type WorkflowDefinition[I any, O any] interface {
-	Name() string
-	Run(run WorkflowRun, in I) (O, error)
+// DurableRunner is the capability object provided to a running workflow.
+// It durably runs activities and provides a context for pure operations
+// that need cancellation propagation.
+type DurableRunner interface {
+	ID() string
+
+	// Context returns the workflow execution context. In a durable
+	// engine this is the deterministic replay context; in the
+	// synchronous backend it is the caller's context.
+	Context() context.Context
+
+	// Run durably runs an activity. The engine provides the activity's
+	// context internally; callers should use [RunActivity] for type safety.
+	Run(activity Activity[any, any], in any) (any, error)
 }
 
-// WorkflowRun is the capability object provided to a running workflow.
-// It provides the means to execute durable steps.
-type WorkflowRun interface {
-	RunID() string
-	ExecuteStep(ctx context.Context, step WorkflowStep[any, any], in any) (any, error)
-}
-
-// RunStep is a convenience function that provides type safety when
-// calling [WorkflowRun.ExecuteStep] with a typed [WorkflowStep].
-func RunStep[I any, O any](run WorkflowRun, ctx context.Context, step WorkflowStep[I, O], in I) (O, error) {
-	wrapper := &typedStepWrapper[I, O]{step: step}
-	result, err := run.ExecuteStep(ctx, wrapper, in)
+// RunActivity provides type-safe durable activity execution from within
+// a workflow body. It is a thin wrapper around [DurableRunner.Run].
+func RunActivity[I any, O any](runner DurableRunner, activity Activity[I, O], in I) (O, error) {
+	result, err := runner.Run(&activityAdapter[I, O]{activity: activity}, in)
 	if err != nil {
 		var zero O
 		return zero, err
@@ -36,30 +36,42 @@ func RunStep[I any, O any](run WorkflowRun, ctx context.Context, step WorkflowSt
 	return result.(O), nil
 }
 
-type typedStepWrapper[I any, O any] struct {
-	step WorkflowStep[I, O]
-}
-
-func (w *typedStepWrapper[I, O]) Name() string { return w.step.Name() }
-func (w *typedStepWrapper[I, O]) Run(ctx context.Context, in any) (any, error) {
-	return w.step.Run(ctx, in.(I))
-}
-
 // WorkflowHandle is a handle to a running or completed workflow execution.
 type WorkflowHandle[O any] interface {
 	WorkflowID() string
-	Get(ctx context.Context) (O, error)
+	AwaitResult(ctx context.Context) (O, error)
 }
 
-// RegisteredWorkflow is a workflow that has been registered with an engine
-// and can be invoked.
-type RegisteredWorkflow[I any, O any] interface {
-	Name() string
-	Run(ctx context.Context, in I) (WorkflowHandle[O], error)
+// OrchestrationRunner starts and awaits orchestration workflows.
+type OrchestrationRunner interface {
+	Run(ctx context.Context, deploymentID DeploymentID) (WorkflowHandle[struct{}], error)
 }
 
-// WorkflowRegistry registers steps and workflows with a durable execution
-// engine.
-type WorkflowRegistry interface {
-	RegisterWorkflow(wf WorkflowDefinition[any, any]) (RegisteredWorkflow[any, any], error)
+// WorkflowEngine creates runners for the workflow types known to the
+// domain. Infrastructure packages provide engine-specific implementations.
+type WorkflowEngine interface {
+	OrchestrationRunner(wf *OrchestrationWorkflow) (OrchestrationRunner, error)
+}
+
+// NewActivity creates an [Activity] from a stable name and a function.
+// Workflow types use this to define their activities as methods.
+func NewActivity[I, O any](name string, fn func(context.Context, I) (O, error)) Activity[I, O] {
+	return &activityFunc[I, O]{name: name, fn: fn}
+}
+
+type activityFunc[I, O any] struct {
+	name string
+	fn   func(context.Context, I) (O, error)
+}
+
+func (a *activityFunc[I, O]) Name() string                             { return a.name }
+func (a *activityFunc[I, O]) Run(ctx context.Context, in I) (O, error) { return a.fn(ctx, in) }
+
+// activityAdapter bridges a typed [Activity] to the any-typed
+// [DurableRunner.Run] interface.
+type activityAdapter[I any, O any] struct{ activity Activity[I, O] }
+
+func (a *activityAdapter[I, O]) Name() string { return a.activity.Name() }
+func (a *activityAdapter[I, O]) Run(ctx context.Context, in any) (any, error) {
+	return a.activity.Run(ctx, in.(I))
 }

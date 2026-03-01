@@ -1,6 +1,5 @@
-// Package syncworkflow provides a synchronous, in-process implementation
-// of the durable workflow port. Steps execute inline with no persistence
-// or replay. This is the starting backend; go-workflows replaces it later.
+// Package syncworkflow provides a synchronous, in-process [domain.WorkflowEngine].
+// Activities execute inline with no persistence or replay.
 package syncworkflow
 
 import (
@@ -13,49 +12,41 @@ import (
 
 var runCounter atomic.Int64
 
-// Registry implements [domain.WorkflowRegistry] with synchronous execution.
-type Registry struct{}
+// Engine implements [domain.WorkflowEngine] with synchronous, in-process
+// execution. No durable state is kept.
+type Engine struct{}
 
-func (r *Registry) RegisterWorkflow(wf domain.WorkflowDefinition[any, any]) (domain.RegisteredWorkflow[any, any], error) {
-	return &registeredWorkflow{wf: wf}, nil
+func (e *Engine) OrchestrationRunner(wf *domain.OrchestrationWorkflow) (domain.OrchestrationRunner, error) {
+	return &runner{wf: wf}, nil
 }
 
-type registeredWorkflow struct {
-	wf domain.WorkflowDefinition[any, any]
+type runner struct {
+	wf *domain.OrchestrationWorkflow
 }
 
-func (rw *registeredWorkflow) Name() string { return rw.wf.Name() }
-
-func (rw *registeredWorkflow) Run(ctx context.Context, in any) (domain.WorkflowHandle[any], error) {
+func (r *runner) Run(ctx context.Context, deploymentID domain.DeploymentID) (domain.WorkflowHandle[struct{}], error) {
 	id := runCounter.Add(1)
-	run := &syncRun{id: id, ctx: ctx}
-	result, err := rw.wf.Run(run, in)
-	return &syncHandle{id: id, result: result, err: err}, nil
+	dr := &syncRunner{id: id, ctx: ctx}
+	result, err := r.wf.Run(dr, deploymentID)
+	return &handle{id: id, result: result, err: err}, nil
 }
 
-type syncRun struct {
+type syncRunner struct {
 	id  int64
 	ctx context.Context
 }
 
-func (r *syncRun) RunID() string {
-	return fmt.Sprintf("sync-%d", r.id)
+func (r *syncRunner) ID() string              { return fmt.Sprintf("sync-%d", r.id) }
+func (r *syncRunner) Context() context.Context { return r.ctx }
+func (r *syncRunner) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(r.ctx, in)
 }
 
-func (r *syncRun) ExecuteStep(ctx context.Context, step domain.WorkflowStep[any, any], in any) (any, error) {
-	return step.Run(ctx, in)
-}
-
-type syncHandle struct {
+type handle struct {
 	id     int64
-	result any
+	result struct{}
 	err    error
 }
 
-func (h *syncHandle) WorkflowID() string {
-	return fmt.Sprintf("sync-%d", h.id)
-}
-
-func (h *syncHandle) Get(_ context.Context) (any, error) {
-	return h.result, h.err
-}
+func (h *handle) WorkflowID() string                      { return fmt.Sprintf("sync-%d", h.id) }
+func (h *handle) AwaitResult(_ context.Context) (struct{}, error) { return h.result, h.err }
