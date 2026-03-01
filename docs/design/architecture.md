@@ -232,6 +232,8 @@ The platform's orchestration pipeline is always the same regardless of which str
 
 The **workspace's target pool** is the set of targets that are valid candidates for a deployment. For a deployment in workspace W, the pool is all targets that belong to W or to any descendant workspace (see resource hierarchy, section 7). The platform loads the pool once per orchestration run; the placement strategy receives it as input and returns a subset (the resolved target set). Placement never fetches targets itself.
 
+**Placement view vs full target state.** The platform separates the state it *shares with placement* from the full target state it stores and passes to delivery. Placement receives only a **placement view** of each target (e.g. ID, name, labels). Other target metadata (e.g. properties, capacity, last-seen) are not passed to placement. As a result, placement cannot depend on them, and the platform need not consider changes to that metadata when deciding whether to re-resolve placement. Only changes to the placement view (e.g. labels, target join/leave) trigger placement invalidation.
+
 **Why pool as input:**
 
 - **Persistent authority.** A deployment has ongoing behavior (re-resolution on invalidation, fleet changes). At re-run time there is no "current user" to check—so the deployment's authority must be attached to the deployment. Creating the deployment in a workspace fixes that: the deployment can only ever see targets in that workspace's tree. The pool is that scope. (An alternative would be a deployment-scoped service principal with configured policy; the workspace model is equivalent to an implicit principal granted access to the workspace's targets.)

@@ -13,9 +13,11 @@ var testPool = []domain.TargetInfo{
 	{ID: "t3", Name: "cluster-c", Labels: map[string]string{"env": "prod", "region": "eu-west"}},
 }
 
+var testPlacementPool = domain.PlacementTargets(testPool)
+
 func TestStaticPlacement_ResolvesExactTargets(t *testing.T) {
 	s := &domain.StaticPlacement{Targets: []domain.TargetID{"t1", "t3"}}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +31,7 @@ func TestStaticPlacement_ResolvesExactTargets(t *testing.T) {
 
 func TestStaticPlacement_PreservesOrder(t *testing.T) {
 	s := &domain.StaticPlacement{Targets: []domain.TargetID{"t3", "t1"}}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +42,7 @@ func TestStaticPlacement_PreservesOrder(t *testing.T) {
 
 func TestStaticPlacement_UnknownTargetReturnsError(t *testing.T) {
 	s := &domain.StaticPlacement{Targets: []domain.TargetID{"t1", "missing"}}
-	_, err := s.Resolve(context.Background(), testPool)
+	_, err := s.Resolve(context.Background(), testPlacementPool)
 	if err == nil {
 		t.Fatal("expected error for unknown target")
 	}
@@ -48,7 +50,7 @@ func TestStaticPlacement_UnknownTargetReturnsError(t *testing.T) {
 
 func TestAllPlacement_ReturnsEntirePool(t *testing.T) {
 	s := &domain.AllPlacement{}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,7 +61,7 @@ func TestAllPlacement_ReturnsEntirePool(t *testing.T) {
 
 func TestAllPlacement_EmptyPool(t *testing.T) {
 	s := &domain.AllPlacement{}
-	got, err := s.Resolve(context.Background(), nil)
+	got, err := s.Resolve(context.Background(), ([]domain.PlacementTarget)(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +74,7 @@ func TestSelectorPlacement_MatchesSingleLabel(t *testing.T) {
 	s := &domain.SelectorPlacement{
 		Selector: domain.TargetSelector{MatchLabels: map[string]string{"env": "prod"}},
 	}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +87,7 @@ func TestSelectorPlacement_MatchesMultipleLabels(t *testing.T) {
 	s := &domain.SelectorPlacement{
 		Selector: domain.TargetSelector{MatchLabels: map[string]string{"env": "prod", "region": "eu-west"}},
 	}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +103,7 @@ func TestSelectorPlacement_NoMatches(t *testing.T) {
 	s := &domain.SelectorPlacement{
 		Selector: domain.TargetSelector{MatchLabels: map[string]string{"env": "dev"}},
 	}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +116,7 @@ func TestSelectorPlacement_EmptySelector(t *testing.T) {
 	s := &domain.SelectorPlacement{
 		Selector: domain.TargetSelector{MatchLabels: map[string]string{}},
 	}
-	got, err := s.Resolve(context.Background(), testPool)
+	got, err := s.Resolve(context.Background(), testPlacementPool)
 	if err != nil {
 		t.Fatal(err)
 	}

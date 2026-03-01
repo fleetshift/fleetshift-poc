@@ -10,11 +10,13 @@ type ManifestStrategy interface {
 
 // PlacementStrategy determines which targets to select from the available pool.
 //
-// Resolve is given the full target pool and returns the resolved target set.
-// The strategy may filter, rank, and limit the pool. The platform treats the
-// returned slice order as meaningful.
+// Resolve receives only the placement view of each target ([PlacementTarget]:
+// ID, Name, Labels). Properties and other target metadata are not visible, so
+// placement cannot depend on them and the platform need not invalidate when
+// they change. The strategy may filter, rank, and limit the pool. The platform
+// treats the returned slice order as meaningful.
 type PlacementStrategy interface {
-	Resolve(ctx context.Context, pool []TargetInfo) ([]TargetInfo, error)
+	Resolve(ctx context.Context, pool []PlacementTarget) ([]PlacementTarget, error)
 }
 
 // RolloutStrategy determines the pacing and ordering of delivery across targets.

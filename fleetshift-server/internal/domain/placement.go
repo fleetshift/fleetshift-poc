@@ -10,13 +10,13 @@ type StaticPlacement struct {
 	Targets []TargetID
 }
 
-func (s *StaticPlacement) Resolve(_ context.Context, pool []TargetInfo) ([]TargetInfo, error) {
-	index := make(map[TargetID]TargetInfo, len(pool))
+func (s *StaticPlacement) Resolve(_ context.Context, pool []PlacementTarget) ([]PlacementTarget, error) {
+	index := make(map[TargetID]PlacementTarget, len(pool))
 	for _, t := range pool {
 		index[t.ID] = t
 	}
 
-	result := make([]TargetInfo, 0, len(s.Targets))
+	result := make([]PlacementTarget, 0, len(s.Targets))
 	for _, id := range s.Targets {
 		t, ok := index[id]
 		if !ok {
@@ -30,8 +30,8 @@ func (s *StaticPlacement) Resolve(_ context.Context, pool []TargetInfo) ([]Targe
 // AllPlacement selects every target in the pool.
 type AllPlacement struct{}
 
-func (a *AllPlacement) Resolve(_ context.Context, pool []TargetInfo) ([]TargetInfo, error) {
-	result := make([]TargetInfo, len(pool))
+func (a *AllPlacement) Resolve(_ context.Context, pool []PlacementTarget) ([]PlacementTarget, error) {
+	result := make([]PlacementTarget, len(pool))
 	copy(result, pool)
 	return result, nil
 }
@@ -42,8 +42,8 @@ type SelectorPlacement struct {
 	Selector TargetSelector
 }
 
-func (s *SelectorPlacement) Resolve(_ context.Context, pool []TargetInfo) ([]TargetInfo, error) {
-	var result []TargetInfo
+func (s *SelectorPlacement) Resolve(_ context.Context, pool []PlacementTarget) ([]PlacementTarget, error) {
+	var result []PlacementTarget
 	for _, t := range pool {
 		if matchLabels(t.Labels, s.Selector.MatchLabels) {
 			result = append(result, t)

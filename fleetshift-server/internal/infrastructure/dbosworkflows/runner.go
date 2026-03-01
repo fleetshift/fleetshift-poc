@@ -28,6 +28,8 @@ func (e *Engine) OrchestrationRunner(wf *domain.OrchestrationWorkflow) (domain.O
 
 	registerActivity(invokers, wf.LoadDeployment())
 	registerActivity(invokers, wf.LoadTargetPool())
+	registerActivity(invokers, wf.ResolvePlacement())
+	registerActivity(invokers, wf.PlanRollout())
 	registerActivity(invokers, wf.GenerateManifests())
 	registerActivity(invokers, wf.DeliverToTarget())
 	registerActivity(invokers, wf.RemoveFromTarget())

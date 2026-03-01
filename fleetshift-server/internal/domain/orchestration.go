@@ -63,9 +63,10 @@ type RemoveInput struct {
 }
 
 // ResolvePlacementInput is the input to the resolve-placement activity.
+// Pool is the placement view of targets only; see [PlacementTarget].
 type ResolvePlacementInput struct {
 	Spec PlacementStrategySpec
-	Pool []TargetInfo
+	Pool []PlacementTarget
 }
 
 // PlanRolloutInput is the input to the plan-rollout activity.
@@ -107,10 +108,10 @@ func (w *OrchestrationWorkflow) LoadTargetPool() Activity[struct{}, []TargetInfo
 }
 
 // ResolvePlacement runs the deployment's placement strategy against the
-// target pool. Invoked as an activity so placement may perform I/O or
-// use state that changes over time.
-func (w *OrchestrationWorkflow) ResolvePlacement() Activity[ResolvePlacementInput, []TargetInfo] {
-	return NewActivity("resolve-placement", func(ctx context.Context, in ResolvePlacementInput) ([]TargetInfo, error) {
+// target pool (placement view only). Invoked as an activity so placement
+// may perform I/O or use state that changes over time.
+func (w *OrchestrationWorkflow) ResolvePlacement() Activity[ResolvePlacementInput, []PlacementTarget] {
+	return NewActivity("resolve-placement", func(ctx context.Context, in ResolvePlacementInput) ([]PlacementTarget, error) {
 		placement, err := w.Strategies.PlacementStrategy(in.Spec)
 		if err != nil {
 			return nil, err
@@ -179,13 +180,14 @@ func (w *OrchestrationWorkflow) Run(runner DurableRunner, deploymentID Deploymen
 
 	resolved, err := RunActivity(runner, w.ResolvePlacement(), ResolvePlacementInput{
 		Spec: dep.PlacementStrategy,
-		Pool: pool,
+		Pool: PlacementTargets(pool),
 	})
 	if err != nil {
 		return struct{}{}, fmt.Errorf("resolve placement: %w", err)
 	}
 
-	delta := ComputeTargetDelta(dep.ResolvedTargets, resolved, pool)
+	resolvedTargets := ResolvedTargetInfos(resolved, pool)
+	delta := ComputeTargetDelta(dep.ResolvedTargets, resolvedTargets, pool)
 
 	plan, err := RunActivity(runner, w.PlanRollout(), PlanRolloutInput{
 		Spec:  dep.RolloutStrategy,
