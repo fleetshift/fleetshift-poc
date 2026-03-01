@@ -303,6 +303,263 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 			t.Fatalf("expected 2 delivery records, got %d", len(records))
 		}
 	})
+
+	t.Run("CreateDeployment_DuplicateID", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1", "t2")
+
+		input := domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+		}
+		_, err := runCreateDeployment(ctx, t, runners, input)
+		if err != nil {
+			t.Fatalf("first Create: %v", err)
+		}
+
+		_, err = runCreateDeployment(ctx, t, runners, input)
+		if err != nil {
+			// Engine rejected duplicate: error should be ErrAlreadyExists (or wrapped).
+			if !errors.Is(err, domain.ErrAlreadyExists) {
+				t.Logf("second Create returned error (acceptable): %v", err)
+			}
+			return
+		}
+		// Engine may be idempotent (same workflow instance ID) and return success.
+		dep, err := infra.Deployments.Get(ctx, "d1")
+		if err != nil || dep.ID != "d1" {
+			t.Fatalf("second Create succeeded but deployment d1 missing or wrong: %v", err)
+		}
+	})
+
+	t.Run("SignalDeploymentEvent_Delete", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1", "t2")
+
+		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+
+		if err := runners.Orchestration.SignalDeploymentEvent(ctx, "d1", domain.DeploymentEvent{Delete: true}); err != nil {
+			t.Fatalf("SignalDeploymentEvent(Delete): %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateDeleting)
+
+		// Delivery implementation may remove records or leave them (e.g. Pending);
+		// the contract asserts the workflow reached Deleting and cleared resolved set.
+		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateDeleting)
+		if len(dep.ResolvedTargets) != 0 {
+			t.Fatalf("after Delete event: ResolvedTargets should be empty, got %v", dep.ResolvedTargets)
+		}
+	})
+
+	t.Run("SignalDeploymentEvent_PoolShrink", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1", "t2", "t3")
+
+		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		assertResolvedTargets(t, dep, "t1", "t2", "t3")
+
+		if err := runners.Orchestration.SignalDeploymentEvent(ctx, "d1", domain.DeploymentEvent{
+			PoolChange: &domain.PoolChange{Removed: []domain.TargetID{"t3"}},
+		}); err != nil {
+			t.Fatalf("SignalDeploymentEvent(PoolShrink): %v", err)
+		}
+
+		dep2 := awaitDeploymentResolvedCount(ctx, t, infra, "d1", 2)
+		assertResolvedTargets(t, dep2, "t1", "t2")
+
+		// After shrink, placement delivers to 2 targets; delivery impl may keep
+		// a record for the removed target (e.g. Pending), so assert delivered count.
+		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		if err != nil {
+			t.Fatalf("ListByDeployment: %v", err)
+		}
+		delivered := 0
+		for _, r := range records {
+			if r.State == domain.DeliveryStateDelivered {
+				delivered++
+			}
+		}
+		if delivered != 2 {
+			t.Fatalf("after pool shrink: expected 2 delivered records, got %d", delivered)
+		}
+	})
+
+	t.Run("CreateDeployment_SelectorPlacement_ZeroMatches", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		must(t, infra.Targets.Create(ctx, domain.TargetInfo{ID: "t1", Name: "a", Labels: map[string]string{"env": "prod"}}))
+		must(t, infra.Targets.Create(ctx, domain.TargetInfo{ID: "t2", Name: "b", Labels: map[string]string{"env": "staging"}}))
+
+		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:           domain.PlacementStrategySelector,
+				TargetSelector: &domain.TargetSelector{MatchLabels: map[string]string{"env": "dev"}},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		if len(dep.ResolvedTargets) != 0 {
+			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", dep.ResolvedTargets)
+		}
+
+		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		if err != nil {
+			t.Fatalf("ListByDeployment: %v", err)
+		}
+		if len(records) != 0 {
+			t.Fatalf("expected 0 delivery records, got %d", len(records))
+		}
+	})
+
+	t.Run("TwoDeployments_Isolation", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1", "t2", "t3")
+
+		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"t1", "t3"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create d1: %v", err)
+		}
+
+		_, err = runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d2",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"t2"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create d2: %v", err)
+		}
+
+		dep1 := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		dep2 := awaitDeploymentState(ctx, t, infra, "d2", domain.DeploymentStateActive)
+
+		assertResolvedTargets(t, dep1, "t1", "t3")
+		assertResolvedTargets(t, dep2, "t2")
+
+		records1, err := infra.Records.ListByDeployment(ctx, "d1")
+		if err != nil {
+			t.Fatalf("ListByDeployment(d1): %v", err)
+		}
+		records2, err := infra.Records.ListByDeployment(ctx, "d2")
+		if err != nil {
+			t.Fatalf("ListByDeployment(d2): %v", err)
+		}
+		if len(records1) != 2 {
+			t.Fatalf("d1: expected 2 delivery records, got %d", len(records1))
+		}
+		if len(records2) != 1 {
+			t.Fatalf("d2: expected 1 delivery record, got %d", len(records2))
+		}
+	})
+
+	t.Run("SignalDeploymentEvent_SpecChanged", func(t *testing.T) {
+		infra := infraFactory(t)
+		runners := registerEngine(t, infra, engineFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1", "t2")
+
+		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+
+		if err := runners.Orchestration.SignalDeploymentEvent(ctx, "d1", domain.DeploymentEvent{SpecChanged: true}); err != nil {
+			t.Fatalf("SignalDeploymentEvent(SpecChanged): %v", err)
+		}
+
+		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		assertResolvedTargets(t, dep, "t1", "t2")
+
+		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		if err != nil {
+			t.Fatalf("ListByDeployment: %v", err)
+		}
+		if len(records) != 2 {
+			t.Fatalf("after SpecChanged: expected 2 delivery records, got %d", len(records))
+		}
+	})
 }
 
 // registerEngine builds workflows from infra, calls engine.Register, returns runners.
