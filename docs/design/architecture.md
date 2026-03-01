@@ -161,9 +161,6 @@ A staged rollout supports several gate types within its stages:
 
 The `deploymentHealth` gate enables choreography between related deployments without a centralized DAG engine. A database deployment can use a staged rollout where the first stage rolls out the database and the second stage gates on the API deployment's health — or vice versa. This composes with `DeploymentGroup` (section 3) for multi-component application orchestration.
 
-
-For the full Go type definitions of these strategies, see [go_contracts_and_testing.md](go_contracts_and_testing.md#value-types). For the HTTP endpoints that create and manage deployments using these strategies, see [api_reference.md](api_reference.md#4-deployments).
-
 ### Declarative placement and safety
 
 Placement strategies are **declarative**: they express the desired target set at any point in time via `Resolve(pool) -> targets`. Removal is implicit -- the platform computes the set difference between the previous resolved set and the current one. The placement strategy never explicitly says "remove from target B"; it just stops including B. This keeps the strategy interface stateless and the contract simple.
@@ -248,30 +245,24 @@ for each deployment in workspace:
     targets = deployment.PlacementStrategy.Resolve(workspace_target_pool)
     delta = diff(targets, previous_targets)
 
-    // Removals happen immediately -- rollout strategy does not gate removals
-    for gone_target in delta.removed:
-        deployment.ManifestStrategy.OnRemoved(gone_target)
-        remove(gone_target)
-
-    // Additions and updates are paced by the rollout strategy
-    targets_needing_delivery = delta.added
-    if manifest_invalidated:
-        targets_needing_delivery = targets_needing_delivery + delta.unchanged
-
-    if len(targets_needing_delivery) > 0:
-        plan = deployment.RolloutStrategy.Plan(
-            TargetDelta{Added: delta.added, Unchanged: delta.unchanged},
-            current_delivery_state,
-        )
-        for batch in plan.batches:
-            await_tasks(batch.beforeTasks)   // approval, health check
-            for target in batch.targets (up to batch.maxConcurrency):
+    plan = deployment.RolloutStrategy.Plan(delta)   // full delta: added, removed, unchanged
+    for step in plan.steps:
+        if step.remove:
+            for target in step.remove.targets:
+                deployment.ManifestStrategy.OnRemoved(target)  // when addon-driven
+                remove(target)
+            await_tasks(step.remove.afterTasks)   // optional gates
+        if step.deliver:
+            await_tasks(step.deliver.beforeTasks)   // approval, health check
+            for target in step.deliver.targets (up to step.deliver.maxConcurrency):
                 gctx = GenerateContext{Target: target, Namespace: ..., Config: ...}
                 manifests = deployment.ManifestStrategy.Generate(gctx)
                 if manifests != stored_previous(target):
                     deliver(target, manifests)  // request/response: blocks until delivery agent ACK
-            await_tasks(batch.afterTasks)    // timed wait, health check, deployment health, approval
+            await_tasks(step.deliver.afterTasks)    // timed wait, health check, deployment health, approval
 ```
+
+The rollout strategy returns a single ordered sequence of steps; each step is either remove (from no-longer-placed targets) or deliver (generate and apply to targets). The orchestrator runs steps in order: "Is this a remove? Remove. Is this a deliver? Deliver." Removals are thus part of the plan and can be paced or gated (e.g. staged teardown, approval before removing from production). A strategy that wants "immediate removal" emits one remove step with all departed targets first, then deliver steps (e.g. `ImmediateRollout`: one remove step, one deliver step).
 
 **Two-phase manifest diffing:** Manifest diffing is two-phase: (1) the platform compares the new generated output against the stored previous output per deployment per target -- if identical, it skips delivery entirely (no network call); (2) when a change is detected, the platform sends the full new manifest payload to the target's delivery agent. For Kubernetes targets, the delivery agent applies using Server-Side Apply, which handles merging platform-owned fields with target-side mutations (HPAs, admission controllers) without overwriting unmanaged fields. Other target types implement their own apply semantics.
 
@@ -297,7 +288,7 @@ A strategy-initiated signal re-runs only that strategy and its downstream effect
 
 **Trigger protocol:** The platform re-evaluates a deployment when any strategy signals a change:
 
-- **Placement-driven**: the placement strategy's resolved target set changes. New targets get manifests generated and delivered. Departed targets get manifests removed. The manifest strategy is not involved in removal -- the platform handles cleanup autonomously. The rollout strategy governs how fast new targets receive manifests.
+- **Placement-driven**: the placement strategy's resolved target set changes. The rollout strategy's plan includes both remove steps (for departed targets) and deliver steps (for new and unchanged targets). The platform runs the plan in order; the manifest strategy is not involved in removal — the platform handles cleanup. The rollout strategy governs pacing and gates for both removals and deliveries.
 - **Manifest-driven**: the manifest source changes. The platform re-calls the manifest strategy's Generate for all currently-placed targets, diffs against previous manifests, and delivers only the changes. The rollout strategy governs the pacing -- a staged rollout means canary targets get updated first.
 - **Rollout-driven**: a gate clears (approval granted, timed wait expires, health check passes, deployment health satisfied). The platform advances to the next batch in the rollout plan and continues delivery. If a gate fails (health check reports degraded targets), the platform pauses and optionally triggers rollback.
 
@@ -306,6 +297,8 @@ A strategy-initiated signal re-runs only that strategy and its downstream effect
 ---
 
 ## 4. Rollout strategies
+
+The rollout strategy's `Plan(delta)` returns an ordered sequence of **steps**; each step is either **remove** (from departed targets) or **deliver** (generate and apply to targets). The platform runs steps in order. This unified model lets a strategy control both removal pacing (e.g. staged teardown, approval before removing from production) and delivery pacing. Default "immediate" behaviour is one remove step (all departed targets) then one deliver step (all added and unchanged).
 
 For `immediate`, the platform delivers to all resolved targets in parallel with no ordering or gating. This is the default when no rollout strategy is specified. For `rolling`, the platform partitions the resolved targets into batches of the configured size and proceeds to the next batch only when the current batch reports healthy. For `staged`, the user defines an ordered list of named stages, each selecting a subset of the resolved targets by label. Stages execute sequentially. Within a stage, targets are updated up to `maxConcurrency` at a time. Between stages, configurable gates control progression.
 

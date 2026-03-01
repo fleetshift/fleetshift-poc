@@ -11,8 +11,9 @@ type StrategyFactory interface {
 }
 
 // DefaultStrategyFactory creates built-in strategy implementations.
-// It lives in the domain layer because all built-in strategies are
-// pure functions with no I/O.
+// Built-in strategies are currently pure with no I/O; the orchestration
+// pipeline invokes all strategies from activities so that custom or
+// future strategies may perform I/O or stateful behavior safely.
 type DefaultStrategyFactory struct{}
 
 func (f DefaultStrategyFactory) ManifestStrategy(spec ManifestStrategySpec) (ManifestStrategy, error) {

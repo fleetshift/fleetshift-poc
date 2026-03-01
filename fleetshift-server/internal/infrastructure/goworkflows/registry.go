@@ -44,6 +44,12 @@ func (e *Engine) OrchestrationRunner(wf *domain.OrchestrationWorkflow) (domain.O
 	if err := registerActivity(e.Worker, invokers, wf.LoadTargetPool()); err != nil {
 		return nil, err
 	}
+	if err := registerActivity(e.Worker, invokers, wf.ResolvePlacement()); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(e.Worker, invokers, wf.PlanRollout()); err != nil {
+		return nil, err
+	}
 	if err := registerActivity(e.Worker, invokers, wf.GenerateManifests()); err != nil {
 		return nil, err
 	}

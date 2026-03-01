@@ -13,14 +13,27 @@ type TargetDelta struct {
 	Unchanged []TargetInfo
 }
 
-// RolloutBatch represents a group of targets to update together.
-type RolloutBatch struct {
+// RolloutStep is a single step in a rollout plan: either remove from targets
+// or deliver to targets. Exactly one of Remove and Deliver is non-nil.
+type RolloutStep struct {
+	Remove  *RolloutStepRemove  // remove deployment from these targets
+	Deliver *RolloutStepDeliver // generate and deliver to these targets
+}
+
+// RolloutStepRemove is a step that removes the deployment from the listed targets.
+type RolloutStepRemove struct {
 	Targets []TargetInfo
 }
 
-// RolloutPlan is the output of a rollout strategy: an ordered sequence of batches.
+// RolloutStepDeliver is a step that generates manifests and delivers to the listed targets.
+type RolloutStepDeliver struct {
+	Targets []TargetInfo
+}
+
+// RolloutPlan is the output of a rollout strategy: an ordered sequence of steps.
+// The orchestrator runs steps in order; each step is either remove or deliver.
 type RolloutPlan struct {
-	Batches []RolloutBatch
+	Steps []RolloutStep
 }
 
 // GenerateContext provides the target context for manifest generation.
@@ -49,10 +62,24 @@ type RemoveInput struct {
 	DeploymentID DeploymentID
 }
 
+// ResolvePlacementInput is the input to the resolve-placement activity.
+type ResolvePlacementInput struct {
+	Spec PlacementStrategySpec
+	Pool []TargetInfo
+}
+
+// PlanRolloutInput is the input to the plan-rollout activity.
+type PlanRolloutInput struct {
+	Spec  *RolloutStrategySpec
+	Delta TargetDelta
+}
+
 // OrchestrationWorkflow is the deployment pipeline expressed as a
-// deterministic workflow. All I/O goes through activities; only pure
-// computation (strategy resolution, delta, rollout planning) happens
-// inline. Infrastructure packages accept this struct to construct an
+// deterministic workflow. All I/O and strategy invocations run inside
+// activities so that placement, manifest, and rollout strategies may
+// perform I/O or stateful behavior. Only pure computation (e.g.
+// [ComputeTargetDelta]) runs inline in the workflow body.
+// Infrastructure packages accept this struct to construct an
 // [OrchestrationRunner] backed by a specific durable execution engine.
 type OrchestrationWorkflow struct {
 	Deployments DeploymentRepository
@@ -76,6 +103,29 @@ func (w *OrchestrationWorkflow) LoadDeployment() Activity[DeploymentID, Deployme
 func (w *OrchestrationWorkflow) LoadTargetPool() Activity[struct{}, []TargetInfo] {
 	return NewActivity("load-target-pool", func(ctx context.Context, _ struct{}) ([]TargetInfo, error) {
 		return w.Targets.List(ctx)
+	})
+}
+
+// ResolvePlacement runs the deployment's placement strategy against the
+// target pool. Invoked as an activity so placement may perform I/O or
+// use state that changes over time.
+func (w *OrchestrationWorkflow) ResolvePlacement() Activity[ResolvePlacementInput, []TargetInfo] {
+	return NewActivity("resolve-placement", func(ctx context.Context, in ResolvePlacementInput) ([]TargetInfo, error) {
+		placement, err := w.Strategies.PlacementStrategy(in.Spec)
+		if err != nil {
+			return nil, err
+		}
+		return placement.Resolve(ctx, in.Pool)
+	})
+}
+
+// PlanRollout runs the deployment's rollout strategy to produce an
+// ordered execution plan from the target delta. Invoked as an activity
+// so rollout may perform I/O or use state that changes over time.
+func (w *OrchestrationWorkflow) PlanRollout() Activity[PlanRolloutInput, RolloutPlan] {
+	return NewActivity("plan-rollout", func(ctx context.Context, in PlanRolloutInput) (RolloutPlan, error) {
+		rollout := w.Strategies.RolloutStrategy(in.Spec)
+		return rollout.Plan(ctx, in.Delta)
 	})
 }
 
@@ -127,49 +177,54 @@ func (w *OrchestrationWorkflow) Run(runner DurableRunner, deploymentID Deploymen
 		return struct{}{}, fmt.Errorf("load target pool: %w", err)
 	}
 
-	placement, err := w.Strategies.PlacementStrategy(dep.PlacementStrategy)
-	if err != nil {
-		return struct{}{}, fmt.Errorf("create placement strategy: %w", err)
-	}
-	resolved, err := placement.Resolve(runner.Context(), pool)
+	resolved, err := RunActivity(runner, w.ResolvePlacement(), ResolvePlacementInput{
+		Spec: dep.PlacementStrategy,
+		Pool: pool,
+	})
 	if err != nil {
 		return struct{}{}, fmt.Errorf("resolve placement: %w", err)
 	}
 
 	delta := ComputeTargetDelta(dep.ResolvedTargets, resolved, pool)
 
-	for _, removed := range delta.Removed {
-		if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
-			Target:       removed,
-			DeploymentID: deploymentID,
-		}); err != nil {
-			return struct{}{}, fmt.Errorf("remove delivery for target %s: %w", removed.ID, err)
-		}
-	}
-
-	rollout := w.Strategies.RolloutStrategy(dep.RolloutStrategy)
-	plan, err := rollout.Plan(runner.Context(), delta)
+	plan, err := RunActivity(runner, w.PlanRollout(), PlanRolloutInput{
+		Spec:  dep.RolloutStrategy,
+		Delta: delta,
+	})
 	if err != nil {
 		return struct{}{}, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	for _, batch := range plan.Batches {
-		for _, target := range batch.Targets {
-			manifests, err := RunActivity(runner, w.GenerateManifests(), GenerateManifestsInput{
-				Spec:   dep.ManifestStrategy,
-				Target: target,
-			})
-			if err != nil {
-				return struct{}{}, fmt.Errorf("generate manifests for target %s: %w", target.ID, err)
+	for _, step := range plan.Steps {
+		if step.Remove != nil {
+			for _, target := range step.Remove.Targets {
+				if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
+					Target:       target,
+					DeploymentID: deploymentID,
+				}); err != nil {
+					return struct{}{}, fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
+				}
 			}
-
-			if _, err := RunActivity(runner, w.DeliverToTarget(), DeliverInput{
-				Target:       target,
-				DeploymentID: deploymentID,
-				Manifests:    manifests,
-			}); err != nil {
-				return struct{}{}, fmt.Errorf("deliver to target %s: %w", target.ID, err)
+			continue
+		}
+		if step.Deliver != nil {
+			for _, target := range step.Deliver.Targets {
+				manifests, err := RunActivity(runner, w.GenerateManifests(), GenerateManifestsInput{
+					Spec:   dep.ManifestStrategy,
+					Target: target,
+				})
+				if err != nil {
+					return struct{}{}, fmt.Errorf("generate manifests for target %s: %w", target.ID, err)
+				}
+				if _, err := RunActivity(runner, w.DeliverToTarget(), DeliverInput{
+					Target:       target,
+					DeploymentID: deploymentID,
+					Manifests:    manifests,
+				}); err != nil {
+					return struct{}{}, fmt.Errorf("deliver to target %s: %w", target.ID, err)
+				}
 			}
+			continue
 		}
 	}
 
