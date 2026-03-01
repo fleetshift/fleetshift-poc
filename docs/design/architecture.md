@@ -231,6 +231,16 @@ The platform's orchestration pipeline is always the same regardless of which str
 6. Diff against previous state; add, update, or remove as needed
 7. Execute the batch's after-tasks (timed wait, health check, deployment health, approval gate) before proceeding
 
+### Workspace target pool
+
+The **workspace's target pool** is the set of targets that are valid candidates for a deployment. For a deployment in workspace W, the pool is all targets that belong to W or to any descendant workspace (see resource hierarchy, section 7). The platform loads the pool once per orchestration run; the placement strategy receives it as input and returns a subset (the resolved target set). Placement never fetches targets itself.
+
+**Why pool as input:**
+
+- **Persistent authority.** A deployment has ongoing behavior (re-resolution on invalidation, fleet changes). At re-run time there is no "current user" to check—so the deployment's authority must be attached to the deployment. Creating the deployment in a workspace fixes that: the deployment can only ever see targets in that workspace's tree. The pool is that scope. (An alternative would be a deployment-scoped service principal with configured policy; the workspace model is equivalent to an implicit principal granted access to the workspace's targets.)
+- **Composition.** Placement has a uniform shape: `Resolve(ctx, pool) → targets`. The output of one placement can be the input to another (e.g. scope → selector → scored). That composition only works if placement consistently expects a pool.
+- **Re-evaluation.** When the fleet or labels change, the platform reloads the pool and re-calls Resolve. Placement stays a pure, scope-agnostic function; static placement validates "ID in pool," selector and "all" filter or take the pool.
+
 **Consolidated orchestration pseudo-code:**
 
 ```
