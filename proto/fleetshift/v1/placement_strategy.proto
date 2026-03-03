@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "fleetshift/v1/target_selector.proto";
+
+// PlacementStrategy specifies how targets are selected.
+message PlacementStrategy {
+  // Type of placement strategy.
+  Type type = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Target IDs for static placement. Used when type is TYPE_STATIC.
+  repeated string target_ids = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Label selector for target matching. Used when type is TYPE_SELECTOR.
+  TargetSelector target_selector = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Type of placement strategy.
+  enum Type {
+    // Default value. Not used.
+    TYPE_UNSPECIFIED = 0;
+
+    // Place on an explicit set of targets.
+    TYPE_STATIC = 1;
+
+    // Place on all eligible targets.
+    TYPE_ALL = 2;
+
+    // Place on targets matching a label selector.
+    TYPE_SELECTOR = 3;
+  }
+}

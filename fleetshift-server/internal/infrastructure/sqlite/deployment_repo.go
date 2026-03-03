@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -37,9 +38,10 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		string(d.ID), string(ms), string(ps), nullString(rs), string(rt), string(d.State),
+		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, created_at, updated_at, etag)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State),
+		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -52,7 +54,7 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state
+		`SELECT id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, created_at, updated_at, etag
 		 FROM deployments WHERE id = ?`,
 		string(id),
 	)
@@ -61,7 +63,7 @@ func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domai
 
 func (r *DeploymentRepo) List(ctx context.Context) ([]domain.Deployment, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT id, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state
+		`SELECT id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, created_at, updated_at, etag
 		 FROM deployments`,
 	)
 	if err != nil {
@@ -92,9 +94,10 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE deployments
 		 SET manifest_strategy = ?, placement_strategy = ?, rollout_strategy = ?,
-		     resolved_targets = ?, state = ?
+		     resolved_targets = ?, state = ?, updated_at = ?, etag = ?
 		 WHERE id = ?`,
-		string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(d.ID),
+		string(ms), string(ps), nullString(rs), string(rt), string(d.State),
+		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, string(d.ID),
 	)
 	if err != nil {
 		return fmt.Errorf("update deployment: %w", err)
@@ -120,16 +123,25 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 
 func scanDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
-	var id, msJSON, psJSON, rtJSON, stateStr string
+	var id, uid, msJSON, psJSON, rtJSON, stateStr, createdAtStr, updatedAtStr, etag string
 	var rsJSON sql.NullString
-	if err := s.Scan(&id, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr); err != nil {
+	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return d, fmt.Errorf("%w", domain.ErrNotFound)
 		}
 		return d, fmt.Errorf("scan deployment: %w", err)
 	}
 	d.ID = domain.DeploymentID(id)
+	d.UID = uid
 	d.State = domain.DeploymentState(stateStr)
+	d.Etag = etag
+
+	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
+		d.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
+		d.UpdatedAt = t
+	}
 
 	if err := json.Unmarshal([]byte(msJSON), &d.ManifestStrategy); err != nil {
 		return d, fmt.Errorf("unmarshal manifest strategy: %w", err)

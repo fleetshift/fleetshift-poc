@@ -13,7 +13,7 @@ import (
 
 // Engine implements [domain.WorkflowEngine] with synchronous, in-process
 // execution. No durable state is kept. Workflow instances are tracked so
-// that [orchestrationRunner.SignalDeploymentEvent] can deliver events to
+// that [orchestrationJournal.SignalDeploymentEvent] can deliver events to
 // the correct goroutine.
 type Engine struct {
 	mu        sync.Mutex
@@ -46,7 +46,7 @@ func (e *Engine) removeInstance(id domain.DeploymentID) {
 
 func (e *Engine) Register(owf *domain.OrchestrationWorkflow, cwf *domain.CreateDeploymentWorkflow) (domain.WorkflowRunners, error) {
 	orchRunner := &orchestrationRunner{engine: e, wf: owf}
-	createRunner := &createDeploymentWorkflowRunner{
+	createRunner := &createDeploymentRunner{
 		cwf:        cwf,
 		orchRunner: orchRunner,
 	}
@@ -67,11 +67,12 @@ func (r *orchestrationRunner) Run(ctx context.Context, deploymentID domain.Deplo
 	done := make(chan orchResult, 1)
 
 	go func() {
-		dr := &deploymentSyncRunner{
-			syncRunner: syncRunner{id: string(deploymentID), ctx: ctx},
-			events:     inst.events,
+		journal := &orchestrationJournal{
+			baseJournal: baseJournal{id: string(deploymentID), ctx: ctx},
+			engine:      r.engine,
+			events:      inst.events,
 		}
-		val, err := r.wf.Run(dr, deploymentID)
+		val, err := r.wf.Run(journal, deploymentID)
 		r.engine.removeInstance(deploymentID)
 		done <- orchResult{val: val, err: err}
 	}()
@@ -79,8 +80,59 @@ func (r *orchestrationRunner) Run(ctx context.Context, deploymentID domain.Deplo
 	return &orchHandle{id: string(deploymentID), done: done}, nil
 }
 
-func (r *orchestrationRunner) SignalDeploymentEvent(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
-	inst := r.engine.getInstance(deploymentID)
+type createDeploymentRunner struct {
+	cwf        *domain.CreateDeploymentWorkflow
+	orchRunner domain.OrchestrationRunner
+}
+
+func (r *createDeploymentRunner) Run(ctx context.Context, input domain.CreateDeploymentInput) (domain.WorkflowHandle[domain.Deployment], error) {
+	done := make(chan createResult, 1)
+
+	go func() {
+		journal := &createDeploymentJournal{
+			baseJournal: baseJournal{id: "create-" + string(input.ID), ctx: ctx},
+			orchRunner:  r.orchRunner,
+			ctx:         ctx,
+		}
+		val, err := r.cwf.Run(journal, input)
+		done <- createResult{val: val, err: err}
+	}()
+
+	return &createHandle{id: "create-" + string(input.ID), done: done}, nil
+}
+
+// --- shared base Journal ---
+
+type baseJournal struct {
+	id  string
+	ctx context.Context
+}
+
+func (j *baseJournal) ID() string              { return j.id }
+func (j *baseJournal) Context() context.Context { return j.ctx }
+func (j *baseJournal) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(j.ctx, in)
+}
+
+// --- OrchestrationJournal ---
+
+type orchestrationJournal struct {
+	baseJournal
+	engine *Engine
+	events <-chan domain.DeploymentEvent
+}
+
+func (j *orchestrationJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+	select {
+	case event := <-j.events:
+		return event, nil
+	case <-j.ctx.Done():
+		return domain.DeploymentEvent{}, j.ctx.Err()
+	}
+}
+
+func (j *orchestrationJournal) SignalDeploymentEvent(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
+	inst := j.engine.getInstance(deploymentID)
 	select {
 	case inst.events <- event:
 		return nil
@@ -89,66 +141,16 @@ func (r *orchestrationRunner) SignalDeploymentEvent(ctx context.Context, deploym
 	}
 }
 
-type createDeploymentWorkflowRunner struct {
-	cwf        *domain.CreateDeploymentWorkflow
-	orchRunner domain.OrchestrationRunner
-}
+// --- CreateDeploymentJournal ---
 
-func (r *createDeploymentWorkflowRunner) Run(ctx context.Context, input domain.CreateDeploymentInput) (domain.WorkflowHandle[domain.Deployment], error) {
-	done := make(chan createResult, 1)
-
-	go func() {
-		dr := &createDeploymentSyncRunner{
-			syncRunner: syncRunner{id: "create-" + string(input.ID), ctx: ctx},
-			orchRunner: r.orchRunner,
-			ctx:        ctx,
-		}
-		val, err := r.cwf.Run(dr, input)
-		done <- createResult{val: val, err: err}
-	}()
-
-	return &createHandle{id: "create-" + string(input.ID), done: done}, nil
-}
-
-// --- shared syncRunner (DurableRunner) ---
-
-type syncRunner struct {
-	id  string
-	ctx context.Context
-}
-
-func (r *syncRunner) ID() string              { return r.id }
-func (r *syncRunner) Context() context.Context { return r.ctx }
-func (r *syncRunner) Run(activity domain.Activity[any, any], in any) (any, error) {
-	return activity.Run(r.ctx, in)
-}
-
-// --- DeploymentWorkflowRunner ---
-
-type deploymentSyncRunner struct {
-	syncRunner
-	events <-chan domain.DeploymentEvent
-}
-
-func (r *deploymentSyncRunner) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
-	select {
-	case event := <-r.events:
-		return event, nil
-	case <-r.ctx.Done():
-		return domain.DeploymentEvent{}, r.ctx.Err()
-	}
-}
-
-// --- CreateDeploymentRunner ---
-
-type createDeploymentSyncRunner struct {
-	syncRunner
+type createDeploymentJournal struct {
+	baseJournal
 	orchRunner domain.OrchestrationRunner
 	ctx        context.Context
 }
 
-func (r *createDeploymentSyncRunner) StartOrchestration(deploymentID domain.DeploymentID) error {
-	_, err := r.orchRunner.Run(r.ctx, deploymentID)
+func (j *createDeploymentJournal) StartOrchestration(deploymentID domain.DeploymentID) error {
+	_, err := j.orchRunner.Run(j.ctx, deploymentID)
 	return err
 }
 

@@ -1,0 +1,40 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "fleetshift/v1/deployment.proto";
+import "fleetshift/v1/create_deployment_request.proto";
+import "fleetshift/v1/get_deployment_request.proto";
+import "fleetshift/v1/list_deployments_request.proto";
+import "fleetshift/v1/list_deployments_response.proto";
+
+// DeploymentService manages deployment resources.
+service DeploymentService {
+  // CreateDeployment creates a new deployment and begins orchestration.
+  rpc CreateDeployment(CreateDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      post: "/v1/deployments"
+      body: "deployment"
+    };
+    option (google.api.method_signature) = "deployment,deployment_id";
+  }
+
+  // GetDeployment retrieves a deployment by resource name.
+  rpc GetDeployment(GetDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      get: "/v1/{name=deployments/*}"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // ListDeployments lists deployments.
+  rpc ListDeployments(ListDeploymentsRequest) returns (ListDeploymentsResponse) {
+    option (google.api.http) = {
+      get: "/v1/deployments"
+    };
+  }
+}

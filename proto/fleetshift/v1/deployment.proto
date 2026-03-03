@@ -1,0 +1,75 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
+import "fleetshift/v1/manifest_strategy.proto";
+import "fleetshift/v1/placement_strategy.proto";
+import "fleetshift/v1/rollout_strategy.proto";
+
+// Deployment is the composition of manifest, placement, and rollout strategies.
+//
+// A declarative-friendly resource (AIP-128): the `state` and `reconciling`
+// fields communicate reconciliation progress to declarative clients.
+message Deployment {
+  option (google.api.resource) = {
+    type: "fleetshift.io/Deployment"
+    pattern: "deployments/{deployment}"
+    style: DECLARATIVE_FRIENDLY
+  };
+
+  // Resource name. Format: deployments/{deployment}
+  string name = 1 [(google.api.field_behavior) = IDENTIFIER];
+
+  // System-assigned UUID.
+  string uid = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Strategy for generating manifests.
+  ManifestStrategy manifest_strategy = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Strategy for selecting targets.
+  PlacementStrategy placement_strategy = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Strategy for pacing the rollout. If omitted, immediate rollout is used.
+  RolloutStrategy rollout_strategy = 5 [(google.api.field_behavior) = OPTIONAL];
+
+  // Target IDs resolved by placement.
+  repeated string resolved_target_ids = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Lifecycle state of the deployment.
+  State state = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // True while the resource is reconciling toward desired state.
+  bool reconciling = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // When the deployment was created.
+  google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // When the deployment was last updated.
+  google.protobuf.Timestamp update_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Concurrency control token.
+  string etag = 11;
+
+  // Lifecycle state of a deployment.
+  enum State {
+    // Default value. Not used.
+    STATE_UNSPECIFIED = 0;
+
+    // Orchestration is in progress.
+    STATE_CREATING = 1;
+
+    // Reconciled and operational.
+    STATE_ACTIVE = 2;
+
+    // Removal is in progress.
+    STATE_DELETING = 3;
+
+    // Orchestration failed permanently.
+    STATE_FAILED = 4;
+  }
+}

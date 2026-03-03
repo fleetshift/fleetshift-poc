@@ -3,17 +3,18 @@ package domain_test
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// recordingRunner wraps a DeploymentWorkflowRunner and records activity
+// recordingJournal wraps an OrchestrationJournal and records activity
 // names and target-related inputs so tests can assert execution sequence.
-type recordingRunner struct {
+type recordingJournal struct {
 	ctx      context.Context
 	records  []activityRecord
-	delegate domain.DeploymentWorkflowRunner
+	delegate domain.OrchestrationJournal
 }
 
 type activityRecord struct {
@@ -22,10 +23,10 @@ type activityRecord struct {
 	TargetID domain.TargetID
 }
 
-func (r *recordingRunner) ID() string              { return r.delegate.ID() }
-func (r *recordingRunner) Context() context.Context { return r.ctx }
+func (j *recordingJournal) ID() string              { return j.delegate.ID() }
+func (j *recordingJournal) Context() context.Context { return j.ctx }
 
-func (r *recordingRunner) Run(activity domain.Activity[any, any], in any) (any, error) {
+func (j *recordingJournal) Run(activity domain.Activity[any, any], in any) (any, error) {
 	name := activity.Name()
 	var targetID domain.TargetID
 	switch v := in.(type) {
@@ -36,26 +37,33 @@ func (r *recordingRunner) Run(activity domain.Activity[any, any], in any) (any, 
 	case domain.DeliverInput:
 		targetID = v.Target.ID
 	}
-	r.records = append(r.records, activityRecord{Name: name, TargetID: targetID})
-	return r.delegate.Run(activity, in)
+	j.records = append(j.records, activityRecord{Name: name, TargetID: targetID})
+	return j.delegate.Run(activity, in)
 }
 
-func (r *recordingRunner) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
-	return r.delegate.AwaitDeploymentEvent()
+func (j *recordingJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+	return j.delegate.AwaitDeploymentEvent()
 }
 
-func (r *recordingRunner) activityNames() []string {
-	names := make([]string, len(r.records))
-	for i, rec := range r.records {
+func (j *recordingJournal) SignalDeploymentEvent(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
+	return j.delegate.SignalDeploymentEvent(ctx, deploymentID, event)
+}
+
+func (j *recordingJournal) activityNames() []string {
+	names := make([]string, len(j.records))
+	for i, rec := range j.records {
 		names[i] = rec.Name
 	}
 	return names
 }
 
 // stubDeploymentRepo returns a fixed deployment for Get and accepts Update.
+// It tracks the full update history for tests that need to assert
+// intermediate states (e.g. Active before Deleting).
 type stubDeploymentRepo struct {
 	deployment domain.Deployment
 	updated    *domain.Deployment
+	updates    []domain.Deployment
 }
 
 func (s *stubDeploymentRepo) Create(_ context.Context, d domain.Deployment) error {
@@ -79,6 +87,7 @@ func (s *stubDeploymentRepo) List(_ context.Context) ([]domain.Deployment, error
 
 func (s *stubDeploymentRepo) Update(_ context.Context, d domain.Deployment) error {
 	s.updated = &d
+	s.updates = append(s.updates, d)
 	return nil
 }
 
@@ -109,50 +118,105 @@ func (s *stubTargetRepo) List(_ context.Context) ([]domain.TargetInfo, error) {
 
 func (s *stubTargetRepo) Delete(_ context.Context, _ domain.TargetID) error { return nil }
 
-// noopDelivery implements DeliveryService with no-op Deliver and Remove.
-// It calls observer.Done synchronously so that the workflow's
-// awaitDeliveries loop can proceed.
-type noopDelivery struct{}
-
-func (noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	observer.Done(result)
-	return result, nil
+// stubDeliveryRepo implements DeliveryRepository with an in-memory map.
+type stubDeliveryRepo struct {
+	deliveries map[domain.DeliveryID]domain.Delivery
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ domain.DeliveryObserver) error {
+func newStubDeliveryRepo() *stubDeliveryRepo {
+	return &stubDeliveryRepo{deliveries: make(map[domain.DeliveryID]domain.Delivery)}
+}
+
+func (s *stubDeliveryRepo) Put(_ context.Context, d domain.Delivery) error {
+	s.deliveries[d.ID] = d
 	return nil
 }
 
-// singleEventRunner is a minimal DeploymentWorkflowRunner that delivers
+func (s *stubDeliveryRepo) Get(_ context.Context, id domain.DeliveryID) (domain.Delivery, error) {
+	d, ok := s.deliveries[id]
+	if !ok {
+		return domain.Delivery{}, domain.ErrNotFound
+	}
+	return d, nil
+}
+
+func (s *stubDeliveryRepo) GetByDeploymentTarget(_ context.Context, depID domain.DeploymentID, tgtID domain.TargetID) (domain.Delivery, error) {
+	for _, d := range s.deliveries {
+		if d.DeploymentID == depID && d.TargetID == tgtID {
+			return d, nil
+		}
+	}
+	return domain.Delivery{}, domain.ErrNotFound
+}
+
+func (s *stubDeliveryRepo) ListByDeployment(_ context.Context, depID domain.DeploymentID) ([]domain.Delivery, error) {
+	var result []domain.Delivery
+	for _, d := range s.deliveries {
+		if d.DeploymentID == depID {
+			result = append(result, d)
+		}
+	}
+	return result, nil
+}
+
+func (s *stubDeliveryRepo) DeleteByDeployment(_ context.Context, depID domain.DeploymentID) error {
+	for id, d := range s.deliveries {
+		if d.DeploymentID == depID {
+			delete(s.deliveries, id)
+		}
+	}
+	return nil
+}
+
+// noopDelivery implements DeliveryService with no-op Deliver and Remove.
+// It calls signaler.Done synchronously so that the workflow's
+// awaitDeliveries loop can proceed.
+type noopDelivery struct{}
+
+func (noopDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// singleEventJournal is a minimal OrchestrationJournal that delivers
 // a single DeploymentEvent and then signals delete on the next call.
 // It runs activities synchronously. The extra channel receives
-// delivery-completion events injected by OnDeliveryDone; they are
-// drained before the scripted event sequence.
-type singleEventRunner struct {
+// delivery-completion events injected via SignalDeploymentEvent; they
+// are drained before the scripted event sequence.
+type singleEventJournal struct {
 	ctx       context.Context
 	event     domain.DeploymentEvent
 	delivered bool
 	extra     chan domain.DeploymentEvent
 }
 
-func (r *singleEventRunner) ID() string              { return "test-single" }
-func (r *singleEventRunner) Context() context.Context { return r.ctx }
-func (r *singleEventRunner) Run(activity domain.Activity[any, any], in any) (any, error) {
-	return activity.Run(r.ctx, in)
+func (j *singleEventJournal) ID() string              { return "test-single" }
+func (j *singleEventJournal) Context() context.Context { return j.ctx }
+func (j *singleEventJournal) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(j.ctx, in)
 }
 
-func (r *singleEventRunner) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+func (j *singleEventJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
 	select {
-	case e := <-r.extra:
+	case e := <-j.extra:
 		return e, nil
 	default:
 	}
-	if !r.delivered {
-		r.delivered = true
-		return r.event, nil
+	if !j.delivered {
+		j.delivered = true
+		return j.event, nil
 	}
 	return domain.DeploymentEvent{Delete: true}, nil
+}
+
+func (j *singleEventJournal) SignalDeploymentEvent(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+	j.extra <- event
+	return nil
 }
 
 func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
@@ -170,7 +234,7 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 				Targets: []domain.TargetID{"new1", "new2"},
 			},
 			RolloutStrategy: nil,
-			State:           domain.DeploymentStatePending,
+			State:           domain.DeploymentStateCreating,
 		},
 	}
 	pool := []domain.TargetInfo{
@@ -181,25 +245,21 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
-	extra := make(chan domain.DeploymentEvent, 16)
 	wf := &domain.OrchestrationWorkflow{
 		Deployments: depRepo,
 		Targets:     targetRepo,
+		Deliveries:  newStubDeliveryRepo(),
 		Delivery:    noopDelivery{},
 		Strategies:  domain.DefaultStrategyFactory{},
-		OnDeliveryDone: func(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
-			extra <- event
-			return nil
-		},
 	}
 	ctx := context.Background()
 
-	baseRunner := &singleEventRunner{
+	baseJournal := &singleEventJournal{
 		ctx:   ctx,
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
-		extra: extra,
+		extra: make(chan domain.DeploymentEvent, 16),
 	}
-	recorder := &recordingRunner{ctx: ctx, delegate: baseRunner}
+	recorder := &recordingJournal{ctx: ctx, delegate: baseJournal}
 
 	_, err := wf.Run(recorder, deploymentID)
 	if err != nil {
@@ -242,32 +302,28 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 			ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 			PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 			RolloutStrategy:   nil,
-			State:             domain.DeploymentStatePending,
+			State:             domain.DeploymentStateCreating,
 		},
 	}
 	pool := []domain.TargetInfo{{ID: "t1"}}
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
-	extra := make(chan domain.DeploymentEvent, 16)
 	wf := &domain.OrchestrationWorkflow{
 		Deployments: depRepo,
 		Targets:     targetRepo,
+		Deliveries:  newStubDeliveryRepo(),
 		Delivery:    noopDelivery{},
 		Strategies:  domain.DefaultStrategyFactory{},
-		OnDeliveryDone: func(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
-			extra <- event
-			return nil
-		},
 	}
 	ctx := context.Background()
 
-	baseRunner := &singleEventRunner{
+	baseJournal := &singleEventJournal{
 		ctx:   ctx,
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
-		extra: extra,
+		extra: make(chan domain.DeploymentEvent, 16),
 	}
-	recorder := &recordingRunner{ctx: ctx, delegate: baseRunner}
+	recorder := &recordingJournal{ctx: ctx, delegate: baseJournal}
 
 	_, err := wf.Run(recorder, deploymentID)
 	if err != nil {
@@ -290,5 +346,176 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	}
 	if !hasPlanRollout {
 		t.Errorf("workflow must invoke plan-rollout activity; got names: %v", names)
+	}
+}
+
+func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
+	deploymentID := domain.DeploymentID("empty-pool")
+	depRepo := &stubDeploymentRepo{
+		deployment: domain.Deployment{
+			ID: deploymentID,
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type: domain.PlacementStrategyAll,
+			},
+			State: domain.DeploymentStateCreating,
+		},
+	}
+
+	targetRepo := &stubTargetRepo{targets: nil}
+
+	wf := &domain.OrchestrationWorkflow{
+		Deployments: depRepo,
+		Targets:     targetRepo,
+		Deliveries:  newStubDeliveryRepo(),
+		Delivery:    noopDelivery{},
+		Strategies:  domain.DefaultStrategyFactory{},
+	}
+
+	journal := &singleEventJournal{
+		ctx:   context.Background(),
+		extra: make(chan domain.DeploymentEvent, 16),
+	}
+
+	_, err := wf.Run(journal, deploymentID)
+	if err == nil {
+		t.Fatal("expected error from empty pool, got nil")
+	}
+	if !strings.Contains(err.Error(), "zero targets") {
+		t.Errorf("error should mention zero targets, got: %v", err)
+	}
+
+	if depRepo.updated == nil {
+		t.Fatal("deployment should have been updated to Failed state")
+	}
+	if depRepo.updated.State != domain.DeploymentStateFailed {
+		t.Errorf("deployment state = %q, want %q", depRepo.updated.State, domain.DeploymentStateFailed)
+	}
+}
+
+// asyncDelivery returns Accepted immediately and calls signaler.Done
+// in a background goroutine, simulating how real delivery agents
+// (e.g. kind) operate.
+type asyncDelivery struct {
+	done chan struct{}
+}
+
+func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	go func() {
+		signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		if a.done != nil {
+			close(a.done)
+		}
+	}()
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// asyncJournal blocks on AwaitDeploymentEvent until a signal arrives
+// on the events channel, then sends a Delete on the next call. This
+// is needed for testing async delivery agents where the completion
+// signal arrives after the activity returns.
+type asyncJournal struct {
+	ctx    context.Context
+	events chan domain.DeploymentEvent
+	sawAll bool
+}
+
+func (j *asyncJournal) ID() string              { return "test-async" }
+func (j *asyncJournal) Context() context.Context { return j.ctx }
+func (j *asyncJournal) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(j.ctx, in)
+}
+
+func (j *asyncJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+	if j.sawAll {
+		return domain.DeploymentEvent{Delete: true}, nil
+	}
+	e := <-j.events
+	return e, nil
+}
+
+func (j *asyncJournal) SignalDeploymentEvent(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+	j.events <- event
+	if event.DeliveryCompleted != nil {
+		j.sawAll = true
+	}
+	return nil
+}
+
+func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
+	deploymentID := domain.DeploymentID("async-test")
+	depRepo := &stubDeploymentRepo{
+		deployment: domain.Deployment{
+			ID: deploymentID,
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"t1"},
+			},
+			State: domain.DeploymentStateCreating,
+		},
+	}
+	pool := []domain.TargetInfo{{ID: "t1"}}
+	targetRepo := &stubTargetRepo{targets: pool}
+	deliveryRepo := newStubDeliveryRepo()
+	asyncDel := &asyncDelivery{done: make(chan struct{})}
+
+	wf := &domain.OrchestrationWorkflow{
+		Deployments: depRepo,
+		Targets:     targetRepo,
+		Deliveries:  deliveryRepo,
+		Delivery:    asyncDel,
+		Strategies:  domain.DefaultStrategyFactory{},
+	}
+
+	journal := &asyncJournal{
+		ctx:    context.Background(),
+		events: make(chan domain.DeploymentEvent, 16),
+	}
+
+	_, err := wf.Run(journal, deploymentID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	<-asyncDel.done
+
+	// The workflow transitions Active → (Delete event) → Deleting.
+	// Reaching Deleting proves Active was reached, since Delete is
+	// only processed from the Active event loop.
+	sawActive := false
+	for _, u := range depRepo.updates {
+		if u.State == domain.DeploymentStateActive {
+			sawActive = true
+		}
+	}
+	if !sawActive {
+		states := make([]string, len(depRepo.updates))
+		for i, u := range depRepo.updates {
+			states[i] = string(u.State)
+		}
+		t.Fatalf("workflow never reached Active; state transitions: %v", states)
+	}
+	if depRepo.updated.State != domain.DeploymentStateDeleting {
+		t.Errorf("final deployment state = %q, want %q", depRepo.updated.State, domain.DeploymentStateDeleting)
+	}
+
+	did := domain.DeliveryID("async-test:t1")
+	d, err := deliveryRepo.Get(context.Background(), did)
+	if err != nil {
+		t.Fatalf("delivery record not found: %v", err)
+	}
+	if d.State != domain.DeliveryStateDelivered {
+		t.Errorf("delivery state = %q, want %q", d.State, domain.DeliveryStateDelivered)
 	}
 }

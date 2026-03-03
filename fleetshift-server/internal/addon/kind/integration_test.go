@@ -46,14 +46,11 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	owf.OnDeliveryDone = runners.Orchestration.SignalDeploymentEvent
-
 	targetSvc := &application.TargetService{Targets: targetRepo}
 	deploySvc := &application.DeploymentService{
-		Deployments:   deploymentRepo,
-		Deliveries:    deliveryRepo,
-		CreateWF:      runners.CreateDeployment,
-		Orchestration: &application.OrchestrationService{Workflow: runners.Orchestration},
+		Deployments: deploymentRepo,
+		Deliveries:  deliveryRepo,
+		CreateWF:    runners.CreateDeployment,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

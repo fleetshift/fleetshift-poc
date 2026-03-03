@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -16,9 +17,12 @@ type Factory func(t *testing.T) domain.DeploymentRepository
 
 // Run exercises the [domain.DeploymentRepository] contract.
 func Run(t *testing.T, factory Factory) {
+	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
+
 	sampleDeployment := func() domain.Deployment {
 		return domain.Deployment{
-			ID: "d1",
+			ID:  "d1",
+			UID: "uid-abc-123",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
@@ -27,7 +31,10 @@ func Run(t *testing.T, factory Factory) {
 				Type:    domain.PlacementStrategyStatic,
 				Targets: []domain.TargetID{"t1", "t2"},
 			},
-			State: domain.DeploymentStatePending,
+			State:     domain.DeploymentStateCreating,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
+			Etag:      "etag-v1",
 		}
 	}
 
@@ -50,8 +57,20 @@ func Run(t *testing.T, factory Factory) {
 		if len(got.PlacementStrategy.Targets) != 2 {
 			t.Errorf("PlacementStrategy.Targets = %d, want 2", len(got.PlacementStrategy.Targets))
 		}
-		if got.State != domain.DeploymentStatePending {
-			t.Errorf("State = %q, want %q", got.State, domain.DeploymentStatePending)
+		if got.State != domain.DeploymentStateCreating {
+			t.Errorf("State = %q, want %q", got.State, domain.DeploymentStateCreating)
+		}
+		if got.UID != "uid-abc-123" {
+			t.Errorf("UID = %q, want %q", got.UID, "uid-abc-123")
+		}
+		if !got.CreatedAt.Equal(fixedTime) {
+			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, fixedTime)
+		}
+		if !got.UpdatedAt.Equal(fixedTime) {
+			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt, fixedTime)
+		}
+		if got.Etag != "etag-v1" {
+			t.Errorf("Etag = %q, want %q", got.Etag, "etag-v1")
 		}
 	})
 
@@ -80,8 +99,11 @@ func Run(t *testing.T, factory Factory) {
 		d := sampleDeployment()
 		_ = repo.Create(ctx, d)
 
+		laterTime := fixedTime.Add(5 * time.Minute)
 		d.State = domain.DeploymentStateActive
 		d.ResolvedTargets = []domain.TargetID{"t1", "t2"}
+		d.UpdatedAt = laterTime
+		d.Etag = "etag-v2"
 		if err := repo.Update(ctx, d); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
@@ -92,6 +114,15 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if len(got.ResolvedTargets) != 2 {
 			t.Errorf("ResolvedTargets = %d, want 2", len(got.ResolvedTargets))
+		}
+		if !got.CreatedAt.Equal(fixedTime) {
+			t.Errorf("CreatedAt changed after Update: got %v, want %v", got.CreatedAt, fixedTime)
+		}
+		if !got.UpdatedAt.Equal(laterTime) {
+			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt, laterTime)
+		}
+		if got.Etag != "etag-v2" {
+			t.Errorf("Etag = %q, want %q", got.Etag, "etag-v2")
 		}
 	})
 

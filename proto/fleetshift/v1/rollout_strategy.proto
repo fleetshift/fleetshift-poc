@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// RolloutStrategy specifies how the rollout is paced.
+message RolloutStrategy {
+  // Type of rollout strategy.
+  Type type = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Type of rollout strategy.
+  enum Type {
+    // Default value. Not used.
+    TYPE_UNSPECIFIED = 0;
+
+    // Deliver to all targets simultaneously.
+    TYPE_IMMEDIATE = 1;
+  }
+}

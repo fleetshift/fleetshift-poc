@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "google/api/resource.proto";
+
+// Request message for
+// [DeploymentService.GetDeployment][fleetshift.v1.DeploymentService.GetDeployment].
+message GetDeploymentRequest {
+  // The resource name of the deployment to retrieve.
+  // Format: deployments/{deployment}
+  string name = 1 [
+    (google.api.field_behavior) = REQUIRED,
+    (google.api.resource_reference) = {
+      type: "fleetshift.io/Deployment"
+    }
+  ];
+}

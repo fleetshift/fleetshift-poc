@@ -15,11 +15,10 @@ import (
 )
 
 type testHarness struct {
-	targets       *application.TargetService
-	deployments   *application.DeploymentService
-	orchestration *application.OrchestrationService
-	deliveries    *sqlite.DeliveryRepo
-	depRepo       *sqlite.DeploymentRepo
+	targets     *application.TargetService
+	deployments *application.DeploymentService
+	deliveries  *sqlite.DeliveryRepo
+	depRepo     *sqlite.DeploymentRepo
 }
 
 const testTargetType domain.TargetType = "test"
@@ -56,21 +55,15 @@ func setup(t *testing.T) testHarness {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	owf.OnDeliveryDone = runners.Orchestration.SignalDeploymentEvent
-
-	orchestration := &application.OrchestrationService{Workflow: runners.Orchestration}
-
 	return testHarness{
 		targets: &application.TargetService{Targets: targetRepo},
 		deployments: &application.DeploymentService{
-			Deployments:   deploymentRepo,
-			Deliveries:    deliveryRepo,
-			CreateWF:      runners.CreateDeployment,
-			Orchestration: orchestration,
+			Deployments: deploymentRepo,
+			Deliveries:  deliveryRepo,
+			CreateWF:    runners.CreateDeployment,
 		},
-		orchestration: orchestration,
-		deliveries:    deliveryRepo,
-		depRepo:       deploymentRepo,
+		deliveries: deliveryRepo,
+		depRepo:    deploymentRepo,
 	}
 }
 
@@ -87,28 +80,6 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, repo *sqlite.Deploy
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for deployment %s to reach state %q", id, want)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-func awaitDeploymentResolvedCount(ctx context.Context, t *testing.T, repo *sqlite.DeploymentRepo, id domain.DeploymentID, want int) domain.Deployment {
-	t.Helper()
-	for {
-		dep, err := repo.Get(ctx, id)
-		if err != nil && !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("Get(%s): %v", id, err)
-		}
-		if err == nil && len(dep.ResolvedTargets) == want {
-			return dep
-		}
-		select {
-		case <-ctx.Done():
-			last := 0
-			if err == nil {
-				last = len(dep.ResolvedTargets)
-			}
-			t.Fatalf("timed out waiting for deployment %s to have %d resolved targets (last: %d)", id, want, last)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
@@ -300,93 +271,6 @@ func TestCreateDeployment_MissingID(t *testing.T) {
 	_, err := h.deployments.Create(context.Background(), domain.CreateDeploymentInput{})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
-	}
-}
-
-func TestSignalDeploymentEvent_PoolChange(t *testing.T) {
-	h := setup(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	registerTargets(t, h, "t1", "t2")
-
-	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "d1",
-		ManifestStrategy: domain.ManifestStrategySpec{
-			Type:      domain.ManifestStrategyInline,
-			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
-		},
-		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
-	assertResolvedTargets(t, dep, "t1", "t2")
-
-	must(t, h.targets.Register(ctx, domain.TargetInfo{ID: "t3", Type: testTargetType, Name: "cluster-t3"}))
-	pool, err := h.targets.List(ctx)
-	if err != nil {
-		t.Fatalf("List targets: %v", err)
-	}
-	if len(pool) != 3 {
-		t.Fatalf("expected 3 targets, got %d", len(pool))
-	}
-	if err := h.orchestration.SignalDeploymentEvent(ctx, "d1", domain.DeploymentEvent{
-		PoolChange: &domain.PoolChange{Set: pool},
-	}); err != nil {
-		t.Fatalf("SignalDeploymentEvent: %v", err)
-	}
-
-	dep2 := awaitDeploymentResolvedCount(ctx, t, h.depRepo, "d1", 3)
-	assertResolvedTargets(t, dep2, "t1", "t2", "t3")
-
-	records, err := h.deliveries.ListByDeployment(ctx, "d1")
-	if err != nil {
-		t.Fatalf("ListByDeployment: %v", err)
-	}
-	if len(records) != 3 {
-		t.Fatalf("expected 3 delivery records after pool change, got %d", len(records))
-	}
-}
-
-func TestSignalDeploymentEvent_ManifestInvalidated(t *testing.T) {
-	h := setup(t)
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-
-	registerTargets(t, h, "t1", "t2")
-
-	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "d1",
-		ManifestStrategy: domain.ManifestStrategySpec{
-			Type:      domain.ManifestStrategyInline,
-			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
-		},
-		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
-
-	if err := h.orchestration.SignalDeploymentEvent(ctx, "d1", domain.DeploymentEvent{
-		ManifestInvalidated: true,
-	}); err != nil {
-		t.Fatalf("SignalDeploymentEvent: %v", err)
-	}
-
-	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
-	assertResolvedTargets(t, dep, "t1", "t2")
-
-	records, err := h.deliveries.ListByDeployment(ctx, "d1")
-	if err != nil {
-		t.Fatalf("ListByDeployment: %v", err)
-	}
-	if len(records) != 2 {
-		t.Fatalf("expected 2 delivery records, got %d", len(records))
 	}
 }
 

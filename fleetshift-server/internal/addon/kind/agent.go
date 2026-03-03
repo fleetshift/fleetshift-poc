@@ -43,7 +43,7 @@ type ClusterProvider interface {
 // ClusterProviderFactory creates a [ClusterProvider] with the given
 // logger wired in. Each delivery creates its own provider so that
 // kind's log output is captured per-delivery via the
-// [domain.DeliveryObserver].
+// [domain.DeliverySignaler].
 type ClusterProviderFactory func(logger log.Logger) ClusterProvider
 
 // Agent implements [domain.DeliveryAgent] for kind clusters.
@@ -59,22 +59,22 @@ func NewAgent(factory ClusterProviderFactory) *Agent {
 // Deliver validates all manifests synchronously. If validation passes,
 // it returns [domain.DeliveryStateAccepted] immediately and performs
 // the actual cluster creation in a background goroutine. Kind's own
-// log output flows through the [domain.DeliveryObserver] via the
+// log output flows through the [domain.DeliverySignaler] via the
 // [observerLogger] adapter.
-func (a *Agent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
+func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
 	}
 
-	provider := a.providerFactory(NewObserverLogger(observer, time.Now))
+	provider := a.providerFactory(NewObserverLogger(ctx, signaler, time.Now))
 
-	go a.deliverAsync(provider, specs, observer)
+	go a.deliverAsync(ctx, provider, specs, signaler)
 
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ domain.DeliveryObserver) error {
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -91,19 +91,19 @@ func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, e
 	return specs, nil
 }
 
-func (a *Agent) deliverAsync(provider ClusterProvider, specs []ClusterSpec, observer domain.DeliveryObserver) {
+func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, specs []ClusterSpec, signaler *domain.DeliverySignaler) {
 	for _, spec := range specs {
 		if a.clusterExists(provider, spec.Name) {
-			observer.Emit(domain.DeliveryEvent{
+			signaler.Emit(ctx, domain.DeliveryEvent{
 				Kind:    domain.DeliveryEventProgress,
 				Message: fmt.Sprintf("Deleting existing cluster %q for recreate", spec.Name),
 			})
 			if err := provider.Delete(spec.Name, ""); err != nil {
-				observer.Emit(domain.DeliveryEvent{
+				signaler.Emit(ctx, domain.DeliveryEvent{
 					Kind:    domain.DeliveryEventError,
 					Message: fmt.Sprintf("delete existing kind cluster %q for recreate: %v", spec.Name, err),
 				})
-				observer.Done(domain.DeliveryResult{
+				signaler.Done(ctx, domain.DeliveryResult{
 					State:   domain.DeliveryStateFailed,
 					Message: fmt.Sprintf("delete existing kind cluster %q for recreate: %v", spec.Name, err),
 				})
@@ -117,11 +117,11 @@ func (a *Agent) deliverAsync(provider ClusterProvider, specs []ClusterSpec, obse
 		}
 
 		if err := provider.Create(spec.Name, opts...); err != nil {
-			observer.Emit(domain.DeliveryEvent{
+			signaler.Emit(ctx, domain.DeliveryEvent{
 				Kind:    domain.DeliveryEventError,
 				Message: fmt.Sprintf("create kind cluster %q: %v", spec.Name, err),
 			})
-			observer.Done(domain.DeliveryResult{
+			signaler.Done(ctx, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: fmt.Sprintf("create kind cluster %q: %v", spec.Name, err),
 			})
@@ -129,7 +129,7 @@ func (a *Agent) deliverAsync(provider ClusterProvider, specs []ClusterSpec, obse
 		}
 	}
 
-	observer.Done(domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
 func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {

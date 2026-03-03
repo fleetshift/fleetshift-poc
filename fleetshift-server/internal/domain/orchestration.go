@@ -3,6 +3,9 @@ package domain
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // TargetDelta represents the difference between the previous and current
@@ -84,27 +87,28 @@ type DeploymentAndPool struct {
 	Pool       []TargetInfo
 }
 
-// DeploymentWorkflowRunner is the execution-time capability passed into
-// [OrchestrationWorkflow.Run]. It extends [DurableRunner] with the ability
-// to block until a deployment-scoped event arrives. Engines (DBOS,
-// go-workflows, sync) implement this interface; the workflow body never
-// interacts with DurableRunner directly.
-type DeploymentWorkflowRunner interface {
-	DurableRunner
+// OrchestrationJournal is the durable execution journal for
+// [OrchestrationWorkflow.Run]. It extends [Journal] with the ability
+// to await and signal deployment-scoped events. Engines (DBOS,
+// go-workflows, sync) implement this interface.
+type OrchestrationJournal interface {
+	Journal
 
 	// AwaitDeploymentEvent blocks until the engine delivers the next
 	// [DeploymentEvent] for this workflow instance.
 	AwaitDeploymentEvent() (DeploymentEvent, error)
-}
-
-// OrchestrationRunner starts orchestration workflows and delivers
-// deployment events to running instances (app-facing API).
-type OrchestrationRunner interface {
-	Run(ctx context.Context, deploymentID DeploymentID) (WorkflowHandle[struct{}], error)
 
 	// SignalDeploymentEvent delivers a [DeploymentEvent] to the
-	// workflow instance identified by deploymentID.
+	// workflow instance identified by deploymentID. The signal is
+	// journaled so that it survives engine restarts.
 	SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
+}
+
+// OrchestrationRunner starts orchestration workflows (app-facing API).
+// Deployment events are delivered to running instances via the
+// [OrchestrationJournal] from within the workflow itself.
+type OrchestrationRunner interface {
+	Run(ctx context.Context, deploymentID DeploymentID) (WorkflowHandle[struct{}], error)
 }
 
 // OrchestrationWorkflow is the deployment pipeline expressed as a
@@ -115,12 +119,26 @@ type OrchestrationRunner interface {
 // Infrastructure packages accept this struct to construct an
 // [OrchestrationRunner] backed by a specific durable execution engine.
 type OrchestrationWorkflow struct {
-	Deployments    DeploymentRepository
-	Targets        TargetRepository
-	Deliveries     DeliveryRepository
-	Delivery       DeliveryService
-	Strategies     StrategyFactory
-	OnDeliveryDone func(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
+	Deployments      DeploymentRepository
+	Targets          TargetRepository
+	Deliveries       DeliveryRepository
+	Delivery         DeliveryService
+	Strategies       StrategyFactory
+	Observer         DeploymentObserver
+	DeliveryObserver DeliveryObserver
+	Now              func() time.Time
+
+	// journal is set by Run before any activities execute. Activity
+	// closures read it at invocation time to access journal capabilities
+	// (e.g. signaling deployment events).
+	journal OrchestrationJournal
+}
+
+func (w *OrchestrationWorkflow) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
 }
 
 func (w *OrchestrationWorkflow) Name() string { return "orchestrate-deployment" }
@@ -184,72 +202,66 @@ func (w *OrchestrationWorkflow) GenerateManifests() Activity[GenerateManifestsIn
 	})
 }
 
-// DeliverToTarget delivers manifests to a target. It creates a
-// [signalingObserver] that transitions the [Delivery] entity through
-// its lifecycle states and signals the workflow on completion.
+// DeliverToTarget delivers manifests to a target. It persists a
+// [Delivery] record in [DeliveryStatePending], creates a
+// [DeliverySignaler] for lifecycle state transitions and workflow
+// signaling, then dispatches to the [DeliveryService].
+//
+// The delivery receives [context.Background] rather than the activity
+// context. Delivery agents may run asynchronously (returning
+// immediately and completing in a background goroutine), and the
+// activity context is canceled once go-workflows completes the
+// activity task. This matches the production architecture where
+// delivery runs on a remote fleetlet with its own context; trace
+// propagation across the boundary is done explicitly, not via Go
+// context inheritance.
 func (w *OrchestrationWorkflow) DeliverToTarget() Activity[DeliverInput, DeliveryResult] {
 	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (DeliveryResult, error) {
-		obs := &signalingObserver{
-			deploymentID: in.DeploymentID,
-			deliveryID:   in.DeliveryID,
-			deliveries:   w.Deliveries,
-			signal:       w.OnDeliveryDone,
+		now := w.now()
+		if err := w.Deliveries.Put(ctx, Delivery{
+			ID:           in.DeliveryID,
+			DeploymentID: in.DeploymentID,
+			TargetID:     in.Target.ID,
+			Manifests:    in.Manifests,
+			State:        DeliveryStatePending,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}); err != nil {
+			return DeliveryResult{}, fmt.Errorf("create delivery record: %w", err)
 		}
-		return w.Delivery.Deliver(ctx, in.Target, in.DeliveryID, in.Manifests, obs)
+
+		signaler := NewDeliverySignaler(
+			in.DeploymentID, in.DeliveryID, in.Target,
+			w.Deliveries, w.journal.SignalDeploymentEvent,
+			w.DeliveryObserver,
+		)
+
+		return w.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, signaler)
 	})
 }
 
 // RemoveFromTarget removes a deployment's manifests from a target.
 func (w *OrchestrationWorkflow) RemoveFromTarget() Activity[RemoveInput, struct{}] {
 	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (struct{}, error) {
-		return struct{}{}, w.Delivery.Remove(ctx, in.Target, in.DeliveryID, NopDeliveryObserver{})
+		return struct{}{}, w.Delivery.Remove(ctx, in.Target, in.DeliveryID, &DeliverySignaler{})
 	})
 }
 
-// UpdateDeployment persists a deployment's updated state.
+// UpdateDeployment persists a deployment's updated state, bumping
+// UpdatedAt and regenerating the Etag.
 func (w *OrchestrationWorkflow) UpdateDeployment() Activity[Deployment, struct{}] {
 	return NewActivity("update-deployment", func(ctx context.Context, d Deployment) (struct{}, error) {
+		d.UpdatedAt = w.now()
+		d.Etag = uuid.New().String()
 		return struct{}{}, w.Deployments.Update(ctx, d)
 	})
 }
 
-// signalingObserver is a [DeliveryObserver] that updates the [Delivery]
-// entity's state in the repository and signals the orchestration
-// workflow when the delivery reaches a terminal state.
-type signalingObserver struct {
-	deploymentID DeploymentID
-	deliveryID   DeliveryID
-	deliveries   DeliveryRepository
-	signal       func(context.Context, DeploymentID, DeploymentEvent) error
-	progressed   bool
-}
-
-func (o *signalingObserver) Emit(event DeliveryEvent) {
-	_ = event
-	if !o.progressed && o.deliveries != nil {
-		o.progressed = true
-		if d, err := o.deliveries.Get(context.Background(), o.deliveryID); err == nil {
-			d.State = DeliveryStateProgressing
-			_ = o.deliveries.Put(context.Background(), d)
-		}
+func (w *OrchestrationWorkflow) observer() DeploymentObserver {
+	if w.Observer != nil {
+		return w.Observer
 	}
-}
-
-func (o *signalingObserver) Done(result DeliveryResult) {
-	if o.deliveries != nil {
-		if d, err := o.deliveries.Get(context.Background(), o.deliveryID); err == nil {
-			d.State = result.State
-			_ = o.deliveries.Put(context.Background(), d)
-		}
-	}
-	if o.signal != nil {
-		_ = o.signal(context.Background(), o.deploymentID, DeploymentEvent{
-			DeliveryCompleted: &DeliveryCompletionEvent{
-				DeliveryID: o.deliveryID,
-				Result:     result,
-			},
-		})
-	}
+	return NoOpDeploymentObserver{}
 }
 
 // Run is the deterministic workflow body. It performs initial placement
@@ -263,19 +275,32 @@ func (o *signalingObserver) Done(result DeliveryResult) {
 // Completed activities return their recorded results; each AwaitDeploymentEvent()
 // is a distinct recorded operation so replay returns the same event for that
 // iteration. So we never receive the same logical event twice across iterations.
-func (w *OrchestrationWorkflow) Run(runner DeploymentWorkflowRunner, deploymentID DeploymentID) (struct{}, error) {
+func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID DeploymentID) (struct{}, error) {
+	w.journal = journal
+
+	ctx, probe := w.observer().RunStarted(journal.Context(), deploymentID)
+	defer probe.End()
+	_ = ctx
+
 	var dep Deployment
 	var pool []TargetInfo
 
 	// Initial placement: no event required. Load, run placement pipeline, update.
-	loaded, err := RunActivity(runner, w.LoadDeploymentAndPool(), deploymentID)
+	loaded, err := RunActivity(journal, w.LoadDeploymentAndPool(), deploymentID)
 	if err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("load deployment and pool: %w", err)
 	}
 	dep, pool = loaded.Deployment, loaded.Pool
 
-	resolvedIDs, err := w.executePlacementPipeline(runner, dep, pool, pool, deploymentID)
+	resolvedIDs, err := w.executePlacementPipeline(journal, dep, pool, pool, deploymentID)
 	if err != nil {
+		dep.State = DeploymentStateFailed
+		probe.StateChanged(dep.State)
+		if _, updateErr := RunActivity(journal, w.UpdateDeployment(), dep); updateErr != nil {
+			probe.Error(updateErr)
+		}
+		probe.Error(err)
 		return struct{}{}, err
 	}
 	dep.ResolvedTargets = resolvedIDs
@@ -283,26 +308,32 @@ func (w *OrchestrationWorkflow) Run(runner DeploymentWorkflowRunner, deploymentI
 	// Active: executeRolloutPlan awaits all delivery completions per step,
 	// so reaching this point means every delivery finished successfully.
 	dep.State = DeploymentStateActive
-	if _, err := RunActivity(runner, w.UpdateDeployment(), dep); err != nil {
+	probe.StateChanged(dep.State)
+	if _, err := RunActivity(journal, w.UpdateDeployment(), dep); err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("update deployment: %w", err)
 	}
 
 	for {
-		event, err := runner.AwaitDeploymentEvent()
+		event, err := journal.AwaitDeploymentEvent()
 		if err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("await deployment event: %w", err)
 		}
+		probe.EventReceived(event)
 
 		if event.Delete {
-			if err := w.executeDelete(runner, dep, pool, deploymentID); err != nil {
+			if err := w.executeDelete(journal, dep, pool, deploymentID); err != nil {
+				probe.Error(err)
 				return struct{}{}, err
 			}
 			return struct{}{}, nil
 		}
 
 		if event.SpecChanged {
-			loaded, err := RunActivity(runner, w.LoadDeploymentAndPool(), deploymentID)
+			loaded, err := RunActivity(journal, w.LoadDeploymentAndPool(), deploymentID)
 			if err != nil {
+				probe.Error(err)
 				return struct{}{}, fmt.Errorf("reload deployment and pool: %w", err)
 			}
 			dep, pool = loaded.Deployment, loaded.Pool
@@ -314,19 +345,28 @@ func (w *OrchestrationWorkflow) Run(runner DeploymentWorkflowRunner, deploymentI
 		}
 
 		if event.ManifestInvalidated {
-			if err := w.executeManifestInvalidation(runner, dep, pool, deploymentID); err != nil {
+			if err := w.executeManifestInvalidation(journal, dep, pool, deploymentID); err != nil {
+				probe.Error(err)
 				return struct{}{}, err
 			}
 		} else {
-			resolvedIDs, err := w.executePlacementPipeline(runner, dep, pool, previousPool, deploymentID)
+			resolvedIDs, err := w.executePlacementPipeline(journal, dep, pool, previousPool, deploymentID)
 			if err != nil {
+				dep.State = DeploymentStateFailed
+				probe.StateChanged(dep.State)
+				if _, updateErr := RunActivity(journal, w.UpdateDeployment(), dep); updateErr != nil {
+					probe.Error(updateErr)
+				}
+				probe.Error(err)
 				return struct{}{}, err
 			}
 			dep.ResolvedTargets = resolvedIDs
 		}
 
 		dep.State = DeploymentStateActive
-		if _, err := RunActivity(runner, w.UpdateDeployment(), dep); err != nil {
+		probe.StateChanged(dep.State)
+		if _, err := RunActivity(journal, w.UpdateDeployment(), dep); err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("update deployment: %w", err)
 		}
 	}
@@ -337,13 +377,13 @@ func (w *OrchestrationWorkflow) Run(runner DeploymentWorkflowRunner, deploymentI
 // pool before any pool change was applied; it provides full [TargetInfo]
 // for targets that were previously resolved but have since left the pool.
 func (w *OrchestrationWorkflow) executePlacementPipeline(
-	runner DeploymentWorkflowRunner,
+	journal OrchestrationJournal,
 	dep Deployment,
 	pool []TargetInfo,
 	previousPool []TargetInfo,
 	deploymentID DeploymentID,
 ) ([]TargetID, error) {
-	resolved, err := RunActivity(runner, w.ResolvePlacement(), ResolvePlacementInput{
+	resolved, err := RunActivity(journal, w.ResolvePlacement(), ResolvePlacementInput{
 		Spec: dep.PlacementStrategy,
 		Pool: PlacementTargets(pool),
 	})
@@ -351,11 +391,15 @@ func (w *OrchestrationWorkflow) executePlacementPipeline(
 		return nil, fmt.Errorf("resolve placement: %w", err)
 	}
 
+	if len(resolved) == 0 {
+		return nil, fmt.Errorf("placement resolved to zero targets")
+	}
+
 	resolvedTargets := ResolvedTargetInfos(resolved, pool)
 	deltaPool := mergePools(previousPool, pool)
 	delta := ComputeTargetDelta(dep.ResolvedTargets, resolvedTargets, deltaPool)
 
-	plan, err := RunActivity(runner, w.PlanRollout(), PlanRolloutInput{
+	plan, err := RunActivity(journal, w.PlanRollout(), PlanRolloutInput{
 		Spec:  dep.RolloutStrategy,
 		Delta: delta,
 	})
@@ -363,7 +407,7 @@ func (w *OrchestrationWorkflow) executePlacementPipeline(
 		return nil, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	if err := w.executeRolloutPlan(runner, dep, plan, deploymentID); err != nil {
+	if err := w.executeRolloutPlan(journal, dep, plan, deploymentID); err != nil {
 		return nil, err
 	}
 
@@ -377,7 +421,7 @@ func (w *OrchestrationWorkflow) executePlacementPipeline(
 // executeManifestInvalidation re-generates and delivers manifests for
 // the currently resolved targets without re-resolving placement.
 func (w *OrchestrationWorkflow) executeManifestInvalidation(
-	runner DeploymentWorkflowRunner,
+	journal OrchestrationJournal,
 	dep Deployment,
 	pool []TargetInfo,
 	deploymentID DeploymentID,
@@ -385,27 +429,27 @@ func (w *OrchestrationWorkflow) executeManifestInvalidation(
 	targets := TargetInfosByID(dep.ResolvedTargets, pool)
 	delta := TargetDelta{Unchanged: targets}
 
-	plan, err := RunActivity(runner, w.PlanRollout(), PlanRolloutInput{
+	plan, err := RunActivity(journal, w.PlanRollout(), PlanRolloutInput{
 		Spec:  dep.RolloutStrategy,
 		Delta: delta,
 	})
 	if err != nil {
 		return fmt.Errorf("plan rollout (manifest invalidation): %w", err)
 	}
-	return w.executeRolloutPlan(runner, dep, plan, deploymentID)
+	return w.executeRolloutPlan(journal, dep, plan, deploymentID)
 }
 
 // executeDelete removes the deployment from all currently resolved
 // targets and updates the deployment state.
 func (w *OrchestrationWorkflow) executeDelete(
-	runner DeploymentWorkflowRunner,
+	journal OrchestrationJournal,
 	dep Deployment,
 	pool []TargetInfo,
 	deploymentID DeploymentID,
 ) error {
 	targets := TargetInfosByID(dep.ResolvedTargets, pool)
 	for _, target := range targets {
-		if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
+		if _, err := RunActivity(journal, w.RemoveFromTarget(), RemoveInput{
 			Target:       target,
 			DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 			DeploymentID: deploymentID,
@@ -416,7 +460,7 @@ func (w *OrchestrationWorkflow) executeDelete(
 
 	dep.ResolvedTargets = nil
 	dep.State = DeploymentStateDeleting
-	if _, err := RunActivity(runner, w.UpdateDeployment(), dep); err != nil {
+	if _, err := RunActivity(journal, w.UpdateDeployment(), dep); err != nil {
 		return fmt.Errorf("update deployment: %w", err)
 	}
 	return nil
@@ -426,7 +470,7 @@ func (w *OrchestrationWorkflow) executeDelete(
 // steps it dispatches all deliveries, then waits for every delivery in
 // the step to reach a terminal state before proceeding to the next step.
 func (w *OrchestrationWorkflow) executeRolloutPlan(
-	runner DeploymentWorkflowRunner,
+	journal OrchestrationJournal,
 	dep Deployment,
 	plan RolloutPlan,
 	deploymentID DeploymentID,
@@ -435,7 +479,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
 				// TODO: need to call the manifest generator on remove hook
-				if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
+				if _, err := RunActivity(journal, w.RemoveFromTarget(), RemoveInput{
 					Target:       target,
 					DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 					DeploymentID: deploymentID,
@@ -448,7 +492,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 		if step.Deliver != nil {
 			var pending []DeliveryID
 			for _, target := range step.Deliver.Targets {
-				manifests, err := RunActivity(runner, w.GenerateManifests(), GenerateManifestsInput{
+				manifests, err := RunActivity(journal, w.GenerateManifests(), GenerateManifestsInput{
 					Spec:   dep.ManifestStrategy,
 					Target: target,
 				})
@@ -456,7 +500,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 					return fmt.Errorf("generate manifests for target %s: %w", target.ID, err)
 				}
 				did := deliveryIDFor(deploymentID, target.ID)
-				if _, err := RunActivity(runner, w.DeliverToTarget(), DeliverInput{
+				if _, err := RunActivity(journal, w.DeliverToTarget(), DeliverInput{
 					Target:       target,
 					DeliveryID:   did,
 					DeploymentID: deploymentID,
@@ -466,7 +510,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 				}
 				pending = append(pending, did)
 			}
-			if _, err := w.awaitDeliveries(runner, pending); err != nil {
+			if _, err := w.awaitDeliveries(journal, pending); err != nil {
 				return err
 			}
 			continue
@@ -480,7 +524,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 // returned for the caller to process later. A Delete event aborts
 // immediately with an error.
 func (w *OrchestrationWorkflow) awaitDeliveries(
-	runner DeploymentWorkflowRunner,
+	journal OrchestrationJournal,
 	pending []DeliveryID,
 ) ([]DeploymentEvent, error) {
 	remaining := make(map[DeliveryID]struct{}, len(pending))
@@ -490,7 +534,7 @@ func (w *OrchestrationWorkflow) awaitDeliveries(
 
 	var deferred []DeploymentEvent
 	for len(remaining) > 0 {
-		event, err := runner.AwaitDeploymentEvent()
+		event, err := journal.AwaitDeploymentEvent()
 		if err != nil {
 			return nil, fmt.Errorf("await delivery completion: %w", err)
 		}

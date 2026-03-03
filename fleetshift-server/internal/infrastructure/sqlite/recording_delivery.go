@@ -17,7 +17,7 @@ type RecordingDeliveryService struct {
 	Now        func() time.Time
 }
 
-func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
+func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	now := s.now()
 	d := domain.Delivery{
 		ID:           deliveryID,
@@ -30,15 +30,15 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 	}
 	if err := s.Deliveries.Put(ctx, d); err != nil {
 		result := domain.DeliveryResult{State: domain.DeliveryStateFailed}
-		observer.Done(result)
+		signaler.Done(ctx, result)
 		return result, err
 	}
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	observer.Done(result)
+	signaler.Done(ctx, result)
 	return result, nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ domain.DeliveryObserver) error {
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ *domain.DeliverySignaler) error {
 	_, err := s.Deliveries.GetByDeploymentTarget(ctx, deploymentIDFromDeliveryID(deliveryID), target.ID)
 	if err != nil {
 		return nil

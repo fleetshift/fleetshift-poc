@@ -9,10 +9,9 @@ import (
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
-	Deployments   domain.DeploymentRepository
-	Deliveries    domain.DeliveryRepository
-	CreateWF      domain.CreateDeploymentRunner
-	Orchestration *OrchestrationService
+	Deployments domain.DeploymentRepository
+	Deliveries  domain.DeliveryRepository
+	CreateWF    domain.CreateDeploymentRunner
 }
 
 // Create starts the durable create-deployment workflow, which persists

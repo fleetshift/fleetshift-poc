@@ -3,6 +3,9 @@ package domain
 import (
 	"context"
 	"fmt"
+	"time"
+
+	"github.com/google/uuid"
 )
 
 // CreateDeploymentInput is the specification for creating a new deployment.
@@ -13,13 +16,15 @@ type CreateDeploymentInput struct {
 	RolloutStrategy   *RolloutStrategySpec
 }
 
-// CreateDeploymentWorkflowRunner is the execution-time capability passed
-// into [CreateDeploymentWorkflow.Run]. It extends [DurableRunner] with the
-// ability to start the orchestration child workflow. The child performs
-// initial placement without awaiting an event; [OrchestrationRunner.SignalDeploymentEvent]
-// is used from the application when invalidation or other events occur.
-type CreateDeploymentWorkflowRunner interface {
-	DurableRunner
+// CreateDeploymentJournal is the durable execution journal for
+// [CreateDeploymentWorkflow.Run]. It extends [Journal] with the
+// ability to start the orchestration child workflow. The child
+// performs initial placement without awaiting an event;
+// invalidation and other events are signaled via
+// [OrchestrationJournal.SignalDeploymentEvent] from within the
+// orchestration workflow itself.
+type CreateDeploymentJournal interface {
+	Journal
 
 	// StartOrchestration durably starts the orchestration child
 	// workflow for the given deployment. The child runs independently
@@ -38,6 +43,14 @@ type CreateDeploymentRunner interface {
 // from the last completed step.
 type CreateDeploymentWorkflow struct {
 	Deployments DeploymentRepository
+	Now         func() time.Time
+}
+
+func (w *CreateDeploymentWorkflow) now() time.Time {
+	if w.Now != nil {
+		return w.Now()
+	}
+	return time.Now()
 }
 
 func (w *CreateDeploymentWorkflow) Name() string { return "create-deployment" }
@@ -45,12 +58,18 @@ func (w *CreateDeploymentWorkflow) Name() string { return "create-deployment" }
 // PersistDeployment creates a pending deployment record.
 func (w *CreateDeploymentWorkflow) PersistDeployment() Activity[CreateDeploymentInput, Deployment] {
 	return NewActivity("persist-deployment", func(ctx context.Context, in CreateDeploymentInput) (Deployment, error) {
+		now := w.now()
+		uid := uuid.New().String()
 		dep := Deployment{
 			ID:                in.ID,
+			UID:               uid,
 			ManifestStrategy:  in.ManifestStrategy,
 			PlacementStrategy: in.PlacementStrategy,
 			RolloutStrategy:   in.RolloutStrategy,
-			State:             DeploymentStatePending,
+			State:             DeploymentStateCreating,
+			CreatedAt:         now,
+			UpdatedAt:         now,
+			Etag:              uid,
 		}
 		if err := w.Deployments.Create(ctx, dep); err != nil {
 			return Deployment{}, err
@@ -61,13 +80,13 @@ func (w *CreateDeploymentWorkflow) PersistDeployment() Activity[CreateDeployment
 
 // Run is the workflow body: persist the deployment, then start
 // orchestration as a durable child workflow.
-func (w *CreateDeploymentWorkflow) Run(runner CreateDeploymentWorkflowRunner, input CreateDeploymentInput) (Deployment, error) {
-	dep, err := RunActivity(runner, w.PersistDeployment(), input)
+func (w *CreateDeploymentWorkflow) Run(journal CreateDeploymentJournal, input CreateDeploymentInput) (Deployment, error) {
+	dep, err := RunActivity(journal, w.PersistDeployment(), input)
 	if err != nil {
 		return Deployment{}, fmt.Errorf("persist deployment: %w", err)
 	}
 
-	if err := runner.StartOrchestration(dep.ID); err != nil {
+	if err := journal.StartOrchestration(dep.ID); err != nil {
 		return Deployment{}, fmt.Errorf("start orchestration: %w", err)
 	}
 

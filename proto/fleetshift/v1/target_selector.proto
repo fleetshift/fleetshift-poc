@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// TargetSelector selects targets by label matching.
+message TargetSelector {
+  // Labels that must all match for a target to be selected.
+  map<string, string> match_labels = 1 [(google.api.field_behavior) = REQUIRED];
+}

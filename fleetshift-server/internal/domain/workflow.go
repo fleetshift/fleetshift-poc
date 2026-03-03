@@ -4,18 +4,18 @@ import "context"
 
 // Workflow types are organized as follows:
 //
-//   - workflow.go: shared primitives (Activity, DurableRunner, WorkflowHandle,
+//   - workflow.go: shared primitives (Activity, Journal, WorkflowHandle,
 //     RunActivity, NewActivity) and the engine contract (WorkflowEngine,
-//     WorkflowRunners). No workflow-specific runner types.
+//     WorkflowRunners). No workflow-specific types.
 //
 //   - Per-workflow file (orchestration.go, create_deployment.go): the workflow
-//     struct, its execution runner, and its starter. Naming:
-//     • XWorkflowRunner = execution-time capability passed to XWorkflow.Run
-//       (extends DurableRunner with workflow-specific methods).
+//     struct, its journal, and its runner. Naming:
+//     • XJournal = execution-time journal passed to XWorkflow.Run
+//       (extends [Journal] with workflow-specific methods).
 //     • XRunner = app-facing starter; Run(ctx, input) returns WorkflowHandle.
 //
-// So: orchestration.go has DeploymentWorkflowRunner + OrchestrationRunner;
-// create_deployment.go has CreateDeploymentWorkflowRunner + CreateDeploymentRunner.
+// So: orchestration.go has OrchestrationJournal + OrchestrationRunner;
+// create_deployment.go has CreateDeploymentJournal + CreateDeploymentRunner.
 
 // Activity is a named, typed, idempotent operation. Implementations must
 // be safe for at-least-once invocation.
@@ -24,10 +24,12 @@ type Activity[I any, O any] interface {
 	Run(ctx context.Context, in I) (O, error)
 }
 
-// DurableRunner is the capability object provided to a running workflow.
-// It durably runs activities and provides a context for pure operations
-// that need cancellation propagation.
-type DurableRunner interface {
+// Journal is the durable execution journal provided to a running
+// workflow. It records activity invocations and their results so
+// the engine can replay the workflow deterministically after a crash.
+// Per-workflow journal interfaces (e.g. [OrchestrationJournal]) extend
+// Journal with workflow-specific operations that are also journaled.
+type Journal interface {
 	ID() string
 
 	// Context returns the workflow execution context. In a durable
@@ -41,9 +43,9 @@ type DurableRunner interface {
 }
 
 // RunActivity provides type-safe durable activity execution from within
-// a workflow body. It is a thin wrapper around [DurableRunner.Run].
-func RunActivity[I any, O any](runner DurableRunner, activity Activity[I, O], in I) (O, error) {
-	result, err := runner.Run(&activityAdapter[I, O]{activity: activity}, in)
+// a workflow body. It is a thin wrapper around [Journal.Run].
+func RunActivity[I any, O any](journal Journal, activity Activity[I, O], in I) (O, error) {
+	result, err := journal.Run(&activityAdapter[I, O]{activity: activity}, in)
 	if err != nil {
 		var zero O
 		return zero, err
@@ -84,7 +86,7 @@ func (a *activityFunc[I, O]) Name() string                             { return 
 func (a *activityFunc[I, O]) Run(ctx context.Context, in I) (O, error) { return a.fn(ctx, in) }
 
 // activityAdapter bridges a typed [Activity] to the any-typed
-// [DurableRunner.Run] interface.
+// [Journal.Run] interface.
 type activityAdapter[I any, O any] struct{ activity Activity[I, O] }
 
 func (a *activityAdapter[I, O]) Name() string { return a.activity.Name() }

@@ -15,7 +15,7 @@ type spyAgent struct {
 	removed   []domain.RemoveInput
 }
 
-func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryObserver) (domain.DeliveryResult, error) {
+func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	s.delivered = append(s.delivered, domain.DeliverInput{
 		Target:       target,
 		DeliveryID:   deliveryID,
@@ -25,7 +25,7 @@ func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, delivery
 	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
-func (s *spyAgent) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ domain.DeliveryObserver) error {
+func (s *spyAgent) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ *domain.DeliverySignaler) error {
 	s.removed = append(s.removed, domain.RemoveInput{
 		Target:       target,
 		DeliveryID:   deliveryID,
@@ -43,7 +43,7 @@ func TestRoutingDeliveryService_RoutesToCorrectAgent(t *testing.T) {
 	router.Register("kubernetes", k8sAgent)
 
 	ctx := context.Background()
-	nop := domain.NopDeliveryObserver{}
+	nop := &domain.DeliverySignaler{}
 	kindTarget := domain.TargetInfo{ID: "k1", Type: "kind", Name: "local-kind"}
 	k8sTarget := domain.TargetInfo{ID: "c1", Type: "kubernetes", Name: "prod-cluster"}
 
@@ -78,7 +78,7 @@ func TestRoutingDeliveryService_RemoveRoutesToCorrectAgent(t *testing.T) {
 	router.Register("kind", agent)
 
 	ctx := context.Background()
-	nop := domain.NopDeliveryObserver{}
+	nop := &domain.DeliverySignaler{}
 	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "local-kind"}
 
 	if err := router.Remove(ctx, target, "d1:k1", nop); err != nil {
@@ -97,7 +97,7 @@ func TestRoutingDeliveryService_UnregisteredTypeReturnsError(t *testing.T) {
 	router := delivery.NewRoutingDeliveryService()
 
 	ctx := context.Background()
-	nop := domain.NopDeliveryObserver{}
+	nop := &domain.DeliverySignaler{}
 	target := domain.TargetInfo{ID: "k1", Type: "unknown", Name: "target"}
 
 	_, err := router.Deliver(ctx, target, "d1:k1", nil, nop)
@@ -126,7 +126,7 @@ func TestRoutingDeliveryService_RegisterReplacesPrevious(t *testing.T) {
 	router.Register("kind", second)
 
 	ctx := context.Background()
-	nop := domain.NopDeliveryObserver{}
+	nop := &domain.DeliverySignaler{}
 	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "target"}
 	manifests := []domain.Manifest{{Raw: json.RawMessage(`{}`)}}
 

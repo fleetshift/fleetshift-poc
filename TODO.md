@@ -1,0 +1,4 @@
+- [ ] Rethink where generated proto types go
+- [ ] Fleetlet installation into kind cluster
+- [ ] Pagination / filter / etc
+- [ ] Revisit failed deployment when no targets – what if it is invalidated? (manifest update) Do we have/need a signal for when new targets might match because they've been newly registered?

@@ -1,0 +1,15 @@
+version: v2
+clean: true
+plugins:
+  - remote: buf.build/protocolbuffers/go
+    out: fleetshift-server/gen
+    opt:
+      - paths=source_relative
+  - remote: buf.build/grpc/go
+    out: fleetshift-server/gen
+    opt:
+      - paths=source_relative
+  - remote: buf.build/grpc-ecosystem/gateway
+    out: fleetshift-server/gen
+    opt:
+      - paths=source_relative

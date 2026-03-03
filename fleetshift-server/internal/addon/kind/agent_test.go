@@ -84,34 +84,41 @@ func fakeFactory(p *fakeProvider) kind.ClusterProviderFactory {
 	}
 }
 
-// channelObserver collects events and signals each one on a channel,
-// enabling deterministic waits in tests with async delivery.
-type channelObserver struct {
+// channelDeliveryObserver collects events and completion results on
+// channels, enabling deterministic waits in tests with async delivery.
+// It implements [domain.DeliveryObserver].
+type channelDeliveryObserver struct {
 	mu     sync.Mutex
 	events []domain.DeliveryEvent
 	ch     chan domain.DeliveryEvent
 	done   chan domain.DeliveryResult
 }
 
-func newChannelObserver() *channelObserver {
-	return &channelObserver{
+func newChannelDeliveryObserver() *channelDeliveryObserver {
+	return &channelDeliveryObserver{
 		ch:   make(chan domain.DeliveryEvent, 100),
 		done: make(chan domain.DeliveryResult, 1),
 	}
 }
 
-func (o *channelObserver) Emit(e domain.DeliveryEvent) {
+func (o *channelDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, e domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
 	o.mu.Lock()
 	o.events = append(o.events, e)
 	o.mu.Unlock()
 	o.ch <- e
+	return ctx, domain.NoOpEventEmittedProbe{}
 }
 
-func (o *channelObserver) Done(result domain.DeliveryResult) {
+func (o *channelDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
 	o.done <- result
+	return ctx, domain.NoOpCompletedProbe{}
 }
 
-var nop = domain.NopDeliveryObserver{}
+func newChannelSignaler(obs *channelDeliveryObserver) *domain.DeliverySignaler {
+	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
+}
+
+var nop = &domain.DeliverySignaler{}
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
@@ -187,7 +194,8 @@ func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
 func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	provider := newFakeProvider()
 	provider.createErr = errors.New("docker not available")
-	observer := newChannelObserver()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
 	agent := kind.NewAgent(fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
@@ -196,7 +204,7 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, observer)
+	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, signaler)
 	if err != nil {
 		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
@@ -207,11 +215,11 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	// The fake provider emits a V(0) log line in Create (via observer
 	// logger) before returning the error. Then deliverAsync emits an
 	// error event.
-	progress := <-observer.ch
+	progress := <-obs.ch
 	if progress.Kind != domain.DeliveryEventProgress {
 		t.Errorf("first event kind = %q, want %q", progress.Kind, domain.DeliveryEventProgress)
 	}
-	errEvent := <-observer.ch
+	errEvent := <-obs.ch
 	if errEvent.Kind != domain.DeliveryEventError {
 		t.Errorf("second event kind = %q, want %q", errEvent.Kind, domain.DeliveryEventError)
 	}
@@ -255,7 +263,8 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 
 func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
-	observer := newChannelObserver()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
 	agent := kind.NewAgent(fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
@@ -264,7 +273,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, observer)
+	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, signaler)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -273,21 +282,31 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	}
 
 	// The fake provider calls logger.V(0).Infof inside Create, which
-	// flows through the observer logger to the observer as a progress event.
-	event := <-observer.ch
+	// flows through the observer logger to the signaler as a progress event.
+	event := <-obs.ch
 	if event.Kind != domain.DeliveryEventProgress {
 		t.Errorf("event kind = %q, want %q", event.Kind, domain.DeliveryEventProgress)
 	}
 }
 
-// recordingObserver is a simple synchronous observer used by
-// observer_logger tests. See [channelObserver] for async agent tests.
-type recordingObserver struct {
+// recordingSignaler creates a *DeliverySignaler that appends emitted
+// events to the provided slice. Used by observer_logger tests.
+func recordingSignaler(events *[]domain.DeliveryEvent) *domain.DeliverySignaler {
+	obs := &recordingDeliveryObserver{events: events}
+	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
+}
+
+// recordingDeliveryObserver implements [domain.DeliveryObserver] by
+// appending events to a slice. Used by observer_logger tests.
+type recordingDeliveryObserver struct {
 	events *[]domain.DeliveryEvent
 }
 
-func (o *recordingObserver) Emit(e domain.DeliveryEvent) {
+func (o *recordingDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, e domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
 	*o.events = append(*o.events, e)
+	return ctx, domain.NoOpEventEmittedProbe{}
 }
 
-func (o *recordingObserver) Done(domain.DeliveryResult) {}
+func (o *recordingDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, _ domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+	return ctx, domain.NoOpCompletedProbe{}
+}

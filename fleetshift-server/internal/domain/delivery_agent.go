@@ -8,6 +8,6 @@ import "context"
 // [TargetInfo.Type]. In-process addons implement this interface
 // directly; remote addons implement it via a fleetlet channel adapter.
 type DeliveryAgent interface {
-	Deliver(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, observer DeliveryObserver) (DeliveryResult, error)
-	Remove(ctx context.Context, target TargetInfo, deliveryID DeliveryID, observer DeliveryObserver) error
+	Deliver(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, signaler *DeliverySignaler) (DeliveryResult, error)
+	Remove(ctx context.Context, target TargetInfo, deliveryID DeliveryID, signaler *DeliverySignaler) error
 }

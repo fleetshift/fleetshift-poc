@@ -19,7 +19,17 @@ import (
 
 func startWorker(t *testing.T, b backend.Backend) *worker.Worker {
 	t.Helper()
-	w := worker.New(b, nil)
+	w := worker.New(b, &worker.Options{
+		WorkflowWorkerOptions: worker.WorkflowWorkerOptions{
+			WorkflowPollers:         2,
+			WorkflowPollingInterval: 5 * time.Millisecond,
+		},
+		ActivityWorkerOptions: worker.ActivityWorkerOptions{
+			ActivityPollers:         2,
+			ActivityPollingInterval: 5 * time.Millisecond,
+		},
+		SingleWorkerMode: true,
+	})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(func() {
 		cancel()

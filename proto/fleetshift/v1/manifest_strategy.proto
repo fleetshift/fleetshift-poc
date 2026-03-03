@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "fleetshift/v1/manifest.proto";
+
+// ManifestStrategy specifies how manifests are generated.
+message ManifestStrategy {
+  // Type of manifest strategy.
+  Type type = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Manifests to deliver verbatim. Required when type is TYPE_INLINE.
+  repeated Manifest manifests = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Type of manifest strategy.
+  enum Type {
+    // Default value. Not used.
+    TYPE_UNSPECIFIED = 0;
+
+    // Deliver manifests verbatim from the spec.
+    TYPE_INLINE = 1;
+  }
+}

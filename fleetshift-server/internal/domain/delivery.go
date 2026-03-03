@@ -52,19 +52,3 @@ type DeliveryEvent struct {
 	Detail    json.RawMessage
 }
 
-// DeliveryObserver receives events emitted by a [DeliveryAgent]
-// during delivery. Agents call [Emit] for progress, warnings, and
-// errors as they happen, then call [Done] exactly once when the
-// delivery reaches a terminal state. The orchestration layer provides
-// an implementation that updates delivery state and signals the
-// workflow; agents are unaware of storage or signaling.
-type DeliveryObserver interface {
-	Emit(event DeliveryEvent)
-	Done(result DeliveryResult)
-}
-
-// NopDeliveryObserver is a [DeliveryObserver] that discards all events.
-type NopDeliveryObserver struct{}
-
-func (NopDeliveryObserver) Emit(DeliveryEvent)    {}
-func (NopDeliveryObserver) Done(DeliveryResult) {}

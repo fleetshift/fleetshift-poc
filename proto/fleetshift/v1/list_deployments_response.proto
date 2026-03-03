@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/deployment.proto";
+
+// Response message for
+// [DeploymentService.ListDeployments][fleetshift.v1.DeploymentService.ListDeployments].
+message ListDeploymentsResponse {
+  // The deployments.
+  repeated Deployment deployments = 1;
+
+  // A token for the next page. If empty, there are no more results.
+  string next_page_token = 2;
+}
