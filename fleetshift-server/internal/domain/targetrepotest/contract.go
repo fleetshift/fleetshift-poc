@@ -22,6 +22,7 @@ func Run(t *testing.T, factory Factory) {
 			ID:         "t1",
 			Type:       "kubernetes",
 			Name:       "cluster-a",
+			State:      domain.TargetStateInitializing,
 			Labels:     map[string]string{"env": "prod"},
 			Properties: map[string]string{"region": "us-east"},
 		}
@@ -40,11 +41,31 @@ func Run(t *testing.T, factory Factory) {
 		if got.Name != "cluster-a" {
 			t.Errorf("Name = %q, want %q", got.Name, "cluster-a")
 		}
+		if got.State != domain.TargetStateInitializing {
+			t.Errorf("State = %q, want %q", got.State, domain.TargetStateInitializing)
+		}
 		if got.Labels["env"] != "prod" {
 			t.Errorf("Labels[env] = %q, want %q", got.Labels["env"], "prod")
 		}
 		if got.Properties["region"] != "us-east" {
 			t.Errorf("Properties[region] = %q, want %q", got.Properties["region"], "us-east")
+		}
+	})
+
+	t.Run("CreateDefaultsToReady", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		target := domain.TargetInfo{ID: "t1", Name: "cluster-a"}
+
+		if err := repo.Create(ctx, target); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repo.Get(ctx, "t1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.State != domain.TargetStateReady {
+			t.Errorf("State = %q, want %q (default)", got.State, domain.TargetStateReady)
 		}
 	})
 

@@ -36,17 +36,17 @@ func goInfra(t *testing.T) workflowenginetest.Infra {
 	db := sqlite.OpenTestDB(t)
 	targetRepo := &sqlite.TargetRepo{DB: db}
 	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	recordRepo := &sqlite.DeliveryRecordRepo{DB: db}
+	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
 	recordingAgent := &sqlite.RecordingDeliveryService{
-		Records: recordRepo,
-		Now:     func() time.Time { return time.Date(2026, 2, 28, 12, 0, 0, 0, time.UTC) },
+		Deliveries: deliveryRepo,
+		Now:        func() time.Time { return time.Date(2026, 2, 28, 12, 0, 0, 0, time.UTC) },
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(workflowenginetest.TestTargetType, recordingAgent)
 	return workflowenginetest.Infra{
 		Targets:     targetRepo,
 		Deployments: deploymentRepo,
-		Records:     recordRepo,
+		Deliveries:  deliveryRepo,
 		Delivery:    router,
 	}
 }

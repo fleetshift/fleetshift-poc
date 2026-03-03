@@ -10,7 +10,7 @@ import (
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
 	Deployments   domain.DeploymentRepository
-	Records       domain.DeliveryRecordRepository
+	Deliveries    domain.DeliveryRepository
 	CreateWF      domain.CreateDeploymentRunner
 	Orchestration *OrchestrationService
 }
@@ -47,8 +47,8 @@ func (s *DeploymentService) List(ctx context.Context) ([]domain.Deployment, erro
 
 // Delete removes a deployment and its delivery records.
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) error {
-	if err := s.Records.DeleteByDeployment(ctx, id); err != nil {
-		return fmt.Errorf("delete delivery records: %w", err)
+	if err := s.Deliveries.DeleteByDeployment(ctx, id); err != nil {
+		return fmt.Errorf("delete deliveries: %w", err)
 	}
 	return s.Deployments.Delete(ctx, id)
 }

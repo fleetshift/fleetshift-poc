@@ -5,6 +5,8 @@ API design follows Google's API design guidelines, in particular:
 - Resource-oriented design: https://google.aip.dev/121
 - Declarative-friendly interfaces: https://google.aip.dev/128
 
+FETCH these explicitly to ensure you are not hallucinating the standards.
+
 Navigate other AIPs as relevant:
 
 AIPs

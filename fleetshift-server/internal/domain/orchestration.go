@@ -52,6 +52,7 @@ type GenerateManifestsInput struct {
 // DeliverInput is the input to the deliver-to-target activity.
 type DeliverInput struct {
 	Target       TargetInfo
+	DeliveryID   DeliveryID
 	DeploymentID DeploymentID
 	Manifests    []Manifest
 }
@@ -59,6 +60,7 @@ type DeliverInput struct {
 // RemoveInput is the input to the remove-from-target activity.
 type RemoveInput struct {
 	Target       TargetInfo
+	DeliveryID   DeliveryID
 	DeploymentID DeploymentID
 }
 
@@ -113,10 +115,12 @@ type OrchestrationRunner interface {
 // Infrastructure packages accept this struct to construct an
 // [OrchestrationRunner] backed by a specific durable execution engine.
 type OrchestrationWorkflow struct {
-	Deployments DeploymentRepository
-	Targets     TargetRepository
-	Delivery    DeliveryService
-	Strategies  StrategyFactory
+	Deployments    DeploymentRepository
+	Targets        TargetRepository
+	Deliveries     DeliveryRepository
+	Delivery       DeliveryService
+	Strategies     StrategyFactory
+	OnDeliveryDone func(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
 }
 
 func (w *OrchestrationWorkflow) Name() string { return "orchestrate-deployment" }
@@ -180,17 +184,25 @@ func (w *OrchestrationWorkflow) GenerateManifests() Activity[GenerateManifestsIn
 	})
 }
 
-// DeliverToTarget delivers manifests to a target.
+// DeliverToTarget delivers manifests to a target. It creates a
+// [signalingObserver] that transitions the [Delivery] entity through
+// its lifecycle states and signals the workflow on completion.
 func (w *OrchestrationWorkflow) DeliverToTarget() Activity[DeliverInput, DeliveryResult] {
 	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (DeliveryResult, error) {
-		return w.Delivery.Deliver(ctx, in.Target, in.DeploymentID, in.Manifests)
+		obs := &signalingObserver{
+			deploymentID: in.DeploymentID,
+			deliveryID:   in.DeliveryID,
+			deliveries:   w.Deliveries,
+			signal:       w.OnDeliveryDone,
+		}
+		return w.Delivery.Deliver(ctx, in.Target, in.DeliveryID, in.Manifests, obs)
 	})
 }
 
 // RemoveFromTarget removes a deployment's manifests from a target.
 func (w *OrchestrationWorkflow) RemoveFromTarget() Activity[RemoveInput, struct{}] {
 	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (struct{}, error) {
-		return struct{}{}, w.Delivery.Remove(ctx, in.Target, in.DeploymentID)
+		return struct{}{}, w.Delivery.Remove(ctx, in.Target, in.DeliveryID, NopDeliveryObserver{})
 	})
 }
 
@@ -199,6 +211,45 @@ func (w *OrchestrationWorkflow) UpdateDeployment() Activity[Deployment, struct{}
 	return NewActivity("update-deployment", func(ctx context.Context, d Deployment) (struct{}, error) {
 		return struct{}{}, w.Deployments.Update(ctx, d)
 	})
+}
+
+// signalingObserver is a [DeliveryObserver] that updates the [Delivery]
+// entity's state in the repository and signals the orchestration
+// workflow when the delivery reaches a terminal state.
+type signalingObserver struct {
+	deploymentID DeploymentID
+	deliveryID   DeliveryID
+	deliveries   DeliveryRepository
+	signal       func(context.Context, DeploymentID, DeploymentEvent) error
+	progressed   bool
+}
+
+func (o *signalingObserver) Emit(event DeliveryEvent) {
+	_ = event
+	if !o.progressed && o.deliveries != nil {
+		o.progressed = true
+		if d, err := o.deliveries.Get(context.Background(), o.deliveryID); err == nil {
+			d.State = DeliveryStateProgressing
+			_ = o.deliveries.Put(context.Background(), d)
+		}
+	}
+}
+
+func (o *signalingObserver) Done(result DeliveryResult) {
+	if o.deliveries != nil {
+		if d, err := o.deliveries.Get(context.Background(), o.deliveryID); err == nil {
+			d.State = result.State
+			_ = o.deliveries.Put(context.Background(), d)
+		}
+	}
+	if o.signal != nil {
+		_ = o.signal(context.Background(), o.deploymentID, DeploymentEvent{
+			DeliveryCompleted: &DeliveryCompletionEvent{
+				DeliveryID: o.deliveryID,
+				Result:     result,
+			},
+		})
+	}
 }
 
 // Run is the deterministic workflow body. It performs initial placement
@@ -228,6 +279,9 @@ func (w *OrchestrationWorkflow) Run(runner DeploymentWorkflowRunner, deploymentI
 		return struct{}{}, err
 	}
 	dep.ResolvedTargets = resolvedIDs
+
+	// Active: executeRolloutPlan awaits all delivery completions per step,
+	// so reaching this point means every delivery finished successfully.
 	dep.State = DeploymentStateActive
 	if _, err := RunActivity(runner, w.UpdateDeployment(), dep); err != nil {
 		return struct{}{}, fmt.Errorf("update deployment: %w", err)
@@ -353,6 +407,7 @@ func (w *OrchestrationWorkflow) executeDelete(
 	for _, target := range targets {
 		if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
 			Target:       target,
+			DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 			DeploymentID: deploymentID,
 		}); err != nil {
 			return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
@@ -367,7 +422,9 @@ func (w *OrchestrationWorkflow) executeDelete(
 	return nil
 }
 
-// executeRolloutPlan runs each step in a [RolloutPlan].
+// executeRolloutPlan runs each step in a [RolloutPlan]. For deliver
+// steps it dispatches all deliveries, then waits for every delivery in
+// the step to reach a terminal state before proceeding to the next step.
 func (w *OrchestrationWorkflow) executeRolloutPlan(
 	runner DeploymentWorkflowRunner,
 	dep Deployment,
@@ -377,8 +434,10 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 	for _, step := range plan.Steps {
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
+				// TODO: need to call the manifest generator on remove hook
 				if _, err := RunActivity(runner, w.RemoveFromTarget(), RemoveInput{
 					Target:       target,
+					DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 					DeploymentID: deploymentID,
 				}); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
@@ -387,6 +446,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 			continue
 		}
 		if step.Deliver != nil {
+			var pending []DeliveryID
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(runner, w.GenerateManifests(), GenerateManifestsInput{
 					Spec:   dep.ManifestStrategy,
@@ -395,18 +455,68 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 				if err != nil {
 					return fmt.Errorf("generate manifests for target %s: %w", target.ID, err)
 				}
+				did := deliveryIDFor(deploymentID, target.ID)
 				if _, err := RunActivity(runner, w.DeliverToTarget(), DeliverInput{
 					Target:       target,
+					DeliveryID:   did,
 					DeploymentID: deploymentID,
 					Manifests:    manifests,
 				}); err != nil {
 					return fmt.Errorf("deliver to target %s: %w", target.ID, err)
 				}
+				pending = append(pending, did)
+			}
+			if _, err := w.awaitDeliveries(runner, pending); err != nil {
+				return err
 			}
 			continue
 		}
 	}
 	return nil
+}
+
+// awaitDeliveries blocks until every delivery in pending has completed.
+// Non-delivery events that arrive while waiting are collected and
+// returned for the caller to process later. A Delete event aborts
+// immediately with an error.
+func (w *OrchestrationWorkflow) awaitDeliveries(
+	runner DeploymentWorkflowRunner,
+	pending []DeliveryID,
+) ([]DeploymentEvent, error) {
+	remaining := make(map[DeliveryID]struct{}, len(pending))
+	for _, id := range pending {
+		remaining[id] = struct{}{}
+	}
+
+	var deferred []DeploymentEvent
+	for len(remaining) > 0 {
+		event, err := runner.AwaitDeploymentEvent()
+		if err != nil {
+			return nil, fmt.Errorf("await delivery completion: %w", err)
+		}
+		if event.Delete {
+			return nil, fmt.Errorf("deployment deleted while awaiting deliveries")
+		}
+		if event.DeliveryCompleted != nil {
+			delete(remaining, event.DeliveryCompleted.DeliveryID)
+			if event.DeliveryCompleted.Result.State == DeliveryStateFailed {
+				return nil, fmt.Errorf("delivery %s failed: %s",
+					event.DeliveryCompleted.DeliveryID,
+					event.DeliveryCompleted.Result.Message)
+			}
+			continue
+		}
+		deferred = append(deferred, event)
+	}
+	return deferred, nil
+}
+
+// deliveryIDFor produces a deterministic [DeliveryID] for a
+// deployment-target pair. This keeps IDs stable across re-deliveries
+// to the same target, which is the current one-delivery-per-pair model.
+// TODO: does this need to be deterministic? Do we actually want different IDs on redelivery?
+func deliveryIDFor(depID DeploymentID, tgtID TargetID) DeliveryID {
+	return DeliveryID(string(depID) + ":" + string(tgtID))
 }
 
 // mergePools returns the union of two pools. Entries in current take

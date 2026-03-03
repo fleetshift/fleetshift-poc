@@ -4,8 +4,9 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrecordrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
@@ -24,9 +25,16 @@ func TestDeploymentRepo(t *testing.T) {
 	})
 }
 
-func TestDeliveryRecordRepo(t *testing.T) {
-	deliveryrecordrepotest.Run(t, func(t *testing.T) domain.DeliveryRecordRepository {
+func TestDeliveryRepo(t *testing.T) {
+	deliveryrepotest.Run(t, func(t *testing.T) domain.DeliveryRepository {
 		db := sqlite.OpenTestDB(t)
-		return &sqlite.DeliveryRecordRepo{DB: db}
+		return &sqlite.DeliveryRepo{DB: db}
+	})
+}
+
+func TestInventoryRepo(t *testing.T) {
+	inventoryrepotest.Run(t, func(t *testing.T) domain.InventoryRepository {
+		db := sqlite.OpenTestDB(t)
+		return &sqlite.InventoryRepo{DB: db}
 	})
 }

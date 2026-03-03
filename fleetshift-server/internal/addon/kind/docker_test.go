@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/log"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
@@ -26,32 +27,35 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Skip("skipping real Docker test in short mode")
 	}
 
-	provider := cluster.NewProvider()
+	checker := cluster.NewProvider()
 
-	if _, err := provider.List(); err != nil {
+	if _, err := checker.List(); err != nil {
 		t.Skipf("Docker not available: %v", err)
 	}
 
 	const clusterName = "fleetshift-test"
 
 	t.Cleanup(func() {
-		_ = provider.Delete(clusterName, "")
+		_ = checker.Delete(clusterName, "")
 	})
 	// Pre-clean in case a previous run left a stale cluster.
-	_ = provider.Delete(clusterName, "")
+	_ = checker.Delete(clusterName, "")
 
-	kindAgent := kindaddon.NewAgent(provider)
+	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
+		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
+	})
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	db := sqlite.OpenTestDB(t)
 	targetRepo := &sqlite.TargetRepo{DB: db}
 	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	recordRepo := &sqlite.DeliveryRecordRepo{DB: db}
+	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
 
 	owf := &domain.OrchestrationWorkflow{
 		Deployments: deploymentRepo,
 		Targets:     targetRepo,
+		Deliveries:  deliveryRepo,
 		Delivery:    router,
 		Strategies:  domain.DefaultStrategyFactory{},
 	}
@@ -62,11 +66,12 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	owf.OnDeliveryDone = runners.Orchestration.SignalDeploymentEvent
 
 	targetSvc := &application.TargetService{Targets: targetRepo}
 	deploySvc := &application.DeploymentService{
 		Deployments:   deploymentRepo,
-		Records:       recordRepo,
+		Deliveries:    deliveryRepo,
 		CreateWF:      runners.CreateDeployment,
 		Orchestration: &application.OrchestrationService{Workflow: runners.Orchestration},
 	}
@@ -111,12 +116,19 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("unexpected ResolvedTargets: %v", dep.ResolvedTargets)
 	}
 
-	clusters, err := provider.List()
-	if err != nil {
-		t.Fatalf("provider.List: %v", err)
-	}
-	found := slices.Contains(clusters, clusterName)
-	if !found {
-		t.Fatalf("kind cluster %q not found after delivery; clusters: %v", clusterName, clusters)
+	// Delivery is async; poll until the cluster appears or context expires.
+	for {
+		clusters, err := checker.List()
+		if err != nil {
+			t.Fatalf("provider.List: %v", err)
+		}
+		if slices.Contains(clusters, clusterName) {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for kind cluster %q to be created", clusterName)
+		case <-time.After(5 * time.Second):
+		}
 	}
 }

@@ -18,10 +18,10 @@ import (
 // Infra is the test-owned infrastructure: repositories and delivery.
 // The same infra is used for all engines; implementations do not provide it.
 type Infra struct {
-	Targets    domain.TargetRepository
+	Targets     domain.TargetRepository
 	Deployments domain.DeploymentRepository
-	Records    domain.DeliveryRecordRepository
-	Delivery   domain.DeliveryService
+	Deliveries  domain.DeliveryRepository
+	Delivery    domain.DeliveryService
 }
 
 // InfraFactory creates infra for a test. Typically shared across engine tests
@@ -68,7 +68,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t3")
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -108,7 +108,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t2", "t3")
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -198,10 +198,10 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 
 		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 
-		must(t, infra.Records.DeleteByDeployment(ctx, "d1"))
+		must(t, infra.Deliveries.DeleteByDeployment(ctx, "d1"))
 		must(t, infra.Deployments.Delete(ctx, "d1"))
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -255,7 +255,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep2 := awaitDeploymentResolvedCount(ctx, t, infra, "d1", 3)
 		assertResolvedTargets(t, dep2, "t1", "t2", "t3")
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -295,7 +295,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t2")
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -410,7 +410,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 
 		// After shrink, placement delivers to 2 targets; delivery impl may keep
 		// a record for the removed target (e.g. Pending), so assert delivered count.
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -454,7 +454,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", dep.ResolvedTargets)
 		}
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -507,11 +507,11 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		assertResolvedTargets(t, dep1, "t1", "t3")
 		assertResolvedTargets(t, dep2, "t2")
 
-		records1, err := infra.Records.ListByDeployment(ctx, "d1")
+		records1, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment(d1): %v", err)
 		}
-		records2, err := infra.Records.ListByDeployment(ctx, "d2")
+		records2, err := infra.Deliveries.ListByDeployment(ctx, "d2")
 		if err != nil {
 			t.Fatalf("ListByDeployment(d2): %v", err)
 		}
@@ -552,7 +552,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t2")
 
-		records, err := infra.Records.ListByDeployment(ctx, "d1")
+		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
 		if err != nil {
 			t.Fatalf("ListByDeployment: %v", err)
 		}
@@ -568,6 +568,7 @@ func registerEngine(t *testing.T, infra Infra, engineFactory EngineFactory) doma
 	owf := &domain.OrchestrationWorkflow{
 		Deployments: infra.Deployments,
 		Targets:     infra.Targets,
+		Deliveries:  infra.Deliveries,
 		Delivery:    infra.Delivery,
 		Strategies:  domain.DefaultStrategyFactory{},
 	}
@@ -578,6 +579,13 @@ func registerEngine(t *testing.T, infra Infra, engineFactory EngineFactory) doma
 	runners, err := engine.Register(owf, cwf)
 	if err != nil {
 		t.Fatalf("engine.Register: %v", err)
+	}
+	owf.OnDeliveryDone = func(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
+		// Run asynchronously to avoid deadlocking durable backends
+		// that hold a transaction lock while executing the activity
+		// (e.g. go-workflows SQLite backend).
+		go runners.Orchestration.SignalDeploymentEvent(context.Background(), deploymentID, event)
+		return nil
 	}
 	return runners
 }

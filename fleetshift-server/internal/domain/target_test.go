@@ -25,8 +25,8 @@ func TestToPlacementTarget_OmitsProperties(t *testing.T) {
 
 func TestPlacementTargets_PreservesOrderAndLength(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "a", Name: "n1", Labels: map[string]string{"x": "1"}},
-		{ID: "b", Name: "n2", Labels: map[string]string{"y": "2"}},
+		{ID: "a", Name: "n1", State: domain.TargetStateReady, Labels: map[string]string{"x": "1"}},
+		{ID: "b", Name: "n2", State: domain.TargetStateReady, Labels: map[string]string{"y": "2"}},
 	}
 	got := domain.PlacementTargets(pool)
 	if len(got) != 2 {
@@ -34,6 +34,33 @@ func TestPlacementTargets_PreservesOrderAndLength(t *testing.T) {
 	}
 	if got[0].ID != "a" || got[1].ID != "b" {
 		t.Errorf("order or IDs wrong: got [%s, %s]", got[0].ID, got[1].ID)
+	}
+}
+
+func TestPlacementTargets_FiltersNonReadyTargets(t *testing.T) {
+	pool := []domain.TargetInfo{
+		{ID: "a", Name: "n1", State: domain.TargetStateReady},
+		{ID: "b", Name: "n2", State: domain.TargetStateInitializing},
+		{ID: "c", Name: "n3", State: domain.TargetStateDraining},
+		{ID: "d", Name: "n4", State: domain.TargetStateTerminated},
+		{ID: "e", Name: "n5", State: domain.TargetStateDiscovered},
+	}
+	got := domain.PlacementTargets(pool)
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (only ready targets)", len(got))
+	}
+	if got[0].ID != "a" {
+		t.Errorf("got[0].ID = %s, want a", got[0].ID)
+	}
+}
+
+func TestPlacementTargets_EmptyStateIsEligible(t *testing.T) {
+	pool := []domain.TargetInfo{
+		{ID: "a", Name: "n1"},
+	}
+	got := domain.PlacementTargets(pool)
+	if len(got) != 1 {
+		t.Fatalf("len(got) = %d, want 1 (empty state treated as ready)", len(got))
 	}
 }
 

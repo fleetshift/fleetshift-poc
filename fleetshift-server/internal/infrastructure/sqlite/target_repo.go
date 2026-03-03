@@ -25,9 +25,14 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 		return fmt.Errorf("marshal properties: %w", err)
 	}
 
+	state := t.State
+	if state == "" {
+		state = domain.TargetStateReady
+	}
+
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, labels, properties) VALUES (?, ?, ?, ?, ?)`,
-		string(t.ID), string(t.Type), t.Name, string(labels), string(props),
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		string(t.ID), string(t.Type), t.Name, string(state), string(labels), string(props), string(t.InventoryItemID),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -40,14 +45,14 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 
 func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, type, name, labels, properties FROM targets WHERE id = ?`,
+		`SELECT id, type, name, state, labels, properties, inventory_item_id FROM targets WHERE id = ?`,
 		string(id),
 	)
 	return scanTarget(row)
 }
 
 func (r *TargetRepo) List(ctx context.Context) ([]domain.TargetInfo, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, labels, properties FROM targets`)
+	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, state, labels, properties, inventory_item_id FROM targets`)
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
@@ -55,7 +60,7 @@ func (r *TargetRepo) List(ctx context.Context) ([]domain.TargetInfo, error) {
 
 	var targets []domain.TargetInfo
 	for rows.Next() {
-		t, err := scanTargetRows(rows)
+		t, err := scanTarget(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -82,8 +87,8 @@ type scanner interface {
 
 func scanTarget(s scanner) (domain.TargetInfo, error) {
 	var t domain.TargetInfo
-	var id, targetType, labelsJSON, propsJSON string
-	if err := s.Scan(&id, &targetType, &t.Name, &labelsJSON, &propsJSON); err != nil {
+	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID string
+	if err := s.Scan(&id, &targetType, &t.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return t, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -91,6 +96,8 @@ func scanTarget(s scanner) (domain.TargetInfo, error) {
 	}
 	t.ID = domain.TargetID(id)
 	t.Type = domain.TargetType(targetType)
+	t.State = domain.TargetState(stateStr)
+	t.InventoryItemID = domain.InventoryItemID(inventoryItemID)
 	if err := json.Unmarshal([]byte(labelsJSON), &t.Labels); err != nil {
 		return t, fmt.Errorf("unmarshal labels: %w", err)
 	}
@@ -98,8 +105,4 @@ func scanTarget(s scanner) (domain.TargetInfo, error) {
 		return t, fmt.Errorf("unmarshal properties: %w", err)
 	}
 	return t, nil
-}
-
-func scanTargetRows(rows *sql.Rows) (domain.TargetInfo, error) {
-	return scanTarget(rows)
 }

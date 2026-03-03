@@ -14,14 +14,21 @@ type PoolChange struct {
 	Updated []TargetInfo // targets whose placement-relevant state changed
 }
 
+// DeliveryCompletionEvent records the terminal outcome of a single delivery.
+type DeliveryCompletionEvent struct {
+	DeliveryID DeliveryID
+	Result     DeliveryResult
+}
+
 // DeploymentEvent is the discriminated envelope delivered to a running
 // orchestration workflow via [DeploymentWorkflowRunner.AwaitDeploymentEvent].
 // Exactly one field is non-nil per event.
 type DeploymentEvent struct {
-	PoolChange          *PoolChange // fleet membership or label change
-	ManifestInvalidated bool        // re-generate manifests for resolved set
-	SpecChanged         bool        // deployment spec changed; reload from repo
-	Delete              bool        // tear down delivery and exit
+	PoolChange          *PoolChange              // fleet membership or label change
+	ManifestInvalidated bool                     // re-generate manifests for resolved set
+	SpecChanged         bool                     // deployment spec changed; reload from repo
+	Delete              bool                     // tear down delivery and exit
+	DeliveryCompleted   *DeliveryCompletionEvent // a delivery reached a terminal state
 }
 
 // ApplyPoolChange produces a new pool by applying a [PoolChange] to the

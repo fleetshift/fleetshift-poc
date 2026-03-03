@@ -37,21 +37,21 @@ func (r *RoutingDeliveryService) Register(targetType domain.TargetType, agent do
 }
 
 // Deliver routes to the agent registered for target.Type.
-func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deploymentID domain.DeploymentID, manifests []domain.Manifest) (domain.DeliveryResult, error) {
+func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
 	agent, err := r.agentFor(target.Type)
 	if err != nil {
 		return domain.DeliveryResult{}, err
 	}
-	return agent.Deliver(ctx, target, deploymentID, manifests)
+	return agent.Deliver(ctx, target, deliveryID, manifests, observer)
 }
 
 // Remove routes to the agent registered for target.Type.
-func (r *RoutingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deploymentID domain.DeploymentID) error {
+func (r *RoutingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, observer domain.DeliveryObserver) error {
 	agent, err := r.agentFor(target.Type)
 	if err != nil {
 		return err
 	}
-	return agent.Remove(ctx, target, deploymentID)
+	return agent.Remove(ctx, target, deliveryID, observer)
 }
 
 func (r *RoutingDeliveryService) agentFor(tt domain.TargetType) (domain.DeliveryAgent, error) {

@@ -1,16 +1,29 @@
 package domain
 
+// TargetState indicates where a target is in its lifecycle.
+type TargetState string
+
+const (
+	TargetStateDiscovered  TargetState = "discovered"
+	TargetStateInitializing TargetState = "initializing"
+	TargetStateReady       TargetState = "ready"
+	TargetStateDraining    TargetState = "draining"
+	TargetStateTerminated  TargetState = "terminated"
+)
+
 // TargetInfo describes a registered target. It is the full state the platform
 // knows: stored in the target repository, passed to delivery and manifest
 // generation, and exposed via API. Properties are not used for placement;
 // only the placement view (see [PlacementTarget]) is passed to placement
 // strategies and considered for invalidation.
 type TargetInfo struct {
-	ID         TargetID
-	Type       TargetType
-	Name       string
-	Labels     map[string]string
-	Properties map[string]string
+	ID              TargetID
+	InventoryItemID InventoryItemID
+	Type            TargetType
+	Name            string
+	State           TargetState
+	Labels          map[string]string
+	Properties      map[string]string
 }
 
 // PlacementTarget is the subset of target state shared with placement
@@ -21,10 +34,14 @@ type TargetInfo struct {
 // Type is included because it is a fundamental, immutable characteristic
 // of a target (changing type = registering a new target). Placement
 // strategies may use it to filter by target type, but are not required to.
+//
+// State is included so placement strategies can enforce readiness
+// requirements (only [TargetStateReady] targets are eligible by default).
 type PlacementTarget struct {
 	ID     TargetID
 	Type   TargetType
 	Name   string
+	State  TargetState
 	Labels map[string]string
 }
 
@@ -35,14 +52,19 @@ func ToPlacementTarget(t TargetInfo) PlacementTarget {
 	for k, v := range t.Labels {
 		labels[k] = v
 	}
-	return PlacementTarget{ID: t.ID, Type: t.Type, Name: t.Name, Labels: labels}
+	return PlacementTarget{ID: t.ID, Type: t.Type, Name: t.Name, State: t.State, Labels: labels}
 }
 
 // PlacementTargets returns the placement view of each target in the slice.
+// Only targets in [TargetStateReady] (or with empty state, for backward
+// compatibility) are included; targets in other states are filtered out.
 func PlacementTargets(pool []TargetInfo) []PlacementTarget {
-	out := make([]PlacementTarget, len(pool))
-	for i, t := range pool {
-		out[i] = ToPlacementTarget(t)
+	out := make([]PlacementTarget, 0, len(pool))
+	for _, t := range pool {
+		if t.State != TargetStateReady && t.State != "" {
+			continue
+		}
+		out = append(out, ToPlacementTarget(t))
 	}
 	return out
 }
@@ -64,3 +86,4 @@ func ResolvedTargetInfos(resolved []PlacementTarget, pool []TargetInfo) []Target
 	}
 	return out
 }
+

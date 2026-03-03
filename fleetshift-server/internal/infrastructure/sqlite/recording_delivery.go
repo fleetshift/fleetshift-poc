@@ -13,36 +13,42 @@ import (
 // development, testing, or target types that have no real delivery
 // agent registered yet.
 type RecordingDeliveryService struct {
-	Records *DeliveryRecordRepo
-	Now     func() time.Time
+	Deliveries *DeliveryRepo
+	Now        func() time.Time
 }
 
-func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deploymentID domain.DeploymentID, manifests []domain.Manifest) (domain.DeliveryResult, error) {
+func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
 	now := s.now()
-	rec := domain.DeliveryRecord{
-		DeploymentID: deploymentID,
+	d := domain.Delivery{
+		ID:           deliveryID,
+		DeploymentID: deploymentIDFromDeliveryID(deliveryID),
 		TargetID:     target.ID,
 		Manifests:    manifests,
 		State:        domain.DeliveryStateDelivered,
+		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := s.Records.Put(ctx, rec); err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
+	if err := s.Deliveries.Put(ctx, d); err != nil {
+		result := domain.DeliveryResult{State: domain.DeliveryStateFailed}
+		observer.Done(result)
+		return result, err
 	}
-	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	observer.Done(result)
+	return result, nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deploymentID domain.DeploymentID) error {
-	// For now, removing means deleting the record. A real implementation
-	// would send a removal command through the fleetlet.
-	_, err := s.Records.Get(ctx, deploymentID, target.ID)
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ domain.DeliveryObserver) error {
+	_, err := s.Deliveries.GetByDeploymentTarget(ctx, deploymentIDFromDeliveryID(deliveryID), target.ID)
 	if err != nil {
 		return nil
 	}
-	return s.Records.Put(ctx, domain.DeliveryRecord{
-		DeploymentID: deploymentID,
+	return s.Deliveries.Put(ctx, domain.Delivery{
+		ID:           deliveryID,
+		DeploymentID: deploymentIDFromDeliveryID(deliveryID),
 		TargetID:     target.ID,
 		State:        domain.DeliveryStatePending,
+		CreatedAt:    s.now(),
 		UpdatedAt:    s.now(),
 	})
 }
@@ -52,4 +58,15 @@ func (s *RecordingDeliveryService) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+// deploymentIDFromDeliveryID extracts the deployment ID from a
+// composite delivery ID of the form "deploymentID:targetID".
+func deploymentIDFromDeliveryID(id domain.DeliveryID) domain.DeploymentID {
+	for i := 0; i < len(id); i++ {
+		if id[i] == ':' {
+			return domain.DeploymentID(id[:i])
+		}
+	}
+	return domain.DeploymentID(id)
 }

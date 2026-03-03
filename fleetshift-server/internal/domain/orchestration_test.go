@@ -110,23 +110,30 @@ func (s *stubTargetRepo) List(_ context.Context) ([]domain.TargetInfo, error) {
 func (s *stubTargetRepo) Delete(_ context.Context, _ domain.TargetID) error { return nil }
 
 // noopDelivery implements DeliveryService with no-op Deliver and Remove.
+// It calls observer.Done synchronously so that the workflow's
+// awaitDeliveries loop can proceed.
 type noopDelivery struct{}
 
-func (noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeploymentID, _ []domain.Manifest) (domain.DeliveryResult, error) {
-	return domain.DeliveryResult{}, nil
+func (noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	observer.Done(result)
+	return result, nil
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeploymentID) error {
+func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ domain.DeliveryObserver) error {
 	return nil
 }
 
 // singleEventRunner is a minimal DeploymentWorkflowRunner that delivers
 // a single DeploymentEvent and then signals delete on the next call.
-// It runs activities synchronously.
+// It runs activities synchronously. The extra channel receives
+// delivery-completion events injected by OnDeliveryDone; they are
+// drained before the scripted event sequence.
 type singleEventRunner struct {
 	ctx       context.Context
 	event     domain.DeploymentEvent
 	delivered bool
+	extra     chan domain.DeploymentEvent
 }
 
 func (r *singleEventRunner) ID() string              { return "test-single" }
@@ -136,6 +143,11 @@ func (r *singleEventRunner) Run(activity domain.Activity[any, any], in any) (any
 }
 
 func (r *singleEventRunner) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+	select {
+	case e := <-r.extra:
+		return e, nil
+	default:
+	}
 	if !r.delivered {
 		r.delivered = true
 		return r.event, nil
@@ -169,17 +181,23 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
+	extra := make(chan domain.DeploymentEvent, 16)
 	wf := &domain.OrchestrationWorkflow{
 		Deployments: depRepo,
 		Targets:     targetRepo,
 		Delivery:    noopDelivery{},
 		Strategies:  domain.DefaultStrategyFactory{},
+		OnDeliveryDone: func(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+			extra <- event
+			return nil
+		},
 	}
 	ctx := context.Background()
 
 	baseRunner := &singleEventRunner{
 		ctx:   ctx,
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
+		extra: extra,
 	}
 	recorder := &recordingRunner{ctx: ctx, delegate: baseRunner}
 
@@ -231,17 +249,23 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
+	extra := make(chan domain.DeploymentEvent, 16)
 	wf := &domain.OrchestrationWorkflow{
 		Deployments: depRepo,
 		Targets:     targetRepo,
 		Delivery:    noopDelivery{},
 		Strategies:  domain.DefaultStrategyFactory{},
+		OnDeliveryDone: func(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+			extra <- event
+			return nil
+		},
 	}
 	ctx := context.Background()
 
 	baseRunner := &singleEventRunner{
 		ctx:   ctx,
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
+		extra: extra,
 	}
 	recorder := &recordingRunner{ctx: ctx, delegate: baseRunner}
 

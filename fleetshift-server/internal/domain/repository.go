@@ -19,11 +19,21 @@ type DeploymentRepository interface {
 	Delete(ctx context.Context, id DeploymentID) error
 }
 
-// DeliveryRecordRepository persists delivery records for each
-// deployment-target pair.
-type DeliveryRecordRepository interface {
-	Put(ctx context.Context, record DeliveryRecord) error
-	Get(ctx context.Context, deploymentID DeploymentID, targetID TargetID) (DeliveryRecord, error)
-	ListByDeployment(ctx context.Context, deploymentID DeploymentID) ([]DeliveryRecord, error)
+// InventoryRepository persists and retrieves inventory items.
+type InventoryRepository interface {
+	Create(ctx context.Context, item InventoryItem) error
+	Get(ctx context.Context, id InventoryItemID) (InventoryItem, error)
+	List(ctx context.Context) ([]InventoryItem, error)
+	ListByType(ctx context.Context, t InventoryType) ([]InventoryItem, error)
+	Update(ctx context.Context, item InventoryItem) error
+	Delete(ctx context.Context, id InventoryItemID) error
+}
+
+// DeliveryRepository persists deliveries for each deployment-target pair.
+type DeliveryRepository interface {
+	Put(ctx context.Context, d Delivery) error
+	Get(ctx context.Context, id DeliveryID) (Delivery, error)
+	GetByDeploymentTarget(ctx context.Context, deploymentID DeploymentID, targetID TargetID) (Delivery, error)
+	ListByDeployment(ctx context.Context, deploymentID DeploymentID) ([]Delivery, error)
 	DeleteByDeployment(ctx context.Context, deploymentID DeploymentID) error
 }

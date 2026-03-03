@@ -18,7 +18,7 @@ type testHarness struct {
 	targets       *application.TargetService
 	deployments   *application.DeploymentService
 	orchestration *application.OrchestrationService
-	records       *sqlite.DeliveryRecordRepo
+	deliveries    *sqlite.DeliveryRepo
 	depRepo       *sqlite.DeploymentRepo
 }
 
@@ -30,11 +30,11 @@ func setup(t *testing.T) testHarness {
 
 	targetRepo := &sqlite.TargetRepo{DB: db}
 	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	recordRepo := &sqlite.DeliveryRecordRepo{DB: db}
+	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
 
 	recordingAgent := &sqlite.RecordingDeliveryService{
-		Records: recordRepo,
-		Now:     func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
+		Deliveries: deliveryRepo,
+		Now:        func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(testTargetType, recordingAgent)
@@ -42,6 +42,7 @@ func setup(t *testing.T) testHarness {
 	owf := &domain.OrchestrationWorkflow{
 		Deployments: deploymentRepo,
 		Targets:     targetRepo,
+		Deliveries:  deliveryRepo,
 		Delivery:    router,
 		Strategies:  domain.DefaultStrategyFactory{},
 	}
@@ -55,6 +56,7 @@ func setup(t *testing.T) testHarness {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	owf.OnDeliveryDone = runners.Orchestration.SignalDeploymentEvent
 
 	orchestration := &application.OrchestrationService{Workflow: runners.Orchestration}
 
@@ -62,12 +64,12 @@ func setup(t *testing.T) testHarness {
 		targets: &application.TargetService{Targets: targetRepo},
 		deployments: &application.DeploymentService{
 			Deployments:   deploymentRepo,
-			Records:      recordRepo,
-			CreateWF:     runners.CreateDeployment,
+			Deliveries:    deliveryRepo,
+			CreateWF:      runners.CreateDeployment,
 			Orchestration: orchestration,
 		},
 		orchestration: orchestration,
-		records:       recordRepo,
+		deliveries:    deliveryRepo,
 		depRepo:       deploymentRepo,
 	}
 }
@@ -163,7 +165,7 @@ func TestCreateDeployment_StaticPlacement(t *testing.T) {
 	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t3")
 
-	records, err := h.records.ListByDeployment(ctx, "d1")
+	records, err := h.deliveries.ListByDeployment(ctx, "d1")
 	if err != nil {
 		t.Fatalf("ListByDeployment: %v", err)
 	}
@@ -194,7 +196,7 @@ func TestCreateDeployment_AllPlacement(t *testing.T) {
 	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t2", "t3")
 
-	records, err := h.records.ListByDeployment(ctx, "d1")
+	records, err := h.deliveries.ListByDeployment(ctx, "d1")
 	if err != nil {
 		t.Fatalf("ListByDeployment: %v", err)
 	}
@@ -279,7 +281,7 @@ func TestDeleteDeployment_RemovesRecords(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	records, err := h.records.ListByDeployment(ctx, "d1")
+	records, err := h.deliveries.ListByDeployment(ctx, "d1")
 	if err != nil {
 		t.Fatalf("ListByDeployment: %v", err)
 	}
@@ -340,7 +342,7 @@ func TestSignalDeploymentEvent_PoolChange(t *testing.T) {
 	dep2 := awaitDeploymentResolvedCount(ctx, t, h.depRepo, "d1", 3)
 	assertResolvedTargets(t, dep2, "t1", "t2", "t3")
 
-	records, err := h.records.ListByDeployment(ctx, "d1")
+	records, err := h.deliveries.ListByDeployment(ctx, "d1")
 	if err != nil {
 		t.Fatalf("ListByDeployment: %v", err)
 	}
@@ -379,7 +381,7 @@ func TestSignalDeploymentEvent_ManifestInvalidated(t *testing.T) {
 	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t2")
 
-	records, err := h.records.ListByDeployment(ctx, "d1")
+	records, err := h.deliveries.ListByDeployment(ctx, "d1")
 	if err != nil {
 		t.Fatalf("ListByDeployment: %v", err)
 	}

@@ -25,16 +25,17 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	targetRepo := &sqlite.TargetRepo{DB: db}
 	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	recordRepo := &sqlite.DeliveryRecordRepo{DB: db}
+	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(provider)
+	kindAgent := kindaddon.NewAgent(fakeFactory(provider))
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	owf := &domain.OrchestrationWorkflow{
 		Deployments: deploymentRepo,
 		Targets:     targetRepo,
+		Deliveries:  deliveryRepo,
 		Delivery:    router,
 		Strategies:  domain.DefaultStrategyFactory{},
 	}
@@ -45,11 +46,12 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
+	owf.OnDeliveryDone = runners.Orchestration.SignalDeploymentEvent
 
 	targetSvc := &application.TargetService{Targets: targetRepo}
 	deploySvc := &application.DeploymentService{
 		Deployments:   deploymentRepo,
-		Records:       recordRepo,
+		Deliveries:    deliveryRepo,
 		CreateWF:      runners.CreateDeployment,
 		Orchestration: &application.OrchestrationService{Workflow: runners.Orchestration},
 	}
@@ -101,7 +103,8 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Errorf("ResolvedTargets[0] = %q, want %q", dep.ResolvedTargets[0], "my-kind")
 	}
 
-	if _, ok := provider.clusters["dev-cluster"]; !ok {
+	<-provider.created
+	if !provider.hasCluster("dev-cluster") {
 		t.Error("expected kind cluster 'dev-cluster' to be created by the provider")
 	}
 }

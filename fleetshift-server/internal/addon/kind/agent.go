@@ -8,8 +8,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
+	"sigs.k8s.io/kind/pkg/log"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -38,32 +40,74 @@ type ClusterProvider interface {
 	List() ([]string, error)
 }
 
+// ClusterProviderFactory creates a [ClusterProvider] with the given
+// logger wired in. Each delivery creates its own provider so that
+// kind's log output is captured per-delivery via the
+// [domain.DeliveryObserver].
+type ClusterProviderFactory func(logger log.Logger) ClusterProvider
+
 // Agent implements [domain.DeliveryAgent] for kind clusters.
 type Agent struct {
-	provider ClusterProvider
+	providerFactory ClusterProviderFactory
 }
 
-// NewAgent returns an Agent backed by the given [ClusterProvider].
-func NewAgent(provider ClusterProvider) *Agent {
-	return &Agent{provider: provider}
+// NewAgent returns an Agent that creates providers via the given factory.
+func NewAgent(factory ClusterProviderFactory) *Agent {
+	return &Agent{providerFactory: factory}
 }
 
-func (a *Agent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeploymentID, manifests []domain.Manifest) (domain.DeliveryResult, error) {
-	for _, m := range manifests {
-		var spec ClusterSpec
-		if err := json.Unmarshal(m.Raw, &spec); err != nil {
-			return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-				fmt.Errorf("unmarshal kind cluster spec: %w", err)
-		}
-		if spec.Name == "" {
-			return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-				fmt.Errorf("%w: kind cluster spec requires a name", domain.ErrInvalidArgument)
-		}
+// Deliver validates all manifests synchronously. If validation passes,
+// it returns [domain.DeliveryStateAccepted] immediately and performs
+// the actual cluster creation in a background goroutine. Kind's own
+// log output flows through the [domain.DeliveryObserver] via the
+// [observerLogger] adapter.
+func (a *Agent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, observer domain.DeliveryObserver) (domain.DeliveryResult, error) {
+	specs, err := a.validateManifests(manifests)
+	if err != nil {
+		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
+	}
 
-		if a.clusterExists(spec.Name) {
-			if err := a.provider.Delete(spec.Name, ""); err != nil {
-				return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-					fmt.Errorf("delete existing kind cluster %q for recreate: %w", spec.Name, err)
+	provider := a.providerFactory(NewObserverLogger(observer, time.Now))
+
+	go a.deliverAsync(provider, specs, observer)
+
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ domain.DeliveryObserver) error {
+	return nil
+}
+
+func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, error) {
+	specs := make([]ClusterSpec, len(manifests))
+	for i, m := range manifests {
+		if err := json.Unmarshal(m.Raw, &specs[i]); err != nil {
+			return nil, fmt.Errorf("unmarshal kind cluster spec: %w", err)
+		}
+		if specs[i].Name == "" {
+			return nil, fmt.Errorf("%w: kind cluster spec requires a name", domain.ErrInvalidArgument)
+		}
+	}
+	return specs, nil
+}
+
+func (a *Agent) deliverAsync(provider ClusterProvider, specs []ClusterSpec, observer domain.DeliveryObserver) {
+	for _, spec := range specs {
+		if a.clusterExists(provider, spec.Name) {
+			observer.Emit(domain.DeliveryEvent{
+				Kind:    domain.DeliveryEventProgress,
+				Message: fmt.Sprintf("Deleting existing cluster %q for recreate", spec.Name),
+			})
+			if err := provider.Delete(spec.Name, ""); err != nil {
+				observer.Emit(domain.DeliveryEvent{
+					Kind:    domain.DeliveryEventError,
+					Message: fmt.Sprintf("delete existing kind cluster %q for recreate: %v", spec.Name, err),
+				})
+				observer.Done(domain.DeliveryResult{
+					State:   domain.DeliveryStateFailed,
+					Message: fmt.Sprintf("delete existing kind cluster %q for recreate: %v", spec.Name, err),
+				})
+				return
 			}
 		}
 
@@ -71,23 +115,25 @@ func (a *Agent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.Deploym
 		if len(spec.Config) > 0 {
 			opts = append(opts, cluster.CreateWithRawConfig(spec.Config))
 		}
-		if err := a.provider.Create(spec.Name, opts...); err != nil {
-			return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-				fmt.Errorf("create kind cluster %q: %w", spec.Name, err)
+
+		if err := provider.Create(spec.Name, opts...); err != nil {
+			observer.Emit(domain.DeliveryEvent{
+				Kind:    domain.DeliveryEventError,
+				Message: fmt.Sprintf("create kind cluster %q: %v", spec.Name, err),
+			})
+			observer.Done(domain.DeliveryResult{
+				State:   domain.DeliveryStateFailed,
+				Message: fmt.Sprintf("create kind cluster %q: %v", spec.Name, err),
+			})
+			return
 		}
 	}
-	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
+
+	observer.Done(domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeploymentID) error {
-	// Removal requires knowing which clusters were created by this
-	// deployment. For now, this is a no-op; a full implementation
-	// would track the mapping from deployment to cluster name(s).
-	return nil
-}
-
-func (a *Agent) clusterExists(name string) bool {
-	clusters, err := a.provider.List()
+func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {
+	clusters, err := provider.List()
 	if err != nil {
 		return false
 	}

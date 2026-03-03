@@ -11,94 +11,112 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// DeliveryRecordRepo implements [domain.DeliveryRecordRepository] backed by SQLite.
-type DeliveryRecordRepo struct {
+// DeliveryRepo implements [domain.DeliveryRepository] backed by SQLite.
+type DeliveryRepo struct {
 	DB *sql.DB
 }
 
-func (r *DeliveryRecordRepo) Put(ctx context.Context, rec domain.DeliveryRecord) error {
-	manifests, err := json.Marshal(rec.Manifests)
+func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
+	manifests, err := json.Marshal(d.Manifests)
 	if err != nil {
 		return fmt.Errorf("marshal manifests: %w", err)
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO delivery_records (deployment_id, target_id, manifests, state, updated_at)
-		 VALUES (?, ?, ?, ?, ?)
+		`INSERT INTO delivery_records (id, deployment_id, target_id, manifests, state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (deployment_id, target_id) DO UPDATE SET
+		   id = excluded.id,
 		   manifests = excluded.manifests,
 		   state = excluded.state,
 		   updated_at = excluded.updated_at`,
-		string(rec.DeploymentID), string(rec.TargetID),
-		string(manifests), string(rec.State), rec.UpdatedAt.UTC().Format(time.RFC3339),
+		string(d.ID), string(d.DeploymentID), string(d.TargetID),
+		string(manifests), string(d.State),
+		d.CreatedAt.UTC().Format(time.RFC3339),
+		d.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
-		return fmt.Errorf("upsert delivery record: %w", err)
+		return fmt.Errorf("upsert delivery: %w", err)
 	}
 	return nil
 }
 
-func (r *DeliveryRecordRepo) Get(ctx context.Context, depID domain.DeploymentID, tgtID domain.TargetID) (domain.DeliveryRecord, error) {
+func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT deployment_id, target_id, manifests, state, updated_at
+		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
+		 FROM delivery_records WHERE id = ?`,
+		string(id),
+	)
+	return scanDelivery(row)
+}
+
+func (r *DeliveryRepo) GetByDeploymentTarget(ctx context.Context, depID domain.DeploymentID, tgtID domain.TargetID) (domain.Delivery, error) {
+	row := r.DB.QueryRowContext(ctx,
+		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
 		 FROM delivery_records WHERE deployment_id = ? AND target_id = ?`,
 		string(depID), string(tgtID),
 	)
-	return scanDeliveryRecord(row)
+	return scanDelivery(row)
 }
 
-func (r *DeliveryRecordRepo) ListByDeployment(ctx context.Context, depID domain.DeploymentID) ([]domain.DeliveryRecord, error) {
+func (r *DeliveryRepo) ListByDeployment(ctx context.Context, depID domain.DeploymentID) ([]domain.Delivery, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT deployment_id, target_id, manifests, state, updated_at
+		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
 		 FROM delivery_records WHERE deployment_id = ?`,
 		string(depID),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list delivery records: %w", err)
+		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
 	defer rows.Close()
 
-	var records []domain.DeliveryRecord
+	var deliveries []domain.Delivery
 	for rows.Next() {
-		rec, err := scanDeliveryRecord(rows)
+		d, err := scanDelivery(rows)
 		if err != nil {
 			return nil, err
 		}
-		records = append(records, rec)
+		deliveries = append(deliveries, d)
 	}
-	return records, rows.Err()
+	return deliveries, rows.Err()
 }
 
-func (r *DeliveryRecordRepo) DeleteByDeployment(ctx context.Context, depID domain.DeploymentID) error {
+func (r *DeliveryRepo) DeleteByDeployment(ctx context.Context, depID domain.DeploymentID) error {
 	_, err := r.DB.ExecContext(ctx,
 		`DELETE FROM delivery_records WHERE deployment_id = ?`,
 		string(depID),
 	)
 	if err != nil {
-		return fmt.Errorf("delete delivery records: %w", err)
+		return fmt.Errorf("delete deliveries: %w", err)
 	}
 	return nil
 }
 
-func scanDeliveryRecord(s scanner) (domain.DeliveryRecord, error) {
-	var rec domain.DeliveryRecord
-	var depID, tgtID, manifestsJSON, stateStr, updatedAtStr string
-	if err := s.Scan(&depID, &tgtID, &manifestsJSON, &stateStr, &updatedAtStr); err != nil {
+func scanDelivery(s scanner) (domain.Delivery, error) {
+	var d domain.Delivery
+	var id, depID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
+	if err := s.Scan(&id, &depID, &tgtID, &manifestsJSON, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return rec, fmt.Errorf("%w", domain.ErrNotFound)
+			return d, fmt.Errorf("%w", domain.ErrNotFound)
 		}
-		return rec, fmt.Errorf("scan delivery record: %w", err)
+		return d, fmt.Errorf("scan delivery: %w", err)
 	}
-	rec.DeploymentID = domain.DeploymentID(depID)
-	rec.TargetID = domain.TargetID(tgtID)
-	rec.State = domain.DeliveryState(stateStr)
-	if err := json.Unmarshal([]byte(manifestsJSON), &rec.Manifests); err != nil {
-		return rec, fmt.Errorf("unmarshal manifests: %w", err)
+	d.ID = domain.DeliveryID(id)
+	d.DeploymentID = domain.DeploymentID(depID)
+	d.TargetID = domain.TargetID(tgtID)
+	d.State = domain.DeliveryState(stateStr)
+	if err := json.Unmarshal([]byte(manifestsJSON), &d.Manifests); err != nil {
+		return d, fmt.Errorf("unmarshal manifests: %w", err)
 	}
-	t, err := time.Parse(time.RFC3339, updatedAtStr)
+	t, err := time.Parse(time.RFC3339, createdAtStr)
 	if err != nil {
-		return rec, fmt.Errorf("parse updated_at: %w", err)
+		return d, fmt.Errorf("parse created_at: %w", err)
 	}
-	rec.UpdatedAt = t
-	return rec, nil
+	d.CreatedAt = t
+	t, err = time.Parse(time.RFC3339, updatedAtStr)
+	if err != nil {
+		return d, fmt.Errorf("parse updated_at: %w", err)
+	}
+	d.UpdatedAt = t
+	return d, nil
 }
