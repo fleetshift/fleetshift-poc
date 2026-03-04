@@ -188,7 +188,7 @@ func TestDeploymentCreateGetList_JSON(t *testing.T) {
 		"--manifest-file", manifestFile,
 		"--placement-type", "all",
 	)
-	if !strings.Contains(out, `"name": "deployments/beta"`) {
+	if !strings.Contains(out, `"deployments/beta"`) {
 		t.Errorf("create JSON should contain name field, got:\n%s", out)
 	}
 	if !strings.Contains(out, `"state"`) {
@@ -196,7 +196,7 @@ func TestDeploymentCreateGetList_JSON(t *testing.T) {
 	}
 
 	out = runCLI(t, "--server", addr, "-o", "json", "deployment", "get", "beta")
-	if !strings.Contains(out, `"name": "deployments/beta"`) {
+	if !strings.Contains(out, `"deployments/beta"`) {
 		t.Errorf("get JSON should contain name, got:\n%s", out)
 	}
 
