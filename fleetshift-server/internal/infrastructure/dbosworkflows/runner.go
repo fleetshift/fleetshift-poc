@@ -29,6 +29,13 @@ type Engine struct {
 }
 
 func (e *Engine) Register(owf *domain.OrchestrationWorkflow, cwf *domain.CreateDeploymentWorkflow) (domain.WorkflowRunners, error) {
+	// --- set workflow-specific engine capabilities ---
+
+	dbosCtx := e.DBOSCtx
+	owf.SignalDeploymentEvent = func(_ context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
+		return dbos.Send(dbosCtx, string(deploymentID), event, deploymentEventTopic)
+	}
+
 	// --- orchestration activities & workflow ---
 
 	orchInvokers := make(map[string]activityInvoker)
@@ -41,13 +48,20 @@ func (e *Engine) Register(owf *domain.OrchestrationWorkflow, cwf *domain.CreateD
 	registerActivity(orchInvokers, owf.RemoveFromTarget())
 	registerActivity(orchInvokers, owf.UpdateDeployment())
 
-	dbosCtx := e.DBOSCtx
 	orchWfFunc := func(ctx dbos.DBOSContext, deploymentID domain.DeploymentID) (struct{}, error) {
-		journal := &orchestrationJournal{
-			baseJournal: baseJournal{ctx: ctx, invokers: orchInvokers},
-			dbosCtx:     dbosCtx,
+		journal := &baseJournal{ctx: ctx, invokers: orchInvokers}
+		awaitEvent := func() (domain.DeploymentEvent, error) {
+			for {
+				event, err := dbos.Recv[domain.DeploymentEvent](ctx, deploymentEventTopic, 24*time.Hour)
+				if err != nil {
+					return domain.DeploymentEvent{}, fmt.Errorf("recv deployment event: %w", err)
+				}
+				if event != (domain.DeploymentEvent{}) {
+					return event, nil
+				}
+			}
 		}
-		return owf.Run(journal, deploymentID)
+		return owf.Run(journal, awaitEvent, deploymentID)
 	}
 
 	dbos.RegisterWorkflow(e.DBOSCtx, orchWfFunc, dbos.WithWorkflowName(owf.Name()))
@@ -57,11 +71,15 @@ func (e *Engine) Register(owf *domain.OrchestrationWorkflow, cwf *domain.CreateD
 	createInvokers := make(map[string]activityInvoker)
 	registerActivity(createInvokers, cwf.PersistDeployment())
 
+	cwf.StartOrchestration = domain.NewActivity("start-orchestration", func(ctx context.Context, deploymentID domain.DeploymentID) (struct{}, error) {
+		// ctx here is the DBOS step context; RunWorkflow uses the parent's DBOS context.
+		_, err := dbos.RunWorkflow(dbosCtx, orchWfFunc, deploymentID, dbos.WithWorkflowID(string(deploymentID)))
+		return struct{}{}, err
+	})
+	registerActivity(createInvokers, cwf.StartOrchestration)
+
 	createWfFunc := func(ctx dbos.DBOSContext, input domain.CreateDeploymentInput) (domain.Deployment, error) {
-		journal := &createDeploymentJournal{
-			baseJournal: baseJournal{ctx: ctx, invokers: createInvokers},
-			orchWfFunc:  orchWfFunc,
-		}
+		journal := &baseJournal{ctx: ctx, invokers: createInvokers}
 		return cwf.Run(journal, input)
 	}
 
@@ -120,48 +138,6 @@ func (j *baseJournal) Run(activity domain.Activity[any, any], in any) (any, erro
 		return nil, fmt.Errorf("activity %q not registered", activity.Name())
 	}
 	return invoke(j.ctx, in)
-}
-
-// --- OrchestrationJournal ---
-
-type orchestrationJournal struct {
-	baseJournal
-	dbosCtx dbos.DBOSContext
-}
-
-// AwaitDeploymentEvent receives the next deployment event. It is called
-// directly from the workflow body (not inside an activity). DBOS Recv is
-// still durable: the runtime checkpoints Recv's result so that on replay
-// the workflow gets the same event from the journal instead of re-reading
-// the queue. So after a crash we do not lose the event or receive it
-// twice. "Exactly once" means the message is consumed when Recv is
-// committed, and replay uses the stored result.
-func (j *orchestrationJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
-	for {
-		event, err := dbos.Recv[domain.DeploymentEvent](j.ctx, deploymentEventTopic, 24*time.Hour)
-		if err != nil {
-			return domain.DeploymentEvent{}, fmt.Errorf("recv deployment event: %w", err)
-		}
-		if event != (domain.DeploymentEvent{}) {
-			return event, nil
-		}
-	}
-}
-
-func (j *orchestrationJournal) SignalDeploymentEvent(_ context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
-	return dbos.Send(j.dbosCtx, string(deploymentID), event, deploymentEventTopic)
-}
-
-// --- CreateDeploymentJournal ---
-
-type createDeploymentJournal struct {
-	baseJournal
-	orchWfFunc dbos.Workflow[domain.DeploymentID, struct{}]
-}
-
-func (j *createDeploymentJournal) StartOrchestration(deploymentID domain.DeploymentID) error {
-	_, err := dbos.RunWorkflow(j.ctx, j.orchWfFunc, deploymentID, dbos.WithWorkflowID(string(deploymentID)))
-	return err
 }
 
 // --- OrchestrationRunner (app-facing) ---

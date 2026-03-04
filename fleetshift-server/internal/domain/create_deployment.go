@@ -16,22 +16,6 @@ type CreateDeploymentInput struct {
 	RolloutStrategy   *RolloutStrategySpec
 }
 
-// CreateDeploymentJournal is the durable execution journal for
-// [CreateDeploymentWorkflow.Run]. It extends [Journal] with the
-// ability to start the orchestration child workflow. The child
-// performs initial placement without awaiting an event;
-// invalidation and other events are signaled via
-// [OrchestrationJournal.SignalDeploymentEvent] from within the
-// orchestration workflow itself.
-type CreateDeploymentJournal interface {
-	Journal
-
-	// StartOrchestration durably starts the orchestration child
-	// workflow for the given deployment. The child runs independently
-	// and performs initial placement; this method returns once the start is recorded.
-	StartOrchestration(deploymentID DeploymentID) error
-}
-
 // CreateDeploymentRunner starts create-deployment workflows (app-facing API).
 type CreateDeploymentRunner interface {
 	Run(ctx context.Context, input CreateDeploymentInput) (WorkflowHandle[Deployment], error)
@@ -44,6 +28,12 @@ type CreateDeploymentRunner interface {
 type CreateDeploymentWorkflow struct {
 	Store Store
 	Now   func() time.Time
+
+	// StartOrchestration durably starts the orchestration child
+	// workflow for the given deployment. Set by the engine during
+	// [WorkflowEngine.Register]. Runs as an activity through the
+	// journal so the start survives replay.
+	StartOrchestration Activity[DeploymentID, struct{}]
 }
 
 func (w *CreateDeploymentWorkflow) now() time.Time {
@@ -89,13 +79,13 @@ func (w *CreateDeploymentWorkflow) PersistDeployment() Activity[CreateDeployment
 
 // Run is the workflow body: persist the deployment, then start
 // orchestration as a durable child workflow.
-func (w *CreateDeploymentWorkflow) Run(journal CreateDeploymentJournal, input CreateDeploymentInput) (Deployment, error) {
+func (w *CreateDeploymentWorkflow) Run(journal Journal, input CreateDeploymentInput) (Deployment, error) {
 	dep, err := RunActivity(journal, w.PersistDeployment(), input)
 	if err != nil {
 		return Deployment{}, fmt.Errorf("persist deployment: %w", err)
 	}
 
-	if err := journal.StartOrchestration(dep.ID); err != nil {
+	if _, err := RunActivity(journal, w.StartOrchestration, dep.ID); err != nil {
 		return Deployment{}, fmt.Errorf("start orchestration: %w", err)
 	}
 

@@ -9,13 +9,13 @@ import "context"
 //     WorkflowRunners). No workflow-specific types.
 //
 //   - Per-workflow file (orchestration.go, create_deployment.go): the workflow
-//     struct, its journal, and its runner. Naming:
-//     • XJournal = execution-time journal passed to XWorkflow.Run
-//       (extends [Journal] with workflow-specific methods).
+//     struct and its runner. Naming:
 //     • XRunner = app-facing starter; Run(ctx, input) returns WorkflowHandle.
 //
-// So: orchestration.go has OrchestrationJournal + OrchestrationRunner;
-// create_deployment.go has CreateDeploymentJournal + CreateDeploymentRunner.
+// Journal is a single universal type used by all workflows. Workflow-specific
+// engine capabilities (e.g. signaling, awaiting events, starting child
+// workflows) are injected as function fields or Activity fields on the
+// workflow struct, or as parameters to Run — not overloaded onto the journal.
 
 // Activity is a named, typed, idempotent operation. Implementations must
 // be safe for at-least-once invocation.
@@ -27,8 +27,6 @@ type Activity[I any, O any] interface {
 // Journal is the durable execution journal provided to a running
 // workflow. It records activity invocations and their results so
 // the engine can replay the workflow deterministically after a crash.
-// Per-workflow journal interfaces (e.g. [OrchestrationJournal]) extend
-// Journal with workflow-specific operations that are also journaled.
 type Journal interface {
 	ID() string
 

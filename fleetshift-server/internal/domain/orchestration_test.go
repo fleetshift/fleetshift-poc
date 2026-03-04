@@ -9,12 +9,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// recordingJournal wraps an OrchestrationJournal and records activity
+// recordingJournal wraps a [domain.Journal] and records activity
 // names and target-related inputs so tests can assert execution sequence.
 type recordingJournal struct {
 	ctx      context.Context
 	records  []activityRecord
-	delegate domain.OrchestrationJournal
+	delegate domain.Journal
 }
 
 type activityRecord struct {
@@ -39,14 +39,6 @@ func (j *recordingJournal) Run(activity domain.Activity[any, any], in any) (any,
 	}
 	j.records = append(j.records, activityRecord{Name: name, TargetID: targetID})
 	return j.delegate.Run(activity, in)
-}
-
-func (j *recordingJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
-	return j.delegate.AwaitDeploymentEvent()
-}
-
-func (j *recordingJournal) SignalDeploymentEvent(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
-	return j.delegate.SignalDeploymentEvent(ctx, deploymentID, event)
 }
 
 func (j *recordingJournal) activityNames() []string {
@@ -205,11 +197,11 @@ func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.Deli
 	return nil
 }
 
-// singleEventJournal is a minimal OrchestrationJournal that delivers
-// a single DeploymentEvent and then signals delete on the next call.
-// It runs activities synchronously. The extra channel receives
-// delivery-completion events injected via SignalDeploymentEvent; they
-// are drained before the scripted event sequence.
+// singleEventJournal is a minimal Journal that runs activities
+// synchronously. awaitEvent delivers one scripted event and then
+// signals delete. The extra channel receives delivery-completion
+// events injected via the workflow's SignalDeploymentEvent field;
+// they are drained before the scripted event sequence.
 type singleEventJournal struct {
 	ctx       context.Context
 	event     domain.DeploymentEvent
@@ -223,7 +215,7 @@ func (j *singleEventJournal) Run(activity domain.Activity[any, any], in any) (an
 	return activity.Run(j.ctx, in)
 }
 
-func (j *singleEventJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+func (j *singleEventJournal) awaitEvent() (domain.DeploymentEvent, error) {
 	select {
 	case e := <-j.extra:
 		return e, nil
@@ -236,7 +228,7 @@ func (j *singleEventJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, err
 	return domain.DeploymentEvent{Delete: true}, nil
 }
 
-func (j *singleEventJournal) SignalDeploymentEvent(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+func (j *singleEventJournal) signal(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
 	j.extra <- event
 	return nil
 }
@@ -267,21 +259,22 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
-	wf := &domain.OrchestrationWorkflow{
-		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
-		Delivery:   noopDelivery{},
-		Strategies: domain.DefaultStrategyFactory{},
-	}
-	ctx := context.Background()
-
-	baseJournal := &singleEventJournal{
-		ctx:   ctx,
+	sej := &singleEventJournal{
+		ctx:   context.Background(),
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
 		extra: make(chan domain.DeploymentEvent, 16),
 	}
-	recorder := &recordingJournal{ctx: ctx, delegate: baseJournal}
 
-	_, err := wf.Run(recorder, deploymentID)
+	wf := &domain.OrchestrationWorkflow{
+		Store:                 &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:              noopDelivery{},
+		Strategies:            domain.DefaultStrategyFactory{},
+		SignalDeploymentEvent: sej.signal,
+	}
+
+	recorder := &recordingJournal{ctx: sej.ctx, delegate: sej}
+
+	_, err := wf.Run(recorder, sej.awaitEvent, deploymentID)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -329,21 +322,22 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: pool}
 
-	wf := &domain.OrchestrationWorkflow{
-		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
-		Delivery:   noopDelivery{},
-		Strategies: domain.DefaultStrategyFactory{},
-	}
-	ctx := context.Background()
-
-	baseJournal := &singleEventJournal{
-		ctx:   ctx,
+	sej := &singleEventJournal{
+		ctx:   context.Background(),
 		event: domain.DeploymentEvent{PoolChange: &domain.PoolChange{Set: pool}},
 		extra: make(chan domain.DeploymentEvent, 16),
 	}
-	recorder := &recordingJournal{ctx: ctx, delegate: baseJournal}
 
-	_, err := wf.Run(recorder, deploymentID)
+	wf := &domain.OrchestrationWorkflow{
+		Store:                 &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:              noopDelivery{},
+		Strategies:            domain.DefaultStrategyFactory{},
+		SignalDeploymentEvent: sej.signal,
+	}
+
+	recorder := &recordingJournal{ctx: sej.ctx, delegate: sej}
+
+	_, err := wf.Run(recorder, sej.awaitEvent, deploymentID)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -385,18 +379,19 @@ func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
 
 	targetRepo := &stubTargetRepo{targets: nil}
 
-	wf := &domain.OrchestrationWorkflow{
-		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
-		Delivery:   noopDelivery{},
-		Strategies: domain.DefaultStrategyFactory{},
-	}
-
 	journal := &singleEventJournal{
 		ctx:   context.Background(),
 		extra: make(chan domain.DeploymentEvent, 16),
 	}
 
-	_, err := wf.Run(journal, deploymentID)
+	wf := &domain.OrchestrationWorkflow{
+		Store:                 &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:              noopDelivery{},
+		Strategies:            domain.DefaultStrategyFactory{},
+		SignalDeploymentEvent: journal.signal,
+	}
+
+	_, err := wf.Run(journal, journal.awaitEvent, deploymentID)
 	if err == nil {
 		t.Fatal("expected error from empty pool, got nil")
 	}
@@ -433,10 +428,9 @@ func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.Del
 	return nil
 }
 
-// asyncJournal blocks on AwaitDeploymentEvent until a signal arrives
-// on the events channel, then sends a Delete on the next call. This
-// is needed for testing async delivery agents where the completion
-// signal arrives after the activity returns.
+// asyncJournal is a Journal for testing async delivery agents. awaitEvent
+// blocks until a signal arrives on the events channel, then sends
+// a Delete on the next call.
 type asyncJournal struct {
 	ctx    context.Context
 	events chan domain.DeploymentEvent
@@ -449,7 +443,7 @@ func (j *asyncJournal) Run(activity domain.Activity[any, any], in any) (any, err
 	return activity.Run(j.ctx, in)
 }
 
-func (j *asyncJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
+func (j *asyncJournal) awaitEvent() (domain.DeploymentEvent, error) {
 	if j.sawAll {
 		return domain.DeploymentEvent{Delete: true}, nil
 	}
@@ -457,7 +451,7 @@ func (j *asyncJournal) AwaitDeploymentEvent() (domain.DeploymentEvent, error) {
 	return e, nil
 }
 
-func (j *asyncJournal) SignalDeploymentEvent(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
+func (j *asyncJournal) signal(_ context.Context, _ domain.DeploymentID, event domain.DeploymentEvent) error {
 	j.events <- event
 	if event.DeliveryCompleted != nil {
 		j.sawAll = true
@@ -487,18 +481,19 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	store := &stubStore{deployments: depRepo, targets: targetRepo, deliveries: deliveryRepo}
 	asyncDel := &asyncDelivery{done: make(chan struct{})}
 
-	wf := &domain.OrchestrationWorkflow{
-		Store:      store,
-		Delivery:   asyncDel,
-		Strategies: domain.DefaultStrategyFactory{},
-	}
-
 	journal := &asyncJournal{
 		ctx:    context.Background(),
 		events: make(chan domain.DeploymentEvent, 16),
 	}
 
-	_, err := wf.Run(journal, deploymentID)
+	wf := &domain.OrchestrationWorkflow{
+		Store:                 store,
+		Delivery:              asyncDel,
+		Strategies:            domain.DefaultStrategyFactory{},
+		SignalDeploymentEvent: journal.signal,
+	}
+
+	_, err := wf.Run(journal, journal.awaitEvent, deploymentID)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}

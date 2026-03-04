@@ -87,26 +87,7 @@ type DeploymentAndPool struct {
 	Pool       []TargetInfo
 }
 
-// OrchestrationJournal is the durable execution journal for
-// [OrchestrationWorkflow.Run]. It extends [Journal] with the ability
-// to await and signal deployment-scoped events. Engines (DBOS,
-// go-workflows, sync) implement this interface.
-type OrchestrationJournal interface {
-	Journal
-
-	// AwaitDeploymentEvent blocks until the engine delivers the next
-	// [DeploymentEvent] for this workflow instance.
-	AwaitDeploymentEvent() (DeploymentEvent, error)
-
-	// SignalDeploymentEvent delivers a [DeploymentEvent] to the
-	// workflow instance identified by deploymentID. The signal is
-	// journaled so that it survives engine restarts.
-	SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
-}
-
 // OrchestrationRunner starts orchestration workflows (app-facing API).
-// Deployment events are delivered to running instances via the
-// [OrchestrationJournal] from within the workflow itself.
 type OrchestrationRunner interface {
 	Run(ctx context.Context, deploymentID DeploymentID) (WorkflowHandle[struct{}], error)
 }
@@ -126,10 +107,11 @@ type OrchestrationWorkflow struct {
 	DeliveryObserver DeliveryObserver
 	Now              func() time.Time
 
-	// journal is set by Run before any activities execute. Activity
-	// closures read it at invocation time to access journal capabilities
-	// (e.g. signaling deployment events).
-	journal OrchestrationJournal
+	// SignalDeploymentEvent delivers a [DeploymentEvent] to the
+	// workflow instance identified by deploymentID. Set by the engine
+	// during [WorkflowEngine.Register]; used by [DeliverToTarget] for
+	// delivery-completion signals. Not a journaled operation.
+	SignalDeploymentEvent func(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
 }
 
 func (w *OrchestrationWorkflow) now() time.Time {
@@ -248,7 +230,7 @@ func (w *OrchestrationWorkflow) DeliverToTarget() Activity[DeliverInput, Deliver
 
 		signaler := NewDeliverySignaler(
 			in.DeploymentID, in.DeliveryID, in.Target,
-			w.Store, w.journal.SignalDeploymentEvent,
+			w.Store, w.SignalDeploymentEvent,
 			w.DeliveryObserver,
 		)
 
@@ -291,18 +273,15 @@ func (w *OrchestrationWorkflow) observer() DeploymentObserver {
 
 // Run is the deterministic workflow body. It performs initial placement
 // (load deployment and pool, resolve placement, rollout) without awaiting
-// an event, then enters a loop that blocks on
-// [DeploymentWorkflowRunner.AwaitDeploymentEvent] and re-evaluates on each
-// event (pool change, manifest invalidation, spec change, delete). The
-// workflow exits when it receives a Delete event or encounters a fatal error.
+// an event, then enters a loop that blocks on awaitEvent and re-evaluates
+// on each event (pool change, manifest invalidation, spec change, delete).
+// The workflow exits when it receives a Delete event or encounters a fatal
+// error.
 //
-// Durable execution: On replay, the engine re-runs Run from the top.
-// Completed activities return their recorded results; each AwaitDeploymentEvent()
-// is a distinct recorded operation so replay returns the same event for that
-// iteration. So we never receive the same logical event twice across iterations.
-func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID DeploymentID) (struct{}, error) {
-	w.journal = journal
-
+// awaitEvent is an engine-provided closure that blocks until the next
+// [DeploymentEvent] arrives for this workflow instance. Durable engines
+// journal the result so replay returns the same event.
+func (w *OrchestrationWorkflow) Run(journal Journal, awaitEvent func() (DeploymentEvent, error), deploymentID DeploymentID) (struct{}, error) {
 	ctx, probe := w.observer().RunStarted(journal.Context(), deploymentID)
 	defer probe.End()
 	_ = ctx
@@ -318,7 +297,7 @@ func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID D
 	}
 	dep, pool = loaded.Deployment, loaded.Pool
 
-	resolvedIDs, err := w.executePlacementPipeline(journal, dep, pool, pool, deploymentID)
+	resolvedIDs, err := w.executePlacementPipeline(journal, awaitEvent, dep, pool, pool, deploymentID)
 	if err != nil {
 		dep.State = DeploymentStateFailed
 		probe.StateChanged(dep.State)
@@ -340,7 +319,7 @@ func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID D
 	}
 
 	for {
-		event, err := journal.AwaitDeploymentEvent()
+		event, err := awaitEvent()
 		if err != nil {
 			probe.Error(err)
 			return struct{}{}, fmt.Errorf("await deployment event: %w", err)
@@ -370,12 +349,12 @@ func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID D
 		}
 
 		if event.ManifestInvalidated {
-			if err := w.executeManifestInvalidation(journal, dep, pool, deploymentID); err != nil {
+			if err := w.executeManifestInvalidation(journal, awaitEvent, dep, pool, deploymentID); err != nil {
 				probe.Error(err)
 				return struct{}{}, err
 			}
 		} else {
-			resolvedIDs, err := w.executePlacementPipeline(journal, dep, pool, previousPool, deploymentID)
+			resolvedIDs, err := w.executePlacementPipeline(journal, awaitEvent, dep, pool, previousPool, deploymentID)
 			if err != nil {
 				dep.State = DeploymentStateFailed
 				probe.StateChanged(dep.State)
@@ -402,7 +381,8 @@ func (w *OrchestrationWorkflow) Run(journal OrchestrationJournal, deploymentID D
 // pool before any pool change was applied; it provides full [TargetInfo]
 // for targets that were previously resolved but have since left the pool.
 func (w *OrchestrationWorkflow) executePlacementPipeline(
-	journal OrchestrationJournal,
+	journal Journal,
+	awaitEvent func() (DeploymentEvent, error),
 	dep Deployment,
 	pool []TargetInfo,
 	previousPool []TargetInfo,
@@ -432,7 +412,7 @@ func (w *OrchestrationWorkflow) executePlacementPipeline(
 		return nil, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	if err := w.executeRolloutPlan(journal, dep, plan, deploymentID); err != nil {
+	if err := w.executeRolloutPlan(journal, awaitEvent, dep, plan, deploymentID); err != nil {
 		return nil, err
 	}
 
@@ -446,7 +426,8 @@ func (w *OrchestrationWorkflow) executePlacementPipeline(
 // executeManifestInvalidation re-generates and delivers manifests for
 // the currently resolved targets without re-resolving placement.
 func (w *OrchestrationWorkflow) executeManifestInvalidation(
-	journal OrchestrationJournal,
+	journal Journal,
+	awaitEvent func() (DeploymentEvent, error),
 	dep Deployment,
 	pool []TargetInfo,
 	deploymentID DeploymentID,
@@ -461,13 +442,13 @@ func (w *OrchestrationWorkflow) executeManifestInvalidation(
 	if err != nil {
 		return fmt.Errorf("plan rollout (manifest invalidation): %w", err)
 	}
-	return w.executeRolloutPlan(journal, dep, plan, deploymentID)
+	return w.executeRolloutPlan(journal, awaitEvent, dep, plan, deploymentID)
 }
 
 // executeDelete removes the deployment from all currently resolved
 // targets and updates the deployment state.
 func (w *OrchestrationWorkflow) executeDelete(
-	journal OrchestrationJournal,
+	journal Journal,
 	dep Deployment,
 	pool []TargetInfo,
 	deploymentID DeploymentID,
@@ -495,7 +476,8 @@ func (w *OrchestrationWorkflow) executeDelete(
 // steps it dispatches all deliveries, then waits for every delivery in
 // the step to reach a terminal state before proceeding to the next step.
 func (w *OrchestrationWorkflow) executeRolloutPlan(
-	journal OrchestrationJournal,
+	journal Journal,
+	awaitEvent func() (DeploymentEvent, error),
 	dep Deployment,
 	plan RolloutPlan,
 	deploymentID DeploymentID,
@@ -535,7 +517,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 				}
 				pending = append(pending, did)
 			}
-			if _, err := w.awaitDeliveries(journal, pending); err != nil {
+			if _, err := w.awaitDeliveries(awaitEvent, pending); err != nil {
 				return err
 			}
 			continue
@@ -549,7 +531,7 @@ func (w *OrchestrationWorkflow) executeRolloutPlan(
 // returned for the caller to process later. A Delete event aborts
 // immediately with an error.
 func (w *OrchestrationWorkflow) awaitDeliveries(
-	journal OrchestrationJournal,
+	awaitEvent func() (DeploymentEvent, error),
 	pending []DeliveryID,
 ) ([]DeploymentEvent, error) {
 	remaining := make(map[DeliveryID]struct{}, len(pending))
@@ -559,7 +541,7 @@ func (w *OrchestrationWorkflow) awaitDeliveries(
 
 	var deferred []DeploymentEvent
 	for len(remaining) > 0 {
-		event, err := journal.AwaitDeploymentEvent()
+		event, err := awaitEvent()
 		if err != nil {
 			return nil, fmt.Errorf("await delivery completion: %w", err)
 		}

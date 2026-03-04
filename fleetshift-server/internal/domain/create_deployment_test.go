@@ -8,19 +8,15 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-type stubCreateDeploymentRunner struct {
-	ctx                context.Context
-	orchestrationStart domain.DeploymentID
+// stubJournal is a minimal Journal that runs activities synchronously.
+type stubJournal struct {
+	ctx context.Context
 }
 
-func (r *stubCreateDeploymentRunner) ID() string              { return "create-test" }
-func (r *stubCreateDeploymentRunner) Context() context.Context { return r.ctx }
-func (r *stubCreateDeploymentRunner) Run(activity domain.Activity[any, any], in any) (any, error) {
-	return activity.Run(r.ctx, in)
-}
-func (r *stubCreateDeploymentRunner) StartOrchestration(id domain.DeploymentID) error {
-	r.orchestrationStart = id
-	return nil
+func (j *stubJournal) ID() string              { return "create-test" }
+func (j *stubJournal) Context() context.Context { return j.ctx }
+func (j *stubJournal) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(j.ctx, in)
 }
 
 func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) {
@@ -28,13 +24,19 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 	store := &stubStore{deployments: depRepo, targets: &stubTargetRepo{}, deliveries: newStubDeliveryRepo()}
 	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 
+	var orchestrationStart domain.DeploymentID
+
 	wf := &domain.CreateDeploymentWorkflow{
 		Store: store,
 		Now:   func() time.Time { return fixedTime },
+		StartOrchestration: domain.NewActivity("start-orchestration", func(_ context.Context, id domain.DeploymentID) (struct{}, error) {
+			orchestrationStart = id
+			return struct{}{}, nil
+		}),
 	}
 
 	ctx := context.Background()
-	runner := &stubCreateDeploymentRunner{ctx: ctx}
+	journal := &stubJournal{ctx: ctx}
 
 	input := domain.CreateDeploymentInput{
 		ID: "d1",
@@ -46,7 +48,7 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 		},
 	}
 
-	dep, err := wf.Run(runner, input)
+	dep, err := wf.Run(journal, input)
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -81,7 +83,7 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 		t.Errorf("persisted ID = %q, want %q", persisted.ID, "d1")
 	}
 
-	if runner.orchestrationStart != "d1" {
-		t.Errorf("StartOrchestration called with %q, want %q", runner.orchestrationStart, "d1")
+	if orchestrationStart != "d1" {
+		t.Errorf("StartOrchestration called with %q, want %q", orchestrationStart, "d1")
 	}
 }
