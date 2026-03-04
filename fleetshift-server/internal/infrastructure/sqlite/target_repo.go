@@ -12,7 +12,7 @@ import (
 
 // TargetRepo implements [domain.TargetRepository] backed by SQLite.
 type TargetRepo struct {
-	DB *sql.DB
+	DB *sql.Tx
 }
 
 func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {

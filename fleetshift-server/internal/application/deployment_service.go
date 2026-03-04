@@ -9,9 +9,8 @@ import (
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
-	Deployments domain.DeploymentRepository
-	Deliveries  domain.DeliveryRepository
-	CreateWF    domain.CreateDeploymentRunner
+	Store    domain.Store
+	CreateWF domain.CreateDeploymentRunner
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -36,18 +35,47 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 
 // Get retrieves a deployment by ID.
 func (s *DeploymentService) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
-	return s.Deployments.Get(ctx, id)
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	dep, err := tx.Deployments().Get(ctx, id)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	return dep, tx.Commit()
 }
 
 // List returns all deployments.
 func (s *DeploymentService) List(ctx context.Context) ([]domain.Deployment, error) {
-	return s.Deployments.List(ctx)
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	deps, err := tx.Deployments().List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return deps, tx.Commit()
 }
 
-// Delete removes a deployment and its delivery records.
+// Delete removes a deployment and its delivery records atomically.
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) error {
-	if err := s.Deliveries.DeleteByDeployment(ctx, id); err != nil {
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := tx.Deliveries().DeleteByDeployment(ctx, id); err != nil {
 		return fmt.Errorf("delete deliveries: %w", err)
 	}
-	return s.Deployments.Delete(ctx, id)
+	if err := tx.Deployments().Delete(ctx, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

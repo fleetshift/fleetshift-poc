@@ -42,8 +42,8 @@ type CreateDeploymentRunner interface {
 // workflow. Both steps are durable: on crash the engine replays
 // from the last completed step.
 type CreateDeploymentWorkflow struct {
-	Deployments DeploymentRepository
-	Now         func() time.Time
+	Store Store
+	Now   func() time.Time
 }
 
 func (w *CreateDeploymentWorkflow) now() time.Time {
@@ -58,6 +58,12 @@ func (w *CreateDeploymentWorkflow) Name() string { return "create-deployment" }
 // PersistDeployment creates a pending deployment record.
 func (w *CreateDeploymentWorkflow) PersistDeployment() Activity[CreateDeploymentInput, Deployment] {
 	return NewActivity("persist-deployment", func(ctx context.Context, in CreateDeploymentInput) (Deployment, error) {
+		tx, err := w.Store.Begin(ctx)
+		if err != nil {
+			return Deployment{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
 		now := w.now()
 		uid := uuid.New().String()
 		dep := Deployment{
@@ -71,8 +77,11 @@ func (w *CreateDeploymentWorkflow) PersistDeployment() Activity[CreateDeployment
 			UpdatedAt:         now,
 			Etag:              uid,
 		}
-		if err := w.Deployments.Create(ctx, dep); err != nil {
+		if err := tx.Deployments().Create(ctx, dep); err != nil {
 			return Deployment{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return Deployment{}, fmt.Errorf("commit: %w", err)
 		}
 		return dep, nil
 	})

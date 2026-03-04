@@ -20,7 +20,7 @@ type DeliverySignaler struct {
 	DeploymentID DeploymentID
 	DeliveryID   DeliveryID
 	Target       TargetInfo
-	Deliveries   DeliveryRepository
+	Store        Store
 	Signal       func(context.Context, DeploymentID, DeploymentEvent) error
 	observer     DeliveryObserver
 	progressed   bool
@@ -32,7 +32,7 @@ func NewDeliverySignaler(
 	deploymentID DeploymentID,
 	deliveryID DeliveryID,
 	target TargetInfo,
-	deliveries DeliveryRepository,
+	store Store,
 	signal func(context.Context, DeploymentID, DeploymentEvent) error,
 	observer DeliveryObserver,
 ) *DeliverySignaler {
@@ -40,51 +40,41 @@ func NewDeliverySignaler(
 		DeploymentID: deploymentID,
 		DeliveryID:   deliveryID,
 		Target:       target,
-		Deliveries:   deliveries,
+		Store:        store,
 		Signal:       signal,
 		observer:     observer,
 	}
 }
 
 // Emit records a delivery event. On the first call it transitions the
-// delivery to [DeliveryStateProgressing] in the repository.
+// delivery to [DeliveryStateProgressing] in the repository within a
+// single transaction (read-modify-write).
 func (s *DeliverySignaler) Emit(ctx context.Context, event DeliveryEvent) {
 	var probe EventEmittedProbe = NoOpEventEmittedProbe{}
 	if s.observer != nil {
 		ctx, probe = s.observer.EventEmitted(ctx, s.DeliveryID, s.Target, event)
 	}
 	defer probe.End()
-	if !s.progressed && s.Deliveries != nil {
+	if !s.progressed && s.Store != nil {
 		s.progressed = true
-		d, err := s.Deliveries.Get(ctx, s.DeliveryID)
-		if err != nil {
-			probe.Error(err)
-			return
-		}
-		d.State = DeliveryStateProgressing
-		if err := s.Deliveries.Put(ctx, d); err != nil {
+		if err := s.updateDeliveryState(ctx, DeliveryStateProgressing); err != nil {
 			probe.Error(err)
 		}
 	}
 }
 
 // Done updates the delivery's terminal state in the repository,
-// signals the workflow, and notifies the observer.
+// signals the workflow, and notifies the observer. The state update
+// runs in its own transaction; signaling happens after commit.
 func (s *DeliverySignaler) Done(ctx context.Context, result DeliveryResult) {
 	var probe CompletedProbe = NoOpCompletedProbe{}
 	if s.observer != nil {
 		ctx, probe = s.observer.Completed(ctx, s.DeliveryID, s.Target, result)
 	}
 	defer probe.End()
-	if s.Deliveries != nil {
-		d, err := s.Deliveries.Get(ctx, s.DeliveryID)
-		if err != nil {
+	if s.Store != nil {
+		if err := s.updateDeliveryState(ctx, result.State); err != nil {
 			probe.Error(err)
-		} else {
-			d.State = result.State
-			if err := s.Deliveries.Put(ctx, d); err != nil {
-				probe.Error(err)
-			}
 		}
 	}
 	if s.Signal != nil {
@@ -97,4 +87,24 @@ func (s *DeliverySignaler) Done(ctx context.Context, result DeliveryResult) {
 			probe.Error(err)
 		}
 	}
+}
+
+// updateDeliveryState performs a transactional read-modify-write to
+// update the delivery's state.
+func (s *DeliverySignaler) updateDeliveryState(ctx context.Context, state DeliveryState) error {
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	d, err := tx.Deliveries().Get(ctx, s.DeliveryID)
+	if err != nil {
+		return err
+	}
+	d.State = state
+	if err := tx.Deliveries().Put(ctx, d); err != nil {
+		return err
+	}
+	return tx.Commit()
 }

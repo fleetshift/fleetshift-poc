@@ -23,9 +23,7 @@ import (
 //     received the cluster creation.
 func TestKindAddon_EndToEnd(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	provider := newFakeProvider()
 	kindAgent := kindaddon.NewAgent(fakeFactory(provider))
@@ -33,24 +31,21 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: deploymentRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
-	cwf := &domain.CreateDeploymentWorkflow{Deployments: deploymentRepo}
+	cwf := &domain.CreateDeploymentWorkflow{Store: store}
 
 	engine := &syncworkflow.Engine{}
 	runners, err := engine.Register(owf, cwf)
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	targetSvc := &application.TargetService{Targets: targetRepo}
+	targetSvc := &application.TargetService{Store: store}
 	deploySvc := &application.DeploymentService{
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		CreateWF:    runners.CreateDeployment,
+		Store:    store,
+		CreateWF: runners.CreateDeployment,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -92,7 +87,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	dep := awaitState(ctx, t, deploymentRepo, "kind-deployment", domain.DeploymentStateActive)
+	dep := awaitState(ctx, t, store, "kind-deployment", domain.DeploymentStateActive)
 	if len(dep.ResolvedTargets) != 1 {
 		t.Fatalf("ResolvedTargets: got %d, want 1", len(dep.ResolvedTargets))
 	}
@@ -106,10 +101,15 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 }
 
-func awaitState(ctx context.Context, t *testing.T, repo *sqlite.DeploymentRepo, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
+func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		dep, err := repo.Get(ctx, id)
+		tx, err := store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		dep, err := tx.Deployments().Get(ctx, id)
+		tx.Rollback()
 		if err == nil && dep.State == want {
 			return dep
 		}

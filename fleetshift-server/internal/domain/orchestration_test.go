@@ -118,6 +118,28 @@ func (s *stubTargetRepo) List(_ context.Context) ([]domain.TargetInfo, error) {
 
 func (s *stubTargetRepo) Delete(_ context.Context, _ domain.TargetID) error { return nil }
 
+// stubStore implements domain.Store backed by in-memory stub repos.
+type stubStore struct {
+	deployments *stubDeploymentRepo
+	targets     *stubTargetRepo
+	deliveries  *stubDeliveryRepo
+}
+
+func (s *stubStore) Begin(_ context.Context) (domain.Tx, error) {
+	return &stubTx{store: s}, nil
+}
+
+type stubTx struct {
+	store *stubStore
+}
+
+func (t *stubTx) Targets() domain.TargetRepository        { return t.store.targets }
+func (t *stubTx) Deployments() domain.DeploymentRepository { return t.store.deployments }
+func (t *stubTx) Deliveries() domain.DeliveryRepository    { return t.store.deliveries }
+func (t *stubTx) Inventory() domain.InventoryRepository    { return nil }
+func (t *stubTx) Commit() error                            { return nil }
+func (t *stubTx) Rollback() error                          { return nil }
+
 // stubDeliveryRepo implements DeliveryRepository with an in-memory map.
 type stubDeliveryRepo struct {
 	deliveries map[domain.DeliveryID]domain.Delivery
@@ -246,11 +268,9 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 	targetRepo := &stubTargetRepo{targets: pool}
 
 	wf := &domain.OrchestrationWorkflow{
-		Deployments: depRepo,
-		Targets:     targetRepo,
-		Deliveries:  newStubDeliveryRepo(),
-		Delivery:    noopDelivery{},
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:   noopDelivery{},
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 	ctx := context.Background()
 
@@ -310,11 +330,9 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	targetRepo := &stubTargetRepo{targets: pool}
 
 	wf := &domain.OrchestrationWorkflow{
-		Deployments: depRepo,
-		Targets:     targetRepo,
-		Deliveries:  newStubDeliveryRepo(),
-		Delivery:    noopDelivery{},
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:   noopDelivery{},
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 	ctx := context.Background()
 
@@ -368,11 +386,9 @@ func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
 	targetRepo := &stubTargetRepo{targets: nil}
 
 	wf := &domain.OrchestrationWorkflow{
-		Deployments: depRepo,
-		Targets:     targetRepo,
-		Deliveries:  newStubDeliveryRepo(),
-		Delivery:    noopDelivery{},
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      &stubStore{deployments: depRepo, targets: targetRepo, deliveries: newStubDeliveryRepo()},
+		Delivery:   noopDelivery{},
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 
 	journal := &singleEventJournal{
@@ -468,14 +484,13 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	pool := []domain.TargetInfo{{ID: "t1"}}
 	targetRepo := &stubTargetRepo{targets: pool}
 	deliveryRepo := newStubDeliveryRepo()
+	store := &stubStore{deployments: depRepo, targets: targetRepo, deliveries: deliveryRepo}
 	asyncDel := &asyncDelivery{done: make(chan struct{})}
 
 	wf := &domain.OrchestrationWorkflow{
-		Deployments: depRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    asyncDel,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   asyncDel,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 
 	journal := &asyncJournal{

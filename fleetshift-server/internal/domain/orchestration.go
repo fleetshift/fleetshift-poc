@@ -119,9 +119,7 @@ type OrchestrationRunner interface {
 // Infrastructure packages accept this struct to construct an
 // [OrchestrationRunner] backed by a specific durable execution engine.
 type OrchestrationWorkflow struct {
-	Deployments      DeploymentRepository
-	Targets          TargetRepository
-	Deliveries       DeliveryRepository
+	Store            Store
 	Delivery         DeliveryService
 	Strategies       StrategyFactory
 	Observer         DeploymentObserver
@@ -152,13 +150,22 @@ func (w *OrchestrationWorkflow) Name() string { return "orchestrate-deployment" 
 // reloading after a spec change.
 func (w *OrchestrationWorkflow) LoadDeploymentAndPool() Activity[DeploymentID, DeploymentAndPool] {
 	return NewActivity("load-deployment-and-pool", func(ctx context.Context, id DeploymentID) (DeploymentAndPool, error) {
-		dep, err := w.Deployments.Get(ctx, id)
+		tx, err := w.Store.Begin(ctx)
+		if err != nil {
+			return DeploymentAndPool{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		dep, err := tx.Deployments().Get(ctx, id)
 		if err != nil {
 			return DeploymentAndPool{}, err
 		}
-		pool, err := w.Targets.List(ctx)
+		pool, err := tx.Targets().List(ctx)
 		if err != nil {
 			return DeploymentAndPool{}, err
+		}
+		if err := tx.Commit(); err != nil {
+			return DeploymentAndPool{}, fmt.Errorf("commit: %w", err)
 		}
 		return DeploymentAndPool{Deployment: dep, Pool: pool}, nil
 	})
@@ -217,8 +224,14 @@ func (w *OrchestrationWorkflow) GenerateManifests() Activity[GenerateManifestsIn
 // context inheritance.
 func (w *OrchestrationWorkflow) DeliverToTarget() Activity[DeliverInput, DeliveryResult] {
 	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (DeliveryResult, error) {
+		tx, err := w.Store.Begin(ctx)
+		if err != nil {
+			return DeliveryResult{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
 		now := w.now()
-		if err := w.Deliveries.Put(ctx, Delivery{
+		if err := tx.Deliveries().Put(ctx, Delivery{
 			ID:           in.DeliveryID,
 			DeploymentID: in.DeploymentID,
 			TargetID:     in.Target.ID,
@@ -229,10 +242,13 @@ func (w *OrchestrationWorkflow) DeliverToTarget() Activity[DeliverInput, Deliver
 		}); err != nil {
 			return DeliveryResult{}, fmt.Errorf("create delivery record: %w", err)
 		}
+		if err := tx.Commit(); err != nil {
+			return DeliveryResult{}, fmt.Errorf("commit: %w", err)
+		}
 
 		signaler := NewDeliverySignaler(
 			in.DeploymentID, in.DeliveryID, in.Target,
-			w.Deliveries, w.journal.SignalDeploymentEvent,
+			w.Store, w.journal.SignalDeploymentEvent,
 			w.DeliveryObserver,
 		)
 
@@ -251,9 +267,18 @@ func (w *OrchestrationWorkflow) RemoveFromTarget() Activity[RemoveInput, struct{
 // UpdatedAt and regenerating the Etag.
 func (w *OrchestrationWorkflow) UpdateDeployment() Activity[Deployment, struct{}] {
 	return NewActivity("update-deployment", func(ctx context.Context, d Deployment) (struct{}, error) {
+		tx, err := w.Store.Begin(ctx)
+		if err != nil {
+			return struct{}{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
 		d.UpdatedAt = w.now()
 		d.Etag = uuid.New().String()
-		return struct{}{}, w.Deployments.Update(ctx, d)
+		if err := tx.Deployments().Update(ctx, d); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, tx.Commit()
 	})
 }
 

@@ -48,29 +48,24 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	db := sqlite.OpenTestDB(t)
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: deploymentRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
-	cwf := &domain.CreateDeploymentWorkflow{Deployments: deploymentRepo}
+	cwf := &domain.CreateDeploymentWorkflow{Store: store}
 
 	engine := &syncworkflow.Engine{}
 	runners, err := engine.Register(owf, cwf)
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
-	targetSvc := &application.TargetService{Targets: targetRepo}
+	targetSvc := &application.TargetService{Store: store}
 	deploySvc := &application.DeploymentService{
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		CreateWF:    runners.CreateDeployment,
+		Store:    store,
+		CreateWF: runners.CreateDeployment,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
@@ -108,7 +103,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	dep := awaitState(ctx, t, deploymentRepo, "kind-docker-deploy", domain.DeploymentStateActive)
+	dep := awaitState(ctx, t, store, "kind-docker-deploy", domain.DeploymentStateActive)
 	if len(dep.ResolvedTargets) != 1 || dep.ResolvedTargets[0] != "kind-docker" {
 		t.Fatalf("unexpected ResolvedTargets: %v", dep.ResolvedTargets)
 	}

@@ -69,9 +69,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 	defer db.Close()
 
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	router := delivery.NewRoutingDeliveryService()
 
@@ -83,16 +81,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	logger := slog.Default()
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments:      deploymentRepo,
-		Targets:          targetRepo,
-		Deliveries:       deliveryRepo,
+		Store:            store,
 		Delivery:         router,
 		Strategies:       domain.DefaultStrategyFactory{},
 		Observer:         observability.NewDeploymentObserver(logger),
 		DeliveryObserver: observability.NewDeliveryObserver(logger),
 	}
 	cwf := &domain.CreateDeploymentWorkflow{
-		Deployments: deploymentRepo,
+		Store: store,
 	}
 
 	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath)
@@ -110,7 +106,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 	// --- seed default targets ---
 
-	targetSvc := &application.TargetService{Targets: targetRepo}
+	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(ctx, domain.TargetInfo{
 		ID:   "kind-local",
 		Type: kindaddon.TargetType,
@@ -128,9 +124,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- application services ---
 
 	deploymentSvc := &application.DeploymentService{
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		CreateWF:    runners.CreateDeployment,
+		Store:    store,
+		CreateWF: runners.CreateDeployment,
 	}
 
 	// --- gRPC server ---

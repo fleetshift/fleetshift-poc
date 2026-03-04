@@ -28,25 +28,21 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 	t.Helper()
 
 	db := sqlite.OpenTestDB(t)
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	recordingAgent := &sqlite.RecordingDeliveryService{
-		Deliveries: deliveryRepo,
-		Now:        func() time.Time { return time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC) },
+		Store: store,
+		Now:   func() time.Time { return time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC) },
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(testTargetType, recordingAgent)
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: deploymentRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
-	cwf := &domain.CreateDeploymentWorkflow{Deployments: deploymentRepo}
+	cwf := &domain.CreateDeploymentWorkflow{Store: store}
 
 	engine := &syncworkflow.Engine{}
 	runners, err := engine.Register(owf, cwf)
@@ -54,16 +50,16 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 		t.Fatalf("Register: %v", err)
 	}
 	deploymentSvc := &application.DeploymentService{
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		CreateWF:    runners.CreateDeployment,
+		Store:    store,
+		CreateWF: runners.CreateDeployment,
 	}
 
 	// Register a test target so placements resolve.
-	if err := targetRepo.Create(context.Background(), domain.TargetInfo{
+	targetSvc := &application.TargetService{Store: store}
+	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
 		ID: "t1", Type: testTargetType, Name: "test-target",
 	}); err != nil {
-		t.Fatalf("create target: %v", err)
+		t.Fatalf("register target: %v", err)
 	}
 
 	lis := bufconn.Listen(1 << 20)

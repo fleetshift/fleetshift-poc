@@ -14,20 +14,16 @@ import (
 func syncInfra(t *testing.T) workflowenginetest.Infra {
 	t.Helper()
 	db := sqlite.OpenTestDB(t)
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 	recordingAgent := &sqlite.RecordingDeliveryService{
-		Deliveries: deliveryRepo,
-		Now:        func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
+		Store: store,
+		Now:   func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(workflowenginetest.TestTargetType, recordingAgent)
 	return workflowenginetest.Infra{
-		Targets:     targetRepo,
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
+		Store:    store,
+		Delivery: router,
 	}
 }
 

@@ -17,8 +17,7 @@ import (
 type testHarness struct {
 	targets     *application.TargetService
 	deployments *application.DeploymentService
-	deliveries  *sqlite.DeliveryRepo
-	depRepo     *sqlite.DeploymentRepo
+	store       domain.Store
 }
 
 const testTargetType domain.TargetType = "test"
@@ -26,28 +25,23 @@ const testTargetType domain.TargetType = "test"
 func setup(t *testing.T) testHarness {
 	t.Helper()
 	db := sqlite.OpenTestDB(t)
-
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	recordingAgent := &sqlite.RecordingDeliveryService{
-		Deliveries: deliveryRepo,
-		Now:        func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
+		Store: store,
+		Now:   func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(testTargetType, recordingAgent)
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: deploymentRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 
 	cwf := &domain.CreateDeploymentWorkflow{
-		Deployments: deploymentRepo,
+		Store: store,
 	}
 
 	engine := &syncworkflow.Engine{}
@@ -56,21 +50,24 @@ func setup(t *testing.T) testHarness {
 		t.Fatalf("Register: %v", err)
 	}
 	return testHarness{
-		targets: &application.TargetService{Targets: targetRepo},
+		targets: &application.TargetService{Store: store},
 		deployments: &application.DeploymentService{
-			Deployments: deploymentRepo,
-			Deliveries:  deliveryRepo,
-			CreateWF:    runners.CreateDeployment,
+			Store:    store,
+			CreateWF: runners.CreateDeployment,
 		},
-		deliveries: deliveryRepo,
-		depRepo:    deploymentRepo,
+		store: store,
 	}
 }
 
-func awaitDeploymentState(ctx context.Context, t *testing.T, repo *sqlite.DeploymentRepo, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
+func awaitDeploymentState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		dep, err := repo.Get(ctx, id)
+		tx, err := store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		dep, err := tx.Deployments().Get(ctx, id)
+		tx.Rollback()
 		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get(%s): %v", id, err)
 		}
@@ -83,6 +80,20 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, repo *sqlite.Deploy
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
+}
+
+func queryDeliveries(ctx context.Context, t *testing.T, store domain.Store, depID domain.DeploymentID) []domain.Delivery {
+	t.Helper()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	records, err := tx.Deliveries().ListByDeployment(ctx, depID)
+	if err != nil {
+		t.Fatalf("ListByDeployment: %v", err)
+	}
+	return records
 }
 
 func registerTargets(t *testing.T, h testHarness, ids ...string) {
@@ -133,13 +144,10 @@ func TestCreateDeployment_StaticPlacement(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
+	dep := awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t3")
 
-	records, err := h.deliveries.ListByDeployment(ctx, "d1")
-	if err != nil {
-		t.Fatalf("ListByDeployment: %v", err)
-	}
+	records := queryDeliveries(ctx, t, h.store, "d1")
 	if len(records) != 2 {
 		t.Fatalf("expected 2 delivery records, got %d", len(records))
 	}
@@ -164,13 +172,10 @@ func TestCreateDeployment_AllPlacement(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
+	dep := awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t2", "t3")
 
-	records, err := h.deliveries.ListByDeployment(ctx, "d1")
-	if err != nil {
-		t.Fatalf("ListByDeployment: %v", err)
-	}
+	records := queryDeliveries(ctx, t, h.store, "d1")
 	if len(records) != 3 {
 		t.Fatalf("expected 3 delivery records, got %d", len(records))
 	}
@@ -200,7 +205,7 @@ func TestCreateDeployment_SelectorPlacement(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	dep := awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
+	dep := awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 	assertResolvedTargets(t, dep, "t1", "t3")
 }
 
@@ -246,16 +251,13 @@ func TestDeleteDeployment_RemovesRecords(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	awaitDeploymentState(ctx, t, h.depRepo, "d1", domain.DeploymentStateActive)
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 
 	if err := h.deployments.Delete(ctx, "d1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	records, err := h.deliveries.ListByDeployment(ctx, "d1")
-	if err != nil {
-		t.Fatalf("ListByDeployment: %v", err)
-	}
+	records := queryDeliveries(ctx, t, h.store, "d1")
 	if len(records) != 0 {
 		t.Fatalf("expected 0 delivery records after delete, got %d", len(records))
 	}

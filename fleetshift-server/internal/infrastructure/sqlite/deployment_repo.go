@@ -13,7 +13,7 @@ import (
 
 // DeploymentRepo implements [domain.DeploymentRepository] backed by SQLite.
 type DeploymentRepo struct {
-	DB *sql.DB
+	DB *sql.Tx
 }
 
 func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {

@@ -13,7 +13,7 @@ import (
 
 // InventoryRepo implements [domain.InventoryRepository] backed by SQLite.
 type InventoryRepo struct {
-	DB *sql.DB
+	DB *sql.Tx
 }
 
 func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) error {

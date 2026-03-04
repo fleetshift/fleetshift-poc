@@ -24,24 +24,19 @@ func Start(t *testing.T) string {
 	t.Helper()
 
 	db := sqlite.OpenTestDB(t)
-
-	targetRepo := &sqlite.TargetRepo{DB: db}
-	deploymentRepo := &sqlite.DeploymentRepo{DB: db}
-	deliveryRepo := &sqlite.DeliveryRepo{DB: db}
+	store := &sqlite.Store{DB: db}
 
 	router := delivery.NewRoutingDeliveryService()
-	recording := &sqlite.RecordingDeliveryService{Deliveries: deliveryRepo}
+	recording := &sqlite.RecordingDeliveryService{Store: store}
 	router.Register("test", recording)
 
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: deploymentRepo,
-		Targets:     targetRepo,
-		Deliveries:  deliveryRepo,
-		Delivery:    router,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 	cwf := &domain.CreateDeploymentWorkflow{
-		Deployments: deploymentRepo,
+		Store: store,
 	}
 
 	engine := &syncworkflow.Engine{}
@@ -50,9 +45,8 @@ func Start(t *testing.T) string {
 		t.Fatalf("register workflows: %v", err)
 	}
 	deploymentSvc := &application.DeploymentService{
-		Deployments: deploymentRepo,
-		Deliveries:  deliveryRepo,
-		CreateWF:    runners.CreateDeployment,
+		Store:    store,
+		CreateWF: runners.CreateDeployment,
 	}
 
 	srv := grpc.NewServer()

@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -13,8 +14,8 @@ import (
 // development, testing, or target types that have no real delivery
 // agent registered yet.
 type RecordingDeliveryService struct {
-	Deliveries *DeliveryRepo
-	Now        func() time.Time
+	Store domain.Store
+	Now   func() time.Time
 }
 
 func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
@@ -28,29 +29,53 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}
-	if err := s.Deliveries.Put(ctx, d); err != nil {
+
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		result := domain.DeliveryResult{State: domain.DeliveryStateFailed}
+		signaler.Done(ctx, result)
+		return result, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := tx.Deliveries().Put(ctx, d); err != nil {
 		result := domain.DeliveryResult{State: domain.DeliveryStateFailed}
 		signaler.Done(ctx, result)
 		return result, err
 	}
+	if err := tx.Commit(); err != nil {
+		result := domain.DeliveryResult{State: domain.DeliveryStateFailed}
+		signaler.Done(ctx, result)
+		return result, fmt.Errorf("commit: %w", err)
+	}
+
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
 	signaler.Done(ctx, result)
 	return result, nil
 }
 
 func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ *domain.DeliverySignaler) error {
-	_, err := s.Deliveries.GetByDeploymentTarget(ctx, deploymentIDFromDeliveryID(deliveryID), target.ID)
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Deliveries().GetByDeploymentTarget(ctx, deploymentIDFromDeliveryID(deliveryID), target.ID)
 	if err != nil {
 		return nil
 	}
-	return s.Deliveries.Put(ctx, domain.Delivery{
+	if err := tx.Deliveries().Put(ctx, domain.Delivery{
 		ID:           deliveryID,
 		DeploymentID: deploymentIDFromDeliveryID(deliveryID),
 		TargetID:     target.ID,
 		State:        domain.DeliveryStatePending,
 		CreatedAt:    s.now(),
 		UpdatedAt:    s.now(),
-	})
+	}); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *RecordingDeliveryService) now() time.Time {

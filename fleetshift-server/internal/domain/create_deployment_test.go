@@ -25,11 +25,12 @@ func (r *stubCreateDeploymentRunner) StartOrchestration(id domain.DeploymentID) 
 
 func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) {
 	depRepo := &stubDeploymentRepo{}
+	store := &stubStore{deployments: depRepo, targets: &stubTargetRepo{}, deliveries: newStubDeliveryRepo()}
 	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 
 	wf := &domain.CreateDeploymentWorkflow{
-		Deployments: depRepo,
-		Now:         func() time.Time { return fixedTime },
+		Store: store,
+		Now:   func() time.Time { return fixedTime },
 	}
 
 	ctx := context.Background()

@@ -15,13 +15,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// Infra is the test-owned infrastructure: repositories and delivery.
+// Infra is the test-owned infrastructure: store and delivery.
 // The same infra is used for all engines; implementations do not provide it.
 type Infra struct {
-	Targets     domain.TargetRepository
-	Deployments domain.DeploymentRepository
-	Deliveries  domain.DeliveryRepository
-	Delivery    domain.DeliveryService
+	Store    domain.Store
+	Delivery domain.DeliveryService
 }
 
 // InfraFactory creates infra for a test. Typically shared across engine tests
@@ -68,10 +66,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t3")
 
-		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
-		if err != nil {
-			t.Fatalf("ListByDeployment: %v", err)
-		}
+		records := queryDeliveries(ctx, t, infra, "d1")
 		if len(records) != 2 {
 			t.Fatalf("expected 2 delivery records, got %d", len(records))
 		}
@@ -108,10 +103,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 		assertResolvedTargets(t, dep, "t1", "t2", "t3")
 
-		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
-		if err != nil {
-			t.Fatalf("ListByDeployment: %v", err)
-		}
+		records := queryDeliveries(ctx, t, infra, "d1")
 		if len(records) != 3 {
 			t.Fatalf("expected 3 delivery records, got %d", len(records))
 		}
@@ -123,15 +115,11 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{
-			ID: "t1", Type: TestTargetType, Name: "cluster-prod", Labels: map[string]string{"env": "prod"},
-		}))
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{
-			ID: "t2", Type: TestTargetType, Name: "cluster-staging", Labels: map[string]string{"env": "staging"},
-		}))
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{
-			ID: "t3", Type: TestTargetType, Name: "cluster-prod-eu", Labels: map[string]string{"env": "prod"},
-		}))
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "t1", Type: TestTargetType, Name: "cluster-prod", Labels: map[string]string{"env": "prod"}},
+			domain.TargetInfo{ID: "t2", Type: TestTargetType, Name: "cluster-staging", Labels: map[string]string{"env": "staging"}},
+			domain.TargetInfo{ID: "t3", Type: TestTargetType, Name: "cluster-prod-eu", Labels: map[string]string{"env": "prod"}},
+		)
 
 		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
 			ID: "d1",
@@ -198,18 +186,14 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 
 		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 
-		must(t, infra.Deliveries.DeleteByDeployment(ctx, "d1"))
-		must(t, infra.Deployments.Delete(ctx, "d1"))
+		deleteDeploymentAndDeliveries(ctx, t, infra, "d1")
 
-		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
-		if err != nil {
-			t.Fatalf("ListByDeployment: %v", err)
-		}
+		records := queryDeliveries(ctx, t, infra, "d1")
 		if len(records) != 0 {
 			t.Fatalf("expected 0 delivery records after delete, got %d", len(records))
 		}
 
-		_, err = infra.Deployments.Get(ctx, "d1")
+		_, err = queryDeployment(ctx, t, infra, "d1")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("expected ErrNotFound after delete, got: %v", err)
 		}
@@ -245,7 +229,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 			return
 		}
 		// Engine may be idempotent (same workflow instance ID) and return success.
-		dep, err := infra.Deployments.Get(ctx, "d1")
+		dep, err := queryDeployment(ctx, t, infra, "d1")
 		if err != nil || dep.ID != "d1" {
 			t.Fatalf("second Create succeeded but deployment d1 missing or wrong: %v", err)
 		}
@@ -257,8 +241,10 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 		defer cancel()
 
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{ID: "t1", Type: TestTargetType, Name: "a", Labels: map[string]string{"env": "prod"}}))
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{ID: "t2", Type: TestTargetType, Name: "b", Labels: map[string]string{"env": "staging"}}))
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "t1", Type: TestTargetType, Name: "a", Labels: map[string]string{"env": "prod"}},
+			domain.TargetInfo{ID: "t2", Type: TestTargetType, Name: "b", Labels: map[string]string{"env": "staging"}},
+		)
 
 		_, err := runCreateDeployment(ctx, t, runners, domain.CreateDeploymentInput{
 			ID: "d1",
@@ -280,10 +266,7 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", dep.ResolvedTargets)
 		}
 
-		records, err := infra.Deliveries.ListByDeployment(ctx, "d1")
-		if err != nil {
-			t.Fatalf("ListByDeployment: %v", err)
-		}
+		records := queryDeliveries(ctx, t, infra, "d1")
 		if len(records) != 0 {
 			t.Fatalf("expected 0 delivery records, got %d", len(records))
 		}
@@ -333,14 +316,8 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 		assertResolvedTargets(t, dep1, "t1", "t3")
 		assertResolvedTargets(t, dep2, "t2")
 
-		records1, err := infra.Deliveries.ListByDeployment(ctx, "d1")
-		if err != nil {
-			t.Fatalf("ListByDeployment(d1): %v", err)
-		}
-		records2, err := infra.Deliveries.ListByDeployment(ctx, "d2")
-		if err != nil {
-			t.Fatalf("ListByDeployment(d2): %v", err)
-		}
+		records1 := queryDeliveries(ctx, t, infra, "d1")
+		records2 := queryDeliveries(ctx, t, infra, "d2")
 		if len(records1) != 2 {
 			t.Fatalf("d1: expected 2 delivery records, got %d", len(records1))
 		}
@@ -355,14 +332,12 @@ func Run(t *testing.T, infraFactory InfraFactory, engineFactory EngineFactory) {
 func registerEngine(t *testing.T, infra Infra, engineFactory EngineFactory) domain.WorkflowRunners {
 	t.Helper()
 	owf := &domain.OrchestrationWorkflow{
-		Deployments: infra.Deployments,
-		Targets:     infra.Targets,
-		Deliveries:  infra.Deliveries,
-		Delivery:    infra.Delivery,
-		Strategies:  domain.DefaultStrategyFactory{},
+		Store:      infra.Store,
+		Delivery:   infra.Delivery,
+		Strategies: domain.DefaultStrategyFactory{},
 	}
 	cwf := &domain.CreateDeploymentWorkflow{
-		Deployments: infra.Deployments,
+		Store: infra.Store,
 	}
 	engine := engineFactory(t)
 	runners, err := engine.Register(owf, cwf)
@@ -386,19 +361,30 @@ const TestTargetType domain.TargetType = "test"
 
 func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...string) {
 	t.Helper()
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
 	for _, id := range ids {
-		must(t, infra.Targets.Create(ctx, domain.TargetInfo{
+		must(t, tx.Targets().Create(ctx, domain.TargetInfo{
 			ID:   domain.TargetID(id),
 			Type: TestTargetType,
 			Name: "cluster-" + id,
 		}))
 	}
+	must(t, tx.Commit())
 }
 
 func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		dep, err := infra.Deployments.Get(ctx, id)
+		tx, err := infra.Store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		dep, err := tx.Deployments().Get(ctx, id)
+		tx.Rollback()
 		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get(%s): %v", id, err)
 		}
@@ -431,6 +417,55 @@ func assertResolvedTargets(t *testing.T, dep domain.Deployment, expectedIDs ...s
 			t.Errorf("expected target %q in ResolvedTargets", id)
 		}
 	}
+}
+
+func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID) []domain.Delivery {
+	t.Helper()
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	records, err := tx.Deliveries().ListByDeployment(ctx, depID)
+	if err != nil {
+		t.Fatalf("ListByDeployment: %v", err)
+	}
+	return records
+}
+
+func queryDeployment(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) (domain.Deployment, error) {
+	t.Helper()
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	return tx.Deployments().Get(ctx, id)
+}
+
+func deleteDeploymentAndDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID) {
+	t.Helper()
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	must(t, tx.Deliveries().DeleteByDeployment(ctx, depID))
+	must(t, tx.Deployments().Delete(ctx, depID))
+	must(t, tx.Commit())
+}
+
+func createTargets(ctx context.Context, t *testing.T, infra Infra, targets ...domain.TargetInfo) {
+	t.Helper()
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	for _, tgt := range targets {
+		must(t, tx.Targets().Create(ctx, tgt))
+	}
+	must(t, tx.Commit())
 }
 
 func must(t *testing.T, err error) {

@@ -13,7 +13,7 @@ import (
 
 // DeliveryRepo implements [domain.DeliveryRepository] backed by SQLite.
 type DeliveryRepo struct {
-	DB *sql.DB
+	DB *sql.Tx
 }
 
 func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
