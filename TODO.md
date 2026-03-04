@@ -2,3 +2,6 @@
 - [ ] Fleetlet installation into kind cluster
 - [ ] Pagination / filter / etc
 - [ ] Revisit failed deployment when no targets – what if it is invalidated? (manifest update) Do we have/need a signal for when new targets might match because they've been newly registered?
+- [ ] What if multiple targets match manifest types? Initial target pool needs to be a bit more specific and therefore flexible. Maybe we want an "InitialPool" kind of abstraction in addition to the placement strategy.
+    - f(deployment) -> targets (initial)
+    - f(targets) -> targets (strategy)
