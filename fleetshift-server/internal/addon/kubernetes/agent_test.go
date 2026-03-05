@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
@@ -32,6 +33,39 @@ func (v *stubVault) Delete(_ context.Context, ref domain.SecretRef) error {
 	return nil
 }
 
+// channelDeliveryObserver collects events and completion results on
+// channels, enabling deterministic waits in tests with async delivery.
+type channelDeliveryObserver struct {
+	mu     sync.Mutex
+	events []domain.DeliveryEvent
+	ch     chan domain.DeliveryEvent
+	done   chan domain.DeliveryResult
+}
+
+func newChannelDeliveryObserver() *channelDeliveryObserver {
+	return &channelDeliveryObserver{
+		ch:   make(chan domain.DeliveryEvent, 100),
+		done: make(chan domain.DeliveryResult, 1),
+	}
+}
+
+func (o *channelDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, e domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+	o.mu.Lock()
+	o.events = append(o.events, e)
+	o.mu.Unlock()
+	o.ch <- e
+	return ctx, domain.NoOpEventEmittedProbe{}
+}
+
+func (o *channelDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+	o.done <- result
+	return ctx, domain.NoOpCompletedProbe{}
+}
+
+func newChannelSignaler(obs *channelDeliveryObserver) *domain.DeliverySignaler {
+	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
+}
+
 func TestAgent_Deliver_MissingKubeconfigRef(t *testing.T) {
 	vault := &stubVault{secrets: make(map[domain.SecretRef][]byte)}
 	agent := kubernetes.NewAgent(vault)
@@ -57,6 +91,8 @@ func TestAgent_Deliver_MissingKubeconfigRef(t *testing.T) {
 
 func TestAgent_Deliver_VaultNotFound(t *testing.T) {
 	vault := &stubVault{secrets: make(map[domain.SecretRef][]byte)}
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
 	agent := kubernetes.NewAgent(vault)
 
 	target := domain.TargetInfo{
@@ -68,12 +104,17 @@ func TestAgent_Deliver_VaultNotFound(t *testing.T) {
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, &domain.DeliverySignaler{})
-	if err == nil {
-		t.Fatal("expected error for missing vault secret")
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, signaler)
+	if err != nil {
+		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
-	if result.State != domain.DeliveryStateFailed {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	asyncResult := <-obs.done
+	if asyncResult.State != domain.DeliveryStateFailed {
+		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateFailed)
 	}
 }
 
@@ -81,6 +122,8 @@ func TestAgent_Deliver_InvalidKubeconfig(t *testing.T) {
 	vault := &stubVault{secrets: map[domain.SecretRef][]byte{
 		"targets/k8s-test/kubeconfig": []byte("not a valid kubeconfig"),
 	}}
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
 	agent := kubernetes.NewAgent(vault)
 
 	target := domain.TargetInfo{
@@ -97,12 +140,17 @@ func TestAgent_Deliver_InvalidKubeconfig(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, &domain.DeliverySignaler{})
-	if err == nil {
-		t.Fatal("expected error for invalid kubeconfig")
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, signaler)
+	if err != nil {
+		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
-	if result.State != domain.DeliveryStateFailed {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	asyncResult := <-obs.done
+	if asyncResult.State != domain.DeliveryStateFailed {
+		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateFailed)
 	}
 }
 

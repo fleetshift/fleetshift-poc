@@ -39,25 +39,41 @@ func NewAgent(vault domain.Vault) *Agent {
 	return &Agent{vault: vault}
 }
 
-// Deliver applies each manifest to the target cluster using SSA. It is
-// synchronous — returns [domain.DeliveryStateDelivered] on success.
+// Deliver validates the target synchronously and returns
+// [domain.DeliveryStateAccepted] immediately. The actual SSA apply
+// runs in a background goroutine; on completion the goroutine calls
+// [domain.DeliverySignaler.Done] so the workflow receives the terminal
+// result via signal rather than activity return value.
 func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	ref, ok := target.Properties["kubeconfig_ref"]
-	if !ok {
+	if _, ok := target.Properties["kubeconfig_ref"]; !ok {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
 			fmt.Errorf("%w: target %q missing kubeconfig_ref property", domain.ErrInvalidArgument, target.ID)
 	}
 
+	go a.deliverAsync(ctx, target, manifests, signaler)
+
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, manifests []domain.Manifest, signaler *domain.DeliverySignaler) {
+	ref := target.Properties["kubeconfig_ref"]
+
 	kubeconfigBytes, err := a.vault.Get(ctx, domain.SecretRef(ref))
 	if err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-			fmt.Errorf("retrieve kubeconfig for target %q: %w", target.ID, err)
+		signaler.Done(ctx, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("retrieve kubeconfig for target %q: %v", target.ID, err),
+		})
+		return
 	}
 
-	applier, err := newApplier(kubeconfigBytes)
+	ap, err := newApplier(kubeconfigBytes)
 	if err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-			fmt.Errorf("build kubernetes client for target %q: %w", target.ID, err)
+		signaler.Done(ctx, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
+		})
+		return
 	}
 
 	for i, m := range manifests {
@@ -66,19 +82,16 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.
 			Message: fmt.Sprintf("Applying manifest %d/%d", i+1, len(manifests)),
 		})
 
-		if err := applier.apply(ctx, m.Raw); err != nil {
-			result := domain.DeliveryResult{
+		if err := ap.apply(ctx, m.Raw); err != nil {
+			signaler.Done(ctx, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: fmt.Sprintf("apply manifest %d: %v", i+1, err),
-			}
-			signaler.Done(ctx, result)
-			return result, nil
+			})
+			return
 		}
 	}
 
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(ctx, result)
-	return result, nil
+	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
 // Remove is a no-op for now.
