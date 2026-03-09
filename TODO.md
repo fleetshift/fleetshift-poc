@@ -5,3 +5,6 @@
 - [ ] What if multiple targets match manifest types? Initial target pool needs to be a bit more specific and therefore flexible. Maybe we want an "InitialPool" kind of abstraction in addition to the placement strategy.
     - f(deployment) -> targets (initial)
     - f(targets) -> targets (strategy)
+- [ ] Revisit workflow contract tests because I think these are just testing the same workflow logic tested elsewhere (so maybe just combine & use to test workflow implementations & workflow logic)
+- [ ] inline manifests need explicit types
+- [ ] In process delivery agents need to also use durable workflows (in their own addon package)
