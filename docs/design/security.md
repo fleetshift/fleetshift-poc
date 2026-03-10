@@ -4,6 +4,7 @@ Principles:
 
 - Minimize built-in trust of platform components. Some trust is unavoidable (bootstrapping, token vending), but it should follow an auditable least-privilege model. No god-mode service accounts or keys.
 - End to end user identity everywhere – auditable, no confused deputy
+- The tenant's IdP is the root trust anchor. The platform is a consumer of tenant trust, never an authority over it. Compromising the platform must not be sufficient to forge identity or redirect trust.
 
 ## Target credential model
 
@@ -39,6 +40,9 @@ As a fall back these agents could get vault credentials for a service account pe
 - Audience scoping – if we want to scope tokens to particular clusters, we need separate audiences for those. More IdP configuration to do. Hard to make dynamic. Token Exchange (RFC 8693) can address this: exchange a platform-audience token for a target-audience token at the IdP. The IdP controls policy (which exchanges are allowed, for which audiences). This avoids per-cluster client IDs but requires IdP support (Keycloak, Dex have it; Auth0/Okta partial).
 - Reconciliation – this is similar to the gitops challenge.
 - Permission tracking – when a delegation service account's RBAC should track the creating user's permissions over time.
+- Root user – there should be some non-IdP issued credential or out of band channel for configuring IdP trust. If your IdP is down or compromised or you messed up the configuration and you need to reconfigure, you need some escape hatch.
+- Trust anchor distribution – this might be solved but it is tricky to think through end to end. If you are trying to avoid privileged service accounts, then you also need to be very careful about how trust is established to tenant-level roots itself. If a compromise can reconfigure all of those, then all of the end to end verification is not helping there.
+- BMC credentials are unavoidable – maybe they can only be retrieved with a user token
 
 ## Bootstrapping targets
 
@@ -46,13 +50,48 @@ When targets (e.g. clusters) are bootstrapped we may necessarily have elevated p
 
 For the delegation SA model, bootstrapping also provisions the platform's own identity in the cluster. Its service account may get tight impersonation permissions (to impersonate delegate SAs). This is the one piece of unavoidable platform trust, but it's scoped and auditable.
 
-## Long running rollouts (e.g. approval gates) / deployment invalidation
+Critically, bootstrapping must not give the platform **ongoing** authority over IdP trust configuration at the target. Elevated privileges during bootstrap are acceptable because they're time-bounded and observable. But if the platform retains the ability to reconfigure which IdP the target trusts, then a platform compromise can redirect trust and forge identity — defeating all downstream verification. The platform's runtime credentials at a target should be scoped to workload operations, not authentication configuration.
 
-Deployments are long-lived intents in a sense. The rollout may take arbitrarily long. An invalidation signals can come arbitrarily late. This retriggers the deployment.
+## Distributing trust anchors
 
-We can confidently detect these signals but require re-approval to continue. That's maybe not so bad actually but does mean lots of approval baby sitting. What you want is essentially some durable tightly scoped approval that tracks the user's own permissions over time.
+Anything that verifies credentials has to have a trust root. Configuring this trust root over time must itself require something that ties back to that trust root. So if you are using OIDC, you can only change the issuer if you have OIDC credentials from the current issuer.
 
-So how to store durable tightly scoped approval?
+### Why the tenant IdP is the right root
+
+The tenant's IdP issuer URL is the irreducible trust anchor. Every other trust relationship (signing keys, delegation SAs, platform credentials) derives from it. It's the right root because:
+
+- It's not new trust. The tenant already trusts their IdP for everything else. We're building on an existing relationship, not introducing a new one.
+- It's tenant-controlled. The tenant manages user lifecycle, MFA policy, group membership, key rotation. A platform-operated root (like a signing CA) would be new trust the tenant has to accept from the platform operator.
+- Compromise is tenant-scoped. If tenant T's IdP is compromised, only tenant T is affected. A platform-level root (CA, signing service) has cross-tenant blast radius.
+
+### OIDC discovery as the distribution mechanism
+
+From a single issuer URL, everything else is derivable via standard OIDC discovery: JWKS (signing keys), endpoints, key rotation — all automatic, no platform involvement. Verifiers poll JWKS on their own schedule. The platform is not in this path.
+
+### Changing trust configuration
+
+Admin operations that affect trust (new verifiers, audience changes, etc.) are standard OIDC-authenticated actions. The admin authenticates via their tenant IdP, gets a standard ID token, and the system verifies that token before applying any change. The admin's ID token IS the proof that chains back to the current trust anchor. No custom token types or non-standard IdP features needed.
+
+The platform can transport trust configuration changes (it's a courier) but cannot author them. Every change requires a credential from the tenant's IdP. The platform's own credentials are never sufficient to modify trust configuration.
+
+### Trust establishment at the target
+
+For cloud-managed clusters (EKS, GKE, AKS): IdP trust is configured via the cloud provider's API, protected by the tenant's cloud IAM. The platform should not have IAM permissions to modify cluster authentication settings — this is naturally separable from deployment-level permissions.
+
+For self-managed clusters: how IdP trust reaches the target is TBD. The key constraint is that the platform must not be the authority for IdP trust configuration on the target — however provisioning works, it must chain back to the tenant's trust root independently of the platform.
+
+### Residual risk
+
+A compromised platform cannot subvert IdP trust on existing targets — the trust is already established and the platform has no write access to it. Only new targets during a compromise window are at risk, and only if the platform is in the trust establishment path for those targets. For cloud-managed clusters this risk is eliminated by IAM separation.
+
+## Durable user authorization
+
+The platform frequently acts as an intermediary between a user and a target where the user isn't making the API call directly. This happens in two distinct ways:
+
+- **Time**: long-running rollouts outlive the user's token. The rollout may take arbitrarily long, invalidation signals can come arbitrarily late.
+- **Indirection**: in provider delivery, the user is behind the curtain and has no direct authority at the factory cluster. The provider platform acts on their behalf. We still want the operation at the factory to be provably bound to the originating user, in addition to the provider's own authentication. See provider_consumer_model.md for the full provider/consumer/factory topology.
+
+Both cases share the same core problem: how do you maintain end-to-end user identity binding at the target when the user isn't present? The mechanisms below apply to both — though some (token passthrough, delegation SAs) only work when the user has direct authority at the target, while the JWT-embedded provenance chain and signed intent models work across both direct delivery and provider-mediated delivery.
 
 ### Token passthrough (synchronous baseline)
 
@@ -60,7 +99,17 @@ The simplest model: the user's bearer token is passed through to the target. Ful
 
 When the token expires mid-rollout, or on workflow replay, the deployment transitions to PausedAuth and waits for an authorized user to resume it with a fresh token. Any authorized user can resume – this is approval-gate semantics for free.
 
-PausedAuth is the universal fallback for all credential models: whenever credentials are insufficient, the deployment pauses rather than failing.
+PausedAuth is the universal fallback for all credential models: whenever credentials are insufficient, the deployment pauses rather than failing. CIBA (Client-Initiated Backchannel Authentication) composes naturally with PausedAuth: instead of passively waiting for a user to show up, the system actively prompts the user for re-approval on a separate device. PausedAuth is the state ("we need credentials"), CIBA is the mechanism ("reach out to the user").
+
+### Accepted initial authorization with ongoing checks
+
+The JWT from the initial request establishes who authorized the operation and when. For long-running operations, rather than requiring a live token throughout, the system can accept this initial authorization and supplement it with ongoing checks:
+
+- Honor a user-specified validity bound in the initial request ("this deployment is valid for N hours").
+- Re-check permissions when invalidation or other signals arrive — against synced RBAC or the IdP, not the expired JWT.
+- Track user status and permission changes over time (via SCIM/CAEP/SSF) and react accordingly — restricting, pausing, or revoking the operation.
+
+This is the weakest credential model (the JWT is stale), but it's practical for operations where the user is known, the permissions are checkable independently, and the risk of a stale authorization is bounded by the validity limit. Falls back to PausedAuth/CIBA when a check fails.
 
 ### Service accounts specifically for delegation
 
@@ -173,10 +222,96 @@ Eager signing is the simpler and more honest model but converges to PausedAuth U
 
 Signed intent is most compelling for GitOps (manifests are already in git, already reviewed, signing is natural) and as a trust-model upgrade for environments where cryptographic proof of user intent matters. For interactive long-running deployments, delegation SAs + PausedAuth is the pragmatic choice.
 
+#### Certificate authority problem
+
+The Fulcio/keyless signing model introduces a central CA whose root key, if compromised, can forge certificates for any user for any intent. The transparency log (Rekor) provides detection after the fact but not prevention. This violates the "no god-mode keys" principle — the CA root key is exactly such a key.
+
+We want signing authority to derive from the tenant's own trust infrastructure (their IdP), not from a platform-operated CA. Ideally this requires only standard OIDC support from the IdP.
+
+#### JWT-embedded provenance chain
+
+An alternative to the Fulcio model that uses only standard OIDC + a platform integrity key. Two-factor: the tenant's JWT provides identity/authorization, a platform-owned key provides integrity. Neither alone is sufficient.
+
+The chain:
+
+1. The user's ID token (standard OIDC JWT from tenant IdP) is embedded in a manifest input alongside the intent and a hash of the JWT. The manifest input is signed using a platform-owned key.
+2. Any generated manifests include a hash of the manifest input and are also signed by the platform key.
+
+Validation at the target (webhook):
+
+- JWT signature valid against tenant IdP JWKS → proves user identity
+- Platform signature on manifest valid → proves integrity/provenance
+- Manifest input creation time <= JWT exp → proves user was authenticated at creation
+- JWT tenant claim matches manifest tenant → binds intent to correct tenant
+- User (from JWT sub/groups) passes SubjectAccessReview → user is authorized for these operations
+- Hash chain from generated manifest → manifest input → JWT is intact
+
+Trust model:
+
+- Compromised platform key alone: can sign manifests but can't produce a valid tenant JWT. Rejected by webhook.
+- Stolen JWT alone: can present identity but can't sign manifests. Rejected by webhook.
+- Compromised platform (has key + user's JWT in transit): can create manifest inputs paired with the user's JWT while the JWT is live. Same exposure window as token passthrough, bounded by JWT lifetime.
+
+Compared to Fulcio: a compromised Fulcio CA can forge signatures for any user indefinitely. This model limits forgery to users whose JWTs the platform currently holds, within JWT lifetime. The blast radius is smaller by orders of magnitude.
+
+The residual risk (platform can pair a valid JWT with arbitrary manifest content while the JWT is live) is inherent to any model where the platform sees the user's token. It's the same as token passthrough but with better auditability — the signed manifest input is a persistent, inspectable artifact rather than an ephemeral API call. Unauthorized manifest inputs are detectable after the fact.
+
+The platform key is not a god key — it can only assert integrity, not identity. Its compromise alone cannot authorize anything. It could be scoped per-tenant to further limit blast radius.
+
+#### Tightening intent-token binding
+
+The JWT-embedded provenance chain's main gap is that the JWT doesn't bind to specific manifest content — a compromised platform can pair a valid JWT with any manifest while the JWT is live. OAuth standards offer a spectrum of binding tightness:
+
+| Binding level | Standard | What it constrains |
+|---|---|---|
+| Identity only | OIDC core (ID token) | Who the user is |
+| Action category | OAuth scopes | Kind of action (e.g. `deploy`, `deploy:production`) |
+| Target | RFC 8707 (Resource Indicators) | Which resource server / cluster accepts the token |
+| Intent details | RFC 9396 (Rich Authorization Requests) | Structured authorization details: target, namespace, action type |
+| Exact content | RFC 9396 + content hash | Token bound to a specific manifest hash — 1:1 binding |
+
+Rich Authorization Requests (RFC 9396) is the key standard. The `authorization_details` parameter carries structured JSON describing what the token authorizes:
+
+```json
+{
+  "type": "fleetshift_deploy",
+  "target": "cluster-x",
+  "namespace": "production",
+  "manifest_hash": "sha256:e3b0c44298fc..."
+}
+```
+
+With `manifest_hash` in `authorization_details`, the token is only valid for this exact manifest. Any change to the manifest invalidates the token. This closes the content-binding gap entirely — the platform can't pair the token with a different manifest because the hash won't match.
+
+RAR is a published RFC (May 2023). IdP support is growing but not yet universal (Keycloak has partial support via custom protocol mappers, full RAR is in progress). The architecture should accommodate the tightest binding the IdP supports and degrade gracefully: check manifest hash if present in `authorization_details`, fall back to scope-level checks, reject or require re-approval if no binding is present.
+
+#### Credential durability for long-running operations
+
+The JWT-embedded provenance chain proves "user X authorized this at time T," but the JWT expires shortly after. For long-running operations, the full set of credential durability mechanisms applies — see the long-running rollouts section above. The JWT-embedded model layers cleanly with any of them: accepted initial authorization with ongoing checks as the default, PausedAuth + CIBA as the fallback, refresh tokens or delegation SAs where appropriate.
+
+#### Intent-bound tokens for GitOps
+
+The tighter the binding between token and content, the safer it is to include a token alongside manifests in git. An unscoped ID token in git is dangerous — it can authorize anything during its validity window. A RAR-scoped access token with `manifest_hash` is safe — it can only authorize the exact manifest it's bound to, and it expires.
+
+Two flows:
+
+**Token before commit (user-driven):** The user's CLI computes `hash(manifest)`, requests an access token from the IdP with `authorization_details` containing the manifest hash (via RAR), and commits the manifest + token together. The gitops controller validates the token against the tenant's IdP JWKS, checks that `authorization_details.manifest_hash` matches the actual manifest, and delivers if valid.
+
+**Approval after commit (CIBA):** The user commits the manifest without a token. CI detects the change, computes the manifest hash, and initiates a CIBA (Client-Initiated Backchannel Authentication, an OIDC extension) flow. The user receives an approval prompt on a separate device showing what they're approving (via CIBA's `binding_message` parameter). On approval, CI receives a RAR-scoped token and attaches it for the gitops controller.
+
+CIBA separates the commit from the approval — natural for gitops where you commit, review in PR, and approve after merge as a separate step. The user doesn't need a token at commit time.
+
+When a token in git expires before the manifest is applied, the controller triggers re-approval (new CIBA flow or equivalent). This is PausedAuth semantics: expired credentials pause rather than fail.
+
+Without full RAR support, standard scopes provide weaker but still useful binding (e.g. `scope=deploy:cluster-x:namespace-production`). Universally supported, much tighter than an unscoped token, but not 1:1 content-bound.
+
 #### Open questions
 
-- SubjectAccessReview in the webhook needs the user's groups. Fulcio certificates typically carry `sub` and `iss`, not groups. The webhook may need to query the IdP for group membership or use a synced group mapping.
 - Signed intent is viable for K8s (admission webhooks are a natural fit). For other targets, it's a lot to ask – probably K8s-specific.
+- TODO: Could the JWT-embedded provenance model extend to the "signed intent beyond GitOps" use case (lazy signing)? The hash chain from generated manifest → manifest input → JWT is essentially the provenance chain that lazy signing requires.
+- SubjectAccessReview in the webhook needs the user's groups. ID tokens typically carry `sub` and `iss`, not always groups. The webhook may need to query the IdP for group membership or rely on a synced group mapping.
+- RAR (RFC 9396) adoption is still early. The architecture should degrade gracefully when the IdP only supports scopes or audiences. What's the minimum binding level we're willing to accept before falling back to PausedAuth / re-approval?
+- For the CIBA gitops flow: how does CI authenticate to initiate the CIBA flow? It needs its own client credentials with the IdP, which is itself a stored secret. This is a narrow, well-scoped secret (can only initiate approval requests, can't issue tokens without user consent), but it exists.
 
 ## Practical architecture summary
 
