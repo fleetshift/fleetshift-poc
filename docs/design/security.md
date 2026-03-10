@@ -86,12 +86,12 @@ A compromised platform cannot subvert IdP trust on existing targets — the trus
 
 ## Durable user authorization
 
-The platform frequently acts as an intermediary between a user and a target where the user isn't making the API call directly. This happens in two distinct ways:
+The platform frequently acts as an intermediary between a user and a target where the user isn't making the API call directly. This is a problem in both time and space:
 
-- **Time**: long-running rollouts outlive the user's token. The rollout may take arbitrarily long, invalidation signals can come arbitrarily late.
-- **Indirection**: in provider delivery, the user is behind the curtain and has no direct authority at the factory cluster. The provider platform acts on their behalf. We still want the operation at the factory to be provably bound to the originating user, in addition to the provider's own authentication. See provider_consumer_model.md for the full provider/consumer/factory topology.
+- **Time**: long-running rollouts outlive the user's token. The authorization must persist beyond the token's validity window.
+- **Space**: in provider delivery, the authorization must cross a trust boundary the user doesn't span directly. The user is behind the curtain with no direct authority at the factory cluster. See provider_consumer_model.md for the full provider/consumer/factory topology.
 
-Both cases share the same core problem: how do you maintain end-to-end user identity binding at the target when the user isn't present? The mechanisms below apply to both — though some (token passthrough, delegation SAs) only work when the user has direct authority at the target, while the JWT-embedded provenance chain and signed intent models work across both direct delivery and provider-mediated delivery.
+Both require the platform to carry proof of the user's intent to a place or moment where the user can't present it themselves. The mechanisms below apply to both — though some (token passthrough, delegation SAs) only work when the user has direct authority at the target (no separation or intermediary in "space"), while the JWT-embedded provenance chain and signed intent models work across both dimensions.
 
 ### Token passthrough (synchronous baseline)
 
