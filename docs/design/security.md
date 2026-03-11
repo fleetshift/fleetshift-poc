@@ -111,6 +111,8 @@ The JWT from the initial request establishes who authorized the operation and wh
 
 This is the weakest credential model (the JWT is stale), but it's practical for operations where the user is known, the permissions are checkable independently, and the risk of a stale authorization is bounded by the validity limit. Falls back to PausedAuth/CIBA when a check fails.
 
+This is the same fundamental tradeoff Kubernetes users already accept: `kubectl apply` authorizes at request time, the CR lives on, and the controller reconciles it with a service account — no ongoing verification of the original user's permissions. FleetShift's model is strictly better: the operation carries cryptographic proof of who authorized it (the embedded JWT), there is no god-mode controller service account, and the platform can still do ongoing permission checks and react to changes. We're not asking users to accept a new tradeoff — we're giving them one they already accept, minus the worst parts, with no stored secrets.
+
 ### Service accounts specifically for delegation
 
 When something is long running, the user creates a service account dedicated to run on their behalf, with a scoped subset of their permissions.
@@ -151,6 +153,17 @@ Ideally you'd:
 
 Refresh tokens shine when: (a) the IdP supports sender constraints and flexible token exchange (rare in practice), and (b) the targets work well with proper OAuth (access tokens, transaction tokens). For K8s with OIDC auth, delegation SAs are simpler and avoid the stored-secret problem entirely.
 
+#### Run-as-you vs. run-as-platform
+
+Refresh tokens and accepted initial authorization may not be a strict upgrade path (one replacing the other). They could be coexisting credential modes with different trust/convenience tradeoffs:
+
+- **Run-as-you (refresh token):** The platform holds a refresh token and gets fresh tokens as the user. Operations at the target see the user's live identity. Naturally tracks IdP policy over time (user disabled → refresh fails, client permissions revoked → response reflects it). Requires a stored secret. Stronger ongoing guarantees, but higher trust in the platform.
+- **Run-as-platform (initial authorization):** The platform acts under its own identity, carrying the user's initial JWT as proof of authorization. No stored secret beyond the short-lived JWT. Weaker ongoing guarantees (stale authorization), but no long-lived credential exposure.
+
+The choice could be user-driven ("I want this deployment to run as me") or policy-driven — the platform evaluates what the user is allowed to do (which resources, which contexts) and determines the available modes. Which modes a user can select is itself an authorization decision at the platform layer.
+
+TODO: The exact policy model is uncertain. The key insight is that these modes have different security properties and operational tradeoffs, and giving users (or administrators) a choice — gated by privilege — may be better than picking one model for all cases.
+
 ### Constrained impersonation
 
 This is conceptually similar to the above, but means the platform directly impersonates the user. The fundamental problem: K8s impersonation lets the impersonator assert group membership, and K8s has no way to verify those assertions. Even with constrained impersonation (limiting which users can be impersonated via `resourceNames`), the impersonator can claim arbitrary groups for that user. If the platform can impersonate group "admins", it can put any user in that group regardless of their actual membership. These are unverifiable claims about a user.
@@ -190,25 +203,17 @@ The bigger challenge is securely storing longer lived credentials. See "Refresh 
 
 ### Signed intent
 
-A more promising model: something cluster-side that operates on "signed intents."
+A more promising model: something cluster-side that validates "signed intents" before applying.
 
 1. A manifest in git is accompanied by a signature and a revision (ideally w/ provenance via hash)
-2. The server is only authorized to put "intent" resources into a cluster
-3. A controller or admission validates the signature, extracts the original user, authorizes against that, and unwraps the manifest and applies that if 
-succesful.
+2. The platform delivers attested manifests to the cluster
+3. The cluster-side delivery agent validates the attestation (proof material, user identity, authorization), and applies the constituent manifests only if validation succeeds. See the attestation-based delivery section below for the concrete protocol.
 
-Signing uses keyless signing (Fulcio/cosign model): the user proves OIDC identity to a CA, gets a short-lived certificate binding their identity to an ephemeral signing key. The signature is verifiable long after the token expires via the certificate chain and transparency log.
+The original design considered keyless signing (Fulcio/cosign model), where the user proves OIDC identity to a CA and gets a short-lived certificate binding their identity to an ephemeral signing key. This has a central CA problem (see below). The JWT-embedded provenance chain replaces it.
 
-The architecture separates concerns cleanly:
+NOTE: We should revisit this for the case the customer _already has a trusted Fulcio CA_.
 
-- The platform has write RBAC for signed intents only (it makes API calls to the cluster)
-- The validating webhook gates every write: is this manifest signed by an authorized user?
-- The platform can't apply unsigned manifests, can't forge signatures
-- The webhook has no write access – it only validates
-
-The platform's write authority is contingent on user signatures. A compromised platform (short of cluster-admin level compromise that could disable the webhook) can't apply anything unauthorized.
-
-A _webhook_ is still privileged (it can block any admission), but its privilege is narrow: verification-only, no writes, auditable, `failClosed`. A controller would be able to write anything. Signature verification built into the API server would be ideal. Signature through validation can be problematic due to mutating web hooks.
+The platform's delivery authority is contingent on valid attestations. A compromised platform can deliver attestation envelopes, but without a valid tenant JWT embedded in the envelope, the delivery agent rejects them. The platform can't apply unattested manifests.
 
 #### Signed intent beyond GitOps
 
@@ -232,31 +237,21 @@ We want signing authority to derive from the tenant's own trust infrastructure (
 
 An alternative to the Fulcio model that uses only standard OIDC + a platform integrity key. Two-factor: the tenant's JWT provides identity/authorization, a platform-owned key provides integrity. Neither alone is sufficient.
 
-The chain:
-
-1. The user's ID token (standard OIDC JWT from tenant IdP) is embedded in a manifest input alongside the intent and a hash of the JWT. The manifest input is signed using a platform-owned key.
-2. Any generated manifests include a hash of the manifest input and are also signed by the platform key.
-
-Validation at the target (webhook):
-
-- JWT signature valid against tenant IdP JWKS → proves user identity
-- Platform signature on manifest valid → proves integrity/provenance
-- Manifest input creation time <= JWT exp → proves user was authenticated at creation
-- JWT tenant claim matches manifest tenant → binds intent to correct tenant
-- User (from JWT sub/groups) passes SubjectAccessReview → user is authorized for these operations
-- Hash chain from generated manifest → manifest input → JWT is intact
+The user's JWT is embedded in an attestation envelope alongside the intent, signed by a platform-owned key. The concrete envelope format and validation sequence are defined in the attestation-based delivery section below.
 
 Trust model:
 
-- Compromised platform key alone: can sign manifests but can't produce a valid tenant JWT. Rejected by webhook.
-- Stolen JWT alone: can present identity but can't sign manifests. Rejected by webhook.
-- Compromised platform (has key + user's JWT in transit): can create manifest inputs paired with the user's JWT while the JWT is live. Same exposure window as token passthrough, bounded by JWT lifetime.
+- Compromised platform key alone: can sign manifests but can't produce a valid tenant JWT. Rejected at validation.
+- Stolen JWT alone: can present identity but can't sign manifests. Rejected at validation.
+- Compromised platform (has key + user's JWT in transit): can create attestations paired with the user's JWT while the JWT is live. Same exposure window as token passthrough, bounded by JWT lifetime.
 
 Compared to Fulcio: a compromised Fulcio CA can forge signatures for any user indefinitely. This model limits forgery to users whose JWTs the platform currently holds, within JWT lifetime. The blast radius is smaller by orders of magnitude.
 
 The residual risk (platform can pair a valid JWT with arbitrary manifest content while the JWT is live) is inherent to any model where the platform sees the user's token. It's the same as token passthrough but with better auditability — the signed manifest input is a persistent, inspectable artifact rather than an ephemeral API call. Unauthorized manifest inputs are detectable after the fact.
 
 The platform key is not a god key — it can only assert integrity, not identity. Its compromise alone cannot authorize anything. It could be scoped per-tenant to further limit blast radius.
+
+Persisting user JWTs to a database (rather than just validating them in-memory per-request) is a deliberate architectural choice. The security question is what happens when the store is compromised. Here, the blast radius is: one user per token, only that user's authorized operations, only within the token's remaining lifetime, and only as one factor of two (the platform signature is also required). Compare to a god-mode service account: any user, any operation, indefinitely, single factor. JWTs should be encrypted at rest and purged after expiry or operation completion.
 
 #### Tightening intent-token binding
 
@@ -313,6 +308,69 @@ Without full RAR support, standard scopes provide weaker but still useful bindin
 - RAR (RFC 9396) adoption is still early. The architecture should degrade gracefully when the IdP only supports scopes or audiences. What's the minimum binding level we're willing to accept before falling back to PausedAuth / re-approval?
 - For the CIBA gitops flow: how does CI authenticate to initiate the CIBA flow? It needs its own client credentials with the IdP, which is itself a stored secret. This is a narrow, well-scoped secret (can only initiate approval requests, can't issue tokens without user consent), but it exists.
 
+## Attestation-based delivery
+
+The deployment specifies its authorization mode as part of the deployment strategy. Two modes:
+
+- **Token passthrough**: the user's token is used directly as the caller credential. No attestation envelope. Works while the token is live, PausedAuth when it expires. Only viable when the user has direct authority at the target (no space separation).
+- **Attestation**: an attestation envelope carries the user's JWT alongside the intent, signed by the platform. Required when there's space separation (the user has no direct authority at the target). Optional but valuable when there's only time separation (provides cryptographic proof of who authorized the operation, survives token expiry as an audit artifact).
+
+Which mode a deployment uses is a property of that deployment, not a global setting. The platform evaluates what modes are available and applicable based on the authorization context.
+
+### Attestation protocol
+
+Within attestation mode, the protocol is uniform regardless of whether the separation is in time, space, or both. The envelope and validation sequence are the same in every case.
+
+**Envelope:**
+
+```
+create_attestation(user_jwt, intent):
+    sign_platform_key({
+        jwt: user_jwt,
+        intent: intent,
+        intent_hash: hash(intent),
+        jwt_hash: hash(user_jwt),
+        created_at: now(),
+        valid_until: user_specified_expiry or default,
+    })
+```
+
+**Validation (same steps, always):**
+
+```
+validate_attestation(attestation, manifest):
+    assert platform_signature_valid(attestation)
+    assert jwt_signature_valid(attestation.jwt, tenant_idp_jwks)
+    assert attestation.created_at <= attestation.jwt.exp
+    assert now() <= attestation.valid_until
+    assert hash(manifest) == attestation.intent_hash  // if content-bound
+    assert user_authorized(attestation.jwt, manifest)  // best-effort
+    // any assertion failure → PausedAuth
+```
+
+Dimensions affect validation strength, not protocol shape: a fresh JWT makes the temporal check strong; a direct target makes the authz check strong (live SubjectAccessReview); RAR-scoped tokens make the content binding tight. The protocol doesn't branch — it degrades gracefully.
+
+### Cluster-side delivery architecture (K8s)
+
+The delivery agent (cluster-side, part of the fleetlet) handles both authorization modes:
+
+- **Token passthrough**: the delivery agent uses the caller's token to apply manifests directly via Server-Side Apply. The target's API server validates the token and evaluates RBAC against the user's real identity.
+- **Attestation mode**: the delivery agent receives attestation envelopes, validates the proof material internally (JWT against IdP JWKS, platform signature, bindings, validity bounds), and applies real resources using its own in-cluster ServiceAccount. It has broad RBAC but is the validation gate — nothing gets applied without passing the full validation sequence.
+
+A separate read-only status agent watches managed resources and reports status and drift back to the platform. It has no write RBAC. If drift is detected, the platform re-delivers through the appropriate delivery path.
+
+In attestation mode there is no broadly privileged reconciler. The delivery agent combines validation and apply in one step. No intermediate CRD, no separate controller with broad RBAC acting on platform-originated data. The delivery agent's in-cluster SA credential never leaves the cluster — the platform sends delivery instructions over the fleetlet connection, and the delivery agent uses its local SA. No cluster credentials travel to the platform.
+
+### Transport as a security knob
+
+The attestation contract (envelope in → validate → apply) is the same regardless of how the envelope reaches the delivery agent. Transport is a configuration choice per target profile:
+
+- **Standard**: attestation envelopes delivered over the fleetlet gRPC connection. Simple, low latency. The platform has a live connection to the delivery agent process.
+- **Hardened**: attestation envelopes written to a buffer (S3, Kafka, NATS). The delivery agent reads from the buffer, validates, applies. No direct connection between the platform and the privileged component. The buffer is the airgap. See provider_consumer_model.md for the full buffer mode discussion.
+- **Future option**: SignedIntent CRDs as a K8s-native transport. The delivery agent watches the API server for SignedIntent resources instead of reading from gRPC or a buffer. Adds standard K8s semantics (watch, list, kubectl visibility) without changing the validation contract.
+
+The delivery agent's code is identical across transports. Dialing up the security knob (from standard to hardened to CRD-based) requires no changes to the validation logic or the attestation format — only a transport configuration change.
+
 ## Practical architecture summary
 
 For K8s targets, the layered model:
@@ -320,8 +378,13 @@ For K8s targets, the layered model:
 | Scenario | Mechanism | User identity at target | User presence needed |
 |----------|-----------|------------------------|---------------------|
 | Synchronous / short-lived ops | Token passthrough | Full (IdP-verified) | During operation |
-| Long-running rollouts | Delegation SAs + TokenRequest | SA identity (correlatable) | At creation only |
-| Any credential failure | PausedAuth | N/A (paused) | To resume |
-| GitOps | Signed intent | Full (cryptographic) | At signing only |
+| Long-running (run-as-platform) | Accepted initial auth + JWT-embedded provenance | Proof of initial user (JWT in signed artifact) | At creation only |
+| Long-running (run-as-you) | Refresh tokens (when IdP supports it) | Full (IdP-verified, refreshed) | At creation only |
+| Long-running (K8s-specific) | Delegation SAs | SA identity (correlatable) | At creation only |
+| Any credential failure | PausedAuth + CIBA | N/A (paused) | To resume (or CIBA-prompted) |
+| GitOps | Signed intent (JWT-embedded provenance) | Proof of initial user (JWT in signed artifact) | At signing only |
+| GitOps (with RAR) | Intent-bound token | Full (IdP-verified, content-bound) | At signing only |
+
+Delivery transport is configurable per target profile: standard (fleetlet gRPC), hardened (buffered via S3/Kafka/NATS), or future CRD-based. The attestation format and validation logic are identical across transports.
 
 For non-K8s targets, the delivery agent declares what credential type it needs and handles the target-specific mechanics (AssumeRole, token exchange, etc). The platform provides the user's identity information and any stored credential references.
