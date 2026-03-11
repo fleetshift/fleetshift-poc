@@ -6,6 +6,13 @@ Principles:
 - End to end user identity everywhere – auditable, no confused deputy
 - The tenant's IdP is the root trust anchor. The platform is a consumer of tenant trust, never an authority over it. Compromising the platform must not be sufficient to forge identity or redirect trust.
 
+## Big ideas
+
+- The easy secure case is platform-side work like inventory, search, and other operations the platform can authorize and audit locally. The hard case is delivery: acting later, elsewhere, or both, when the user is no longer making the target API call directly.
+- Prefer direct user identity at the target when possible (`token passthrough`). When that is not durable enough, the fallback is not "give the platform broad standing power"; it is to carry proof of user intent forward (`accepted initial authorization`, `signed intent`) or use tightly scoped delegation (`delegation SAs`, sometimes refresh tokens).
+- The main design split is between three separate knobs: credential durability (how authority persists over time), attested apply (how user intent is proven and validated at the target), and transport (how the instruction reaches the target). Keeping those separate lets the system get stricter without redesigning everything at once.
+- Bootstrap-time privilege is sometimes unavoidable, but it must not become steady-state trust authority. In particular, the platform must not be able to rewrite target trust configuration or otherwise turn temporary operational access into permanent identity authority.
+
 ## Target credential model
 
 The delivery target plugin declares what credential presentation it needs; the platform should not hard-code one token type for every target.
