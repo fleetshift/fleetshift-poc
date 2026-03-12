@@ -392,17 +392,10 @@ If we control the target's auth stack (for example, a Kubernetes distribution we
 
 ### Deployment options (UX)
 
-This means when you deploy something, you (a user or an addon creating a deployment) have various options:
+On the deployment, this reduces to 3 high level options (with refresh variants):
 
-1. Run-as who?
-  a. Me
-  1. Durably?
-    a. No – use JWT, no refresh token
-    b. Yes – get refresh token
-    1. Authorize future revisions? (Should this be an option? I don't really like it.)
-      a. No – Refresh token not used on edits
-      b. Yes – Refresh token used an edits. Platform authorizes edits. Target authorizes original user.
-      orm
-  2. Durably?
-    a. No – use
-
+1. Run as me (w/ optional refresh)
+2. Run as service account
+  - This could be one that tracks your own permissions if we support that, or just some service account created separately with its own deployment... or something
+3. Run as platform w/ attestation (w/ optional refresh)
+  - If refresh, this becomes a property of the original manifest intent that can't be forged later–we'll see that it requires a recent token and reject otherwise.
