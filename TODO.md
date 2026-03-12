@@ -1,15 +1,25 @@
-- [ ] Rethink where generated proto types go
+# TODO
+
+## Design
+
+- [ ] Incorporate "root" service account (locked up keys, rarely used) best practice?
+- [ ] Look at workload identity federation kinds of techniques for authenticating the platform or authenticating agents
+- [ ] Should RBAC "push" (bootstrapping) be done by deployments in which the pool is everything in that workspace? And then new clusters are new targets which trigger the pipeline again? This is pretty elegant and follows existing authorization model.
+- [ ] I think an explicit tenant notion is needed in the managed cluster case (can possibly be sharded but instances are still managed by provider)
+- [ ] What happens if agent is offline during delivery? Does it stall the whole stage?
+
+## Functionality
+
 - [ ] Fleetlet installation into kind cluster
 - [ ] Pagination / filter / etc
 - [ ] Revisit failed deployment when no targets – what if it is invalidated? (manifest update) Do we have/need a signal for when new targets might match because they've been newly registered?
 - [ ] What if multiple targets match manifest types? Initial target pool needs to be a bit more specific and therefore flexible. Maybe we want an "InitialPool" kind of abstraction in addition to the placement strategy.
     - f(deployment) -> targets (initial)
     - f(targets) -> targets (strategy)
-- [ ] Revisit workflow contract tests because I think these are just testing the same workflow logic tested elsewhere (so maybe just combine & use to test workflow implementations & workflow logic)
 - [ ] inline manifests need explicit types
+
+## Code / Trivial
+
+- [ ] Rethink where generated proto types go
+- [ ] Revisit workflow contract tests because I think these are just testing the same workflow logic tested elsewhere (so maybe just combine & use to test workflow implementations & workflow logic)
 - [ ] In process delivery agents need to also use durable workflows (in their own addon package)
-- [ ] Incorporate "root" service account (locked up keys, rarely used) best practice?
-- [ ] Look at workload identity federation kinds of techniques for authenticating the platform or authenticating agents
-- [ ] Should RBAC "push" (bootstrapping) be done by deployments in which the pool is everything in that workspace? And then new clusters are new targets which trigger the pipeline again? This is pretty elegant and follows existing authorization model.
-- [ ] I think an explicit tenant notion is needed in the managed cluster case (can possibly be sharded but instances are still managed by provider)
-- [ ] What happens if agent is offline during delivery? Does it stall the whole stage?
