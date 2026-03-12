@@ -12,3 +12,4 @@
 - [ ] Look at workload identity federation kinds of techniques for authenticating the platform or authenticating agents
 - [ ] Should RBAC "push" (bootstrapping) be done by deployments in which the pool is everything in that workspace? And then new clusters are new targets which trigger the pipeline again? This is pretty elegant and follows existing authorization model.
 - [ ] I think an explicit tenant notion is needed in the managed cluster case (can possibly be sharded but instances are still managed by provider)
+- [ ] What happens if agent is offline during delivery? Does it stall the whole stage?
