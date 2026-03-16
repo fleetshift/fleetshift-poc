@@ -329,7 +329,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 	}
 	dep, pool = loaded.Deployment, loaded.Pool
 
-	resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID)
+	resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID, probe)
 	if err != nil {
 		dep.State = DeploymentStateFailed
 		probe.StateChanged(dep.State)
@@ -379,12 +379,12 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 		}
 
 		if event.ManifestInvalidated {
-			if err := s.executeManifestInvalidation(record, dep, pool, deploymentID); err != nil {
+			if err := s.executeManifestInvalidation(record, dep, pool, deploymentID, probe); err != nil {
 				probe.Error(err)
 				return struct{}{}, err
 			}
 		} else {
-			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, previousPool, deploymentID)
+			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, previousPool, deploymentID, probe)
 			if err != nil {
 				dep.State = DeploymentStateFailed
 				probe.StateChanged(dep.State)
@@ -416,6 +416,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	pool []TargetInfo,
 	previousPool []TargetInfo,
 	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
 ) ([]TargetID, error) {
 	resolved, err := RunActivity(record, s.ResolvePlacement(), ResolvePlacementInput{
 		Spec: dep.PlacementStrategy,
@@ -441,7 +442,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	if err := s.executeRolloutPlan(record, dep, plan, deploymentID); err != nil {
+	if err := s.executeRolloutPlan(record, dep, plan, deploymentID, probe); err != nil {
 		return nil, err
 	}
 
@@ -459,6 +460,7 @@ func (s *OrchestrationWorkflowSpec) executeManifestInvalidation(
 	dep Deployment,
 	pool []TargetInfo,
 	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
 ) error {
 	targets := TargetInfosByID(dep.ResolvedTargets, pool)
 	delta := TargetDelta{Unchanged: targets}
@@ -470,7 +472,7 @@ func (s *OrchestrationWorkflowSpec) executeManifestInvalidation(
 	if err != nil {
 		return fmt.Errorf("plan rollout (manifest invalidation): %w", err)
 	}
-	return s.executeRolloutPlan(record, dep, plan, deploymentID)
+	return s.executeRolloutPlan(record, dep, plan, deploymentID, probe)
 }
 
 // executeDelete removes the deployment from all currently resolved
@@ -508,6 +510,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	dep Deployment,
 	plan RolloutPlan,
 	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
 ) error {
 	for _, step := range plan.Steps {
 		if step.Remove != nil {
@@ -536,7 +539,9 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				// TODO: partial delivery (where some manifests are filtered out)
 				// may result in an incomplete or incoherent manifest set for a
 				// target. Revisit whether to warn or make this configurable.
+				total := len(manifests)
 				manifests = FilterAcceptedManifests(target, manifests)
+				probe.ManifestsFiltered(target, total, len(manifests))
 				if len(manifests) == 0 {
 					continue
 				}
@@ -560,6 +565,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					if _, err := RunActivity(record, s.ProcessDeliveryOutputs(), result); err != nil {
 						return fmt.Errorf("process delivery outputs: %w", err)
 					}
+					probe.DeliveryOutputsProcessed(result.ProvisionedTargets, len(result.ProducedSecrets))
 				}
 			}
 			continue

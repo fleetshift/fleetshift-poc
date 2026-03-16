@@ -128,8 +128,16 @@ func getDelivery(t *testing.T, store domain.Store, id domain.DeliveryID) domain.
 
 type recordingObserver struct {
 	domain.NoOpDeploymentObserver
-	mu     sync.Mutex
-	states []domain.DeploymentState
+	mu       sync.Mutex
+	states   []domain.DeploymentState
+	filtered []filteredEvent
+	outputs  []outputsEvent
+}
+
+type filteredEvent struct {
+	TargetID domain.TargetID
+	Total    int
+	Accepted int
 }
 
 func (o *recordingObserver) RunStarted(ctx context.Context, _ domain.DeploymentID) (context.Context, domain.DeploymentRunProbe) {
@@ -145,6 +153,31 @@ func (p *recordingProbe) StateChanged(state domain.DeploymentState) {
 	p.observer.mu.Lock()
 	defer p.observer.mu.Unlock()
 	p.observer.states = append(p.observer.states, state)
+}
+
+type outputsEvent struct {
+	TargetIDs []domain.TargetID
+	Secrets   int
+}
+
+func (p *recordingProbe) DeliveryOutputsProcessed(targets []domain.ProvisionedTarget, secrets int) {
+	p.observer.mu.Lock()
+	defer p.observer.mu.Unlock()
+	ids := make([]domain.TargetID, len(targets))
+	for i, t := range targets {
+		ids[i] = t.ID
+	}
+	p.observer.outputs = append(p.observer.outputs, outputsEvent{TargetIDs: ids, Secrets: secrets})
+}
+
+func (p *recordingProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
+	p.observer.mu.Lock()
+	defer p.observer.mu.Unlock()
+	p.observer.filtered = append(p.observer.filtered, filteredEvent{
+		TargetID: target.ID,
+		Total:    total,
+		Accepted: accepted,
+	})
 }
 
 // ---------------------------------------------------------------------------
@@ -306,6 +339,31 @@ func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ doma
 		}
 	}()
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+// emittingAsyncDelivery is like [asyncDelivery] but also calls
+// [domain.DeliverySignaler.Emit] before completion, simulating how the
+// kind agent emits progress events during cluster creation.
+type emittingAsyncDelivery struct {
+	done chan struct{}
+}
+
+func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	go func() {
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Kind:    domain.DeliveryEventProgress,
+			Message: "creating cluster",
+		})
+		signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		if a.done != nil {
+			close(a.done)
+		}
+	}()
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
 }
 
 func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
@@ -554,12 +612,14 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 		}},
 	}
 
+	obs := &recordingObserver{}
 	wf := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
 		Delivery:   delivery,
 		Strategies: domain.DefaultStrategyFactory{},
 		Registry:   reg,
 		Vault:      vault,
+		Observer:   obs,
 	}
 
 	_, err := wf.Run(rec, deploymentID)
@@ -576,6 +636,18 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 	}
 
 	_ = getTarget(t, store, "k8s-test-cluster")
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+	if len(obs.outputs) != 1 {
+		t.Fatalf("expected 1 outputs event, got %d", len(obs.outputs))
+	}
+	if len(obs.outputs[0].TargetIDs) != 1 || obs.outputs[0].TargetIDs[0] != "k8s-test-cluster" {
+		t.Errorf("outputs target IDs = %v, want [k8s-test-cluster]", obs.outputs[0].TargetIDs)
+	}
+	if obs.outputs[0].Secrets != 1 {
+		t.Errorf("outputs secrets = %d, want 1", obs.outputs[0].Secrets)
+	}
 }
 
 func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
@@ -709,6 +781,76 @@ func TestOrchestration_ResourceTypeFiltering_SkipsIncompatibleTargets(t *testing
 	}
 	if deliveredTo[0] != "kind-local" {
 		t.Errorf("expected delivery to kind-local, got %s", deliveredTo[0])
+	}
+}
+
+func TestOrchestration_ResourceTypeFiltering_ObserverReportsFiltering(t *testing.T) {
+	store, _ := setupStore(t)
+
+	deploymentID := domain.DeploymentID("rt-obs")
+	seedDeployment(t, store, domain.Deployment{
+		ID: deploymentID,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type: domain.PlacementStrategyAll,
+		},
+		State: domain.DeploymentStateCreating,
+	})
+
+	pool := []domain.TargetInfo{
+		{ID: "kind-local", Name: "Kind Provider", Type: "kind", AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster"}},
+		{ID: "k8s-existing", Name: "Existing K8s", Type: "kubernetes", AcceptedResourceTypes: []domain.ResourceType{"kubernetes"}},
+	}
+	seedTargets(t, store, pool...)
+
+	events := make(chan domain.DeploymentEvent, 16)
+	reg := &stubRegistry{events: events}
+
+	rec := &singleEventRecord{
+		ctx:    context.Background(),
+		event:  domain.DeploymentEvent{Delete: true},
+		events: events,
+	}
+
+	obs := &recordingObserver{}
+	wf := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   noopDelivery{},
+		Strategies: domain.DefaultStrategyFactory{},
+		Registry:   reg,
+		Observer:   obs,
+	}
+
+	_, err := wf.Run(rec, deploymentID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+
+	if len(obs.filtered) != 2 {
+		t.Fatalf("expected 2 filtered events (one per target), got %d", len(obs.filtered))
+	}
+
+	byTarget := make(map[domain.TargetID]filteredEvent)
+	for _, f := range obs.filtered {
+		byTarget[f.TargetID] = f
+	}
+
+	kindEvt := byTarget["kind-local"]
+	if kindEvt.Total != 1 || kindEvt.Accepted != 1 {
+		t.Errorf("kind-local: total=%d accepted=%d, want 1/1", kindEvt.Total, kindEvt.Accepted)
+	}
+
+	k8sEvt := byTarget["k8s-existing"]
+	if k8sEvt.Total != 1 || k8sEvt.Accepted != 0 {
+		t.Errorf("k8s-existing: total=%d accepted=%d, want 1/0", k8sEvt.Total, k8sEvt.Accepted)
 	}
 }
 
@@ -857,5 +999,69 @@ func TestOrchestration_ResourceTypeFiltering_MixedManifestsFilteredPerTarget(t *
 	}
 	if k8sManifests[0].ResourceType != "kubernetes" {
 		t.Errorf("k8s-target: expected kubernetes, got %s", k8sManifests[0].ResourceType)
+	}
+}
+
+func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T) {
+	store, _ := setupStore(t)
+
+	deploymentID := domain.DeploymentID("obs-test")
+	seedDeployment(t, store, domain.Deployment{
+		ID: deploymentID,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	emitting := &emittingAsyncDelivery{done: make(chan struct{})}
+	events := make(chan domain.DeploymentEvent, 16)
+	reg := &stubRegistry{events: events}
+
+	rec := &asyncRecord{
+		ctx:    context.Background(),
+		events: events,
+	}
+
+	delObs := &recordingDeliveryObserver{}
+	wf := &domain.OrchestrationWorkflowSpec{
+		Store:            store,
+		Delivery:         emitting,
+		Strategies:       domain.DefaultStrategyFactory{},
+		Registry:         reg,
+		DeliveryObserver: delObs,
+	}
+
+	go func() {
+		<-emitting.done
+		events <- domain.DeploymentEvent{Delete: true}
+	}()
+
+	_, err := wf.Run(rec, deploymentID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	emittedEvents, completions := delObs.snapshot()
+	if len(emittedEvents) == 0 {
+		t.Fatal("delivery observer received no progress events; Emit → observer chain is broken")
+	}
+	if emittedEvents[0].Kind != domain.DeliveryEventProgress {
+		t.Errorf("event kind = %q, want %q", emittedEvents[0].Kind, domain.DeliveryEventProgress)
+	}
+	if emittedEvents[0].Message != "creating cluster" {
+		t.Errorf("event message = %q, want %q", emittedEvents[0].Message, "creating cluster")
+	}
+	if len(completions) == 0 {
+		t.Fatal("delivery observer received no completion results; Done → observer chain is broken")
+	}
+	if completions[0].State != domain.DeliveryStateDelivered {
+		t.Errorf("completion state = %q, want %q", completions[0].State, domain.DeliveryStateDelivered)
 	}
 }

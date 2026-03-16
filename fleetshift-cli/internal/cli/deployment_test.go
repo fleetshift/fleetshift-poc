@@ -152,6 +152,7 @@ func TestDeploymentCreateGetList_Table(t *testing.T) {
 		"deployment", "create",
 		"--id", "alpha",
 		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
 		"--placement-type", "all",
 	)
 	if !strings.Contains(out, "deployments/alpha") {
@@ -186,6 +187,7 @@ func TestDeploymentCreateGetList_JSON(t *testing.T) {
 		"deployment", "create",
 		"--id", "beta",
 		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
 		"--placement-type", "all",
 	)
 	if !strings.Contains(out, `"deployments/beta"`) {
@@ -241,6 +243,7 @@ func TestDeploymentCreate_StaticPlacement(t *testing.T) {
 		"deployment", "create",
 		"--id", "static-dep",
 		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
 		"--placement-type", "static",
 		"--target-ids", "t1,t2",
 	)
@@ -258,6 +261,7 @@ func TestDeploymentCreate_StaticPlacement_ResolvedTargets(t *testing.T) {
 		"deployment", "create",
 		"--id", "tgt-dep",
 		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
 		"--placement-type", "static",
 		"--target-ids", "node-a,node-b",
 	)

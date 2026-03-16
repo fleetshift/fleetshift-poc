@@ -63,6 +63,41 @@ func (p *deploymentRunProbe) StateChanged(state domain.DeploymentState) {
 	)
 }
 
+func (p *deploymentRunProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
+	if accepted == 0 {
+		p.logger.LogAttrs(p.ctx, slog.LevelWarn, "all manifests filtered for target",
+			slog.String("target_id", string(target.ID)),
+			slog.String("target_type", string(target.Type)),
+			slog.Int("total", total),
+		)
+		return
+	}
+	if !p.logger.Enabled(p.ctx, slog.LevelDebug) {
+		return
+	}
+	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "manifests filtered for target",
+		slog.String("target_id", string(target.ID)),
+		slog.String("target_type", string(target.Type)),
+		slog.Int("total", total),
+		slog.Int("accepted", accepted),
+	)
+}
+
+func (p *deploymentRunProbe) DeliveryOutputsProcessed(targets []domain.ProvisionedTarget, secrets int) {
+	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
+		return
+	}
+	targetIDs := make([]string, len(targets))
+	for i, t := range targets {
+		targetIDs[i] = string(t.ID)
+	}
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery outputs processed",
+		slog.Int("targets_registered", len(targets)),
+		slog.Int("secrets_stored", secrets),
+		slog.Any("target_ids", targetIDs),
+	)
+}
+
 func (p *deploymentRunProbe) Error(err error) {
 	p.err = err
 }

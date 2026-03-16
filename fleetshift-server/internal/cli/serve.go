@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	wfbackend "github.com/cschleiden/go-workflows/backend"
 	wfsqlite "github.com/cschleiden/go-workflows/backend/sqlite"
 	"github.com/cschleiden/go-workflows/client"
 	"github.com/cschleiden/go-workflows/worker"
@@ -93,7 +94,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return err
 	}
 
-	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath)
+	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath,
+		wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger)),
+	)
 	wfWorker := worker.New(wfBackend, nil)
 	wfClient := client.New(wfBackend)
 

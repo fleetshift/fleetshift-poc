@@ -11,12 +11,13 @@ import (
 )
 
 type createDeploymentFlags struct {
-	id            string
-	manifestFile  string
-	placementType string
-	targetIDs     []string
+	id             string
+	manifestFile   string
+	resourceType   string
+	placementType  string
+	targetIDs      []string
 	targetSelector map[string]string
-	rolloutType   string
+	rolloutType    string
 }
 
 func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
@@ -44,6 +45,7 @@ func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
 
 	cmd.Flags().StringVar(&f.id, "id", "", "deployment identifier (required)")
 	cmd.Flags().StringVar(&f.manifestFile, "manifest-file", "", "path to manifest JSON file (use - for stdin)")
+	cmd.Flags().StringVar(&f.resourceType, "resource-type", "", "manifest resource type (e.g. api.kind.cluster)")
 	cmd.Flags().StringVar(&f.placementType, "placement-type", "all", "placement strategy: static, all, selector")
 	cmd.Flags().StringSliceVar(&f.targetIDs, "target-ids", nil, "target IDs for static placement (comma-separated)")
 	cmd.Flags().StringToStringVar(&f.targetSelector, "target-selector", nil, "label selector for selector placement (key=val,...)")
@@ -51,6 +53,7 @@ func newDeploymentCreateCmd(ctx *cmdContext) *cobra.Command {
 
 	_ = cmd.MarkFlagRequired("id")
 	_ = cmd.MarkFlagRequired("manifest-file")
+	_ = cmd.MarkFlagRequired("resource-type")
 
 	return cmd
 }
@@ -64,7 +67,7 @@ func buildCreateRequest(f *createDeploymentFlags) (*pb.CreateDeploymentRequest, 
 	ms := &pb.ManifestStrategy{
 		Type: pb.ManifestStrategy_TYPE_INLINE,
 		Manifests: []*pb.Manifest{{
-			ResourceType: "raw",
+			ResourceType: f.resourceType,
 			Raw:          manifest,
 		}},
 	}

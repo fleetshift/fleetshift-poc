@@ -67,6 +67,60 @@ func TestDeploymentRunProbe_FullLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeploymentRunProbe_ManifestsFiltered_AllDroppedLogsWarning(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewDeploymentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "dep-filter")
+
+	probe.ManifestsFiltered(domain.TargetInfo{ID: "k8s-1", Type: "kubernetes"}, 2, 0)
+	probe.End()
+
+	records := handler.Records()
+	var filterRecord *slog.Record
+	for i := range records {
+		if records[i].Message == "all manifests filtered for target" {
+			filterRecord = &records[i]
+			break
+		}
+	}
+	if filterRecord == nil {
+		t.Fatal("expected 'all manifests filtered for target' log record")
+	}
+	if filterRecord.Level != slog.LevelWarn {
+		t.Errorf("level = %v, want %v", filterRecord.Level, slog.LevelWarn)
+	}
+}
+
+func TestDeploymentRunProbe_ManifestsFiltered_PartialLogsDebug(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewDeploymentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "dep-partial")
+
+	probe.ManifestsFiltered(domain.TargetInfo{ID: "kind-1", Type: "kind"}, 3, 2)
+	probe.End()
+
+	records := handler.Records()
+	var filterRecord *slog.Record
+	for i := range records {
+		if records[i].Message == "manifests filtered for target" {
+			filterRecord = &records[i]
+			break
+		}
+	}
+	if filterRecord == nil {
+		t.Fatal("expected 'manifests filtered for target' log record")
+	}
+	if filterRecord.Level != slog.LevelDebug {
+		t.Errorf("level = %v, want %v", filterRecord.Level, slog.LevelDebug)
+	}
+}
+
 func TestDeploymentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
@@ -91,5 +145,34 @@ func TestDeploymentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	}
 	if endRecord.Level != slog.LevelError {
 		t.Errorf("level = %v, want %v", endRecord.Level, slog.LevelError)
+	}
+}
+
+func TestDeploymentRunProbe_DeliveryOutputsProcessed_LogsTargets(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewDeploymentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "dep-outputs")
+
+	probe.DeliveryOutputsProcessed([]domain.ProvisionedTarget{
+		{ID: "k8s-cluster1", Type: "kubernetes", Name: "cluster1"},
+	}, 1)
+	probe.End()
+
+	records := handler.Records()
+	var outputRecord *slog.Record
+	for i := range records {
+		if records[i].Message == "delivery outputs processed" {
+			outputRecord = &records[i]
+			break
+		}
+	}
+	if outputRecord == nil {
+		t.Fatal("expected 'delivery outputs processed' log record")
+	}
+	if outputRecord.Level != slog.LevelInfo {
+		t.Errorf("level = %v, want %v", outputRecord.Level, slog.LevelInfo)
 	}
 }
