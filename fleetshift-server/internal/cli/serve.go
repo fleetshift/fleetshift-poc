@@ -106,7 +106,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	)
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	kubeAgent := kubernetesaddon.NewAgent(vault)
+	kubeAgent := kubernetesaddon.NewAgent()
 	router.Register(kubernetesaddon.TargetType, kubeAgent)
 
 	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath,

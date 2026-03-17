@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/kind/pkg/log"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 )
@@ -223,5 +224,137 @@ func TestKindAddon_OIDCAuthWithRBAC(t *testing.T) {
 	_, err = bobClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err == nil {
 		t.Error("expected bob to be forbidden, got nil error")
+	}
+}
+
+// TestKindAddon_TokenPassthrough verifies that the kubernetes delivery
+// agent can apply manifests using the caller's JWT (token passthrough)
+// instead of a stored kubeconfig. Alice (with cluster-admin RBAC) can
+// create a ConfigMap; bob (no RBAC) gets rejected.
+//
+// Requires Docker or Podman (skipped when unavailable or -short).
+func TestKindAddon_TokenPassthrough(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real Docker test in short mode")
+	}
+
+	auth := domain.DeliveryAuth{
+		Caller:   &domain.SubjectClaims{ID: "alice"},
+		Audience: []domain.Audience{"fleetshift"},
+	}
+	res := createOIDCCluster(t, "fleetshift-passthrough-test", auth)
+
+	apiServer, caCert, err := kindaddon.ExtractClusterConnInfo([]byte(res.Kubeconfig))
+	if err != nil {
+		t.Fatalf("ExtractClusterConnInfo: %v", err)
+	}
+
+	k8sTarget := domain.TargetInfo{
+		ID:   domain.TargetID("k8s-" + res.ClusterName),
+		Type: kubeaddon.TargetType,
+		Name: res.ClusterName,
+		Properties: map[string]string{
+			"api_server": apiServer,
+			"ca_cert":    string(caCert),
+		},
+	}
+
+	configMapManifest := json.RawMessage(`{
+		"apiVersion": "v1",
+		"kind": "ConfigMap",
+		"metadata": {
+			"name": "passthrough-test",
+			"namespace": "default"
+		},
+		"data": {
+			"hello": "world"
+		}
+	}`)
+	manifests := []domain.Manifest{{
+		ResourceType: kubeaddon.ManifestResourceType,
+		Raw:          configMapManifest,
+	}}
+
+	kubeAgent := kubeaddon.NewAgent()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Alice has cluster-admin via RBAC bootstrap: delivery should succeed.
+	aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
+	aliceAuth := domain.DeliveryAuth{
+		Caller:   &domain.SubjectClaims{ID: "alice", Issuer: res.IssuerURL},
+		Audience: []domain.Audience{"fleetshift"},
+		Token:    domain.RawToken(aliceToken),
+	}
+
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, signaler)
+	if err != nil {
+		t.Fatalf("Deliver (alice): %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	select {
+	case doneResult := <-obs.done:
+		if doneResult.State != domain.DeliveryStateDelivered {
+			t.Fatalf("alice delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateDelivered, doneResult.Message)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for alice delivery")
+	}
+
+	// Verify the ConfigMap was actually created on the cluster.
+	adminClient := oidcK8sClient(t, res.Kubeconfig, aliceToken)
+	cm, err := adminClient.CoreV1().ConfigMaps("default").Get(ctx, "passthrough-test", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get ConfigMap: %v", err)
+	}
+	if cm.Data["hello"] != "world" {
+		t.Errorf("ConfigMap data = %v, want hello=world", cm.Data)
+	}
+
+	// Bob has no RBAC: delivery should fail with a 403-like error.
+	bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
+	bobAuth := domain.DeliveryAuth{
+		Caller:   &domain.SubjectClaims{ID: "bob", Issuer: res.IssuerURL},
+		Audience: []domain.Audience{"fleetshift"},
+		Token:    domain.RawToken(bobToken),
+	}
+
+	bobObs := newChannelDeliveryObserver()
+	bobSignaler := newChannelSignaler(bobObs)
+
+	bobManifest := json.RawMessage(`{
+		"apiVersion": "v1",
+		"kind": "ConfigMap",
+		"metadata": {
+			"name": "bob-test",
+			"namespace": "default"
+		},
+		"data": {
+			"should": "fail"
+		}
+	}`)
+
+	result, err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
+		ResourceType: kubeaddon.ManifestResourceType,
+		Raw:          bobManifest,
+	}}, bobAuth, bobSignaler)
+	if err != nil {
+		t.Fatalf("Deliver (bob): %v", err)
+	}
+
+	select {
+	case doneResult := <-bobObs.done:
+		if doneResult.State != domain.DeliveryStateFailed {
+			t.Fatalf("bob delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateFailed, doneResult.Message)
+		}
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for bob delivery")
 	}
 }

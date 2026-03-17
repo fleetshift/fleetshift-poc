@@ -24,6 +24,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 		in.Auth = domain.DeliveryAuth{
 			Caller:   ac.Subject,
 			Audience: ac.Audience,
+			Token:    ac.Token,
 		}
 	}
 

@@ -11,28 +11,6 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-type stubVault struct {
-	secrets map[domain.SecretRef][]byte
-}
-
-func (v *stubVault) Put(_ context.Context, ref domain.SecretRef, value []byte) error {
-	v.secrets[ref] = value
-	return nil
-}
-
-func (v *stubVault) Get(_ context.Context, ref domain.SecretRef) ([]byte, error) {
-	val, ok := v.secrets[ref]
-	if !ok {
-		return nil, domain.ErrNotFound
-	}
-	return val, nil
-}
-
-func (v *stubVault) Delete(_ context.Context, ref domain.SecretRef) error {
-	delete(v.secrets, ref)
-	return nil
-}
-
 // channelDeliveryObserver collects events and completion results on
 // channels, enabling deterministic waits in tests with async delivery.
 type channelDeliveryObserver struct {
@@ -66,9 +44,8 @@ func newChannelSignaler(obs *channelDeliveryObserver) *domain.DeliverySignaler {
 	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
 }
 
-func TestAgent_Deliver_MissingKubeconfigRef(t *testing.T) {
-	vault := &stubVault{secrets: make(map[domain.SecretRef][]byte)}
-	agent := kubernetes.NewAgent(vault)
+func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
+	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{
 		ID:         "k8s-test",
@@ -77,9 +54,10 @@ func TestAgent_Deliver_MissingKubeconfigRef(t *testing.T) {
 		Properties: map[string]string{},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.DeliverySignaler{})
+	auth := domain.DeliveryAuth{Token: "some-token"}
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, auth, &domain.DeliverySignaler{})
 	if err == nil {
-		t.Fatal("expected error for missing kubeconfig_ref")
+		t.Fatal("expected error for missing api_server")
 	}
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("expected ErrInvalidArgument, got: %v", err)
@@ -89,58 +67,51 @@ func TestAgent_Deliver_MissingKubeconfigRef(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_VaultNotFound(t *testing.T) {
-	vault := &stubVault{secrets: make(map[domain.SecretRef][]byte)}
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-	agent := kubernetes.NewAgent(vault)
+func TestAgent_Deliver_MissingToken(t *testing.T) {
+	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
-			"kubeconfig_ref": "targets/k8s-test/kubeconfig",
+			"api_server": "https://127.0.0.1:6443",
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, signaler)
-	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected error for missing token")
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("expected ErrInvalidArgument, got: %v", err)
 	}
-
-	asyncResult := <-obs.done
-	if asyncResult.State != domain.DeliveryStateFailed {
-		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateFailed)
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
 }
 
-func TestAgent_Deliver_InvalidKubeconfig(t *testing.T) {
-	vault := &stubVault{secrets: map[domain.SecretRef][]byte{
-		"targets/k8s-test/kubeconfig": []byte("not a valid kubeconfig"),
-	}}
+func TestAgent_Deliver_BadAPIServer(t *testing.T) {
+	agent := kubernetes.NewAgent()
 	obs := newChannelDeliveryObserver()
 	signaler := newChannelSignaler(obs)
-	agent := kubernetes.NewAgent(vault)
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
-			"kubeconfig_ref": "targets/k8s-test/kubeconfig",
+			"api_server": "https://127.0.0.1:1",
 		},
 	}
 
+	auth := domain.DeliveryAuth{Token: "not-a-real-token"}
 	manifests := []domain.Manifest{{
 		ResourceType: "raw",
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, domain.DeliveryAuth{}, signaler)
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
 	if err != nil {
 		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
@@ -155,8 +126,7 @@ func TestAgent_Deliver_InvalidKubeconfig(t *testing.T) {
 }
 
 func TestAgent_Remove_IsNoop(t *testing.T) {
-	vault := &stubVault{secrets: make(map[domain.SecretRef][]byte)}
-	agent := kubernetes.NewAgent(vault)
+	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{ID: "k8s-test", Type: kubernetes.TargetType, Name: "test-cluster"}
 	if err := agent.Remove(context.Background(), target, "d1", &domain.DeliverySignaler{}); err != nil {

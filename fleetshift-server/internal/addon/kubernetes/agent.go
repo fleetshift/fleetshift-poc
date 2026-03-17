@@ -1,7 +1,7 @@
 // Package kubernetes implements a [domain.DeliveryAgent] that applies
 // Kubernetes manifests to a cluster via server-side apply (SSA). The
-// kubeconfig is retrieved from a [domain.Vault] using a ref stored in
-// the target's Properties.
+// agent authenticates using the caller's JWT (token passthrough) and
+// reads cluster connection info from target properties.
 package kubernetes
 
 import (
@@ -15,14 +15,14 @@ import (
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/discovery/cached/memory"
 	"k8s.io/client-go/dynamic"
+	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
-	"k8s.io/client-go/tools/clientcmd"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // TargetType is the [domain.TargetType] for Kubernetes clusters
-// managed by the direct delivery agent (kubeconfig-based, no fleetlet).
+// managed by the direct delivery agent (token-passthrough, no fleetlet).
 const TargetType domain.TargetType = "kubernetes"
 
 // ManifestResourceType is the [domain.ResourceType] for generic
@@ -31,47 +31,47 @@ const ManifestResourceType domain.ResourceType = "kubernetes"
 
 const fieldManager = "fleetshift"
 
-// Agent implements [domain.DeliveryAgent] for direct Kubernetes cluster
-// access via kubeconfig. It retrieves the kubeconfig from a [domain.Vault]
-// and applies manifests using server-side apply.
-type Agent struct {
-	vault domain.Vault
+// Agent implements [domain.DeliveryAgent] for Kubernetes clusters using
+// token passthrough. It reads cluster connection info (API server URL,
+// CA cert) from target properties and authenticates with the caller's
+// JWT. No stored credentials are used.
+type Agent struct{}
+
+// NewAgent returns an Agent.
+func NewAgent() *Agent {
+	return &Agent{}
 }
 
-// NewAgent returns an Agent that retrieves kubeconfigs from the given vault.
-func NewAgent(vault domain.Vault) *Agent {
-	return &Agent{vault: vault}
-}
-
-// Deliver validates the target synchronously and returns
+// Deliver validates the target and auth synchronously and returns
 // [domain.DeliveryStateAccepted] immediately. The actual SSA apply
 // runs in a background goroutine; on completion the goroutine calls
-// [domain.DeliverySignaler.Done] so the workflow receives the terminal
-// result via signal rather than activity return value.
-func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	if _, ok := target.Properties["kubeconfig_ref"]; !ok {
+// [domain.DeliverySignaler.Done].
+func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	if _, ok := target.Properties["api_server"]; !ok {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-			fmt.Errorf("%w: target %q missing kubeconfig_ref property", domain.ErrInvalidArgument, target.ID)
+			fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+	}
+	if auth.Token == "" {
+		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
+			fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
 	}
 
-	go a.deliverAsync(ctx, target, manifests, signaler)
+	go a.deliverAsync(ctx, target, manifests, auth, signaler)
 
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, manifests []domain.Manifest, signaler *domain.DeliverySignaler) {
-	ref := target.Properties["kubeconfig_ref"]
-
-	kubeconfigBytes, err := a.vault.Get(ctx, domain.SecretRef(ref))
+func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, manifests []domain.Manifest, auth domain.DeliveryAuth, signaler *domain.DeliverySignaler) {
+	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("retrieve kubeconfig for target %q: %v", target.ID, err),
+			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
 	}
 
-	ap, err := newApplier(kubeconfigBytes)
+	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -104,18 +104,28 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.Delivery
 	return nil
 }
 
+func buildRESTConfig(target domain.TargetInfo, token domain.RawToken) (*rest.Config, error) {
+	apiServer := target.Properties["api_server"]
+	if apiServer == "" {
+		return nil, fmt.Errorf("target %q missing api_server property", target.ID)
+	}
+	cfg := &rest.Config{
+		Host:        apiServer,
+		BearerToken: string(token),
+	}
+	if ca := target.Properties["ca_cert"]; ca != "" {
+		cfg.TLSClientConfig.CAData = []byte(ca)
+	}
+	return cfg, nil
+}
+
 // applier wraps a dynamic client and REST mapper for SSA.
 type applier struct {
 	client dynamic.Interface
 	mapper meta.RESTMapper
 }
 
-func newApplier(kubeconfig []byte) (*applier, error) {
-	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
-	if err != nil {
-		return nil, fmt.Errorf("parse kubeconfig: %w", err)
-	}
-
+func newApplierFromConfig(cfg *rest.Config) (*applier, error) {
 	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("create discovery client: %w", err)

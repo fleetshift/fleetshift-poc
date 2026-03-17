@@ -60,6 +60,12 @@ type OIDCMetadata struct {
 	JWKSURI               EndpointURL
 }
 
+// RawToken is a verified JWT string. It has been validated by the
+// platform's authn layer and may be passed through to target APIs.
+//
+// TODO: encrypt at rest when persisted on deployments.
+type RawToken string
+
 // SubjectID uniquely identifies an authenticated subject.
 type SubjectID string
 

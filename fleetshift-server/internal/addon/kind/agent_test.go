@@ -299,7 +299,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_ProducesTargetAndSecretOutputs(t *testing.T) {
+func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	provider := newFakeProvider()
 	obs := newChannelDeliveryObserver()
 	signaler := newChannelSignaler(obs)
@@ -324,8 +324,8 @@ func TestAgent_Deliver_ProducesTargetAndSecretOutputs(t *testing.T) {
 	if len(result.ProvisionedTargets) != 1 {
 		t.Fatalf("ProvisionedTargets count = %d, want 1", len(result.ProvisionedTargets))
 	}
-	if len(result.ProducedSecrets) != 1 {
-		t.Fatalf("ProducedSecrets count = %d, want 1", len(result.ProducedSecrets))
+	if len(result.ProducedSecrets) != 0 {
+		t.Fatalf("ProducedSecrets count = %d, want 0 (no stored credentials)", len(result.ProducedSecrets))
 	}
 
 	pt := result.ProvisionedTargets[0]
@@ -338,17 +338,9 @@ func TestAgent_Deliver_ProducesTargetAndSecretOutputs(t *testing.T) {
 	if pt.Name != "dev-cluster" {
 		t.Errorf("target Name = %q, want %q", pt.Name, "dev-cluster")
 	}
-	ref, ok := pt.Properties["kubeconfig_ref"]
-	if !ok {
-		t.Fatal("target Properties missing kubeconfig_ref")
-	}
-
-	secret := result.ProducedSecrets[0]
-	if string(secret.Ref) != ref {
-		t.Errorf("secret Ref = %q, want %q", secret.Ref, ref)
-	}
-	if len(secret.Value) == 0 {
-		t.Error("secret Value is empty")
+	apiServer, ok := pt.Properties["api_server"]
+	if !ok || apiServer == "" {
+		t.Fatal("target Properties missing api_server")
 	}
 }
 
@@ -374,8 +366,8 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	if len(result.ProvisionedTargets) != 2 {
 		t.Errorf("ProvisionedTargets count = %d, want 2", len(result.ProvisionedTargets))
 	}
-	if len(result.ProducedSecrets) != 2 {
-		t.Errorf("ProducedSecrets count = %d, want 2", len(result.ProducedSecrets))
+	if len(result.ProducedSecrets) != 0 {
+		t.Errorf("ProducedSecrets count = %d, want 0", len(result.ProducedSecrets))
 	}
 }
 

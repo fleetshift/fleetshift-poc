@@ -14,6 +14,7 @@ type AuthorizationContext struct {
 	Subject  *domain.SubjectClaims // nil if anonymous
 	Client   *ClientClaims         // nil if no client info
 	Audience []domain.Audience     // token audience (aud claim)
+	Token    domain.RawToken       // raw verified JWT; empty if no token-based auth
 	Request  RequestClaims
 }
 

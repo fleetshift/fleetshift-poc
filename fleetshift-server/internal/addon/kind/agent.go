@@ -155,7 +155,6 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
 	for _, out := range outputs {
 		result.ProvisionedTargets = append(result.ProvisionedTargets, out.Target())
-		result.ProducedSecrets = append(result.ProducedSecrets, out.Secret())
 	}
 	signaler.Done(ctx, result)
 }
@@ -228,10 +227,18 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		probe.RBACBootstrapped(auth.Caller.ID, username)
 	}
 
+	apiServer, caCert, err := ExtractClusterConnInfo([]byte(kc))
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, signaler, "extract connection info for %q: %v", spec.Name, err)
+		return nil, false
+	}
+
 	out := ClusterOutput{
-		TargetID:   domain.TargetID("k8s-" + spec.Name),
-		Name:       spec.Name,
-		KubeConfig: []byte(kc),
+		TargetID:  domain.TargetID("k8s-" + spec.Name),
+		Name:      spec.Name,
+		APIServer: apiServer,
+		CACert:    caCert,
 	}
 	return &out, true
 }
