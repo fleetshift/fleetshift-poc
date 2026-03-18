@@ -4,7 +4,7 @@ Principles:
 
 - Minimize built-in trust of platform components. Some trust is unavoidable (bootstrapping, token vending), but it should follow an auditable least-privilege model. No god-mode service accounts or keys.
 - End to end user identity everywhere – auditable, no confused deputy
-- The tenant's IdP is the root trust anchor. The platform is a consumer of tenant trust, never an authority over it. Compromising the platform must not be sufficient to forge identity or redirect trust.
+- It follows that trust anchors must be external to the platform. The platform is a consumer of tenant trust or addon trust, never an authority over them. Compromising the platform must not be sufficient to forge identity or redirect trust.
 
 ## Big ideas
 
@@ -101,7 +101,7 @@ This is similar to the tradeoff Kubernetes users already accept: `kubectl apply`
 
 However, it introduces a tradeoff Kubernetes doesn't have: the platform holds the user's JWT for its validity period. In Kubernetes, the API server sees the token for one API call (milliseconds) and discards it. In FleetShift, the platform can create attestation envelopes pairing the JWT with any operation the user is authorized for — not just the one they requested. This is a token-reuse window that doesn't exist in the standard K8s model. The K8s API server *could* abuse the token during a request, but the window is tiny and the operation is specific. FleetShift's window is the JWT's entire lifetime.
 
-This tradeoff narrows with tighter token binding: RAR (RFC 9396) with a manifest hash closes it entirely (the token is only valid for the specific content the user authorized). Short JWT lifetimes further limit the window. But without content binding, the gap exists and should be acknowledged.
+This tradeoff narrows with tighter token binding: RAR (RFC 9396) with an intent hash closes it entirely (the token is only valid for the specific intent the user authorized). Short JWT lifetimes further limit the window. But without content binding, the gap exists and should be acknowledged. User-level intent signing (see below) eliminates the concern by a different path — with user signing, the per-request JWT isn't stored at all, so there's no token for the platform to pair with other operations. A JWT is still stored per-enrollment in the key binding bundle, but that is not a per-request credential.
 
 The JWT embedded in the attestation envelope should be encrypted for the target cluster, so that only a privileged cluster-side component (the delivery agent) can decrypt it. This limits exposure: the platform stores and transports the envelope, but can't extract the JWT from delivered envelopes after creation. On the cluster, only the delivery agent's decryption key (provisioned during bootstrap) can access the token for validation.
 
@@ -185,7 +185,7 @@ A more promising model is cluster-side validation of signed intent before apply.
 2. The platform delivers the resulting attestation envelope to the cluster.
 3. The cluster-side delivery agent validates the envelope and applies only if validation succeeds. See the attestation-based delivery section below for the concrete protocol.
 
-In this document, the concrete signed-intent mechanism is the JWT-embedded provenance chain below. The earlier keyless-signing idea (Fulcio/cosign) has a central CA problem, so it is not the default.
+Two concrete signed-intent mechanisms are described below: the JWT-embedded provenance chain (platform holds the user's JWT as one factor of two) and user-level intent signing (user signs the intent directly with their own key, eliminating per-request JWT storage). The earlier keyless-signing idea (Fulcio/cosign) has a central CA problem, so it is not the default.
 
 NOTE: We should revisit this for the case the customer *already has a trusted Fulcio CA*.
 
@@ -197,11 +197,11 @@ Could the deployment itself be the "durable tightly scoped approval" via signing
 
 **Eager signing**: generate all manifests upfront, user signs the rendered output, deliver signed artifacts. No provenance chain needed – the signed artifact IS the applied artifact. Clean. But every invalidation requires re-generation, re-review, and re-signing. The user must be present for every invalidation, which is operationally equivalent to PausedAuth. The benefit over PausedAuth is the trust model: cryptographic proof of intent at the target, not just "the platform had a valid token."
 
-**Lazy signing**: user signs the deployment spec, platform generates manifests just-in-time. Invalidation can proceed without the user. But now the platform is in the rendering trust chain – the target must trust that the platform faithfully translated the signed spec into these specific manifests. This requires a provenance chain (spec signature + rendering attestation) and reintroduces platform trust for correctness, though not for identity.
+**Lazy signing**: user signs the deployment spec, platform generates manifests just-in-time. Invalidation can proceed without the user. But now the platform is in the rendering trust chain – the target must trust that the platform faithfully translated the signed spec into these specific manifests. This requires a provenance chain (spec signature + rendering attestation) and reintroduces platform trust for correctness, though not for identity. User-level intent signing (see below) is the concrete mechanism for lazy signing: the user signs the intent with their own key, and the field mapping rules (below) constrain what the platform can render from it.
 
-Eager signing is the simpler and more honest model but converges to PausedAuth UX for invalidation. Lazy signing avoids the UX problem but reintroduces trust. Neither is strictly better than delegation SAs for the invalidation case.
+Eager signing is the simpler and more honest model but converges to PausedAuth UX for invalidation. Lazy signing avoids the UX problem but reintroduces trust for rendering correctness. Neither is strictly better than delegation SAs for the invalidation case.
 
-Signed intent is most compelling for GitOps (manifests are already in git, already reviewed, signing is natural) and as a trust-model upgrade for environments where cryptographic proof of user intent matters. For interactive long-running deployments, delegation SAs + PausedAuth is the pragmatic choice.
+With passkeys (web) and keychain-backed signing (CLI), signed intent is practical for interactive deployments too — not just GitOps. Signed intent is compelling wherever cryptographic proof of user intent matters, including interactive long-running deployments where user signing eliminates the need for per-request JWT storage.
 
 #### Certificate authority problem
 
@@ -223,13 +223,13 @@ Trust model:
 
 Compared to Fulcio: a compromised Fulcio CA can forge signatures for any user indefinitely. This model limits forgery to users whose JWTs the platform currently holds, within JWT lifetime. The blast radius is smaller by orders of magnitude.
 
-The residual risk (platform can pair a valid JWT with arbitrary manifest content while the JWT is live) is inherent to any model where the platform sees the user's token. It's the same as token passthrough but with better auditability — the signed manifest input is a persistent, inspectable artifact rather than an ephemeral API call. Unauthorized manifest inputs are detectable after the fact.
+The residual risk (platform can pair a valid JWT with arbitrary manifest content while the JWT is live) is inherent to any model where the platform holds the user's token. It's the same as token passthrough but with better auditability — the signed manifest input is a persistent, inspectable artifact rather than an ephemeral API call. Unauthorized manifest inputs are detectable after the fact. User-level intent signing (below) resolves this risk: the user signs the intent directly, the per-request JWT is discarded after request-time verification, and the platform can't pair it with other operations. User signing is the natural evolution of this model — same IdP-anchored trust chain, but the user's signature replaces the stored JWT as the durable proof of intent.
 
 The platform key is not a god key — it can only assert integrity, not identity. Its compromise alone cannot authorize anything. It could be scoped per-tenant to further limit blast radius.
 
 This is a bounded short-lived credential retention model, not a long-lived secret model like refresh tokens. The platform may retain a JWT for replay/audit purposes, but the credential expires quickly and is only one factor of two.
 
-Persisting user JWTs to a database (rather than just validating them in-memory per-request) is a deliberate architectural choice. The security question is what happens when the store is compromised. Here, the blast radius is: one user per token, only that user's authorized operations, only within the token's remaining lifetime, and only as one factor of two (the platform signature is also required). Compare to a god-mode service account: any user, any operation, indefinitely, single factor. JWTs should be encrypted at rest and purged after expiry or operation completion.
+Persisting user JWTs to a database (rather than just validating them in-memory per-request) is a deliberate architectural choice. The security question is what happens when the store is compromised. Here, the blast radius is: one user per token, only that user's authorized operations, only within the token's remaining lifetime, and only as one factor of two (the platform signature is also required). Compare to a god-mode service account: any user, any operation, indefinitely, single factor. JWTs should be encrypted at rest and purged after expiry or operation completion. With user-level intent signing, this per-request JWT persistence becomes unnecessary — the signed intent replaces the stored JWT as the durable proof. The JWT-embedded model remains valid as a fallback when user signing is not available.
 
 #### Tightening intent-token binding
 
@@ -237,13 +237,16 @@ The JWT-embedded provenance chain's main gap is that the JWT doesn't bind to wha
 
 OAuth `scope` and RFC 9396 `authorization_details` both serve this purpose — they express what the token authorizes, at different granularity. The delivery agent enforces the same check regardless of how the authorization is expressed: do the generated manifests fall within what the token authorizes?
 
-| Binding level   | Standard                               | What it constrains                                               |
-| --------------- | -------------------------------------- | ---------------------------------------------------------------- |
-| Identity only   | OIDC core (ID token)                   | Who the user is                                                  |
-| Action category | OAuth scopes                           | Kind of action (e.g. `deploy`, `deploy:production`)              |
-| Target          | RFC 8707 (Resource Indicators)         | Which resource server / cluster accepts the token                |
-| Intent details  | RFC 9396 (Rich Authorization Requests) | Structured authorization of the user's intent: tenant, target, namespace, resource types |
-| Exact intent    | RFC 9396 + intent hash                 | Token bound to a specific intent (deployment spec) via content hash — 1:1 binding |
+
+| Binding level   | Standard                               | What it constrains                                                                                                                                           |
+| --------------- | -------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Identity only   | OIDC core (ID token)                   | Who the user is                                                                                                                                              |
+| Action category | OAuth scopes                           | Kind of action (e.g. `deploy`, `deploy:production`)                                                                                                          |
+| Target          | RFC 8707 (Resource Indicators)         | Which resource server / cluster accepts the token                                                                                                            |
+| Intent details  | RFC 9396 (Rich Authorization Requests) | Structured authorization of the user's intent: tenant, target, namespace, resource types                                                                     |
+| Exact intent    | RFC 9396 + intent hash                 | Token bound to a specific intent (deployment spec) via content hash — 1:1 binding                                                                            |
+| User signing    | User-held key + key binding bundle     | User directly signs the intent hash — 1:1 binding with same strength as RAR + hash, but distributed keys, no per-deployment token storage, no RAR dependency |
+
 
 Rich Authorization Requests (RFC 9396) is the key standard for structured intent binding. The `authorization_details` parameter carries structured JSON describing what the user authorized — at the intent level, not the manifest level. The user may never see the rendered manifests (and in managed service provider scenarios, shouldn't):
 
@@ -257,12 +260,13 @@ Rich Authorization Requests (RFC 9396) is the key standard for structured intent
 }
 ```
 
-Validation has two levels:
+Validation has two levels (three with user signing):
 
 1. **Manifests → intent** (always structural): the delivery agent checks that generated manifests are consistent with the intent they were rendered from. If the intent says `tenant=acme, namespace=production`, no manifest can target a different tenant or namespace. This is always structural field matching because the manifests are rendered from the intent, not identical to it.
 2. **Intent → token** (hash or structural): the delivery agent checks that the intent matches what the token authorized. With `intent_hash`, this is exact — a compromised platform can't swap in a different intent. Without it, the check is structural field matching against the token's `authorization_details` or `scope`.
+3. **Intent → user signature** (cryptographic, when user signing is active): the delivery agent verifies the user directly signed this specific intent. Independent of the token — even if the token were somehow replayed, it can't authorize a different intent than what the user signed. See "User-level intent signing" below.
 
-Both levels apply regardless. The hash tightens level 2 (intent-to-token) if available.
+Levels 1 and 2 always apply. Level 3 applies when user signing is active and provides the same 1:1 binding as RAR + intent hash (level 2 at its tightest), but without requiring per-deployment token storage or IdP RAR support. The hash tightens level 2 if available; user signing makes it redundant for intent binding (though RAR scoping remains valuable for non-signing modes).
 
 This binding is compatible with manifest invalidation. When manifests are re-generated (e.g., config rotation triggers `InvalidateManifests`), the intent hasn't changed — the token still authorizes the same intent. The new manifests must still satisfy the same field matching rules. The token binds to the intent, not to specific manifest content, so re-generation doesn't require a new token.
 
@@ -276,6 +280,131 @@ Start with hardcoded rules in the delivery agent for well-known fields (TBD, but
 
 If configurable rules are needed later (dynamic resource types, addons), updates to those rules must be secured by a trust anchor external to the platform — e.g., a token from the platform administrator's IdP, validated the same way any trust configuration change is validated. The platform must not be able to unilaterally loosen the mapping rules on a target. The same principle as IdP trust configuration applies: the platform is a courier for rule updates, not the authority.
 
+#### User-level intent signing
+
+JWT with RAR containing an intent hash achieves perfect 1:1 intent-to-user binding — the token is cryptographically tied to exactly one intent. User signing achieves the same binding strength. The difference is operational, not cryptographic:
+
+- **JWT + RAR (with intent hash):** perfect binding, but requires storing a unique token per deployment, centralizing signing in the IdP, and requiring RAR support and configuration at the IdP (not universally available).
+- **User signing:** perfect binding, with distributed private keys per user per device (already common with Git commit signing), no stored tokens per deployment, and no RAR dependency — works with any standard OIDC provider.
+
+With perfect binding, the platform is reduced to a courier that can delay or misdirect, but can't forge intent. The platform can't create new intents, only deliver ones that real users actually signed. User signing achieves this without per-deployment token storage, without centralized signing keys, and without IdP-level RAR support.
+
+##### How it composes with the existing model
+
+- JWT proves identity (from the tenant IdP, in this case for establishing a trust chain from the user's configured public key)
+- User signature proves intent authorization (the user signed THIS specific intent)
+- Platform connection auth proves transport integrity (for standard transport); platform signature for buffer transport
+- These are independent links in a distributed chain of trust — compromising one doesn't break those "above" it
+
+With user signing, the per-request JWT may no longer need to be stored. The user authenticates (JWT verified at request time), the user signs the intent (cryptographic proof of what they authorized + their current claims), then the per-request JWT can be discarded. The signed intent carries everything the delivery agent needs. No stored per-request tokens, no token-reuse-window concern. Note: a JWT is still stored as part of the key binding bundle (see below), but that is per-enrollment with a TTL — not per-request.
+
+Validation with user signing adds a third level to the existing two-level model:
+
+1. **Manifests → intent** (structural, unchanged): generated manifests are consistent with the intent.
+2. **Intent → token** (hash or structural, unchanged): the intent matches what the token authorized.
+3. **Intent → user signature** (cryptographic): the user directly signed this specific intent. Independent of the token — even if the token were somehow replayed, it can't authorize a different intent than what the user signed.
+
+##### Three signing surfaces
+
+All three follow the same model: a per-user key pair is generated during enrollment, the private key stays with the user, the public key is registered via an OIDC-authenticated ceremony.
+
+- **Web UI — Passkeys (WebAuthn):** The frontend computes `hash(intent)` and uses `navigator.credentials.get()` with the hash as the challenge. User approves via biometric. Zero new key management — passkeys are generated during enrollment, stored in the device's secure enclave, synced via passkey providers. Phishing-resistant, cross-platform.
+- **CLI — Generated signing key:** `fleetshift auth enroll-signing` generates a dedicated ECDSA key pair. Private key stored in the OS keychain (macOS Keychain / Secure Enclave, Linux secret-service, Windows Credential Manager) — hardware-backed where available. On `fleetshift deploy`, the CLI signs `hash(intent)` with the stored key; user sees a keychain prompt (biometric on macOS Touch ID, PIN elsewhere). SSH keys supported as an opt-in alternative.
+- **GitOps — Signed intent in git:** The user (or tooling like `fleetshift gitops sign`, a pre-commit hook, or a CI step) signs the intent hash with their signing key and stores the signature in the git repo alongside the source content. The platform reads the signature from the repo, renders manifests if needed, and delivers everything in the same attestation envelope as web/CLI. The delivery agent's verification is identical to the other surfaces — no git metadata forwarding, no special GitOps verification path. Git is just the transport/storage medium for the signed intent. The same signing key used for `fleetshift deploy` works for `fleetshift gitops sign`. Standard git commit signing (`git commit -S`) is orthogonal: it provides git-level integrity (defense in depth) but is not the FleetShift verification mechanism.
+
+##### Key binding trust model
+
+The delivery agent must verify that a public key genuinely belongs to a given user. If the platform controls the key registry, a compromised platform can swap a user's key and forge intents. The key-to-user binding must be anchored to the IdP, not to the platform.
+
+**Key binding bundle:** At registration time, the user creates a self-certifying bundle:
+
+1. User authenticates to their IdP → gets a JWT
+2. User generates key pair (or uses an existing one)
+3. User signs `{public_key, jwt.sub, jwt.iss, timestamp}` with the new private key (proof of possession)
+4. The bundle `{key_binding_doc, key_binding_signature, jwt}` is stored on the platform
+
+The delivery agent verifies the bundle independently:
+
+- JWT signature valid against tenant IdP JWKS → the IdP vouched for this user's identity at registration time
+- `jwt.sub` matches the claimed user identity → the key is for this user
+- Key binding is signed by the corresponding private key → proof of possession
+- The intent is signed by the same key → continuity
+
+A compromised platform can't swap the key because it would need a JWT with `sub=alice@tenant.com` to create a valid binding for Alice — and it can't get that without authenticating as Alice to the tenant's IdP. The IdP is the trust anchor for key binding.
+
+**Key binding TTL and renewal:** Key bindings have a TTL (e.g., 30-90 days). Before expiry, the client auto-renews by creating a fully fresh bundle: authenticate to IdP → get new JWT (signed with current IdP key) → re-sign the key binding doc with updated timestamp (fresh proof of possession) → replace the old bundle. Everything in the renewed bundle is from the same point in time. Automatable if the client has a session or refresh token. Provides a natural revocation boundary: even if a key is compromised, the binding expires within the TTL.
+
+**GitOps key registry:** With the unified signing model, GitOps uses the same key binding bundle as web/CLI — the primary verification mechanism is identical across all surfaces. The git hosting platform's public key endpoints (GitHub `GET /users/:username/ssh_signing_keys`, `GET /users/:username/gpg_keys`; GitLab `GET /users/:id/keys`) remain available as an additional or fallback verification source, fetched directly by the delivery agent (not through the platform). These endpoints are unauthenticated and function like JWKS endpoints.
+
+TODO: Can different key registries be pluggable? The high level API is the same (validate this signature for this user) but the implementations are quite different.
+
+##### IdP key rotation and key binding verification
+
+Keeping a JWKS history (caching old IdP signing keys) would undermine the purpose of key rotation — you rotate keys to limit the blast radius of compromise, and keeping old keys trusted defeats that. Instead, we integrate with rotation rather than circumventing it.
+
+The delivery agent uses only the **current** JWKS from the IdP (fetched directly, no history). Key binding bundles must be renewed before the signing key leaves the JWKS. This works because IdP key rotation has a grace period where both old and new keys are in the JWKS simultaneously:
+
+1. IdP adds new key B to JWKS, starts signing new tokens with B (both A and B are valid during grace period)
+2. User's client renews key binding (triggered by TTL or detected rotation) → gets new JWT signed with B → fresh bundle replaces old
+3. IdP removes old key A from JWKS → doesn't matter, bundle is now signed with B
+
+**Constraint:** key binding TTL must be shorter than the IdP's key rotation grace period, so normal TTL-driven renewals happen more frequently than rotations.
+
+**Emergency rotation (compromise response):** IdP immediately removes old key. All key bindings signed with that key become unverifiable. Affected deployments enter PausedAuth. This is correct behavior — if the IdP rotated due to compromise, old key bindings should be invalidated. JWKS history would have undermined exactly this.
+
+**UX softening for rotation events:** The platform watches the IdP's JWKS. When it detects a rotation, it proactively notifies users whose key bindings were signed with the rotating key. If CIBA is available, the platform can push out-of-band re-authentication requests. An interactive user agent (web UI, CLI) can do an automatic renewal with the user already present. Inactive users whose key bindings expire enter PausedAuth on their next interaction — standard flow.
+
+##### Multi-signature for high availability and audit
+
+A deployment can carry multiple signatures over the same intent from different authorized users. The delivery agent accepts the intent if at least one signature is verifiable against a valid key binding. Benefits:
+
+- **High availability:** if one signer's key binding expires (inactive user, missed renewal), the deployment continues as long as another signer's binding is still valid. Reduces PausedAuth events for critical deployments.
+- **Audit:** multiple signatures cryptographically demonstrate review and acceptance from multiple humans in the loop — useful for compliance and change management audit trails.
+
+Reactive re-signing (any authorized user re-signs the current intent when a key binding is approaching expiry) already falls out of the existing "updates by different users" model. Multi-signature adds proactive redundancy on top: signatures are collected at creation/update time, not just when someone re-signs later.
+
+##### Updates and anti-replay
+
+Deployments can be updated by different authorized users. Each update requires the editor to sign the new intent. The delivery agent verifies the new signature.
+
+A compromised platform can't forge a new signed intent (no user signing key). Residual attacks:
+
+- **Replay:** present an old signed intent. Defense: monotonic sequence number or nonce in the signed intent. Delivery agent rejects intents with sequence <= current.
+- **Withholding:** refuse to deliver a valid signed intent (DoS). Observable — the user sees their deployment isn't progressing.
+- **Misdirection:** deliver a legitimately signed intent to the wrong target. Defense: the signed intent includes target scope; the delivery agent checks consistency.
+
+##### Interaction with invalidation
+
+The user signed the intent (deployment spec). On manifest invalidation, the intent hasn't changed — the same signature is still valid. New manifests are validated structurally against the same signed intent (manifests → intent field matching). No re-signing needed unless the intent itself changes (user edits the deployment spec), which requires the editor to sign the new intent.
+
+##### Placement enforcement and removal protection
+
+If a compromised platform can trigger removal of all resources (by manipulating placement or sending unsigned deletions), the signing model hasn't bought much. The delivery agent must be able to independently verify that any placement or removal action is legitimate.
+
+**Core principle:** any state change that affects what happens to a deployment on a cluster must carry verifiable provenance back to a non-platform authority. The delivery agent trusts something independent of the platform — cluster-side state, an external authority's signature, or the signed intent's own constraints. The platform is a courier, not the authority.
+
+This principle has several dimensions:
+
+**1. Removal allowance (deployment/addon property).** Whether a deployment can be removed from a cluster via placement change, or only via explicit signed deletion. This is a knob the deployment or addon declares. Pool-based placements (e.g., hosted control planes on management clusters) would typically disallow removal by placement change — once placed, the resource stays absent explicit lifecycle action. Consumer workload deployments may allow it. This prevents a blanket "remove everything" attack for sticky deployments.
+
+**2. Change provenance for placement-affecting state.** When the platform delivers a removal or rescheduling decision, it should carry the provenance of the triggering state change — not just "remove this" but "remove this because user X removed label L from you; here's the attested request (token, scope, the specific change)." The delivery agent verifies: the state change was authorized, the change means the placement constraints no longer match, therefore removal is legitimate. This extends to any platform-known state that affects placement (labels, pool membership, etc.). The cluster agent doesn't just trust "the platform says remove" — it verifies the *reason* for removal.
+
+**3. External placement authority.** When placement decisions come from outside the platform (scoring addons, external capacity services), they carry their own signing authority. The delivery agent can verify these independently. A cluster-side component scoring itself is one case; an external service in a separate trust boundary signing placement decisions with its own keys is another. The platform consumes these decisions but doesn't control them at the enforcement point.
+
+**4. Platform-generated artifacts bound to signed intent.** The pool membership set, the resolved target list — these are platform-generated. The signed intent includes placement constraints (label selectors, pool reference, target scope). The delivery agent independently confirms it matches: for label-based placement, the agent checks its own locally-trusted labels against the intent's constraints; for pool-based, pool membership is derived from cluster labels (self-assessable) or explicitly assigned with admin-signed provenance. The pool definition itself (membership criteria) chains back to a signed action — the delivery agent can verify that the pool's criteria were legitimately established.
+
+Examples of how these compose:
+
+- *Pool-based HCP placement:* removal disallowed by placement change (dimension 1). Consumer signed intent says "place in pool X." Agent verifies it's in pool X via its own labels (dimension 4). Deletion requires consumer signed deletion intent. Provider draining a management cluster is an elevated lifecycle operation with provider-level authorization.
+- *Label-based workload placement:* removal allowed by placement change (dimension 1). Platform says "remove because label changed." Agent verifies the label change provenance (dimension 2) — who changed it, was it in scope. If verified, agent accepts the removal.
+- *Score-based rebalancing:* scoring addon signs its placement decisions independently (dimension 3). Agent trusts the addon's authority. Platform routes the decision but can't forge it.
+
+##### Considered and not recommended
+
+- **Web Crypto API (SubtleCrypto):** Fallback for environments without passkey support. Weaker: no hardware protection (keys are JS-accessible, vulnerable to XSS), browser/origin-specific, no biometric UX.
+- **HTTP Message Signatures (RFC 9421):** Signs components of an HTTP *request* (method, path, headers, body digest) for hop-by-hop transport integrity. The signature is bound to the HTTP request lifecycle and doesn't survive beyond it. For FleetShift, the signature must travel from the user to the delivery agent through intermediaries (platform, rendering, transport) — a content signature over the intent hash, not a transport signature over one HTTP hop.
+- **Git commit signing as the verification mechanism:** Git commit signatures are bound to the git object model (tree hash, parent, author). Using them for delivery verification requires either forwarding git metadata to the delivery agent (fragile, doesn't survive rendering) or having the agent pull from git directly (heavy). Instead, GitOps uses the same signed-intent model as web/CLI: tooling signs the intent and stores the signature in git. Git commit signing is orthogonal git-level integrity.
+
 #### IdP support
 
 RAR is a published RFC (May 2023). IdP support is growing but not yet universal (Keycloak has partial support via custom protocol mappers, full RAR is in progress). The architecture should accommodate the tightest binding the IdP supports and degrade gracefully: check `authorization_details` fields if present, fall back to `scope`-level checks, reject or require re-approval if no binding is present.
@@ -285,6 +414,10 @@ RAR is a published RFC (May 2023). IdP support is growing but not yet universal 
 The JWT-embedded provenance chain proves "user X authorized this at time T," but the JWT expires shortly after. For long-running operations, the durability modes above still apply: accepted initial authorization with ongoing checks by default, `PausedAuth` when fresh approval is needed, and refresh tokens or delegation SAs where appropriate.
 
 #### Intent-bound tokens for GitOps
+
+With user-level intent signing (above), the GitOps verification model is unified with web/CLI: tooling signs the intent hash and stores the signature in the git repo alongside the source content. The delivery agent's verification path is identical across all surfaces — no git metadata forwarding, no special GitOps verification path. Git commit signing (`git commit -S`) provides orthogonal git-level integrity (defense in depth, recommended but not required by FleetShift). The git hosting platform's public key endpoints remain available as a fallback/additional verification source for the delivery agent.
+
+The token-based flows below remain relevant when user signing is not available, or as a complement to it:
 
 The tighter the binding between token and content, the safer it is to include a token alongside manifests in git. A token with no meaningful scoping beyond identity is risky because it can authorize too much during its validity window. A RAR-scoped access token with `manifest_hash` is the strongest form — it can only authorize the exact manifest it's bound to, and it expires.
 
@@ -308,6 +441,14 @@ A useful refinement is to wrap repo-stored authorization material in a JWE encry
 
 - RAR (RFC 9396) adoption is still early. The architecture should degrade gracefully when the IdP only supports scopes or audiences. What's the minimum binding level we're willing to accept before falling back to PausedAuth / re-approval?
 - For the CIBA gitops flow: how does CI authenticate to initiate the CIBA flow? It needs its own client credentials with the IdP, which is itself a stored secret. This is a narrow, well-scoped secret (can only initiate approval requests, can't issue tokens without user consent), but it exists.
+- Key lifecycle for user signing: rotation, revocation, lost keys. What happens when a user loses their device? The key binding TTL provides a natural expiry, but active revocation (before TTL) may need a mechanism.
+- Claims freshness with user signing: the signed intent embeds claims from signing time. If the user's permissions change after signing, the claims are stale. How much does this matter given we already accept stale JWTs in the "accepted initial authorization" mode?
+- Anti-replay mechanism details: monotonic sequence numbers vs. nonces — which is simpler to implement correctly for the delivery agent?
+- Secure bootstrap of cluster-side label/identity state for placement enforcement. How does a cluster initially receive its labels through a non-platform authority?
+- Trust model for scoring addons and external scoring services. How does a delivery agent know to trust a particular scoring addon's signatures?
+- Whether placement constraints in signed intents are mandatory or opt-in.
+- Multi-signature policy: when to require vs. allow multiple signers, quorum rules for critical deployments.
+- Can different key registries be pluggable? The high-level API is the same (validate this signature for this user) but implementations differ (key binding bundles, git hosting platform endpoints, etc.).
 
 ## Attestation-based delivery
 
@@ -349,7 +490,22 @@ validate_attestation(attestation, manifest):
     // any assertion failure → PausedAuth
 ```
 
-Dimensions affect validation strength, not protocol shape: a fresh JWT makes the temporal check strong; a direct target makes the authz check strong (live SubjectAccessReview); RAR-scoped tokens make the content binding tight. The protocol doesn't branch — it degrades gracefully.
+**With user signing**, the envelope includes the user's signature over the intent and the key binding bundle. Validation adds:
+
+```
+validate_user_signed_attestation(attestation, manifest):
+    // standard checks (platform sig, validity bounds, structural matching)...
+    assert user_signature_valid(attestation.intent, attestation.user_signature, attestation.key_binding.public_key)
+    assert key_binding_jwt_valid(attestation.key_binding.jwt, tenant_idp_jwks)
+    assert key_binding_possession_valid(attestation.key_binding)
+    assert attestation.key_binding.jwt.sub == claimed_user
+    // platform signature optional (only needed for buffer transport)
+    // per-request JWT not required — the key binding bundle anchors identity
+```
+
+The core protocol shape is the same — user signing is an additive check. The platform signature becomes optional for standard (gRPC) transport when user signing is active, since the user's signature provides the integrity guarantee. For buffer transport, the platform signature is still valuable.
+
+Dimensions affect validation strength, not protocol shape: a fresh JWT makes the temporal check strong; a direct target makes the authz check strong (live SubjectAccessReview); RAR-scoped tokens make the content binding tight; user signing makes the intent binding cryptographic. The protocol doesn't branch — it degrades gracefully.
 
 ### Cluster-side delivery architecture (K8s)
 
@@ -381,15 +537,17 @@ For K8s targets, the layered model:
 Credential durability, attestation, and transport are orthogonal; this table shows the common combinations.
 
 
-| Scenario                       | Mechanism                                       | User identity at target                        | User presence needed         |
-| ------------------------------ | ----------------------------------------------- | ---------------------------------------------- | ---------------------------- |
-| Synchronous / short-lived ops  | Token passthrough                               | Full (IdP-verified)                            | During operation             |
-| Long-running (run-as-platform) | Accepted initial auth + JWT-embedded provenance | Proof of initial user (JWT in signed artifact) | At creation only             |
-| Long-running (run-as-you)      | Refresh tokens (when IdP supports it)           | Full (IdP-verified, refreshed)                 | At creation only             |
-| Long-running (K8s-specific)    | Delegation SAs                                  | SA identity (correlatable)                     | At creation only             |
-| Any credential failure         | PausedAuth + CIBA                               | N/A (paused)                                   | To resume (or CIBA-prompted) |
-| GitOps                         | Signed intent (JWT-embedded provenance)         | Proof of initial user (JWT in signed artifact) | At signing only              |
-| GitOps (with RAR)              | Intent-bound token                              | Full (IdP-verified, content-bound)             | At signing only              |
+| Scenario                       | Mechanism                                       | User identity at target                          | User presence needed         |
+| ------------------------------ | ----------------------------------------------- | ------------------------------------------------ | ---------------------------- |
+| Synchronous / short-lived ops  | Token passthrough                               | Full (IdP-verified)                              | During operation             |
+| Long-running (run-as-platform) | Accepted initial auth + JWT-embedded provenance | Proof of initial user (JWT in signed artifact)   | At creation only             |
+| Long-running (run-as-you)      | Refresh tokens (when IdP supports it)           | Full (IdP-verified, refreshed)                   | At creation only             |
+| Long-running (K8s-specific)    | Delegation SAs                                  | SA identity (correlatable)                       | At creation only             |
+| Any credential failure         | PausedAuth + CIBA                               | N/A (paused)                                     | To resume (or CIBA-prompted) |
+| User-signed intent             | User signs intent + key binding bundle          | Proof of user (user signature, IdP-anchored key) | At signing only              |
+| GitOps                         | Signed intent (JWT-embedded provenance)         | Proof of initial user (JWT in signed artifact)   | At signing only              |
+| GitOps (with user signing)     | User-signed intent in git                       | Proof of user (same as web/CLI)                  | At signing only              |
+| GitOps (with RAR)              | Intent-bound token                              | Full (IdP-verified, content-bound)               | At signing only              |
 
 
 Delivery transport is configurable per target profile: standard (fleetlet gRPC), hardened (buffered via S3/Kafka/NATS), or future CRD-based. The attestation format and validation logic are identical across transports.
@@ -416,5 +574,7 @@ On the deployment, this reduces to 3 high level options (with refresh variants):
 1. Run as me (w/ optional refresh)
 2. Run as service account
   - This could be one that tracks your own permissions if we support that, or just some service account created separately with its own deployment... or something
-3. Run as platform w/ attestation (w/ optional refresh)
+3. Run as platform w/ attestation (w/ optional refresh, w/ optional user signing)
   - If refresh, this becomes a property of the original manifest intent that can't be forged later–we'll see that it requires a recent token and reject otherwise.
+  - With user signing, per-request JWT storage is eliminated and the token-reuse concern disappears. The user signs the intent with their own key; the delivery agent verifies the signature against the key binding bundle. This is a refinement of option 3, not a fourth option — the deployment still runs as the platform, but with stronger intent binding.
+
