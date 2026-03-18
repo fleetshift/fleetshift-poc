@@ -16,10 +16,10 @@ This pattern repeats at every scale:
 
 1. **Laptop**: one instance, a few clusters. No explicit provider/consumer split -- the admin is both.
 2. **Small fleet**: neighborhoods start to emerge (workload clusters vs. virt clusters). Still one instance, but workspace structure reflects the separation.
-3. **Enterprise platform team**: full provider/consumer split. Platform team operates a provider instance with factory pools. Internal teams get consumer-facing workspaces or their own instances.
-4. **Managed service provider**: same topology as (3) with hard cryptographic boundaries, per-tenant consumer instances, signed intents, and network curtain.
+3. **Enterprise platform team**: full provider/consumer split. Platform team operates a provider instance with factory pools. Internal teams consume managed resources through the provider's API using their own tenant identity and IdP(s). Teams that also want fleet-wide workload management over their provisioned clusters can optionally run their own FleetShift instance.
+4. **Managed service provider**: same topology as (3) with hard cryptographic boundaries, signed intents, and network curtain. Consumers interact with the provider API directly. Per-tenant FleetShift instances are available for consumers who want their own fleet management plane on top of the managed clusters provisioned for them.
 
-The progression is continuous. The product experience should guide users along this path naturally, not require a product switch at any step.
+The progression is continuous. The product experience should guide users along this path naturally, not require a product switch at any step. Critically, consumers do not need their own FleetShift instance to use a provider -- they can interact with the provider's API directly. The provider must know the consumer's tenant identity and IdP(s) in order to store, deliver, and validate deployments on their behalf. A consumer's own FleetShift instance is an additive capability, not a prerequisite.
 
 ## 1. First-class pool concept
 
@@ -39,23 +39,33 @@ Placement strategies that target a pool receive the pool's membership rather tha
 
 **Relationship to existing concepts**: a pool is not a workspace. Workspaces define organizational scope and access boundaries. Pools define operational groupings of infrastructure with capacity semantics. A pool's targets may span multiple workspaces (e.g., a global HCP management pool with members in several regional workspaces), or a single workspace may contain targets in multiple pools (management pool + argo pool in the same region).
 
-## 2. Provider-surfaced managed addons for consumers
+## 2. Provider-surfaced managed resource types
 
-**Current state**: the `platform` target type enables a parent platform to deploy to child platform instances. Consumer platforms can target the provider platform to deliver FleetShift deployment specs (high-level intent). But the consumer-side addon model -- how consumers request managed resources and how those requests flow to the provider -- isn't explicitly modeled.
+**Current state**: the `platform` target type enables a parent platform to deploy to child platform instances. But the consumer-side model -- how consumers request managed resources and how those requests flow to the provider -- isn't explicitly modeled. The implicit assumption is that consumers always have their own FleetShift instance, which isn't true.
 
-**Problem**: when a consumer wants a managed cluster, the flow is: consumer addon generates a FleetShift deployment spec -> delivers to provider platform -> provider's internal addon generates low-level manifests -> schedules onto factory cluster. This works mechanically with the existing `platform` target type, but the consumer-side addon ("managed-cluster") and the provider-side addon ("hcp") are loosely coupled by convention. The consumer addon must know the exact format the provider expects. There's no contract between them beyond "deliver a deployment spec that the provider's addon will understand."
+**Problem**: the contract between consumers and providers needs to work at two levels: (1) consumers using the provider's API directly with their own tenant identity and IdP(s), and (2) consumers who also run their own FleetShift instance and want provisioned clusters registered as targets in their fleet. The current design only addresses (2), making recursive instantiation a prerequisite rather than an optional enhancement.
 
-**Proposal**: the provider platform registers **managed resource types** that it surfaces to consumer platforms. A managed resource type is a contract:
+**Proposal**: the provider platform registers **managed resource types** that define the consumer-facing contract. A managed resource type is:
 
-- **Schema**: what the consumer can request (region, version, size, capabilities). Validated by the provider platform on receipt. The consumer addon doesn't need to know the internal representation -- it generates requests against this schema.
+- **Schema**: what the consumer can request (region, version, size, capabilities). Validated by the provider platform on receipt.
 - **Manifest generator (provider-side)**: takes a validated request and generates the low-level manifests for the factory (HostedCluster CRDs, ArgoCD instances, etc.). This is the provider's internal addon.
 - **Placement strategy (provider-side)**: how the generated manifests are scheduled onto the factory pool. Bespoke per managed resource type (binpacking for HCP, different binpacking for Argo, etc.).
 - **Health model (provider-side)**: what "healthy" means for this managed resource type. HCP healthy means the control plane pods are running and the API server is reachable. Argo healthy means the ArgoCD instance is reconciling. Each type defines its own health.
 - **Consumer-facing status**: the subset of health and lifecycle information surfaced back to the consumer. The consumer sees "my managed cluster is Provisioning / Ready / Degraded" without seeing which management cluster it's on or how many pods it has.
 
-When a consumer platform is deployed by the provider, the provider's managed resource types are advertised to it. The consumer platform's "managed-cluster" addon is generated from the provider's managed resource type schema -- the consumer doesn't write bespoke addon code, it uses a generic "managed resource" addon that adapts to whatever types the provider exposes.
+### Direct consumer integration (baseline)
 
-This also handles the target registration problem: when the provider provisions a cluster on behalf of a consumer, the provider configures the new cluster's fleetlet to connect to the consumer platform. The managed resource type's lifecycle includes this cross-platform target registration -- the provider knows the consumer platform's endpoint and injects it into the provisioned cluster's bootstrap configuration.
+A consumer interacts with the provider's API directly, authenticated by their own IdP. The provider registers the consumer's tenant identity and IdP(s) so it can store, deliver, and validate deployments on the consumer's behalf. The consumer requests managed resources against the provider's managed resource type schemas. The provider handles provisioning, placement, and lifecycle internally. The consumer observes status through the provider's API.
+
+This is the default integration mode. The consumer does not need a FleetShift instance, a `platform` target type, or any cross-platform delivery. They use the provider's managed resource API the same way they would use any managed service API.
+
+### Enhanced consumer integration (own FleetShift instance)
+
+A consumer can also run their own FleetShift instance. This adds fleet-wide workload management on top of the managed clusters provisioned for them: the consumer can register provisioned clusters as targets in their own fleet, deploy workloads across them, search indexed resources, and use the full deployment pipeline (Manifest x Placement x Rollout) for their own applications.
+
+When the provider provisions a cluster on behalf of such a consumer, the provider configures the new cluster's fleetlet to connect to the consumer's FleetShift instance. The managed resource type's lifecycle includes this cross-instance target registration -- the provider knows the consumer instance's endpoint and injects it into the provisioned cluster's bootstrap configuration.
+
+The provider's managed resource types are also advertised to the consumer instance. The consumer instance can use a generic "managed resource" addon that adapts to whatever types the provider exposes, allowing the consumer to request managed resources through their own deployment pipeline rather than calling the provider API directly. This is the recursive instantiation path described in architecture.md section 12, but it is opt-in -- not the only way consumers interact with providers.
 
 ## 3. Signed intent verification in delivery
 
@@ -104,6 +114,7 @@ The vault can also rate-limit credential issuance and alert on anomalous pattern
 **Proposal**: factory targets use a **restricted channel profile** with an optional **buffer transport**.
 
 **Factory target profile (restricted channels)**:
+
 - **Delivery channel**: enabled, with signed intent validation in the fleetlet before passing to the local delivery agent.
 - **Status channel**: enabled (target -> platform only). Accepts the confidentiality risk of the platform knowing factory status, because the provider needs to know whether delivery succeeded.
 - **Protocol channel (K8s API proxy)**: structurally absent. Not disabled -- absent from the factory fleetlet's capability set. The factory fleetlet binary (or configuration) does not include the protocol channel handler. No mechanism exists for the platform to tunnel API requests to the factory cluster through normal operation.
@@ -138,6 +149,7 @@ The flow:
 6. **Session expires or is explicitly revoked.** The fleetlet tears down the protocol channel. The platform records the full session lifecycle in its audit log.
 
 **Security properties**:
+
 - No standing access to factory clusters through the platform. The protocol channel is structurally absent until an approved session activates it.
 - Three independent factors required: the SRE's identity (OIDC token for the factory cluster), the approver's signed authorization (for the fleetlet to enable the channel), and network reachability through the platform. Compromising any one is insufficient.
 - Unified audit: every break-glass session is a platform resource with full lifecycle tracking, visible alongside deployments and delivery status. "Show me all break-glass sessions for factory clusters in the last 30 days" is a platform query.
@@ -161,7 +173,7 @@ If the provider needs operational visibility into what's running on factory clus
 
 ## 8. Provider-adjacent domain-specific abstractions
 
-**Current state**: FleetShift's core model is fully generic: Manifest x Placement x Rollout, with pluggable strategies, target types, and addon contracts. The provider/consumer/factory topology is achievable by composing these primitives (recursive instantiation, `platform` target type, bespoke addons), but it is not structurally supported -- the framework doesn't know about providers, consumers, neighborhoods, or managed resources.
+**Current state**: FleetShift's core model is fully generic: Manifest x Placement x Rollout, with pluggable strategies, target types, and addon contracts. The provider/consumer/factory topology is partially achievable by composing these primitives (managed resource type APIs for direct consumer integration, recursive instantiation via the `platform` target type for consumers with their own instances, bespoke addons), but it is not structurally supported -- the framework doesn't know about providers, consumers, neighborhoods, or managed resources.
 
 **Problem**: if the provider/consumer/factory topology is the universal pattern for infrastructure management at scale, requiring users to assemble it from generic primitives is both error-prone and undiscoverable. The framework can't guide users toward the right structure if the structure isn't part of its vocabulary.
 
@@ -179,9 +191,9 @@ If the provider needs operational visibility into what's running on factory clus
 
 ## Open questions
 
-### Consumer platform binpacking
+### Consumer instance binpacking (own-instance mode only)
 
-Consumer platforms themselves run on clusters. Should consumer platform instances be binpacked onto shared "consumer platform clusters" (with tenant density as a knob), or should each tenant get a dedicated cluster for their consumer platform? This is another neighborhood type (the "consumer platform neighborhood") with its own density limits, blast radius considerations, and security profile. A density of 1 is the most isolated; higher density is more cost-efficient but increases blast radius.
+For consumers who opt into running their own FleetShift instance (the enhanced integration mode), those instances run on clusters. Should consumer instances be binpacked onto shared "consumer instance clusters" (with tenant density as a knob), or should each tenant get a dedicated cluster? This is another neighborhood type (the "consumer instance neighborhood") with its own density limits, blast radius considerations, and security profile. A density of 1 is the most isolated; higher density is more cost-efficient but increases blast radius. This question does not apply to consumers using direct API integration, who have no instance to host.
 
 ### Standing intent renewal protocol
 
