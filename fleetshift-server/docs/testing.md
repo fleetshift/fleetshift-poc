@@ -21,7 +21,7 @@ Observability is often untested or awkward to test. Take advantage of the [Domai
 
 For real world examples in a Go codebase, see [this](https://github.com/project-kessel/parsec/blob/main/internal/service/observability.go) and [this](https://github.com/alechenninger/falcon/blob/main/internal/domain/observer.go).
 
-## Deterministic concurrency {#deterministic-concurrency}
+## Deterministic concurrency
 
 Coordinating threads / goroutines is sometimes necessary in tests. To do this deterministically and cleanly, take advantage of the [Domain Oriented Observability](https://martinfowler.com/articles/domain-oriented-observability.html) pattern. The main code is coupled on to an interface with certain probe points. Then, an implementation of this injected at test time uses these probes to block, or signal waiting code.
 
@@ -33,7 +33,7 @@ No "method verifying" mocks, ever.
 
 Prefer simply using a real instance. If an object is not coupled to external I/O, there is no reason not to reuse it. It is the least work and the best coverage.
 
-If it is, prefer using a Fake. In memory fakes are a useful feature of an application ("Kessel in a box"), so the investment pays for itself quickly. When implementing fakes (or any second implementation of an interface), first define a set of "[contract tests](./internal-architecture.md)" at the interface layer.
+If it is, prefer using a Fake. In memory fakes are a useful feature of an application ("Kessel in a box"), so the investment pays for itself quickly. When implementing fakes (or any second implementation of an interface), first define a set of "contract tests" at the interface layer.
 
 Stubs or dummies can be used judiciously when the interaction is completely trivial, but this is rare. There is usually no point if the in memory version is just as fast.
 
