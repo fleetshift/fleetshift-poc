@@ -22,6 +22,7 @@ const (
 	DeploymentService_CreateDeployment_FullMethodName = "/fleetshift.v1.DeploymentService/CreateDeployment"
 	DeploymentService_GetDeployment_FullMethodName    = "/fleetshift.v1.DeploymentService/GetDeployment"
 	DeploymentService_ListDeployments_FullMethodName  = "/fleetshift.v1.DeploymentService/ListDeployments"
+	DeploymentService_ResumeDeployment_FullMethodName = "/fleetshift.v1.DeploymentService/ResumeDeployment"
 )
 
 // DeploymentServiceClient is the client API for DeploymentService service.
@@ -36,6 +37,11 @@ type DeploymentServiceClient interface {
 	GetDeployment(ctx context.Context, in *GetDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error)
 	// ListDeployments lists deployments.
 	ListDeployments(ctx context.Context, in *ListDeploymentsRequest, opts ...grpc.CallOption) (*ListDeploymentsResponse, error)
+	// ResumeDeployment resumes a deployment that is paused for authentication.
+	// The caller's fresh Bearer token is captured and used for subsequent
+	// deliveries. Any authorized user may resume; this gives approval-gate
+	// semantics for free.
+	ResumeDeployment(ctx context.Context, in *ResumeDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error)
 }
 
 type deploymentServiceClient struct {
@@ -76,6 +82,16 @@ func (c *deploymentServiceClient) ListDeployments(ctx context.Context, in *ListD
 	return out, nil
 }
 
+func (c *deploymentServiceClient) ResumeDeployment(ctx context.Context, in *ResumeDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Deployment)
+	err := c.cc.Invoke(ctx, DeploymentService_ResumeDeployment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // DeploymentServiceServer is the server API for DeploymentService service.
 // All implementations must embed UnimplementedDeploymentServiceServer
 // for forward compatibility.
@@ -88,6 +104,11 @@ type DeploymentServiceServer interface {
 	GetDeployment(context.Context, *GetDeploymentRequest) (*Deployment, error)
 	// ListDeployments lists deployments.
 	ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error)
+	// ResumeDeployment resumes a deployment that is paused for authentication.
+	// The caller's fresh Bearer token is captured and used for subsequent
+	// deliveries. Any authorized user may resume; this gives approval-gate
+	// semantics for free.
+	ResumeDeployment(context.Context, *ResumeDeploymentRequest) (*Deployment, error)
 	mustEmbedUnimplementedDeploymentServiceServer()
 }
 
@@ -106,6 +127,9 @@ func (UnimplementedDeploymentServiceServer) GetDeployment(context.Context, *GetD
 }
 func (UnimplementedDeploymentServiceServer) ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDeployments not implemented")
+}
+func (UnimplementedDeploymentServiceServer) ResumeDeployment(context.Context, *ResumeDeploymentRequest) (*Deployment, error) {
+	return nil, status.Error(codes.Unimplemented, "method ResumeDeployment not implemented")
 }
 func (UnimplementedDeploymentServiceServer) mustEmbedUnimplementedDeploymentServiceServer() {}
 func (UnimplementedDeploymentServiceServer) testEmbeddedByValue()                           {}
@@ -182,6 +206,24 @@ func _DeploymentService_ListDeployments_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeploymentService_ResumeDeployment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ResumeDeploymentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeploymentServiceServer).ResumeDeployment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeploymentService_ResumeDeployment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeploymentServiceServer).ResumeDeployment(ctx, req.(*ResumeDeploymentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // DeploymentService_ServiceDesc is the grpc.ServiceDesc for DeploymentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -200,6 +242,10 @@ var DeploymentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListDeployments",
 			Handler:    _DeploymentService_ListDeployments_Handler,
+		},
+		{
+			MethodName: "ResumeDeployment",
+			Handler:    _DeploymentService_ResumeDeployment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

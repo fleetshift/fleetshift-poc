@@ -11,6 +11,7 @@ import "fleetshift/v1/create_deployment_request.proto";
 import "fleetshift/v1/get_deployment_request.proto";
 import "fleetshift/v1/list_deployments_request.proto";
 import "fleetshift/v1/list_deployments_response.proto";
+import "fleetshift/v1/resume_deployment_request.proto";
 
 // DeploymentService manages deployment resources.
 service DeploymentService {
@@ -36,5 +37,17 @@ service DeploymentService {
     option (google.api.http) = {
       get: "/v1/deployments"
     };
+  }
+
+  // ResumeDeployment resumes a deployment that is paused for authentication.
+  // The caller's fresh Bearer token is captured and used for subsequent
+  // deliveries. Any authorized user may resume; this gives approval-gate
+  // semantics for free.
+  rpc ResumeDeployment(ResumeDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      post: "/v1/{name=deployments/*}:resume"
+      body: "*"
+    };
+    option (google.api.method_signature) = "name";
   }
 }

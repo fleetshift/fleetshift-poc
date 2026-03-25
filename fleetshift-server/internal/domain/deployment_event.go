@@ -20,6 +20,12 @@ type DeliveryCompletionEvent struct {
 	Result     DeliveryResult
 }
 
+// AuthResumedEvent carries fresh credentials from a user resuming a
+// deployment that is in [DeploymentStatePausedAuth].
+type AuthResumedEvent struct {
+	Auth DeliveryAuth
+}
+
 // DeploymentEvent is the discriminated envelope delivered to a running
 // orchestration workflow via [DeploymentWorkflowRunner.AwaitDeploymentEvent].
 // Exactly one field is non-nil per event.
@@ -29,6 +35,7 @@ type DeploymentEvent struct {
 	SpecChanged         bool                     // deployment spec changed; reload from repo
 	Delete              bool                     // tear down delivery and exit
 	DeliveryCompleted   *DeliveryCompletionEvent // a delivery reached a terminal state
+	AuthResumed         *AuthResumedEvent        // fresh credentials from a resume
 }
 
 // ApplyPoolChange produces a new pool by applying a [PoolChange] to the

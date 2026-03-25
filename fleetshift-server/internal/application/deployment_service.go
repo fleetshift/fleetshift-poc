@@ -11,6 +11,7 @@ import (
 type DeploymentService struct {
 	Store    domain.Store
 	CreateWF domain.CreateDeploymentWorkflow
+	Registry domain.Registry
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -69,6 +70,50 @@ func (s *DeploymentService) List(ctx context.Context) ([]domain.Deployment, erro
 		return nil, err
 	}
 	return deps, tx.Commit()
+}
+
+// Resume resumes a deployment that is paused for authentication. It
+// extracts the caller's fresh token from the request context and
+// signals the orchestration workflow to continue with the new credentials.
+func (s *DeploymentService) Resume(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	dep, err := tx.Deployments().Get(ctx, id)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Deployment{}, fmt.Errorf("commit: %w", err)
+	}
+
+	if dep.State != domain.DeploymentStatePausedAuth {
+		return domain.Deployment{}, fmt.Errorf("%w: deployment %q is in state %q, not paused_auth",
+			domain.ErrInvalidArgument, id, dep.State)
+	}
+
+	ac := AuthFromContext(ctx)
+	if ac == nil || ac.Subject == nil {
+		return domain.Deployment{}, fmt.Errorf("%w: resuming a deployment requires an authenticated caller",
+			domain.ErrInvalidArgument)
+	}
+
+	freshAuth := domain.DeliveryAuth{
+		Caller:   ac.Subject,
+		Audience: ac.Audience,
+		Token:    ac.Token,
+	}
+
+	if err := s.Registry.SignalDeploymentEvent(ctx, id, domain.DeploymentEvent{
+		AuthResumed: &domain.AuthResumedEvent{Auth: freshAuth},
+	}); err != nil {
+		return domain.Deployment{}, fmt.Errorf("signal auth resume: %w", err)
+	}
+
+	return dep, nil
 }
 
 // Delete removes a deployment and its delivery records atomically.

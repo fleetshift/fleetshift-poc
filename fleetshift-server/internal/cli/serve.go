@@ -194,6 +194,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	deploymentSvc := &application.DeploymentService{
 		Store:    store,
 		CreateWF: createWf,
+		Registry: reg,
 	}
 
 	// --- gRPC server ---

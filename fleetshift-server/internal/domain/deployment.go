@@ -6,10 +6,11 @@ import "time"
 type DeploymentState string
 
 const (
-	DeploymentStateCreating DeploymentState = "creating"
-	DeploymentStateActive   DeploymentState = "active"
-	DeploymentStateDeleting DeploymentState = "deleting"
-	DeploymentStateFailed   DeploymentState = "failed"
+	DeploymentStateCreating    DeploymentState = "creating"
+	DeploymentStateActive      DeploymentState = "active"
+	DeploymentStateDeleting    DeploymentState = "deleting"
+	DeploymentStateFailed      DeploymentState = "failed"
+	DeploymentStatePausedAuth  DeploymentState = "paused_auth"
 )
 
 // Deployment is the composition of manifest, placement, and rollout strategies.

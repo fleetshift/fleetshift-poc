@@ -3,13 +3,24 @@ package kubernetes_test
 import (
 	"context"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"sync"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+func tlsServerCAPEM(ts *httptest.Server) string {
+	return string(pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE",
+		Bytes: ts.Certificate().Raw,
+	}))
+}
 
 // channelDeliveryObserver collects events and completion results on
 // channels, enabling deterministic waits in tests with async delivery.
@@ -131,5 +142,89 @@ func TestAgent_Remove_IsNoop(t *testing.T) {
 	target := domain.TargetInfo{ID: "k8s-test", Type: kubernetes.TargetType, Name: "test-cluster"}
 	if err := agent.Remove(context.Background(), target, "d1", &domain.DeliverySignaler{}); err != nil {
 		t.Fatalf("Remove: %v", err)
+	}
+}
+
+func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Unauthorized","reason":"Unauthorized","code":401}`)
+	}))
+	defer ts.Close()
+
+	agent := kubernetes.NewAgent()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	}
+
+	auth := domain.DeliveryAuth{Token: "expired-token"}
+	manifests := []domain.Manifest{{
+		ResourceType: "raw",
+		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
+	}}
+
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
+	if err != nil {
+		t.Fatalf("Deliver should not return error after ack: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	asyncResult := <-obs.done
+	if asyncResult.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("async State = %q, want %q; message: %s", asyncResult.State, domain.DeliveryStateAuthFailed, asyncResult.Message)
+	}
+}
+
+func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Forbidden","reason":"Forbidden","code":403}`)
+	}))
+	defer ts.Close()
+
+	agent := kubernetes.NewAgent()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	}
+
+	auth := domain.DeliveryAuth{Token: "some-token"}
+	manifests := []domain.Manifest{{
+		ResourceType: "raw",
+		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
+	}}
+
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
+	if err != nil {
+		t.Fatalf("Deliver should not return error after ack: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	asyncResult := <-obs.done
+	if asyncResult.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("async State = %q, want %q; message: %s", asyncResult.State, domain.DeliveryStateAuthFailed, asyncResult.Message)
 	}
 }

@@ -2,11 +2,17 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// errAuthPaused is a sentinel error returned by [awaitDeliveries] when
+// a delivery reports [DeliveryStateAuthFailed]. The orchestration loop
+// catches this to transition to [DeploymentStatePausedAuth].
+var errAuthPaused = errors.New("delivery auth failed: pausing for fresh credentials")
 
 // TargetDelta represents the difference between the previous and current
 // resolved target sets for a deployment.
@@ -330,7 +336,12 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 	dep, pool = loaded.Deployment, loaded.Pool
 
 	resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID, probe)
-	if err != nil {
+	if errors.Is(err, errAuthPaused) {
+		dep, err = s.handleAuthPause(record, dep, pool, deploymentID, probe)
+		if err != nil {
+			return struct{}{}, err
+		}
+	} else if err != nil {
 		dep.State = DeploymentStateFailed
 		probe.StateChanged(dep.State)
 		if _, updateErr := RunActivity(record, s.UpdateDeployment(), dep); updateErr != nil {
@@ -338,8 +349,9 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 		}
 		probe.Error(err)
 		return struct{}{}, err
+	} else {
+		dep.ResolvedTargets = resolvedIDs
 	}
-	dep.ResolvedTargets = resolvedIDs
 
 	dep.State = DeploymentStateActive
 	probe.StateChanged(dep.State)
@@ -380,12 +392,24 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 
 		if event.ManifestInvalidated {
 			if err := s.executeManifestInvalidation(record, dep, pool, deploymentID, probe); err != nil {
-				probe.Error(err)
-				return struct{}{}, err
+				if errors.Is(err, errAuthPaused) {
+					dep, err = s.handleAuthPause(record, dep, pool, deploymentID, probe)
+					if err != nil {
+						return struct{}{}, err
+					}
+				} else {
+					probe.Error(err)
+					return struct{}{}, err
+				}
 			}
 		} else {
 			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, previousPool, deploymentID, probe)
-			if err != nil {
+			if errors.Is(err, errAuthPaused) {
+				dep, err = s.handleAuthPause(record, dep, pool, deploymentID, probe)
+				if err != nil {
+					return struct{}{}, err
+				}
+			} else if err != nil {
 				dep.State = DeploymentStateFailed
 				probe.StateChanged(dep.State)
 				if _, updateErr := RunActivity(record, s.UpdateDeployment(), dep); updateErr != nil {
@@ -393,8 +417,9 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 				}
 				probe.Error(err)
 				return struct{}{}, err
+			} else {
+				dep.ResolvedTargets = resolvedIDs
 			}
-			dep.ResolvedTargets = resolvedIDs
 		}
 
 		dep.State = DeploymentStateActive
@@ -502,6 +527,77 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	return nil
 }
 
+// handleAuthPause transitions the deployment to [DeploymentStatePausedAuth],
+// persists the state, and waits for either an [AuthResumedEvent] (which
+// provides fresh credentials) or a Delete. On resume it updates dep.Auth,
+// persists the deployment, and re-runs the full placement pipeline. Returns
+// the updated deployment or an error (including on Delete).
+func (s *OrchestrationWorkflowSpec) handleAuthPause(
+	record Record,
+	dep Deployment,
+	pool []TargetInfo,
+	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
+) (Deployment, error) {
+	dep.State = DeploymentStatePausedAuth
+	probe.StateChanged(dep.State)
+	if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
+		probe.Error(err)
+		return dep, fmt.Errorf("update deployment (paused_auth): %w", err)
+	}
+
+	freshAuth, err := s.awaitAuthResume(record, dep, pool, deploymentID, probe)
+	if err != nil {
+		return dep, err
+	}
+
+	dep.Auth = freshAuth
+	if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
+		probe.Error(err)
+		return dep, fmt.Errorf("update deployment (auth resumed): %w", err)
+	}
+
+	resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID, probe)
+	if err != nil {
+		return dep, err
+	}
+	dep.ResolvedTargets = resolvedIDs
+	return dep, nil
+}
+
+// awaitAuthResume blocks until an [AuthResumedEvent] arrives with fresh
+// credentials, or a Delete terminates the workflow. Other events are
+// silently discarded while paused.
+func (s *OrchestrationWorkflowSpec) awaitAuthResume(
+	record Record,
+	dep Deployment,
+	pool []TargetInfo,
+	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
+) (DeliveryAuth, error) {
+	for {
+		event, err := AwaitSignal(record, DeploymentEventSignal)
+		if err != nil {
+			probe.Error(err)
+			return DeliveryAuth{}, fmt.Errorf("await auth resume: %w", err)
+		}
+		probe.EventReceived(event)
+
+		if event.Delete {
+			if err := s.executeDelete(record, dep, pool, deploymentID); err != nil {
+				probe.Error(err)
+				return DeliveryAuth{}, err
+			}
+			return DeliveryAuth{}, fmt.Errorf("deployment deleted while paused for auth")
+		}
+
+		if event.AuthResumed != nil {
+			return event.AuthResumed.Auth, nil
+		}
+		// TODO: accumulate deferred events for processing after resume
+	}
+}
+
 // executeRolloutPlan runs each step in a [RolloutPlan]. For deliver
 // steps it dispatches all deliveries, then waits for every delivery in
 // the step to reach a terminal state before proceeding to the next step.
@@ -599,8 +695,14 @@ func (s *OrchestrationWorkflowSpec) awaitDeliveries(
 		}
 		if event.DeliveryCompleted != nil {
 			delete(remaining, event.DeliveryCompleted.DeliveryID)
-			if event.DeliveryCompleted.Result.State == DeliveryStateFailed {
+			switch event.DeliveryCompleted.Result.State {
+			case DeliveryStateFailed:
 				return nil, nil, fmt.Errorf("delivery %s failed: %s",
+					event.DeliveryCompleted.DeliveryID,
+					event.DeliveryCompleted.Result.Message)
+			case DeliveryStateAuthFailed:
+				return nil, nil, fmt.Errorf("%w: delivery %s: %s",
+					errAuthPaused,
 					event.DeliveryCompleted.DeliveryID,
 					event.DeliveryCompleted.Result.Message)
 			}

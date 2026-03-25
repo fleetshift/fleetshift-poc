@@ -915,6 +915,54 @@ func TestOrchestration_ResourceTypeFiltering_UnconstrainedTargetReceivesAll(t *t
 	}
 }
 
+// authFailingDelivery simulates a delivery agent that reports an
+// authentication failure (e.g. 401 Unauthorized from the target API).
+type authFailingDelivery struct{}
+
+func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	result := domain.DeliveryResult{
+		State:   domain.DeliveryStateAuthFailed,
+		Message: "401 Unauthorized",
+	}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// authFailThenSucceedDelivery fails the first delivery with
+// DeliveryStateAuthFailed, then succeeds on all subsequent deliveries.
+// This simulates the resume scenario.
+type authFailThenSucceedDelivery struct {
+	mu      sync.Mutex
+	attempt int
+}
+
+func (d *authFailThenSucceedDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	d.mu.Lock()
+	d.attempt++
+	n := d.attempt
+	d.mu.Unlock()
+
+	if n == 1 {
+		result := domain.DeliveryResult{
+			State:   domain.DeliveryStateAuthFailed,
+			Message: "401 Unauthorized",
+		}
+		signaler.Done(ctx, result)
+		return result, nil
+	}
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (d *authFailThenSucceedDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
 // recordingDelivery records the manifests delivered to each target, allowing
 // tests to assert per-target manifest filtering.
 type recordingDelivery struct {
@@ -1063,5 +1111,177 @@ func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T
 	}
 	if completions[0].State != domain.DeliveryStateDelivered {
 		t.Errorf("completion state = %q, want %q", completions[0].State, domain.DeliveryStateDelivered)
+	}
+}
+
+// pausedAuthRecord is a Record for testing the PausedAuth flow. It
+// drains delivery-completion events from the events channel (placed
+// there by signaler.Done via stubRegistry) and interleaves scripted
+// events (AuthResumed, Delete) at the right points.
+type pausedAuthRecord struct {
+	ctx        context.Context
+	events     chan domain.DeploymentEvent
+	scripted   []domain.DeploymentEvent
+	scriptIdx  int
+}
+
+func (r *pausedAuthRecord) ID() string              { return "test-paused-auth" }
+func (r *pausedAuthRecord) Context() context.Context { return r.ctx }
+func (r *pausedAuthRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
+	return activity.Run(r.ctx, in)
+}
+
+func (r *pausedAuthRecord) Await(_ string) (any, error) {
+	select {
+	case e := <-r.events:
+		return e, nil
+	default:
+	}
+	if r.scriptIdx < len(r.scripted) {
+		e := r.scripted[r.scriptIdx]
+		r.scriptIdx++
+		return e, nil
+	}
+	return domain.DeploymentEvent{Delete: true}, nil
+}
+
+func TestOrchestration_AuthFailed_TransitionsToPausedAuth_ThenResumes(t *testing.T) {
+	store, _ := setupStore(t)
+
+	deploymentID := domain.DeploymentID("auth-pause-test")
+	seedDeployment(t, store, domain.Deployment{
+		ID: deploymentID,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateCreating,
+		Auth: domain.DeliveryAuth{
+			Token: "expired-token",
+		},
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	reg := &stubRegistry{events: events}
+
+	delivery := &authFailThenSucceedDelivery{}
+	obs := &recordingObserver{}
+
+	wf := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   delivery,
+		Strategies: domain.DefaultStrategyFactory{},
+		Registry:   reg,
+		Observer:   obs,
+	}
+
+	freshAuth := domain.DeliveryAuth{
+		Token: "fresh-token",
+		Caller: &domain.SubjectClaims{
+			ID:     "alice",
+			Issuer: "https://issuer.example.com",
+		},
+	}
+
+	rec := &pausedAuthRecord{
+		ctx:    context.Background(),
+		events: events,
+		scripted: []domain.DeploymentEvent{
+			{AuthResumed: &domain.AuthResumedEvent{Auth: freshAuth}},
+			{Delete: true},
+		},
+	}
+
+	_, err := wf.Run(rec, deploymentID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+
+	sawPausedAuth := false
+	sawActive := false
+	for _, s := range obs.states {
+		if s == domain.DeploymentStatePausedAuth {
+			sawPausedAuth = true
+		}
+		if s == domain.DeploymentStateActive {
+			sawActive = true
+		}
+	}
+	if !sawPausedAuth {
+		t.Errorf("workflow never reached PausedAuth; state transitions: %v", obs.states)
+	}
+	if !sawActive {
+		t.Errorf("workflow never reached Active after resume; state transitions: %v", obs.states)
+	}
+}
+
+func TestOrchestration_AuthFailed_DeleteWhilePaused(t *testing.T) {
+	store, _ := setupStore(t)
+
+	deploymentID := domain.DeploymentID("auth-delete-test")
+	seedDeployment(t, store, domain.Deployment{
+		ID: deploymentID,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateCreating,
+		Auth: domain.DeliveryAuth{
+			Token: "expired-token",
+		},
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	reg := &stubRegistry{events: events}
+
+	obs := &recordingObserver{}
+	wf := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   authFailingDelivery{},
+		Strategies: domain.DefaultStrategyFactory{},
+		Registry:   reg,
+		Observer:   obs,
+	}
+
+	rec := &pausedAuthRecord{
+		ctx:    context.Background(),
+		events: events,
+		scripted: []domain.DeploymentEvent{
+			{Delete: true},
+		},
+	}
+
+	_, err := wf.Run(rec, deploymentID)
+	if err == nil {
+		t.Fatal("expected error from delete while paused, got nil")
+	}
+	if !strings.Contains(err.Error(), "deleted while paused") {
+		t.Errorf("error should mention 'deleted while paused', got: %v", err)
+	}
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+
+	sawPausedAuth := false
+	for _, s := range obs.states {
+		if s == domain.DeploymentStatePausedAuth {
+			sawPausedAuth = true
+		}
+	}
+	if !sawPausedAuth {
+		t.Errorf("workflow never reached PausedAuth; state transitions: %v", obs.states)
 	}
 }

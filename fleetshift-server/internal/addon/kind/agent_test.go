@@ -501,6 +501,127 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 	}
 }
 
+// fakeTokenVerifier implements [domain.OIDCTokenVerifier] for unit tests.
+type fakeTokenVerifier struct {
+	err error // if non-nil, Verify returns this error
+}
+
+func (v *fakeTokenVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (domain.SubjectClaims, error) {
+	if v.err != nil {
+		return domain.SubjectClaims{}, v.err
+	}
+	return domain.SubjectClaims{ID: "alice", Issuer: "https://issuer.example.com"}, nil
+}
+
+func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
+	provider := newFakeProvider()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	verifier := &fakeTokenVerifier{}
+	cfg := domain.OIDCConfig{
+		IssuerURL: "https://issuer.example.com",
+		Audience:  "fleetshift",
+	}
+
+	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+
+	auth := domain.DeliveryAuth{
+		Token: "valid-token",
+	}
+
+	manifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          json.RawMessage(`{"name": "verified-cluster"}`),
+	}}
+
+	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, signaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	doneResult := <-obs.done
+	if doneResult.State != domain.DeliveryStateDelivered {
+		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
+	}
+}
+
+func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
+	provider := newFakeProvider()
+
+	verifier := &fakeTokenVerifier{err: errors.New("token expired")}
+	cfg := domain.OIDCConfig{
+		IssuerURL: "https://issuer.example.com",
+		Audience:  "fleetshift",
+	}
+
+	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+
+	auth := domain.DeliveryAuth{
+		Token: "expired-token",
+		Caller: &domain.SubjectClaims{
+			ID:     "alice",
+			Issuer: "https://issuer.example.com",
+		},
+		Audience: []domain.Audience{"fleetshift"},
+	}
+
+	manifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          json.RawMessage(`{"name": "rejected-cluster"}`),
+	}}
+
+	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nop)
+	if err != nil {
+		t.Fatalf("Deliver should not return an error (auth failure is a result, not an error): %v", err)
+	}
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+	if result.Message == "" {
+		t.Error("expected a message describing the verification failure")
+	}
+
+	if provider.clusterCount() != 0 {
+		t.Error("no cluster should have been created when token verification fails")
+	}
+}
+
+func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T) {
+	provider := newFakeProvider()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	verifier := &fakeTokenVerifier{err: errors.New("should not be called")}
+	cfg := domain.OIDCConfig{
+		IssuerURL: "https://issuer.example.com",
+		Audience:  "fleetshift",
+	}
+
+	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+
+	manifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          json.RawMessage(`{"name": "no-token-cluster"}`),
+	}}
+
+	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, signaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	doneResult := <-obs.done
+	if doneResult.State != domain.DeliveryStateDelivered {
+		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
+	}
+}
+
 func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	provider := newFakeProvider()
 	obs := newChannelDeliveryObserver()

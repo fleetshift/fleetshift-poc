@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -74,7 +75,7 @@ func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, mani
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
-			State:   domain.DeliveryStateFailed,
+			State:   deliveryStateForError(err),
 			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
@@ -88,7 +89,7 @@ func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, mani
 
 		if err := ap.apply(ctx, m.Raw); err != nil {
 			signaler.Done(ctx, domain.DeliveryResult{
-				State:   domain.DeliveryStateFailed,
+				State:   deliveryStateForError(err),
 				Message: fmt.Sprintf("apply manifest %d: %v", i+1, err),
 			})
 			return
@@ -96,6 +97,16 @@ func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, mani
 	}
 
 	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+}
+
+// deliveryStateForError returns [domain.DeliveryStateAuthFailed] for
+// Kubernetes API authentication/authorization errors (401/403), and
+// [domain.DeliveryStateFailed] for everything else.
+func deliveryStateForError(err error) domain.DeliveryState {
+	if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) {
+		return domain.DeliveryStateAuthFailed
+	}
+	return domain.DeliveryStateFailed
 }
 
 // Remove is a no-op for now.

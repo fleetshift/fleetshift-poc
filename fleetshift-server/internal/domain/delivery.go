@@ -24,6 +24,7 @@ const (
 	DeliveryStateDelivered   DeliveryState = "delivered"
 	DeliveryStateFailed      DeliveryState = "failed"
 	DeliveryStatePartial     DeliveryState = "partial"
+	DeliveryStateAuthFailed  DeliveryState = "auth_failed"
 )
 
 // Delivery is a first-class entity capturing a single

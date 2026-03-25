@@ -23,6 +23,7 @@ func newDeploymentCmd(ctx *cmdContext) *cobra.Command {
 		newDeploymentCreateCmd(ctx),
 		newDeploymentGetCmd(ctx),
 		newDeploymentListCmd(ctx),
+		newDeploymentResumeCmd(ctx),
 	)
 
 	return cmd
@@ -69,6 +70,8 @@ func formatState(s pb.Deployment_State) string {
 		return "Deleting"
 	case pb.Deployment_STATE_FAILED:
 		return "Failed"
+	case pb.Deployment_STATE_PAUSED_AUTH:
+		return "PausedAuth"
 	default:
 		return "Unknown"
 	}

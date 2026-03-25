@@ -58,6 +58,20 @@ func (s *DeploymentServer) GetDeployment(ctx context.Context, req *pb.GetDeploym
 	return deploymentToProto(dep), nil
 }
 
+func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeDeploymentRequest) (*pb.Deployment, error) {
+	id, err := parseDeploymentName(req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
+	}
+
+	dep, err := s.Deployments.Resume(ctx, id)
+	if err != nil {
+		return nil, domainError(err)
+	}
+
+	return deploymentToProto(dep), nil
+}
+
 func (s *DeploymentServer) ListDeployments(ctx context.Context, _ *pb.ListDeploymentsRequest) (*pb.ListDeploymentsResponse, error) {
 	// TODO: implement pagination
 	deps, err := s.Deployments.List(ctx)
@@ -181,7 +195,9 @@ func deploymentToProto(d domain.Deployment) *pb.Deployment {
 		State: deploymentStateToProto(d.State),
 	}
 
-	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING || dep.State == pb.Deployment_STATE_DELETING
+	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
+		dep.State == pb.Deployment_STATE_DELETING ||
+		dep.State == pb.Deployment_STATE_PAUSED_AUTH
 
 	dep.ManifestStrategy = manifestStrategyToProto(d.ManifestStrategy)
 	dep.PlacementStrategy = placementStrategyToProto(d.PlacementStrategy)
@@ -221,6 +237,8 @@ func deploymentStateToProto(s domain.DeploymentState) pb.Deployment_State {
 		return pb.Deployment_STATE_DELETING
 	case domain.DeploymentStateFailed:
 		return pb.Deployment_STATE_FAILED
+	case domain.DeploymentStatePausedAuth:
+		return pb.Deployment_STATE_PAUSED_AUTH
 	default:
 		return pb.Deployment_STATE_UNSPECIFIED
 	}

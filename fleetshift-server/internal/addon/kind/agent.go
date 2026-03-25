@@ -55,6 +55,8 @@ type Agent struct {
 	observer        AgentObserver
 	tempDir         string
 	oidcCABundle    []byte
+	tokenVerifier   domain.OIDCTokenVerifier
+	oidcConfig      *domain.OIDCConfig
 }
 
 // AgentOption configures an [Agent].
@@ -80,6 +82,18 @@ func WithTempDir(dir string) AgentOption {
 // trust store.
 func WithOIDCCABundle(pem []byte) AgentOption {
 	return func(a *Agent) { a.oidcCABundle = pem }
+}
+
+// WithTokenVerifier configures the agent to verify the caller's JWT
+// before acting on a delivery. This simulates the provenance check
+// that a remote delivery agent would perform: verifying that the
+// token is valid (signature, expiry, issuer, audience) before
+// creating infrastructure on behalf of the caller.
+func WithTokenVerifier(v domain.OIDCTokenVerifier, cfg domain.OIDCConfig) AgentOption {
+	return func(a *Agent) {
+		a.tokenVerifier = v
+		a.oidcConfig = &cfg
+	}
 }
 
 // NewAgent returns an Agent that creates providers via the given factory.
@@ -109,11 +123,33 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.Deliv
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
 	}
 
+	if err := a.verifyToken(ctx, auth); err != nil {
+		return domain.DeliveryResult{
+			State:   domain.DeliveryStateAuthFailed,
+			Message: fmt.Sprintf("token verification failed: %v", err),
+		}, nil
+	}
+
 	provider := a.providerFactory(NewObserverLogger(ctx, signaler, time.Now))
 
 	go a.deliverAsync(ctx, provider, specs, auth, signaler)
 
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+// verifyToken checks the caller's JWT when a verifier is configured.
+// This simulates the provenance responsibility of a remote delivery
+// agent: refuse to act if the token is expired, has a bad signature,
+// or targets the wrong audience.
+func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error {
+	if a.tokenVerifier == nil || a.oidcConfig == nil {
+		return nil
+	}
+	if auth.Token == "" {
+		return nil
+	}
+	_, err := a.tokenVerifier.Verify(ctx, *a.oidcConfig, string(auth.Token))
+	return err
 }
 
 func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {

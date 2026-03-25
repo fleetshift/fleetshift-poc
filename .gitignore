@@ -31,6 +31,7 @@ go.work.sum
 # .idea/
 # .vscode/
 .vscode/.debug-tmpdir
+*.code-workspace
 
 # Build artifacts
 **/bin/

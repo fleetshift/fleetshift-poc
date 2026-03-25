@@ -37,6 +37,8 @@ const (
 	Deployment_STATE_DELETING Deployment_State = 3
 	// Orchestration failed permanently.
 	Deployment_STATE_FAILED Deployment_State = 4
+	// Paused waiting for fresh authentication credentials.
+	Deployment_STATE_PAUSED_AUTH Deployment_State = 5
 )
 
 // Enum value maps for Deployment_State.
@@ -47,6 +49,7 @@ var (
 		2: "STATE_ACTIVE",
 		3: "STATE_DELETING",
 		4: "STATE_FAILED",
+		5: "STATE_PAUSED_AUTH",
 	}
 	Deployment_State_value = map[string]int32{
 		"STATE_UNSPECIFIED": 0,
@@ -54,6 +57,7 @@ var (
 		"STATE_ACTIVE":      2,
 		"STATE_DELETING":    3,
 		"STATE_FAILED":      4,
+		"STATE_PAUSED_AUTH": 5,
 	}
 )
 
@@ -227,7 +231,7 @@ var File_fleetshift_v1_deployment_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\n" +
-	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\x8d\x06\n" +
+	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\xa5\x06\n" +
 	"\n" +
 	"Deployment\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x15\n" +
@@ -243,13 +247,14 @@ const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\vupdate_time\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
 	"updateTime\x12\x12\n" +
-	"\x04etag\x18\v \x01(\tR\x04etag\"j\n" +
+	"\x04etag\x18\v \x01(\tR\x04etag\"\x81\x01\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATE_CREATING\x10\x01\x12\x10\n" +
 	"\fSTATE_ACTIVE\x10\x02\x12\x12\n" +
 	"\x0eSTATE_DELETING\x10\x03\x12\x10\n" +
-	"\fSTATE_FAILED\x10\x04::\xeaA7\n" +
+	"\fSTATE_FAILED\x10\x04\x12\x15\n" +
+	"\x11STATE_PAUSED_AUTH\x10\x05::\xeaA7\n" +
 	"\x18fleetshift.io/Deployment\x12\x18deployments/{deployment}R\x01\x01BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
