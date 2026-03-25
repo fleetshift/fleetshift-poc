@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/register_target.proto";
+
+// ControlEvent is the envelope for fleetlet-to-platform messages on
+// the control channel.
+message ControlEvent {
+  oneof event {
+    RegisterTarget register_target = 1;
+  }
+}

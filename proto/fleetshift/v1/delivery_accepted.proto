@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// DeliveryAccepted acknowledges that the agent received a
+// [DeliveryRequest] and will begin applying manifests.
+message DeliveryAccepted {
+  string delivery_id = 1;
+}

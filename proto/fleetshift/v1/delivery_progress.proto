@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/protobuf/timestamp.proto";
+
+// DeliveryProgress reports a progress, warning, or error event during
+// an active delivery.
+message DeliveryProgress {
+  string delivery_id = 1;
+
+  // Classification of this event.
+  Kind kind = 2;
+
+  // Human-readable description.
+  string message = 3;
+
+  // Optional structured detail (e.g. agent-specific JSON).
+  bytes detail = 4;
+
+  google.protobuf.Timestamp timestamp = 5;
+
+  // Classification of a delivery progress event.
+  enum Kind {
+    KIND_UNSPECIFIED = 0;
+    KIND_PROGRESS = 1;
+    KIND_WARNING = 2;
+    KIND_ERROR = 3;
+  }
+}

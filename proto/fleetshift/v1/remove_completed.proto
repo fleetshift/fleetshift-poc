@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// RemoveCompleted reports the outcome of a [RemoveRequest].
+message RemoveCompleted {
+  string delivery_id = 1;
+
+  // Whether the removal succeeded.
+  bool success = 2;
+
+  // Human-readable detail (especially on failure).
+  string message = 3;
+}

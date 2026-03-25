@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// ManifestResult reports the apply outcome of a single manifest within
+// a delivery. Identified by ordinal index into the delivery's manifest list.
+message ManifestResult {
+  // Zero-based index into the delivery's manifest list.
+  int32 ordinal = 1;
+
+  // Resource type of the manifest (echoed from the request).
+  string resource_type = 2;
+
+  // Apply outcome.
+  State state = 3;
+
+  // Human-readable detail about the outcome (especially on failure).
+  string message = 4;
+
+  // Apply outcome of a single manifest.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_APPLIED = 1;
+    STATE_FAILED = 2;
+    STATE_CONFLICT = 3;
+  }
+}

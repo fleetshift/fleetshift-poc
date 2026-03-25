@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// RemoveRequest instructs the fleetlet to remove a delivery from a target.
+message RemoveRequest {
+  string delivery_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  string deployment_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  string target_id = 3 [(google.api.field_behavior) = REQUIRED];
+}

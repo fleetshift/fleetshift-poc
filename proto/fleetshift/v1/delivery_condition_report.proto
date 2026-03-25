@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/protobuf/timestamp.proto";
+import "fleetshift/v1/condition.proto";
+
+// DeliveryConditionReport carries ongoing health conditions for an
+// active delivery on a target. Streamed continuously after delivery
+// completion for as long as the delivery is active.
+message DeliveryConditionReport {
+  string delivery_id = 1;
+
+  string target_id = 2;
+
+  // Current set of conditions observed by the delivery agent.
+  repeated Condition conditions = 3;
+
+  // When the agent last evaluated these conditions.
+  google.protobuf.Timestamp observed_at = 4;
+}

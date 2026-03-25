@@ -1,0 +1,31 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// RegisterTarget requests that the platform register a target served by
+// this fleetlet. The platform confirms via [TargetAccepted] or rejects
+// via [FleetletError].
+message RegisterTarget {
+  // Proposed target identifier. Must be unique across the platform.
+  string target_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Target type, determining which delivery agent handles it.
+  string target_type = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Human-readable name.
+  string name = 3;
+
+  // Labels for placement selection.
+  map<string, string> labels = 4;
+
+  // Opaque properties for delivery agents and manifest strategies.
+  map<string, string> properties = 5;
+
+  // Resource types this target can accept. An empty list means
+  // the target is unconstrained.
+  repeated string accepted_resource_types = 6;
+}

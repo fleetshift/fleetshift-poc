@@ -1,0 +1,37 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/manifest_result.proto";
+import "fleetshift/v1/provisioned_target.proto";
+import "fleetshift/v1/produced_secret.proto";
+
+// DeliveryCompleted reports the terminal outcome of a delivery attempt.
+message DeliveryCompleted {
+  string delivery_id = 1;
+
+  // Aggregate outcome.
+  State state = 2;
+
+  // Human-readable summary.
+  string message = 3;
+
+  // Per-manifest apply outcomes.
+  repeated ManifestResult manifest_results = 4;
+
+  // Targets created by this delivery that the platform should register.
+  repeated ProvisionedTarget provisioned_targets = 5;
+
+  // Secrets produced by this delivery that the platform should store.
+  repeated ProducedSecret produced_secrets = 6;
+
+  // Terminal state of a delivery.
+  enum State {
+    STATE_UNSPECIFIED = 0;
+    STATE_DELIVERED = 1;
+    STATE_FAILED = 2;
+    STATE_PARTIAL = 3;
+  }
+}

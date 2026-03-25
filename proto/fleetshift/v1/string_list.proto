@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// StringList is a wrapper for a repeated string value, used as a map
+// value type where proto maps do not support repeated values directly.
+message StringList {
+  repeated string values = 1;
+}

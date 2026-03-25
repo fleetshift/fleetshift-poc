@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/delivery_accepted.proto";
+import "fleetshift/v1/delivery_progress.proto";
+import "fleetshift/v1/delivery_completed.proto";
+import "fleetshift/v1/remove_completed.proto";
+import "fleetshift/v1/delivery_condition_report.proto";
+
+// DeliverEvent is the envelope for fleetlet-to-platform messages on
+// the delivery channel.
+message DeliverEvent {
+  oneof event {
+    DeliveryAccepted delivery_accepted = 1;
+    DeliveryProgress delivery_progress = 2;
+    DeliveryCompleted delivery_completed = 3;
+    RemoveCompleted remove_completed = 4;
+    DeliveryConditionReport condition_report = 5;
+  }
+}

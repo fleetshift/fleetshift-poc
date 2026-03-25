@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "fleetshift/v1/string_list.proto";
+
+// SubjectClaims represents the identity claims of an authenticated subject.
+message SubjectClaims {
+  // Unique identifier of the subject.
+  string id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Issuer URL that authenticated this subject.
+  string issuer = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // Additional claims (groups, email, custom claims) keyed by claim name.
+  map<string, StringList> extra = 3;
+}

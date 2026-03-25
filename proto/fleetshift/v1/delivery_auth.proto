@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/subject_claims.proto";
+
+// DeliveryAuth carries caller credentials into a delivery so agents
+// can act on behalf of the user who initiated the deployment.
+message DeliveryAuth {
+  // Identity of the user who initiated the delivery.
+  SubjectClaims caller = 1;
+
+  // Token audiences; used to derive target-specific OIDC client IDs.
+  repeated string audiences = 2;
+}

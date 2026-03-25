@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/delivery_request.proto";
+import "fleetshift/v1/remove_request.proto";
+
+// DeliverInstruction is the envelope for platform-to-fleetlet messages
+// on the delivery channel.
+message DeliverInstruction {
+  oneof instruction {
+    DeliveryRequest delivery_request = 1;
+    RemoveRequest remove_request = 2;
+  }
+}

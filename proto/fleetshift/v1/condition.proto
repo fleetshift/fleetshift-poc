@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Condition follows the Kubernetes condition convention for reporting
+// the health of a delivered resource. Condition types are agent-defined,
+// not a fixed enum; different delivery agents assess health differently.
+message Condition {
+  // Agent-defined condition type (e.g. "Available", "Progressing").
+  string type = 1;
+
+  // Status of the condition: "True", "False", or "Unknown".
+  string status = 2;
+
+  // Machine-readable reason for the condition's last transition.
+  string reason = 3;
+
+  // Human-readable message with details about the last transition.
+  string message = 4;
+
+  // When the condition last transitioned from one status to another.
+  google.protobuf.Timestamp last_transition_time = 5;
+}

@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "fleetshift/v1/manifest.proto";
+import "fleetshift/v1/delivery_auth.proto";
+
+// DeliveryRequest instructs the fleetlet to deliver manifests to a target.
+message DeliveryRequest {
+  string delivery_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  string deployment_id = 2 [(google.api.field_behavior) = REQUIRED];
+
+  string target_id = 3 [(google.api.field_behavior) = REQUIRED];
+
+  // Manifests to apply on the target.
+  repeated Manifest manifests = 4 [(google.api.field_behavior) = REQUIRED];
+
+  // Caller credentials for attestation-based delivery.
+  DeliveryAuth auth = 5;
+}

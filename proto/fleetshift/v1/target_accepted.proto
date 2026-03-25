@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// TargetAccepted confirms that the platform has registered the target.
+message TargetAccepted {
+  // The target identifier that was registered.
+  string target_id = 1;
+}

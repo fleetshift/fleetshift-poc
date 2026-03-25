@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/control_event.proto";
+import "fleetshift/v1/control_instruction.proto";
+import "fleetshift/v1/deliver_event.proto";
+import "fleetshift/v1/deliver_instruction.proto";
+
+// FleetletService is the platform-side API that fleetlets connect to.
+// Authentication is per-fleetlet at the transport level; the platform
+// identifies the caller from gRPC metadata on stream creation.
+service FleetletService {
+  // Control handles target registration on a single bidirectional
+  // stream per fleetlet connection.
+  rpc Control(stream ControlEvent) returns (stream ControlInstruction);
+
+  // Deliver carries the full delivery lifecycle: the platform pushes
+  // manifest delivery and removal requests; the fleetlet acknowledges,
+  // reports progress, completion, and ongoing health conditions.
+  rpc Deliver(stream DeliverEvent) returns (stream DeliverInstruction);
+}

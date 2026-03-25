@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// FleetletError is a structured error sent by the platform on the
+// control channel when an operation fails.
+message FleetletError {
+  // Error classification.
+  Code code = 1;
+
+  // Human-readable error message.
+  string message = 2;
+
+  // When set, scopes the error to a specific target.
+  string target_id = 3;
+
+  // Error codes for fleetlet control operations.
+  enum Code {
+    CODE_UNSPECIFIED = 0;
+    CODE_ALREADY_REGISTERED = 1;
+    CODE_NOT_FOUND = 2;
+    CODE_INVALID_ARGUMENT = 3;
+    CODE_INTERNAL = 4;
+  }
+}

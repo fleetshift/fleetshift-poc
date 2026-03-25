@@ -1,0 +1,24 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// ProvisionedTarget declares a target that a delivery created and that
+// the platform should register. Properties should include vault refs
+// for any associated secrets (e.g. "kubeconfig_ref").
+message ProvisionedTarget {
+  string target_id = 1 [(google.api.field_behavior) = REQUIRED];
+
+  string target_type = 2 [(google.api.field_behavior) = REQUIRED];
+
+  string name = 3 [(google.api.field_behavior) = REQUIRED];
+
+  map<string, string> labels = 4;
+
+  map<string, string> properties = 5;
+
+  repeated string accepted_resource_types = 6;
+}
