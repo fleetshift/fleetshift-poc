@@ -1223,6 +1223,118 @@ func TestOrchestration_AuthFailed_TransitionsToPausedAuth_ThenResumes(t *testing
 	}
 }
 
+// authFailNThenSucceedDelivery fails the first n deliveries with
+// DeliveryStateAuthFailed, then succeeds on all subsequent deliveries.
+type authFailNThenSucceedDelivery struct {
+	mu       sync.Mutex
+	attempt  int
+	failures int
+}
+
+func (d *authFailNThenSucceedDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	d.mu.Lock()
+	d.attempt++
+	n := d.attempt
+	d.mu.Unlock()
+
+	if n <= d.failures {
+		result := domain.DeliveryResult{
+			State:   domain.DeliveryStateAuthFailed,
+			Message: "401 Unauthorized",
+		}
+		signaler.Done(ctx, result)
+		return result, nil
+	}
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (d *authFailNThenSucceedDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+func TestOrchestration_AuthFailed_RepeatedResume_StaysPaused(t *testing.T) {
+	store, _ := setupStore(t)
+
+	deploymentID := domain.DeploymentID("auth-double-fail")
+	seedDeployment(t, store, domain.Deployment{
+		ID: deploymentID,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateCreating,
+		Auth: domain.DeliveryAuth{
+			Token: "expired-token",
+		},
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	reg := &stubRegistry{events: events}
+
+	delivery := &authFailNThenSucceedDelivery{failures: 2}
+	obs := &recordingObserver{}
+
+	wf := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   delivery,
+		Strategies: domain.DefaultStrategyFactory{},
+		Registry:   reg,
+		Observer:   obs,
+	}
+
+	badAuth := domain.DeliveryAuth{
+		Token:  "still-bad-token",
+		Caller: &domain.SubjectClaims{ID: "bob", Issuer: "https://issuer.example.com"},
+	}
+	goodAuth := domain.DeliveryAuth{
+		Token:  "good-token",
+		Caller: &domain.SubjectClaims{ID: "alice", Issuer: "https://issuer.example.com"},
+	}
+
+	rec := &pausedAuthRecord{
+		ctx:    context.Background(),
+		events: events,
+		scripted: []domain.DeploymentEvent{
+			{AuthResumed: &domain.AuthResumedEvent{Auth: badAuth}},
+			{AuthResumed: &domain.AuthResumedEvent{Auth: goodAuth}},
+			{Delete: true},
+		},
+	}
+
+	_, err := wf.Run(rec, deploymentID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	obs.mu.Lock()
+	defer obs.mu.Unlock()
+
+	pausedCount := 0
+	sawActive := false
+	for _, s := range obs.states {
+		if s == domain.DeploymentStatePausedAuth {
+			pausedCount++
+		}
+		if s == domain.DeploymentStateActive {
+			sawActive = true
+		}
+	}
+	if pausedCount < 2 {
+		t.Errorf("expected at least 2 PausedAuth transitions (initial + re-pause), got %d; states: %v",
+			pausedCount, obs.states)
+	}
+	if !sawActive {
+		t.Errorf("workflow never reached Active after second resume; state transitions: %v", obs.states)
+	}
+}
+
 func TestOrchestration_AuthFailed_DeleteWhilePaused(t *testing.T) {
 	store, _ := setupStore(t)
 

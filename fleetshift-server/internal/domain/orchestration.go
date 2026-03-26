@@ -530,8 +530,11 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 // handleAuthPause transitions the deployment to [DeploymentStatePausedAuth],
 // persists the state, and waits for either an [AuthResumedEvent] (which
 // provides fresh credentials) or a Delete. On resume it updates dep.Auth,
-// persists the deployment, and re-runs the full placement pipeline. Returns
-// the updated deployment or an error (including on Delete).
+// persists the deployment, and re-runs the full placement pipeline.
+//
+// If the re-delivery also fails with auth (e.g. the caller's token
+// still lacks the required permissions), the loop re-pauses and waits
+// for another resume signal rather than terminating the workflow.
 func (s *OrchestrationWorkflowSpec) handleAuthPause(
 	record Record,
 	dep Deployment,
@@ -539,30 +542,35 @@ func (s *OrchestrationWorkflowSpec) handleAuthPause(
 	deploymentID DeploymentID,
 	probe DeploymentRunProbe,
 ) (Deployment, error) {
-	dep.State = DeploymentStatePausedAuth
-	probe.StateChanged(dep.State)
-	if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
-		probe.Error(err)
-		return dep, fmt.Errorf("update deployment (paused_auth): %w", err)
-	}
+	for {
+		dep.State = DeploymentStatePausedAuth
+		probe.StateChanged(dep.State)
+		if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
+			probe.Error(err)
+			return dep, fmt.Errorf("update deployment (paused_auth): %w", err)
+		}
 
-	freshAuth, err := s.awaitAuthResume(record, dep, pool, deploymentID, probe)
-	if err != nil {
-		return dep, err
-	}
+		freshAuth, err := s.awaitAuthResume(record, dep, pool, deploymentID, probe)
+		if err != nil {
+			return dep, err
+		}
 
-	dep.Auth = freshAuth
-	if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
-		probe.Error(err)
-		return dep, fmt.Errorf("update deployment (auth resumed): %w", err)
-	}
+		dep.Auth = freshAuth
+		if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
+			probe.Error(err)
+			return dep, fmt.Errorf("update deployment (auth resumed): %w", err)
+		}
 
-	resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID, probe)
-	if err != nil {
-		return dep, err
+		resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, pool, deploymentID, probe)
+		if errors.Is(err, errAuthPaused) {
+			continue
+		}
+		if err != nil {
+			return dep, err
+		}
+		dep.ResolvedTargets = resolvedIDs
+		return dep, nil
 	}
-	dep.ResolvedTargets = resolvedIDs
-	return dep, nil
 }
 
 // awaitAuthResume blocks until an [AuthResumedEvent] arrives with fresh
