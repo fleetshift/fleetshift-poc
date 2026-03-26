@@ -80,7 +80,7 @@ func setup(t *testing.T) testHarness {
 func awaitDeploymentState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		tx, err := store.Begin(ctx)
+		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
@@ -102,7 +102,7 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, store domain.Store,
 
 func queryDeliveries(ctx context.Context, t *testing.T, store domain.Store, depID domain.DeploymentID) []domain.Delivery {
 	t.Helper()
-	tx, err := store.Begin(ctx)
+	tx, err := store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 
 func queryDeployment(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID) (domain.Deployment, error) {
 	t.Helper()
-	tx, err := store.Begin(ctx)
+	tx, err := store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -298,7 +298,7 @@ func queryDeployment(ctx context.Context, t *testing.T, store domain.Store, id d
 func awaitCondition(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, cond func(domain.Deployment) bool) domain.Deployment {
 	t.Helper()
 	for {
-		tx, err := store.Begin(ctx)
+		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}

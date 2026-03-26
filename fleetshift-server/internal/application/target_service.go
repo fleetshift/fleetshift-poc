@@ -34,7 +34,7 @@ func (s *TargetService) Register(ctx context.Context, target domain.TargetInfo) 
 
 // Get retrieves a target by ID.
 func (s *TargetService) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.TargetInfo{}, fmt.Errorf("begin tx: %w", err)
 	}
@@ -49,7 +49,7 @@ func (s *TargetService) Get(ctx context.Context, id domain.TargetID) (domain.Tar
 
 // List returns all registered targets.
 func (s *TargetService) List(ctx context.Context) ([]domain.TargetInfo, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}

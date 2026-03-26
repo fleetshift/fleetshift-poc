@@ -51,6 +51,42 @@ func (d *Deployment) TryAcquireReconciliation() bool {
 	return true
 }
 
+// MarkActive records a successful reconciliation: the deployment is
+// now active with the given resolved targets.
+func (d *Deployment) MarkActive(resolvedTargets []TargetID) {
+	d.State = DeploymentStateActive
+	d.ResolvedTargets = resolvedTargets
+}
+
+// MarkFailed records that the reconciliation pipeline failed.
+func (d *Deployment) MarkFailed() {
+	d.State = DeploymentStateFailed
+}
+
+// MarkPausedAuth records that a delivery reported an authentication
+// failure and the deployment is paused until resumed.
+func (d *Deployment) MarkPausedAuth() {
+	d.State = DeploymentStatePausedAuth
+}
+
+// MarkDeleted clears the resolved targets after all deliveries have
+// been removed. The state remains [DeploymentStateDeleting] so the
+// service layer can perform final cleanup (e.g. row deletion).
+func (d *Deployment) MarkDeleted() {
+	d.ResolvedTargets = nil
+	d.State = DeploymentStateDeleting
+}
+
+// ApplyReconciliationResult merges the observable state produced by a
+// reconciliation workflow onto this deployment. Bookkeeping fields
+// (Generation, ObservedGeneration, Reconciling) are left untouched
+// so that concurrent service-layer mutations are preserved.
+func (d *Deployment) ApplyReconciliationResult(source Deployment) {
+	d.State = source.State
+	d.ResolvedTargets = source.ResolvedTargets
+	d.Auth = source.Auth
+}
+
 // CompleteReconciliation releases the reconciliation lock and advances
 // [ObservedGeneration] to reconciledGen. If [Generation] has advanced
 // past reconciledGen, the lock is re-acquired and needsRestart is true,

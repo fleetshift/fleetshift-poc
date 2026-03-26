@@ -68,7 +68,7 @@ func seedTargets(t *testing.T, store domain.Store, targets ...domain.TargetInfo)
 
 func getDeployment(t *testing.T, store domain.Store, id domain.DeploymentID) domain.Deployment {
 	t.Helper()
-	tx, err := store.Begin(context.Background())
+	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
@@ -82,7 +82,7 @@ func getDeployment(t *testing.T, store domain.Store, id domain.DeploymentID) dom
 
 func getTarget(t *testing.T, store domain.Store, id domain.TargetID) domain.TargetInfo {
 	t.Helper()
-	tx, err := store.Begin(context.Background())
+	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
@@ -96,7 +96,7 @@ func getTarget(t *testing.T, store domain.Store, id domain.TargetID) domain.Targ
 
 func getDeliveries(t *testing.T, store domain.Store, depID domain.DeploymentID) []domain.Delivery {
 	t.Helper()
-	tx, err := store.Begin(context.Background())
+	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
@@ -110,7 +110,7 @@ func getDeliveries(t *testing.T, store domain.Store, depID domain.DeploymentID) 
 
 func getDelivery(t *testing.T, store domain.Store, id domain.DeliveryID) domain.Delivery {
 	t.Helper()
-	tx, err := store.Begin(context.Background())
+	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}

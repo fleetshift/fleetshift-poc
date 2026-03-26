@@ -315,16 +315,18 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 		awaitDeploymentState(ctx, t, infra, "d-outputs", domain.DeploymentStateActive)
 
-		tx, err := infra.Store.Begin(ctx)
+		tx, err := infra.Store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		defer tx.Rollback()
 
 		tgt, err := tx.Targets().Get(ctx, "k8s-new-cluster")
 		if err != nil {
+			tx.Rollback()
 			t.Fatalf("provisioned target not found: %v", err)
 		}
+		tx.Rollback()
+
 		if tgt.Type != "kubernetes" {
 			t.Errorf("target type = %q, want %q", tgt.Type, "kubernetes")
 		}
@@ -473,7 +475,7 @@ func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...stri
 func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		tx, err := infra.Store.Begin(ctx)
+		tx, err := infra.Store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
@@ -515,7 +517,7 @@ func assertResolvedTargets(t *testing.T, dep domain.Deployment, expectedIDs ...s
 
 func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID) []domain.Delivery {
 	t.Helper()
-	tx, err := infra.Store.Begin(ctx)
+	tx, err := infra.Store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
@@ -529,7 +531,7 @@ func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domai
 
 func queryDeployment(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) (domain.Deployment, error) {
 	t.Helper()
-	tx, err := infra.Store.Begin(ctx)
+	tx, err := infra.Store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}

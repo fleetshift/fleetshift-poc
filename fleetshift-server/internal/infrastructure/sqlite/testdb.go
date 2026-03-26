@@ -16,6 +16,13 @@ import (
 // the shared-cache database from being destroyed if the pool momentarily
 // drops to zero active connections (e.g. due to context cancellation in a
 // background goroutine).
+//
+// MaxOpenConns is set to 2: one for the sentinel and one for actual work.
+// This funnels all transactions through a single active connection,
+// serializing writes at the pool level. Without this, concurrent
+// BEGIN IMMEDIATE from different goroutines would hit SQLITE_LOCKED
+// in shared-cache mode (the busy_timeout pragma does not help with
+// SQLITE_LOCKED, only SQLITE_BUSY on file-backed databases).
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
@@ -23,6 +30,7 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
+	db.SetMaxOpenConns(2)
 	sentinel, err := db.Conn(context.Background())
 	if err != nil {
 		db.Close()

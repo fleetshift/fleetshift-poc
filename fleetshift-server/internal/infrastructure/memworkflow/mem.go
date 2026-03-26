@@ -18,10 +18,16 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"runtime"
 	"sync"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+// activityMaxAttempts mirrors go-workflows' DefaultRetryOptions
+// (3 attempts). Activities that fail with transient errors (e.g.
+// SQLITE_LOCKED in shared-cache mode) are retried transparently.
+const activityMaxAttempts = 3
 
 // Registry implements [domain.Registry] with in-memory execution.
 // Workflow instances are tracked so that event signals can be delivered
@@ -135,38 +141,59 @@ type baseRecord struct {
 	events <-chan []byte // JSON-serialized signals
 }
 
-func (r *baseRecord) ID() string              { return r.id }
+func (r *baseRecord) ID() string               { return r.id }
 func (r *baseRecord) Context() context.Context { return r.ctx }
 
 // Run dispatches the activity to a goroutine with a fresh context and
 // JSON round-trips both input and output. The workflow goroutine blocks
-// until the activity completes.
+// until the activity completes. Failed activities are retried up to
+// [activityMaxAttempts] times, matching go-workflows' default retry
+// policy. Between retries a [runtime.Gosched] yields the processor so
+// transient contention (e.g. SQLite SQLITE_LOCKED) can resolve.
 func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	deserializedIn, err := jsonRoundTrip(in)
 	if err != nil {
 		return nil, fmt.Errorf("memworkflow: round-trip activity %q input: %w", activity.Name(), err)
 	}
 
+	var lastErr error
+	for attempt := range activityMaxAttempts {
+		if attempt > 0 {
+			runtime.Gosched()
+		}
+
+		out, err := r.runOnce(activity, deserializedIn)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+
+		deserializedOut, err := jsonRoundTrip(out)
+		if err != nil {
+			return nil, fmt.Errorf("memworkflow: round-trip activity %q output: %w", activity.Name(), err)
+		}
+		return deserializedOut, nil
+	}
+	return nil, lastErr
+}
+
+// runOnce dispatches a single activity attempt in a goroutine with a
+// fresh [context.Background] and blocks until it completes or the
+// workflow context is cancelled.
+func (r *baseRecord) runOnce(activity domain.Activity[any, any], in any) (any, error) {
 	type actResult struct {
 		out any
 		err error
 	}
 	ch := make(chan actResult, 1)
 	go func() {
-		out, err := activity.Run(context.Background(), deserializedIn)
+		out, err := activity.Run(context.Background(), in)
 		ch <- actResult{out, err}
 	}()
 
 	select {
 	case res := <-ch:
-		if res.err != nil {
-			return nil, res.err
-		}
-		deserializedOut, err := jsonRoundTrip(res.out)
-		if err != nil {
-			return nil, fmt.Errorf("memworkflow: round-trip activity %q output: %w", activity.Name(), err)
-		}
-		return deserializedOut, nil
+		return res.out, res.err
 	case <-r.ctx.Done():
 		return nil, r.ctx.Err()
 	}

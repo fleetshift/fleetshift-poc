@@ -99,7 +99,7 @@ type DeploymentAndPool struct {
 // that was reconciled so the activity can atomically decide whether a new
 // reconciliation is needed.
 type CompleteReconciliationInput struct {
-	DeploymentID DeploymentID
+	DeploymentID  DeploymentID
 	ReconciledGen Generation
 }
 
@@ -140,7 +140,7 @@ func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-deployme
 // reloading after a spec change.
 func (s *OrchestrationWorkflowSpec) LoadDeploymentAndPool() Activity[DeploymentID, DeploymentAndPool] {
 	return NewActivity("load-deployment-and-pool", func(ctx context.Context, id DeploymentID) (DeploymentAndPool, error) {
-		tx, err := s.Store.Begin(ctx)
+		tx, err := s.Store.BeginReadOnly(ctx)
 		if err != nil {
 			return DeploymentAndPool{}, fmt.Errorf("begin tx: %w", err)
 		}
@@ -253,20 +253,29 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, str
 	})
 }
 
-// UpdateDeployment persists a deployment's updated state, bumping
-// UpdatedAt and regenerating the Etag.
+// UpdateDeployment persists a deployment's updated content fields
+// (state, resolved targets, auth) using a fresh read-modify-write
+// cycle. The activity reads the latest aggregate so that concurrent
+// generation bumps by the service layer are preserved.
 func (s *OrchestrationWorkflowSpec) UpdateDeployment() Activity[Deployment, struct{}] {
 	return NewActivity("update-deployment", func(ctx context.Context, d Deployment) (struct{}, error) {
-		d.UpdatedAt = s.now()
-		d.Etag = uuid.New().String()
-
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
-		if err := tx.Deployments().UpdateContent(ctx, d); err != nil {
+		fresh, err := tx.Deployments().Get(ctx, d.ID)
+		if err != nil {
+			return struct{}{}, fmt.Errorf("get deployment: %w", err)
+		}
+
+		// TODO: we should probably use a separate type to capture this result rather than modifying a deployment object in place
+		fresh.ApplyReconciliationResult(d)
+		fresh.UpdatedAt = s.now()
+		fresh.Etag = uuid.New().String()
+
+		if err := tx.Deployments().Update(ctx, fresh); err != nil {
 			return struct{}{}, err
 		}
 		return struct{}{}, tx.Commit()
@@ -321,7 +330,7 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 // store. Used mid-rollout to detect whether a new mutation has arrived.
 func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[DeploymentID, Generation] {
 	return NewActivity("check-generation", func(ctx context.Context, id DeploymentID) (Generation, error) {
-		tx, err := s.Store.Begin(ctx)
+		tx, err := s.Store.BeginReadOnly(ctx)
 		if err != nil {
 			return 0, fmt.Errorf("begin tx: %w", err)
 		}
@@ -395,14 +404,14 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 		default:
 			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, deploymentID, startGen, probe)
 			if errors.Is(err, errAuthPaused) {
-				dep.State = DeploymentStatePausedAuth
+				dep.MarkPausedAuth()
 				probe.StateChanged(dep.State)
 				if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
 					probe.Error(err)
 					return struct{}{}, fmt.Errorf("update deployment (paused_auth): %w", err)
 				}
 			} else if err != nil {
-				dep.State = DeploymentStateFailed
+				dep.MarkFailed()
 				probe.StateChanged(dep.State)
 				if _, updateErr := RunActivity(record, s.UpdateDeployment(), dep); updateErr != nil {
 					probe.Error(updateErr)
@@ -410,8 +419,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 				probe.Error(err)
 				return struct{}{}, err
 			} else {
-				dep.ResolvedTargets = resolvedIDs
-				dep.State = DeploymentStateActive
+				dep.MarkActive(resolvedIDs)
 				probe.StateChanged(dep.State)
 				if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
 					probe.Error(err)
@@ -497,8 +505,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 		}
 	}
 
-	dep.ResolvedTargets = nil
-	dep.State = DeploymentStateDeleting
+	dep.MarkDeleted()
 	if _, err := RunActivity(record, s.UpdateDeployment(), dep); err != nil {
 		return fmt.Errorf("update deployment: %w", err)
 	}

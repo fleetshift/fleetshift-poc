@@ -128,35 +128,6 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-func (r *DeploymentRepo) UpdateContent(ctx context.Context, d domain.Deployment) error {
-	ms, _ := json.Marshal(d.ManifestStrategy)
-	ps, _ := json.Marshal(d.PlacementStrategy)
-	var rs []byte
-	if d.RolloutStrategy != nil {
-		rs, _ = json.Marshal(d.RolloutStrategy)
-	}
-	rt, _ := json.Marshal(d.ResolvedTargets)
-	auth, _ := json.Marshal(d.Auth)
-
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE deployments
-		 SET manifest_strategy = ?, placement_strategy = ?, rollout_strategy = ?,
-		     resolved_targets = ?, state = ?, auth = ?,
-		     updated_at = ?, etag = ?
-		 WHERE id = ?`,
-		string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth),
-		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, string(d.ID),
-	)
-	if err != nil {
-		return fmt.Errorf("update deployment content: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("deployment %q: %w", d.ID, domain.ErrNotFound)
-	}
-	return nil
-}
-
 func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) error {
 	res, err := r.DB.ExecContext(ctx, `DELETE FROM deployments WHERE id = ?`, string(id))
 	if err != nil {

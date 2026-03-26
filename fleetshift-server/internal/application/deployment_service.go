@@ -44,7 +44,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 
 // Get retrieves a deployment by ID.
 func (s *DeploymentService) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
 	}
@@ -59,7 +59,7 @@ func (s *DeploymentService) Get(ctx context.Context, id domain.DeploymentID) (do
 
 // List returns all deployments.
 func (s *DeploymentService) List(ctx context.Context) ([]domain.Deployment, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}

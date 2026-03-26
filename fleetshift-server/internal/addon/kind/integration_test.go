@@ -115,7 +115,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
 	t.Helper()
 	for {
-		tx, err := store.Begin(ctx)
+		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}

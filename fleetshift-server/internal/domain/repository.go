@@ -17,13 +17,6 @@ type DeploymentRepository interface {
 	List(ctx context.Context) ([]Deployment, error)
 	Update(ctx context.Context, d Deployment) error
 	Delete(ctx context.Context, id DeploymentID) error
-
-	// UpdateContent persists only the deployment's "content" fields
-	// (strategies, state, resolved targets, auth, timestamps, etag)
-	// without touching reconciliation bookkeeping (generation,
-	// observed_generation, reconciling). Use this inside a running
-	// workflow to avoid overwriting concurrent generation bumps.
-	UpdateContent(ctx context.Context, d Deployment) error
 }
 
 // InventoryRepository persists and retrieves inventory items.

@@ -3,10 +3,19 @@ package domain
 import "context"
 
 // Store provides transactional access to all repositories. Use
-// [Store.Begin] to start a transaction, then access repositories
-// through the returned [Tx].
+// [Store.Begin] to start a read-write transaction or
+// [Store.BeginReadOnly] for a read-only transaction, then access
+// repositories through the returned [Tx].
 type Store interface {
+	// Begin starts a read-write transaction. On SQLite this issues
+	// BEGIN IMMEDIATE so writers are serialized and read-lock-upgrade
+	// deadlocks cannot occur.
 	Begin(ctx context.Context) (Tx, error)
+
+	// BeginReadOnly starts a read-only transaction. It uses a
+	// deferred lock so it never contends with other readers or
+	// writers. Use this for queries that do not mutate state.
+	BeginReadOnly(ctx context.Context) (Tx, error)
 }
 
 // Tx is a transaction that provides access to all repositories.

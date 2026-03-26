@@ -21,6 +21,14 @@ func (s *Store) Begin(ctx context.Context) (domain.Tx, error) {
 	return &storeTx{tx: tx}, nil
 }
 
+func (s *Store) BeginReadOnly(ctx context.Context) (domain.Tx, error) {
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, fmt.Errorf("begin read-only tx: %w", err)
+	}
+	return &storeTx{tx: tx}, nil
+}
+
 type storeTx struct {
 	tx   *sql.Tx
 	done bool
