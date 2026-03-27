@@ -68,7 +68,7 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 	}
 	r.orchWfFunc = orchWfFunc
 
-	dbos.RegisterWorkflow(r.DBOSCtx, orchWfFunc, dbos.WithWorkflowName(spec.Name()))
+	dbos.RegisterWorkflow(r.DBOSCtx, orchWfFunc, dbos.WithWorkflowName(spec.Name()), dbos.WithMaxRetries(-1))
 
 	return &orchestrationWorkflow{
 		dbosCtx:    r.DBOSCtx,
@@ -152,6 +152,11 @@ type orchestrationWorkflow struct {
 }
 
 func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID) (domain.Execution[struct{}], error) {
+	// DBOS uses the workflow ID for idempotency: calling RunWorkflow
+	// with an already-active ID returns a handle to the existing
+	// instance rather than starting a second one. This means Start
+	// returns (handle, nil) instead of ErrAlreadyRunning, which the
+	// service layer's Reconcile handles correctly.
 	handle, err := dbos.RunWorkflow(w.dbosCtx, w.orchWfFunc, deploymentID, dbos.WithWorkflowID(string(deploymentID)))
 	if err != nil {
 		return nil, fmt.Errorf("run DBOS workflow: %w", err)

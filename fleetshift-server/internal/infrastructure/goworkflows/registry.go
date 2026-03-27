@@ -4,9 +4,11 @@ package goworkflows
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/cschleiden/go-workflows/backend"
 	"github.com/cschleiden/go-workflows/client"
 	goregistry "github.com/cschleiden/go-workflows/registry"
 	"github.com/cschleiden/go-workflows/worker"
@@ -14,6 +16,18 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+// activityOptions overrides go-workflows' DefaultActivityOptions with
+// aggressive retries so that transient failures (network blips,
+// database contention) do not permanently fail a reconciliation.
+var activityOptions = workflow.ActivityOptions{
+	RetryOptions: workflow.RetryOptions{
+		MaxAttempts:        20,
+		FirstRetryInterval: 500 * time.Millisecond,
+		MaxRetryInterval:   30 * time.Second,
+		BackoffCoefficient: 2,
+	},
+}
 
 // activityInvoker calls an activity from the workflow context with the
 // correct generic types. Created at construction time when concrete
@@ -131,7 +145,7 @@ func registerActivity[I, O any](
 
 	invokers[name] = func(wfCtx workflow.Context, in any) (any, error) {
 		result, err := workflow.ExecuteActivity[O](
-			wfCtx, workflow.DefaultActivityOptions, name, in,
+			wfCtx, activityOptions, name, in,
 		).Get(wfCtx)
 		return result, err
 	}
@@ -183,6 +197,9 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.D
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: string(deploymentID),
 	}, w.wfName, deploymentID)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrAlreadyRunning
+	}
 	if err != nil {
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}

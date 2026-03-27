@@ -400,7 +400,6 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
 		State:             domain.DeploymentStateCreating,
@@ -423,9 +422,6 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 	if dep.ObservedGeneration != 1 {
 		t.Errorf("ObservedGeneration = %d, want 1", dep.ObservedGeneration)
 	}
-	if dep.Reconciling {
-		t.Error("Reconciling should be false after completion")
-	}
 
 	deliveries := getDeliveries(t, store, "d1")
 	if len(deliveries) != 2 {
@@ -438,7 +434,6 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:              "d1",
 		Generation:      1,
-		Reconciling:     true,
 		ResolvedTargets: []domain.TargetID{"old1"},
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
@@ -497,7 +492,6 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.DeploymentStateCreating,
@@ -529,7 +523,6 @@ func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategySelector, TargetSelector: &domain.TargetSelector{MatchLabels: map[string]string{"env": "prod"}}},
 		State:             domain.DeploymentStateCreating,
@@ -559,7 +552,6 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
 		State:             domain.DeploymentStateCreating,
@@ -613,7 +605,6 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.DeploymentStateCreating,
@@ -640,7 +631,6 @@ func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.DeploymentStateCreating,
@@ -670,7 +660,6 @@ func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.DeploymentStateCreating,
@@ -697,7 +686,6 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        2,
-		Reconciling:       true,
 		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
@@ -744,7 +732,6 @@ func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T)
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
 		Generation:        1,
-		Reconciling:       true,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
 		State:             domain.DeploymentStateCreating,
@@ -774,9 +761,6 @@ func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T)
 	dep := getDeployment(t, store, "d1")
 	if dep.ObservedGeneration != 3 {
 		t.Errorf("ObservedGeneration = %d, want 3 (loop should reconcile up to bumped generation)", dep.ObservedGeneration)
-	}
-	if dep.Reconciling {
-		t.Error("Reconciling should be false (fully caught up)")
 	}
 }
 
@@ -828,7 +812,6 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 	seedDeployment(t, store, domain.Deployment{
 		ID:         "d1",
 		Generation: 1,
-		Reconciling: true,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{

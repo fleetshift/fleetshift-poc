@@ -2,6 +2,7 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -29,6 +30,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 		}
 	}
 
+	// TODO: don't store token; keep it in memory. use peer cluster to retrieve from peers on concurrent updates.
 	exec, err := s.CreateWF.Start(ctx, in)
 	if err != nil {
 		return domain.Deployment{}, fmt.Errorf("start create-deployment workflow: %w", err)
@@ -144,33 +146,16 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	return s.Reconcile(ctx, id)
 }
 
-// Reconcile attempts to start a reconciliation workflow for the given
-// deployment. It uses a CAS gate so that at most one workflow runs per
-// deployment at a time. If a reconciliation is already in progress,
-// the method returns nil — the running workflow will observe the new
-// generation when it finishes.
+// Reconcile starts a reconciliation workflow for the given deployment.
+// The workflow engine enforces at-most-one-active-instance per
+// deployment ID; if a workflow is already running, [domain.ErrAlreadyRunning]
+// is swallowed and the method returns nil — the running workflow will
+// observe the new generation when it finishes.
 func (s *DeploymentService) Reconcile(ctx context.Context, id domain.DeploymentID) error {
-	tx, err := s.Store.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	dep, err := tx.Deployments().Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if !dep.TryAcquireReconciliation() {
+	_, err := s.Orchestration.Start(ctx, id)
+	if errors.Is(err, domain.ErrAlreadyRunning) {
 		return nil
 	}
-	if err := tx.Deployments().Update(ctx, dep); err != nil {
-		return fmt.Errorf("update deployment: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	_, err = s.Orchestration.Start(ctx, id)
 	return err
 }
 

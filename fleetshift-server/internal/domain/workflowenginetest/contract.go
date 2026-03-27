@@ -399,6 +399,49 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 	})
 
+	t.Run("StartOrchestration_AlreadyRunning", func(t *testing.T) {
+		infra := infraFactory(t)
+		wfs := registerWorkflows(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1")
+
+		// Seed the deployment directly (bypassing create workflow) so
+		// there is no prior orchestration instance to race against.
+		seedDeployment(ctx, t, infra, domain.Deployment{
+			ID:         "dup",
+			Generation: 1,
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"t1"},
+			},
+			State: domain.DeploymentStateCreating,
+		})
+
+		// First Start should succeed (no workflow currently running).
+		exec, err := wfs.Orchestration.Start(ctx, "dup")
+		if err != nil {
+			t.Fatalf("first Start: %v", err)
+		}
+
+		// Second Start while the first is still running: expect
+		// ErrAlreadyRunning (go-workflows, memworkflow) or nil (DBOS).
+		_, err = wfs.Orchestration.Start(ctx, "dup")
+		if err != nil && !errors.Is(err, domain.ErrAlreadyRunning) {
+			t.Fatalf("second Start: got %v, want ErrAlreadyRunning or nil", err)
+		}
+
+		// Let the first workflow complete.
+		if exec != nil {
+			exec.AwaitResult(ctx)
+		}
+	})
+
 }
 
 // registerWorkflows builds workflow specs from infra, calls
@@ -548,6 +591,29 @@ func deleteDeploymentAndDeliveries(ctx context.Context, t *testing.T, infra Infr
 	defer tx.Rollback()
 	must(t, tx.Deliveries().DeleteByDeployment(ctx, depID))
 	must(t, tx.Deployments().Delete(ctx, depID))
+	must(t, tx.Commit())
+}
+
+func seedDeployment(ctx context.Context, t *testing.T, infra Infra, dep domain.Deployment) {
+	t.Helper()
+	if dep.UID == "" {
+		dep.UID = "test-uid"
+	}
+	if dep.Etag == "" {
+		dep.Etag = "test-etag"
+	}
+	if dep.CreatedAt.IsZero() {
+		dep.CreatedAt = time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	}
+	if dep.UpdatedAt.IsZero() {
+		dep.UpdatedAt = dep.CreatedAt
+	}
+	tx, err := infra.Store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	must(t, tx.Deployments().Create(ctx, dep))
 	must(t, tx.Commit())
 }
 

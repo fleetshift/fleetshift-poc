@@ -24,10 +24,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// activityMaxAttempts mirrors go-workflows' DefaultRetryOptions
-// (3 attempts). Activities that fail with transient errors (e.g.
-// SQLITE_LOCKED in shared-cache mode) are retried transparently.
-const activityMaxAttempts = 3
+// activityMaxAttempts controls how many times a failing activity is
+// retried before the error propagates to the workflow. Set high enough
+// to ride out transient failures (database contention, network blips)
+// without permanently failing the reconciliation.
+const activityMaxAttempts = 10
 
 // Registry implements [domain.Registry] with in-memory execution.
 // Workflow instances are tracked so that event signals can be delivered
@@ -91,21 +92,43 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 type orchestrationWorkflow struct {
 	registry *Registry
 	spec     *domain.OrchestrationWorkflowSpec
+	mu       sync.Mutex
+	running  map[domain.DeploymentID]struct{}
 }
 
 func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID) (domain.Execution[struct{}], error) {
+	w.mu.Lock()
+	if w.running == nil {
+		w.running = make(map[domain.DeploymentID]struct{})
+	}
+	if _, active := w.running[deploymentID]; active {
+		w.mu.Unlock()
+		return nil, domain.ErrAlreadyRunning
+	}
+	w.running[deploymentID] = struct{}{}
+	w.mu.Unlock()
+
 	inst := w.registry.getInstance(deploymentID)
 
 	done := make(chan orchResult, 1)
 
 	go func() {
+		defer func() {
+			w.registry.removeInstance(deploymentID)
+			w.mu.Lock()
+			delete(w.running, deploymentID)
+			w.mu.Unlock()
+			if r := recover(); r != nil {
+				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
+			}
+		}()
+
 		record := &baseRecord{
 			id:     string(deploymentID),
 			ctx:    ctx,
 			events: inst.events,
 		}
 		val, err := w.spec.Run(record, deploymentID)
-		w.registry.removeInstance(deploymentID)
 		done <- orchResult{val: val, err: err}
 	}()
 

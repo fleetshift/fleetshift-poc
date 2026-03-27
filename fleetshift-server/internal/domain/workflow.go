@@ -95,6 +95,10 @@ type Registry interface {
 
 // OrchestrationWorkflow is a registered orchestration workflow that
 // can start new instances. Returned by [Registry.RegisterOrchestration].
+//
+// If a workflow for the given deployment is already active
+// the engine may return an [Execution] handle for the running workflow,
+// or an [ErrAlreadyRunning] error.
 type OrchestrationWorkflow interface {
 	Start(ctx context.Context, deploymentID DeploymentID) (Execution[struct{}], error)
 }

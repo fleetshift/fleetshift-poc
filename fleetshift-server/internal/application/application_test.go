@@ -275,11 +275,10 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	awaitCondition(ctx, t, h.store, "d1", func(dep domain.Deployment) bool {
-		return dep.State == domain.DeploymentStateDeleting && !dep.Reconciling
+	dep := awaitCondition(ctx, t, h.store, "d1", func(dep domain.Deployment) bool {
+		return dep.State == domain.DeploymentStateDeleting && dep.ObservedGeneration >= dep.Generation
 	})
 
-	dep, _ := queryDeployment(ctx, t, h.store, "d1")
 	if len(dep.ResolvedTargets) != 0 {
 		t.Errorf("expected 0 resolved targets after delete reconciliation, got %d", len(dep.ResolvedTargets))
 	}

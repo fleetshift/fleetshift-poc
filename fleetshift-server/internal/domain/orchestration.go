@@ -343,10 +343,10 @@ func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[DeploymentID, Gen
 	})
 }
 
-// CompleteReconciliation clears the reconciliation lock and advances
-// the observed generation. If the deployment's generation has advanced
-// past reconciledGen during the workflow run, the lock is re-acquired
-// and needsRestart is returned as true.
+// CompleteReconciliation advances [Deployment.ObservedGeneration] to
+// reconciledGen. If the deployment's generation has advanced past
+// reconciledGen during the workflow run, needsRestart is returned as
+// true, indicating the caller should loop.
 func (s *OrchestrationWorkflowSpec) CompleteReconciliation() Activity[CompleteReconciliationInput, bool] {
 	return NewActivity("complete-reconciliation", func(ctx context.Context, in CompleteReconciliationInput) (bool, error) {
 		tx, err := s.Store.Begin(ctx)
