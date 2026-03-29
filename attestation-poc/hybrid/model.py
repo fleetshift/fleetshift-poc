@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from .cel_runtime import CelEvaluationError, evaluate_bool
@@ -19,6 +19,80 @@ class TrustAnchor:
 
     anchor_id: str
     known_keys: dict[str, bytes]
+    attributes: dict[str, Any] = field(default_factory=dict)
+    constraints: tuple[TrustAnchorConstraint, ...] = ()
+
+    def verify_signer(
+        self,
+        *,
+        signer_id: str,
+        public_key: bytes,
+        subject: dict[str, Any],
+        label: str,
+        context: VerificationContext,
+    ) -> VerificationResult:
+        known_key = self.known_keys.get(signer_id)
+        if known_key is None or known_key != public_key:
+            return context.fail(label, f"key not recognised by anchor {self.anchor_id}")
+
+        children: list[VerificationResult] = []
+        for constraint in self.constraints:
+            constraint_result = constraint.verify(
+                anchor=self,
+                subject=subject,
+                label=label,
+                context=context,
+            )
+            children.append(constraint_result)
+            if not constraint_result.valid:
+                return context.fail(
+                    label,
+                    f"trust anchor constraint failed: {constraint.name}",
+                    children,
+                )
+
+        detail = f"recognised signer {signer_id}"
+        if self.constraints:
+            detail += f" with {len(self.constraints)} anchor constraints"
+        return context.ok(label, detail, children)
+
+    def to_context(self) -> dict[str, Any]:
+        return {
+            "anchor_id": self.anchor_id,
+            "attributes": self.attributes,
+        }
+
+
+@dataclass(frozen=True)
+class TrustAnchorConstraint:
+    """A CEL predicate the trust anchor applies to signer subjects."""
+
+    name: str
+    expression: str
+
+    def verify(
+        self,
+        *,
+        anchor: TrustAnchor,
+        subject: dict[str, Any],
+        label: str,
+        context: VerificationContext,
+    ) -> VerificationResult:
+        try:
+            valid = evaluate_bool(
+                self.expression,
+                {
+                    "anchor": anchor.to_context(),
+                    "subject": subject,
+                },
+            )
+        except CelEvaluationError as exc:
+            return context.fail(label, f"trust anchor constraint evaluation failed: {exc}")
+
+        if not valid:
+            return context.fail(label, f"predicate returned false: {self.name}")
+
+        return context.ok(label, f"trust anchor constraint matched: {self.name}")
 
 
 @dataclass(frozen=True)
@@ -193,12 +267,15 @@ class Output:
                 f"trust anchor not found: {self.signature.trust_anchor_id}",
             ), None
 
-        known_key = anchor.known_keys.get(signature.signer_id)
-        if known_key is None or known_key != signature.public_key:
-            return context.fail(
-                label,
-                f"key not recognised by anchor {anchor.anchor_id}",
-            ), None
+        anchor_result = anchor.verify_signer(
+            signer_id=signature.signer_id,
+            public_key=signature.public_key,
+            subject=self.to_trust_anchor_subject(attestation_id, signature.signer_id),
+            label=f"{attestation_id} output anchor",
+            context=context,
+        )
+        if not anchor_result.valid:
+            return context.fail(label, "output trust anchor rejected signer", [anchor_result]), None
 
         return (
             context.ok(
@@ -207,6 +284,7 @@ class Output:
                     f"signed by {signature.signer_id}, "
                     f"verified against {self.signature.trust_anchor_id}"
                 ),
+                [anchor_result],
             ),
             VerifiedOutput(
                 content=self.content,
@@ -229,6 +307,18 @@ class Output:
             "has_signature": self.signature is not None,
             "signature": signature_context,
             "signer_id": verified_output.signer_id,
+        }
+
+    def to_trust_anchor_subject(
+        self,
+        attestation_id: str,
+        signer_id: str | None,
+    ) -> dict[str, Any]:
+        return {
+            "attestation_id": attestation_id,
+            "content": self.content,
+            "kind": "output",
+            "signer_id": signer_id,
         }
 
 
@@ -276,12 +366,15 @@ class SignedInput(Input):
                 f"trust anchor not found: {self.key_binding.trust_anchor_id}",
             ), None
 
-        known_key = anchor.known_keys.get(self.key_binding.signer_id)
-        if known_key is None or known_key != self.key_binding.public_key:
-            return context.fail(
-                label,
-                f"key not recognised by anchor {anchor.anchor_id}",
-            ), None
+        anchor_result = anchor.verify_signer(
+            signer_id=self.key_binding.signer_id,
+            public_key=self.key_binding.public_key,
+            subject=self.to_trust_anchor_subject(attestation_id),
+            label=f"{attestation_id} input anchor",
+            context=context,
+        )
+        if not anchor_result.valid:
+            return context.fail(label, "trust anchor rejected signer or content", [anchor_result]), None
 
         binding_result = self.key_binding.verify(context)
         if not binding_result.valid:
@@ -316,7 +409,7 @@ class SignedInput(Input):
             f"{len(self.output_constraints)} CEL constraints"
         )
         return (
-            context.ok(label, detail),
+            context.ok(label, detail, [anchor_result, binding_result]),
             VerifiedInput(
                 content=self.content,
                 content_hash=content_hash(self.content),
@@ -324,6 +417,15 @@ class SignedInput(Input):
                 signer_id=self.signature.signer_id,
             ),
         )
+
+    def to_trust_anchor_subject(self, attestation_id: str) -> dict[str, Any]:
+        return {
+            "attestation_id": attestation_id,
+            "content": self.content,
+            "kind": "input",
+            "signer_id": self.signature.signer_id,
+            "valid_until": self.valid_until,
+        }
 
 
 @dataclass(frozen=True)

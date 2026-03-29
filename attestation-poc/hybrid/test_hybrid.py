@@ -15,6 +15,7 @@ from .model import (
     OutputConstraint,
     SignedInput,
     TrustAnchor,
+    TrustAnchorConstraint,
 )
 from .policy import constraint_to_document
 from .verify import (
@@ -83,6 +84,17 @@ def no_cluster_admin() -> OutputConstraint:
             'output.content.all('
             'm, !(m.kind == "ClusterRoleBinding" && m.roleRef.name == "cluster-admin")'
             ')'
+        ),
+    )
+
+
+def tenant_subject_must_match_anchor_tenant() -> TrustAnchorConstraint:
+    return TrustAnchorConstraint(
+        name="input tenant must match anchor tenant",
+        expression=(
+            'subject.kind != "input" || '
+            '("tenant" in subject.content && '
+            'subject.content.tenant == anchor.attributes.tenant)'
         ),
     )
 
@@ -494,6 +506,67 @@ class HybridAttestationTests(unittest.TestCase):
             )
 
         self.assertIn("no ClusterRoleBinding may grant cluster-admin", str(context.exception))
+
+    def test_tenant_scoped_trust_anchor_accepts_matching_tenant(self) -> None:
+        tenant_alice = make_identity("alice-tenant-a", "tenant-a-idp")
+        trust_store = TrustStore()
+        trust_store.add(
+            TrustAnchor(
+                anchor_id="tenant-a-idp",
+                known_keys={"alice-tenant-a": tenant_alice.keys.public_key_bytes},
+                attributes={"tenant": "tenant-a"},
+                constraints=(tenant_subject_must_match_anchor_tenant(),),
+            )
+        )
+
+        attestation = Attestation(
+            attestation_id="tenant-match",
+            input=self._input(
+                tenant_alice,
+                {"tenant": "tenant-a", "intent": "deploy-web"},
+            ),
+            output=make_output([{"kind": "ConfigMap"}]),
+        )
+        self.attestation_store.add(attestation)
+
+        verified = verify_attestation(
+            attestation,
+            self.attestation_store,
+            trust_store,
+        )
+
+        self.assertEqual(verified.content, [{"kind": "ConfigMap"}])
+
+    def test_tenant_scoped_trust_anchor_rejects_other_tenant(self) -> None:
+        tenant_alice = make_identity("alice-tenant-a", "tenant-a-idp")
+        trust_store = TrustStore()
+        trust_store.add(
+            TrustAnchor(
+                anchor_id="tenant-a-idp",
+                known_keys={"alice-tenant-a": tenant_alice.keys.public_key_bytes},
+                attributes={"tenant": "tenant-a"},
+                constraints=(tenant_subject_must_match_anchor_tenant(),),
+            )
+        )
+
+        attestation = Attestation(
+            attestation_id="tenant-mismatch",
+            input=self._input(
+                tenant_alice,
+                {"tenant": "tenant-b", "intent": "deploy-web"},
+            ),
+            output=make_output([{"kind": "ConfigMap"}]),
+        )
+        self.attestation_store.add(attestation)
+
+        with self.assertRaises(VerificationError) as context:
+            verify_attestation(
+                attestation,
+                self.attestation_store,
+                trust_store,
+            )
+
+        self.assertIn("input tenant must match anchor tenant", str(context.exception))
 
     def _input(
         self,
