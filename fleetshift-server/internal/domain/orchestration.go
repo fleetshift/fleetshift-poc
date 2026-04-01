@@ -460,6 +460,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("resolve placement: %w", err)
 	}
 
+	// TODO: is this actually an error case?
 	if len(resolved) == 0 {
 		return nil, fmt.Errorf("placement resolved to zero targets")
 	}
