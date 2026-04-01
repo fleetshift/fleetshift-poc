@@ -233,6 +233,24 @@ class AddonPlacementStrategy:
 
 
 # ---------------------------------------------------------------------------
+# Manifest envelope -- typed payload items within a delivery.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ManifestEnvelope:
+    """A single typed manifest/resource item within a delivery.
+
+    Analogous to fleetshift-server's domain.Manifest: each item carries
+    an explicit resource_type so receivers know how to parse the opaque
+    content.  Order within a manifests list may be significant.
+    """
+
+    resource_type: str
+    content: Any
+
+
+# ---------------------------------------------------------------------------
 # Delivery output types -- algebraic output variants for typed deliveries.
 # ---------------------------------------------------------------------------
 
@@ -257,9 +275,14 @@ class PlacementEvidence:
 
 @dataclass(frozen=True)
 class PutManifests:
-    """Deliver manifests to a target."""
+    """Deliver manifests to a target.
 
-    manifests: Any
+    manifests is an ordered sequence of typed envelopes.  Order is
+    preserved through signing and verification because some targets may
+    treat multi-item deliveries as an ordered sequence.
+    """
+
+    manifests: tuple[ManifestEnvelope, ...]
     signature: OutputSignature | None = None
     placement: PlacementEvidence | None = None
 
@@ -274,10 +297,12 @@ class PutManifests:
         label = f"{attestation_id} output"
         children: list[VerificationResult] = []
 
+        serialized = _serialize_manifests(self.manifests)
+
         manifest_signer_id: str | None = None
         if self.signature is not None:
             sig_result, manifest_signer_id = _verify_output_sig(
-                self.manifests, self.signature,
+                serialized, self.signature,
                 f"{attestation_id} manifest signature", context,
             )
             children.append(sig_result)
@@ -319,11 +344,11 @@ class PutManifests:
                         None,
                     )
 
-        manifest_hash = content_hash(self.manifests)
+        manifest_hash = content_hash(serialized)
         return (
             context.ok(label, "satisfies all constraints", children),
             VerifiedOutput(
-                content=self.manifests,
+                content=serialized,
                 content_hash=manifest_hash,
                 signer_id=manifest_signer_id,
             ),
@@ -486,10 +511,33 @@ def _verify_placement_evidence(
     )
 
 
+def _serialize_manifests(manifests: tuple[ManifestEnvelope, ...]) -> list[dict[str, Any]]:
+    """Serialize manifest envelopes for the CEL evaluation context."""
+    return [
+        {"resource_type": m.resource_type, "content": m.content}
+        for m in manifests
+    ]
+
+
+def _extract_update_content(serialized_manifests: Any) -> Any:
+    """Extract the spec_update payload from a serialized manifest list.
+
+    DerivedInput uses PutManifests whose envelope list contains a single
+    spec_update item.  This helper finds that item and returns its content
+    so that mutation.apply_update can consume it unchanged.
+    """
+    if not isinstance(serialized_manifests, list):
+        raise ValueError("update output must be a list of manifest envelopes")
+    for envelope in serialized_manifests:
+        if isinstance(envelope, dict) and envelope.get("resource_type") == "spec_update":
+            return envelope.get("content")
+    raise ValueError("no spec_update manifest found in update output")
+
+
 def _delivery_cel_context(
     verified_input: VerifiedInput,
     action: str,
-    manifests: Any,
+    manifests: tuple[ManifestEnvelope, ...] | None,
     manifest_sig: OutputSignature | None,
     manifest_signer_id: str | None,
     placement: PlacementEvidence | None,
@@ -506,7 +554,7 @@ def _delivery_cel_context(
                 "trust_anchor_id": manifest_sig.trust_anchor_id,
             }
         output_ctx = {
-            "manifests": manifests,
+            "manifests": _serialize_manifests(manifests),
             "has_signature": manifest_sig is not None,
             "signer_id": manifest_signer_id,
             "signature": sig_ctx,
@@ -715,12 +763,13 @@ class DerivedInput(Input):
             ), None
 
         try:
+            update_content = _extract_update_content(verified_update_output.content)
             derived_content = apply_update(
                 verified_prior.content,
-                verified_update_output.content,
+                update_content,
             )
             output_constraints = derive_constraints(
-                verified_update_output.content,
+                update_content,
                 derived_content,
             )
         except Exception as exc:

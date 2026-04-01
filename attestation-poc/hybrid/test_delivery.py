@@ -18,6 +18,7 @@ from .crypto import KeyPair, content_hash, generate_keypair, sign
 from .model import (
     Attestation,
     KeyBinding,
+    ManifestEnvelope,
     OutputConstraint,
     OutputSignature,
     PlacementEvidence,
@@ -32,6 +33,28 @@ from .verify import (
     VerificationError,
     verify_attestation,
 )
+
+
+# ---------------------------------------------------------------------------
+# Envelope helpers
+# ---------------------------------------------------------------------------
+
+
+def k8s_manifests(*objects: dict) -> tuple[ManifestEnvelope, ...]:
+    """Wrap raw Kubernetes objects as typed manifest envelopes."""
+    return tuple(
+        ManifestEnvelope(resource_type="kubernetes", content=obj)
+        for obj in objects
+    )
+
+
+def serialize_envelopes(envelopes: tuple[ManifestEnvelope, ...]) -> list[dict]:
+    return [{"resource_type": m.resource_type, "content": m.content} for m in envelopes]
+
+
+# ---------------------------------------------------------------------------
+# Identities
+# ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -52,13 +75,15 @@ def make_identity(signer_id: str, trust_anchor_id: str) -> Identity:
     )
 
 
-SAMPLE_MANIFESTS = [
+SAMPLE_MANIFESTS = k8s_manifests(
     {
         "apiVersion": "apps/v1",
         "kind": "Deployment",
         "metadata": {"name": "nginx", "namespace": "default"},
     },
-]
+)
+
+SAMPLE_MANIFESTS_SERIALIZED = serialize_envelopes(SAMPLE_MANIFESTS)
 
 
 class DeliveryVerificationTests(unittest.TestCase):
@@ -104,7 +129,7 @@ class DeliveryVerificationTests(unittest.TestCase):
 
     def _inline_predicate_input(
         self,
-        manifests,
+        manifests: tuple[ManifestEnvelope, ...],
         predicate: str,
         *,
         output_constraints=(),
@@ -114,7 +139,10 @@ class DeliveryVerificationTests(unittest.TestCase):
             self.alice.key_binding,
             content={
                 "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "inline", "manifests": manifests},
+                "manifest_strategy": {
+                    "type": "inline",
+                    "manifests": serialize_envelopes(manifests),
+                },
                 "placement_strategy": {"type": "predicate", "expression": predicate},
             },
             output_constraints=output_constraints,
@@ -173,7 +201,7 @@ class DeliveryVerificationTests(unittest.TestCase):
 
     def _inline_addon_input(
         self,
-        manifests,
+        manifests: tuple[ManifestEnvelope, ...],
         placement_addon: str = "capacity-planner",
         placement_anchor: str = "fleet-addons",
         *,
@@ -184,7 +212,10 @@ class DeliveryVerificationTests(unittest.TestCase):
             self.alice.key_binding,
             content={
                 "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "inline", "manifests": manifests},
+                "manifest_strategy": {
+                    "type": "inline",
+                    "manifests": serialize_envelopes(manifests),
+                },
                 "placement_strategy": {
                     "type": "addon",
                     "addon_id": placement_addon,
@@ -206,11 +237,13 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_inline_manifest_tampered_output(self) -> None:
         si = self._inline_predicate_input(SAMPLE_MANIFESTS, 'target.labels.env == "prod"')
-        tampered = [{"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "evil", "namespace": "default"}}]
+        tampered = k8s_manifests(
+            {"apiVersion": "v1", "kind": "Secret", "metadata": {"name": "evil", "namespace": "default"}},
+        )
         output = make_put_manifests(tampered)
         att = Attestation(attestation_id="att-1", input=si, output=output)
         with self.assertRaises(VerificationError) as ctx:
@@ -235,7 +268,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
         self.assertEqual(result.signer_id, "observability")
 
     def test_addon_manifest_wrong_addon_signs(self) -> None:
@@ -300,7 +333,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_predicate_placement_target_no_match_put_rejected(self) -> None:
         si = self._inline_predicate_input(SAMPLE_MANIFESTS, 'target.labels.env == "prod"')
@@ -351,7 +384,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_addon_placement_missing_evidence_rejected(self) -> None:
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
@@ -443,7 +476,7 @@ class DeliveryVerificationTests(unittest.TestCase):
     def test_namespace_constraint_plus_addon_strategy(self) -> None:
         ns_constraint = OutputConstraint(
             name="must be in namespace default",
-            expression='output.manifests.all(m, m.metadata.namespace == "default")',
+            expression='output.manifests.all(m, m.content.metadata.namespace == "default")',
         )
         si = self._addon_predicate_input(output_constraints=(ns_constraint,))
         output = sign_put_manifests(
@@ -455,12 +488,12 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_namespace_constraint_fails_with_wrong_namespace(self) -> None:
         ns_constraint = OutputConstraint(
             name="must be in namespace kube-system",
-            expression='output.manifests.all(m, m.metadata.namespace == "kube-system")',
+            expression='output.manifests.all(m, m.content.metadata.namespace == "kube-system")',
         )
         si = self._addon_predicate_input(output_constraints=(ns_constraint,))
         output = sign_put_manifests(
@@ -478,7 +511,10 @@ class DeliveryVerificationTests(unittest.TestCase):
     def test_gvk_allowlist_plus_inline_strategy(self) -> None:
         gvk_constraint = OutputConstraint(
             name="only Deployments allowed",
-            expression='output.manifests.all(m, (m.apiVersion + "/" + m.kind) == "apps/v1/Deployment")',
+            expression=(
+                'output.manifests.all(m, '
+                '(m.content.apiVersion + "/" + m.content.kind) == "apps/v1/Deployment")'
+            ),
         )
         si = self._inline_predicate_input(
             SAMPLE_MANIFESTS, 'target.labels.env == "prod"',
@@ -490,12 +526,12 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_user_constraint_fails_even_though_strategy_passes(self) -> None:
         strict_constraint = OutputConstraint(
             name="no Deployments allowed",
-            expression='output.manifests.all(m, m.kind != "Deployment")',
+            expression='output.manifests.all(m, m.content.kind != "Deployment")',
         )
         si = self._inline_predicate_input(
             SAMPLE_MANIFESTS, 'target.labels.env == "prod"',
@@ -539,15 +575,22 @@ class DeliveryVerificationTests(unittest.TestCase):
 
     def test_swap_manifests_between_attestations(self) -> None:
         """Manifests from deploy-2 cannot satisfy deploy-1's inline constraint."""
-        manifests_a = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "a", "namespace": "default"}}]
-        manifests_b = [{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "b", "namespace": "default"}}]
+        manifests_a = k8s_manifests(
+            {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "a", "namespace": "default"}},
+        )
+        manifests_b = k8s_manifests(
+            {"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "b", "namespace": "default"}},
+        )
 
         si_a = make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
             content={
                 "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "inline", "manifests": manifests_a},
+                "manifest_strategy": {
+                    "type": "inline",
+                    "manifests": serialize_envelopes(manifests_a),
+                },
                 "placement_strategy": {"type": "predicate", "expression": 'target.labels.env == "prod"'},
             },
         )
@@ -566,7 +609,10 @@ class DeliveryVerificationTests(unittest.TestCase):
             self.alice.key_binding,
             content={
                 "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "inline", "manifests": SAMPLE_MANIFESTS},
+                "manifest_strategy": {
+                    "type": "inline",
+                    "manifests": SAMPLE_MANIFESTS_SERIALIZED,
+                },
                 "placement_strategy": {"type": "predicate", "expression": 'target.labels.env == "prod"'},
             },
             valid_duration_sec=-1,
@@ -638,7 +684,10 @@ class DeliveryVerificationTests(unittest.TestCase):
             self.alice.key_binding,
             content={
                 "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "inline", "manifests": SAMPLE_MANIFESTS},
+                "manifest_strategy": {
+                    "type": "inline",
+                    "manifests": SAMPLE_MANIFESTS_SERIALIZED,
+                },
                 "placement_strategy": {"type": "custom-unknown"},
             },
         )
@@ -672,7 +721,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
         self.assertEqual(result.signer_id, "observability")
 
     def test_addon_manifest_addon_placement_remove_happy_path(self) -> None:
@@ -703,7 +752,7 @@ class DeliveryVerificationTests(unittest.TestCase):
             att, self.empty_bundle, self.trust_store,
             target_identity=self.prod_target,
         )
-        self.assertEqual(result.content, SAMPLE_MANIFESTS)
+        self.assertEqual(result.content, SAMPLE_MANIFESTS_SERIALIZED)
 
     def test_forged_manifest_signature_untrusted_key(self) -> None:
         """Addon signature from a key not in the trust anchor should fail."""

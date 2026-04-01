@@ -10,16 +10,20 @@ from .policy import constraints_from_documents, derive_strategy_constraints
 
 
 def apply_update(prior_content: Any, update_content: Any) -> Any:
+    """Apply a spec-update directive to prior input content.
+
+    The caller is responsible for ensuring update_content comes from a
+    manifest envelope whose resource_type identifies it as a spec update;
+    this function does not re-check that discriminator.
+    """
     if not isinstance(prior_content, dict):
         raise ValueError("prior content must be a dict")
     if not isinstance(update_content, dict):
         raise ValueError("update content must be a dict")
-    if update_content.get("type") != "spec_update":
-        raise ValueError("update content must have type spec_update")
 
     expression = update_content.get("derive_input_expression")
     if not isinstance(expression, str) or not expression:
-        raise ValueError("spec_update requires a non-empty derive_input_expression")
+        raise ValueError("update content requires a non-empty derive_input_expression")
 
     result = evaluate_json(
         expression,

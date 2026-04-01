@@ -8,6 +8,7 @@ from typing import Any, Iterable
 from .crypto import KeyPair, content_hash, sign
 from .model import (
     KeyBinding,
+    ManifestEnvelope,
     OutputConstraint,
     OutputSignature,
     PlacementEvidence,
@@ -15,6 +16,7 @@ from .model import (
     RemoveByDeliveryId,
     Signature,
     SignedInput,
+    _serialize_manifests,
 )
 from .policy import signed_input_envelope
 
@@ -70,7 +72,7 @@ def make_signed_input(
 
 
 def make_put_manifests(
-    manifests: Any,
+    manifests: tuple[ManifestEnvelope, ...],
     *,
     placement: PlacementEvidence | None = None,
 ) -> PutManifests:
@@ -81,11 +83,12 @@ def sign_put_manifests(
     keys: KeyPair,
     signer_id: str,
     trust_anchor_id: str,
-    manifests: Any,
+    manifests: tuple[ManifestEnvelope, ...],
     *,
     placement: PlacementEvidence | None = None,
 ) -> PutManifests:
-    manifest_hash = content_hash(manifests)
+    serialized = _serialize_manifests(manifests)
+    manifest_hash = content_hash(serialized)
     return PutManifests(
         manifests=manifests,
         signature=OutputSignature(
