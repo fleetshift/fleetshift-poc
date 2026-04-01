@@ -162,31 +162,6 @@ class OutputConstraint:
     name: str
     expression: str
 
-    def verify(
-        self,
-        attestation_id: str,
-        verified_input: VerifiedInput,
-        output: Output,
-        verified_output: VerifiedOutput,
-        context: VerificationContext,
-    ) -> VerificationResult:
-        label = f"{attestation_id} constraint"
-        try:
-            valid = evaluate_bool(
-                self.expression,
-                {
-                    "input": verified_input.content,
-                    "output": output.to_context(verified_output),
-                },
-            )
-        except CelEvaluationError as exc:
-            return context.fail(label, f"constraint evaluation failed: {exc}")
-
-        if not valid:
-            return context.fail(label, f"predicate returned false: {self.name}")
-
-        return context.ok(label, f"constraint matched: {self.name}")
-
     def evaluate(
         self,
         attestation_id: str,
@@ -219,143 +194,6 @@ class VerifiedOutput:
     content: Any
     content_hash: bytes
     signer_id: str | None = None
-
-
-@dataclass(frozen=True)
-class Output:
-    """Produced content, optionally signed."""
-
-    content: Any
-    signature: OutputSignature | None = None
-
-    def verify(
-        self,
-        attestation_id: str,
-        verified_input: VerifiedInput,
-        context: VerificationContext,
-    ) -> tuple[VerificationResult, VerifiedOutput | None]:
-        label = f"{attestation_id} output"
-        children: list[VerificationResult] = []
-
-        signature_result, verified_output = self.verify_signature(attestation_id, context)
-        children.append(signature_result)
-        if not signature_result.valid or verified_output is None:
-            return context.fail(label, "output signature invalid", children), None
-
-        if not verified_input.output_constraints:
-            children.append(
-                context.ok(
-                    f"{attestation_id} output constraints",
-                    "no output constraints",
-                )
-            )
-            return (
-                context.ok(label, "satisfies all constraints", children),
-                verified_output,
-            )
-
-        for constraint in verified_input.output_constraints:
-            constraint_result = constraint.verify(
-                attestation_id,
-                verified_input,
-                self,
-                verified_output,
-                context,
-            )
-            children.append(constraint_result)
-            if not constraint_result.valid:
-                return (
-                    context.fail(
-                        label,
-                        f"constraint failed: {constraint.name}",
-                        children,
-                    ),
-                    None,
-                )
-
-        return context.ok(label, "satisfies all constraints", children), verified_output
-
-    def verify_signature(
-        self,
-        attestation_id: str,
-        context: VerificationContext,
-    ) -> tuple[VerificationResult, VerifiedOutput | None]:
-        label = f"{attestation_id} output signature"
-        output_hash = content_hash(self.content)
-
-        if self.signature is None:
-            return (
-                context.ok(label, "unsigned output"),
-                VerifiedOutput(content=self.content, content_hash=output_hash),
-            )
-
-        signature = self.signature.signature
-        if signature.content_hash != output_hash:
-            return context.fail(label, "output hash mismatch"), None
-        if not verify(signature.public_key, output_hash, signature.signature_bytes):
-            return context.fail(
-                label,
-                f"output signature verification failed for {signature.signer_id}",
-            ), None
-
-        anchor = context.trust_store.get(self.signature.trust_anchor_id)
-        if anchor is None:
-            return context.fail(
-                label,
-                f"trust anchor not found: {self.signature.trust_anchor_id}",
-            ), None
-
-        anchor_result = anchor.verify_signer(
-            signer_id=signature.signer_id,
-            public_key=signature.public_key,
-            subject=self.to_trust_anchor_subject(signature.signer_id),
-            label=f"{attestation_id} output anchor",
-            context=context,
-        )
-        if not anchor_result.valid:
-            return context.fail(label, "output trust anchor rejected signer", [anchor_result]), None
-
-        return (
-            context.ok(
-                label,
-                (
-                    f"signed by {signature.signer_id}, "
-                    f"verified against {self.signature.trust_anchor_id}"
-                ),
-                [anchor_result],
-            ),
-            VerifiedOutput(
-                content=self.content,
-                content_hash=output_hash,
-                signer_id=signature.signer_id,
-            ),
-        )
-
-    def to_context(self, verified_output: VerifiedOutput) -> dict[str, Any]:
-        signature_context: dict[str, Any] | None = None
-        if self.signature is not None:
-            signature_context = {
-                "signer_id": self.signature.signature.signer_id,
-                "trust_anchor_id": self.signature.trust_anchor_id,
-            }
-
-        return {
-            "content": verified_output.content,
-            "content_hash": verified_output.content_hash.hex(),
-            "has_signature": self.signature is not None,
-            "signature": signature_context,
-            "signer_id": verified_output.signer_id,
-        }
-
-    def to_trust_anchor_subject(
-        self,
-        signer_id: str | None,
-    ) -> TrustAnchorSubject:
-        return TrustAnchorSubject(
-            kind="output",
-            signer_id=signer_id,
-            content=self.content,
-        )
 
 
 # ---------------------------------------------------------------------------
@@ -406,8 +244,13 @@ class PlacementEvidence:
     The decision is a concrete list of target IDs -- placement answers
     "which targets," nothing more.  Unsigned placement decisions are
     meaningless (cannot be trusted), so the signature is required.
+
+    deployment_id binds this evidence to a specific deployment so that
+    valid evidence from one deployment cannot be replayed against another.
+    The signature covers both deployment_id and targets.
     """
 
+    deployment_id: str
     targets: tuple[str, ...]
     signature: OutputSignature
 
@@ -447,9 +290,8 @@ class PutManifests:
 
         placement_signer_id: str | None = None
         if self.placement is not None:
-            pe_result, placement_signer_id = _verify_output_sig(
-                list(self.placement.targets), self.placement.signature,
-                f"{attestation_id} placement evidence", context,
+            pe_result, placement_signer_id = _verify_placement_evidence(
+                self.placement, verified_input, attestation_id, context,
             )
             children.append(pe_result)
             if not pe_result.valid:
@@ -508,9 +350,8 @@ class RemoveByDeliveryId:
 
         placement_signer_id: str | None = None
         if self.placement is not None:
-            pe_result, placement_signer_id = _verify_output_sig(
-                list(self.placement.targets), self.placement.signature,
-                f"{attestation_id} placement evidence", context,
+            pe_result, placement_signer_id = _verify_placement_evidence(
+                self.placement, verified_input, attestation_id, context,
             )
             children.append(pe_result)
             if not pe_result.valid:
@@ -600,6 +441,51 @@ def _verify_output_sig(
     )
 
 
+def _placement_evidence_content(evidence: PlacementEvidence) -> dict[str, Any]:
+    """Canonical document that a placement addon signs over."""
+    return {
+        "deployment_id": evidence.deployment_id,
+        "targets": list(evidence.targets),
+    }
+
+
+def _verify_placement_evidence(
+    evidence: PlacementEvidence,
+    verified_input: VerifiedInput,
+    attestation_id: str,
+    context: VerificationContext,
+) -> tuple[VerificationResult, str | None]:
+    """Verify placement evidence signature and deployment binding."""
+    label = f"{attestation_id} placement evidence"
+    children: list[VerificationResult] = []
+
+    sig_result, signer_id = _verify_output_sig(
+        _placement_evidence_content(evidence), evidence.signature,
+        label, context,
+    )
+    children.append(sig_result)
+    if not sig_result.valid:
+        return context.fail(label, "signature invalid", children), None
+
+    input_content = verified_input.content
+    expected_id = input_content.get("deployment_id") if isinstance(input_content, dict) else None
+    if expected_id is not None and evidence.deployment_id != expected_id:
+        return (
+            context.fail(
+                label,
+                f"deployment_id mismatch: evidence has {evidence.deployment_id!r}, "
+                f"input has {expected_id!r}",
+                children,
+            ),
+            None,
+        )
+
+    return (
+        context.ok(label, f"verified for deployment {evidence.deployment_id!r}", children),
+        signer_id,
+    )
+
+
 def _delivery_cel_context(
     verified_input: VerifiedInput,
     action: str,
@@ -629,6 +515,7 @@ def _delivery_cel_context(
     placement_ctx: dict[str, Any]
     if placement is not None:
         placement_ctx = {
+            "deployment_id": placement.deployment_id,
             "targets": list(placement.targets),
             "has_signature": True,
             "signer_id": placement_signer_id,
@@ -639,6 +526,7 @@ def _delivery_cel_context(
         }
     else:
         placement_ctx = {
+            "deployment_id": None,
             "targets": [],
             "has_signature": False,
             "signer_id": None,
@@ -861,7 +749,7 @@ class Attestation:
 
     attestation_id: str
     input: Input
-    output: Output | PutManifests | RemoveByDeliveryId
+    output: PutManifests | RemoveByDeliveryId
 
     def verify(
         self,

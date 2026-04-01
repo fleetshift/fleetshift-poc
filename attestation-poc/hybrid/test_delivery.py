@@ -342,6 +342,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-1", "cluster-prod-2"),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_put_manifests(SAMPLE_MANIFESTS, placement=evidence)
@@ -367,6 +368,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.obs_addon.keys, "observability", "fleet-addons",
             targets=("cluster-prod-1",),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_put_manifests(SAMPLE_MANIFESTS, placement=evidence)
@@ -382,6 +384,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-2", "cluster-prod-3"),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_put_manifests(SAMPLE_MANIFESTS, placement=evidence)
@@ -422,6 +425,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-2",),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_remove_by_delivery_id("delivery-1", placement=evidence)
@@ -514,6 +518,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("c1", "c2", "c3"),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(
             SAMPLE_MANIFESTS,
@@ -575,10 +580,28 @@ class DeliveryVerificationTests(unittest.TestCase):
             )
         self.assertIn("expired", str(ctx.exception))
 
+    def test_placement_evidence_cross_deployment_replay_rejected(self) -> None:
+        """Evidence signed for deploy-2 cannot be used with deploy-1's attestation."""
+        evidence_for_other = make_placement_evidence(
+            self.placer_addon.keys, "capacity-planner", "fleet-addons",
+            targets=("cluster-prod-1",),
+            deployment_id="deploy-2",
+        )
+        si = self._inline_addon_input(SAMPLE_MANIFESTS)
+        output = make_put_manifests(SAMPLE_MANIFESTS, placement=evidence_for_other)
+        att = Attestation(attestation_id="att-1", input=si, output=output)
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                att, self.empty_bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("deployment_id mismatch", str(ctx.exception))
+
     def test_forged_placement_evidence_wrong_key(self) -> None:
         forged_evidence = make_placement_evidence(
             self.evil.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-1",),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_put_manifests(SAMPLE_MANIFESTS, placement=forged_evidence)
@@ -636,6 +659,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-1",),
+            deployment_id="deploy-1",
         )
         si = self._addon_addon_input()
         output = sign_put_manifests(
@@ -655,6 +679,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-2",),
+            deployment_id="deploy-1",
         )
         si = self._addon_addon_input()
         output = make_remove_by_delivery_id("delivery-1", placement=evidence)
@@ -669,6 +694,7 @@ class DeliveryVerificationTests(unittest.TestCase):
         evidence = make_placement_evidence(
             self.placer_addon.keys, "capacity-planner", "fleet-addons",
             targets=("cluster-prod-1",),
+            deployment_id="deploy-1",
         )
         si = self._inline_addon_input(SAMPLE_MANIFESTS)
         output = make_put_manifests(SAMPLE_MANIFESTS, placement=evidence)

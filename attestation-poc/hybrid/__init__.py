@@ -6,17 +6,16 @@ Combines:
   - explicit, signed CEL output constraints on inputs
   - self-contained verification bundles (no external store)
   - data-driven derivation from signed CEL update outputs
+  - delivery-aware output types with strategy-implied constraints
   - explainable verification results
 """
 
 from .build import (
     make_key_binding,
-    make_output,
     make_placement_evidence,
     make_put_manifests,
     make_remove_by_delivery_id,
     make_signed_input,
-    sign_output,
     sign_put_manifests,
 )
 from .cel_runtime import CelEvaluationError
@@ -29,7 +28,6 @@ from .model import (
     DerivedInput,
     InlineManifestStrategy,
     KeyBinding,
-    Output,
     OutputConstraint,
     OutputSignature,
     PlacementEvidence,
@@ -43,7 +41,7 @@ from .model import (
     TrustAnchorSubject,
     VerifiedOutput,
 )
-from .policy import derive_output_constraints, derive_strategy_constraints
+from .policy import derive_strategy_constraints
 from .verify import (
     TrustStore,
     VerificationBundle,
@@ -63,7 +61,6 @@ __all__ = [
     "InlineManifestStrategy",
     "KeyBinding",
     "KeyPair",
-    "Output",
     "OutputConstraint",
     "OutputSignature",
     "PlacementEvidence",
@@ -80,17 +77,14 @@ __all__ = [
     "VerificationError",
     "VerificationResult",
     "VerifiedOutput",
-    "derive_output_constraints",
     "derive_strategy_constraints",
     "explain_verification",
     "generate_keypair",
     "make_key_binding",
-    "make_output",
     "make_placement_evidence",
     "make_put_manifests",
     "make_remove_by_delivery_id",
     "make_signed_input",
-    "sign_output",
     "sign_put_manifests",
     "verify_attestation",
 ]

@@ -8,7 +8,6 @@ from typing import Any, Iterable
 from .crypto import KeyPair, content_hash, sign
 from .model import (
     KeyBinding,
-    Output,
     OutputConstraint,
     OutputSignature,
     PlacementEvidence,
@@ -65,31 +64,6 @@ def make_signed_input(
     )
 
 
-def make_output(content: Any) -> Output:
-    return Output(content=content)
-
-
-def sign_output(
-    keys: KeyPair,
-    signer_id: str,
-    trust_anchor_id: str,
-    content: Any,
-) -> Output:
-    output_hash = content_hash(content)
-    return Output(
-        content=content,
-        signature=OutputSignature(
-            signature=Signature(
-                signer_id=signer_id,
-                public_key=keys.public_key_bytes,
-                content_hash=output_hash,
-                signature_bytes=sign(keys.private_key, output_hash),
-            ),
-            trust_anchor_id=trust_anchor_id,
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Delivery output helpers
 # ---------------------------------------------------------------------------
@@ -140,16 +114,20 @@ def make_placement_evidence(
     signer_id: str,
     trust_anchor_id: str,
     targets: tuple[str, ...],
+    *,
+    deployment_id: str,
 ) -> PlacementEvidence:
-    targets_hash = content_hash(list(targets))
+    evidence_doc = {"deployment_id": deployment_id, "targets": list(targets)}
+    doc_hash = content_hash(evidence_doc)
     return PlacementEvidence(
+        deployment_id=deployment_id,
         targets=targets,
         signature=OutputSignature(
             signature=Signature(
                 signer_id=signer_id,
                 public_key=keys.public_key_bytes,
-                content_hash=targets_hash,
-                signature_bytes=sign(keys.private_key, targets_hash),
+                content_hash=doc_hash,
+                signature_bytes=sign(keys.private_key, doc_hash),
             ),
             trust_anchor_id=trust_anchor_id,
         ),

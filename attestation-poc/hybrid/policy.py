@@ -53,39 +53,6 @@ def signed_input_envelope(
     }
 
 
-def derive_output_constraints(content: Any) -> tuple[OutputConstraint, ...]:
-    """Legacy derivation for the generic Output model."""
-    if not isinstance(content, dict):
-        return ()
-
-    strategy = content.get("manifest_strategy", {})
-    if not isinstance(strategy, dict):
-        return ()
-
-    if strategy.get("type") != "addon":
-        return ()
-
-    addon_id = strategy.get("addon_id") or strategy.get("addon")
-    if not addon_id:
-        return ()
-
-    trust_anchor_id = (
-        strategy.get("trust_anchor_id")
-        or strategy.get("trust_anchor")
-        or "fleet-addons"
-    )
-    return (
-        OutputConstraint(
-            name=f"output must be signed by {addon_id} via {trust_anchor_id}",
-            expression=(
-                f'output.has_signature && '
-                f'output.signature.trust_anchor_id == "{trust_anchor_id}" && '
-                f'output.signer_id == "{addon_id}"'
-            ),
-        ),
-    )
-
-
 # ---------------------------------------------------------------------------
 # Strategy-implied constraint derivation for the delivery output model.
 # ---------------------------------------------------------------------------
