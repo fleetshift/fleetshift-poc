@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
 from .crypto import KeyPair, content_hash, sign
 from .model import (
@@ -19,6 +19,9 @@ from .model import (
     _serialize_manifests,
 )
 from .policy import signed_input_envelope
+
+if TYPE_CHECKING:
+    from .model import DeploymentContent
 
 
 def make_key_binding(
@@ -43,7 +46,7 @@ def make_key_binding(
 def make_signed_input(
     keys: KeyPair,
     key_binding: KeyBinding,
-    content: Any,
+    content: DeploymentContent,
     *,
     output_constraints: Iterable[OutputConstraint] = (),
     valid_duration_sec: float = 86400,

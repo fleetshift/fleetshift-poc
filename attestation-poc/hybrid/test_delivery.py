@@ -86,6 +86,24 @@ def make_identity(signer_id: str, trust_anchor_id: str) -> Identity:
     )
 
 
+_NOOP_PLACEMENT = StrategySpec(type="predicate", attributes={"expression": "true"})
+
+
+def _addon_content(
+    addon_id: str,
+    trust_anchor_id: str = "fleet-addons",
+    deployment_id: str = "update-request",
+) -> DeploymentContent:
+    return DeploymentContent(
+        deployment_id=deployment_id,
+        manifest_strategy=StrategySpec(
+            type="addon",
+            attributes={"addon_id": addon_id, "trust_anchor_id": trust_anchor_id},
+        ),
+        placement_strategy=_NOOP_PLACEMENT,
+    )
+
+
 SAMPLE_MANIFESTS = k8s_manifests(
     {
         "apiVersion": "apps/v1",
@@ -1174,7 +1192,7 @@ class FleetWideUpgradeTests(unittest.TestCase):
             input=make_signed_input(
                 self.bob.keys,
                 self.bob.key_binding,
-                content={"type": "request", "capability": "upgrade-planner"},
+                content=_addon_content("upgrade-planner"),
                 output_constraints=(
                     OutputConstraint(
                         name="output must be signed by upgrade-planner via fleet-addons",
@@ -1236,7 +1254,7 @@ class FleetWideUpgradeTests(unittest.TestCase):
             input=make_signed_input(
                 self.bob.keys,
                 self.bob.key_binding,
-                content={"type": "request", "capability": "upgrade-planner"},
+                content=_addon_content("upgrade-planner"),
                 output_constraints=(
                     OutputConstraint(
                         name="output must be signed by upgrade-planner via fleet-addons",
@@ -1341,7 +1359,7 @@ class FleetWideUpgradeTests(unittest.TestCase):
             input=make_signed_input(
                 self.evil.keys,
                 self.evil.key_binding,
-                content={"type": "request"},
+                content=_addon_content("upgrade-planner"),
             ),
             output=sign_put_manifests(
                 self.evil.keys, "evil", "evil-anchor",
@@ -1395,7 +1413,7 @@ class FleetWideUpgradeTests(unittest.TestCase):
             input=make_signed_input(
                 self.bob.keys,
                 self.bob.key_binding,
-                content={"type": "request", "capability": "upgrade-planner"},
+                content=_addon_content("upgrade-planner"),
                 output_constraints=(
                     OutputConstraint(
                         name="output must be signed by upgrade-planner via fleet-addons",
@@ -1422,7 +1440,7 @@ class FleetWideUpgradeTests(unittest.TestCase):
             input=make_signed_input(
                 self.bob.keys,
                 self.bob.key_binding,
-                content={"type": "request", "capability": "upgrade-planner"},
+                content=_addon_content("upgrade-planner"),
                 output_constraints=(
                     OutputConstraint(
                         name="output must be signed by upgrade-planner via fleet-addons",
@@ -1884,7 +1902,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             input=make_signed_input(
                 self.bob.keys,
                 self.bob.key_binding,
-                content={"type": "request", "capability": "upgrade-planner"},
+                content=_addon_content("upgrade-planner"),
                 output_constraints=(
                     OutputConstraint(
                         name="output must be signed by upgrade-planner via fleet-addons",
@@ -2111,7 +2129,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 input=make_signed_input(
                     self.bob.keys,
                     self.bob.key_binding,
-                    content={"type": "request"},
+                    content=_addon_content("upgrade-planner"),
                     output_constraints=(
                         OutputConstraint(
                             name="output must be signed by upgrade-planner",
@@ -2175,7 +2193,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 attestation_id=att_id,
                 input=make_signed_input(
                     self.bob.keys, self.bob.key_binding,
-                    content={"type": "request"},
+                    content=_addon_content("upgrade-planner"),
                 ),
                 output=sign_put_manifests(
                     self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
@@ -2353,7 +2371,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             attestation_id="u1",
             input=make_signed_input(
                 self.bob.keys, self.bob.key_binding,
-                content={"type": "request"},
+                content=_addon_content("upgrade-planner"),
             ),
             output=sign_put_manifests(
                 self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
@@ -2371,7 +2389,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             attestation_id="u2",
             input=make_signed_input(
                 self.bob.keys, self.bob.key_binding,
-                content={"type": "request"},
+                content=_addon_content("upgrade-planner"),
             ),
             output=sign_put_manifests(
                 self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
@@ -2455,7 +2473,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             attestation_id="ua",
             input=make_signed_input(
                 self.bob.keys, self.bob.key_binding,
-                content={"type": "request"},
+                content=_addon_content("upgrade-planner"),
             ),
             output=sign_put_manifests(
                 self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
@@ -2470,7 +2488,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             attestation_id="ub",
             input=make_signed_input(
                 self.bob.keys, self.bob.key_binding,
-                content={"type": "request"},
+                content=_addon_content("upgrade-planner"),
             ),
             output=sign_put_manifests(
                 self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",

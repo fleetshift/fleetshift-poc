@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .model import OutputConstraint
+
+if TYPE_CHECKING:
+    from .model import DeploymentContent
 
 
 def constraint_to_document(constraint: OutputConstraint) -> dict[str, Any]:
@@ -164,17 +167,12 @@ def derive_placement_strategy_constraints(
     )
 
 
-def derive_strategy_constraints(content: Any) -> tuple[OutputConstraint, ...]:
+def derive_strategy_constraints(content: DeploymentContent) -> tuple[OutputConstraint, ...]:
     """Derive all strategy-implied constraints from signed input content."""
-    from .model import DeploymentContent
-
-    if isinstance(content, DeploymentContent):
-        content = content.to_dict()
-    if not isinstance(content, dict):
-        return ()
+    d = content.to_dict()
     return (
-        derive_manifest_strategy_constraints(content)
-        + derive_placement_strategy_constraints(content)
+        derive_manifest_strategy_constraints(d)
+        + derive_placement_strategy_constraints(d)
     )
 
 

@@ -137,9 +137,50 @@ def tenant_subject_must_match_anchor_tenant() -> TrustAnchorConstraint:
         name="input tenant must match anchor tenant",
         expression=(
             'subject.kind != "input" || '
-            '("tenant" in subject.content && '
-            'subject.content.tenant == anchor.attributes.tenant)'
+            'subject.content.deployment_id.startsWith(anchor.attributes.tenant + "/")'
         ),
+    )
+
+
+_NOOP_PLACEMENT = StrategySpec(type="predicate", attributes={"expression": "true"})
+
+
+def _content(deployment_id: str = "test") -> DeploymentContent:
+    """Minimal deployment content for tests that fail before output verification."""
+    return DeploymentContent(
+        deployment_id=deployment_id,
+        manifest_strategy=StrategySpec(type="inline", attributes={"manifests": []}),
+        placement_strategy=_NOOP_PLACEMENT,
+    )
+
+
+def _inline_content(
+    manifests: tuple[ManifestEnvelope, ...],
+    deployment_id: str = "test",
+) -> DeploymentContent:
+    """Inline deployment content with manifests matching the output."""
+    return DeploymentContent(
+        deployment_id=deployment_id,
+        manifest_strategy=StrategySpec(
+            type="inline",
+            attributes={"manifests": serialize_envelopes(manifests)},
+        ),
+        placement_strategy=_NOOP_PLACEMENT,
+    )
+
+
+def _addon_content(
+    addon_id: str,
+    trust_anchor_id: str = "fleet-addons",
+    deployment_id: str = "test",
+) -> DeploymentContent:
+    return DeploymentContent(
+        deployment_id=deployment_id,
+        manifest_strategy=StrategySpec(
+            type="addon",
+            attributes={"addon_id": addon_id, "trust_anchor_id": trust_anchor_id},
+        ),
+        placement_strategy=_NOOP_PLACEMENT,
     )
 
 
@@ -190,7 +231,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="direct",
             input=self._input(
                 self.alice,
-                {"intent": "deploy-web"},
+                _inline_content(manifests),
                 output_constraints=(
                     namespace_constraint("prod"),
                     allowed_gvks("apps/v1/Deployment"),
@@ -212,13 +253,7 @@ class HybridAttestationTests(unittest.TestCase):
     # arbitrary output. Tracked separately from the generation refactor.
 
     def test_addon_signed_output_with_explicit_cel_policy_verifies(self) -> None:
-        spec = {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-            }
-        }
+        spec = _addon_content("capi-provisioner")
         manifests = k8s_manifests(
             {
                 "apiVersion": "cluster.x-k8s.io/v1beta1",
@@ -269,7 +304,6 @@ class HybridAttestationTests(unittest.TestCase):
             output_constraints=(addon_must_sign("capi-provisioner"),),
         )
 
-        update_request = {"type": "request", "capability": "upgrade-planner"}
         update_directive = {
             "derive_input_expression": (
                 'set_path(prior, "manifest_strategy.config.version", "1.30.2")'
@@ -282,7 +316,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="upgrade-1",
             input=self._input(
                 self.bob,
-                update_request,
+                _addon_content("upgrade-planner"),
                 output_constraints=(addon_must_sign("upgrade-planner"),),
             ),
             output=self._signed_output(
@@ -353,7 +387,7 @@ class HybridAttestationTests(unittest.TestCase):
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -405,7 +439,7 @@ class HybridAttestationTests(unittest.TestCase):
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update-bad-expression",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -454,7 +488,7 @@ class HybridAttestationTests(unittest.TestCase):
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update-wrong",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -494,7 +528,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="expired",
             input=self._input(
                 self.alice,
-                {"intent": "too-late"},
+                _content(),
                 valid_duration_sec=-1,
             ),
             output=make_put_manifests(k8s_manifests({"ignored": True})),
@@ -508,7 +542,7 @@ class HybridAttestationTests(unittest.TestCase):
     def test_tampered_signed_constraints_fail(self) -> None:
         signed_input = self._input(
             self.alice,
-            {"intent": "tamper-check"},
+            _content(),
             output_constraints=(namespace_constraint("prod"),),
         )
         tampered_input = SignedInput(
@@ -542,7 +576,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="bad-rbac",
             input=self._input(
                 self.alice,
-                {"intent": "deploy-rbac"},
+                _inline_content(manifests),
                 output_constraints=(no_cluster_admin(),),
             ),
             output=make_put_manifests(manifests),
@@ -570,7 +604,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="tenant-match",
             input=self._input(
                 tenant_alice,
-                {"tenant": "tenant-a", "intent": "deploy-web"},
+                _inline_content(manifests, deployment_id="tenant-a/deploy-web"),
             ),
             output=make_put_manifests(manifests),
         )
@@ -595,7 +629,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="tenant-mismatch",
             input=self._input(
                 tenant_alice,
-                {"tenant": "tenant-b", "intent": "deploy-web"},
+                _content(deployment_id="tenant-b/deploy-web"),
             ),
             output=make_put_manifests(k8s_manifests({"kind": "ConfigMap"})),
         )
@@ -625,7 +659,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="tenant-b/spoofed-reference",
             input=self._input(
                 tenant_alice,
-                {"tenant": "tenant-a", "intent": "deploy-web"},
+                _content(deployment_id="tenant-a/deploy-web"),
             ),
             output=make_put_manifests(k8s_manifests({"kind": "ConfigMap"})),
         )
@@ -644,7 +678,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="wrong-addon",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon", "addon_id": "capi-provisioner"}},
+                _addon_content("capi-provisioner"),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=self._signed_output(
@@ -659,16 +693,17 @@ class HybridAttestationTests(unittest.TestCase):
         )
 
     def test_namespace_violation(self) -> None:
+        manifests = k8s_manifests(
+            {"kind": "Deployment", "metadata": {"name": "web", "namespace": "kube-system"}},
+        )
         att = Attestation(
             attestation_id="ns-viol",
             input=self._input(
                 self.alice,
-                {"intent": "deploy"},
+                _inline_content(manifests),
                 output_constraints=(namespace_constraint("prod"),),
             ),
-            output=make_put_manifests(k8s_manifests(
-                {"kind": "Deployment", "metadata": {"name": "web", "namespace": "kube-system"}},
-            )),
+            output=make_put_manifests(manifests),
         )
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(att, self.empty_bundle, self.trust_store)
@@ -683,7 +718,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="multi-ok",
             input=self._input(
                 self.alice,
-                {"intent": "deploy"},
+                _inline_content(manifests),
                 output_constraints=(
                     namespace_constraint("prod"),
                     allowed_gvks("apps/v1/Deployment", "v1/Service"),
@@ -703,7 +738,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="gvk-viol",
             input=self._input(
                 self.alice,
-                {"intent": "deploy"},
+                _inline_content(manifests),
                 output_constraints=(allowed_gvks("apps/v1/Deployment", "v1/Service"),),
             ),
             output=make_put_manifests(manifests),
@@ -713,14 +748,15 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("only GVKs in", str(ctx.exception))
 
     def test_unsigned_output_fails_addon_constraint(self) -> None:
+        cluster_manifests = k8s_manifests({"kind": "Cluster"})
         att = Attestation(
             attestation_id="unsigned",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(cluster_manifests),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
-            output=make_put_manifests(k8s_manifests({"kind": "Cluster"})),
+            output=make_put_manifests(cluster_manifests),
         )
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(att, self.empty_bundle, self.trust_store)
@@ -732,10 +768,10 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_forged_input_signature_wrong_key(self) -> None:
         """Forger signs the same content with their key, keeps alice's key binding."""
-        real = self._input(self.alice, {"x": 1})
+        real = self._input(self.alice, _content())
         forger = generate_keypair()
         forger_kb = make_key_binding(forger, "alice", "tenant-idp")
-        forged = make_signed_input(forger, forger_kb, {"x": 1})
+        forged = make_signed_input(forger, forger_kb, _content())
         tampered = SignedInput(
             content=real.content,
             signature=forged.signature,
@@ -756,7 +792,7 @@ class HybridAttestationTests(unittest.TestCase):
         empty_ts = TrustStore()
         att = Attestation(
             attestation_id="untrusted",
-            input=self._input(self.alice, {"x": 1}),
+            input=self._input(self.alice, _content()),
             output=make_put_manifests(k8s_manifests({"x": 1})),
         )
         with self.assertRaises(VerificationError) as ctx:
@@ -768,7 +804,7 @@ class HybridAttestationTests(unittest.TestCase):
         carol = make_identity("carol", "tenant-idp")
         att = Attestation(
             attestation_id="unknown-key",
-            input=self._input(carol, {"x": 1}),
+            input=self._input(carol, _content()),
             output=make_put_manifests(k8s_manifests({"x": 1})),
         )
         with self.assertRaises(VerificationError) as ctx:
@@ -777,7 +813,7 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_tampered_valid_until_breaks_envelope(self) -> None:
         """Extend valid_until after signing. Envelope hash changes."""
-        si = self._input(self.alice, {"x": 1}, valid_duration_sec=-1)
+        si = self._input(self.alice, _content(), valid_duration_sec=-1)
         tampered = SignedInput(
             content=si.content,
             signature=si.signature,
@@ -795,9 +831,9 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("signed input hash mismatch", str(ctx.exception))
 
     def test_tampered_input_content_breaks_envelope(self) -> None:
-        si = self._input(self.alice, {"original": True})
+        si = self._input(self.alice, _content("original"))
         tampered = SignedInput(
-            content={"malicious": True},
+            content=_content("tampered"),
             signature=si.signature,
             key_binding=si.key_binding,
             valid_until=si.valid_until,
@@ -823,7 +859,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="forged-output",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(k8s_manifests({"kind": "Cluster"})),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=self._signed_output(
@@ -847,7 +883,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="tampered-output",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(k8s_manifests({"kind": "Cluster"})),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=tampered,
@@ -863,7 +899,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="missing-anchor",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(k8s_manifests({"kind": "Cluster"})),
                 output_constraints=(
                     addon_must_sign("rogue-addon", "nonexistent-addon-ca"),
                 ),
@@ -882,7 +918,7 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_key_binding_signer_mismatch(self) -> None:
         """Signature claims bob, key binding is for alice."""
-        si = self._input(self.alice, {"x": 1})
+        si = self._input(self.alice, _content())
         tampered_sig = Signature(
             signer_id="bob",
             public_key=si.signature.public_key,
@@ -920,7 +956,7 @@ class HybridAttestationTests(unittest.TestCase):
             trust_anchor_id="tenant-idp",
             binding_proof=forged_proof,
         )
-        si = make_signed_input(self.alice.keys, forged_kb, {"x": 1})
+        si = make_signed_input(self.alice.keys, forged_kb, _content())
         att = Attestation(
             attestation_id="forged-proof",
             input=si,
@@ -932,7 +968,7 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_key_binding_wrong_public_key(self) -> None:
         """Signature uses a different public key than the key binding."""
-        si = self._input(self.alice, {"x": 1})
+        si = self._input(self.alice, _content())
         other_keys = generate_keypair()
         tampered_sig = Signature(
             signer_id="alice",
@@ -966,7 +1002,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="user-as-addon",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(k8s_manifests({"kind": "Cluster"})),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=self._signed_output(
@@ -982,7 +1018,7 @@ class HybridAttestationTests(unittest.TestCase):
         rogue = make_identity("evil-user", "fleet-addons")
         att = Attestation(
             attestation_id="user-in-addon",
-            input=self._input(rogue, {"x": 1}),
+            input=self._input(rogue, _content()),
             output=make_put_manifests(k8s_manifests({"x": 1})),
         )
         with self.assertRaises(VerificationError) as ctx:
@@ -995,7 +1031,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="self-auth",
             input=self._input(
                 self.capi_addon,
-                {"manifest_strategy": {"type": "addon"}},
+                _inline_content(k8s_manifests({"kind": "Cluster"})),
                 output_constraints=(addon_must_sign("cluster-lifecycle"),),
             ),
             output=self._signed_output(
@@ -1021,7 +1057,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="no-addon-anchor",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _addon_content("capi-provisioner"),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=self._signed_output(
@@ -1043,7 +1079,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="no-user-anchor",
             input=self._input(
                 self.alice,
-                {"manifest_strategy": {"type": "addon"}},
+                _content(),
                 output_constraints=(addon_must_sign("capi-provisioner"),),
             ),
             output=self._signed_output(
@@ -1082,7 +1118,7 @@ class HybridAttestationTests(unittest.TestCase):
                 attestation_id=att_id,
                 input=self._input(
                     self.bob,
-                    {"type": "request", "version": version},
+                    _addon_content("upgrade-planner"),
                 ),
                 output=self._signed_output(
                     self.planner_addon,
@@ -1146,7 +1182,7 @@ class HybridAttestationTests(unittest.TestCase):
         ))
         shared_update = Attestation(
             attestation_id="shared",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1182,7 +1218,7 @@ class HybridAttestationTests(unittest.TestCase):
     def test_missing_prior_input_in_bundle(self) -> None:
         update_att = Attestation(
             attestation_id="update",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1205,7 +1241,7 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("prior input not found", str(ctx.exception))
 
     def test_missing_update_attestation_in_bundle(self) -> None:
-        prior_input = self._input(self.alice, {"x": 1})
+        prior_input = self._input(self.alice, _content(deployment_id="deploy-1"))
         att = Attestation(
             attestation_id="missing-update",
             input=DerivedInput(
@@ -1241,7 +1277,7 @@ class HybridAttestationTests(unittest.TestCase):
         )
         update_att = Attestation(
             attestation_id="update",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1293,7 +1329,7 @@ class HybridAttestationTests(unittest.TestCase):
         )
         update_att = Attestation(
             attestation_id="update",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1341,7 +1377,7 @@ class HybridAttestationTests(unittest.TestCase):
         update_att = Attestation(
             attestation_id="update",
             input=self._input(
-                self.bob, {"type": "request"}, valid_duration_sec=-1,
+                self.bob, _addon_content("upgrade-planner"), valid_duration_sec=-1,
             ),
             output=self._signed_output(
                 self.planner_addon,
@@ -1392,7 +1428,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="update",
             input=self._input(
                 self.bob,
-                {"type": "request"},
+                _addon_content("upgrade-planner"),
                 output_constraints=(addon_must_sign("upgrade-planner"),),
             ),
             output=self._signed_output(
@@ -1421,7 +1457,7 @@ class HybridAttestationTests(unittest.TestCase):
         )
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(att, bundle, self.trust_store)
-        self.assertIn("output must be signed by upgrade-planner", str(ctx.exception))
+        self.assertIn("must be signed by upgrade-planner", str(ctx.exception))
 
     def test_untrusted_prior_signer_deep_in_chain(self) -> None:
         """Chain rooted in an untrusted signer (eve / rogue-idp)."""
@@ -1445,7 +1481,7 @@ class HybridAttestationTests(unittest.TestCase):
         def _update_att(version: str, att_id: str) -> Attestation:
             return Attestation(
                 attestation_id=att_id,
-                input=self._input(self.alice, {"type": "request"}),
+                input=self._input(self.alice, _addon_content("upgrade-planner")),
                 output=self._signed_output(
                     self.planner_addon,
                     spec_update_manifest({
@@ -1506,7 +1542,7 @@ class HybridAttestationTests(unittest.TestCase):
         eve = make_identity("eve", "rogue-idp")
         update_att = Attestation(
             attestation_id="update",
-            input=self._input(eve, {"type": "request"}),
+            input=self._input(eve, _addon_content("upgrade-planner")),
             output=make_put_manifests(spec_update_manifest({
                 "derive_input_expression": (
                     'set_path(prior, "manifest_strategy.config.version", "9.9.9")'
@@ -1538,15 +1574,18 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_replay_output_from_different_attestation(self) -> None:
         """Addon signed manifests for deployment A. Replayed in B (different constraints)."""
+        prod_cluster_manifests = k8s_manifests(
+            {"kind": "Cluster", "metadata": {"namespace": "prod"}},
+        )
         legit_output = self._signed_output(
             self.capi_addon,
-            k8s_manifests({"kind": "Cluster", "metadata": {"namespace": "prod"}}),
+            prod_cluster_manifests,
         )
         att = Attestation(
             attestation_id="replay",
             input=self._input(
                 self.alice,
-                {"intent": "staging"},
+                _inline_content(prod_cluster_manifests),
                 output_constraints=(
                     addon_must_sign("capi-provisioner"),
                     namespace_constraint("staging"),
@@ -1563,7 +1602,7 @@ class HybridAttestationTests(unittest.TestCase):
         attacker = make_identity("mallory", "rogue-idp")
         att = Attestation(
             attestation_id="bypass",
-            input=self._input(attacker, {"evil": True}),
+            input=self._input(attacker, _content()),
             output=self._signed_output(
                 attacker, k8s_manifests({"kind": "Backdoor"}),
             ),
@@ -1591,7 +1630,7 @@ class HybridAttestationTests(unittest.TestCase):
         ))
         update_att = Attestation(
             attestation_id="update",
-            input=self._input(self.bob, {"type": "request"}),
+            input=self._input(self.bob, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1652,7 +1691,7 @@ class HybridAttestationTests(unittest.TestCase):
             attestation_id="update",
             input=self._input(
                 self.bob,
-                {"type": "request"},
+                _addon_content("upgrade-planner"),
                 output_constraints=(addon_must_sign("upgrade-planner"),),
             ),
             output=self._signed_output(
@@ -1703,7 +1742,7 @@ class HybridAttestationTests(unittest.TestCase):
         v1_input = self._input(self.alice, v1_spec)
         update_1 = Attestation(
             attestation_id="update-1",
-            input=self._input(self.alice, {"type": "request"}),
+            input=self._input(self.alice, _addon_content("upgrade-planner")),
             output=self._signed_output(
                 self.planner_addon,
                 spec_update_manifest({
@@ -1716,7 +1755,7 @@ class HybridAttestationTests(unittest.TestCase):
         eve = make_identity("eve", "rogue-idp")
         update_2 = Attestation(
             attestation_id="update-2",
-            input=self._input(eve, {"type": "request"}),
+            input=self._input(eve, _addon_content("upgrade-planner")),
             output=make_put_manifests(spec_update_manifest({
                 "derive_input_expression": (
                     'set_path(prior, "manifest_strategy.config.version", "1.30")'
@@ -1759,7 +1798,7 @@ class HybridAttestationTests(unittest.TestCase):
     def _input(
         self,
         identity: Identity,
-        content: object,
+        content: DeploymentContent,
         *,
         output_constraints: tuple[OutputConstraint, ...] = (),
         valid_duration_sec: float = 86400,

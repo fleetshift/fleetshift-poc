@@ -241,7 +241,7 @@ class OutputConstraint:
 
 @dataclass(frozen=True)
 class VerifiedInput:
-    content: Any
+    content: DeploymentContent
     content_hash: bytes
     output_constraints: tuple[OutputConstraint, ...]
     signer_id: str | None = None
@@ -436,19 +436,12 @@ class RemoveByDeploymentId:
         label = f"{attestation_id} output"
         children: list[VerificationResult] = []
 
-        input_content = verified_input.content
-        if isinstance(input_content, DeploymentContent):
-            expected_id: str | None = input_content.deployment_id
-        elif isinstance(input_content, dict):
-            expected_id = input_content.get("deployment_id")
-        else:
-            expected_id = None
-        if expected_id is not None and self.deployment_id != expected_id:
+        if self.deployment_id != verified_input.content.deployment_id:
             return (
                 context.fail(
                     label,
                     f"remove deployment_id mismatch: output targets {self.deployment_id!r}, "
-                    f"input has {expected_id!r}",
+                    f"input has {verified_input.content.deployment_id!r}",
                 ),
                 None,
             )
@@ -572,19 +565,12 @@ def _verify_placement_evidence(
     if not sig_result.valid:
         return context.fail(label, "signature invalid", children), None
 
-    input_content = verified_input.content
-    if isinstance(input_content, DeploymentContent):
-        expected_id: str | None = input_content.deployment_id
-    elif isinstance(input_content, dict):
-        expected_id = input_content.get("deployment_id")
-    else:
-        expected_id = None
-    if expected_id is not None and evidence.deployment_id != expected_id:
+    if evidence.deployment_id != verified_input.content.deployment_id:
         return (
             context.fail(
                 label,
                 f"deployment_id mismatch: evidence has {evidence.deployment_id!r}, "
-                f"input has {expected_id!r}",
+                f"input has {verified_input.content.deployment_id!r}",
                 children,
             ),
             None,
@@ -665,11 +651,7 @@ def _delivery_cel_context(
             "signer_id": None,
         }
 
-    input_ctx = (
-        verified_input.content.to_dict()
-        if isinstance(verified_input.content, DeploymentContent)
-        else verified_input.content
-    )
+    input_ctx = verified_input.content.to_dict()
     return {
         "input": input_ctx,
         "output": output_ctx,
@@ -696,7 +678,7 @@ class Input(ABC):
 class SignedInput(Input):
     """A signer's direct authorization of input content and CEL constraints."""
 
-    content: Any
+    content: DeploymentContent
     signature: Signature
     key_binding: KeyBinding
     valid_until: float
@@ -850,17 +832,11 @@ class DerivedInput(Input):
         if not prior_result.valid or verified_prior is None:
             return context.fail(label, "prior input verification failed", children), None
 
-        # -- grounding check: deployment_id must match the signed prior --
-        prior_dep_id: str | None = (
-            verified_prior.content.deployment_id
-            if isinstance(verified_prior.content, DeploymentContent)
-            else None
-        )
-        if prior_dep_id is not None and self.deployment_id != prior_dep_id:
+        if self.deployment_id != verified_prior.content.deployment_id:
             return context.fail(
                 label,
                 f"deployment_id mismatch: input declares {self.deployment_id!r}, "
-                f"prior has {prior_dep_id!r}",
+                f"prior has {verified_prior.content.deployment_id!r}",
             ), None
 
         # -- verify update with the deployment as the target --
@@ -882,13 +858,11 @@ class DerivedInput(Input):
         try:
             update_content = _extract_update_content(verified_update_output.content)
             check_preconditions(verified_prior.content, update_content)
-            derived_content = apply_update(
+            derived_content = DeploymentContent.from_dict(apply_update(
                 verified_prior.content,
                 update_content,
-            )
-            if isinstance(verified_prior.content, DeploymentContent):
-                derived_content = DeploymentContent.from_dict(derived_content)
-                if derived_content.deployment_id != self.deployment_id:
+            ))
+            if derived_content.deployment_id != self.deployment_id:
                     raise ValueError(
                         f"update must not rewrite deployment identity: "
                         f"expected {self.deployment_id!r}, "
@@ -1021,15 +995,9 @@ def _check_generation(
             f"no target state (stateless)",
         )
 
-    content = verified_input.content
-    if isinstance(content, DeploymentContent):
-        dep_id: str | None = content.deployment_id
-    elif isinstance(content, dict):
-        dep_id = content.get("deployment_id")
-    else:
-        dep_id = None
+    dep_id = verified_input.content.deployment_id
 
-    if dep_id is not None and state.deployment_id != dep_id:
+    if state.deployment_id != dep_id:
         return context.fail(
             label,
             f"deployment state mismatch: state is for {state.deployment_id!r}, "

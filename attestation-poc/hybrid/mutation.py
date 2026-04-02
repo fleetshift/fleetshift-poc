@@ -2,42 +2,40 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .cel_runtime import UPDATE_FUNCTIONS, evaluate_bool, evaluate_json
 from .model import OutputConstraint
 from .policy import constraints_from_documents
 
+if TYPE_CHECKING:
+    from .model import DeploymentContent
 
-def check_preconditions(prior_content: Any, update_content: Any) -> None:
+
+def check_preconditions(prior_content: DeploymentContent, update_content: dict[str, Any]) -> None:
     """Evaluate signed preconditions against prior content.
 
     If any precondition evaluates false, raises ValueError to halt
     derivation (fail closed).  Updates that want conditional/no-op
     behavior should encode that inside the derive_input_expression.
     """
-    from .model import DeploymentContent
-
-    if not isinstance(update_content, dict):
-        return
     preconditions = update_content.get("preconditions")
     if preconditions is None:
         return
     if not isinstance(preconditions, list):
         raise ValueError("preconditions must be a list when provided")
 
-    if isinstance(prior_content, DeploymentContent):
-        prior_content = prior_content.to_dict()
+    prior_dict = prior_content.to_dict()
 
     for i, expr in enumerate(preconditions):
         if not isinstance(expr, str) or not expr:
             raise ValueError(f"precondition {i} must be a non-empty string")
-        result = evaluate_bool(expr, {"prior": prior_content, "update": update_content})
+        result = evaluate_bool(expr, {"prior": prior_dict, "update": update_content})
         if not result:
             raise ValueError(f"precondition failed: {expr}")
 
 
-def apply_update(prior_content: Any, update_content: Any) -> Any:
+def apply_update(prior_content: DeploymentContent, update_content: dict[str, Any]) -> dict[str, Any]:
     """Apply a spec-update directive to prior input content.
 
     The caller is responsible for ensuring update_content comes from a
@@ -46,14 +44,7 @@ def apply_update(prior_content: Any, update_content: Any) -> Any:
 
     Returns a plain dict -- the caller reconstitutes typed content.
     """
-    from .model import DeploymentContent
-
-    if isinstance(prior_content, DeploymentContent):
-        prior_content = prior_content.to_dict()
-    if not isinstance(prior_content, dict):
-        raise ValueError("prior content must be a dict")
-    if not isinstance(update_content, dict):
-        raise ValueError("update content must be a dict")
+    prior_dict = prior_content.to_dict()
 
     expression = update_content.get("derive_input_expression")
     if not isinstance(expression, str) or not expression:
@@ -62,7 +53,7 @@ def apply_update(prior_content: Any, update_content: Any) -> Any:
     result = evaluate_json(
         expression,
         {
-            "prior": prior_content,
+            "prior": prior_dict,
             "update": update_content,
         },
         functions=UPDATE_FUNCTIONS,
@@ -74,7 +65,7 @@ def apply_update(prior_content: Any, update_content: Any) -> Any:
 
 def derive_constraints(
     prior_constraints: tuple[OutputConstraint, ...],
-    update_content: Any,
+    update_content: dict[str, Any],
 ) -> tuple[OutputConstraint, ...]:
     """Derive the explicit output constraints for a derived input.
 
@@ -86,8 +77,6 @@ def derive_constraints(
     Strategy-implied constraints are not produced here; they are derived
     late from the final computed content at verification time.
     """
-    if not isinstance(update_content, dict):
-        raise ValueError("update content must be a dict")
 
     additional = update_content.get("output_constraints")
     if additional is None:
