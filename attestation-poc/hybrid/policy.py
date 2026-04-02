@@ -45,12 +45,16 @@ def signed_input_envelope(
     content: Any,
     valid_until: float,
     constraints: tuple[OutputConstraint, ...],
+    expected_generation: int | None = None,
 ) -> dict[str, Any]:
-    return {
+    envelope: dict[str, Any] = {
         "content": content,
         "output_constraints": constraints_to_documents(constraints),
         "valid_until": valid_until,
     }
+    if expected_generation is not None:
+        envelope["expected_generation"] = expected_generation
+    return envelope
 
 
 # ---------------------------------------------------------------------------

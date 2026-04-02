@@ -4,9 +4,37 @@ from __future__ import annotations
 
 from typing import Any
 
-from .cel_runtime import UPDATE_FUNCTIONS, evaluate_json
+from .cel_runtime import UPDATE_FUNCTIONS, evaluate_bool, evaluate_json
 from .model import OutputConstraint
 from .policy import constraints_from_documents
+
+
+def check_preconditions(prior_content: Any, update_content: Any) -> None:
+    """Evaluate signed preconditions against prior content.
+
+    If any precondition evaluates false, raises ValueError to halt
+    derivation (fail closed).  Updates that want conditional/no-op
+    behavior should encode that inside the derive_input_expression.
+    """
+    from .model import DeploymentContent
+
+    if not isinstance(update_content, dict):
+        return
+    preconditions = update_content.get("preconditions")
+    if preconditions is None:
+        return
+    if not isinstance(preconditions, list):
+        raise ValueError("preconditions must be a list when provided")
+
+    if isinstance(prior_content, DeploymentContent):
+        prior_content = prior_content.to_dict()
+
+    for i, expr in enumerate(preconditions):
+        if not isinstance(expr, str) or not expr:
+            raise ValueError(f"precondition {i} must be a non-empty string")
+        result = evaluate_bool(expr, {"prior": prior_content, "update": update_content})
+        if not result:
+            raise ValueError(f"precondition failed: {expr}")
 
 
 def apply_update(prior_content: Any, update_content: Any) -> Any:

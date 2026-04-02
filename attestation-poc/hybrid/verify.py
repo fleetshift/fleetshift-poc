@@ -78,10 +78,19 @@ class VerificationResult:
 
 
 @dataclass(frozen=True)
+class DeploymentState:
+    """Target-side state for a specific deployment, used for replay protection."""
+
+    deployment_id: str
+    generation: int
+
+
+@dataclass(frozen=True)
 class VerificationContext:
     bundle: VerificationBundle
     trust_store: TrustStore
     target_identity: dict[str, Any] = field(default_factory=dict)
+    current_deployment_state: DeploymentState | None = None
 
     def input_ref(self, input_id: str) -> VerificationRef:
         return ("input", input_id)
@@ -132,11 +141,13 @@ def verify_attestation(
     trust_store: TrustStore,
     *,
     target_identity: dict[str, Any] | None = None,
+    current_deployment_state: DeploymentState | None = None,
 ) -> VerifiedOutput:
     context = VerificationContext(
         bundle=bundle,
         trust_store=trust_store,
         target_identity=target_identity or {},
+        current_deployment_state=current_deployment_state,
     )
     result, _, verified_output = attestation.verify(context, frozenset())
     if not result.valid or verified_output is None:

@@ -13,7 +13,7 @@ from .model import (
     OutputSignature,
     PlacementEvidence,
     PutManifests,
-    RemoveByDeliveryId,
+    RemoveByDeploymentId,
     Signature,
     SignedInput,
     _serialize_manifests,
@@ -47,10 +47,13 @@ def make_signed_input(
     *,
     output_constraints: Iterable[OutputConstraint] = (),
     valid_duration_sec: float = 86400,
+    expected_generation: int | None = None,
 ) -> SignedInput:
     constraints = tuple(output_constraints)
     valid_until = time.time() + valid_duration_sec
-    envelope = signed_input_envelope(content, valid_until, constraints)
+    envelope = signed_input_envelope(
+        content, valid_until, constraints, expected_generation,
+    )
     envelope_hash = content_hash(envelope)
     return SignedInput(
         content=content,
@@ -63,6 +66,7 @@ def make_signed_input(
         key_binding=key_binding,
         valid_until=valid_until,
         output_constraints=constraints,
+        expected_generation=expected_generation,
     )
 
 
@@ -104,12 +108,12 @@ def sign_put_manifests(
     )
 
 
-def make_remove_by_delivery_id(
-    delivery_id: str,
+def make_remove_by_deployment_id(
+    deployment_id: str,
     *,
     placement: PlacementEvidence | None = None,
-) -> RemoveByDeliveryId:
-    return RemoveByDeliveryId(delivery_id=delivery_id, placement=placement)
+) -> RemoveByDeploymentId:
+    return RemoveByDeploymentId(deployment_id=deployment_id, placement=placement)
 
 
 def make_placement_evidence(

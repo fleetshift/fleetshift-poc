@@ -245,6 +245,7 @@ class VerifiedInput:
     content_hash: bytes
     output_constraints: tuple[OutputConstraint, ...]
     signer_id: str | None = None
+    expected_generation: int | None = None
 
 
 @dataclass(frozen=True)
@@ -414,10 +415,14 @@ class PutManifests:
 
 
 @dataclass(frozen=True)
-class RemoveByDeliveryId:
-    """Remove a delivery from a target by delivery ID."""
+class RemoveByDeploymentId:
+    """Remove a deployment from a target by deployment ID.
 
-    delivery_id: str
+    The deployment_id must match the attested deployment's identity,
+    preventing confused-deputy attacks via opaque handles.
+    """
+
+    deployment_id: str
     placement: PlacementEvidence | None = None
 
     def verify(
@@ -430,6 +435,23 @@ class RemoveByDeliveryId:
 
         label = f"{attestation_id} output"
         children: list[VerificationResult] = []
+
+        input_content = verified_input.content
+        if isinstance(input_content, DeploymentContent):
+            expected_id: str | None = input_content.deployment_id
+        elif isinstance(input_content, dict):
+            expected_id = input_content.get("deployment_id")
+        else:
+            expected_id = None
+        if expected_id is not None and self.deployment_id != expected_id:
+            return (
+                context.fail(
+                    label,
+                    f"remove deployment_id mismatch: output targets {self.deployment_id!r}, "
+                    f"input has {expected_id!r}",
+                ),
+                None,
+            )
 
         placement_signer_id: str | None = None
         if self.placement is not None:
@@ -447,7 +469,7 @@ class RemoveByDeliveryId:
             verified_input, "remove", None, None,
             None, self.placement, placement_signer_id, context,
         )
-        cel_ctx["output"] = {"delivery_id": self.delivery_id}
+        cel_ctx["output"] = {"deployment_id": self.deployment_id}
 
         if not all_constraints:
             children.append(
@@ -463,7 +485,7 @@ class RemoveByDeliveryId:
                         None,
                     )
 
-        remove_content: dict[str, Any] = {"delivery_id": self.delivery_id}
+        remove_content: dict[str, Any] = {"deployment_id": self.deployment_id}
         return (
             context.ok(label, "satisfies all constraints", children),
             VerifiedOutput(
@@ -473,7 +495,7 @@ class RemoveByDeliveryId:
         )
 
 
-DeliveryOutput = PutManifests | RemoveByDeliveryId
+DeliveryOutput = PutManifests | RemoveByDeploymentId
 
 
 def _verify_output_sig(
@@ -679,6 +701,7 @@ class SignedInput(Input):
     key_binding: KeyBinding
     valid_until: float
     output_constraints: tuple[OutputConstraint, ...] = ()
+    expected_generation: int | None = None
 
     def verify(
         self,
@@ -722,6 +745,7 @@ class SignedInput(Input):
             self.content,
             self.valid_until,
             self.output_constraints,
+            self.expected_generation,
         )
         envelope_hash = content_hash(envelope)
         if self.signature.content_hash != envelope_hash:
@@ -750,6 +774,7 @@ class SignedInput(Input):
                 content_hash=content_hash(self.content),
                 output_constraints=self.output_constraints,
                 signer_id=self.signature.signer_id,
+                expected_generation=self.expected_generation,
             ),
         )
 
@@ -791,7 +816,7 @@ class DerivedInput(Input):
         context: VerificationContext,
         visited: frozenset[VerificationRef],
     ) -> tuple[VerificationResult, VerifiedInput | None]:
-        from .mutation import apply_update, derive_constraints
+        from .mutation import apply_update, check_preconditions, derive_constraints
 
         label = f"{attestation_id} input"
         children: list[VerificationResult] = []
@@ -856,15 +881,27 @@ class DerivedInput(Input):
 
         try:
             update_content = _extract_update_content(verified_update_output.content)
+            check_preconditions(verified_prior.content, update_content)
             derived_content = apply_update(
                 verified_prior.content,
                 update_content,
             )
             if isinstance(verified_prior.content, DeploymentContent):
                 derived_content = DeploymentContent.from_dict(derived_content)
+                if derived_content.deployment_id != self.deployment_id:
+                    raise ValueError(
+                        f"update must not rewrite deployment identity: "
+                        f"expected {self.deployment_id!r}, "
+                        f"got {derived_content.deployment_id!r}"
+                    )
             output_constraints = derive_constraints(
                 verified_prior.output_constraints,
                 update_content,
+            )
+            resolved_generation = (
+                verified_prior.expected_generation + 1
+                if verified_prior.expected_generation is not None
+                else None
             )
         except Exception as exc:
             return context.fail(label, f"derivation failed: {exc}", children), None
@@ -882,6 +919,7 @@ class DerivedInput(Input):
                 content=derived_content,
                 content_hash=content_hash(derived_content),
                 output_constraints=output_constraints,
+                expected_generation=resolved_generation,
             ),
         )
 
@@ -892,7 +930,7 @@ class Attestation:
 
     attestation_id: str
     input: Input
-    output: PutManifests | RemoveByDeliveryId
+    output: PutManifests | RemoveByDeploymentId
 
     def verify(
         self,
@@ -939,13 +977,75 @@ class Attestation:
                 None,
             )
 
+        gen_result = _check_generation(
+            self.attestation_id, verified_input, context,
+        )
+        if not gen_result.valid:
+            return (
+                context.fail(
+                    self.attestation_id,
+                    "generation check failed",
+                    [input_result, output_result, gen_result],
+                ),
+                verified_input,
+                None,
+            )
+
         return (
             context.ok(
                 self.attestation_id,
                 "fully verified",
-                [input_result, output_result],
+                [input_result, output_result, gen_result],
             ),
             verified_input,
             verified_output,
         )
 
+
+def _check_generation(
+    attestation_id: str,
+    verified_input: VerifiedInput,
+    context: VerificationContext,
+) -> VerificationResult:
+    """Check expected_generation against optional target-side state."""
+    label = f"{attestation_id} generation"
+    state = context.current_deployment_state
+
+    if verified_input.expected_generation is None:
+        return context.ok(label, "no expected_generation signed")
+
+    if state is None:
+        return context.ok(
+            label,
+            f"expected_generation={verified_input.expected_generation}, "
+            f"no target state (stateless)",
+        )
+
+    content = verified_input.content
+    if isinstance(content, DeploymentContent):
+        dep_id: str | None = content.deployment_id
+    elif isinstance(content, dict):
+        dep_id = content.get("deployment_id")
+    else:
+        dep_id = None
+
+    if dep_id is not None and state.deployment_id != dep_id:
+        return context.fail(
+            label,
+            f"deployment state mismatch: state is for {state.deployment_id!r}, "
+            f"attestation resolves to {dep_id!r}",
+        )
+
+    expected_current = state.generation + 1
+    if verified_input.expected_generation != expected_current:
+        return context.fail(
+            label,
+            f"generation mismatch: attestation expects {verified_input.expected_generation}, "
+            f"target accepts {expected_current}",
+        )
+
+    return context.ok(
+        label,
+        f"generation {verified_input.expected_generation} matches "
+        f"target at {state.generation}",
+    )

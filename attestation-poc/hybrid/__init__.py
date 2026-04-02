@@ -14,7 +14,7 @@ from .build import (
     make_key_binding,
     make_placement_evidence,
     make_put_manifests,
-    make_remove_by_delivery_id,
+    make_remove_by_deployment_id,
     make_signed_input,
     sign_put_manifests,
 )
@@ -35,7 +35,7 @@ from .model import (
     PlacementEvidence,
     PredicatePlacementStrategy,
     PutManifests,
-    RemoveByDeliveryId,
+    RemoveByDeploymentId,
     SignedInput,
     Signature,
     StrategySpec,
@@ -46,6 +46,7 @@ from .model import (
 )
 from .policy import derive_strategy_constraints
 from .verify import (
+    DeploymentState,
     TrustStore,
     VerificationBundle,
     VerificationError,
@@ -61,6 +62,7 @@ __all__ = [
     "CelEvaluationError",
     "DeliveryOutput",
     "DeploymentContent",
+    "DeploymentState",
     "DerivedInput",
     "InlineManifestStrategy",
     "KeyBinding",
@@ -71,7 +73,7 @@ __all__ = [
     "PlacementEvidence",
     "PredicatePlacementStrategy",
     "PutManifests",
-    "RemoveByDeliveryId",
+    "RemoveByDeploymentId",
     "Signature",
     "SignedInput",
     "StrategySpec",
@@ -89,7 +91,7 @@ __all__ = [
     "make_key_binding",
     "make_placement_evidence",
     "make_put_manifests",
-    "make_remove_by_delivery_id",
+    "make_remove_by_deployment_id",
     "make_signed_input",
     "sign_put_manifests",
     "verify_attestation",

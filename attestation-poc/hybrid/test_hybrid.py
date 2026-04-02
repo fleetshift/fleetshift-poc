@@ -208,6 +208,9 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertEqual(verified.content, serialize_envelopes(manifests))
         self.assertIsNone(verified.signer_id)
 
+    # TODO: Freeform signed input without constraints currently allows
+    # arbitrary output. Tracked separately from the generation refactor.
+
     def test_addon_signed_output_with_explicit_cel_policy_verifies(self) -> None:
         spec = {
             "manifest_strategy": {
