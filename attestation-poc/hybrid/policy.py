@@ -162,6 +162,10 @@ def derive_placement_strategy_constraints(
 
 def derive_strategy_constraints(content: Any) -> tuple[OutputConstraint, ...]:
     """Derive all strategy-implied constraints from signed input content."""
+    from .model import DeploymentContent
+
+    if isinstance(content, DeploymentContent):
+        content = content.to_dict()
     if not isinstance(content, dict):
         return ()
     return (

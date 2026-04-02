@@ -115,6 +115,13 @@ class VerificationContext:
             children=children or [],
         )
 
+    def with_target_identity(self, target_identity: dict[str, Any]) -> VerificationContext:
+        return VerificationContext(
+            bundle=self.bundle,
+            trust_store=self.trust_store,
+            target_identity=target_identity,
+        )
+
     def now(self) -> float:
         return time.time()
 

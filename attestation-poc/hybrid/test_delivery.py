@@ -17,6 +17,8 @@ from .build import (
 from .crypto import KeyPair, content_hash, generate_keypair, sign
 from .model import (
     Attestation,
+    DeploymentContent,
+    DerivedInput,
     KeyBinding,
     ManifestEnvelope,
     OutputConstraint,
@@ -25,12 +27,15 @@ from .model import (
     PutManifests,
     RemoveByDeliveryId,
     Signature,
+    StrategySpec,
     TrustAnchor,
 )
+from .policy import constraint_to_document
 from .verify import (
     TrustStore,
     VerificationBundle,
     VerificationError,
+    explain_verification,
     verify_attestation,
 )
 
@@ -46,6 +51,11 @@ def k8s_manifests(*objects: dict) -> tuple[ManifestEnvelope, ...]:
         ManifestEnvelope(resource_type="kubernetes", content=obj)
         for obj in objects
     )
+
+
+def spec_update_manifest(directive: dict) -> tuple[ManifestEnvelope, ...]:
+    """Wrap a spec_update directive as a single-item manifest envelope."""
+    return (ManifestEnvelope(resource_type="spec_update", content=directive),)
 
 
 def serialize_envelopes(envelopes: tuple[ManifestEnvelope, ...]) -> list[dict]:
@@ -137,14 +147,17 @@ class DeliveryVerificationTests(unittest.TestCase):
         return make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "inline",
-                    "manifests": serialize_envelopes(manifests),
-                },
-                "placement_strategy": {"type": "predicate", "expression": predicate},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="inline",
+                    attributes={"manifests": serialize_envelopes(manifests)},
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": predicate},
+                ),
+            ),
             output_constraints=output_constraints,
         )
 
@@ -159,15 +172,20 @@ class DeliveryVerificationTests(unittest.TestCase):
         return make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "addon",
-                    "addon_id": addon_id,
-                    "trust_anchor_id": trust_anchor_id,
-                },
-                "placement_strategy": {"type": "predicate", "expression": predicate},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": addon_id,
+                        "trust_anchor_id": trust_anchor_id,
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": predicate},
+                ),
+            ),
             output_constraints=output_constraints,
         )
 
@@ -183,19 +201,23 @@ class DeliveryVerificationTests(unittest.TestCase):
         return make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "addon",
-                    "addon_id": manifest_addon,
-                    "trust_anchor_id": manifest_anchor,
-                },
-                "placement_strategy": {
-                    "type": "addon",
-                    "addon_id": placement_addon,
-                    "trust_anchor_id": placement_anchor,
-                },
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": manifest_addon,
+                        "trust_anchor_id": manifest_anchor,
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": placement_addon,
+                        "trust_anchor_id": placement_anchor,
+                    },
+                ),
+            ),
             output_constraints=output_constraints,
         )
 
@@ -210,18 +232,20 @@ class DeliveryVerificationTests(unittest.TestCase):
         return make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "inline",
-                    "manifests": serialize_envelopes(manifests),
-                },
-                "placement_strategy": {
-                    "type": "addon",
-                    "addon_id": placement_addon,
-                    "trust_anchor_id": placement_anchor,
-                },
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="inline",
+                    attributes={"manifests": serialize_envelopes(manifests)},
+                ),
+                placement_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": placement_addon,
+                        "trust_anchor_id": placement_anchor,
+                    },
+                ),
+            ),
             output_constraints=output_constraints,
         )
 
@@ -585,14 +609,17 @@ class DeliveryVerificationTests(unittest.TestCase):
         si_a = make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "inline",
-                    "manifests": serialize_envelopes(manifests_a),
-                },
-                "placement_strategy": {"type": "predicate", "expression": 'target.labels.env == "prod"'},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="inline",
+                    attributes={"manifests": serialize_envelopes(manifests_a)},
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": 'target.labels.env == "prod"'},
+                ),
+            ),
         )
         output_b = make_put_manifests(manifests_b)
         att = Attestation(attestation_id="att-1", input=si_a, output=output_b)
@@ -607,14 +634,17 @@ class DeliveryVerificationTests(unittest.TestCase):
         si = make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "inline",
-                    "manifests": SAMPLE_MANIFESTS_SERIALIZED,
-                },
-                "placement_strategy": {"type": "predicate", "expression": 'target.labels.env == "prod"'},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="inline",
+                    attributes={"manifests": SAMPLE_MANIFESTS_SERIALIZED},
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": 'target.labels.env == "prod"'},
+                ),
+            ),
             valid_duration_sec=-1,
         )
         output = make_put_manifests(SAMPLE_MANIFESTS)
@@ -663,11 +693,14 @@ class DeliveryVerificationTests(unittest.TestCase):
         si = make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {"type": "custom-unknown"},
-                "placement_strategy": {"type": "predicate", "expression": 'target.labels.env == "prod"'},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(type="custom-unknown"),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": 'target.labels.env == "prod"'},
+                ),
+            ),
         )
         output = make_put_manifests(SAMPLE_MANIFESTS)
         att = Attestation(attestation_id="att-1", input=si, output=output)
@@ -682,14 +715,14 @@ class DeliveryVerificationTests(unittest.TestCase):
         si = make_signed_input(
             self.alice.keys,
             self.alice.key_binding,
-            content={
-                "deployment_id": "deploy-1",
-                "manifest_strategy": {
-                    "type": "inline",
-                    "manifests": SAMPLE_MANIFESTS_SERIALIZED,
-                },
-                "placement_strategy": {"type": "custom-unknown"},
-            },
+            content=DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="inline",
+                    attributes={"manifests": SAMPLE_MANIFESTS_SERIALIZED},
+                ),
+                placement_strategy=StrategySpec(type="custom-unknown"),
+            ),
         )
         output = make_put_manifests(SAMPLE_MANIFESTS)
         att = Attestation(attestation_id="att-1", input=si, output=output)
@@ -768,6 +801,896 @@ class DeliveryVerificationTests(unittest.TestCase):
                 target_identity=self.prod_target,
             )
         self.assertIn("manifest signature", str(ctx.exception).lower())
+
+
+class FleetWideUpgradeTests(unittest.TestCase):
+    """Controlled fleet-wide upgrades via derived input + delivery verification.
+
+    Demonstrates the original motivating problem: a fleet operator pushes
+    a Kubernetes version bump across all CAPI-managed clusters.  Each
+    target cluster's agent verifies the full attestation chain before
+    applying the upgrade.
+
+    Actors:
+      alice          -- tenant user, creates the base deployment
+      bob            -- fleet operator, requests the upgrade
+      upgrade-planner-- fleet addon, produces the version-patch directive
+      capi-provisioner- fleet addon, renders the final manifests per target
+      capacity-planner- fleet addon, signs placement decisions
+
+    Flow:
+      1. alice creates deployment "cluster-01" (v1.29.5, addon manifests,
+         predicate placement, constraint: capi-provisioner must sign).
+      2. bob requests an upgrade; upgrade-planner produces a spec_update
+         that bumps version to 1.30.2 and carries new constraints.
+      3. At each target, the agent constructs an Attestation whose input
+         is DerivedInput(prior=cluster-01-v1, update=upgrade-1).
+         The derived spec inherits manifest/placement strategies.
+      4. capi-provisioner renders manifests for the target.
+      5. verify_attestation checks the full chain + strategies + target.
+    """
+
+    def setUp(self) -> None:
+        self.alice = make_identity("alice", "tenant-idp")
+        self.bob = make_identity("bob", "tenant-idp")
+        self.upgrade_planner = make_identity("upgrade-planner", "fleet-addons")
+        self.capi_addon = make_identity("capi-provisioner", "fleet-addons")
+        self.placer_addon = make_identity("capacity-planner", "fleet-addons")
+        self.evil = make_identity("evil", "evil-anchor")
+
+        self.trust_store = TrustStore()
+        self.trust_store.add(
+            TrustAnchor(
+                anchor_id="tenant-idp",
+                known_keys={
+                    "alice": self.alice.keys.public_key_bytes,
+                    "bob": self.bob.keys.public_key_bytes,
+                },
+            )
+        )
+        self.trust_store.add(
+            TrustAnchor(
+                anchor_id="fleet-addons",
+                known_keys={
+                    "upgrade-planner": self.upgrade_planner.keys.public_key_bytes,
+                    "capi-provisioner": self.capi_addon.keys.public_key_bytes,
+                    "capacity-planner": self.placer_addon.keys.public_key_bytes,
+                },
+            )
+        )
+
+        self.prod_target = {
+            "id": "cluster-prod-1",
+            "labels": {"env": "prod", "region": "us-east-1"},
+        }
+        self.staging_target = {
+            "id": "cluster-staging-1",
+            "labels": {"env": "staging", "region": "us-west-2"},
+        }
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    def _base_deployment_input(
+        self,
+        *,
+        deployment_id: str = "cluster-01",
+        version: str = "1.29.5",
+        predicate: str = 'target.labels.env == "prod"',
+    ):
+        """v1 signed input: alice creates a CAPI cluster deployment."""
+        return make_signed_input(
+            self.alice.keys,
+            self.alice.key_binding,
+            content=DeploymentContent(
+                deployment_id=deployment_id,
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capi-provisioner",
+                        "trust_anchor_id": "fleet-addons",
+                        "config": {"version": version},
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": predicate},
+                ),
+            ),
+            output_constraints=(
+                OutputConstraint(
+                    name="output must be signed by capi-provisioner via fleet-addons",
+                    expression=(
+                        'output.has_signature && '
+                        'output.signature.trust_anchor_id == "fleet-addons" && '
+                        'output.signer_id == "capi-provisioner"'
+                    ),
+                ),
+            ),
+        )
+
+    def _upgrade_attestation(
+        self,
+        *,
+        new_version: str = "1.30.2",
+        extra_constraints: tuple[OutputConstraint, ...] = (),
+        target_deployments: tuple[str, ...] = ("cluster-01",),
+    ) -> Attestation:
+        """The upgrade-planner addon produces a spec_update for the version bump.
+
+        The upgrade request is itself a deployment: it has manifest and
+        placement strategies.  The placement strategy gates which target
+        deployments this upgrade applies to -- the capacity-planner addon
+        signs placement evidence listing allowed deployment IDs.
+        """
+        update_directive = {
+            "derive_input_expression": (
+                f'set_path(prior, "manifest_strategy.config.version", "{new_version}")'
+            ),
+            "output_constraints": [
+                constraint_to_document(OutputConstraint(
+                    name="all manifests must be in namespace capi-system",
+                    expression=(
+                        'output.manifests.all(m, m.content.metadata.namespace == "capi-system")'
+                    ),
+                )),
+                *(constraint_to_document(c) for c in extra_constraints),
+            ],
+        }
+        return Attestation(
+            attestation_id="upgrade-1",
+            input=make_signed_input(
+                self.bob.keys,
+                self.bob.key_binding,
+                content=DeploymentContent(
+                    deployment_id="upgrade-request-1",
+                    manifest_strategy=StrategySpec(
+                        type="addon",
+                        attributes={
+                            "addon_id": "upgrade-planner",
+                            "trust_anchor_id": "fleet-addons",
+                        },
+                    ),
+                    placement_strategy=StrategySpec(
+                        type="addon",
+                        attributes={
+                            "addon_id": "capacity-planner",
+                            "trust_anchor_id": "fleet-addons",
+                        },
+                    ),
+                ),
+                output_constraints=(
+                    OutputConstraint(
+                        name="output must be signed by upgrade-planner via fleet-addons",
+                        expression=(
+                            'output.has_signature && '
+                            'output.signature.trust_anchor_id == "fleet-addons" && '
+                            'output.signer_id == "upgrade-planner"'
+                        ),
+                    ),
+                ),
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                spec_update_manifest(update_directive),
+                placement=make_placement_evidence(
+                    self.placer_addon.keys, "capacity-planner", "fleet-addons",
+                    targets=target_deployments,
+                    deployment_id="upgrade-request-1",
+                ),
+            ),
+        )
+
+    # ==================================================================
+    # Happy path: full chain verified at target
+    # ==================================================================
+
+    def test_fleet_upgrade_happy_path(self) -> None:
+        """Full end-to-end: base deployment -> upgrade patch -> delivery at target."""
+        v1_input = self._base_deployment_input()
+        upgrade_att = self._upgrade_attestation()
+
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        result = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+
+        self.assertEqual(result.signer_id, "capi-provisioner")
+        serialized = serialize_envelopes(target_manifests)
+        self.assertEqual(result.content, serialized)
+        self.assertEqual(
+            serialized[0]["content"]["spec"]["topology"]["version"],
+            "1.30.2",
+        )
+
+    def test_fleet_upgrade_explanation_shows_full_chain(self) -> None:
+        """The explanation tree contains the derivation, upgrade signer, and strategy."""
+        v1_input = self._base_deployment_input()
+        upgrade_att = self._upgrade_attestation()
+
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        explanation = explain_verification(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+
+        all_details = _all_details(explanation)
+        self.assertIn("derived from prior=cluster-01-v1 + update=upgrade-1", all_details)
+        self.assertIn("upgrade-planner", all_details)
+        self.assertIn("capi-provisioner", all_details)
+
+    # ==================================================================
+    # Target mismatch: predicate rejects non-prod target
+    # ==================================================================
+
+    def test_fleet_upgrade_wrong_target_rejected(self) -> None:
+        """Derived placement predicate still gates delivery to non-matching targets."""
+        v1_input = self._base_deployment_input()
+        upgrade_att = self._upgrade_attestation()
+
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.staging_target,
+            )
+        self.assertIn("placement predicate", str(ctx.exception))
+
+    # ==================================================================
+    # Wrong addon signs the output after upgrade
+    # ==================================================================
+
+    def test_fleet_upgrade_wrong_manifest_signer_rejected(self) -> None:
+        """Manifests signed by the wrong addon fail the derived constraint."""
+        v1_input = self._base_deployment_input()
+        upgrade_att = self._upgrade_attestation()
+
+        wrong_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                wrong_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("capi-provisioner", str(ctx.exception))
+
+    # ==================================================================
+    # Prior constraints carry forward without repetition
+    # ==================================================================
+
+    def test_fleet_upgrade_prior_constraints_carry_forward(self) -> None:
+        """Prior's explicit constraint is enforced even when update adds none."""
+        v1_input = self._base_deployment_input()
+        bare_upgrade = Attestation(
+            attestation_id="upgrade-1",
+            input=make_signed_input(
+                self.bob.keys,
+                self.bob.key_binding,
+                content={"type": "request", "capability": "upgrade-planner"},
+                output_constraints=(
+                    OutputConstraint(
+                        name="output must be signed by upgrade-planner via fleet-addons",
+                        expression=(
+                            'output.has_signature && '
+                            'output.signature.trust_anchor_id == "fleet-addons" && '
+                            'output.signer_id == "upgrade-planner"'
+                        ),
+                    ),
+                ),
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "1.30.2")'
+                    ),
+                }),
+            ),
+        )
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+
+        # Output signed by wrong addon -- should fail from the *prior's* constraint
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": bare_upgrade},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("capi-provisioner", str(ctx.exception))
+
+    def test_fleet_upgrade_prior_constraints_carry_forward_happy_path(self) -> None:
+        """Prior's explicit constraint passes when satisfied, even if update adds nothing."""
+        v1_input = self._base_deployment_input()
+        bare_upgrade = Attestation(
+            attestation_id="upgrade-1",
+            input=make_signed_input(
+                self.bob.keys,
+                self.bob.key_binding,
+                content={"type": "request", "capability": "upgrade-planner"},
+                output_constraints=(
+                    OutputConstraint(
+                        name="output must be signed by upgrade-planner via fleet-addons",
+                        expression=(
+                            'output.has_signature && '
+                            'output.signature.trust_anchor_id == "fleet-addons" && '
+                            'output.signer_id == "upgrade-planner"'
+                        ),
+                    ),
+                ),
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "1.30.2")'
+                    ),
+                }),
+            ),
+        )
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": bare_upgrade},
+        )
+        result = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+        self.assertEqual(result.signer_id, "capi-provisioner")
+
+    # ==================================================================
+    # Namespace constraint from upgrade propagates (additive)
+    # ==================================================================
+
+    def test_fleet_upgrade_namespace_violation_rejected(self) -> None:
+        """Upgrade-derived namespace constraint rejects wrong namespace."""
+        v1_input = self._base_deployment_input()
+        upgrade_att = self._upgrade_attestation()
+
+        bad_ns_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "default"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                bad_ns_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("capi-system", str(ctx.exception))
+
+    # ==================================================================
+    # Untrusted upgrade signer
+    # ==================================================================
+
+    def test_fleet_upgrade_untrusted_upgrade_signer_rejected(self) -> None:
+        """An upgrade signed by an untrusted key cannot produce valid derived input."""
+        v1_input = self._base_deployment_input()
+
+        evil_upgrade = Attestation(
+            attestation_id="upgrade-1",
+            input=make_signed_input(
+                self.evil.keys,
+                self.evil.key_binding,
+                content={"type": "request"},
+            ),
+            output=sign_put_manifests(
+                self.evil.keys, "evil", "evil-anchor",
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "0.0.0-pwned")'
+                    ),
+                }),
+            ),
+        )
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": evil_upgrade},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("trust anchor not found", str(ctx.exception))
+
+    # ==================================================================
+    # Chained upgrades: v1 -> v2 -> v3, delivery at target
+    # ==================================================================
+
+    def test_fleet_upgrade_chained_two_hops(self) -> None:
+        """Two successive upgrades: v1.29 -> v1.30 -> v1.31, delivered at target."""
+        v1_input = self._base_deployment_input(version="1.29.5")
+
+        upgrade_1_att = Attestation(
+            attestation_id="upgrade-1",
+            input=make_signed_input(
+                self.bob.keys,
+                self.bob.key_binding,
+                content={"type": "request", "capability": "upgrade-planner"},
+                output_constraints=(
+                    OutputConstraint(
+                        name="output must be signed by upgrade-planner via fleet-addons",
+                        expression=(
+                            'output.has_signature && '
+                            'output.signature.trust_anchor_id == "fleet-addons" && '
+                            'output.signer_id == "upgrade-planner"'
+                        ),
+                    ),
+                ),
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "1.30.2")'
+                    ),
+                }),
+            ),
+        )
+
+        upgrade_2_att = Attestation(
+            attestation_id="upgrade-2",
+            input=make_signed_input(
+                self.bob.keys,
+                self.bob.key_binding,
+                content={"type": "request", "capability": "upgrade-planner"},
+                output_constraints=(
+                    OutputConstraint(
+                        name="output must be signed by upgrade-planner via fleet-addons",
+                        expression=(
+                            'output.has_signature && '
+                            'output.signature.trust_anchor_id == "fleet-addons" && '
+                            'output.signer_id == "upgrade-planner"'
+                        ),
+                    ),
+                ),
+            ),
+            output=sign_put_manifests(
+                self.upgrade_planner.keys, "upgrade-planner", "fleet-addons",
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "1.31.0")'
+                    ),
+                }),
+            ),
+        )
+
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.31.0"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v3",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v2",
+                update_attestation_id="upgrade-2",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+
+        bundle = VerificationBundle(
+            inputs={
+                "cluster-01-v1": v1_input,
+                "cluster-01-v2": DerivedInput(
+                    deployment_id="cluster-01",
+                    prior_input_id="cluster-01-v1",
+                    update_attestation_id="upgrade-1",
+                ),
+            },
+            attestations={
+                "upgrade-1": upgrade_1_att,
+                "upgrade-2": upgrade_2_att,
+            },
+        )
+        result = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+
+        self.assertEqual(result.signer_id, "capi-provisioner")
+        serialized = serialize_envelopes(target_manifests)
+        self.assertEqual(
+            serialized[0]["content"]["spec"]["topology"]["version"],
+            "1.31.0",
+        )
+
+    # ==================================================================
+    # Upgrade with addon placement (placement evidence bound to deployment)
+    # ==================================================================
+
+    def test_fleet_upgrade_with_addon_placement(self) -> None:
+        """Upgrade flow with addon placement: evidence is bound to deployment."""
+        v1_input = make_signed_input(
+            self.alice.keys,
+            self.alice.key_binding,
+            content=DeploymentContent(
+                deployment_id="cluster-01",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capi-provisioner",
+                        "trust_anchor_id": "fleet-addons",
+                        "config": {"version": "1.29.5"},
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capacity-planner",
+                        "trust_anchor_id": "fleet-addons",
+                    },
+                ),
+            ),
+            output_constraints=(
+                OutputConstraint(
+                    name="output must be signed by capi-provisioner via fleet-addons",
+                    expression=(
+                        'output.has_signature && '
+                        'output.signature.trust_anchor_id == "fleet-addons" && '
+                        'output.signer_id == "capi-provisioner"'
+                    ),
+                ),
+            ),
+        )
+        upgrade_att = self._upgrade_attestation()
+
+        evidence = make_placement_evidence(
+            self.placer_addon.keys, "capacity-planner", "fleet-addons",
+            targets=("cluster-prod-1", "cluster-prod-2"),
+            deployment_id="cluster-01",
+        )
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+                placement=evidence,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        result = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+
+        self.assertEqual(result.signer_id, "capi-provisioner")
+
+    # ==================================================================
+    # Cross-deployment evidence replay after upgrade
+    # ==================================================================
+
+    def test_fleet_upgrade_cross_deployment_evidence_rejected(self) -> None:
+        """Placement evidence for cluster-02 cannot satisfy cluster-01's attestation."""
+        v1_input = make_signed_input(
+            self.alice.keys,
+            self.alice.key_binding,
+            content=DeploymentContent(
+                deployment_id="cluster-01",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capi-provisioner",
+                        "trust_anchor_id": "fleet-addons",
+                        "config": {"version": "1.29.5"},
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capacity-planner",
+                        "trust_anchor_id": "fleet-addons",
+                    },
+                ),
+            ),
+            output_constraints=(
+                OutputConstraint(
+                    name="output must be signed by capi-provisioner via fleet-addons",
+                    expression=(
+                        'output.has_signature && '
+                        'output.signature.trust_anchor_id == "fleet-addons" && '
+                        'output.signer_id == "capi-provisioner"'
+                    ),
+                ),
+            ),
+        )
+        upgrade_att = self._upgrade_attestation()
+
+        stolen_evidence = make_placement_evidence(
+            self.placer_addon.keys, "capacity-planner", "fleet-addons",
+            targets=("cluster-prod-1",),
+            deployment_id="cluster-02",
+        )
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-01", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-01-v2",
+            input=DerivedInput(
+                deployment_id="cluster-01",
+                prior_input_id="cluster-01-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+                placement=stolen_evidence,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-01-v1": v1_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("deployment_id mismatch", str(ctx.exception))
+
+
+    # ==================================================================
+    # Cross-deployment upgrade replay (upgrade targets wrong deployment)
+    # ==================================================================
+
+    def test_fleet_upgrade_replay_against_different_deployment_rejected(self) -> None:
+        """An upgrade targeting cluster-01 cannot be replayed against cluster-02.
+
+        The upgrade attestation's placement strategy gates which deployment
+        IDs the update applies to.  When DerivedInput.verify verifies the
+        update with target_identity={"id": "cluster-02"}, the placement
+        constraint rejects because "cluster-02" is not in the upgrade's
+        placement targets.
+        """
+        cluster_02_input = self._base_deployment_input(deployment_id="cluster-02")
+        upgrade_att = self._upgrade_attestation(target_deployments=("cluster-01",))
+
+        target_manifests = k8s_manifests(
+            {
+                "apiVersion": "cluster.x-k8s.io/v1beta1",
+                "kind": "Cluster",
+                "metadata": {"name": "workload-02", "namespace": "capi-system"},
+                "spec": {"topology": {"version": "1.30.2"}},
+            },
+        )
+        final_attestation = Attestation(
+            attestation_id="cluster-02-v2",
+            input=DerivedInput(
+                deployment_id="cluster-02",
+                prior_input_id="cluster-02-v1",
+                update_attestation_id="upgrade-1",
+            ),
+            output=sign_put_manifests(
+                self.capi_addon.keys, "capi-provisioner", "fleet-addons",
+                target_manifests,
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"cluster-02-v1": cluster_02_input},
+            attestations={"upgrade-1": upgrade_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
+        self.assertIn("placement", str(ctx.exception).lower())
+
+
+def _all_details(result) -> str:
+    """Collect all detail strings from a verification result tree."""
+    nodes = _all_nodes(result)
+    return " | ".join(node.detail for node in nodes if node.detail)
+
+
+def _all_nodes(result) -> list:
+    nodes = [result]
+    for child in result.children:
+        nodes.extend(_all_nodes(child))
+    return nodes
 
 
 if __name__ == "__main__":

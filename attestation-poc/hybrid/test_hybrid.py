@@ -16,6 +16,7 @@ from .build import (
 from .crypto import KeyPair, content_hash, generate_keypair, sign
 from .model import (
     Attestation,
+    DeploymentContent,
     DerivedInput,
     KeyBinding,
     ManifestEnvelope,
@@ -24,6 +25,7 @@ from .model import (
     PutManifests,
     Signature,
     SignedInput,
+    StrategySpec,
     TrustAnchor,
     TrustAnchorConstraint,
 )
@@ -171,6 +173,11 @@ class HybridAttestationTests(unittest.TestCase):
             )
         )
 
+        self.prod_target = {
+            "id": "cluster-prod-1",
+            "labels": {"env": "prod", "region": "us-east-1"},
+        }
+
     def test_direct_attestation_with_signed_cel_constraints_verifies(self) -> None:
         manifests = k8s_manifests(
             {
@@ -238,15 +245,21 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertEqual(verified.signer_id, "capi-provisioner")
 
     def test_derived_input_uses_signed_cel_update_and_constraints(self) -> None:
-        prior_spec = {
-            "deployment_id": "cluster-01",
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-                "config": {"version": "1.29.5"},
-            },
-        }
+        prior_spec = DeploymentContent(
+            deployment_id="cluster-01",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29.5"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         prior_input = self._input(
             self.alice,
             prior_spec,
@@ -259,7 +272,6 @@ class HybridAttestationTests(unittest.TestCase):
                 'set_path(prior, "manifest_strategy.config.version", "1.30.2")'
             ),
             "output_constraints": [
-                constraint_to_document(addon_must_sign("capi-provisioner")),
                 constraint_to_document(namespace_constraint("capi-system")),
             ],
         }
@@ -286,6 +298,7 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="d1-v2",
             input=DerivedInput(
+                deployment_id="cluster-01",
                 prior_input_id="d1-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -297,8 +310,14 @@ class HybridAttestationTests(unittest.TestCase):
             attestations={"upgrade-1": update_attestation},
         )
 
-        verified = verify_attestation(final_attestation, bundle, self.trust_store)
-        explanation = explain_verification(final_attestation, bundle, self.trust_store)
+        verified = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
+        explanation = explain_verification(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
 
         self.assertEqual(verified.signer_id, "capi-provisioner")
         serialized = serialize_envelopes(final_manifests)
@@ -313,14 +332,21 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("upgrade-planner", self._all_details(explanation))
 
     def test_derived_input_falls_back_to_spec_derived_constraints(self) -> None:
-        prior_spec = {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-                "config": {"version": "1.29.5"},
-            }
-        }
+        prior_spec = DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29.5"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update",
@@ -337,6 +363,7 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -350,18 +377,28 @@ class HybridAttestationTests(unittest.TestCase):
             attestations={"update": update_attestation},
         )
 
-        verified = verify_attestation(final_attestation, bundle, self.trust_store)
+        verified = verify_attestation(
+            final_attestation, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
 
         self.assertEqual(verified.signer_id, "capi-provisioner")
 
     def test_bad_update_expression_fails_derivation(self) -> None:
-        prior_spec = {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-            }
-        }
+        prior_spec = DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update-bad-expression",
@@ -376,6 +413,7 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final-bad-expression",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior-bad-update",
                 update_attestation_id="update-bad-expression",
             ),
@@ -395,14 +433,21 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("derive_input_expression must return an object", str(context.exception))
 
     def test_wrong_output_signer_fails_against_derived_constraint(self) -> None:
-        prior_spec = {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-                "config": {"version": "1.29.5"},
-            }
-        }
+        prior_spec = DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29.5"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         prior_input = self._input(self.alice, prior_spec)
         update_attestation = Attestation(
             attestation_id="update-wrong",
@@ -419,6 +464,7 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final-wrong",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior-wrong",
                 update_attestation_id="update-wrong",
             ),
@@ -433,7 +479,10 @@ class HybridAttestationTests(unittest.TestCase):
         )
 
         with self.assertRaises(VerificationError) as context:
-            verify_attestation(final_attestation, bundle, self.trust_store)
+            verify_attestation(
+                final_attestation, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
 
         self.assertIn("manifests must be signed by capi-provisioner", str(context.exception))
 
@@ -1008,14 +1057,21 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_chained_three_version_updates(self) -> None:
         """v1 -> v2 -> v3 through bundle references."""
-        v1_spec = {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-                "config": {"version": "1.28"},
-            },
-        }
+        v1_spec = DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.28"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         v1_input = self._input(self.alice, v1_spec)
 
         def _update_att(version: str, att_id: str) -> Attestation:
@@ -1039,6 +1095,7 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
+                    deployment_id="deploy-1",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),
@@ -1052,6 +1109,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1061,18 +1119,28 @@ class HybridAttestationTests(unittest.TestCase):
             ),
         )
 
-        verified = verify_attestation(att, bundle, self.trust_store)
+        verified = verify_attestation(
+            att, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
         self.assertEqual(verified.signer_id, "capi-provisioner")
 
     def test_input_and_attestation_ids_may_overlap_without_false_cycle(self) -> None:
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon",
-                "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons",
-                "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         shared_update = Attestation(
             attestation_id="shared",
             input=self._input(self.bob, {"type": "request"}),
@@ -1088,6 +1156,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="final-overlap",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="shared",
                 update_attestation_id="shared",
             ),
@@ -1100,7 +1169,10 @@ class HybridAttestationTests(unittest.TestCase):
             attestations={"shared": shared_update},
         )
 
-        verified = verify_attestation(att, bundle, self.trust_store)
+        verified = verify_attestation(
+            att, bundle, self.trust_store,
+            target_identity=self.prod_target,
+        )
 
         self.assertEqual(verified.signer_id, "capi-provisioner")
 
@@ -1118,6 +1190,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="missing-prior",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="nonexistent",
                 update_attestation_id="update",
             ),
@@ -1133,6 +1206,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="missing-update",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="nonexistent",
             ),
@@ -1143,13 +1217,75 @@ class HybridAttestationTests(unittest.TestCase):
             verify_attestation(att, bundle, self.trust_store)
         self.assertIn("update attestation not found", str(ctx.exception))
 
+    def test_derived_input_deployment_id_must_match_prior(self) -> None:
+        prior_input = self._input(
+            self.alice,
+            DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capi-provisioner",
+                        "trust_anchor_id": "fleet-addons",
+                        "config": {"version": "1.29"},
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": 'target.labels.env == "prod"'},
+                ),
+            ),
+        )
+        update_att = Attestation(
+            attestation_id="update",
+            input=self._input(self.bob, {"type": "request"}),
+            output=self._signed_output(
+                self.planner_addon,
+                spec_update_manifest({
+                    "derive_input_expression": (
+                        'set_path(prior, "manifest_strategy.config.version", "1.30")'
+                    ),
+                }),
+            ),
+        )
+        att = Attestation(
+            attestation_id="deployment-id-mismatch",
+            input=DerivedInput(
+                deployment_id="deploy-2",
+                prior_input_id="prior",
+                update_attestation_id="update",
+            ),
+            output=self._signed_output(
+                self.capi_addon, k8s_manifests({"kind": "Cluster"}),
+            ),
+        )
+        bundle = VerificationBundle(
+            inputs={"prior": prior_input},
+            attestations={"update": update_att},
+        )
+        with self.assertRaises(VerificationError) as ctx:
+            verify_attestation(att, bundle, self.trust_store)
+        self.assertIn("deployment_id mismatch", str(ctx.exception))
+        self.assertIn("input declares 'deploy-2'", str(ctx.exception))
+
     def test_expired_prior_input_in_derivation(self) -> None:
         expired_input = self._input(
             self.alice,
-            {"manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            }},
+            DeploymentContent(
+                deployment_id="deploy-1",
+                manifest_strategy=StrategySpec(
+                    type="addon",
+                    attributes={
+                        "addon_id": "capi-provisioner",
+                        "trust_anchor_id": "fleet-addons",
+                        "config": {"version": "1.29"},
+                    },
+                ),
+                placement_strategy=StrategySpec(
+                    type="predicate",
+                    attributes={"expression": 'target.labels.env == "prod"'},
+                ),
+            ),
             valid_duration_sec=-1,
         )
         update_att = Attestation(
@@ -1167,6 +1303,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="expired-prior",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1183,12 +1320,21 @@ class HybridAttestationTests(unittest.TestCase):
         self.assertIn("expired", str(ctx.exception))
 
     def test_expired_update_input_in_derivation(self) -> None:
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         update_att = Attestation(
             attestation_id="update",
             input=self._input(
@@ -1206,6 +1352,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="expired-update",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1223,12 +1370,21 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_update_attestation_fails_own_constraints(self) -> None:
         """Update's output is signed by the wrong addon for its own input constraints."""
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         update_att = Attestation(
             attestation_id="update",
             input=self._input(
@@ -1248,6 +1404,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="bad-update",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1266,12 +1423,21 @@ class HybridAttestationTests(unittest.TestCase):
     def test_untrusted_prior_signer_deep_in_chain(self) -> None:
         """Chain rooted in an untrusted signer (eve / rogue-idp)."""
         eve = make_identity("eve", "rogue-idp")
-        v1_input = self._input(eve, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.28"},
-            },
-        })
+        v1_input = self._input(eve, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.28"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
 
         def _update_att(version: str, att_id: str) -> Attestation:
             return Attestation(
@@ -1291,6 +1457,7 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
+                    deployment_id="deploy-1",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),
@@ -1304,6 +1471,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1317,12 +1485,21 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_untrusted_update_signer_in_derivation(self) -> None:
         """Update signed by unknown user (eve / rogue-idp)."""
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         eve = make_identity("eve", "rogue-idp")
         update_att = Attestation(
             attestation_id="update",
@@ -1336,6 +1513,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="untrusted-update",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1393,12 +1571,21 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_valid_derivation_wrong_output_addon(self) -> None:
         """Derivation is valid but final output signed by the wrong addon."""
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         update_att = Attestation(
             attestation_id="update",
             input=self._input(self.bob, {"type": "request"}),
@@ -1414,6 +1601,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="wrong-output",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1426,7 +1614,10 @@ class HybridAttestationTests(unittest.TestCase):
             attestations={"update": update_att},
         )
         with self.assertRaises(VerificationError) as ctx:
-            verify_attestation(att, bundle, self.trust_store)
+            verify_attestation(
+                att, bundle, self.trust_store,
+                target_identity=self.prod_target,
+            )
         self.assertIn("manifests must be signed by capi-provisioner", str(ctx.exception))
 
     def test_mixed_trust_both_anchors_needed(self) -> None:
@@ -1439,12 +1630,21 @@ class HybridAttestationTests(unittest.TestCase):
                 "bob": self.bob.keys.public_key_bytes,
             },
         ))
-        prior_input = self._input(self.alice, {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.29"},
-            },
-        })
+        prior_input = self._input(self.alice, DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.29"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        ))
         update_att = Attestation(
             attestation_id="update",
             input=self._input(
@@ -1464,6 +1664,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="mixed",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1481,12 +1682,21 @@ class HybridAttestationTests(unittest.TestCase):
 
     def test_chained_middle_update_untrusted(self) -> None:
         """Three-step chain: the second update is signed by an untrusted signer."""
-        v1_spec = {
-            "manifest_strategy": {
-                "type": "addon", "addon_id": "capi-provisioner",
-                "trust_anchor_id": "fleet-addons", "config": {"version": "1.28"},
-            },
-        }
+        v1_spec = DeploymentContent(
+            deployment_id="deploy-1",
+            manifest_strategy=StrategySpec(
+                type="addon",
+                attributes={
+                    "addon_id": "capi-provisioner",
+                    "trust_anchor_id": "fleet-addons",
+                    "config": {"version": "1.28"},
+                },
+            ),
+            placement_strategy=StrategySpec(
+                type="predicate",
+                attributes={"expression": 'target.labels.env == "prod"'},
+            ),
+        )
         v1_input = self._input(self.alice, v1_spec)
         update_1 = Attestation(
             attestation_id="update-1",
@@ -1513,6 +1723,7 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
+                deployment_id="deploy-1",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1524,6 +1735,7 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
+                    deployment_id="deploy-1",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),

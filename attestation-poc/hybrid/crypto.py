@@ -41,6 +41,14 @@ def verify(public_key_bytes: bytes, data: bytes, signature: bytes) -> bool:
         return False
 
 
+def _json_default(obj: Any) -> Any:
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
+
+
 def content_hash(content: Any) -> bytes:
-    canonical = json.dumps(content, sort_keys=True, separators=(",", ":"))
+    canonical = json.dumps(
+        content, sort_keys=True, separators=(",", ":"), default=_json_default,
+    )
     return hashlib.sha256(canonical.encode()).digest()
