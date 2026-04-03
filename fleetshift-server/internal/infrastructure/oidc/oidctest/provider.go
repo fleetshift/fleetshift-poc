@@ -66,7 +66,8 @@ type Option func(*providerConfig)
 type providerConfig struct {
 	audience      string
 	listenAddress string
-	issuerURL     string // override; empty means derive from listen address
+	issuerURL     string   // override; empty means derive from listen address
+	extraSANIPs   []net.IP // additional IP SANs for the server certificate
 }
 
 // WithAudience sets the default audience for issued tokens.
@@ -79,6 +80,14 @@ func WithAudience(aud string) Option {
 // Defaults to "127.0.0.1:0".
 func WithListenAddress(addr string) Option {
 	return func(c *providerConfig) { c.listenAddress = addr }
+}
+
+// WithExtraSANIPs adds additional IP addresses to the server
+// certificate's Subject Alternative Names. Use this when the server
+// will be reached via an IP address other than 127.0.0.1 (e.g., a
+// Docker bridge gateway IP).
+func WithExtraSANIPs(ips ...net.IP) Option {
+	return func(c *providerConfig) { c.extraSANIPs = append(c.extraSANIPs, ips...) }
 }
 
 // WithIssuerURL overrides the issuer URL reported in discovery and
@@ -103,7 +112,7 @@ func Start(t *testing.T, opts ...Option) *Provider {
 	}
 
 	caCert, caKey := generateCA(t)
-	serverCert, serverKey := generateServerCert(t, caCert, caKey)
+	serverCert, serverKey := generateServerCert(t, caCert, caKey, cfg.extraSANIPs)
 
 	signingKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -353,13 +362,16 @@ func generateCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	return cert, key
 }
 
-func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey) (*x509.Certificate, *ecdsa.PrivateKey) {
+func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.PrivateKey, extraIPs []net.IP) (*x509.Certificate, *ecdsa.PrivateKey) {
 	t.Helper()
 
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("oidctest: generate server key: %v", err)
 	}
+
+	ips := []net.IP{net.IPv4(127, 0, 0, 1)}
+	ips = append(ips, extraIPs...)
 
 	template := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
@@ -369,7 +381,7 @@ func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Pri
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		DNSNames:     []string{"localhost", "host.docker.internal"},
-		IPAddresses:  []net.IP{net.IPv4(127, 0, 0, 1)},
+		IPAddresses:  ips,
 	}
 
 	certDER, err := x509.CreateCertificate(rand.Reader, template, caCert, &key.PublicKey, caKey)
