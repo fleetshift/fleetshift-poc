@@ -19,8 +19,8 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/oauth2"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
+	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 )
 
 func newAuthEnrollSigningCmd(ctx *cmdContext) *cobra.Command {
@@ -91,7 +91,7 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 
 	client := pb.NewSigningKeyBindingServiceClient(ctx.conn)
 	_, err = client.CreateSigningKeyBinding(cmd.Context(), &pb.CreateSigningKeyBindingRequest{
-		SigningKeyBindingId:  bindingID,
+		SigningKeyBindingId: bindingID,
 		KeyBindingDoc:       docBytes,
 		KeyBindingSignature: sig,
 		IdentityToken:       idToken,
@@ -192,7 +192,14 @@ func performEnrollmentOIDCFlow(cmd *cobra.Command, cfg auth.Config) (string, err
 
 	_ = server.Shutdown(context.Background())
 
-	tok, err := oauthCfg.Exchange(cmd.Context(), code,
+	exchangeCtx := cmd.Context()
+	if httpClient, err := cfg.HTTPClient(); err != nil {
+		return "", fmt.Errorf("create HTTP client: %w", err)
+	} else if httpClient != nil {
+		exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, httpClient)
+	}
+
+	tok, err := oauthCfg.Exchange(exchangeCtx, code,
 		oauth2.SetAuthURLParam("code_verifier", pkce.Verifier),
 	)
 	if err != nil {
