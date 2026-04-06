@@ -183,7 +183,8 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 
 // Delete transitions a deployment to the deleting state, bumps its
 // generation, and triggers a reconciliation that will execute the
-// delete pipeline.
+// delete pipeline. Idempotent: if the deployment is already deleting,
+// the current snapshot is returned without modification.
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
@@ -195,6 +196,14 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	if err != nil {
 		return domain.Deployment{}, err
 	}
+
+	if dep.State == domain.DeploymentStateDeleting {
+		if err := tx.Commit(); err != nil {
+			return domain.Deployment{}, fmt.Errorf("commit: %w", err)
+		}
+		return dep, nil
+	}
+
 	dep.State = domain.DeploymentStateDeleting
 	dep.BumpGeneration()
 	if err := tx.Deployments().Update(ctx, dep); err != nil {

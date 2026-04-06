@@ -261,7 +261,7 @@ func TestCreateMissingFields(t *testing.T) {
 	}
 }
 
-func TestDeleteDeployment(t *testing.T) {
+func TestDelete_ReturnsSnapshot(t *testing.T) {
 	client := setup(t)
 	ctx := context.Background()
 
@@ -301,7 +301,7 @@ func TestDeleteDeployment(t *testing.T) {
 	}
 }
 
-func TestDeleteDeploymentNotFound(t *testing.T) {
+func TestDelete_NotFound(t *testing.T) {
 	client := setup(t)
 	ctx := context.Background()
 
@@ -328,6 +328,52 @@ func TestDeleteDeploymentInvalidName(t *testing.T) {
 	}
 	if status.Code(err) != codes.InvalidArgument {
 		t.Errorf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
+func TestDelete_Idempotent(t *testing.T) {
+	client := setup(t)
+	ctx := context.Background()
+
+	raw, _ := json.Marshal(map[string]string{"k": "v"})
+	_, err := client.CreateDeployment(ctx, &pb.CreateDeploymentRequest{
+		DeploymentId: "del-idem",
+		Deployment: &pb.Deployment{
+			ManifestStrategy: &pb.ManifestStrategy{
+				Type:      pb.ManifestStrategy_TYPE_INLINE,
+				Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+			},
+			PlacementStrategy: &pb.PlacementStrategy{
+				Type:      pb.PlacementStrategy_TYPE_STATIC,
+				TargetIds: []string{"t1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDeployment: %v", err)
+	}
+
+	first, err := client.DeleteDeployment(ctx, &pb.DeleteDeploymentRequest{
+		Name: "deployments/del-idem",
+	})
+	if err != nil {
+		t.Fatalf("first DeleteDeployment: %v", err)
+	}
+	if first.GetState() != pb.Deployment_STATE_DELETING {
+		t.Fatalf("first delete state = %v, want STATE_DELETING", first.GetState())
+	}
+
+	second, err := client.DeleteDeployment(ctx, &pb.DeleteDeploymentRequest{
+		Name: "deployments/del-idem",
+	})
+	if err != nil {
+		t.Fatalf("second DeleteDeployment: %v", err)
+	}
+	if second.GetState() != pb.Deployment_STATE_DELETING {
+		t.Errorf("second delete state = %v, want STATE_DELETING", second.GetState())
+	}
+	if second.GetName() != first.GetName() {
+		t.Errorf("second delete name = %q, want %q", second.GetName(), first.GetName())
 	}
 }
 
