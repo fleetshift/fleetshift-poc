@@ -152,7 +152,24 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 	return err
 }
 
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
+// Remove deletes kind clusters described by the manifests.
+// Clusters that are already gone are silently skipped.
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
+	specs, err := a.validateManifests(manifests, domain.DeliveryAuth{})
+	if err != nil {
+		return fmt.Errorf("validate manifests: %w", err)
+	}
+
+	provider := a.providerFactory(nil)
+
+	for _, spec := range specs {
+		if !a.clusterExists(provider, spec.Name) {
+			continue
+		}
+		if err := provider.Delete(spec.Name, ""); err != nil {
+			return fmt.Errorf("delete kind cluster %q: %w", spec.Name, err)
+		}
+	}
 	return nil
 }
 
