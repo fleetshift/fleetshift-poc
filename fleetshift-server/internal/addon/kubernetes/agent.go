@@ -161,24 +161,9 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, cf
 	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
-// deliveryStateForError returns [domain.DeliveryStateAuthFailed] for
-// Kubernetes API authentication/authorization errors (401/403), and
-// [domain.DeliveryStateFailed] for everything else.
-func deliveryStateForError(err error) domain.DeliveryState {
-	if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) {
-		return domain.DeliveryStateAuthFailed
-	}
-	return domain.DeliveryStateFailed
-}
-
-// Remove deletes all manifested resources from the target cluster.
+// deleteManifests deletes Kubernetes resources described by manifests.
 // Resources that are already gone (404) are silently skipped.
-func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
-	cfg, err := buildRESTConfig(target, auth.Token)
-	if err != nil {
-		return fmt.Errorf("build REST config: %w", err)
-	}
-
+func (a *Agent) deleteManifests(ctx context.Context, cfg *rest.Config, manifests []domain.Manifest) error {
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("build kubernetes client: %w", err)
@@ -190,6 +175,40 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.D
 		}
 	}
 	return nil
+}
+
+// deliveryStateForError returns [domain.DeliveryStateAuthFailed] for
+// Kubernetes API authentication/authorization errors (401/403), and
+// [domain.DeliveryStateFailed] for everything else.
+func deliveryStateForError(err error) domain.DeliveryState {
+	if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) {
+		return domain.DeliveryStateAuthFailed
+	}
+	return domain.DeliveryStateFailed
+}
+
+// Remove deletes all manifested resources from the target cluster.
+// When an attestation is provided and the agent has a verifier,
+// the attestation is verified and platform credentials are used.
+// Otherwise falls back to token passthrough (auth.Token).
+// Resources that are already gone (404) are silently skipped.
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, _ *domain.DeliverySignaler) error {
+	if att != nil && a.verifier != nil {
+		if err := a.verifier.Verify(ctx, att); err != nil {
+			return fmt.Errorf("attestation verification failed: %w", err)
+		}
+		cfg, err := a.buildPlatformRESTConfig(ctx, target)
+		if err != nil {
+			return fmt.Errorf("build platform REST config: %w", err)
+		}
+		return a.deleteManifests(ctx, cfg, manifests)
+	}
+
+	cfg, err := buildRESTConfig(target, auth.Token)
+	if err != nil {
+		return fmt.Errorf("build REST config: %w", err)
+	}
+	return a.deleteManifests(ctx, cfg, manifests)
 }
 
 // buildPlatformRESTConfig builds a REST config from target properties

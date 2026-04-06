@@ -246,7 +246,7 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		Raw: json.RawMessage(`{"name":"my-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, &domain.DeliverySignaler{})
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -265,7 +265,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, &domain.DeliverySignaler{})
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
 	if err != nil {
 		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
 	}

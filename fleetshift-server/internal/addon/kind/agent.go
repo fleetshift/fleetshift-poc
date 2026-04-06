@@ -154,7 +154,7 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	specs, err := a.validateManifests(manifests, domain.DeliveryAuth{})
 	if err != nil {
 		return fmt.Errorf("validate manifests: %w", err)
