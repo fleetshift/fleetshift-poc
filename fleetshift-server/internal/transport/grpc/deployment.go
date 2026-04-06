@@ -80,6 +80,20 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 	return deploymentToProto(dep), nil
 }
 
+func (s *DeploymentServer) DeleteDeployment(ctx context.Context, req *pb.DeleteDeploymentRequest) (*pb.Deployment, error) {
+	id, err := parseDeploymentName(req.GetName())
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
+	}
+
+	dep, err := s.Deployments.Delete(ctx, id)
+	if err != nil {
+		return nil, domainError(err)
+	}
+
+	return deploymentToProto(dep), nil
+}
+
 func (s *DeploymentServer) ListDeployments(ctx context.Context, _ *pb.ListDeploymentsRequest) (*pb.ListDeploymentsResponse, error) {
 	// TODO: implement pagination
 	deps, err := s.Deployments.List(ctx)

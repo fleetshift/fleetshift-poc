@@ -12,7 +12,7 @@ import "fleetshift/v1/signing_key_binding.proto";
 
 // Signature is a detached signature over a canonical content hash.
 // Matches the hybrid PoC's Signature dataclass.
-message Signaature {
+message Signature {
   string signer_id = 1;
   bytes public_key = 2;
   bytes content_hash = 3;

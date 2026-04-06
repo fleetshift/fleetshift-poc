@@ -8,6 +8,7 @@ import "google/api/annotations.proto";
 import "google/api/client.proto";
 import "fleetshift/v1/deployment.proto";
 import "fleetshift/v1/create_deployment_request.proto";
+import "fleetshift/v1/delete_deployment_request.proto";
 import "fleetshift/v1/get_deployment_request.proto";
 import "fleetshift/v1/list_deployments_request.proto";
 import "fleetshift/v1/list_deployments_response.proto";
@@ -37,6 +38,17 @@ service DeploymentService {
     option (google.api.http) = {
       get: "/v1/deployments"
     };
+  }
+
+  // DeleteDeployment transitions a deployment to the deleting state and
+  // triggers reconciliation that removes it from all targets.
+  // The response is the deployment in DELETING state (AIP-128
+  // declarative-friendly: the resource is returned, not Empty).
+  rpc DeleteDeployment(DeleteDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      delete: "/v1/{name=deployments/*}"
+    };
+    option (google.api.method_signature) = "name";
   }
 
   // ResumeDeployment resumes a deployment that is paused for authentication.

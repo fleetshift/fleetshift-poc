@@ -184,27 +184,31 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 // Delete transitions a deployment to the deleting state, bumps its
 // generation, and triggers a reconciliation that will execute the
 // delete pipeline.
-func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) error {
+func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
+		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	dep, err := tx.Deployments().Get(ctx, id)
 	if err != nil {
-		return err
+		return domain.Deployment{}, err
 	}
 	dep.State = domain.DeploymentStateDeleting
 	dep.BumpGeneration()
 	if err := tx.Deployments().Update(ctx, dep); err != nil {
-		return fmt.Errorf("update deployment: %w", err)
+		return domain.Deployment{}, fmt.Errorf("update deployment: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
+		return domain.Deployment{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return s.Reconcile(ctx, id)
+	if err := s.Reconcile(ctx, id); err != nil {
+		return domain.Deployment{}, fmt.Errorf("reconcile: %w", err)
+	}
+
+	return dep, nil
 }
 
 // Reconcile starts a reconciliation workflow for the given deployment.

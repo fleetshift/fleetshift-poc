@@ -261,6 +261,76 @@ func TestCreateMissingFields(t *testing.T) {
 	}
 }
 
+func TestDeleteDeployment(t *testing.T) {
+	client := setup(t)
+	ctx := context.Background()
+
+	raw, _ := json.Marshal(map[string]string{"k": "v"})
+	_, err := client.CreateDeployment(ctx, &pb.CreateDeploymentRequest{
+		DeploymentId: "del-1",
+		Deployment: &pb.Deployment{
+			ManifestStrategy: &pb.ManifestStrategy{
+				Type:      pb.ManifestStrategy_TYPE_INLINE,
+				Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+			},
+			PlacementStrategy: &pb.PlacementStrategy{
+				Type:      pb.PlacementStrategy_TYPE_STATIC,
+				TargetIds: []string{"t1"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateDeployment: %v", err)
+	}
+
+	got, err := client.DeleteDeployment(ctx, &pb.DeleteDeploymentRequest{
+		Name: "deployments/del-1",
+	})
+	if err != nil {
+		t.Fatalf("DeleteDeployment: %v", err)
+	}
+
+	if got.GetName() != "deployments/del-1" {
+		t.Errorf("name = %q, want %q", got.GetName(), "deployments/del-1")
+	}
+	if got.GetState() != pb.Deployment_STATE_DELETING {
+		t.Errorf("state = %v, want STATE_DELETING", got.GetState())
+	}
+	if !got.GetReconciling() {
+		t.Error("reconciling = false, want true for DELETING state")
+	}
+}
+
+func TestDeleteDeploymentNotFound(t *testing.T) {
+	client := setup(t)
+	ctx := context.Background()
+
+	_, err := client.DeleteDeployment(ctx, &pb.DeleteDeploymentRequest{
+		Name: "deployments/nonexistent",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if s, ok := status.FromError(err); !ok || s.Code() != codes.NotFound {
+		t.Errorf("code = %v, want NotFound", status.Code(err))
+	}
+}
+
+func TestDeleteDeploymentInvalidName(t *testing.T) {
+	client := setup(t)
+	ctx := context.Background()
+
+	_, err := client.DeleteDeployment(ctx, &pb.DeleteDeploymentRequest{
+		Name: "invalid-name",
+	})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if status.Code(err) != codes.InvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", status.Code(err))
+	}
+}
+
 func TestCreateStateAndReconciling(t *testing.T) {
 	client := setup(t)
 	ctx := context.Background()

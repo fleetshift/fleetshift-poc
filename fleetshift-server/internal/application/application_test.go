@@ -271,7 +271,7 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 
 	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 
-	if err := h.deployments.Delete(ctx, "d1"); err != nil {
+	if _, err := h.deployments.Delete(ctx, "d1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 

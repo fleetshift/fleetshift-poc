@@ -22,6 +22,7 @@ const (
 	DeploymentService_CreateDeployment_FullMethodName = "/fleetshift.v1.DeploymentService/CreateDeployment"
 	DeploymentService_GetDeployment_FullMethodName    = "/fleetshift.v1.DeploymentService/GetDeployment"
 	DeploymentService_ListDeployments_FullMethodName  = "/fleetshift.v1.DeploymentService/ListDeployments"
+	DeploymentService_DeleteDeployment_FullMethodName = "/fleetshift.v1.DeploymentService/DeleteDeployment"
 	DeploymentService_ResumeDeployment_FullMethodName = "/fleetshift.v1.DeploymentService/ResumeDeployment"
 )
 
@@ -37,6 +38,11 @@ type DeploymentServiceClient interface {
 	GetDeployment(ctx context.Context, in *GetDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error)
 	// ListDeployments lists deployments.
 	ListDeployments(ctx context.Context, in *ListDeploymentsRequest, opts ...grpc.CallOption) (*ListDeploymentsResponse, error)
+	// DeleteDeployment transitions a deployment to the deleting state and
+	// triggers reconciliation that removes it from all targets.
+	// The response is the deployment in DELETING state (AIP-128
+	// declarative-friendly: the resource is returned, not Empty).
+	DeleteDeployment(ctx context.Context, in *DeleteDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error)
 	// ResumeDeployment resumes a deployment that is paused for authentication.
 	// The caller's fresh Bearer token is captured and used for subsequent
 	// deliveries. Any authorized user may resume; this gives approval-gate
@@ -82,6 +88,16 @@ func (c *deploymentServiceClient) ListDeployments(ctx context.Context, in *ListD
 	return out, nil
 }
 
+func (c *deploymentServiceClient) DeleteDeployment(ctx context.Context, in *DeleteDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(Deployment)
+	err := c.cc.Invoke(ctx, DeploymentService_DeleteDeployment_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *deploymentServiceClient) ResumeDeployment(ctx context.Context, in *ResumeDeploymentRequest, opts ...grpc.CallOption) (*Deployment, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(Deployment)
@@ -104,6 +120,11 @@ type DeploymentServiceServer interface {
 	GetDeployment(context.Context, *GetDeploymentRequest) (*Deployment, error)
 	// ListDeployments lists deployments.
 	ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error)
+	// DeleteDeployment transitions a deployment to the deleting state and
+	// triggers reconciliation that removes it from all targets.
+	// The response is the deployment in DELETING state (AIP-128
+	// declarative-friendly: the resource is returned, not Empty).
+	DeleteDeployment(context.Context, *DeleteDeploymentRequest) (*Deployment, error)
 	// ResumeDeployment resumes a deployment that is paused for authentication.
 	// The caller's fresh Bearer token is captured and used for subsequent
 	// deliveries. Any authorized user may resume; this gives approval-gate
@@ -127,6 +148,9 @@ func (UnimplementedDeploymentServiceServer) GetDeployment(context.Context, *GetD
 }
 func (UnimplementedDeploymentServiceServer) ListDeployments(context.Context, *ListDeploymentsRequest) (*ListDeploymentsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListDeployments not implemented")
+}
+func (UnimplementedDeploymentServiceServer) DeleteDeployment(context.Context, *DeleteDeploymentRequest) (*Deployment, error) {
+	return nil, status.Error(codes.Unimplemented, "method DeleteDeployment not implemented")
 }
 func (UnimplementedDeploymentServiceServer) ResumeDeployment(context.Context, *ResumeDeploymentRequest) (*Deployment, error) {
 	return nil, status.Error(codes.Unimplemented, "method ResumeDeployment not implemented")
@@ -206,6 +230,24 @@ func _DeploymentService_ListDeployments_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _DeploymentService_DeleteDeployment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(DeleteDeploymentRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(DeploymentServiceServer).DeleteDeployment(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: DeploymentService_DeleteDeployment_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(DeploymentServiceServer).DeleteDeployment(ctx, req.(*DeleteDeploymentRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _DeploymentService_ResumeDeployment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(ResumeDeploymentRequest)
 	if err := dec(in); err != nil {
@@ -242,6 +284,10 @@ var DeploymentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "ListDeployments",
 			Handler:    _DeploymentService_ListDeployments_Handler,
+		},
+		{
+			MethodName: "DeleteDeployment",
+			Handler:    _DeploymentService_DeleteDeployment_Handler,
 		},
 		{
 			MethodName: "ResumeDeployment",
