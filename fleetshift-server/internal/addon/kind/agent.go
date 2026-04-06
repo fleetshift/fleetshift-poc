@@ -152,7 +152,7 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 	return err
 }
 
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

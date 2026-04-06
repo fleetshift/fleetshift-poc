@@ -52,7 +52,7 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

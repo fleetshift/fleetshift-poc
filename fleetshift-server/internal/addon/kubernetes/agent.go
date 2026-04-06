@@ -111,7 +111,7 @@ func deliveryStateForError(err error) domain.DeliveryState {
 
 // Remove is a no-op for now.
 // TODO: implement resource pruning on removal
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

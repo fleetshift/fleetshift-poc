@@ -25,7 +25,7 @@ func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, delivery
 	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
-func (s *spyAgent) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (s *spyAgent) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	s.removed = append(s.removed, domain.RemoveInput{
 		Target:       target,
 		DeliveryID:   deliveryID,
@@ -81,7 +81,7 @@ func TestRoutingDeliveryService_RemoveRoutesToCorrectAgent(t *testing.T) {
 	nop := &domain.DeliverySignaler{}
 	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "local-kind"}
 
-	if err := router.Remove(ctx, target, "d1:k1", nop); err != nil {
+	if err := router.Remove(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nop); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 
@@ -108,7 +108,7 @@ func TestRoutingDeliveryService_UnregisteredTypeReturnsError(t *testing.T) {
 		t.Errorf("expected ErrInvalidArgument, got: %v", err)
 	}
 
-	err = router.Remove(ctx, target, "d1:k1", nop)
+	err = router.Remove(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nop)
 	if err == nil {
 		t.Fatal("expected error for unregistered target type")
 	}

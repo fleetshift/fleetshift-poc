@@ -74,6 +74,7 @@ type RemoveInput struct {
 	Target       TargetInfo
 	DeliveryID   DeliveryID
 	DeploymentID DeploymentID
+	Manifests    []Manifest
 	Auth         DeliveryAuth
 	Attestation  *Attestation // nil for token-passthrough deliveries
 }
@@ -252,7 +253,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, Del
 // RemoveFromTarget removes a deployment's manifests from a target.
 func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, struct{}] {
 	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (struct{}, error) {
-		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, &DeliverySignaler{})
+		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, in.Manifests, in.Auth, &DeliverySignaler{})
 	})
 }
 
@@ -500,11 +501,16 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 ) error {
 	targets := targetInfosByID(dep.ResolvedTargets, pool)
 	for _, target := range targets {
-		if _, err := RunActivity(record, s.RemoveFromTarget(), RemoveInput{
+		in := RemoveInput{
 			Target:       target,
 			DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 			DeploymentID: deploymentID,
-		}); err != nil {
+			Auth:         dep.Auth,
+		}
+		if dep.Auth.Provenance != nil {
+			in.Attestation = assembleRemoveAttestation(dep)
+		}
+		if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 			return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
 		}
 	}

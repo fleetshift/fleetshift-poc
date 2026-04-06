@@ -15,5 +15,5 @@ import "context"
 // durable engines that hold locks during activity execution.
 type DeliveryService interface {
 	Deliver(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, auth DeliveryAuth, signaler *DeliverySignaler) (DeliveryResult, error)
-	Remove(ctx context.Context, target TargetInfo, deliveryID DeliveryID, signaler *DeliverySignaler) error
+	Remove(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, auth DeliveryAuth, signaler *DeliverySignaler) error
 }

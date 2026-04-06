@@ -241,7 +241,7 @@ func TestAgent_Remove_IsNoopForNow(t *testing.T) {
 	agent := kind.NewAgent(fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
-	if err := agent.Remove(context.Background(), target, "d1:k1", nop); err != nil {
+	if err := agent.Remove(context.Background(), target, "d1:k1", nil, domain.DeliveryAuth{}, nop); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 }

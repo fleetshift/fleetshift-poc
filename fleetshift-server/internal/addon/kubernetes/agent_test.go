@@ -140,7 +140,7 @@ func TestAgent_Remove_IsNoop(t *testing.T) {
 	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{ID: "k8s-test", Type: kubernetes.TargetType, Name: "test-cluster"}
-	if err := agent.Remove(context.Background(), target, "d1", &domain.DeliverySignaler{}); err != nil {
+	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.DeliverySignaler{}); err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
 }
