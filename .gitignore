@@ -46,3 +46,9 @@ go.work.sum
 
 # Local test certs
 *.pem
+
+# Gas Town / polecat workspace
+.beads/
+.claude/
+.runtime/
+CLAUDE.md
