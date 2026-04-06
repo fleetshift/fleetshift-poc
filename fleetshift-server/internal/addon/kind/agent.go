@@ -152,7 +152,23 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 	return err
 }
 
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+// Remove deletes the kind cluster identified by [target.Name]. If the
+// cluster does not exist the call succeeds silently (idempotent).
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, signaler *domain.DeliverySignaler) error {
+	provider := a.providerFactory(NewObserverLogger(ctx, signaler, time.Now))
+
+	if !a.clusterExists(provider, target.Name) {
+		return nil
+	}
+
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Kind:    domain.DeliveryEventProgress,
+		Message: fmt.Sprintf("Deleting kind cluster %q", target.Name),
+	})
+
+	if err := provider.Delete(target.Name, ""); err != nil {
+		return fmt.Errorf("delete kind cluster %q: %w", target.Name, err)
+	}
 	return nil
 }
 

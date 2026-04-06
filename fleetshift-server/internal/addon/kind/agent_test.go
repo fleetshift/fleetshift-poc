@@ -23,6 +23,7 @@ type fakeProvider struct {
 	mu        sync.Mutex
 	clusters  map[string][]byte // name → raw config
 	createErr error
+	deleteErr error
 	logger    log.Logger
 	created   chan string // receives cluster name after each Create; buffered
 }
@@ -49,6 +50,9 @@ func (p *fakeProvider) Create(name string, opts ...cluster.CreateOption) error {
 }
 
 func (p *fakeProvider) Delete(name, _ string) error {
+	if p.deleteErr != nil {
+		return p.deleteErr
+	}
 	p.mu.Lock()
 	delete(p.clusters, name)
 	p.mu.Unlock()
@@ -235,14 +239,84 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_IsNoopForNow(t *testing.T) {
+func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["dev-cluster"] = nil
 	agent := kind.NewAgent(fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "dev-cluster"}
 	if err := agent.Remove(context.Background(), target, "d1:k1", nop); err != nil {
 		t.Fatalf("Remove: %v", err)
+	}
+
+	if provider.hasCluster("dev-cluster") {
+		t.Error("expected cluster 'dev-cluster' to be deleted")
+	}
+}
+
+func TestAgent_Remove_NonexistentCluster_Succeeds(t *testing.T) {
+	provider := newFakeProvider()
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "no-such-cluster"}
+	if err := agent.Remove(context.Background(), target, "d1:k1", nop); err != nil {
+		t.Fatalf("Remove should succeed for nonexistent cluster: %v", err)
+	}
+}
+
+func TestAgent_Remove_DeleteFailure_ReturnsError(t *testing.T) {
+	provider := newFakeProvider()
+	provider.clusters["dev-cluster"] = nil
+	provider.deleteErr = errors.New("docker not available")
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "dev-cluster"}
+	err := agent.Remove(context.Background(), target, "d1:k1", nop)
+	if err == nil {
+		t.Fatal("expected error when delete fails")
+	}
+	if got := err.Error(); got != `delete kind cluster "dev-cluster": docker not available` {
+		t.Errorf("error = %q, want wrapped message", got)
+	}
+}
+
+func TestAgent_Remove_EmitsProgressEvent(t *testing.T) {
+	provider := newFakeProvider()
+	provider.clusters["dev-cluster"] = nil
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "dev-cluster"}
+	if err := agent.Remove(context.Background(), target, "d1:k1", signaler); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	event := <-obs.ch
+	if event.Kind != domain.DeliveryEventProgress {
+		t.Errorf("event kind = %q, want %q", event.Kind, domain.DeliveryEventProgress)
+	}
+	if event.Message == "" {
+		t.Error("expected a non-empty progress message")
+	}
+}
+
+func TestAgent_Remove_DoesNotAffectOtherClusters(t *testing.T) {
+	provider := newFakeProvider()
+	provider.clusters["cluster-a"] = nil
+	provider.clusters["cluster-b"] = nil
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "cluster-a"}
+	if err := agent.Remove(context.Background(), target, "d1:k1", nop); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+
+	if provider.hasCluster("cluster-a") {
+		t.Error("expected cluster-a to be deleted")
+	}
+	if !provider.hasCluster("cluster-b") {
+		t.Error("cluster-b should not be affected")
 	}
 }
 
