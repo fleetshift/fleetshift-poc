@@ -275,13 +275,9 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	dep := awaitCondition(ctx, t, h.store, "d1", func(dep domain.Deployment) bool {
-		return dep.State == domain.DeploymentStateDeleting && dep.ObservedGeneration >= dep.Generation
-	})
-
-	if len(dep.ResolvedTargets) != 0 {
-		t.Errorf("expected 0 resolved targets after delete reconciliation, got %d", len(dep.ResolvedTargets))
-	}
+	// The delete pipeline now hard-deletes deployment and delivery
+	// records. Wait until the deployment is gone.
+	awaitDeleted(ctx, t, h.store, "d1")
 }
 
 func queryDeployment(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID) (domain.Deployment, error) {
@@ -309,6 +305,26 @@ func awaitCondition(ctx context.Context, t *testing.T, store domain.Store, id do
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for condition on deployment %s", id)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func awaitDeleted(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		_, err = tx.Deployments().Get(ctx, id)
+		tx.Rollback()
+		if errors.Is(err, domain.ErrNotFound) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for deployment %s to be deleted", id)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

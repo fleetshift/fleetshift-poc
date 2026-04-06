@@ -3,6 +3,7 @@ package domain_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -120,6 +121,52 @@ func getDelivery(t *testing.T, store domain.Store, id domain.DeliveryID) domain.
 		t.Fatalf("get delivery %q: %v", id, err)
 	}
 	return d
+}
+
+func seedDeliveries(t *testing.T, store domain.Store, depID domain.DeploymentID, targetIDs ...domain.TargetID) {
+	t.Helper()
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, tgtID := range targetIDs {
+		did := domain.DeliveryID(string(depID) + ":" + string(tgtID))
+		if err := tx.Deliveries().Put(context.Background(), domain.Delivery{
+			ID:           did,
+			DeploymentID: depID,
+			TargetID:     tgtID,
+			State:        domain.DeliveryStateDelivered,
+			CreatedAt:    now,
+			UpdatedAt:    now,
+		}); err != nil {
+			t.Fatalf("seed delivery %q: %v", did, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func seedProvisionedTarget(t *testing.T, store domain.Store, target domain.TargetInfo) {
+	t.Helper()
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	reg := &domain.TargetRegistrar{
+		Targets:   tx.Targets(),
+		Inventory: tx.Inventory(),
+	}
+	if err := reg.Register(context.Background(), target); err != nil {
+		t.Fatalf("register provisioned target %q: %v", target.ID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -353,6 +400,20 @@ func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ d
 
 func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
 	return nil
+}
+
+type failingRemoveDelivery struct {
+	err error
+}
+
+func (d *failingRemoveDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (d *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return d.err
 }
 
 type recordingDelivery struct {
@@ -718,12 +779,248 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		t.Errorf("expected 2 remove-from-target, got %d (activities: %v)", removeCount, names)
 	}
 
+	// The delete pipeline now hard-deletes the deployment record.
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if err == nil {
+		t.Error("deployment record should be deleted after delete pipeline")
+	}
+}
+
+func TestExecuteDelete_WithResolvedTargets(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
+		domain.TargetInfo{ID: "t2", Name: "t2", Type: "test"},
+	)
+	// Seed delivery records so RemoveFromTarget can find them.
+	seedDeliveries(t, store, "d1", "t1", "t2")
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
+
+	_, err := wf.Run(recorder, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify remove-from-target ran for both targets.
+	names := recorder.activityNames()
+	removeCount := 0
+	for _, name := range names {
+		if name == "remove-from-target" {
+			removeCount++
+		}
+	}
+	if removeCount != 2 {
+		t.Errorf("expected 2 remove-from-target, got %d (activities: %v)", removeCount, names)
+	}
+
+	// Verify delete-deployment-record ran.
+	if !contains(names, "delete-deployment-record") {
+		t.Errorf("expected delete-deployment-record activity, got %v", names)
+	}
+
+	// Verify deployment record was deleted.
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if err == nil {
+		t.Error("deployment record should be deleted")
+	}
+
+	// Verify delivery records were deleted.
+	deliveries, err := tx.Deliveries().ListByDeployment(context.Background(), "d1")
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
+	}
+	if len(deliveries) != 0 {
+		t.Errorf("expected 0 delivery records, got %d", len(deliveries))
+	}
+}
+
+func TestExecuteDelete_NoResolvedTargets(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   nil,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
+
+	_, err := wf.Run(recorder, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// No remove-from-target should have run.
+	names := recorder.activityNames()
+	for _, name := range names {
+		if name == "remove-from-target" {
+			t.Error("unexpected remove-from-target with no resolved targets")
+		}
+	}
+
+	// Deployment record should still be deleted.
+	if !contains(names, "delete-deployment-record") {
+		t.Errorf("expected delete-deployment-record activity, got %v", names)
+	}
+
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if err == nil {
+		t.Error("deployment record should be deleted")
+	}
+}
+
+func TestExecuteDelete_DeliveryRecordNotFound(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+	// Intentionally NOT seeding delivery records.
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+
+	_, err := wf.Run(rec, "d1")
+	if err != nil {
+		t.Fatalf("Run should succeed when delivery record is missing: %v", err)
+	}
+
+	// Deployment record should be deleted despite missing delivery records.
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if err == nil {
+		t.Error("deployment record should be deleted")
+	}
+}
+
+func TestExecuteDelete_RemoveFailure(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+	seedDeliveries(t, store, "d1", "t1")
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, &failingRemoveDelivery{err: fmt.Errorf("agent unreachable")}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+
+	_, err := wf.Run(rec, "d1")
+	if err == nil {
+		t.Fatal("Run should fail when Remove returns an error")
+	}
+	if !strings.Contains(err.Error(), "agent unreachable") {
+		t.Errorf("error = %q, want to contain 'agent unreachable'", err.Error())
+	}
+
+	// Deployment record should still exist (delete was not completed).
 	dep := getDeployment(t, store, "d1")
 	if dep.State != domain.DeploymentStateDeleting {
-		t.Errorf("State = %q, want deleting", dep.State)
+		t.Errorf("State = %q, want deleting (unchanged)", dep.State)
 	}
-	if len(dep.ResolvedTargets) != 0 {
-		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets)
+}
+
+func TestExecuteDelete_WithProvisionedTargets(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"provisioner"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "provisioner", Name: "provisioner", Type: "test"},
+	)
+	seedDeliveries(t, store, "d1", "provisioner")
+
+	// Register a provisioned target via TargetRegistrar (simulates
+	// what ProcessDeliveryOutputs does during a deliver pipeline).
+	seedProvisionedTarget(t, store, domain.TargetInfo{
+		ID:   "k8s-new-cluster",
+		Type: "kubernetes",
+		Name: "new-cluster",
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
+
+	_, err := wf.Run(recorder, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	// Verify cleanup-provisioned-targets ran.
+	names := recorder.activityNames()
+	if !contains(names, "cleanup-provisioned-targets") {
+		t.Errorf("expected cleanup-provisioned-targets activity, got %v", names)
+	}
+
+	// Verify the provisioned target was deleted.
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Targets().Get(context.Background(), "k8s-new-cluster")
+	if err == nil {
+		t.Error("provisioned target should be deleted")
 	}
 }
 
