@@ -104,7 +104,14 @@ func runAuthLogin(cmd *cobra.Command, _ *cmdContext) error {
 
 	_ = server.Shutdown(context.Background())
 
-	tok, err := oauthCfg.Exchange(cmd.Context(), code,
+	exchangeCtx := cmd.Context()
+	if httpClient, err := cfg.HTTPClient(); err != nil {
+		return fmt.Errorf("create HTTP client: %w", err)
+	} else if httpClient != nil {
+		exchangeCtx = context.WithValue(exchangeCtx, oauth2.HTTPClient, httpClient)
+	}
+
+	tok, err := oauthCfg.Exchange(exchangeCtx, code,
 		oauth2.SetAuthURLParam("code_verifier", pkce.Verifier),
 	)
 	if err != nil {
