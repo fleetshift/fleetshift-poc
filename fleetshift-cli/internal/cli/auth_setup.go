@@ -6,8 +6,8 @@ import (
 
 	"github.com/spf13/cobra"
 
-	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
+	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 )
 
 type authSetupFlags struct {
@@ -17,6 +17,7 @@ type authSetupFlags struct {
 	methodID              string
 	audience              string
 	keyEnrollmentClientID string
+	oidcCAFile            string
 }
 
 func newAuthSetupCmd(ctx *cmdContext) *cobra.Command {
@@ -34,6 +35,7 @@ func newAuthSetupCmd(ctx *cmdContext) *cobra.Command {
 	cmd.Flags().StringVar(&f.methodID, "method-id", "default", "Auth method ID on the server")
 	cmd.Flags().StringVar(&f.audience, "audience", "", "Expected audience claim")
 	cmd.Flags().StringVar(&f.keyEnrollmentClientID, "key-enrollment-client-id", "", "OAuth2 client ID for signing key enrollment (dedicated OIDC client)")
+	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuer (saved to local config)")
 	_ = cmd.MarkFlagRequired("issuer-url")
 	_ = cmd.MarkFlagRequired("client-id")
 	return cmd
@@ -59,12 +61,13 @@ func runAuthSetup(cmd *cobra.Command, ctx *cmdContext, f *authSetupFlags) error 
 
 	scopes := strings.Split(f.scopes, ",")
 	cfg := auth.Config{
-		IssuerURL:              f.issuerURL,
-		ClientID:               f.clientID,
-		Scopes:                 scopes,
-		AuthorizationEndpoint:  resp.GetOidcConfig().GetAuthorizationEndpoint(),
-		TokenEndpoint:          resp.GetOidcConfig().GetTokenEndpoint(),
-		KeyEnrollmentClientID:  f.keyEnrollmentClientID,
+		IssuerURL:             f.issuerURL,
+		ClientID:              f.clientID,
+		Scopes:                scopes,
+		AuthorizationEndpoint: resp.GetOidcConfig().GetAuthorizationEndpoint(),
+		TokenEndpoint:         resp.GetOidcConfig().GetTokenEndpoint(),
+		KeyEnrollmentClientID: f.keyEnrollmentClientID,
+		OIDCCAFile:            f.oidcCAFile,
 	}
 
 	if err := auth.SaveConfig(cfg); err != nil {

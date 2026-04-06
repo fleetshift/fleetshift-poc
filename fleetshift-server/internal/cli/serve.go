@@ -2,6 +2,8 @@ package cli
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -88,15 +90,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return err
 	}
 
-	kindOpts := []kindaddon.AgentOption{
-		kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
-	}
+	var oidcCABundle []byte
 	if f.oidcCAFile != "" {
-		caBundle, err := os.ReadFile(f.oidcCAFile)
+		var err error
+		oidcCABundle, err = os.ReadFile(f.oidcCAFile)
 		if err != nil {
 			return fmt.Errorf("read OIDC CA file: %w", err)
 		}
-		kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(caBundle))
+	}
+
+	kindOpts := []kindaddon.AgentOption{
+		kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
+	}
+	if oidcCABundle != nil {
+		kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
 	}
 	kindAgent := kindaddon.NewAgent(
 		func(logger kindlog.Logger) kindaddon.ClusterProvider {
@@ -163,9 +170,28 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- auth infrastructure ---
 
+	var oidcHTTPClient *http.Client
+	if oidcCABundle != nil {
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		pool.AppendCertsFromPEM(oidcCABundle)
+		oidcHTTPClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: pool},
+			},
+		}
+	}
+
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
-	discoveryClient := oidc.NewDiscoveryClient(nil)
-	tokenVerifier, err := oidc.NewVerifier(ctx)
+	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
+
+	var verifierOpts []oidc.VerifierOption
+	if oidcHTTPClient != nil {
+		verifierOpts = append(verifierOpts, oidc.WithHTTPClient(oidcHTTPClient))
+	}
+	tokenVerifier, err := oidc.NewVerifier(ctx, verifierOpts...)
 	if err != nil {
 		return fmt.Errorf("create OIDC verifier: %w", err)
 	}

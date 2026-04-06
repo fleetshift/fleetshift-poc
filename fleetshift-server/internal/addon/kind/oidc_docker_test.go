@@ -4,6 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
@@ -28,6 +31,39 @@ type oidcClusterResult struct {
 	Kubeconfig  string
 }
 
+// dockerHostIP returns the gateway IP of the Docker "kind" network, which
+// is the address kind containers use to reach the host. We resolve this
+// dynamically instead of relying on host.docker.internal because that DNS
+// name may resolve to an unreachable IP when another DNS resolver (e.g.,
+// Podman) is present on the host.
+func dockerHostIP(t *testing.T) string {
+	t.Helper()
+
+	// Ensure the "kind" network exists. kind creates it on first use,
+	// but we need the gateway IP before cluster creation for TLS SANs.
+	_ = exec.Command("docker", "network", "create", "kind").Run()
+
+	// Try each IPAM config entry; the IPv4 gateway is typically at
+	// index 0 or 1 depending on whether IPv6 is also configured.
+	for _, idx := range []string{"0", "1"} {
+		out, err := exec.Command("docker", "network", "inspect", "kind",
+			"--format", fmt.Sprintf("{{(index .IPAM.Config %s).Gateway}}", idx)).CombinedOutput()
+		if err != nil {
+			continue
+		}
+		ip := strings.TrimSpace(string(out))
+		if ip == "" || ip == "<no value>" {
+			continue
+		}
+		// Skip IPv6 addresses.
+		if net.ParseIP(ip) != nil && net.ParseIP(ip).To4() != nil {
+			return ip
+		}
+	}
+	t.Fatal("could not determine Docker host IP from kind network")
+	return ""
+}
+
 // createOIDCCluster creates a kind cluster with OIDC trust derived from
 // the caller's identity. It starts a fake OIDC provider, delivers the
 // cluster via the kind agent, and returns the kubeconfig and provider.
@@ -42,11 +78,14 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	t.Cleanup(func() { _ = checker.Delete(clusterName, "") })
 	_ = checker.Delete(clusterName, "")
 
+	hostIP := dockerHostIP(t)
+
 	idp := oidctest.Start(t,
 		oidctest.WithListenAddress("0.0.0.0:0"),
 		oidctest.WithAudience(string(auth.Audience[0])),
+		oidctest.WithExtraSANIPs(net.ParseIP(hostIP)),
 	)
-	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://host.docker.internal:%s", idp.Port()))
+	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostIP, idp.Port()))
 	idp.SetIssuerURL(dockerIssuer)
 
 	auth.Caller.Issuer = dockerIssuer

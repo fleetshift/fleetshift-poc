@@ -1,20 +1,47 @@
 package auth
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
 	"path/filepath"
 )
 
 // Config holds local OIDC client configuration saved by `fleetctl auth setup`.
 type Config struct {
-	IssuerURL              string   `json:"issuer_url"`
-	ClientID               string   `json:"client_id"`
-	Scopes                 []string `json:"scopes"`
-	AuthorizationEndpoint  string   `json:"authorization_endpoint"`
-	TokenEndpoint          string   `json:"token_endpoint"`
-	KeyEnrollmentClientID  string   `json:"key_enrollment_client_id,omitempty"`
+	IssuerURL             string   `json:"issuer_url"`
+	ClientID              string   `json:"client_id"`
+	Scopes                []string `json:"scopes"`
+	AuthorizationEndpoint string   `json:"authorization_endpoint"`
+	TokenEndpoint         string   `json:"token_endpoint"`
+	KeyEnrollmentClientID string   `json:"key_enrollment_client_id,omitempty"`
+	OIDCCAFile            string   `json:"oidc_ca_file,omitempty"`
+}
+
+// HTTPClient returns an *http.Client that trusts the CA certificate at
+// cfg.OIDCCAFile (in addition to system CAs). Returns nil if OIDCCAFile
+// is not set.
+func (cfg Config) HTTPClient() (*http.Client, error) {
+	if cfg.OIDCCAFile == "" {
+		return nil, nil
+	}
+	caPEM, err := os.ReadFile(cfg.OIDCCAFile)
+	if err != nil {
+		return nil, fmt.Errorf("read CA file %s: %w", cfg.OIDCCAFile, err)
+	}
+	pool, err := x509.SystemCertPool()
+	if err != nil {
+		pool = x509.NewCertPool()
+	}
+	pool.AppendCertsFromPEM(caPEM)
+	return &http.Client{
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{RootCAs: pool},
+		},
+	}, nil
 }
 
 func configDir() (string, error) {
