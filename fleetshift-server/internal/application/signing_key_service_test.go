@@ -126,8 +126,10 @@ func ecPubKeyJWK(t *testing.T, pub *ecdsa.PublicKey) []byte {
 func callerCtx(subject string, issuer domain.IssuerURL) context.Context {
 	return application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{
-			ID:     domain.SubjectID(subject),
-			Issuer: issuer,
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: domain.SubjectID(subject),
+				Issuer:  issuer,
+			},
 		},
 		Token: "access-token",
 	})
@@ -146,8 +148,8 @@ func TestSigningKeyService_Create_ValidBundle(t *testing.T) {
 	if binding.ID != "skb-1" {
 		t.Errorf("ID = %q, want %q", binding.ID, "skb-1")
 	}
-	if binding.SubjectID != "user-1" {
-		t.Errorf("SubjectID = %q, want %q", binding.SubjectID, "user-1")
+	if binding.Subject != "user-1" {
+		t.Errorf("Subject = %q, want %q", binding.Subject, "user-1")
 	}
 	if binding.Algorithm != "ES256" {
 		t.Errorf("Algorithm = %q, want %q", binding.Algorithm, "ES256")

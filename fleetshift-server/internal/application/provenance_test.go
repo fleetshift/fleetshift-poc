@@ -28,9 +28,11 @@ func enrollKeyBinding(t *testing.T, store domain.Store, subjectID domain.Subject
 
 	now := time.Now().UTC()
 	binding := domain.SigningKeyBinding{
-		ID:                  "skb-test-1",
-		SubjectID:           subjectID,
-		Issuer:              issuer,
+		ID: "skb-test-1",
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: subjectID,
+			Issuer:  issuer,
+		},
 		PublicKeyJWK:        pubJWK,
 		Algorithm:           "ES256",
 		KeyBindingDoc:       []byte(`{"subject":"` + string(subjectID) + `"}`),
@@ -106,7 +108,7 @@ func TestCreateDeployment_WithSignature_AttachesProvenance(t *testing.T) {
 	defer cancel()
 
 	ctx = application.ContextWithAuth(ctx, &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: subjectID, Issuer: issuer},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
 		Token:   "access-token",
 	})
 
@@ -122,17 +124,17 @@ func TestCreateDeployment_WithSignature_AttachesProvenance(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if dep.Auth.Provenance == nil {
+	if dep.Provenance == nil {
 		t.Fatal("expected Provenance to be set on signed deployment")
 	}
-	if dep.Auth.Provenance.Sig.SignerID != subjectID {
-		t.Errorf("SignerID = %q, want %q", dep.Auth.Provenance.Sig.SignerID, subjectID)
+	if dep.Provenance.Sig.Signer.Subject != subjectID {
+		t.Errorf("Signer.Subject = %q, want %q", dep.Provenance.Sig.Signer.Subject, subjectID)
 	}
-	if len(dep.Auth.Provenance.Sig.SignatureBytes) == 0 {
+	if len(dep.Provenance.Sig.SignatureBytes) == 0 {
 		t.Error("expected non-empty SignatureBytes")
 	}
-	if dep.Auth.Provenance.ExpectedGeneration != 1 {
-		t.Errorf("ExpectedGeneration = %d, want 1", dep.Auth.Provenance.ExpectedGeneration)
+	if dep.Provenance.ExpectedGeneration != 1 {
+		t.Errorf("ExpectedGeneration = %d, want 1", dep.Provenance.ExpectedGeneration)
 	}
 }
 
@@ -142,7 +144,7 @@ func TestCreateDeployment_WithoutSignature_NoProvenance(t *testing.T) {
 	registerTargets(t, h, "t1")
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
 		Token:   "access-token",
 	})
 
@@ -155,7 +157,7 @@ func TestCreateDeployment_WithoutSignature_NoProvenance(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if dep.Auth.Provenance != nil {
+	if dep.Provenance != nil {
 		t.Error("expected no Provenance on unsigned deployment")
 	}
 }
@@ -172,7 +174,7 @@ func TestCreateDeployment_WithSignature_NoKeyBinding_Fails(t *testing.T) {
 	sig := signEnvelope(t, privKey, "no-binding-dep", ms, ps, validUntil, 1)
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-no-binding", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-no-binding", Issuer: "https://issuer.example.com"}},
 		Token:   "access-token",
 	})
 
@@ -202,7 +204,7 @@ func TestCreateDeployment_WithBadSignature_Fails(t *testing.T) {
 	registerTargets(t, h, "t1")
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: subjectID, Issuer: issuer},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
 		Token:   "access-token",
 	})
 
@@ -231,21 +233,19 @@ func TestResumeDeployment_WithProvenance_RequiresReSign(t *testing.T) {
 	seedDeployment(t, h.store, domain.Deployment{
 		ID:    "prov-dep",
 		State: domain.DeploymentStatePausedAuth,
-		Auth: domain.DeliveryAuth{
-			Provenance: &domain.Provenance{
-				Sig: domain.Signature{
-					SignerID:       subjectID,
-					SignatureBytes: []byte("old-sig"),
-				},
-				ExpectedGeneration: 1,
+		Provenance: &domain.Provenance{
+			Sig: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: subjectID, Issuer: issuer},
+				SignatureBytes: []byte("old-sig"),
 			},
+			ExpectedGeneration: 1,
 		},
 		ManifestStrategy:  defaultManifestStrategy(),
 		PlacementStrategy: defaultPlacementStrategy(),
 	})
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: subjectID, Issuer: issuer},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
 		Token:   "access-token",
 	})
 
@@ -271,14 +271,12 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 	seedDeployment(t, h.store, domain.Deployment{
 		ID:    "resign-dep",
 		State: domain.DeploymentStatePausedAuth,
-		Auth: domain.DeliveryAuth{
-			Provenance: &domain.Provenance{
-				Sig: domain.Signature{
-					SignerID:       subjectID,
-					SignatureBytes: []byte("old-sig"),
-				},
-				ExpectedGeneration: 1,
+		Provenance: &domain.Provenance{
+			Sig: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: subjectID, Issuer: issuer},
+				SignatureBytes: []byte("old-sig"),
 			},
+			ExpectedGeneration: 1,
 		},
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
@@ -289,7 +287,7 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 	sig := signEnvelope(t, privKey, "resign-dep", ms, ps, validUntil, 2)
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: subjectID, Issuer: issuer},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
 		Token:   "access-token",
 	})
 
@@ -302,11 +300,11 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 		t.Fatalf("Resume: %v", err)
 	}
 
-	if dep.Auth.Provenance == nil {
+	if dep.Provenance == nil {
 		t.Fatal("expected fresh Provenance after re-sign")
 	}
-	if dep.Auth.Provenance.ExpectedGeneration != 2 {
-		t.Errorf("ExpectedGeneration = %d, want 2", dep.Auth.Provenance.ExpectedGeneration)
+	if dep.Provenance.ExpectedGeneration != 2 {
+		t.Errorf("ExpectedGeneration = %d, want 2", dep.Provenance.ExpectedGeneration)
 	}
 }
 
@@ -321,7 +319,7 @@ func TestResumeDeployment_TokenPassthrough_NoProvenance(t *testing.T) {
 	})
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
 		Token:   "fresh-token",
 	})
 
@@ -329,12 +327,12 @@ func TestResumeDeployment_TokenPassthrough_NoProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if dep.Auth.Provenance != nil {
+	if dep.Provenance != nil {
 		t.Error("expected no Provenance on token-passthrough resume")
 	}
 }
 
-func TestRepoRoundTrip_ProvenanceInDeliveryAuth(t *testing.T) {
+func TestRepoRoundTrip_ProvenanceOnDeployment(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 
 	now := time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)
@@ -354,29 +352,24 @@ func TestRepoRoundTrip_ProvenanceInDeliveryAuth(t *testing.T) {
 		},
 		Auth: domain.DeliveryAuth{
 			Caller: &domain.SubjectClaims{
-				ID:     "user-1",
-				Issuer: "https://issuer.example.com",
+				FederatedIdentity: domain.FederatedIdentity{
+					Subject: "user-1",
+					Issuer:  "https://issuer.example.com",
+				},
 			},
 			Token: "test-token",
-			Provenance: &domain.Provenance{
-				Sig: domain.Signature{
-					SignerID:       "user-1",
-					PublicKey:      []byte("pubkey-bytes"),
-					ContentHash:    []byte("hash-bytes"),
-					SignatureBytes: []byte("sig-bytes"),
-				},
-				KeyBinding: domain.SigningKeyBinding{
-					ID:           "skb-1",
-					SubjectID:    "user-1",
-					Issuer:       "https://issuer.example.com",
-					PublicKeyJWK: []byte(`{"kty":"EC","crv":"P-256","x":"abc","y":"def"}`),
-					Algorithm:    "ES256",
-				},
-				ValidUntil:         now.Add(24 * time.Hour),
-				ExpectedGeneration: 1,
-				OutputConstraints: []domain.OutputConstraint{
-					{Name: "test-constraint", Expression: "output.valid == true"},
-				},
+		},
+		Provenance: &domain.Provenance{
+			Sig: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
+				PublicKey:      []byte("pubkey-bytes"),
+				ContentHash:    []byte("hash-bytes"),
+				SignatureBytes: []byte("sig-bytes"),
+			},
+			ValidUntil:         now.Add(24 * time.Hour),
+			ExpectedGeneration: 1,
+			OutputConstraints: []domain.OutputConstraint{
+				{Name: "test-constraint", Expression: "output.valid == true"},
 			},
 		},
 		State:      domain.DeploymentStateCreating,
@@ -409,13 +402,16 @@ func TestRepoRoundTrip_ProvenanceInDeliveryAuth(t *testing.T) {
 		t.Fatalf("get: %v", err)
 	}
 
-	if got.Auth.Provenance == nil {
+	if got.Provenance == nil {
 		t.Fatal("expected Provenance to survive round-trip")
 	}
 
-	p := got.Auth.Provenance
-	if p.Sig.SignerID != "user-1" {
-		t.Errorf("Sig.SignerID = %q, want %q", p.Sig.SignerID, "user-1")
+	p := got.Provenance
+	if p.Sig.Signer.Subject != "user-1" {
+		t.Errorf("Sig.Signer.Subject = %q, want %q", p.Sig.Signer.Subject, "user-1")
+	}
+	if p.Sig.Signer.Issuer != "https://issuer.example.com" {
+		t.Errorf("Sig.Signer.Issuer = %q, want %q", p.Sig.Signer.Issuer, "https://issuer.example.com")
 	}
 	if string(p.Sig.PublicKey) != "pubkey-bytes" {
 		t.Errorf("Sig.PublicKey mismatch")
@@ -425,12 +421,6 @@ func TestRepoRoundTrip_ProvenanceInDeliveryAuth(t *testing.T) {
 	}
 	if string(p.Sig.SignatureBytes) != "sig-bytes" {
 		t.Errorf("Sig.SignatureBytes mismatch")
-	}
-	if p.KeyBinding.ID != "skb-1" {
-		t.Errorf("KeyBinding.ID = %q, want %q", p.KeyBinding.ID, "skb-1")
-	}
-	if p.KeyBinding.Algorithm != "ES256" {
-		t.Errorf("KeyBinding.Algorithm = %q, want %q", p.KeyBinding.Algorithm, "ES256")
 	}
 	if p.ExpectedGeneration != 1 {
 		t.Errorf("ExpectedGeneration = %d, want 1", p.ExpectedGeneration)

@@ -642,7 +642,7 @@ func must(t *testing.T, err error) {
 // delivery. The manifest's "name" field determines the target ID.
 type outputAgent struct{}
 
-func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	var spec struct{ Name string }
 	if err := json.Unmarshal(manifests[0].Raw, &spec); err != nil {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: err.Error()}, err

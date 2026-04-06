@@ -15,7 +15,7 @@ type spyAgent struct {
 	removed   []domain.RemoveInput
 }
 
-func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	s.delivered = append(s.delivered, domain.DeliverInput{
 		Target:       target,
 		DeliveryID:   deliveryID,
@@ -49,10 +49,10 @@ func TestRoutingDeliveryService_RoutesToCorrectAgent(t *testing.T) {
 
 	manifests := []domain.Manifest{{Raw: json.RawMessage(`{}`)}}
 
-	if _, err := router.Deliver(ctx, kindTarget, "d1:k1", manifests, domain.DeliveryAuth{}, nop); err != nil {
+	if _, err := router.Deliver(ctx, kindTarget, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop); err != nil {
 		t.Fatalf("Deliver to kind: %v", err)
 	}
-	if _, err := router.Deliver(ctx, k8sTarget, "d2:c1", manifests, domain.DeliveryAuth{}, nop); err != nil {
+	if _, err := router.Deliver(ctx, k8sTarget, "d2:c1", manifests, domain.DeliveryAuth{}, nil, nop); err != nil {
 		t.Fatalf("Deliver to kubernetes: %v", err)
 	}
 
@@ -100,7 +100,7 @@ func TestRoutingDeliveryService_UnregisteredTypeReturnsError(t *testing.T) {
 	nop := &domain.DeliverySignaler{}
 	target := domain.TargetInfo{ID: "k1", Type: "unknown", Name: "target"}
 
-	_, err := router.Deliver(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nop)
+	_, err := router.Deliver(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nil, nop)
 	if err == nil {
 		t.Fatal("expected error for unregistered target type")
 	}
@@ -130,7 +130,7 @@ func TestRoutingDeliveryService_RegisterReplacesPrevious(t *testing.T) {
 	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "target"}
 	manifests := []domain.Manifest{{Raw: json.RawMessage(`{}`)}}
 
-	if _, err := router.Deliver(ctx, target, "d1:k1", manifests, domain.DeliveryAuth{}, nop); err != nil {
+	if _, err := router.Deliver(ctx, target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop); err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 

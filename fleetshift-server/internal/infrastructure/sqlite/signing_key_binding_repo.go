@@ -22,7 +22,7 @@ func (r *SigningKeyBindingRepo) Create(ctx context.Context, b domain.SigningKeyB
 		 (id, subject_id, issuer, public_key_jwk, algorithm, key_binding_doc, key_binding_signature, identity_token, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(b.ID),
-		string(b.SubjectID),
+		string(b.Subject),
 		string(b.Issuer),
 		b.PublicKeyJWK,
 		b.Algorithm,
@@ -52,13 +52,13 @@ func (r *SigningKeyBindingRepo) Get(ctx context.Context, id domain.SigningKeyBin
 	return scanSigningKeyBinding(row)
 }
 
-func (r *SigningKeyBindingRepo) ListBySubject(ctx context.Context, subjectID domain.SubjectID, issuer domain.IssuerURL) ([]domain.SigningKeyBinding, error) {
+func (r *SigningKeyBindingRepo) ListBySubject(ctx context.Context, identity domain.FederatedIdentity) ([]domain.SigningKeyBinding, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT id, subject_id, issuer, public_key_jwk, algorithm,
 		        key_binding_doc, key_binding_signature, identity_token,
 		        created_at, expires_at
 		 FROM signing_key_bindings WHERE subject_id = ? AND issuer = ?`,
-		string(subjectID), string(issuer),
+		string(identity.Subject), string(identity.Issuer),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("query signing key bindings: %w", err)
@@ -91,7 +91,7 @@ func scanSigningKeyBinding(s scanner) (domain.SigningKeyBinding, error) {
 	}
 
 	b.ID = domain.SigningKeyBindingID(id)
-	b.SubjectID = domain.SubjectID(subjectID)
+	b.Subject = domain.SubjectID(subjectID)
 	b.Issuer = domain.IssuerURL(issuer)
 	b.PublicKeyJWK = publicKeyJWK
 	b.Algorithm = algorithm

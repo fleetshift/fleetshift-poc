@@ -173,9 +173,11 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 	}
 
 	wantClaims := domain.SubjectClaims{
-		ID:     "user-123",
-		Issuer: "https://issuer.example.com",
-		Extra:  map[string][]string{"email": {"user@example.com"}},
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "user-123",
+			Issuer:  "https://issuer.example.com",
+		},
+		Extra: map[string][]string{"email": {"user@example.com"}},
 	}
 	verifier := &fakeOIDCTokenVerifier{
 		acceptToken: "valid-token",
@@ -195,8 +197,8 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 	if capture.authCtx.Subject == nil {
 		t.Fatal("Subject is nil, want authenticated claims")
 	}
-	if capture.authCtx.Subject.ID != wantClaims.ID {
-		t.Errorf("Subject.ID = %q, want %q", capture.authCtx.Subject.ID, wantClaims.ID)
+	if capture.authCtx.Subject.Subject != wantClaims.Subject {
+		t.Errorf("Subject.Subject = %q, want %q", capture.authCtx.Subject.Subject, wantClaims.Subject)
 	}
 	if capture.authCtx.Subject.Issuer != wantClaims.Issuer {
 		t.Errorf("Subject.Issuer = %q, want %q", capture.authCtx.Subject.Issuer, wantClaims.Issuer)

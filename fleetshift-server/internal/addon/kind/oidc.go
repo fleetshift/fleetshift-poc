@@ -99,11 +99,11 @@ func bootstrapRBAC(ctx context.Context, kubeconfig []byte, issuerURL domain.Issu
 	}
 
 	// K8s OIDC authentication formats the username as "issuer#sub".
-	username := string(issuerURL) + "#" + string(caller.ID)
+	username := string(issuerURL) + "#" + string(caller.Subject)
 
 	binding := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
-			Name: "fleetshift-admin-" + string(caller.ID),
+			Name: "fleetshift-admin-" + string(caller.Subject),
 		},
 		Subjects: []rbacv1.Subject{{
 			Kind:     "User",

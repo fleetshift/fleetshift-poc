@@ -5,14 +5,18 @@ import (
 	"time"
 )
 
-// DeliveryAuth carries the caller's credentials into a delivery. Agents
-// use this to act on behalf of the caller (e.g., bootstrapping RBAC for
-// the user who created a cluster).
+// DeliveryAuth carries the caller's passthrough credentials into a
+// delivery. Agents use this to act on behalf of the caller (e.g.,
+// bootstrapping RBAC for the user who created a cluster).
+//
+// Cryptographic provenance is stored on [Deployment.Provenance], not
+// here. When provenance is present the orchestration assembles a
+// self-contained [Attestation] and passes it to the delivery agent
+// separately.
 type DeliveryAuth struct {
-	Caller     *SubjectClaims // identity of the user who initiated the delivery
-	Audience   []Audience     // token audience; used to derive target OIDC client ID
-	Token      RawToken       // verified JWT; agents use for passthrough to target APIs
-	Provenance *Provenance    // nil for token-passthrough deployments
+	Caller   *SubjectClaims // identity of the user who initiated the delivery
+	Audience []Audience     // token audience; used to derive target OIDC client ID
+	Token    RawToken       // verified JWT; agents use for passthrough to target APIs
 }
 
 // DeliveryState indicates where a delivery is in its lifecycle.

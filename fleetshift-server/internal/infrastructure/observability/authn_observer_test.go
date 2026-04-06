@@ -27,8 +27,10 @@ func TestAuthnObserver_FullLifecycle_Authenticated(t *testing.T) {
 	probe.MethodsLoaded(2)
 	probe.VerifyingCredential("oidc-1", domain.AuthMethodTypeOIDC)
 	probe.Authenticated(domain.AuthMethodTypeOIDC, domain.SubjectClaims{
-		ID:     "user-123",
-		Issuer: "https://issuer.example.com",
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "user-123",
+			Issuer:  "https://issuer.example.com",
+		},
 	})
 	probe.End()
 
@@ -197,7 +199,9 @@ func TestAuthnObserver_ErrorTakesPrecedence(t *testing.T) {
 
 	probe.MethodsLoaded(1)
 	probe.VerifyingCredential("oidc-1", domain.AuthMethodTypeOIDC)
-	probe.Authenticated(domain.AuthMethodTypeOIDC, domain.SubjectClaims{ID: "user-1"})
+	probe.Authenticated(domain.AuthMethodTypeOIDC, domain.SubjectClaims{
+		FederatedIdentity: domain.FederatedIdentity{Subject: "user-1"},
+	})
 	probe.Error(errors.New("something went wrong"))
 	probe.End()
 

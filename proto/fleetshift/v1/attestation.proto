@@ -10,10 +10,17 @@ import "fleetshift/v1/manifest_strategy.proto";
 import "fleetshift/v1/placement_strategy.proto";
 import "fleetshift/v1/signing_key_binding.proto";
 
+// FederatedIdentity unambiguously identifies a subject by pairing
+// the issuer-scoped subject ID with the issuer URL that vouches for it.
+message FederatedIdentity {
+  string subject = 1;
+  string issuer = 2;
+}
+
 // Signature is a detached signature over a canonical content hash.
 // Matches the hybrid PoC's Signature dataclass.
-message Signaature {
-  string signer_id = 1;
+message Signature {
+  FederatedIdentity signer = 1;
   bytes public_key = 2;
   bytes content_hash = 3;
   bytes signature_bytes = 4;
@@ -27,43 +34,56 @@ message OutputConstraint {
 }
 
 // Provenance carries the cryptographic proof that a user authorized
-// a deployment. Does NOT carry deployment content — that lives on
-// the Deployment message itself. Matches the proof-material side
-// of the hybrid PoC's SignedInput.
+// a deployment. Does NOT carry deployment content or the full key
+// binding bundle — the issuer needed for delivery-time key binding
+// lookup is carried inside Signature.signer.
 message Provenance {
   Signature signature = 1;
-  SigningKeyBinding key_binding = 2;
-  google.protobuf.Timestamp valid_until = 3;
-  int64 expected_generation = 4;
+  google.protobuf.Timestamp valid_until = 2;
+  int64 expected_generation = 3;
+  repeated OutputConstraint output_constraints = 4;
+}
+
+// DeploymentContent groups the identity and strategy fields that the
+// signer authorizes. Matches the hybrid PoC's DeploymentContent.
+message DeploymentContent {
+  string deployment_id = 1;
+  ManifestStrategy manifest_strategy = 2;
+  PlacementStrategy placement_strategy = 3;
+}
+
+// SignedInput composes deployment content with its cryptographic proof.
+// Assembled at delivery time from stored Provenance + looked-up key
+// binding. Matches the hybrid PoC's SignedInput.
+message SignedInput {
+  DeploymentContent content = 1;
+  Signature signature = 2;
+  SigningKeyBinding key_binding = 3;
+  google.protobuf.Timestamp valid_until = 4;
   repeated OutputConstraint output_constraints = 5;
+  int64 expected_generation = 6;
 }
 
 // Attestation is a self-contained verification bundle for delivery.
-// Composes proof material (Provenance) with deployment content and
-// a typed delivery action. Matches the hybrid PoC's Attestation
-// (input + output).
+// Composes a SignedInput with a typed delivery action.
+// Matches the hybrid PoC's Attestation (input + output).
 message Attestation {
-  // Input: proof material from stored Provenance.
-  Provenance provenance = 1;
+  SignedInput input = 1;
 
-  // Input: deployment content (from the deployment's own fields).
-  string deployment_id = 2;
-  ManifestStrategy manifest_strategy = 3;
-  PlacementStrategy placement_strategy = 4;
-
-  // Output: the delivery action. Exactly one is set.
-  PutManifests put_manifests = 5;
-  RemoveByDeploymentId remove = 6;
+  oneof output {
+    PutManifests put_manifests = 2;
+    RemoveByDeploymentId remove = 3;
+  }
 }
 
 // PutManifests delivers manifests to a target.
 message PutManifests {
   repeated Manifest manifests = 1;
 
-  // Cap 8+: addon-signed manifests.
+  // TODO: addon-signed manifests.
   OutputSignature manifest_signature = 2;
 
-  // Cap 8+: signed placement decision.
+  // TODO: signed placement decision.
   PlacementEvidence placement = 3;
 }
 
@@ -71,7 +91,7 @@ message PutManifests {
 message RemoveByDeploymentId {
   string deployment_id = 1;
 
-  // Cap 8+: signed placement decision.
+  // TODO: signed placement decision.
   PlacementEvidence placement = 2;
 }
 

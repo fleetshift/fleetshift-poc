@@ -70,15 +70,25 @@ type OIDCMetadata struct {
 // TODO: encrypt at rest when persisted on deployments.
 type RawToken string
 
-// SubjectID uniquely identifies an authenticated subject.
+// SubjectID identifies an authenticated subject within a single issuer.
+// On its own it is ambiguous; use [FederatedIdentity] when an
+// unambiguous cross-issuer reference is needed.
 type SubjectID string
+
+// FederatedIdentity unambiguously identifies a subject by pairing
+// the issuer-scoped [SubjectID] with the [IssuerURL] that vouches
+// for it. Two subjects with the same SubjectID from different issuers
+// are distinct identities.
+type FederatedIdentity struct {
+	Subject SubjectID
+	Issuer  IssuerURL
+}
 
 // SubjectClaims represents the identity claims produced by authenticating
 // a credential via any supported protocol.
 type SubjectClaims struct {
-	ID     SubjectID
-	Issuer IssuerURL
-	Extra  map[string][]string // groups, email, custom claims
+	FederatedIdentity
+	Extra map[string][]string // groups, email, custom claims
 }
 
 // AuthMethodRepository persists configured authentication methods.
@@ -114,9 +124,8 @@ type SigningKeyBindingID string
 // is verified at enrollment time and stored for later use by the
 // delivery agent during attestation validation.
 type SigningKeyBinding struct {
-	ID                  SigningKeyBindingID
-	SubjectID           SubjectID
-	Issuer              IssuerURL
+	ID SigningKeyBindingID
+	FederatedIdentity
 	PublicKeyJWK        []byte
 	Algorithm           string // e.g. "ES256"
 	KeyBindingDoc       []byte // canonical JSON signed by the user
@@ -130,5 +139,5 @@ type SigningKeyBinding struct {
 type SigningKeyBindingRepository interface {
 	Create(ctx context.Context, binding SigningKeyBinding) error
 	Get(ctx context.Context, id SigningKeyBindingID) (SigningKeyBinding, error)
-	ListBySubject(ctx context.Context, subjectID SubjectID, issuer IssuerURL) ([]SigningKeyBinding, error)
+	ListBySubject(ctx context.Context, identity FederatedIdentity) ([]SigningKeyBinding, error)
 }

@@ -117,7 +117,7 @@ func (a *Agent) agentObserver() AgentObserver {
 // the actual cluster creation in a background goroutine. Kind's own
 // log output flows through the [domain.DeliverySignaler] via the
 // [observerLogger] adapter.
-func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	specs, err := a.validateManifests(manifests, auth)
 	if err != nil {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
@@ -191,6 +191,7 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
 	for _, out := range outputs {
 		result.ProvisionedTargets = append(result.ProvisionedTargets, out.Target())
+		result.ProducedSecrets = append(result.ProducedSecrets, out.Secrets()...)
 	}
 	signaler.Done(ctx, result)
 }
@@ -252,15 +253,15 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	if auth.Caller != nil {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
-			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.ID, spec.Name),
+			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.Subject, spec.Name),
 		})
-		username := string(auth.Caller.Issuer) + "#" + string(auth.Caller.ID)
+		username := string(auth.Caller.Issuer) + "#" + string(auth.Caller.Subject)
 		if err := bootstrapRBAC(ctx, []byte(kc), auth.Caller.Issuer, auth.Caller); err != nil {
 			probe.Error(err)
 			failDelivery(ctx, signaler, "bootstrap RBAC on %q: %v", spec.Name, err)
 			return nil, false
 		}
-		probe.RBACBootstrapped(auth.Caller.ID, username)
+		probe.RBACBootstrapped(auth.Caller.Subject, username)
 	}
 
 	apiServer, caCert, err := ExtractClusterConnInfo([]byte(kc))
@@ -270,12 +271,29 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		return nil, false
 	}
 
+	targetID := domain.TargetID("k8s-" + spec.Name)
 	out := ClusterOutput{
-		TargetID:  domain.TargetID("k8s-" + spec.Name),
+		TargetID:  targetID,
 		Name:      spec.Name,
 		APIServer: apiServer,
 		CACert:    caCert,
 	}
+
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Kind:    domain.DeliveryEventProgress,
+		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", spec.Name),
+	})
+	ref, token, saErr := bootstrapPlatformSA(ctx, []byte(kc), targetID)
+	if saErr != nil {
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Kind:    domain.DeliveryEventWarning,
+			Message: fmt.Sprintf("platform SA bootstrap on %q: %v (attested delivery will not work)", spec.Name, saErr),
+		})
+	} else {
+		out.SATokenRef = ref
+		out.SAToken = token
+	}
+
 	return &out, true
 }
 

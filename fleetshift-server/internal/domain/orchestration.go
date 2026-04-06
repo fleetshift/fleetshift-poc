@@ -245,7 +245,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, Del
 			s.DeliveryObserver,
 		)
 
-		return s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, signaler)
+		return s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation, signaler)
 	})
 }
 
@@ -532,6 +532,15 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 ) error {
 	policy := dep.RolloutStrategy.EffectiveVersionConflictPolicy()
 
+	var kb *SigningKeyBinding
+	if dep.Provenance != nil {
+		looked, err := lookupKeyBinding(record.Context(), s.Store, dep.Provenance)
+		if err != nil {
+			return fmt.Errorf("lookup key binding for attestation assembly: %w", err)
+		}
+		kb = &looked
+	}
+
 	for i, step := range plan.Steps {
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
@@ -542,8 +551,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					DeploymentID: deploymentID,
 					Auth:         dep.Auth,
 				}
-				if dep.Auth.Provenance != nil {
-					in.Attestation = assembleRemoveAttestation(dep)
+				if kb != nil {
+					in.Attestation = assembleRemoveAttestation(dep, *kb)
 				}
 				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
@@ -577,8 +586,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					Manifests:    manifests,
 					Auth:         dep.Auth,
 				}
-				if dep.Auth.Provenance != nil {
-					in.Attestation = assembleDeliverAttestation(dep, manifests)
+				if kb != nil {
+					in.Attestation = assembleDeliverAttestation(dep, manifests, *kb)
 				}
 				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
 					return fmt.Errorf("deliver to target %s: %w", target.ID, err)
@@ -711,30 +720,64 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	return delta
 }
 
-func assembleDeliverAttestation(dep Deployment, manifests []Manifest) *Attestation {
+func lookupKeyBinding(ctx context.Context, store Store, prov *Provenance) (SigningKeyBinding, error) {
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		return SigningKeyBinding{}, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	found, err := tx.SigningKeyBindings().ListBySubject(ctx, prov.Sig.Signer)
+	if err != nil {
+		return SigningKeyBinding{}, fmt.Errorf("list key bindings: %w", err)
+	}
+	if len(found) == 0 {
+		return SigningKeyBinding{}, fmt.Errorf("no signing key binding found for %s / %s", prov.Sig.Signer.Subject, prov.Sig.Signer.Issuer)
+	}
+	if err := tx.Commit(); err != nil {
+		return SigningKeyBinding{}, fmt.Errorf("commit read tx: %w", err)
+	}
+	return found[0], nil
+}
+
+func assembleDeliverAttestation(dep Deployment, manifests []Manifest, kb SigningKeyBinding) *Attestation {
+	prov := dep.Provenance
 	return &Attestation{
-		Provenance:        *dep.Auth.Provenance,
-		DeploymentID:      dep.ID,
-		ManifestStrategy:  dep.ManifestStrategy,
-		PlacementStrategy: dep.PlacementStrategy,
-		Output: DeliveryOutput{
-			PutManifests: &PutManifests{
-				Manifests: manifests,
+		Input: SignedInput{
+			Content: DeploymentContent{
+				DeploymentID:      dep.ID,
+				ManifestStrategy:  dep.ManifestStrategy,
+				PlacementStrategy: dep.PlacementStrategy,
 			},
+			Sig:                prov.Sig,
+			KeyBinding:         kb,
+			ValidUntil:         prov.ValidUntil,
+			OutputConstraints:  prov.OutputConstraints,
+			ExpectedGeneration: prov.ExpectedGeneration,
+		},
+		Output: &PutManifests{
+			Manifests: manifests,
 		},
 	}
 }
 
-func assembleRemoveAttestation(dep Deployment) *Attestation {
+func assembleRemoveAttestation(dep Deployment, kb SigningKeyBinding) *Attestation {
+	prov := dep.Provenance
 	return &Attestation{
-		Provenance:        *dep.Auth.Provenance,
-		DeploymentID:      dep.ID,
-		ManifestStrategy:  dep.ManifestStrategy,
-		PlacementStrategy: dep.PlacementStrategy,
-		Output: DeliveryOutput{
-			RemoveByDeploymentId: &RemoveByDeploymentId{
-				DeploymentID: dep.ID,
+		Input: SignedInput{
+			Content: DeploymentContent{
+				DeploymentID:      dep.ID,
+				ManifestStrategy:  dep.ManifestStrategy,
+				PlacementStrategy: dep.PlacementStrategy,
 			},
+			Sig:                prov.Sig,
+			KeyBinding:         kb,
+			ValidUntil:         prov.ValidUntil,
+			OutputConstraints:  prov.OutputConstraints,
+			ExpectedGeneration: prov.ExpectedGeneration,
+		},
+		Output: &RemoveByDeploymentId{
+			DeploymentID: dep.ID,
 		},
 	}
 }

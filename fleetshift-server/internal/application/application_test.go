@@ -355,7 +355,7 @@ func seedDeployment(t *testing.T, store domain.Store, dep domain.Deployment) {
 
 func testAuthContext() *application.AuthorizationContext {
 	return &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
 		Token:   "fresh-token",
 	}
 }
@@ -406,7 +406,7 @@ type authFailThenSucceedAgent struct {
 	attempt int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
@@ -439,7 +439,7 @@ func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 	registerTargets(t, h, "t1")
 
 	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
 		Token:   "expired-token",
 	})
 
@@ -461,7 +461,7 @@ func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStatePausedAuth)
 
 	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
-		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
 		Token:   "fresh-token",
 	})
 	_, err = h.deployments.Resume(resumeCtx, application.ResumeInput{ID: "d1"})

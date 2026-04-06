@@ -40,11 +40,18 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	if err != nil {
 		return fmt.Errorf("marshal auth: %w", err)
 	}
+	var provJSON []byte
+	if d.Provenance != nil {
+		provJSON, err = json.Marshal(d.Provenance)
+		if err != nil {
+			return fmt.Errorf("marshal provenance: %w", err)
+		}
+	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, generation, observed_generation, created_at, updated_at, etag)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth),
+		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, created_at, updated_at, etag)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth), nullString(provJSON),
 		int64(d.Generation), int64(d.ObservedGeneration),
 		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
 	)
@@ -57,7 +64,7 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, generation, observed_generation, created_at, updated_at, etag`
+const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, created_at, updated_at, etag`
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
@@ -96,15 +103,19 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	}
 	rt, _ := json.Marshal(d.ResolvedTargets)
 	auth, _ := json.Marshal(d.Auth)
+	var provJSON []byte
+	if d.Provenance != nil {
+		provJSON, _ = json.Marshal(d.Provenance)
+	}
 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE deployments
 		 SET manifest_strategy = ?, placement_strategy = ?, rollout_strategy = ?,
-		     resolved_targets = ?, state = ?, auth = ?,
+		     resolved_targets = ?, state = ?, auth = ?, provenance = ?,
 		     generation = ?, observed_generation = ?,
 		     updated_at = ?, etag = ?
 		 WHERE id = ?`,
-		string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth),
+		string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth), nullString(provJSON),
 		int64(d.Generation), int64(d.ObservedGeneration),
 		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, string(d.ID),
 	)
@@ -133,9 +144,9 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 func scanDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
 	var id, uid, msJSON, psJSON, rtJSON, stateStr, authJSON, createdAtStr, updatedAtStr, etag string
-	var rsJSON sql.NullString
+	var rsJSON, provJSON sql.NullString
 	var generation, observedGeneration int64
-	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &authJSON,
+	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &authJSON, &provJSON,
 		&generation, &observedGeneration,
 		&createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -175,6 +186,12 @@ func scanDeployment(s scanner) (domain.Deployment, error) {
 	if authJSON != "" {
 		if err := json.Unmarshal([]byte(authJSON), &d.Auth); err != nil {
 			return d, fmt.Errorf("unmarshal auth: %w", err)
+		}
+	}
+	if provJSON.Valid {
+		d.Provenance = &domain.Provenance{}
+		if err := json.Unmarshal([]byte(provJSON.String), d.Provenance); err != nil {
+			return d, fmt.Errorf("unmarshal provenance: %w", err)
 		}
 	}
 	return d, nil

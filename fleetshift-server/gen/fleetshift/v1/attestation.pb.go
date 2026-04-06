@@ -22,11 +22,65 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
+// FederatedIdentity unambiguously identifies a subject by pairing
+// the issuer-scoped subject ID with the issuer URL that vouches for it.
+type FederatedIdentity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Subject       string                 `protobuf:"bytes,1,opt,name=subject,proto3" json:"subject,omitempty"`
+	Issuer        string                 `protobuf:"bytes,2,opt,name=issuer,proto3" json:"issuer,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *FederatedIdentity) Reset() {
+	*x = FederatedIdentity{}
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[0]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *FederatedIdentity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*FederatedIdentity) ProtoMessage() {}
+
+func (x *FederatedIdentity) ProtoReflect() protoreflect.Message {
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[0]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use FederatedIdentity.ProtoReflect.Descriptor instead.
+func (*FederatedIdentity) Descriptor() ([]byte, []int) {
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{0}
+}
+
+func (x *FederatedIdentity) GetSubject() string {
+	if x != nil {
+		return x.Subject
+	}
+	return ""
+}
+
+func (x *FederatedIdentity) GetIssuer() string {
+	if x != nil {
+		return x.Issuer
+	}
+	return ""
+}
+
 // Signature is a detached signature over a canonical content hash.
 // Matches the hybrid PoC's Signature dataclass.
 type Signature struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
-	SignerId       string                 `protobuf:"bytes,1,opt,name=signer_id,json=signerId,proto3" json:"signer_id,omitempty"`
+	Signer         *FederatedIdentity     `protobuf:"bytes,1,opt,name=signer,proto3" json:"signer,omitempty"`
 	PublicKey      []byte                 `protobuf:"bytes,2,opt,name=public_key,json=publicKey,proto3" json:"public_key,omitempty"`
 	ContentHash    []byte                 `protobuf:"bytes,3,opt,name=content_hash,json=contentHash,proto3" json:"content_hash,omitempty"`
 	SignatureBytes []byte                 `protobuf:"bytes,4,opt,name=signature_bytes,json=signatureBytes,proto3" json:"signature_bytes,omitempty"`
@@ -36,7 +90,7 @@ type Signature struct {
 
 func (x *Signature) Reset() {
 	*x = Signature{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[0]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -48,7 +102,7 @@ func (x *Signature) String() string {
 func (*Signature) ProtoMessage() {}
 
 func (x *Signature) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[0]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -61,14 +115,14 @@ func (x *Signature) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Signature.ProtoReflect.Descriptor instead.
 func (*Signature) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{0}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *Signature) GetSignerId() string {
+func (x *Signature) GetSigner() *FederatedIdentity {
 	if x != nil {
-		return x.SignerId
+		return x.Signer
 	}
-	return ""
+	return nil
 }
 
 func (x *Signature) GetPublicKey() []byte {
@@ -104,7 +158,7 @@ type OutputConstraint struct {
 
 func (x *OutputConstraint) Reset() {
 	*x = OutputConstraint{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[1]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -116,7 +170,7 @@ func (x *OutputConstraint) String() string {
 func (*OutputConstraint) ProtoMessage() {}
 
 func (x *OutputConstraint) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[1]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -129,7 +183,7 @@ func (x *OutputConstraint) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutputConstraint.ProtoReflect.Descriptor instead.
 func (*OutputConstraint) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{1}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *OutputConstraint) GetName() string {
@@ -147,23 +201,22 @@ func (x *OutputConstraint) GetExpression() string {
 }
 
 // Provenance carries the cryptographic proof that a user authorized
-// a deployment. Does NOT carry deployment content — that lives on
-// the Deployment message itself. Matches the proof-material side
-// of the hybrid PoC's SignedInput.
+// a deployment. Does NOT carry deployment content or the full key
+// binding bundle — the issuer needed for delivery-time key binding
+// lookup is carried inside Signature.signer.
 type Provenance struct {
 	state              protoimpl.MessageState `protogen:"open.v1"`
 	Signature          *Signature             `protobuf:"bytes,1,opt,name=signature,proto3" json:"signature,omitempty"`
-	KeyBinding         *SigningKeyBinding     `protobuf:"bytes,2,opt,name=key_binding,json=keyBinding,proto3" json:"key_binding,omitempty"`
-	ValidUntil         *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
-	ExpectedGeneration int64                  `protobuf:"varint,4,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
-	OutputConstraints  []*OutputConstraint    `protobuf:"bytes,5,rep,name=output_constraints,json=outputConstraints,proto3" json:"output_constraints,omitempty"`
+	ValidUntil         *timestamppb.Timestamp `protobuf:"bytes,2,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	ExpectedGeneration int64                  `protobuf:"varint,3,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
+	OutputConstraints  []*OutputConstraint    `protobuf:"bytes,4,rep,name=output_constraints,json=outputConstraints,proto3" json:"output_constraints,omitempty"`
 	unknownFields      protoimpl.UnknownFields
 	sizeCache          protoimpl.SizeCache
 }
 
 func (x *Provenance) Reset() {
 	*x = Provenance{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[2]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -175,7 +228,7 @@ func (x *Provenance) String() string {
 func (*Provenance) ProtoMessage() {}
 
 func (x *Provenance) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[2]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -188,19 +241,12 @@ func (x *Provenance) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Provenance.ProtoReflect.Descriptor instead.
 func (*Provenance) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{2}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *Provenance) GetSignature() *Signature {
 	if x != nil {
 		return x.Signature
-	}
-	return nil
-}
-
-func (x *Provenance) GetKeyBinding() *SigningKeyBinding {
-	if x != nil {
-		return x.KeyBinding
 	}
 	return nil
 }
@@ -226,28 +272,173 @@ func (x *Provenance) GetOutputConstraints() []*OutputConstraint {
 	return nil
 }
 
+// DeploymentContent groups the identity and strategy fields that the
+// signer authorizes. Matches the hybrid PoC's DeploymentContent.
+type DeploymentContent struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	DeploymentId      string                 `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
+	ManifestStrategy  *ManifestStrategy      `protobuf:"bytes,2,opt,name=manifest_strategy,json=manifestStrategy,proto3" json:"manifest_strategy,omitempty"`
+	PlacementStrategy *PlacementStrategy     `protobuf:"bytes,3,opt,name=placement_strategy,json=placementStrategy,proto3" json:"placement_strategy,omitempty"`
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *DeploymentContent) Reset() {
+	*x = DeploymentContent{}
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *DeploymentContent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*DeploymentContent) ProtoMessage() {}
+
+func (x *DeploymentContent) ProtoReflect() protoreflect.Message {
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use DeploymentContent.ProtoReflect.Descriptor instead.
+func (*DeploymentContent) Descriptor() ([]byte, []int) {
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *DeploymentContent) GetDeploymentId() string {
+	if x != nil {
+		return x.DeploymentId
+	}
+	return ""
+}
+
+func (x *DeploymentContent) GetManifestStrategy() *ManifestStrategy {
+	if x != nil {
+		return x.ManifestStrategy
+	}
+	return nil
+}
+
+func (x *DeploymentContent) GetPlacementStrategy() *PlacementStrategy {
+	if x != nil {
+		return x.PlacementStrategy
+	}
+	return nil
+}
+
+// SignedInput composes deployment content with its cryptographic proof.
+// Assembled at delivery time from stored Provenance + looked-up key
+// binding. Matches the hybrid PoC's SignedInput.
+type SignedInput struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Content            *DeploymentContent     `protobuf:"bytes,1,opt,name=content,proto3" json:"content,omitempty"`
+	Signature          *Signature             `protobuf:"bytes,2,opt,name=signature,proto3" json:"signature,omitempty"`
+	KeyBinding         *SigningKeyBinding     `protobuf:"bytes,3,opt,name=key_binding,json=keyBinding,proto3" json:"key_binding,omitempty"`
+	ValidUntil         *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	OutputConstraints  []*OutputConstraint    `protobuf:"bytes,5,rep,name=output_constraints,json=outputConstraints,proto3" json:"output_constraints,omitempty"`
+	ExpectedGeneration int64                  `protobuf:"varint,6,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *SignedInput) Reset() {
+	*x = SignedInput{}
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SignedInput) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SignedInput) ProtoMessage() {}
+
+func (x *SignedInput) ProtoReflect() protoreflect.Message {
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SignedInput.ProtoReflect.Descriptor instead.
+func (*SignedInput) Descriptor() ([]byte, []int) {
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *SignedInput) GetContent() *DeploymentContent {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *SignedInput) GetSignature() *Signature {
+	if x != nil {
+		return x.Signature
+	}
+	return nil
+}
+
+func (x *SignedInput) GetKeyBinding() *SigningKeyBinding {
+	if x != nil {
+		return x.KeyBinding
+	}
+	return nil
+}
+
+func (x *SignedInput) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
+func (x *SignedInput) GetOutputConstraints() []*OutputConstraint {
+	if x != nil {
+		return x.OutputConstraints
+	}
+	return nil
+}
+
+func (x *SignedInput) GetExpectedGeneration() int64 {
+	if x != nil {
+		return x.ExpectedGeneration
+	}
+	return 0
+}
+
 // Attestation is a self-contained verification bundle for delivery.
-// Composes proof material (Provenance) with deployment content and
-// a typed delivery action. Matches the hybrid PoC's Attestation
-// (input + output).
+// Composes a SignedInput with a typed delivery action.
+// Matches the hybrid PoC's Attestation (input + output).
 type Attestation struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Input: proof material from stored Provenance.
-	Provenance *Provenance `protobuf:"bytes,1,opt,name=provenance,proto3" json:"provenance,omitempty"`
-	// Input: deployment content (from the deployment's own fields).
-	DeploymentId      string             `protobuf:"bytes,2,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
-	ManifestStrategy  *ManifestStrategy  `protobuf:"bytes,3,opt,name=manifest_strategy,json=manifestStrategy,proto3" json:"manifest_strategy,omitempty"`
-	PlacementStrategy *PlacementStrategy `protobuf:"bytes,4,opt,name=placement_strategy,json=placementStrategy,proto3" json:"placement_strategy,omitempty"`
-	// Output: the delivery action. Exactly one is set.
-	PutManifests  *PutManifests         `protobuf:"bytes,5,opt,name=put_manifests,json=putManifests,proto3" json:"put_manifests,omitempty"`
-	Remove        *RemoveByDeploymentId `protobuf:"bytes,6,opt,name=remove,proto3" json:"remove,omitempty"`
+	Input *SignedInput           `protobuf:"bytes,1,opt,name=input,proto3" json:"input,omitempty"`
+	// Types that are valid to be assigned to Output:
+	//
+	//	*Attestation_PutManifests
+	//	*Attestation_Remove
+	Output        isAttestation_Output `protobuf_oneof:"output"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *Attestation) Reset() {
 	*x = Attestation{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[3]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -259,7 +450,7 @@ func (x *Attestation) String() string {
 func (*Attestation) ProtoMessage() {}
 
 func (x *Attestation) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[3]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -272,58 +463,64 @@ func (x *Attestation) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use Attestation.ProtoReflect.Descriptor instead.
 func (*Attestation) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{3}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{6}
 }
 
-func (x *Attestation) GetProvenance() *Provenance {
+func (x *Attestation) GetInput() *SignedInput {
 	if x != nil {
-		return x.Provenance
+		return x.Input
 	}
 	return nil
 }
 
-func (x *Attestation) GetDeploymentId() string {
+func (x *Attestation) GetOutput() isAttestation_Output {
 	if x != nil {
-		return x.DeploymentId
-	}
-	return ""
-}
-
-func (x *Attestation) GetManifestStrategy() *ManifestStrategy {
-	if x != nil {
-		return x.ManifestStrategy
-	}
-	return nil
-}
-
-func (x *Attestation) GetPlacementStrategy() *PlacementStrategy {
-	if x != nil {
-		return x.PlacementStrategy
+		return x.Output
 	}
 	return nil
 }
 
 func (x *Attestation) GetPutManifests() *PutManifests {
 	if x != nil {
-		return x.PutManifests
+		if x, ok := x.Output.(*Attestation_PutManifests); ok {
+			return x.PutManifests
+		}
 	}
 	return nil
 }
 
 func (x *Attestation) GetRemove() *RemoveByDeploymentId {
 	if x != nil {
-		return x.Remove
+		if x, ok := x.Output.(*Attestation_Remove); ok {
+			return x.Remove
+		}
 	}
 	return nil
 }
+
+type isAttestation_Output interface {
+	isAttestation_Output()
+}
+
+type Attestation_PutManifests struct {
+	PutManifests *PutManifests `protobuf:"bytes,2,opt,name=put_manifests,json=putManifests,proto3,oneof"`
+}
+
+type Attestation_Remove struct {
+	Remove *RemoveByDeploymentId `protobuf:"bytes,3,opt,name=remove,proto3,oneof"`
+}
+
+func (*Attestation_PutManifests) isAttestation_Output() {}
+
+func (*Attestation_Remove) isAttestation_Output() {}
 
 // PutManifests delivers manifests to a target.
 type PutManifests struct {
 	state     protoimpl.MessageState `protogen:"open.v1"`
 	Manifests []*Manifest            `protobuf:"bytes,1,rep,name=manifests,proto3" json:"manifests,omitempty"`
-	// Cap 8+: addon-signed manifests.
+	// TODO: addon-signed manifests.
 	ManifestSignature *OutputSignature `protobuf:"bytes,2,opt,name=manifest_signature,json=manifestSignature,proto3" json:"manifest_signature,omitempty"`
-	// Cap 8+: signed placement decision.
+	// TODO: signed placement decision.
 	Placement     *PlacementEvidence `protobuf:"bytes,3,opt,name=placement,proto3" json:"placement,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -331,7 +528,7 @@ type PutManifests struct {
 
 func (x *PutManifests) Reset() {
 	*x = PutManifests{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[4]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -343,7 +540,7 @@ func (x *PutManifests) String() string {
 func (*PutManifests) ProtoMessage() {}
 
 func (x *PutManifests) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[4]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -356,7 +553,7 @@ func (x *PutManifests) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PutManifests.ProtoReflect.Descriptor instead.
 func (*PutManifests) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{4}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{7}
 }
 
 func (x *PutManifests) GetManifests() []*Manifest {
@@ -384,7 +581,7 @@ func (x *PutManifests) GetPlacement() *PlacementEvidence {
 type RemoveByDeploymentId struct {
 	state        protoimpl.MessageState `protogen:"open.v1"`
 	DeploymentId string                 `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
-	// Cap 8+: signed placement decision.
+	// TODO: signed placement decision.
 	Placement     *PlacementEvidence `protobuf:"bytes,2,opt,name=placement,proto3" json:"placement,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -392,7 +589,7 @@ type RemoveByDeploymentId struct {
 
 func (x *RemoveByDeploymentId) Reset() {
 	*x = RemoveByDeploymentId{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[5]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -404,7 +601,7 @@ func (x *RemoveByDeploymentId) String() string {
 func (*RemoveByDeploymentId) ProtoMessage() {}
 
 func (x *RemoveByDeploymentId) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[5]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -417,7 +614,7 @@ func (x *RemoveByDeploymentId) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RemoveByDeploymentId.ProtoReflect.Descriptor instead.
 func (*RemoveByDeploymentId) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{5}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *RemoveByDeploymentId) GetDeploymentId() string {
@@ -446,7 +643,7 @@ type OutputSignature struct {
 
 func (x *OutputSignature) Reset() {
 	*x = OutputSignature{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[6]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -458,7 +655,7 @@ func (x *OutputSignature) String() string {
 func (*OutputSignature) ProtoMessage() {}
 
 func (x *OutputSignature) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[6]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -471,7 +668,7 @@ func (x *OutputSignature) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use OutputSignature.ProtoReflect.Descriptor instead.
 func (*OutputSignature) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{6}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{9}
 }
 
 func (x *OutputSignature) GetSignature() *Signature {
@@ -501,7 +698,7 @@ type PlacementEvidence struct {
 
 func (x *PlacementEvidence) Reset() {
 	*x = PlacementEvidence{}
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[7]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[10]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -513,7 +710,7 @@ func (x *PlacementEvidence) String() string {
 func (*PlacementEvidence) ProtoMessage() {}
 
 func (x *PlacementEvidence) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_attestation_proto_msgTypes[7]
+	mi := &file_fleetshift_v1_attestation_proto_msgTypes[10]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -526,7 +723,7 @@ func (x *PlacementEvidence) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use PlacementEvidence.ProtoReflect.Descriptor instead.
 func (*PlacementEvidence) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{7}
+	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{10}
 }
 
 func (x *PlacementEvidence) GetDeploymentId() string {
@@ -554,9 +751,12 @@ var File_fleetshift_v1_attestation_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_attestation_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffleetshift/v1/attestation.proto\x12\rfleetshift.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cfleetshift/v1/manifest.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a'fleetshift/v1/signing_key_binding.proto\"\x93\x01\n" +
-	"\tSignature\x12\x1b\n" +
-	"\tsigner_id\x18\x01 \x01(\tR\bsignerId\x12\x1d\n" +
+	"\x1ffleetshift/v1/attestation.proto\x12\rfleetshift.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cfleetshift/v1/manifest.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a'fleetshift/v1/signing_key_binding.proto\"E\n" +
+	"\x11FederatedIdentity\x12\x18\n" +
+	"\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n" +
+	"\x06issuer\x18\x02 \x01(\tR\x06issuer\"\xb0\x01\n" +
+	"\tSignature\x128\n" +
+	"\x06signer\x18\x01 \x01(\v2 .fleetshift.v1.FederatedIdentityR\x06signer\x12\x1d\n" +
 	"\n" +
 	"public_key\x18\x02 \x01(\fR\tpublicKey\x12!\n" +
 	"\fcontent_hash\x18\x03 \x01(\fR\vcontentHash\x12'\n" +
@@ -565,25 +765,32 @@ const file_fleetshift_v1_attestation_proto_rawDesc = "" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x1e\n" +
 	"\n" +
 	"expression\x18\x02 \x01(\tR\n" +
-	"expression\"\xc5\x02\n" +
+	"expression\"\x82\x02\n" +
 	"\n" +
 	"Provenance\x126\n" +
-	"\tsignature\x18\x01 \x01(\v2\x18.fleetshift.v1.SignatureR\tsignature\x12A\n" +
-	"\vkey_binding\x18\x02 \x01(\v2 .fleetshift.v1.SigningKeyBindingR\n" +
-	"keyBinding\x12;\n" +
-	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"\tsignature\x18\x01 \x01(\v2\x18.fleetshift.v1.SignatureR\tsignature\x12;\n" +
+	"\vvalid_until\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"validUntil\x12/\n" +
-	"\x13expected_generation\x18\x04 \x01(\x03R\x12expectedGeneration\x12N\n" +
-	"\x12output_constraints\x18\x05 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\"\x8b\x03\n" +
-	"\vAttestation\x129\n" +
-	"\n" +
-	"provenance\x18\x01 \x01(\v2\x19.fleetshift.v1.ProvenanceR\n" +
-	"provenance\x12#\n" +
-	"\rdeployment_id\x18\x02 \x01(\tR\fdeploymentId\x12L\n" +
-	"\x11manifest_strategy\x18\x03 \x01(\v2\x1f.fleetshift.v1.ManifestStrategyR\x10manifestStrategy\x12O\n" +
-	"\x12placement_strategy\x18\x04 \x01(\v2 .fleetshift.v1.PlacementStrategyR\x11placementStrategy\x12@\n" +
-	"\rput_manifests\x18\x05 \x01(\v2\x1b.fleetshift.v1.PutManifestsR\fputManifests\x12;\n" +
-	"\x06remove\x18\x06 \x01(\v2#.fleetshift.v1.RemoveByDeploymentIdR\x06remove\"\xd4\x01\n" +
+	"\x13expected_generation\x18\x03 \x01(\x03R\x12expectedGeneration\x12N\n" +
+	"\x12output_constraints\x18\x04 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\"\xd7\x01\n" +
+	"\x11DeploymentContent\x12#\n" +
+	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12L\n" +
+	"\x11manifest_strategy\x18\x02 \x01(\v2\x1f.fleetshift.v1.ManifestStrategyR\x10manifestStrategy\x12O\n" +
+	"\x12placement_strategy\x18\x03 \x01(\v2 .fleetshift.v1.PlacementStrategyR\x11placementStrategy\"\x82\x03\n" +
+	"\vSignedInput\x12:\n" +
+	"\acontent\x18\x01 \x01(\v2 .fleetshift.v1.DeploymentContentR\acontent\x126\n" +
+	"\tsignature\x18\x02 \x01(\v2\x18.fleetshift.v1.SignatureR\tsignature\x12A\n" +
+	"\vkey_binding\x18\x03 \x01(\v2 .fleetshift.v1.SigningKeyBindingR\n" +
+	"keyBinding\x12;\n" +
+	"\vvalid_until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
+	"validUntil\x12N\n" +
+	"\x12output_constraints\x18\x05 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\x12/\n" +
+	"\x13expected_generation\x18\x06 \x01(\x03R\x12expectedGeneration\"\xcc\x01\n" +
+	"\vAttestation\x120\n" +
+	"\x05input\x18\x01 \x01(\v2\x1a.fleetshift.v1.SignedInputR\x05input\x12B\n" +
+	"\rput_manifests\x18\x02 \x01(\v2\x1b.fleetshift.v1.PutManifestsH\x00R\fputManifests\x12=\n" +
+	"\x06remove\x18\x03 \x01(\v2#.fleetshift.v1.RemoveByDeploymentIdH\x00R\x06removeB\b\n" +
+	"\x06output\"\xd4\x01\n" +
 	"\fPutManifests\x125\n" +
 	"\tmanifests\x18\x01 \x03(\v2\x17.fleetshift.v1.ManifestR\tmanifests\x12M\n" +
 	"\x12manifest_signature\x18\x02 \x01(\v2\x1e.fleetshift.v1.OutputSignatureR\x11manifestSignature\x12>\n" +
@@ -611,43 +818,51 @@ func file_fleetshift_v1_attestation_proto_rawDescGZIP() []byte {
 	return file_fleetshift_v1_attestation_proto_rawDescData
 }
 
-var file_fleetshift_v1_attestation_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_fleetshift_v1_attestation_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_fleetshift_v1_attestation_proto_goTypes = []any{
-	(*Signature)(nil),             // 0: fleetshift.v1.Signature
-	(*OutputConstraint)(nil),      // 1: fleetshift.v1.OutputConstraint
-	(*Provenance)(nil),            // 2: fleetshift.v1.Provenance
-	(*Attestation)(nil),           // 3: fleetshift.v1.Attestation
-	(*PutManifests)(nil),          // 4: fleetshift.v1.PutManifests
-	(*RemoveByDeploymentId)(nil),  // 5: fleetshift.v1.RemoveByDeploymentId
-	(*OutputSignature)(nil),       // 6: fleetshift.v1.OutputSignature
-	(*PlacementEvidence)(nil),     // 7: fleetshift.v1.PlacementEvidence
-	(*SigningKeyBinding)(nil),     // 8: fleetshift.v1.SigningKeyBinding
-	(*timestamppb.Timestamp)(nil), // 9: google.protobuf.Timestamp
-	(*ManifestStrategy)(nil),      // 10: fleetshift.v1.ManifestStrategy
-	(*PlacementStrategy)(nil),     // 11: fleetshift.v1.PlacementStrategy
-	(*Manifest)(nil),              // 12: fleetshift.v1.Manifest
+	(*FederatedIdentity)(nil),     // 0: fleetshift.v1.FederatedIdentity
+	(*Signature)(nil),             // 1: fleetshift.v1.Signature
+	(*OutputConstraint)(nil),      // 2: fleetshift.v1.OutputConstraint
+	(*Provenance)(nil),            // 3: fleetshift.v1.Provenance
+	(*DeploymentContent)(nil),     // 4: fleetshift.v1.DeploymentContent
+	(*SignedInput)(nil),           // 5: fleetshift.v1.SignedInput
+	(*Attestation)(nil),           // 6: fleetshift.v1.Attestation
+	(*PutManifests)(nil),          // 7: fleetshift.v1.PutManifests
+	(*RemoveByDeploymentId)(nil),  // 8: fleetshift.v1.RemoveByDeploymentId
+	(*OutputSignature)(nil),       // 9: fleetshift.v1.OutputSignature
+	(*PlacementEvidence)(nil),     // 10: fleetshift.v1.PlacementEvidence
+	(*timestamppb.Timestamp)(nil), // 11: google.protobuf.Timestamp
+	(*ManifestStrategy)(nil),      // 12: fleetshift.v1.ManifestStrategy
+	(*PlacementStrategy)(nil),     // 13: fleetshift.v1.PlacementStrategy
+	(*SigningKeyBinding)(nil),     // 14: fleetshift.v1.SigningKeyBinding
+	(*Manifest)(nil),              // 15: fleetshift.v1.Manifest
 }
 var file_fleetshift_v1_attestation_proto_depIdxs = []int32{
-	0,  // 0: fleetshift.v1.Provenance.signature:type_name -> fleetshift.v1.Signature
-	8,  // 1: fleetshift.v1.Provenance.key_binding:type_name -> fleetshift.v1.SigningKeyBinding
-	9,  // 2: fleetshift.v1.Provenance.valid_until:type_name -> google.protobuf.Timestamp
-	1,  // 3: fleetshift.v1.Provenance.output_constraints:type_name -> fleetshift.v1.OutputConstraint
-	2,  // 4: fleetshift.v1.Attestation.provenance:type_name -> fleetshift.v1.Provenance
-	10, // 5: fleetshift.v1.Attestation.manifest_strategy:type_name -> fleetshift.v1.ManifestStrategy
-	11, // 6: fleetshift.v1.Attestation.placement_strategy:type_name -> fleetshift.v1.PlacementStrategy
-	4,  // 7: fleetshift.v1.Attestation.put_manifests:type_name -> fleetshift.v1.PutManifests
-	5,  // 8: fleetshift.v1.Attestation.remove:type_name -> fleetshift.v1.RemoveByDeploymentId
-	12, // 9: fleetshift.v1.PutManifests.manifests:type_name -> fleetshift.v1.Manifest
-	6,  // 10: fleetshift.v1.PutManifests.manifest_signature:type_name -> fleetshift.v1.OutputSignature
-	7,  // 11: fleetshift.v1.PutManifests.placement:type_name -> fleetshift.v1.PlacementEvidence
-	7,  // 12: fleetshift.v1.RemoveByDeploymentId.placement:type_name -> fleetshift.v1.PlacementEvidence
-	0,  // 13: fleetshift.v1.OutputSignature.signature:type_name -> fleetshift.v1.Signature
-	6,  // 14: fleetshift.v1.PlacementEvidence.signature:type_name -> fleetshift.v1.OutputSignature
-	15, // [15:15] is the sub-list for method output_type
-	15, // [15:15] is the sub-list for method input_type
-	15, // [15:15] is the sub-list for extension type_name
-	15, // [15:15] is the sub-list for extension extendee
-	0,  // [0:15] is the sub-list for field type_name
+	0,  // 0: fleetshift.v1.Signature.signer:type_name -> fleetshift.v1.FederatedIdentity
+	1,  // 1: fleetshift.v1.Provenance.signature:type_name -> fleetshift.v1.Signature
+	11, // 2: fleetshift.v1.Provenance.valid_until:type_name -> google.protobuf.Timestamp
+	2,  // 3: fleetshift.v1.Provenance.output_constraints:type_name -> fleetshift.v1.OutputConstraint
+	12, // 4: fleetshift.v1.DeploymentContent.manifest_strategy:type_name -> fleetshift.v1.ManifestStrategy
+	13, // 5: fleetshift.v1.DeploymentContent.placement_strategy:type_name -> fleetshift.v1.PlacementStrategy
+	4,  // 6: fleetshift.v1.SignedInput.content:type_name -> fleetshift.v1.DeploymentContent
+	1,  // 7: fleetshift.v1.SignedInput.signature:type_name -> fleetshift.v1.Signature
+	14, // 8: fleetshift.v1.SignedInput.key_binding:type_name -> fleetshift.v1.SigningKeyBinding
+	11, // 9: fleetshift.v1.SignedInput.valid_until:type_name -> google.protobuf.Timestamp
+	2,  // 10: fleetshift.v1.SignedInput.output_constraints:type_name -> fleetshift.v1.OutputConstraint
+	5,  // 11: fleetshift.v1.Attestation.input:type_name -> fleetshift.v1.SignedInput
+	7,  // 12: fleetshift.v1.Attestation.put_manifests:type_name -> fleetshift.v1.PutManifests
+	8,  // 13: fleetshift.v1.Attestation.remove:type_name -> fleetshift.v1.RemoveByDeploymentId
+	15, // 14: fleetshift.v1.PutManifests.manifests:type_name -> fleetshift.v1.Manifest
+	9,  // 15: fleetshift.v1.PutManifests.manifest_signature:type_name -> fleetshift.v1.OutputSignature
+	10, // 16: fleetshift.v1.PutManifests.placement:type_name -> fleetshift.v1.PlacementEvidence
+	10, // 17: fleetshift.v1.RemoveByDeploymentId.placement:type_name -> fleetshift.v1.PlacementEvidence
+	1,  // 18: fleetshift.v1.OutputSignature.signature:type_name -> fleetshift.v1.Signature
+	9,  // 19: fleetshift.v1.PlacementEvidence.signature:type_name -> fleetshift.v1.OutputSignature
+	20, // [20:20] is the sub-list for method output_type
+	20, // [20:20] is the sub-list for method input_type
+	20, // [20:20] is the sub-list for extension type_name
+	20, // [20:20] is the sub-list for extension extendee
+	0,  // [0:20] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_attestation_proto_init() }
@@ -659,13 +874,17 @@ func file_fleetshift_v1_attestation_proto_init() {
 	file_fleetshift_v1_manifest_strategy_proto_init()
 	file_fleetshift_v1_placement_strategy_proto_init()
 	file_fleetshift_v1_signing_key_binding_proto_init()
+	file_fleetshift_v1_attestation_proto_msgTypes[6].OneofWrappers = []any{
+		(*Attestation_PutManifests)(nil),
+		(*Attestation_Remove)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fleetshift_v1_attestation_proto_rawDesc), len(file_fleetshift_v1_attestation_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

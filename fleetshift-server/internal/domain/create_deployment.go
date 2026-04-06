@@ -15,8 +15,9 @@ type CreateDeploymentInput struct {
 	PlacementStrategy PlacementStrategySpec
 	RolloutStrategy   *RolloutStrategySpec
 	Auth              DeliveryAuth
-	UserSignature     []byte    // ECDSA-P256-SHA256 signature; empty for unsigned deployments
-	ValidUntil        time.Time // client-supplied attestation expiry; zero for unsigned
+	Provenance        *Provenance // set by the service layer after signature verification
+	UserSignature     []byte      // ECDSA-P256-SHA256 signature; empty for unsigned deployments
+	ValidUntil        time.Time   // client-supplied attestation expiry; zero for unsigned
 	// TODO: not sure this makes sense here
 	ExpectedGeneration Generation // always 1 for new deployments; 0 means unsigned
 }
@@ -61,6 +62,7 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 			PlacementStrategy: in.PlacementStrategy,
 			RolloutStrategy:   in.RolloutStrategy,
 			Auth:              in.Auth,
+			Provenance:        in.Provenance,
 			State:             DeploymentStateCreating,
 			Generation:        1,
 			CreatedAt:         now,

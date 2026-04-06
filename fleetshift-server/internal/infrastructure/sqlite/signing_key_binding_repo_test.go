@@ -15,9 +15,11 @@ func TestSigningKeyBindingRepo_CreateAndGet(t *testing.T) {
 	ctx := context.Background()
 
 	binding := domain.SigningKeyBinding{
-		ID:                  "skb-1",
-		SubjectID:           "user-1",
-		Issuer:              "https://issuer.example.com",
+		ID: "skb-1",
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "user-1",
+			Issuer:  "https://issuer.example.com",
+		},
 		PublicKeyJWK:        []byte(`{"kty":"EC","crv":"P-256","x":"x","y":"y"}`),
 		Algorithm:           "ES256",
 		KeyBindingDoc:       []byte(`{"subject":"user-1"}`),
@@ -52,8 +54,8 @@ func TestSigningKeyBindingRepo_CreateAndGet(t *testing.T) {
 	if got.ID != "skb-1" {
 		t.Errorf("ID = %q, want %q", got.ID, "skb-1")
 	}
-	if got.SubjectID != "user-1" {
-		t.Errorf("SubjectID = %q, want %q", got.SubjectID, "user-1")
+	if got.Subject != "user-1" {
+		t.Errorf("Subject = %q, want %q", got.Subject, "user-1")
 	}
 	if got.Issuer != "https://issuer.example.com" {
 		t.Errorf("Issuer = %q, want %q", got.Issuer, "https://issuer.example.com")
@@ -87,9 +89,11 @@ func TestSigningKeyBindingRepo_CreateDuplicate(t *testing.T) {
 	ctx := context.Background()
 
 	binding := domain.SigningKeyBinding{
-		ID:                  "skb-dup",
-		SubjectID:           "user-1",
-		Issuer:              "https://issuer.example.com",
+		ID: "skb-dup",
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "user-1",
+			Issuer:  "https://issuer.example.com",
+		},
 		PublicKeyJWK:        []byte(`{}`),
 		Algorithm:           "ES256",
 		KeyBindingDoc:       []byte(`{}`),
@@ -128,7 +132,11 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 
 	bindings := []domain.SigningKeyBinding{
 		{
-			ID: "skb-a", SubjectID: "user-1", Issuer: "https://issuer.example.com",
+			ID: "skb-a",
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-1",
+				Issuer:  "https://issuer.example.com",
+			},
 			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
 			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
 			IdentityToken: "tok-a",
@@ -136,7 +144,11 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 			ExpiresAt: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-b", SubjectID: "user-1", Issuer: "https://issuer.example.com",
+			ID: "skb-b",
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-1",
+				Issuer:  "https://issuer.example.com",
+			},
 			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
 			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
 			IdentityToken: "tok-b",
@@ -144,7 +156,11 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 			ExpiresAt: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-c", SubjectID: "user-2", Issuer: "https://issuer.example.com",
+			ID: "skb-c",
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-2",
+				Issuer:  "https://issuer.example.com",
+			},
 			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
 			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
 			IdentityToken: "tok-c",
@@ -152,7 +168,11 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 			ExpiresAt: time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-d", SubjectID: "user-1", Issuer: "https://other-issuer.example.com",
+			ID: "skb-d",
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-1",
+				Issuer:  "https://other-issuer.example.com",
+			},
 			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
 			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
 			IdentityToken: "tok-d",
@@ -180,7 +200,10 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	got, err := tx.SigningKeyBindings().ListBySubject(ctx, "user-1", "https://issuer.example.com")
+	got, err := tx.SigningKeyBindings().ListBySubject(ctx, domain.FederatedIdentity{
+		Subject: "user-1",
+		Issuer:  "https://issuer.example.com",
+	})
 	if err != nil {
 		t.Fatalf("ListBySubject: %v", err)
 	}

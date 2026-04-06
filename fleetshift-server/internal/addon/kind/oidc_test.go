@@ -88,8 +88,10 @@ func TestBuildKindOIDCConfig_ValidationErrors(t *testing.T) {
 func callerAuth() domain.DeliveryAuth {
 	return domain.DeliveryAuth{
 		Caller: &domain.SubjectClaims{
-			ID:     "alice",
-			Issuer: "https://host.docker.internal:9443",
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  "https://host.docker.internal:9443",
+			},
 		},
 		Audience: []domain.Audience{"fleetshift"},
 	}
@@ -111,7 +113,7 @@ func TestAgent_Deliver_ConfigWithCallerRejected(t *testing.T) {
 		Raw:          json.RawMessage(specBytes),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nop)
+	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil, nop)
 	if err == nil {
 		t.Fatal("expected error for config + authenticated caller")
 	}

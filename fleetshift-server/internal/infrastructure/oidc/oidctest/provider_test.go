@@ -54,8 +54,8 @@ func TestProvider_IssueAndVerify(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	if claims.ID != "alice" {
-		t.Errorf("ID = %q, want %q", claims.ID, "alice")
+	if claims.Subject != "alice" {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "alice")
 	}
 	if claims.Issuer != idp.IssuerURL() {
 		t.Errorf("Issuer = %q, want %q", claims.Issuer, idp.IssuerURL())
@@ -127,8 +127,8 @@ func TestProvider_DefaultSubject(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	if claims.ID != "test-user" {
-		t.Errorf("ID = %q, want %q", claims.ID, "test-user")
+	if claims.Subject != "test-user" {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "test-user")
 	}
 }
 
@@ -148,7 +148,7 @@ func TestProvider_CustomAudience(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	if claims.ID != "bob" {
-		t.Errorf("ID = %q, want %q", claims.ID, "bob")
+	if claims.Subject != "bob" {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "bob")
 	}
 }

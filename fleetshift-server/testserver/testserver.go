@@ -24,8 +24,10 @@ type stubVerifier struct{}
 
 func (stubVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ string) (domain.SubjectClaims, error) {
 	return domain.SubjectClaims{
-		ID:     "test-user",
-		Issuer: "test-issuer",
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "test-user",
+			Issuer:  "test-issuer",
+		},
 	}, nil
 }
 

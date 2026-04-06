@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -66,7 +67,7 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, auth, &domain.DeliverySignaler{})
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil, &domain.DeliverySignaler{})
 	if err == nil {
 		t.Fatal("expected error for missing api_server")
 	}
@@ -90,7 +91,7 @@ func TestAgent_Deliver_MissingToken(t *testing.T) {
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.DeliverySignaler{})
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
 	if err == nil {
 		t.Fatal("expected error for missing token")
 	}
@@ -122,7 +123,7 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, signaler)
 	if err != nil {
 		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
@@ -173,7 +174,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, signaler)
 	if err != nil {
 		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
@@ -215,7 +216,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, signaler)
+	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, signaler)
 	if err != nil {
 		t.Fatalf("Deliver should not return error after ack: %v", err)
 	}
@@ -228,3 +229,71 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 		t.Errorf("async State = %q, want %q; message: %s", asyncResult.State, domain.DeliveryStateAuthFailed, asyncResult.Message)
 	}
 }
+
+func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
+	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
+	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			KeyBinding: domain.SigningKeyBinding{
+				FederatedIdentity: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Deliver should not return error: %v", err)
+	}
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateAuthFailed, result.Message)
+	}
+}
+
+func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
+	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
+	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			KeyBinding: domain.SigningKeyBinding{
+				FederatedIdentity: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	// No token — the attestation code path doesn't require one.
+	// Verification will fail (untrusted issuer), proving we reached the
+	// attestation path rather than the token-required check.
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Deliver should not return error: %v", err)
+	}
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+}
+

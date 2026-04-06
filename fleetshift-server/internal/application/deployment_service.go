@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
@@ -55,7 +56,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 			return domain.Deployment{}, fmt.Errorf("commit read tx: %w", err)
 		}
 		// TODO: I don't like this modification of the input after the fact
-		in.Auth.Provenance = prov
+		in.Provenance = prov
 	}
 
 	// TODO: don't store token; keep it in memory. use peer cluster to retrieve from peers on concurrent updates.
@@ -140,7 +141,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 			domain.ErrInvalidArgument, in.ID, dep.State)
 	}
 
-	hadProvenance := dep.Auth.Provenance != nil
+	hadProvenance := dep.Provenance != nil
 
 	dep.Auth = domain.DeliveryAuth{
 		Caller:   ac.Subject,
@@ -163,7 +164,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 		if err != nil {
 			return domain.Deployment{}, fmt.Errorf("build provenance: %w", err)
 		}
-		dep.Auth.Provenance = prov
+		dep.Provenance = prov
 	}
 
 	dep.BumpGeneration()
@@ -234,12 +235,12 @@ func (s *DeploymentService) buildProvenance(
 	userSig []byte,
 	validUntil time.Time,
 ) (*domain.Provenance, error) {
-	found, err := bindings.ListBySubject(ctx, caller.ID, caller.Issuer)
+	found, err := bindings.ListBySubject(ctx, caller.FederatedIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("list key bindings: %w", err)
 	}
 	if len(found) == 0 {
-		return nil, fmt.Errorf("%w: no signing key binding found for %s", domain.ErrInvalidArgument, caller.ID)
+		return nil, fmt.Errorf("%w: no signing key binding found for %s", domain.ErrInvalidArgument, caller.Subject)
 	}
 
 	// TODO: just getting the first one?
@@ -255,12 +256,12 @@ func (s *DeploymentService) buildProvenance(
 	}
 	envelopeHash := domain.HashIntent(envelopeBytes)
 
-	pubKey, err := ParseECPublicKeyFromJWK(binding.PublicKeyJWK)
+	pubKey, err := fscrypto.ParseECPublicKeyFromJWK(binding.PublicKeyJWK)
 	if err != nil {
 		return nil, fmt.Errorf("parse public key: %w", err)
 	}
 
-	if err := VerifyECDSASignature(pubKey, envelopeBytes, userSig); err != nil {
+	if err := fscrypto.VerifyECDSASignature(pubKey, envelopeBytes, userSig); err != nil {
 		return nil, fmt.Errorf("%w: signature verification failed", domain.ErrInvalidArgument)
 	}
 
@@ -272,12 +273,11 @@ func (s *DeploymentService) buildProvenance(
 
 	return &domain.Provenance{
 		Sig: domain.Signature{
-			SignerID:       caller.ID,
+			Signer:         caller.FederatedIdentity,
 			PublicKey:      pubKeyBytes,
 			ContentHash:    envelopeHash,
 			SignatureBytes: userSig,
 		},
-		KeyBinding:         binding,
 		ValidUntil:         validUntil,
 		ExpectedGeneration: generation,
 		OutputConstraints:  nil,

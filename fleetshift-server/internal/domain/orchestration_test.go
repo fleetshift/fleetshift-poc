@@ -49,6 +49,21 @@ func seedDeployment(t *testing.T, store domain.Store, dep domain.Deployment) {
 	}
 }
 
+func seedKeyBinding(t *testing.T, store domain.Store, kb domain.SigningKeyBinding) {
+	t.Helper()
+	tx, err := store.Begin(context.Background())
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if err := tx.SigningKeyBindings().Create(context.Background(), kb); err != nil {
+		t.Fatalf("seed key binding: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
 func seedTargets(t *testing.T, store domain.Store, targets ...domain.TargetInfo) {
 	t.Helper()
 	tx, err := store.Begin(context.Background())
@@ -271,7 +286,7 @@ func (r *stubRegistry) RegisterCreateDeployment(_ *domain.CreateDeploymentWorkfl
 
 type noopDelivery struct{}
 
-func (noopDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (noopDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
 	signaler.Done(ctx, result)
 	return result, nil
@@ -285,7 +300,7 @@ type asyncDelivery struct {
 	done chan struct{}
 }
 
-func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	go func() {
 		signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		if a.done != nil {
@@ -303,7 +318,7 @@ type emittingAsyncDelivery struct {
 	done chan struct{}
 }
 
-func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	go func() {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
@@ -326,7 +341,7 @@ type outputProducingDelivery struct {
 	secrets []domain.ProducedSecret
 }
 
-func (d *outputProducingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (d *outputProducingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	result := domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
 		ProvisionedTargets: d.targets,
@@ -342,7 +357,7 @@ func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo,
 
 type authFailingDelivery struct{}
 
-func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	result := domain.DeliveryResult{
 		State:   domain.DeliveryStateAuthFailed,
 		Message: "401 Unauthorized",
@@ -360,7 +375,7 @@ type recordingDelivery struct {
 	delivered []domain.TargetID
 }
 
-func (d *recordingDelivery) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (d *recordingDelivery) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	d.mu.Lock()
 	d.delivered = append(d.delivered, target.ID)
 	d.mu.Unlock()
@@ -891,16 +906,30 @@ func (r *attestationCapturingRecord) Run(activity domain.Activity[any, any], in 
 func testProvenance() *domain.Provenance {
 	return &domain.Provenance{
 		Sig: domain.Signature{
-			SignerID:       "test-signer",
+			Signer:         domain.FederatedIdentity{Subject: "test-signer", Issuer: "https://issuer.example.com"},
 			PublicKey:      []byte("pub-key-bytes"),
 			ContentHash:    []byte("content-hash"),
 			SignatureBytes: []byte("sig-bytes"),
 		},
-		KeyBinding: domain.SigningKeyBinding{
-			ID: "kb-1",
-		},
 		ValidUntil:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 		ExpectedGeneration: 1,
+	}
+}
+
+func testKeyBinding(id domain.SigningKeyBindingID, subjectID domain.SubjectID) domain.SigningKeyBinding {
+	return domain.SigningKeyBinding{
+		ID: id,
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: subjectID,
+			Issuer:  "https://issuer.example.com",
+		},
+		PublicKeyJWK:        json.RawMessage(`{"kty":"EC","crv":"P-256","x":"x","y":"y"}`),
+		Algorithm:           "ES256",
+		KeyBindingDoc:       []byte("test-binding-doc"),
+		KeyBindingSignature: []byte("test-binding-sig"),
+		IdentityToken:       "test-id-token",
+		CreatedAt:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:           time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -916,16 +945,17 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 		Targets: []domain.TargetID{"t1"},
 	}
 
+	seedKeyBinding(t, store, testKeyBinding("kb-test", "test-signer"))
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "attested-dep",
 		Generation:        1,
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		Auth: domain.DeliveryAuth{
-			Caller:     &domain.SubjectClaims{ID: "test-signer"},
-			Provenance: prov,
+			Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "test-signer"}},
 		},
-		State: domain.DeploymentStateCreating,
+		Provenance: prov,
+		State:      domain.DeploymentStateCreating,
 	})
 	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
 
@@ -953,29 +983,29 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 		t.Fatal("Attestation is nil; expected it to be assembled from Provenance")
 	}
 
-	if att.DeploymentID != "attested-dep" {
-		t.Errorf("Attestation.DeploymentID = %q, want %q", att.DeploymentID, "attested-dep")
+	if att.Input.Content.DeploymentID != "attested-dep" {
+		t.Errorf("Input.Content.DeploymentID = %q, want %q", att.Input.Content.DeploymentID, "attested-dep")
 	}
-	if att.Provenance.Sig.SignerID != prov.Sig.SignerID {
-		t.Errorf("Attestation.Provenance.Sig.SignerID = %q, want %q",
-			att.Provenance.Sig.SignerID, prov.Sig.SignerID)
+	if att.Input.Sig.Signer != prov.Sig.Signer {
+		t.Errorf("Input.Sig.Signer = %v, want %v", att.Input.Sig.Signer, prov.Sig.Signer)
 	}
-	if string(att.ManifestStrategy.Type) != string(ms.Type) {
-		t.Errorf("Attestation.ManifestStrategy.Type = %q, want %q",
-			att.ManifestStrategy.Type, ms.Type)
+	if att.Input.KeyBinding.ID != "kb-test" {
+		t.Errorf("Input.KeyBinding.ID = %q, want %q", att.Input.KeyBinding.ID, "kb-test")
 	}
-	if string(att.PlacementStrategy.Type) != string(ps.Type) {
-		t.Errorf("Attestation.PlacementStrategy.Type = %q, want %q",
-			att.PlacementStrategy.Type, ps.Type)
+	if string(att.Input.Content.ManifestStrategy.Type) != string(ms.Type) {
+		t.Errorf("Input.Content.ManifestStrategy.Type = %q, want %q",
+			att.Input.Content.ManifestStrategy.Type, ms.Type)
 	}
-	if att.Output.PutManifests == nil {
-		t.Fatal("Attestation.Output.PutManifests is nil")
+	if string(att.Input.Content.PlacementStrategy.Type) != string(ps.Type) {
+		t.Errorf("Input.Content.PlacementStrategy.Type = %q, want %q",
+			att.Input.Content.PlacementStrategy.Type, ps.Type)
 	}
-	if len(att.Output.PutManifests.Manifests) == 0 {
-		t.Error("Attestation.Output.PutManifests.Manifests is empty")
+	put, ok := att.Output.(*domain.PutManifests)
+	if !ok {
+		t.Fatalf("Attestation.Output is %T, want *PutManifests", att.Output)
 	}
-	if att.Output.RemoveByDeploymentId != nil {
-		t.Error("Attestation.Output.RemoveByDeploymentId should be nil for deliver")
+	if len(put.Manifests) == 0 {
+		t.Error("PutManifests.Manifests is empty")
 	}
 }
 
@@ -1031,6 +1061,7 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 		Targets: []domain.TargetID{"new1"},
 	}
 
+	seedKeyBinding(t, store, testKeyBinding("kb-rm", "test-signer"))
 	seedDeployment(t, store, domain.Deployment{
 		ID:              "rm-attested",
 		Generation:      2,
@@ -1038,10 +1069,10 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		Auth: domain.DeliveryAuth{
-			Caller:     &domain.SubjectClaims{ID: "test-signer"},
-			Provenance: prov,
+			Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "test-signer"}},
 		},
-		State: domain.DeploymentStateCreating,
+		Provenance: prov,
+		State:      domain.DeploymentStateCreating,
 	})
 	seedTargets(t, store,
 		domain.TargetInfo{ID: "old1", Name: "old1", Type: "test"},
@@ -1071,18 +1102,15 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	if att == nil {
 		t.Fatal("Attestation is nil; expected remove attestation")
 	}
-	if att.DeploymentID != "rm-attested" {
-		t.Errorf("Attestation.DeploymentID = %q, want %q", att.DeploymentID, "rm-attested")
+	if att.Input.Content.DeploymentID != "rm-attested" {
+		t.Errorf("Input.Content.DeploymentID = %q, want %q", att.Input.Content.DeploymentID, "rm-attested")
 	}
-	if att.Output.RemoveByDeploymentId == nil {
-		t.Fatal("Attestation.Output.RemoveByDeploymentId is nil")
+	rm, ok := att.Output.(*domain.RemoveByDeploymentId)
+	if !ok {
+		t.Fatalf("Attestation.Output is %T, want *RemoveByDeploymentId", att.Output)
 	}
-	if att.Output.RemoveByDeploymentId.DeploymentID != "rm-attested" {
-		t.Errorf("RemoveByDeploymentId.DeploymentID = %q, want %q",
-			att.Output.RemoveByDeploymentId.DeploymentID, "rm-attested")
-	}
-	if att.Output.PutManifests != nil {
-		t.Error("Attestation.Output.PutManifests should be nil for remove")
+	if rm.DeploymentID != "rm-attested" {
+		t.Errorf("RemoveByDeploymentId.DeploymentID = %q, want %q", rm.DeploymentID, "rm-attested")
 	}
 }
 

@@ -1,4 +1,7 @@
-package application
+// Package crypto provides shared EC cryptographic helpers used by both
+// the application layer (provenance construction, key enrollment) and
+// the attestation verification library.
+package crypto
 
 import (
 	"crypto/ecdsa"
@@ -19,8 +22,7 @@ type ECJWK struct {
 }
 
 // ParseECPublicKeyFromJWK parses a P-256 public key from its JWK
-// JSON representation. Used by signing key enrollment (Cap 6) and
-// provenance construction (Cap 7).
+// JSON representation.
 func ParseECPublicKeyFromJWK(raw json.RawMessage) (*ecdsa.PublicKey, error) {
 	var jwk ECJWK
 	if err := json.Unmarshal(raw, &jwk); err != nil {

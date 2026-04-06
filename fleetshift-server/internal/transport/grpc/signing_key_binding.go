@@ -55,7 +55,7 @@ func parseSigningKeyBindingName(name string) (domain.SigningKeyBindingID, error)
 func signingKeyBindingToProto(b domain.SigningKeyBinding) *pb.SigningKeyBinding {
 	out := &pb.SigningKeyBinding{
 		Name:                signingKeyBindingName(b.ID),
-		Subject:             string(b.SubjectID),
+		Subject:             string(b.Subject),
 		Issuer:              string(b.Issuer),
 		PublicKeyJwk:        b.PublicKeyJWK,
 		Algorithm:           b.Algorithm,

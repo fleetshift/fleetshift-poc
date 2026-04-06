@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
 // SigningKeyService handles signing key enrollment by validating
@@ -69,10 +70,10 @@ func (s *SigningKeyService) Create(ctx context.Context, in CreateSigningKeyBindi
 		return domain.SigningKeyBinding{}, fmt.Errorf("identity token verification failed: %w", err)
 	}
 
-	if idTokenClaims.ID != ac.Subject.ID {
+	if idTokenClaims.Subject != ac.Subject.Subject {
 		return domain.SigningKeyBinding{}, fmt.Errorf(
 			"%w: identity token subject %q does not match caller %q",
-			domain.ErrInvalidArgument, idTokenClaims.ID, ac.Subject.ID)
+			domain.ErrInvalidArgument, idTokenClaims.Subject, ac.Subject.Subject)
 	}
 
 	var doc keyBindingDoc
@@ -82,14 +83,14 @@ func (s *SigningKeyService) Create(ctx context.Context, in CreateSigningKeyBindi
 			domain.ErrInvalidArgument, err)
 	}
 
-	pubKey, err := ParseECPublicKeyFromJWK(doc.PublicKeyJWK)
+	pubKey, err := fscrypto.ParseECPublicKeyFromJWK(doc.PublicKeyJWK)
 	if err != nil {
 		return domain.SigningKeyBinding{}, fmt.Errorf(
 			"%w: invalid public key in key_binding_doc: %v",
 			domain.ErrInvalidArgument, err)
 	}
 
-	if err := VerifyECDSASignature(pubKey, in.KeyBindingDoc, in.KeyBindingSignature); err != nil {
+	if err := fscrypto.VerifyECDSASignature(pubKey, in.KeyBindingDoc, in.KeyBindingSignature); err != nil {
 		return domain.SigningKeyBinding{}, fmt.Errorf(
 			"%w: proof of possession verification failed: %v",
 			domain.ErrInvalidArgument, err)
@@ -97,9 +98,8 @@ func (s *SigningKeyService) Create(ctx context.Context, in CreateSigningKeyBindi
 
 	now := time.Now().UTC()
 	binding := domain.SigningKeyBinding{
-		ID:                  in.ID,
-		SubjectID:           ac.Subject.ID,
-		Issuer:              ac.Subject.Issuer,
+		ID:                in.ID,
+		FederatedIdentity: ac.Subject.FederatedIdentity,
 		PublicKeyJWK:        []byte(doc.PublicKeyJWK),
 		Algorithm:           "ES256",
 		KeyBindingDoc:       in.KeyBindingDoc,

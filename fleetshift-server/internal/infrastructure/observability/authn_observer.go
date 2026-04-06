@@ -127,7 +127,7 @@ func (p *authnProbe) End() {
 	switch p.outcome {
 	case authnOutcomeAuthenticated:
 		attrs = append(attrs,
-			slog.String("subject_id", string(p.subject.ID)),
+			slog.String("subject_id", string(p.subject.Subject)),
 			slog.String("auth_method_type", string(p.authType)),
 		)
 		p.logger.LogAttrs(p.ctx, slog.LevelInfo, "authenticated", attrs...)

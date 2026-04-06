@@ -27,9 +27,10 @@ type Deployment struct {
 	RolloutStrategy   *RolloutStrategySpec // nil means immediate
 	ResolvedTargets   []TargetID
 	State             DeploymentState
-	Auth              DeliveryAuth // authorization context; may change over time (e.g. token refresh)
-	Generation         Generation // incremented on every mutation; starts at 1
-	ObservedGeneration Generation // last generation fully reconciled by a workflow
+	Auth              DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
+	Provenance        *Provenance  // nil for token-passthrough deployments
+	Generation         Generation  // incremented on every mutation; starts at 1
+	ObservedGeneration Generation  // last generation fully reconciled by a workflow
 	CreatedAt         time.Time
 	UpdatedAt         time.Time
 	Etag              string

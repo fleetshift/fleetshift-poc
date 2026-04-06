@@ -238,8 +238,8 @@ func deploymentToProto(d domain.Deployment) *pb.Deployment {
 	dep.Uid = d.UID
 	dep.Etag = d.Etag
 
-	if d.Auth.Provenance != nil {
-		dep.Provenance = provenanceToProto(d.Auth.Provenance)
+	if d.Provenance != nil {
+		dep.Provenance = provenanceToProto(d.Provenance)
 	}
 
 	return dep
@@ -248,12 +248,14 @@ func deploymentToProto(d domain.Deployment) *pb.Deployment {
 func provenanceToProto(p *domain.Provenance) *pb.Provenance {
 	prov := &pb.Provenance{
 		Signature: &pb.Signature{
-			SignerId:       string(p.Sig.SignerID),
+			Signer: &pb.FederatedIdentity{
+				Subject: string(p.Sig.Signer.Subject),
+				Issuer:  string(p.Sig.Signer.Issuer),
+			},
 			PublicKey:      p.Sig.PublicKey,
 			ContentHash:    p.Sig.ContentHash,
 			SignatureBytes: p.Sig.SignatureBytes,
 		},
-		KeyBinding:         signingKeyBindingToProto(p.KeyBinding),
 		ValidUntil:         timestamppb.New(p.ValidUntil),
 		ExpectedGeneration: int64(p.ExpectedGeneration),
 	}

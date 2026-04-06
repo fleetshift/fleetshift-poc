@@ -109,9 +109,11 @@ func (v *Verifier) Verify(ctx context.Context, config domain.OIDCConfig, rawToke
 	iss, _ := tok.Issuer()
 
 	claims := domain.SubjectClaims{
-		ID:     domain.SubjectID(sub),
-		Issuer: domain.IssuerURL(iss),
-		Extra:  make(map[string][]string),
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: domain.SubjectID(sub),
+			Issuer:  domain.IssuerURL(iss),
+		},
+		Extra: make(map[string][]string),
 	}
 
 	var email string

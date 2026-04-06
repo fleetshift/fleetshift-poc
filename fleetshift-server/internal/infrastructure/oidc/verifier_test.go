@@ -26,8 +26,8 @@ func TestVerifier_ValidToken(t *testing.T) {
 		t.Fatalf("Verify: %v", err)
 	}
 
-	if claims.ID != "user-123" {
-		t.Errorf("ID: got %q, want %q", claims.ID, "user-123")
+	if claims.Subject != "user-123" {
+		t.Errorf("Subject: got %q, want %q", claims.Subject, "user-123")
 	}
 	if claims.Issuer != idp.IssuerURL() {
 		t.Errorf("Issuer: got %q, want %q", claims.Issuer, idp.IssuerURL())

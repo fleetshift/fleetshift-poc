@@ -15,24 +15,34 @@ import (
 const KubernetesTargetType domain.TargetType = "kubernetes"
 
 // ClusterOutput captures what a successful kind cluster creation
-// produces: connection info for the provisioned cluster. No secrets
-// are stored; the admin kubeconfig is used ephemerally for bootstrap
-// and then discarded.
+// produces: connection info for the provisioned cluster and,
+// optionally, a platform ServiceAccount token for attested delivery.
 type ClusterOutput struct {
 	TargetID  domain.TargetID
 	Name      string
 	APIServer string // e.g. "https://127.0.0.1:PORT"
 	CACert    []byte // PEM-encoded cluster CA certificate
+
+	// SATokenRef and SAToken are set when platform SA bootstrapping
+	// succeeds. SATokenRef is a vault key; SAToken is the raw bearer
+	// token stored under that key.
+	SATokenRef domain.SecretRef
+	SAToken    []byte
 }
 
 // Target returns a [domain.ProvisionedTarget] with connection info
-// stored as properties. No vault secrets are produced.
+// stored as properties. When a platform SA token was provisioned, the
+// target includes a service_account_token_ref pointing at the vault
+// secret rather than embedding the raw credential.
 func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	props := map[string]string{
 		"api_server": o.APIServer,
 	}
 	if len(o.CACert) > 0 {
 		props["ca_cert"] = string(o.CACert)
+	}
+	if o.SATokenRef != "" {
+		props["service_account_token_ref"] = string(o.SATokenRef)
 	}
 	return domain.ProvisionedTarget{
 		ID:                    o.TargetID,
@@ -41,6 +51,19 @@ func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 		Properties:            props,
 		AcceptedResourceTypes: []domain.ResourceType{kubernetes.ManifestResourceType},
 	}
+}
+
+// Secrets returns the [domain.ProducedSecret] entries that should be
+// stored in the vault for this cluster. Returns nil when no platform
+// SA was bootstrapped.
+func (o *ClusterOutput) Secrets() []domain.ProducedSecret {
+	if o.SATokenRef == "" {
+		return nil
+	}
+	return []domain.ProducedSecret{{
+		Ref:   o.SATokenRef,
+		Value: o.SAToken,
+	}}
 }
 
 // ExtractClusterConnInfo parses a kubeconfig to extract the API server

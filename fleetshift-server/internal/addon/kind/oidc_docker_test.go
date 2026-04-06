@@ -78,7 +78,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	result, err := kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, signaler)
+	result, err := kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, nil, signaler)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -141,7 +141,9 @@ func TestKindAddon_OIDCAuth(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{
-		Caller:   &domain.SubjectClaims{ID: "alice"},
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
+		},
 		Audience: []domain.Audience{"fleetshift"},
 	}
 	res := createOIDCCluster(t, "fleetshift-oidc-test", auth)
@@ -199,7 +201,9 @@ func TestKindAddon_OIDCAuthWithRBAC(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{
-		Caller:   &domain.SubjectClaims{ID: "alice"},
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
+		},
 		Audience: []domain.Audience{"fleetshift"},
 	}
 	res := createOIDCCluster(t, "fleetshift-rbac-test", auth)
@@ -239,7 +243,9 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{
-		Caller:   &domain.SubjectClaims{ID: "alice"},
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
+		},
 		Audience: []domain.Audience{"fleetshift"},
 	}
 	res := createOIDCCluster(t, "fleetshift-passthrough-test", auth)
@@ -283,7 +289,12 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	// Alice has cluster-admin via RBAC bootstrap: delivery should succeed.
 	aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
 	aliceAuth := domain.DeliveryAuth{
-		Caller:   &domain.SubjectClaims{ID: "alice", Issuer: res.IssuerURL},
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  res.IssuerURL,
+			},
+		},
 		Audience: []domain.Audience{"fleetshift"},
 		Token:    domain.RawToken(aliceToken),
 	}
@@ -291,7 +302,7 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	obs := newChannelDeliveryObserver()
 	signaler := newChannelSignaler(obs)
 
-	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, signaler)
+	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, signaler)
 	if err != nil {
 		t.Fatalf("Deliver (alice): %v", err)
 	}
@@ -321,7 +332,12 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	// Bob has no RBAC: delivery should fail with a 403-like error.
 	bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
 	bobAuth := domain.DeliveryAuth{
-		Caller:   &domain.SubjectClaims{ID: "bob", Issuer: res.IssuerURL},
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "bob",
+				Issuer:  res.IssuerURL,
+			},
+		},
 		Audience: []domain.Audience{"fleetshift"},
 		Token:    domain.RawToken(bobToken),
 	}
@@ -344,7 +360,7 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	result, err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
 		ResourceType: kubeaddon.ManifestResourceType,
 		Raw:          bobManifest,
-	}}, bobAuth, bobSignaler)
+	}}, bobAuth, nil, bobSignaler)
 	if err != nil {
 		t.Fatalf("Deliver (bob): %v", err)
 	}
