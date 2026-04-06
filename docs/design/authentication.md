@@ -190,7 +190,7 @@ All three follow the same model: a per-user key pair is generated during enrollm
 
 The delivery agent must verify that a public key genuinely belongs to a given user. If the platform controls the key registry, a compromised platform can swap a user's key and forge intents. Key-to-user binding must be anchored externally — not derived from the platform itself. Two distribution models are available (which can vary by tenant or user):
 
-1. **Platform distribution through a "JWT binding bundle."** This binds a public key entry to a user's own JWT, self-signed, tracing trust back to an IdP rather than the platform, while retaining the platform as the distribution mechanism.
+1. **Platform distribution through a "JWT binding bundle."** This binds a public key entry to a user's own JWT, self-signed, tracing trust back to an IdP rather than the platform, while retaining the platform as the distribution mechanism. IMPORTANT: This requires IdP support to bind the token to the user's key, such as through proof of posession and the cnf claim, through RaR authorization_details, or some other mechanism.
 2. **External key source** such as GitHub or GitLab APIs (which both offer unauthenticated key endpoints for retrieving public key material per user). As in IdP trust / JWKS, these external sources must be configured with the appropriate authority and validated at the delivery agent.
 
 TODO: Can different key registries be pluggable? The high level API is the same (validate this signature for this user) but the implementations, at least in these two cases, are quite different.
@@ -199,8 +199,10 @@ TODO: Can different key registries be pluggable? The high level API is the same 
 
 At "registration time" (login, or at auto-detected intervals by the user agent), the user creates a self-certifying bundle:
 
-1. User authenticates to their IdP → gets a JWT
-2. User generates key pair (or uses an existing one)
+1. User generates key pair (or uses an existing one)
+2. User authenticates to their IdP with their key (whether through PoP or resource authorization) → gets an access JWT with a claim referring back to their key
+    - This is what requires advanced IdP support, although more and more IdPs are supporting PoP.
+    - This should ideally be a separate audience than normal management API calls
 3. User signs `{public_key, jwt.sub, jwt.iss, timestamp}` with the new private key (proof of possession)
 4. The bundle `{key_binding_doc, key_binding_signature, jwt}` is stored on the platform
 
@@ -208,10 +210,11 @@ The delivery agent verifies the bundle independently:
 
 - JWT signature valid against tenant IdP JWKS → the IdP vouched for this user's identity at registration time
 - `jwt.sub` matches the claimed user identity → the key is for this user
-- Key binding is signed by the corresponding private key → proof of possession
+- The JWT's key reference matches the key being used → proof of possession for the bearer token
+- Key binding is signed by the corresponding private key → proof of possession for the bundle
 - The intent is signed by the same key → continuity
 
-A compromised platform can't swap the key because it would need a JWT with `sub=alice@tenant.com` to create a valid binding for Alice — and it can't get that without authenticating as Alice to the tenant's IdP. The IdP is the trust anchor for key binding.
+A compromised platform can't swap the key because it would need a JWT with _both_ `sub=alice@tenant.com` and a binding to _that_ key, to create a valid binding for Alice. It can't get that without authenticating as Alice to the tenant's IdP. The IdP is the trust anchor for key binding.
 
 **Key binding TTL and renewal:** Key bindings have a TTL (e.g., 30-90 days). Before expiry, the client auto-renews by creating a fully fresh bundle: authenticate to IdP → get new JWT (signed with current IdP key) → re-sign the key binding doc with updated timestamp (fresh proof of possession) → replace the old bundle. Everything in the renewed bundle is from the same point in time. Automatable if the client has a session or refresh token. Provides a natural revocation boundary: even if a key is compromised, the binding expires within the TTL.
 
@@ -232,6 +235,8 @@ TODO: Look at how this interacts with "root" accounts
 #### External distribution
 
 **GitOps key registry:** With the unified signing model, GitOps uses the same key binding bundle as web/CLI — the primary verification mechanism is identical across all surfaces. The git hosting platform's public key endpoints (GitHub `GET /users/:username/ssh_signing_keys`, `GET /users/:username/gpg_keys`; GitLab `GET /users/:id/keys`) remain available as an additional or fallback verification source, fetched directly by the delivery agent (not through the platform). These endpoints are unauthenticated and function like JWKS endpoints.
+
+If the external key registry cannot be reached directly, we could consider a proxy deployed in secure network (not reachable externally, unlike the management server) that bridges verifiers to these registries.
 
 ### Multi-signature for high availability and audit
 
@@ -306,6 +311,7 @@ create_attestation(intent, user_signature, key_binding):
 validate_attestation(attestation, manifest):
     assert user_signature_valid(attestation.intent, attestation.user_signature, attestation.key_binding.public_key)
     assert key_binding_jwt_valid(attestation.key_binding.jwt, tenant_idp_jwks)
+    assert key_binding_jwt_possession_valid(attestation.key_binding.jwt, attestation.key_binding.public_key)
     assert key_binding_possession_valid(attestation.key_binding)
     assert attestation.key_binding.jwt.sub == claimed_user
     assert now() <= attestation.valid_until
@@ -344,43 +350,48 @@ For built-in strategies, checks 1 and the existing field mapping rules still app
 
 ##### Addon key lifecycle
 
-The addon needs a signing key pair. Three models, depending on the addon's deployment environment:
+The addon needs a signing key pair. In practice, X.509 workload identity is the most deployable model for addons: the issuer binds addon identity to the public key, the private key stays local to the addon, and the delivery agent verifies signatures against a trusted certificate chain. The platform may courier signed output and leaf certificates, but it is not the identity authority.
+
+Four models are relevant:
 
 **SPIFFE/SPIRE (preferred when available).** The addon gets an X.509 SVID from its local SPIRE agent. It signs manifests directly with the SVID's private key. The delivery agent verifies the signature against the SPIFFE trust bundle for the addon's trust domain. The X.509 certificate IS the identity-to-key binding — no separate key binding ceremony needed. SPIRE handles rotation automatically (short-lived SVIDs, auto-renewed). Trust bundle rotation is a first-class SPIRE concern. The admin-signed addon registration includes the SPIFFE trust domain and trust bundle endpoint. Each addon gets its own SPIFFE ID (e.g., `spiffe://fleet-addons/mco-observability`), and the delivery agent enforces that only the expected identity signed the manifests.
 
-**Cloud workload identity or K8s projected service account tokens.** The addon obtains a JWT from its runtime identity provider (GKE Workload Identity, EKS Pod Identity, AKS Workload Identity Federation, or raw K8s projected SA tokens — which underlie the cloud-specific mechanisms and work on any K8s cluster). The addon generates a signing key pair and creates a key binding bundle using the JWT — the same pattern as user key binding bundles: `{public_key, identity_claims, timestamp}` signed by the new private key (proof of possession), bundled with the identity JWT. The delivery agent verifies: JWT valid against the issuer's JWKS → subject matches the expected addon identity → proof of possession → manifests signed by the bound key.
+**Kubernetes CSR API / local workload CA.** The addon generates a key pair locally and submits a `CertificateSigningRequest` to a signer trusted for addon identities. The signer issues a short-lived X.509 certificate whose identity (typically a URI SAN) names the addon. The addon signs manifests with the same private key, and the delivery agent verifies the signature against the certificate and the trusted CA bundle. The CSR API is the plumbing, not the trust policy: the signer/approver policy defines what identities may be claimed. Public key trust is rooted in the issuer's CA bundle or root fingerprint, not in the CSR object itself. For FleetShift verifiers, the practical default is to pin that CA material by value in addon registration; leaf certificates can then rotate freely under the same CA. If automatic trust-anchor updates are required, the same CA bundle can instead be published at a verifier-reachable location by reference.
 
-**Admin-provisioned key (fallback).** When the addon runs in an environment without workload identity (bare metal, air-gapped), the admin registers the addon's public key as part of a signed administrative action — the same trust model as IdP trust configuration. Rotation is manual (the admin re-signs with updated keys). To reduce this burden, the admin-signed registration can authorize an identity source (an OIDC issuer, a SPIFFE trust domain), effectively upgrading to one of the above models. The initial registration bootstraps trust; subsequent rotations are automatic.
+**cert-manager workload certificates (practical Kubernetes option without SPIRE).** cert-manager can implement the CSR pattern without requiring SPIRE. An addon-local controller or CSI driver generates the private key locally and creates a `CertificateRequest` to a cert-manager `Issuer` or `ClusterIssuer`. The resulting certificate is used directly for manifest signing. If multiple addon identities share an issuer or CA, issuance should be constrained by an approver or equivalent CA partitioning so one addon cannot mint another addon's identity. If the addon cluster/CA itself is the trusted addon authority, such constraints are defense in depth rather than the primary trust boundary. Public key trust follows the issuer CA rather than each addon's leaf key: cert-manager handles issuance only. As with the raw CSR API, the practical default is to pin the issuer CA bundle or root fingerprint by value in addon registration. If automatic trust-anchor updates are required, the CA bundle can instead be published at a verifier-reachable location by reference. Tools like trust-manager help publish that CA in-cluster, but they do not by themselves solve external trust distribution.
+
+**JWT key binding bundle (completeness; likely impractical in practice).** In principle the addon could bind its signing key to a workload identity JWT, similar to the user key binding bundle. In practice this requires the workload identity issuer to mint a token that is itself bound to the addon's signing key (for example `cnf`, `jkt`, or an equivalent key confirmation claim). Mainstream Kubernetes/cloud workload identity systems generally bind tokens to the workload subject, audience, or role, but not to an arbitrary application signing key. Without that key confirmation, a platform that can read the stored JWT can replace the bundle with a different key. This model is included for completeness, but is unlikely to be the default recommendation.
+
+**Admin-provisioned key (fallback).** When the addon runs in an environment without workload identity or local certificate issuance (bare metal, air-gapped), the admin registers the addon's public key or CA as part of a signed administrative action. Rotation is manual unless the registration later authorizes a stronger identity source (SPIFFE trust domain, local CA, etc.).
 
 ##### Addon key distribution to the delivery agent
 
-The delivery agent needs to verify the addon's signing key. Two approaches:
+For certificate-based addon identities, the delivery agent needs the addon's leaf certificate plus a trusted CA bundle or trust domain. The raw workload identity token does not need to leave the addon cluster. External trust distribution is therefore a separate concern from local certificate issuance.
 
-**By reference (issuer URL or trust domain).** The addon registration includes an OIDC issuer URL or SPIFFE trust domain. The delivery agent resolves the current keys at verification time by fetching the JWKS or trust bundle from the issuer. This works when the issuer endpoint is reachable — either because it's a public URL (cloud-managed OIDC issuers) or because the delivery agent and the addon's cluster are on the same side of the network curtain (see provider_consumer_model.md). Rotation is automatic: the delivery agent always has current keys.
+Two approaches:
 
-**By value (cached JWKS).** The addon registration includes the JWKS directly. The delivery agent caches it. This is necessary when the issuer endpoint is unreachable from the delivery agent (cross-curtain delivery to consumer clusters). Rotation requires updating the cached JWKS.
+**By value (pinned CA bundle or root fingerprint).** The addon registration includes the CA bundle, intermediate set, or root fingerprint directly. The delivery agent caches or pins it. This is the simplest practical model because it requires no custom external endpoint: leaf certificates can rotate freely under the pinned CA, and only CA rotation requires an overlap window or administrative re-registration.
 
-For by-value distribution, rotation is handled through **rotation attestation during the key overlap window**: K8s API servers maintain both old and new signing keys in the JWKS simultaneously during rotation. During this window, the addon's fleetlet detects the JWKS change and creates a rotation attestation — "the new JWKS is X" — signed using the addon's identity under the old key (which the delivery agent still trusts). The platform couriers the attestation but cannot forge it (the old key is behind the curtain). The delivery agent verifies the attestation against the old JWKS, accepts the update, and now trusts both keys. If the overlap window is missed (fleetlet down for the entire duration), deployments enter PausedAuth until an admin re-establishes trust — the standard fail-safe degradation.
+**By reference (trust domain or CA bundle publication point).** The addon registration includes a SPIFFE trust domain, static HTTPS bundle URL, object storage location, git-hosted file, OCI artifact, or other verifier-reachable trust source. The delivery agent resolves the current trust bundle at verification time. This works when the publication point is reachable from the delivery agent and supports automatic trust-anchor updates. A custom endpoint is optional, not required.
+
+For by-value distribution, rotation is handled through overlap or re-registration: old and new CA material must both be trusted during the rotation window, or an admin must explicitly update the pinned trust bundle. If the overlap window is missed, deployments enter PausedAuth until trust is re-established — the standard fail-safe degradation. In-cluster tools such as trust-manager can help publish the CA bundle to local consumers, but FleetShift verifiers outside the addon cluster still need either by-value pinning or a separate external publication point.
 
 ##### Network topology reinforcement
 
-When addons run behind the provider/consumer network curtain (on factory clusters with restricted fleetlet profiles), the network topology reinforces the cryptographic model. The platform cannot reach the addon's cluster — the fleetlet connection is outbound-only, the protocol channel is structurally absent. The platform cannot request tokens on the addon's behalf, cannot access the addon's signing key, and cannot interact with the local SPIRE agent or K8s token infrastructure. The signing key stays in the addon's security domain by network enforcement. The only thing that crosses the curtain is the addon's signed output, carried through the fleetlet delivery channel.
+When addons run behind the provider/consumer network curtain (on factory clusters with restricted fleetlet profiles), the network topology reinforces the cryptographic model. The platform cannot reach the addon's cluster — the fleetlet connection is outbound-only, the protocol channel is structurally absent. The platform cannot request tokens on the addon's behalf, cannot access the addon's signing key, and cannot interact with the local SPIRE agent, certificate issuer, or K8s token infrastructure. The signing key stays in the addon's security domain by network enforcement. The only thing that crosses the curtain is the addon's signed output, carried through the fleetlet delivery channel.
 
 This means a compromised platform can invoke the addon (it can send messages through the delivery channel) but cannot impersonate it. The curtain makes the channel unidirectional for trust: signed artifacts flow out, but identity material cannot be injected in.
 
 ### Open questions
 
-- RAR (RFC 9396) adoption is still early. The architecture should degrade gracefully when the IdP only supports scopes or audiences. What's the minimum binding level we're willing to accept before falling back to PausedAuth / re-approval?
-- For the CIBA gitops flow: how does CI authenticate to initiate the CIBA flow? It needs its own client credentials with the IdP, which is itself a stored secret. This is a narrow, well-scoped secret (can only initiate approval requests, can't issue tokens without user consent), but it exists.
-- Key lifecycle for user signing: rotation, revocation, lost keys. What happens when a user loses their device? The key binding TTL provides a natural expiry, but active revocation (before TTL) may need a mechanism.
+- For the CIBA flow: how does CI authenticate to initiate the CIBA flow? It needs its own client credentials with the IdP, which is itself a stored secret. This is a narrow, well-scoped secret (can only initiate approval requests, can't issue tokens without user consent), but it exists.
 - Claims freshness with user signing: the signed intent embeds claims from signing time. If the user's permissions change after signing, the claims are stale. How should the system handle this — re-check via SCIM/CAEP, key binding TTL as a natural bound, or require re-signing on permission changes?
 - Anti-replay mechanism details: monotonic sequence numbers vs. nonces — which is simpler to implement correctly for the delivery agent?
 - Secure bootstrap of cluster-side label/identity state for placement enforcement. How does a cluster initially receive its labels through a non-platform authority?
 - Trust model for scoring addons and external scoring services. How does a delivery agent know to trust a particular scoring addon's signatures? (Partially addressed by the addon key lifecycle section above — the same signing and registration model applies to scoring addons, placement addons, and manifest-generating addons.)
 - Addon signing: should the intent schema enforce that addon-strategy deployments always name the addon, or can legacy/low-security deployments omit it and skip addon signature verification?
 - Addon signing: for addons with highly dynamic output (e.g., per-target customization that varies with target state), what is the right granularity for structural schemas? Per-addon-version? Per-deployment? Or purely optional?
-- Rotation attestation: what is the acceptable overlap window for K8s signing key rotation? Should the platform enforce a minimum overlap duration as a prerequisite for addon registration with by-value JWKS?
-- Whether placement constraints in signed intents are mandatory or opt-in.
+- Trust bundle rotation: what is the acceptable overlap window for addon CA rotation? Should the platform enforce a minimum overlap duration as a prerequisite for addon registration with by-value trust bundles?
 - Multi-signature policy: when to require vs. allow multiple signers, quorum rules for critical deployments.
 - Can different key registries be pluggable? The high-level API is the same (validate this signature for this user) but implementations differ (key binding bundles, git hosting platform endpoints, etc.).
 
