@@ -109,9 +109,36 @@ func deliveryStateForError(err error) domain.DeliveryState {
 	return domain.DeliveryStateFailed
 }
 
-// Remove is a no-op for now.
-// TODO: implement resource pruning on removal
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
+// Remove deletes the Kubernetes resources described by manifests from the
+// target cluster. If manifests is empty there is nothing to delete and
+// Remove returns nil immediately. NotFound errors are treated as success
+// (the resource is already gone).
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
+	if len(manifests) == 0 {
+		return nil
+	}
+	if _, ok := target.Properties["api_server"]; !ok {
+		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+	}
+	if auth.Token == "" {
+		return fmt.Errorf("%w: removal from target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
+	}
+
+	cfg, err := buildRESTConfig(target, auth.Token)
+	if err != nil {
+		return fmt.Errorf("build kubernetes client for target %q: %w", target.ID, err)
+	}
+
+	ap, err := newApplierFromConfig(cfg)
+	if err != nil {
+		return err
+	}
+
+	for i, m := range manifests {
+		if err := ap.delete(ctx, m.Raw); err != nil {
+			return fmt.Errorf("delete manifest %d: %w", i+1, err)
+		}
+	}
 	return nil
 }
 
@@ -150,6 +177,39 @@ func newApplierFromConfig(cfg *rest.Config) (*applier, error) {
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))
 
 	return &applier{client: dyn, mapper: mapper}, nil
+}
+
+func (a *applier) delete(ctx context.Context, raw json.RawMessage) error {
+	obj := &unstructured.Unstructured{}
+	if err := obj.UnmarshalJSON(raw); err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	gvk := obj.GroupVersionKind()
+	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return fmt.Errorf("resolve GVR for %s: %w", gvk, err)
+	}
+
+	var dr dynamic.ResourceInterface
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		ns := obj.GetNamespace()
+		if ns == "" {
+			ns = "default"
+		}
+		dr = a.client.Resource(mapping.Resource).Namespace(ns)
+	} else {
+		dr = a.client.Resource(mapping.Resource)
+	}
+
+	err = dr.Delete(ctx, obj.GetName(), metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("delete %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
+	}
+	return nil
 }
 
 func (a *applier) apply(ctx context.Context, raw json.RawMessage) error {

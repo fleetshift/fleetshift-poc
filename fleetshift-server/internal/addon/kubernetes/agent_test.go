@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -136,12 +137,116 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_IsNoop(t *testing.T) {
+func TestRemove_EmptyManifests_ReturnsNil(t *testing.T) {
 	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{ID: "k8s-test", Type: kubernetes.TargetType, Name: "test-cluster"}
 	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.DeliverySignaler{}); err != nil {
+		t.Fatalf("Remove with nil manifests: %v", err)
+	}
+}
+
+// fakeKubeAPI returns a TLS test server that serves minimal Kubernetes
+// discovery responses for core/v1 ConfigMaps and delegates DELETE
+// requests to deleteHandler.
+func fakeKubeAPI(t *testing.T, deleteHandler http.HandlerFunc) (*httptest.Server, domain.TargetInfo) {
+	t.Helper()
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.URL.Path == "/api" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"versions":["v1"]}`)
+		case r.URL.Path == "/apis" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"kind":"APIGroupList","apiVersion":"v1","groups":[]}`)
+		case r.URL.Path == "/api/v1" && r.Method == http.MethodGet:
+			fmt.Fprint(w, `{"groupVersion":"v1","resources":[{"name":"configmaps","namespaced":true,"kind":"ConfigMap","verbs":["create","delete","get","list","patch","update","watch"]}]}`)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/namespaces/") && r.Method == http.MethodDelete:
+			deleteHandler(w, r)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","reason":"NotFound","code":404}`)
+		}
+	}))
+	t.Cleanup(ts.Close)
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	}
+	return ts, target
+}
+
+var testConfigMap = json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`)
+
+func TestRemove_DeletesResources(t *testing.T) {
+	var deleted bool
+	_, target := fakeKubeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		deleted = true
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Success"}`)
+	})
+
+	agent := kubernetes.NewAgent()
+	manifests := []domain.Manifest{{ResourceType: "kubernetes", Raw: testConfigMap}}
+	auth := domain.DeliveryAuth{Token: "valid-token"}
+
+	err := agent.Remove(context.Background(), target, "d1", manifests, auth, &domain.DeliverySignaler{})
+	if err != nil {
 		t.Fatalf("Remove: %v", err)
+	}
+	if !deleted {
+		t.Error("expected DELETE request to be sent")
+	}
+}
+
+func TestRemove_HandlesNotFound(t *testing.T) {
+	_, target := fakeKubeAPI(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"configmaps \"test\" not found","reason":"NotFound","code":404}`)
+	})
+
+	agent := kubernetes.NewAgent()
+	manifests := []domain.Manifest{{ResourceType: "kubernetes", Raw: testConfigMap}}
+	auth := domain.DeliveryAuth{Token: "valid-token"}
+
+	err := agent.Remove(context.Background(), target, "d1", manifests, auth, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Remove should succeed when resource is already gone: %v", err)
+	}
+}
+
+func TestRemove_AuthError(t *testing.T) {
+	// Return 401 for all requests (including discovery).
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprint(w, `{"kind":"Status","apiVersion":"v1","status":"Failure","message":"Unauthorized","reason":"Unauthorized","code":401}`)
+	}))
+	defer ts.Close()
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	}
+
+	agent := kubernetes.NewAgent()
+	manifests := []domain.Manifest{{ResourceType: "kubernetes", Raw: testConfigMap}}
+	auth := domain.DeliveryAuth{Token: "expired-token"}
+
+	err := agent.Remove(context.Background(), target, "d1", manifests, auth, &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected error for unauthorized request")
 	}
 }
 
