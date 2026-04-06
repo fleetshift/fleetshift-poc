@@ -1,0 +1,91 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/protobuf/timestamp.proto";
+import "fleetshift/v1/manifest.proto";
+import "fleetshift/v1/manifest_strategy.proto";
+import "fleetshift/v1/placement_strategy.proto";
+import "fleetshift/v1/signing_key_binding.proto";
+
+// Signature is a detached signature over a canonical content hash.
+// Matches the hybrid PoC's Signature dataclass.
+message Signaature {
+  string signer_id = 1;
+  bytes public_key = 2;
+  bytes content_hash = 3;
+  bytes signature_bytes = 4;
+}
+
+// OutputConstraint is a CEL predicate the delivery output must satisfy.
+// Matches the hybrid PoC's OutputConstraint. Empty for Cap 7.
+message OutputConstraint {
+  string name = 1;
+  string expression = 2;
+}
+
+// Provenance carries the cryptographic proof that a user authorized
+// a deployment. Does NOT carry deployment content — that lives on
+// the Deployment message itself. Matches the proof-material side
+// of the hybrid PoC's SignedInput.
+message Provenance {
+  Signature signature = 1;
+  SigningKeyBinding key_binding = 2;
+  google.protobuf.Timestamp valid_until = 3;
+  int64 expected_generation = 4;
+  repeated OutputConstraint output_constraints = 5;
+}
+
+// Attestation is a self-contained verification bundle for delivery.
+// Composes proof material (Provenance) with deployment content and
+// a typed delivery action. Matches the hybrid PoC's Attestation
+// (input + output).
+message Attestation {
+  // Input: proof material from stored Provenance.
+  Provenance provenance = 1;
+
+  // Input: deployment content (from the deployment's own fields).
+  string deployment_id = 2;
+  ManifestStrategy manifest_strategy = 3;
+  PlacementStrategy placement_strategy = 4;
+
+  // Output: the delivery action. Exactly one is set.
+  PutManifests put_manifests = 5;
+  RemoveByDeploymentId remove = 6;
+}
+
+// PutManifests delivers manifests to a target.
+message PutManifests {
+  repeated Manifest manifests = 1;
+
+  // Cap 8+: addon-signed manifests.
+  OutputSignature manifest_signature = 2;
+
+  // Cap 8+: signed placement decision.
+  PlacementEvidence placement = 3;
+}
+
+// RemoveByDeploymentId removes a deployment from a target.
+message RemoveByDeploymentId {
+  string deployment_id = 1;
+
+  // Cap 8+: signed placement decision.
+  PlacementEvidence placement = 2;
+}
+
+// OutputSignature is verification material for a signed output.
+// Matches the hybrid PoC's OutputSignature.
+message OutputSignature {
+  Signature signature = 1;
+  string trust_anchor_id = 2;
+}
+
+// PlacementEvidence is a signed placement decision from an addon.
+// Matches the hybrid PoC's PlacementEvidence.
+message PlacementEvidence {
+  string deployment_id = 1;
+  repeated string targets = 2;
+  OutputSignature signature = 3;
+}

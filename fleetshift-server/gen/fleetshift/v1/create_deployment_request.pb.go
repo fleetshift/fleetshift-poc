@@ -10,6 +10,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -33,9 +34,18 @@ type CreateDeploymentRequest struct {
 	// are /[a-z][0-9]-/.
 	DeploymentId string `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
 	// The deployment to create.
-	Deployment    *Deployment `protobuf:"bytes,2,opt,name=deployment,proto3" json:"deployment,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Deployment *Deployment `protobuf:"bytes,2,opt,name=deployment,proto3" json:"deployment,omitempty"`
+	// ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+	// When set, the server reconstructs the envelope from the deployment
+	// fields, verifies the signature, and attaches Provenance.
+	UserSignature []byte `protobuf:"bytes,3,opt,name=user_signature,json=userSignature,proto3" json:"user_signature,omitempty"`
+	// Client-supplied attestation expiry. The server uses this timestamp
+	// to reconstruct the identical signed envelope (avoiding clock skew).
+	ValidUntil *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	// Expected deployment generation (always 1 for new deployments).
+	ExpectedGeneration int64 `protobuf:"varint,5,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *CreateDeploymentRequest) Reset() {
@@ -82,16 +92,41 @@ func (x *CreateDeploymentRequest) GetDeployment() *Deployment {
 	return nil
 }
 
+func (x *CreateDeploymentRequest) GetUserSignature() []byte {
+	if x != nil {
+		return x.UserSignature
+	}
+	return nil
+}
+
+func (x *CreateDeploymentRequest) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
+func (x *CreateDeploymentRequest) GetExpectedGeneration() int64 {
+	if x != nil {
+		return x.ExpectedGeneration
+	}
+	return 0
+}
+
 var File_fleetshift_v1_create_deployment_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_create_deployment_request_proto_rawDesc = "" +
 	"\n" +
-	"-fleetshift/v1/create_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1efleetshift/v1/deployment.proto\"\x83\x01\n" +
+	"-fleetshift/v1/create_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1efleetshift/v1/deployment.proto\"\xa7\x02\n" +
 	"\x17CreateDeploymentRequest\x12(\n" +
 	"\rdeployment_id\x18\x01 \x01(\tB\x03\xe0A\x02R\fdeploymentId\x12>\n" +
 	"\n" +
 	"deployment\x18\x02 \x01(\v2\x19.fleetshift.v1.DeploymentB\x03\xe0A\x02R\n" +
-	"deploymentBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"deployment\x12*\n" +
+	"\x0euser_signature\x18\x03 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
+	"\vvalid_until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
+	"validUntil\x124\n" +
+	"\x13expected_generation\x18\x05 \x01(\x03B\x03\xe0A\x01R\x12expectedGenerationBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_create_deployment_request_proto_rawDescOnce sync.Once
@@ -109,14 +144,16 @@ var file_fleetshift_v1_create_deployment_request_proto_msgTypes = make([]protoim
 var file_fleetshift_v1_create_deployment_request_proto_goTypes = []any{
 	(*CreateDeploymentRequest)(nil), // 0: fleetshift.v1.CreateDeploymentRequest
 	(*Deployment)(nil),              // 1: fleetshift.v1.Deployment
+	(*timestamppb.Timestamp)(nil),   // 2: google.protobuf.Timestamp
 }
 var file_fleetshift_v1_create_deployment_request_proto_depIdxs = []int32{
 	1, // 0: fleetshift.v1.CreateDeploymentRequest.deployment:type_name -> fleetshift.v1.Deployment
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 1: fleetshift.v1.CreateDeploymentRequest.valid_until:type_name -> google.protobuf.Timestamp
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_create_deployment_request_proto_init() }

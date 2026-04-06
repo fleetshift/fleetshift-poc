@@ -5,6 +5,7 @@ package fleetshift.v1;
 option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
 
 import "google/api/field_behavior.proto";
+import "fleetshift/v1/attestation.proto";
 import "fleetshift/v1/manifest.proto";
 import "fleetshift/v1/delivery_auth.proto";
 
@@ -21,4 +22,8 @@ message DeliveryRequest {
 
   // Caller credentials for attestation-based delivery.
   DeliveryAuth auth = 5;
+
+  // Self-contained verification bundle for delivery agent.
+  // Present when the deployment was created with a user signature.
+  Attestation attestation = 6;
 }

@@ -6,6 +6,7 @@ option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/
 
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
+import "google/protobuf/timestamp.proto";
 
 // Request message for
 // [DeploymentService.ResumeDeployment][fleetshift.v1.DeploymentService.ResumeDeployment].
@@ -18,4 +19,11 @@ message ResumeDeploymentRequest {
       type: "fleetshift.io/Deployment"
     }
   ];
+
+  // ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+  // Required when the deployment has Provenance (re-signing).
+  bytes user_signature = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // Client-supplied attestation expiry for envelope reconstruction.
+  google.protobuf.Timestamp valid_until = 3 [(google.api.field_behavior) = OPTIONAL];
 }

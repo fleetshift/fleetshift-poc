@@ -369,7 +369,7 @@ func TestResumeDeployment_WrongState(t *testing.T) {
 		State: domain.DeploymentStateActive,
 	})
 
-	_, err := h.deployments.Resume(ctx, "d1")
+	_, err := h.deployments.Resume(ctx, application.ResumeInput{ID: "d1"})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
 	}
@@ -379,7 +379,7 @@ func TestResumeDeployment_NotFound(t *testing.T) {
 	h := setup(t)
 	ctx := application.ContextWithAuth(context.Background(), testAuthContext())
 
-	_, err := h.deployments.Resume(ctx, "nonexistent")
+	_, err := h.deployments.Resume(ctx, application.ResumeInput{ID: "nonexistent"})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
@@ -393,7 +393,7 @@ func TestResumeDeployment_NoAuth(t *testing.T) {
 		State: domain.DeploymentStatePausedAuth,
 	})
 
-	_, err := h.deployments.Resume(context.Background(), "d1")
+	_, err := h.deployments.Resume(context.Background(), application.ResumeInput{ID: "d1"})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
 	}
@@ -464,7 +464,7 @@ func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 		Subject: &domain.SubjectClaims{ID: "user-1", Issuer: "https://issuer.example.com"},
 		Token:   "fresh-token",
 	})
-	_, err = h.deployments.Resume(resumeCtx, "d1")
+	_, err = h.deployments.Resume(resumeCtx, application.ResumeInput{ID: "d1"})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}

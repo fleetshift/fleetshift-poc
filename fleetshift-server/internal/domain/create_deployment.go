@@ -15,6 +15,10 @@ type CreateDeploymentInput struct {
 	PlacementStrategy PlacementStrategySpec
 	RolloutStrategy   *RolloutStrategySpec
 	Auth              DeliveryAuth
+	UserSignature     []byte    // ECDSA-P256-SHA256 signature; empty for unsigned deployments
+	ValidUntil        time.Time // client-supplied attestation expiry; zero for unsigned
+	// TODO: not sure this makes sense here
+	ExpectedGeneration Generation // always 1 for new deployments; 0 means unsigned
 }
 
 // CreateDeploymentWorkflowSpec is a short-lived parent workflow that

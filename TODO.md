@@ -1,9 +1,5 @@
 # TODO
 
-## In flight
-
-- 
-
 ## Design
 
 - Incorporate "root" service account (locked up keys, rarely used) best practice? ([FM-43](https://redhat.atlassian.net/browse/FM-43))
@@ -28,6 +24,8 @@
 ## Implementation detail (nontrivial)
 
 - Not sure about the credential design (should we assume one raw token? what about other token types?)
+- The whole key binding doc should probably not travel on the deployment state
+- Not sure about how canonical deployment representation is calculated for signing (e.g. CLI coupling to strategy types)
 
 ## Code / Trivial
 
@@ -35,4 +33,4 @@
 - Revisit workflow contract tests because I think these are just testing the same workflow logic tested elsewhere (so maybe just combine & use to test workflow implementations & workflow logic)
 - In process delivery agents need to also use durable workflows (in their own addon package)
 - The feetctl token output should probably be treated more like standard output rather than custom
-
+- Not sure about how provenance is built and assigned to inputs

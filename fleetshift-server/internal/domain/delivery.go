@@ -9,9 +9,10 @@ import (
 // use this to act on behalf of the caller (e.g., bootstrapping RBAC for
 // the user who created a cluster).
 type DeliveryAuth struct {
-	Caller   *SubjectClaims // identity of the user who initiated the delivery
-	Audience []Audience     // token audience; used to derive target OIDC client ID
-	Token    RawToken       // verified JWT; agents use for passthrough to target APIs
+	Caller     *SubjectClaims // identity of the user who initiated the delivery
+	Audience   []Audience     // token audience; used to derive target OIDC client ID
+	Token      RawToken       // verified JWT; agents use for passthrough to target APIs
+	Provenance *Provenance    // nil for token-passthrough deployments
 }
 
 // DeliveryState indicates where a delivery is in its lifecycle.

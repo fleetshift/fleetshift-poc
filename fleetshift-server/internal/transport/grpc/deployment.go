@@ -64,7 +64,15 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	dep, err := s.Deployments.Resume(ctx, id)
+	in := application.ResumeInput{
+		ID:            id,
+		UserSignature: req.GetUserSignature(),
+	}
+	if req.GetValidUntil() != nil {
+		in.ValidUntil = req.GetValidUntil().AsTime()
+	}
+
+	dep, err := s.Deployments.Resume(ctx, in)
 	if err != nil {
 		return nil, domainError(err)
 	}
@@ -120,12 +128,18 @@ func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploym
 		}
 		rs = &v
 	}
-	return domain.CreateDeploymentInput{
+	in := domain.CreateDeploymentInput{
 		ID:                domain.DeploymentID(req.GetDeploymentId()),
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		RolloutStrategy:   rs,
-	}, nil
+		UserSignature:     req.GetUserSignature(),
+		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
+	}
+	if req.GetValidUntil() != nil {
+		in.ValidUntil = req.GetValidUntil().AsTime()
+	}
+	return in, nil
 }
 
 func manifestStrategyFromProto(p *pb.ManifestStrategy) (domain.ManifestStrategySpec, error) {
@@ -224,8 +238,39 @@ func deploymentToProto(d domain.Deployment) *pb.Deployment {
 	dep.Uid = d.UID
 	dep.Etag = d.Etag
 
+	if d.Auth.Provenance != nil {
+		dep.Provenance = provenanceToProto(d.Auth.Provenance)
+	}
+
 	return dep
 }
+
+func provenanceToProto(p *domain.Provenance) *pb.Provenance {
+	prov := &pb.Provenance{
+		Signature: &pb.Signature{
+			SignerId:       string(p.Sig.SignerID),
+			PublicKey:      p.Sig.PublicKey,
+			ContentHash:    p.Sig.ContentHash,
+			SignatureBytes: p.Sig.SignatureBytes,
+		},
+		KeyBinding:         signingKeyBindingToProto(p.KeyBinding),
+		ValidUntil:         timestamppb.New(p.ValidUntil),
+		ExpectedGeneration: int64(p.ExpectedGeneration),
+	}
+
+	if len(p.OutputConstraints) > 0 {
+		prov.OutputConstraints = make([]*pb.OutputConstraint, len(p.OutputConstraints))
+		for i, c := range p.OutputConstraints {
+			prov.OutputConstraints[i] = &pb.OutputConstraint{
+				Name:       c.Name,
+				Expression: c.Expression,
+			}
+		}
+	}
+
+	return prov
+}
+
 
 func deploymentStateToProto(s domain.DeploymentState) pb.Deployment_State {
 	switch s {

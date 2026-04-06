@@ -5,6 +5,7 @@ package fleetshift.v1;
 option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
 
 import "google/api/field_behavior.proto";
+import "google/protobuf/timestamp.proto";
 import "fleetshift/v1/deployment.proto";
 
 // Request message for
@@ -19,4 +20,16 @@ message CreateDeploymentRequest {
 
   // The deployment to create.
   Deployment deployment = 2 [(google.api.field_behavior) = REQUIRED];
+
+  // ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+  // When set, the server reconstructs the envelope from the deployment
+  // fields, verifies the signature, and attaches Provenance.
+  bytes user_signature = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Client-supplied attestation expiry. The server uses this timestamp
+  // to reconstruct the identical signed envelope (avoiding clock skew).
+  google.protobuf.Timestamp valid_until = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Expected deployment generation (always 1 for new deployments).
+  int64 expected_generation = 5 [(google.api.field_behavior) = OPTIONAL];
 }

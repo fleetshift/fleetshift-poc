@@ -66,6 +66,7 @@ type DeliverInput struct {
 	DeploymentID DeploymentID
 	Manifests    []Manifest
 	Auth         DeliveryAuth
+	Attestation  *Attestation // nil for token-passthrough deliveries
 }
 
 // RemoveInput is the input to the remove-from-target activity.
@@ -73,6 +74,8 @@ type RemoveInput struct {
 	Target       TargetInfo
 	DeliveryID   DeliveryID
 	DeploymentID DeploymentID
+	Auth         DeliveryAuth
+	Attestation  *Attestation // nil for token-passthrough deliveries
 }
 
 // ResolvePlacementInput is the input to the resolve-placement activity.
@@ -533,11 +536,16 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
 				// TODO: need to call the manifest generator on remove hook
-				if _, err := RunActivity(record, s.RemoveFromTarget(), RemoveInput{
+				in := RemoveInput{
 					Target:       target,
 					DeliveryID:   deliveryIDFor(deploymentID, target.ID),
 					DeploymentID: deploymentID,
-				}); err != nil {
+					Auth:         dep.Auth,
+				}
+				if dep.Auth.Provenance != nil {
+					in.Attestation = assembleRemoveAttestation(dep)
+				}
+				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
 				}
 			}
@@ -562,13 +570,17 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					continue
 				}
 				did := deliveryIDFor(deploymentID, target.ID)
-				if _, err := RunActivity(record, s.DeliverToTarget(), DeliverInput{
+				in := DeliverInput{
 					Target:       target,
 					DeliveryID:   did,
 					DeploymentID: deploymentID,
 					Manifests:    manifests,
 					Auth:         dep.Auth,
-				}); err != nil {
+				}
+				if dep.Auth.Provenance != nil {
+					in.Attestation = assembleDeliverAttestation(dep, manifests)
+				}
+				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
 					return fmt.Errorf("deliver to target %s: %w", target.ID, err)
 				}
 				pending = append(pending, did)
@@ -697,4 +709,32 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	}
 
 	return delta
+}
+
+func assembleDeliverAttestation(dep Deployment, manifests []Manifest) *Attestation {
+	return &Attestation{
+		Provenance:        *dep.Auth.Provenance,
+		DeploymentID:      dep.ID,
+		ManifestStrategy:  dep.ManifestStrategy,
+		PlacementStrategy: dep.PlacementStrategy,
+		Output: DeliveryOutput{
+			PutManifests: &PutManifests{
+				Manifests: manifests,
+			},
+		},
+	}
+}
+
+func assembleRemoveAttestation(dep Deployment) *Attestation {
+	return &Attestation{
+		Provenance:        *dep.Auth.Provenance,
+		DeploymentID:      dep.ID,
+		ManifestStrategy:  dep.ManifestStrategy,
+		PlacementStrategy: dep.PlacementStrategy,
+		Output: DeliveryOutput{
+			RemoveByDeploymentId: &RemoveByDeploymentId{
+				DeploymentID: dep.ID,
+			},
+		},
+	}
 }

@@ -115,7 +115,11 @@ type Deployment struct {
 	// When the deployment was last updated.
 	UpdateTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=update_time,json=updateTime,proto3" json:"update_time,omitempty"`
 	// Concurrency control token.
-	Etag          string `protobuf:"bytes,11,opt,name=etag,proto3" json:"etag,omitempty"`
+	Etag string `protobuf:"bytes,11,opt,name=etag,proto3" json:"etag,omitempty"`
+	// Cryptographic proof that a user authorized this deployment.
+	// Present when the deployment was created with a user signature.
+	// Carries only proof material — content is in the strategy fields above.
+	Provenance    *Provenance `protobuf:"bytes,12,opt,name=provenance,proto3" json:"provenance,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -227,11 +231,18 @@ func (x *Deployment) GetEtag() string {
 	return ""
 }
 
+func (x *Deployment) GetProvenance() *Provenance {
+	if x != nil {
+		return x.Provenance
+	}
+	return nil
+}
+
 var File_fleetshift_v1_deployment_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\n" +
-	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\xa5\x06\n" +
+	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ffleetshift/v1/attestation.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\xe5\x06\n" +
 	"\n" +
 	"Deployment\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x15\n" +
@@ -247,7 +258,10 @@ const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\vupdate_time\x18\n" +
 	" \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
 	"updateTime\x12\x12\n" +
-	"\x04etag\x18\v \x01(\tR\x04etag\"\x81\x01\n" +
+	"\x04etag\x18\v \x01(\tR\x04etag\x12>\n" +
+	"\n" +
+	"provenance\x18\f \x01(\v2\x19.fleetshift.v1.ProvenanceB\x03\xe0A\x03R\n" +
+	"provenance\"\x81\x01\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATE_CREATING\x10\x01\x12\x10\n" +
@@ -278,6 +292,7 @@ var file_fleetshift_v1_deployment_proto_goTypes = []any{
 	(*PlacementStrategy)(nil),     // 3: fleetshift.v1.PlacementStrategy
 	(*RolloutStrategy)(nil),       // 4: fleetshift.v1.RolloutStrategy
 	(*timestamppb.Timestamp)(nil), // 5: google.protobuf.Timestamp
+	(*Provenance)(nil),            // 6: fleetshift.v1.Provenance
 }
 var file_fleetshift_v1_deployment_proto_depIdxs = []int32{
 	2, // 0: fleetshift.v1.Deployment.manifest_strategy:type_name -> fleetshift.v1.ManifestStrategy
@@ -286,11 +301,12 @@ var file_fleetshift_v1_deployment_proto_depIdxs = []int32{
 	0, // 3: fleetshift.v1.Deployment.state:type_name -> fleetshift.v1.Deployment.State
 	5, // 4: fleetshift.v1.Deployment.create_time:type_name -> google.protobuf.Timestamp
 	5, // 5: fleetshift.v1.Deployment.update_time:type_name -> google.protobuf.Timestamp
-	6, // [6:6] is the sub-list for method output_type
-	6, // [6:6] is the sub-list for method input_type
-	6, // [6:6] is the sub-list for extension type_name
-	6, // [6:6] is the sub-list for extension extendee
-	0, // [0:6] is the sub-list for field type_name
+	6, // 6: fleetshift.v1.Deployment.provenance:type_name -> fleetshift.v1.Provenance
+	7, // [7:7] is the sub-list for method output_type
+	7, // [7:7] is the sub-list for method input_type
+	7, // [7:7] is the sub-list for extension type_name
+	7, // [7:7] is the sub-list for extension extendee
+	0, // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_deployment_proto_init() }
@@ -298,6 +314,7 @@ func file_fleetshift_v1_deployment_proto_init() {
 	if File_fleetshift_v1_deployment_proto != nil {
 		return
 	}
+	file_fleetshift_v1_attestation_proto_init()
 	file_fleetshift_v1_manifest_strategy_proto_init()
 	file_fleetshift_v1_placement_strategy_proto_init()
 	file_fleetshift_v1_rollout_strategy_proto_init()

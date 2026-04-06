@@ -2,13 +2,8 @@ package application
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/elliptic"
-	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"math/big"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -37,14 +32,6 @@ type keyBindingDoc struct {
 	Subject      string          `json:"subject"`
 	Issuer       string          `json:"issuer"`
 	EnrolledAt   string          `json:"enrolled_at"`
-}
-
-// ecJWK is the minimal JWK representation for an EC public key.
-type ecJWK struct {
-	Kty string `json:"kty"`
-	Crv string `json:"crv"`
-	X   string `json:"x"`
-	Y   string `json:"y"`
 }
 
 // Create validates a key binding bundle and stores it. The validation
@@ -95,14 +82,14 @@ func (s *SigningKeyService) Create(ctx context.Context, in CreateSigningKeyBindi
 			domain.ErrInvalidArgument, err)
 	}
 
-	pubKey, err := parseECPublicKeyFromJWK(doc.PublicKeyJWK)
+	pubKey, err := ParseECPublicKeyFromJWK(doc.PublicKeyJWK)
 	if err != nil {
 		return domain.SigningKeyBinding{}, fmt.Errorf(
 			"%w: invalid public key in key_binding_doc: %v",
 			domain.ErrInvalidArgument, err)
 	}
 
-	if err := verifyECDSASignature(pubKey, in.KeyBindingDoc, in.KeyBindingSignature); err != nil {
+	if err := VerifyECDSASignature(pubKey, in.KeyBindingDoc, in.KeyBindingSignature); err != nil {
 		return domain.SigningKeyBinding{}, fmt.Errorf(
 			"%w: proof of possession verification failed: %v",
 			domain.ErrInvalidArgument, err)
@@ -168,42 +155,3 @@ func (s *SigningKeyService) verifyIdentityToken(ctx context.Context, oidcConfig 
 	return s.Verifier.Verify(ctx, enrollmentConfig, rawToken)
 }
 
-func parseECPublicKeyFromJWK(raw json.RawMessage) (*ecdsa.PublicKey, error) {
-	var jwk ecJWK
-	if err := json.Unmarshal(raw, &jwk); err != nil {
-		return nil, fmt.Errorf("unmarshal JWK: %w", err)
-	}
-	if jwk.Kty != "EC" {
-		return nil, fmt.Errorf("unsupported key type: %s", jwk.Kty)
-	}
-	if jwk.Crv != "P-256" {
-		return nil, fmt.Errorf("unsupported curve: %s", jwk.Crv)
-	}
-
-	xBytes, err := base64URLDecode(jwk.X)
-	if err != nil {
-		return nil, fmt.Errorf("decode x: %w", err)
-	}
-	yBytes, err := base64URLDecode(jwk.Y)
-	if err != nil {
-		return nil, fmt.Errorf("decode y: %w", err)
-	}
-
-	return &ecdsa.PublicKey{
-		Curve: elliptic.P256(),
-		X:     new(big.Int).SetBytes(xBytes),
-		Y:     new(big.Int).SetBytes(yBytes),
-	}, nil
-}
-
-func verifyECDSASignature(pub *ecdsa.PublicKey, doc, sig []byte) error {
-	hash := sha256.Sum256(doc)
-	if !ecdsa.VerifyASN1(pub, hash[:], sig) {
-		return fmt.Errorf("ECDSA signature verification failed")
-	}
-	return nil
-}
-
-func base64URLDecode(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(s)
-}

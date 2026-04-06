@@ -10,6 +10,7 @@ import (
 	_ "google.golang.org/genproto/googleapis/api/annotations"
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
 	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
+	timestamppb "google.golang.org/protobuf/types/known/timestamppb"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
@@ -28,7 +29,12 @@ type ResumeDeploymentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// The resource name of the deployment to resume.
 	// Format: deployments/{deployment}
-	Name          string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
+	// ECDSA-P256-SHA256 signature over sha256(canonical signed envelope).
+	// Required when the deployment has Provenance (re-signing).
+	UserSignature []byte `protobuf:"bytes,2,opt,name=user_signature,json=userSignature,proto3" json:"user_signature,omitempty"`
+	// Client-supplied attestation expiry for envelope reconstruction.
+	ValidUntil    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -70,14 +76,31 @@ func (x *ResumeDeploymentRequest) GetName() string {
 	return ""
 }
 
+func (x *ResumeDeploymentRequest) GetUserSignature() []byte {
+	if x != nil {
+		return x.UserSignature
+	}
+	return nil
+}
+
+func (x *ResumeDeploymentRequest) GetValidUntil() *timestamppb.Timestamp {
+	if x != nil {
+		return x.ValidUntil
+	}
+	return nil
+}
+
 var File_fleetshift_v1_resume_deployment_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_resume_deployment_request_proto_rawDesc = "" +
 	"\n" +
-	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\"O\n" +
+	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbd\x01\n" +
 	"\x17ResumeDeploymentRequest\x124\n" +
 	"\x04name\x18\x01 \x01(\tB \xe0A\x02\xfaA\x1a\n" +
-	"\x18fleetshift.io/DeploymentR\x04nameBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\x18fleetshift.io/DeploymentR\x04name\x12*\n" +
+	"\x0euser_signature\x18\x02 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
+	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
+	"validUntilBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_resume_deployment_request_proto_rawDescOnce sync.Once
@@ -94,13 +117,15 @@ func file_fleetshift_v1_resume_deployment_request_proto_rawDescGZIP() []byte {
 var file_fleetshift_v1_resume_deployment_request_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_fleetshift_v1_resume_deployment_request_proto_goTypes = []any{
 	(*ResumeDeploymentRequest)(nil), // 0: fleetshift.v1.ResumeDeploymentRequest
+	(*timestamppb.Timestamp)(nil),   // 1: google.protobuf.Timestamp
 }
 var file_fleetshift_v1_resume_deployment_request_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: fleetshift.v1.ResumeDeploymentRequest.valid_until:type_name -> google.protobuf.Timestamp
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_resume_deployment_request_proto_init() }

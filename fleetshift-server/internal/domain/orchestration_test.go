@@ -856,6 +856,237 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Attestation assembly
+// ---------------------------------------------------------------------------
+
+// attestationCapturingRecord wraps a Record and captures the full
+// DeliverInput and RemoveInput passed to delivery/removal activities.
+type attestationCapturingRecord struct {
+	delegate domain.Record
+	mu       sync.Mutex
+	delivers []domain.DeliverInput
+	removes  []domain.RemoveInput
+}
+
+func (r *attestationCapturingRecord) ID() string              { return r.delegate.ID() }
+func (r *attestationCapturingRecord) Context() context.Context { return r.delegate.Context() }
+func (r *attestationCapturingRecord) Await(sig string) (any, error) {
+	return r.delegate.Await(sig)
+}
+
+func (r *attestationCapturingRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
+	switch v := in.(type) {
+	case domain.DeliverInput:
+		r.mu.Lock()
+		r.delivers = append(r.delivers, v)
+		r.mu.Unlock()
+	case domain.RemoveInput:
+		r.mu.Lock()
+		r.removes = append(r.removes, v)
+		r.mu.Unlock()
+	}
+	return r.delegate.Run(activity, in)
+}
+
+func testProvenance() *domain.Provenance {
+	return &domain.Provenance{
+		Sig: domain.Signature{
+			SignerID:       "test-signer",
+			PublicKey:      []byte("pub-key-bytes"),
+			ContentHash:    []byte("content-hash"),
+			SignatureBytes: []byte("sig-bytes"),
+		},
+		KeyBinding: domain.SigningKeyBinding{
+			ID: "kb-1",
+		},
+		ValidUntil:         time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		ExpectedGeneration: 1,
+	}
+}
+
+func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) {
+	store, _ := setupStore(t)
+	prov := testProvenance()
+	ms := domain.ManifestStrategySpec{
+		Type:      domain.ManifestStrategyInline,
+		Manifests: []domain.Manifest{{ResourceType: "test.resource", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+	}
+	ps := domain.PlacementStrategySpec{
+		Type:    domain.PlacementStrategyStatic,
+		Targets: []domain.TargetID{"t1"},
+	}
+
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "attested-dep",
+		Generation:        1,
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		Auth: domain.DeliveryAuth{
+			Caller:     &domain.SubjectClaims{ID: "test-signer"},
+			Provenance: prov,
+		},
+		State: domain.DeploymentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	simple := &simpleRecord{ctx: context.Background(), events: events}
+	capRec := &attestationCapturingRecord{delegate: simple}
+
+	_, err := wf.Run(capRec, "attested-dep")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	capRec.mu.Lock()
+	delivers := capRec.delivers
+	capRec.mu.Unlock()
+
+	if len(delivers) != 1 {
+		t.Fatalf("expected 1 deliver input, got %d", len(delivers))
+	}
+
+	att := delivers[0].Attestation
+	if att == nil {
+		t.Fatal("Attestation is nil; expected it to be assembled from Provenance")
+	}
+
+	if att.DeploymentID != "attested-dep" {
+		t.Errorf("Attestation.DeploymentID = %q, want %q", att.DeploymentID, "attested-dep")
+	}
+	if att.Provenance.Sig.SignerID != prov.Sig.SignerID {
+		t.Errorf("Attestation.Provenance.Sig.SignerID = %q, want %q",
+			att.Provenance.Sig.SignerID, prov.Sig.SignerID)
+	}
+	if string(att.ManifestStrategy.Type) != string(ms.Type) {
+		t.Errorf("Attestation.ManifestStrategy.Type = %q, want %q",
+			att.ManifestStrategy.Type, ms.Type)
+	}
+	if string(att.PlacementStrategy.Type) != string(ps.Type) {
+		t.Errorf("Attestation.PlacementStrategy.Type = %q, want %q",
+			att.PlacementStrategy.Type, ps.Type)
+	}
+	if att.Output.PutManifests == nil {
+		t.Fatal("Attestation.Output.PutManifests is nil")
+	}
+	if len(att.Output.PutManifests.Manifests) == 0 {
+		t.Error("Attestation.Output.PutManifests.Manifests is empty")
+	}
+	if att.Output.RemoveByDeploymentId != nil {
+		t.Error("Attestation.Output.RemoveByDeploymentId should be nil for deliver")
+	}
+}
+
+func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:         "no-prov-dep",
+		Generation: 1,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	simple := &simpleRecord{ctx: context.Background(), events: events}
+	capRec := &attestationCapturingRecord{delegate: simple}
+
+	_, err := wf.Run(capRec, "no-prov-dep")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	capRec.mu.Lock()
+	delivers := capRec.delivers
+	capRec.mu.Unlock()
+
+	if len(delivers) != 1 {
+		t.Fatalf("expected 1 deliver input, got %d", len(delivers))
+	}
+	if delivers[0].Attestation != nil {
+		t.Error("Attestation should be nil for token-passthrough deployments (no provenance)")
+	}
+}
+
+func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testing.T) {
+	store, _ := setupStore(t)
+	prov := testProvenance()
+	ms := domain.ManifestStrategySpec{
+		Type:      domain.ManifestStrategyInline,
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+	}
+	ps := domain.PlacementStrategySpec{
+		Type:    domain.PlacementStrategyStatic,
+		Targets: []domain.TargetID{"new1"},
+	}
+
+	seedDeployment(t, store, domain.Deployment{
+		ID:              "rm-attested",
+		Generation:      2,
+		ResolvedTargets: []domain.TargetID{"old1"},
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		Auth: domain.DeliveryAuth{
+			Caller:     &domain.SubjectClaims{ID: "test-signer"},
+			Provenance: prov,
+		},
+		State: domain.DeploymentStateCreating,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "old1", Name: "old1", Type: "test"},
+		domain.TargetInfo{ID: "new1", Name: "new1", Type: "test"},
+	)
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	simple := &simpleRecord{ctx: context.Background(), events: events}
+	capRec := &attestationCapturingRecord{delegate: simple}
+
+	_, err := wf.Run(capRec, "rm-attested")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	capRec.mu.Lock()
+	removes := capRec.removes
+	capRec.mu.Unlock()
+
+	if len(removes) != 1 {
+		t.Fatalf("expected 1 remove input, got %d", len(removes))
+	}
+
+	att := removes[0].Attestation
+	if att == nil {
+		t.Fatal("Attestation is nil; expected remove attestation")
+	}
+	if att.DeploymentID != "rm-attested" {
+		t.Errorf("Attestation.DeploymentID = %q, want %q", att.DeploymentID, "rm-attested")
+	}
+	if att.Output.RemoveByDeploymentId == nil {
+		t.Fatal("Attestation.Output.RemoveByDeploymentId is nil")
+	}
+	if att.Output.RemoveByDeploymentId.DeploymentID != "rm-attested" {
+		t.Errorf("RemoveByDeploymentId.DeploymentID = %q, want %q",
+			att.Output.RemoveByDeploymentId.DeploymentID, "rm-attested")
+	}
+	if att.Output.PutManifests != nil {
+		t.Error("Attestation.Output.PutManifests should be nil for remove")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

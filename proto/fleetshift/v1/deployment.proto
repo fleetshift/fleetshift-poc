@@ -7,6 +7,7 @@ option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/
 import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/timestamp.proto";
+import "fleetshift/v1/attestation.proto";
 import "fleetshift/v1/manifest_strategy.proto";
 import "fleetshift/v1/placement_strategy.proto";
 import "fleetshift/v1/rollout_strategy.proto";
@@ -54,6 +55,11 @@ message Deployment {
 
   // Concurrency control token.
   string etag = 11;
+
+  // Cryptographic proof that a user authorized this deployment.
+  // Present when the deployment was created with a user signature.
+  // Carries only proof material — content is in the strategy fields above.
+  Provenance provenance = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Lifecycle state of a deployment.
   enum State {
