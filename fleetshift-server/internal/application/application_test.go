@@ -425,7 +425,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 	return result, nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

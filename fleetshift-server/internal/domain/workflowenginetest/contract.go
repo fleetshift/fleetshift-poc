@@ -669,6 +669,6 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.D
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.DeliverySignaler) error {
 	return nil
 }
