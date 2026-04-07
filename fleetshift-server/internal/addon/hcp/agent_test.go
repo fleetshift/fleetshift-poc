@@ -28,8 +28,9 @@ func makeManifest(t *testing.T, spec ClusterSpec) domain.Manifest {
 
 func TestValidateManifests_ValidMinimalSpec(t *testing.T) {
 	spec := ClusterSpec{
-		Name:    "test-cluster",
-		RoleARN: "arn:aws:iam::123456789012:role/test",
+		Name:       "test-cluster",
+		RoleARN:    "arn:aws:iam::123456789012:role/test",
+		BaseDomain: "example.com",
 		NodePools: []NodePoolSpec{
 			{Name: "default", Replicas: 2},
 		},
@@ -55,8 +56,9 @@ func TestValidateManifests_ValidMinimalSpec(t *testing.T) {
 
 func TestValidateManifests_DefaultsApplied(t *testing.T) {
 	spec := ClusterSpec{
-		Name:    "test-cluster",
-		RoleARN: "arn:aws:iam::123456789012:role/test",
+		Name:       "test-cluster",
+		RoleARN:    "arn:aws:iam::123456789012:role/test",
+		BaseDomain: "example.com",
 		NodePools: []NodePoolSpec{
 			{Name: "default", Replicas: 2},
 		},
@@ -116,10 +118,30 @@ func TestValidateManifests_MissingRoleARN(t *testing.T) {
 	}
 }
 
-func TestValidateManifests_EmptyNodePools(t *testing.T) {
+func TestValidateManifests_MissingBaseDomain(t *testing.T) {
 	spec := ClusterSpec{
 		Name:    "test-cluster",
 		RoleARN: "arn:aws:iam::123456789012:role/test",
+		NodePools: []NodePoolSpec{
+			{Name: "default", Replicas: 2},
+		},
+	}
+	manifests := []domain.Manifest{makeManifest(t, spec)}
+
+	_, err := validateManifests(manifests)
+	if err == nil {
+		t.Fatal("expected error for missing baseDomain")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("got %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestValidateManifests_EmptyNodePools(t *testing.T) {
+	spec := ClusterSpec{
+		Name:       "test-cluster",
+		RoleARN:    "arn:aws:iam::123456789012:role/test",
+		BaseDomain: "example.com",
 	}
 	manifests := []domain.Manifest{makeManifest(t, spec)}
 
@@ -176,12 +198,17 @@ func (f *fakeMgmt) deleteHostedCluster(_ context.Context, name string) error {
 	return f.deleteErr
 }
 
+func (f *fakeMgmt) waitForDeletion(_ context.Context, _ string) error {
+	return f.deleteErr
+}
+
 func validSpec() ClusterSpec {
 	return ClusterSpec{
-		Name:    "test-cluster",
-		InfraID: "test-infra",
-		RoleARN: "arn:aws:iam::123456789012:role/test",
-		Region:  "us-east-1",
+		Name:       "test-cluster",
+		InfraID:    "test-infra",
+		RoleARN:    "arn:aws:iam::123456789012:role/test",
+		Region:     "us-east-1",
+		BaseDomain: "example.com",
 		NodePools: []NodePoolSpec{
 			{Name: "default", Replicas: 2},
 		},

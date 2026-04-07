@@ -81,9 +81,17 @@ func BuildHostedCluster(spec ClusterSpec, infra InfraOutput, iam IAMOutput, _ Pl
 					},
 				},
 			},
-			Services: defaultServicePublishingStrategy(),
+			Services:                            defaultServicePublishingStrategy(),
+			InfrastructureAvailabilityPolicy:     infraAvailabilityPolicy(spec.InfraAvailability),
 		},
 	}
+}
+
+func infraAvailabilityPolicy(s string) hyperv1.AvailabilityPolicy {
+	if s == "SingleReplica" {
+		return hyperv1.SingleReplica
+	}
+	return hyperv1.HighlyAvailable
 }
 
 func defaultServicePublishingStrategy() []hyperv1.ServicePublishingStrategyMapping {

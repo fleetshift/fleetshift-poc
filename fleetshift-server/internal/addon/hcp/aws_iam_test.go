@@ -106,6 +106,21 @@ func (m *mockIAM) ListInstanceProfilesForRole(ctx context.Context, input *iam.Li
 	return &iam.ListInstanceProfilesForRoleOutput{}, nil
 }
 
+func (m *mockIAM) ListOpenIDConnectProviders(ctx context.Context, input *iam.ListOpenIDConnectProvidersInput, optFns ...func(*iam.Options)) (*iam.ListOpenIDConnectProvidersOutput, error) {
+	m.calls = append(m.calls, "ListOpenIDConnectProviders")
+	// Return the OIDC provider that was created, if any.
+	var providers []iamtypes.OpenIDConnectProviderListEntry
+	if m.oidcProviderURL != "" {
+		arn := "arn:aws:iam::123456789012:oidc-provider/" + m.oidcProviderURL
+		providers = append(providers, iamtypes.OpenIDConnectProviderListEntry{
+			Arn: aws.String(arn),
+		})
+	}
+	return &iam.ListOpenIDConnectProvidersOutput{
+		OpenIDConnectProviderList: providers,
+	}, nil
+}
+
 func TestCreateIAM_OIDCProviderCreated(t *testing.T) {
 	mock := &mockIAM{}
 	params := IAMParams{

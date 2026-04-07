@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
@@ -24,6 +25,7 @@ type IAMAPI interface {
 	RemoveRoleFromInstanceProfile(ctx context.Context, input *iam.RemoveRoleFromInstanceProfileInput, optFns ...func(*iam.Options)) (*iam.RemoveRoleFromInstanceProfileOutput, error)
 	ListRolePolicies(ctx context.Context, input *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error)
 	ListInstanceProfilesForRole(ctx context.Context, input *iam.ListInstanceProfilesForRoleInput, optFns ...func(*iam.Options)) (*iam.ListInstanceProfilesForRoleOutput, error)
+	ListOpenIDConnectProviders(ctx context.Context, input *iam.ListOpenIDConnectProvidersInput, optFns ...func(*iam.Options)) (*iam.ListOpenIDConnectProvidersOutput, error)
 }
 
 // IAMOutput captures all IAM resource identifiers created for an HCP cluster.
@@ -350,9 +352,26 @@ func DestroyIAM(ctx context.Context, iamClient IAMAPI, infraID string, out *IAMO
 	}
 
 	// 4. Delete OIDC provider
-	if out != nil && out.OIDCProviderArn != "" {
+	oidcArn := ""
+	if out != nil {
+		oidcArn = out.OIDCProviderArn
+	}
+	if oidcArn == "" {
+		// Discover the OIDC provider by listing all and matching the infraID.
+		providers, err := iamClient.ListOpenIDConnectProviders(ctx, &iam.ListOpenIDConnectProvidersInput{})
+		if err != nil {
+			return fmt.Errorf("list OIDC providers: %w", err)
+		}
+		for _, p := range providers.OpenIDConnectProviderList {
+			if p.Arn != nil && strings.Contains(*p.Arn, infraID) {
+				oidcArn = *p.Arn
+				break
+			}
+		}
+	}
+	if oidcArn != "" {
 		if _, err := iamClient.DeleteOpenIDConnectProvider(ctx, &iam.DeleteOpenIDConnectProviderInput{
-			OpenIDConnectProviderArn: aws.String(out.OIDCProviderArn),
+			OpenIDConnectProviderArn: aws.String(oidcArn),
 		}); err != nil {
 			return fmt.Errorf("delete OIDC provider: %w", err)
 		}

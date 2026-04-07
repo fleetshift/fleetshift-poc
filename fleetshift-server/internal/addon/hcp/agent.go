@@ -39,6 +39,7 @@ type ClusterSpec struct {
 	NodePools                []NodePoolSpec `json:"nodePools"`
 	IDP                      *IDPSpec       `json:"idp,omitempty"`
 	ControlPlaneAvailability string         `json:"controlPlaneAvailability,omitempty"`
+	InfraAvailability        string         `json:"infraAvailability,omitempty"`
 }
 
 // NodePoolSpec describes a node pool within an HCP cluster.
@@ -70,6 +71,9 @@ func validateManifests(manifests []domain.Manifest) ([]ClusterSpec, error) {
 		if specs[i].RoleARN == "" {
 			return nil, fmt.Errorf("%w: hcp cluster spec requires a roleArn", domain.ErrInvalidArgument)
 		}
+		if specs[i].BaseDomain == "" {
+			return nil, fmt.Errorf("%w: hcp cluster spec requires a baseDomain", domain.ErrInvalidArgument)
+		}
 		if len(specs[i].NodePools) == 0 {
 			return nil, fmt.Errorf("%w: hcp cluster spec requires at least one nodePool", domain.ErrInvalidArgument)
 		}
@@ -77,6 +81,9 @@ func validateManifests(manifests []domain.Manifest) ([]ClusterSpec, error) {
 		// Apply defaults.
 		if specs[i].ControlPlaneAvailability == "" {
 			specs[i].ControlPlaneAvailability = "HighlyAvailable"
+		}
+		if specs[i].InfraAvailability == "" {
+			specs[i].InfraAvailability = "HighlyAvailable"
 		}
 		for j := range specs[i].NodePools {
 			if specs[i].NodePools[j].InstanceType == "" {
@@ -197,6 +204,12 @@ func (a *Agent) Remove(ctx context.Context, _ domain.TargetInfo, _ domain.Delive
 			return fmt.Errorf("delete hosted cluster %q: %w", spec.Name, err)
 		}
 
+		// Wait for the HyperShift operator to finish cleaning up cloud
+		// resources (load balancers, ENIs, etc.) before destroying the VPC.
+		if err := mc.waitForDeletion(ctx, spec.Name); err != nil {
+			return fmt.Errorf("wait for hosted cluster %q deletion: %w", spec.Name, err)
+		}
+
 		// Clean up AWS IAM resources (roles, instance profile, OIDC provider).
 		infraID := spec.InfraID
 		if infraID == "" {
@@ -211,6 +224,8 @@ func (a *Agent) Remove(ctx context.Context, _ domain.TargetInfo, _ domain.Delive
 		if err := DestroyInfra(ctx, a.ec2, a.route53, infraID, nil); err != nil {
 			return fmt.Errorf("destroy infrastructure for %q: %w", spec.Name, err)
 		}
+
+		// TODO: clean up vault secrets for target hcp-{name} (requires secret store access)
 	}
 	return nil
 }

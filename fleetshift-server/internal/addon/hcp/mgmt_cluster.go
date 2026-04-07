@@ -23,6 +23,7 @@ type mgmtCluster interface {
 	getAdminKubeconfig(ctx context.Context, name string) ([]byte, error)
 	deleteNodePools(ctx context.Context, spec ClusterSpec) error
 	deleteHostedCluster(ctx context.Context, name string) error
+	waitForDeletion(ctx context.Context, name string) error
 }
 
 var (
@@ -151,6 +152,24 @@ func (m *kubeMgmtCluster) deleteNodePools(ctx context.Context, spec ClusterSpec)
 
 func (m *kubeMgmtCluster) deleteHostedCluster(ctx context.Context, name string) error {
 	return m.dynamicClient.Resource(hostedClusterGVR).Namespace(hostedClusterNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+}
+
+func (m *kubeMgmtCluster) waitForDeletion(ctx context.Context, name string) error {
+	for {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		_, err := m.dynamicClient.Resource(hostedClusterGVR).Namespace(hostedClusterNamespace).Get(ctx, name, metav1.GetOptions{})
+		if err != nil {
+			// Resource is gone.
+			return nil
+		}
+
+		time.Sleep(10 * time.Second)
+	}
 }
 
 // toUnstructured converts a typed K8s object to unstructured with proper
