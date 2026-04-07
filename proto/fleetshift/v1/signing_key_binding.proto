@@ -8,18 +8,16 @@ import "google/api/field_behavior.proto";
 import "google/api/resource.proto";
 import "google/protobuf/timestamp.proto";
 
-// SigningKeyBinding ties a user's signing public key to their IdP
-// identity via a self-certifying key binding bundle. The bundle's
-// identity token is verified against the tenant IdP JWKS, and the
-// proof-of-possession signature proves the user controls the
-// corresponding private key.
-message SigningKeyBinding {
+// SignerEnrollment records that a user enrolled their signing identity
+// with the platform. The external key registry (identified by
+// registry_id) is the authority for the user's public keys.
+message SignerEnrollment {
   option (google.api.resource) = {
-    type: "fleetshift.io/SigningKeyBinding"
-    pattern: "signingKeyBindings/{signing_key_binding}"
+    type: "fleetshift.io/SignerEnrollment"
+    pattern: "signerEnrollments/{signer_enrollment}"
   };
 
-  // Resource name. Format: signingKeyBindings/{signing_key_binding}
+  // Resource name. Format: signerEnrollments/{signer_enrollment}
   string name = 1 [(google.api.field_behavior) = IDENTIFIER];
 
   // Subject identifier from the identity token (jwt.sub).
@@ -28,25 +26,20 @@ message SigningKeyBinding {
   // OIDC issuer URL from the identity token (jwt.iss).
   string issuer = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // JWK-encoded public key.
-  bytes public_key_jwk = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Signing algorithm (e.g. "ES256").
-  string algorithm = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // Canonical JSON key binding document that was signed.
-  bytes key_binding_doc = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
-
-  // ECDSA signature over key_binding_doc (proof of possession).
-  bytes key_binding_signature = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
-
   // Purpose-scoped ID token from the tenant IdP, included in the
-  // bundle for delivery agent verification.
-  string identity_token = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // enrollment for delivery agent verification.
+  string identity_token = 4 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // When the key binding was created.
-  google.protobuf.Timestamp create_time = 9 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Registry subject derived from CEL claim mapping at enrollment time
+  // (e.g. a GitHub username).
+  string registry_subject = 5 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // When the key binding expires.
-  google.protobuf.Timestamp expire_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
+  // Which external key registry holds the user's signing keys.
+  string registry_id = 6 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // When the enrollment was created.
+  google.protobuf.Timestamp create_time = 7 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // When the enrollment expires.
+  google.protobuf.Timestamp expire_time = 8 [(google.api.field_behavior) = OUTPUT_ONLY];
 }

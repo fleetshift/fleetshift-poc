@@ -35,6 +35,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
@@ -113,8 +114,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	)
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	kubeAgent := kubernetesaddon.NewAgent()
-	router.Register(kubernetesaddon.TargetType, kubeAgent)
+	// Kubernetes agent is registered after the attestation verifier is
+	// built (see below). The router is only consulted at delivery time.
 
 	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath,
 		wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger)),
@@ -157,7 +158,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		ID:                    "kind-local",
 		Type:                  kindaddon.TargetType,
 		Name:                  "Local Kind Provider",
-		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("seed kind target: %w", err)
 	}
@@ -196,9 +197,23 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("create OIDC verifier: %w", err)
 	}
 
+	provSpec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods:      authMethodRepo,
+		Discovery:        discoveryClient,
+		CreateDeployment: createWf,
+		TrustBundlePlacement: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+	}
+	provWf, err := reg.RegisterProvisionIdP(provSpec)
+	if err != nil {
+		return fmt.Errorf("register provision-idp: %w", err)
+	}
+
 	authMethodSvc := &application.AuthMethodService{
-		Methods:   authMethodRepo,
-		Discovery: discoveryClient,
+		Methods:     authMethodRepo,
+		ProvisionWF: provWf,
 	}
 
 	existingMethods, err := authMethodSvc.List(ctx)
@@ -217,17 +232,37 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- application services ---
 
+	keyResolver := &application.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
+		},
+	}
+
 	deploymentSvc := &application.DeploymentService{
 		Store:         store,
 		CreateWF:      createWf,
 		Orchestration: orchWf,
+		KeyResolver:   keyResolver,
 	}
 
-	signingKeySvc := &application.SigningKeyService{
+	signerEnrollmentSvc := &application.SignerEnrollmentService{
 		Store:       store,
 		Verifier:    tokenVerifier,
 		AuthMethods: authMethodRepo,
 	}
+
+	// --- kubernetes delivery agent ---
+
+	kubeAgentOpts := []kubernetesaddon.AgentOption{
+		kubernetesaddon.WithKeyResolver(keyResolver),
+		kubernetesaddon.WithVault(vault),
+	}
+	if oidcHTTPClient != nil {
+		kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
+	}
+	kubeAgent := kubernetesaddon.NewAgent(kubeAgentOpts...)
+	router.Register(kubernetesaddon.TargetType, kubeAgent)
 
 	// --- gRPC server ---
 
@@ -242,8 +277,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodSvc,
 		Authn:       authnInterceptor,
 	})
-	pb.RegisterSigningKeyBindingServiceServer(grpcServer, &transportgrpc.SigningKeyBindingServer{
-		SigningKeys: signingKeySvc,
+	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
+		Enrollments: signerEnrollmentSvc,
 	})
 	reflection.Register(grpcServer)
 
@@ -262,8 +297,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if err := pb.RegisterAuthMethodServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
 		return fmt.Errorf("register auth method gateway: %w", err)
 	}
-	if err := pb.RegisterSigningKeyBindingServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
-		return fmt.Errorf("register signing key binding gateway: %w", err)
+	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
+		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
 
 	httpServer := &http.Server{

@@ -7,24 +7,17 @@ option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/
 import "google/api/field_behavior.proto";
 
 // Request message for
-// [SigningKeyBindingService.CreateSigningKeyBinding][fleetshift.v1.SigningKeyBindingService.CreateSigningKeyBinding].
+// [SignerEnrollmentService.CreateSignerEnrollment][fleetshift.v1.SignerEnrollmentService.CreateSignerEnrollment].
 //
-// The caller provides the three components of a key binding bundle.
-// The server validates the bundle (ID token verification, proof of
-// possession, subject match) and extracts resource fields from it.
-message CreateSigningKeyBindingRequest {
-  // Client-assigned ID for the signing key binding, which becomes
+// The caller provides a purpose-scoped ID token. The server verifies
+// the token, evaluates the configured CEL claim mapping to derive the
+// registry subject, and persists the enrollment.
+message CreateSignerEnrollmentRequest {
+  // Client-assigned ID for the signer enrollment, which becomes
   // the final component of the resource name.
-  string signing_key_binding_id = 1 [(google.api.field_behavior) = REQUIRED];
-
-  // Canonical JSON key binding document: {public_key_jwk, subject,
-  // issuer, enrolled_at}. Signed by the user's private key.
-  bytes key_binding_doc = 2 [(google.api.field_behavior) = REQUIRED];
-
-  // ECDSA-P256 signature over key_binding_doc (proof of possession).
-  bytes key_binding_signature = 3 [(google.api.field_behavior) = REQUIRED];
+  string signer_enrollment_id = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Purpose-scoped ID token from the tenant IdP, obtained via a
-  // dedicated OIDC client for key enrollment.
-  string identity_token = 4 [(google.api.field_behavior) = REQUIRED];
+  // dedicated OIDC client for signer enrollment.
+  string identity_token = 2 [(google.api.field_behavior) = REQUIRED];
 }

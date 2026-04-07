@@ -12,6 +12,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
@@ -23,6 +25,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -38,21 +41,33 @@ const ManifestResourceType domain.ResourceType = "kubernetes"
 const fieldManager = "fleetshift"
 
 // Agent implements [domain.DeliveryAgent] for Kubernetes clusters.
-// When a [attestation.Verifier] is set, it verifies attestations and
-// applies using platform credentials (run-as-platform). Otherwise it
-// falls back to token passthrough.
+// When a target has a trust_bundle property and an attestation is
+// present, verification is done per-target. Verifiers are cached by
+// trust bundle content so repeated deliveries to the same target
+// don't re-initialize JWKS fetching. Falls back to token passthrough
+// when no attestation is present.
 type Agent struct {
-	verifier *attestation.Verifier
-	vault    domain.Vault
+	keyResolver *application.KeyResolver
+	httpClient  *http.Client
+	vault       domain.Vault
+
+	mu        sync.RWMutex
+	verifiers map[string]*attestation.Verifier
 }
 
 // AgentOption configures an [Agent].
 type AgentOption func(*Agent)
 
-// WithAttestationVerifier enables attested delivery mode. The verifier
-// owns its own JWKS cache and trust bundle, independent of the server.
-func WithAttestationVerifier(v *attestation.Verifier) AgentOption {
-	return func(a *Agent) { a.verifier = v }
+// WithKeyResolver sets the key resolver used for attestation
+// verification (resolving signing keys from external registries).
+func WithKeyResolver(r *application.KeyResolver) AgentOption {
+	return func(a *Agent) { a.keyResolver = r }
+}
+
+// WithHTTPClient sets the HTTP client used by per-target JWKS
+// fetchers. Defaults to [http.DefaultClient].
+func WithHTTPClient(c *http.Client) AgentOption {
+	return func(a *Agent) { a.httpClient = c }
 }
 
 // WithVault configures the vault used to resolve secret references in
@@ -64,7 +79,9 @@ func WithVault(v domain.Vault) AgentOption {
 
 // NewAgent returns an Agent with optional configuration.
 func NewAgent(opts ...AgentOption) *Agent {
-	a := &Agent{}
+	a := &Agent{
+		verifiers: make(map[string]*attestation.Verifier),
+	}
 	for _, o := range opts {
 		o(a)
 	}
@@ -85,8 +102,15 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.
 			fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
 	}
 
-	if att != nil && a.verifier != nil {
-		if err := a.verifier.Verify(ctx, att); err != nil {
+	if att != nil {
+		v, err := a.verifierForTarget(target)
+		if err != nil {
+			return domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
+			}, nil
+		}
+		if err := v.Verify(ctx, att); err != nil {
 			return domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("attestation verification failed: %v", err),
@@ -102,6 +126,53 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.
 	}
 	go a.deliverAsync(ctx, target, manifests, auth, signaler)
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+// verifierForTarget builds or retrieves a cached [attestation.Verifier]
+// from the target's trust_bundle property. Returns an error if the
+// target has no trust_bundle (you cannot deliver attested content to a
+// target without trust config).
+func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifier, error) {
+	trustJSON := target.Properties["trust_bundle"]
+	if trustJSON == "" {
+		return nil, fmt.Errorf("target %q has no trust_bundle property", target.ID)
+	}
+
+	a.mu.RLock()
+	if v, ok := a.verifiers[trustJSON]; ok {
+		a.mu.RUnlock()
+		return v, nil
+	}
+	a.mu.RUnlock()
+
+	var entries []domain.TrustBundleEntry
+	if err := json.Unmarshal([]byte(trustJSON), &entries); err != nil {
+		return nil, fmt.Errorf("parse trust_bundle: %w", err)
+	}
+
+	issuers := make(map[domain.IssuerURL]attestation.TrustedIssuer, len(entries))
+	for _, e := range entries {
+		issuers[e.IssuerURL] = attestation.TrustedIssuer{
+			JWKSURI:                e.JWKSURI,
+			Audience:               e.EnrollmentAudience,
+			RegistrySubjectMapping: e.RegistrySubjectMapping,
+		}
+	}
+
+	var opts []attestation.VerifierOption
+	if a.httpClient != nil {
+		opts = append(opts, attestation.WithHTTPClient(a.httpClient))
+	}
+	if a.keyResolver != nil {
+		opts = append(opts, attestation.WithKeyResolver(a.keyResolver))
+	}
+	v := attestation.NewVerifier(issuers, opts...)
+
+	a.mu.Lock()
+	a.verifiers[trustJSON] = v
+	a.mu.Unlock()
+
+	return v, nil
 }
 
 // deliverAsyncPlatform applies manifests using platform credentials

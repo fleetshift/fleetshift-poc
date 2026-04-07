@@ -10,24 +10,22 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 )
 
-// testHarness holds all the cryptographic material needed to build a
-// valid attestation for testing.
 type testHarness struct {
-	provider      *oidctest.Provider
-	privKey       *ecdsa.PrivateKey
-	pubKeyJWK     json.RawMessage
-	pubKeyBytes   []byte
-	signerID      domain.SubjectID
-	issuer        domain.IssuerURL
-	identityToken string
-	keyBindingDoc []byte
-	keyBindingSig []byte
-	verifier      *attestation.Verifier
+	provider        *oidctest.Provider
+	privKey         *ecdsa.PrivateKey
+	signerID        domain.SubjectID
+	issuer          domain.IssuerURL
+	identityToken   string
+	registrySubject domain.RegistrySubject
+	fakeReg         *keyregistry.Fake
+	verifier        *attestation.Verifier
 }
 
 func setupHarness(t *testing.T) *testHarness {
@@ -37,25 +35,28 @@ func setupHarness(t *testing.T) *testHarness {
 
 	signerID := domain.SubjectID("test-user")
 	issuer := provider.IssuerURL()
+	registrySubject := domain.RegistrySubject("gh-test-user")
 
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	pubKeyJWK := ecPublicKeyToJWK(t, &privKey.PublicKey)
-	ecdhKey, err := privKey.PublicKey.ECDH()
-	if err != nil {
-		t.Fatalf("ECDH: %v", err)
-	}
-	pubKeyBytes := ecdhKey.Bytes()
-
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
 		Audience: "fleetshift-enroll",
+		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
-	kbDoc, kbSig := buildKeyBinding(t, privKey, pubKeyJWK, signerID)
+	fakeReg := keyregistry.NewFake()
+	fakeReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
+
+	keyResolver := &application.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: fakeReg,
+		},
+	}
 
 	jwksURI := string(issuer) + "/jwks"
 	verifier := attestation.NewVerifier(
@@ -63,23 +64,26 @@ func setupHarness(t *testing.T) *testHarness {
 			issuer: {
 				JWKSURI:  domain.EndpointURL(jwksURI),
 				Audience: "fleetshift-enroll",
+				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+					RegistryID: "github.com",
+					Expression: `claims.preferred_username`,
+				},
 			},
 		},
 		attestation.WithHTTPClient(provider.HTTPClient()),
 		attestation.WithClock(func() time.Time { return time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC) }),
+		attestation.WithKeyResolver(keyResolver),
 	)
 
 	return &testHarness{
-		provider:      provider,
-		privKey:       privKey,
-		pubKeyJWK:     pubKeyJWK,
-		pubKeyBytes:   pubKeyBytes,
-		signerID:      signerID,
-		issuer:        issuer,
-		identityToken: identityToken,
-		keyBindingDoc: kbDoc,
-		keyBindingSig: kbSig,
-		verifier:      verifier,
+		provider:        provider,
+		privKey:         privKey,
+		signerID:        signerID,
+		issuer:          issuer,
+		identityToken:   identityToken,
+		registrySubject: registrySubject,
+		fakeReg:         fakeReg,
+		verifier:        verifier,
 	}
 }
 
@@ -117,21 +121,13 @@ func (h *testHarness) buildValidAttestation(t *testing.T) *domain.Attestation {
 			},
 			Sig: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: h.signerID, Issuer: h.issuer},
-				PublicKey:      h.pubKeyBytes,
 				ContentHash:    envelopeHash,
 				SignatureBytes: sigBytes,
 			},
-			KeyBinding: domain.SigningKeyBinding{
-				ID: "kb-1",
-				FederatedIdentity: domain.FederatedIdentity{
-					Subject: h.signerID,
-					Issuer:  h.issuer,
-				},
-				PublicKeyJWK:        h.pubKeyJWK,
-				Algorithm:           "ES256",
-				KeyBindingDoc:       h.keyBindingDoc,
-				KeyBindingSignature: h.keyBindingSig,
-				IdentityToken:       domain.RawToken(h.identityToken),
+			Signer: domain.SignerAssertion{
+				IdentityToken:   domain.RawToken(h.identityToken),
+				RegistryID:      "github.com",
+				RegistrySubject: h.registrySubject,
 			},
 			ValidUntil:         validUntil,
 			ExpectedGeneration: gen,
@@ -171,6 +167,12 @@ func TestVerifyAttestation_Expired(t *testing.T) {
 		h.verifier.TrustedIssuers(),
 		attestation.WithHTTPClient(h.provider.HTTPClient()),
 		attestation.WithClock(func() time.Time { return time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC) }),
+		attestation.WithKeyResolver(&application.KeyResolver{
+			Registries: domain.BuiltInKeyRegistries(),
+			Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+				domain.KeyRegistryTypeGitHub: h.fakeReg,
+			},
+		}),
 	)
 
 	err := expiredVerifier.Verify(context.Background(), att)
@@ -179,18 +181,7 @@ func TestVerifyAttestation_Expired(t *testing.T) {
 	}
 }
 
-func TestVerifyAttestation_KeyBindingPoPFailure(t *testing.T) {
-	h := setupHarness(t)
-	att := h.buildValidAttestation(t)
-	att.Input.KeyBinding.KeyBindingSignature = []byte("wrong-sig")
-
-	err := h.verifier.Verify(context.Background(), att)
-	if err == nil {
-		t.Fatal("expected verification to fail for bad key binding PoP")
-	}
-}
-
-func TestVerifyAttestation_SignerMismatch(t *testing.T) {
+func TestVerifyAttestation_SignerSubjectMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
 	att.Input.Sig.Signer.Subject = "wrong-signer"
@@ -201,17 +192,14 @@ func TestVerifyAttestation_SignerMismatch(t *testing.T) {
 	}
 }
 
-func TestVerifyAttestation_PublicKeyMismatch(t *testing.T) {
+func TestVerifyAttestation_RegistrySubjectMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-
-	otherKey, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	otherECDH, _ := otherKey.PublicKey.ECDH()
-	att.Input.Sig.PublicKey = otherECDH.Bytes()
+	att.Input.Signer.RegistrySubject = "wrong-registry-subject"
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
-		t.Fatal("expected verification to fail for public key mismatch")
+		t.Fatal("expected verification to fail for registry subject mismatch")
 	}
 }
 
@@ -260,7 +248,7 @@ func TestVerifyAttestation_RemoveDeploymentIDMatch(t *testing.T) {
 func TestVerifyAttestation_UntrustedIssuer(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.KeyBinding.Issuer = "https://evil.example.com"
+	att.Input.Sig.Signer.Issuer = "https://evil.example.com"
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -275,8 +263,9 @@ func TestVerifyAttestation_IdentityTokenSubjectMismatch(t *testing.T) {
 	wrongToken := h.provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  "wrong-user",
 		Audience: "fleetshift-enroll",
+		Extra:    map[string]any{"preferred_username": h.registrySubject},
 	})
-	att.Input.KeyBinding.IdentityToken = domain.RawToken(wrongToken)
+	att.Input.Signer.IdentityToken = domain.RawToken(wrongToken)
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -295,75 +284,33 @@ func TestVerifyAttestation_ContentHashMismatch(t *testing.T) {
 	}
 }
 
+func TestVerifyAttestation_NoKeyResolver(t *testing.T) {
+	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	issuer := provider.IssuerURL()
+
+	verifier := attestation.NewVerifier(
+		map[domain.IssuerURL]attestation.TrustedIssuer{
+			issuer: {
+				JWKSURI:  domain.EndpointURL(string(issuer) + "/jwks"),
+				Audience: "fleetshift-enroll",
+			},
+		},
+		attestation.WithHTTPClient(provider.HTTPClient()),
+	)
+
+	h := setupHarness(t)
+	att := h.buildValidAttestation(t)
+	att.Input.Sig.Signer.Issuer = issuer
+
+	err := verifier.Verify(context.Background(), att)
+	if err == nil {
+		t.Fatal("expected verification to fail without key resolver")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-func ecPublicKeyToJWK(t *testing.T, pub *ecdsa.PublicKey) json.RawMessage {
-	t.Helper()
-	xBytes := pub.X.Bytes()
-	yBytes := pub.Y.Bytes()
-	padTo32 := func(b []byte) []byte {
-		if len(b) >= 32 {
-			return b
-		}
-		padded := make([]byte, 32)
-		copy(padded[32-len(b):], b)
-		return padded
-	}
-	xBytes = padTo32(xBytes)
-	yBytes = padTo32(yBytes)
-	jwk := map[string]string{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   b64url(xBytes),
-		"y":   b64url(yBytes),
-	}
-	raw, err := json.Marshal(jwk)
-	if err != nil {
-		t.Fatalf("marshal JWK: %v", err)
-	}
-	return raw
-}
-
-func b64url(data []byte) string {
-	const enc = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"
-	n := len(data)
-	buf := make([]byte, 0, (n*4+2)/3)
-	for i := 0; i < n; i += 3 {
-		val := uint(data[i]) << 16
-		if i+1 < n {
-			val |= uint(data[i+1]) << 8
-		}
-		if i+2 < n {
-			val |= uint(data[i+2])
-		}
-		buf = append(buf, enc[(val>>18)&0x3f])
-		buf = append(buf, enc[(val>>12)&0x3f])
-		if i+1 < n {
-			buf = append(buf, enc[(val>>6)&0x3f])
-		}
-		if i+2 < n {
-			buf = append(buf, enc[val&0x3f])
-		}
-	}
-	return string(buf)
-}
-
-func buildKeyBinding(t *testing.T, privKey *ecdsa.PrivateKey, pubKeyJWK json.RawMessage, signerID domain.SubjectID) (doc, sig []byte) {
-	t.Helper()
-	ecdhKey, _ := privKey.PublicKey.ECDH()
-	kbDoc := map[string]string{
-		"public_key": b64url(ecdhKey.Bytes()),
-		"signer_id":  string(signerID),
-	}
-	docBytes, err := json.Marshal(kbDoc)
-	if err != nil {
-		t.Fatalf("marshal kb doc: %v", err)
-	}
-	sigBytes := signDoc(t, privKey, docBytes)
-	return docBytes, sigBytes
-}
 
 func signDoc(t *testing.T, privKey *ecdsa.PrivateKey, doc []byte) []byte {
 	t.Helper()
@@ -379,4 +326,3 @@ func signEnvelope(t *testing.T, privKey *ecdsa.PrivateKey, envelope []byte) []by
 	t.Helper()
 	return signDoc(t, privKey, envelope)
 }
-

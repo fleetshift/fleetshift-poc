@@ -127,6 +127,32 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 	}, nil
 }
 
+func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+
+	if err := registerActivity(r.Worker, invokers, spec.ResolveAndPersist()); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.DeployTrustBundle()); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, input domain.ProvisionIdPInput) (domain.AuthMethod, error) {
+		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
+		return spec.Run(record, input)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &provisionIdPWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
 // registerActivity registers a typed activity with go-workflows and
 // creates a corresponding typed invoker.
 func registerActivity[I, O any](
@@ -234,6 +260,29 @@ func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.Creat
 	}, nil
 }
 
+// --- ProvisionIdPWorkflow ---
+
+type provisionIdPWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.ProvisionIdPInput) (domain.Execution[domain.AuthMethod], error) {
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: "provision-idp-" + string(input.AuthMethodID),
+	}, w.wfName, input)
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[domain.AuthMethod]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
 // --- Execution ---
 
 type execution[O any] struct {
@@ -252,7 +301,8 @@ func (e *execution[O]) AwaitResult(ctx context.Context) (O, error) {
 
 // Compile-time interface checks.
 var (
-	_ domain.Registry                = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow   = (*orchestrationWorkflow)(nil)
+	_ domain.Registry                 = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow    = (*orchestrationWorkflow)(nil)
 	_ domain.CreateDeploymentWorkflow = (*createDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow     = (*provisionIdPWorkflow)(nil)
 )

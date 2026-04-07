@@ -9,10 +9,8 @@ import (
 )
 
 // Signature is a detached signature over a canonical content hash.
-// Matches the hybrid PoC's Signature dataclass.
 type Signature struct {
 	Signer         FederatedIdentity
-	PublicKey      []byte // raw EC public key bytes (from JWK x,y coordinates)
 	ContentHash    []byte // SHA-256 of the canonical signed envelope
 	SignatureBytes []byte // ECDSA-P256 ASN.1 signature
 }
@@ -45,13 +43,22 @@ type DeploymentContent struct {
 	PlacementStrategy PlacementStrategySpec
 }
 
+// SignerAssertion carries the minimal data a delivery agent needs
+// to independently resolve a signer's public keys from an external
+// registry.
+type SignerAssertion struct {
+	IdentityToken   RawToken        // enrollment ID token (agent re-verifies via JWKS)
+	RegistryID      KeyRegistryID   // which registry to query
+	RegistrySubject RegistrySubject // derived from CEL mapping (agent re-derives to confirm)
+}
+
 // SignedInput is a first-class composition of content + proof,
-// assembled at delivery time from stored Provenance plus the
-// looked-up key binding. Matches the hybrid PoC's SignedInput.
+// assembled at delivery time from stored Provenance plus the signer
+// assertion derived from the enrollment record.
 type SignedInput struct {
 	Content            DeploymentContent
 	Sig                Signature
-	KeyBinding         SigningKeyBinding // full bundle, looked up at assembly time
+	Signer             SignerAssertion // replaces the former full key binding bundle
 	ValidUntil         time.Time
 	OutputConstraints  []OutputConstraint
 	ExpectedGeneration Generation

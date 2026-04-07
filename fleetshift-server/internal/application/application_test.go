@@ -11,6 +11,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
@@ -19,6 +20,7 @@ type testHarness struct {
 	targets     *application.TargetService
 	deployments *application.DeploymentService
 	store       domain.Store
+	fakeReg     *keyregistry.Fake
 }
 
 const testTargetType domain.TargetType = "test"
@@ -56,14 +58,24 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	fakeReg := keyregistry.NewFake()
+	keyResolver := &application.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: fakeReg,
+		},
+	}
+
 	return testHarness{
 		targets: &application.TargetService{Store: store},
 		deployments: &application.DeploymentService{
 			Store:         store,
 			CreateWF:      createWf,
 			Orchestration: orchWf,
+			KeyResolver:   keyResolver,
 		},
-		store: store,
+		store:   store,
+		fakeReg: fakeReg,
 	}
 }
 

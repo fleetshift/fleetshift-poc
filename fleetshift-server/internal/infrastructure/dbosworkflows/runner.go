@@ -88,15 +88,33 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 
 	dbos.RegisterWorkflow(r.DBOSCtx, createWfFunc, dbos.WithWorkflowName(spec.Name()))
 
+	return &createDeploymentWorkflow{
+		dbosCtx: r.DBOSCtx,
+		wfFunc:  createWfFunc,
+	}, nil
+}
+
+func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+	registerActivity(invokers, spec.ResolveAndPersist())
+	registerActivity(invokers, spec.DeployTrustBundle())
+
+	provWfFunc := func(ctx dbos.DBOSContext, input domain.ProvisionIdPInput) (domain.AuthMethod, error) {
+		record := &baseRecord{ctx: ctx, invokers: invokers, signals: nil}
+		return spec.Run(record, input)
+	}
+
+	dbos.RegisterWorkflow(r.DBOSCtx, provWfFunc, dbos.WithWorkflowName(spec.Name()))
+
 	r.launchOnce.Do(func() {
 		if err := dbos.Launch(r.DBOSCtx); err != nil {
 			panic(err)
 		}
 	})
 
-	return &createDeploymentWorkflow{
+	return &provisionIdPWorkflow{
 		dbosCtx: r.DBOSCtx,
-		wfFunc:  createWfFunc,
+		wfFunc:  provWfFunc,
 	}, nil
 }
 
@@ -179,6 +197,21 @@ func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.Creat
 	return &createExecution{handle: handle}, nil
 }
 
+// --- ProvisionIdPWorkflow ---
+
+type provisionIdPWorkflow struct {
+	dbosCtx dbos.DBOSContext
+	wfFunc  dbos.Workflow[domain.ProvisionIdPInput, domain.AuthMethod]
+}
+
+func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.ProvisionIdPInput) (domain.Execution[domain.AuthMethod], error) {
+	handle, err := dbos.RunWorkflow(w.dbosCtx, w.wfFunc, input, dbos.WithWorkflowID("provision-idp-"+string(input.AuthMethodID)))
+	if err != nil {
+		return nil, fmt.Errorf("run DBOS provision-idp workflow: %w", err)
+	}
+	return &provisionExecution{handle: handle}, nil
+}
+
 // --- Execution types ---
 
 type orchExecution struct {
@@ -199,9 +232,19 @@ func (e *createExecution) AwaitResult(_ context.Context) (domain.Deployment, err
 	return e.handle.GetResult()
 }
 
+type provisionExecution struct {
+	handle dbos.WorkflowHandle[domain.AuthMethod]
+}
+
+func (e *provisionExecution) WorkflowID() string { return e.handle.GetWorkflowID() }
+func (e *provisionExecution) AwaitResult(_ context.Context) (domain.AuthMethod, error) {
+	return e.handle.GetResult()
+}
+
 // Compile-time interface checks.
 var (
-	_ domain.Registry                = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow   = (*orchestrationWorkflow)(nil)
+	_ domain.Registry                 = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow    = (*orchestrationWorkflow)(nil)
 	_ domain.CreateDeploymentWorkflow = (*createDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow     = (*provisionIdPWorkflow)(nil)
 )

@@ -5,18 +5,15 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/sha256"
 	"crypto/x509"
-	"encoding/base64"
 	"encoding/hex"
-	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"net"
 	"net/http"
-	"time"
 
 	"github.com/spf13/cobra"
+	"golang.org/x/crypto/ssh"
 	"golang.org/x/oauth2"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-cli/internal/auth"
@@ -26,11 +23,12 @@ import (
 func newAuthEnrollSigningCmd(ctx *cmdContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "enroll-signing",
-		Short: "Generate a signing key pair and enroll the public key with the server",
+		Short: "Generate a signing key pair and enroll with the server",
 		Long: `Generates an ECDSA P-256 key pair, authenticates via a dedicated OIDC
-client to get a purpose-scoped ID token, creates a self-certifying key
-binding bundle, and submits it to the server. The private key is stored
-in the OS keyring.`,
+client to get a purpose-scoped ID token, and submits the token to the
+server to create a signer enrollment. The private key is stored in the
+OS keyring. The public key is exported in SSH format for the user to
+upload to GitHub as a signing key.`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runAuthEnrollSigning(cmd, ctx)
 		},
@@ -52,52 +50,23 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 		return fmt.Errorf("generate key pair: %w", err)
 	}
 
-	pubJWK, err := ecPublicKeyToJWK(&privateKey.PublicKey)
-	if err != nil {
-		return fmt.Errorf("export public key as JWK: %w", err)
-	}
-
 	idToken, err := performEnrollmentOIDCFlow(cmd, cfg)
 	if err != nil {
 		return fmt.Errorf("enrollment OIDC flow: %w", err)
 	}
 
-	claims, err := parseUnsafeJWTClaims(idToken)
+	enrollmentID, err := generateID()
 	if err != nil {
-		return fmt.Errorf("parse ID token claims: %w", err)
+		return fmt.Errorf("generate enrollment ID: %w", err)
 	}
 
-	doc := keyBindingDoc{
-		PublicKeyJWK: json.RawMessage(pubJWK),
-		Subject:      claims.Sub,
-		Issuer:       claims.Iss,
-		EnrolledAt:   time.Now().UTC().Format(time.RFC3339),
-	}
-	docBytes, err := json.Marshal(doc)
-	if err != nil {
-		return fmt.Errorf("marshal key binding doc: %w", err)
-	}
-
-	hash := sha256.Sum256(docBytes)
-	sig, err := ecdsa.SignASN1(rand.Reader, privateKey, hash[:])
-	if err != nil {
-		return fmt.Errorf("sign key binding doc: %w", err)
-	}
-
-	bindingID, err := generateID()
-	if err != nil {
-		return fmt.Errorf("generate binding ID: %w", err)
-	}
-
-	client := pb.NewSigningKeyBindingServiceClient(ctx.conn)
-	_, err = client.CreateSigningKeyBinding(cmd.Context(), &pb.CreateSigningKeyBindingRequest{
-		SigningKeyBindingId: bindingID,
-		KeyBindingDoc:       docBytes,
-		KeyBindingSignature: sig,
-		IdentityToken:       idToken,
+	client := pb.NewSignerEnrollmentServiceClient(ctx.conn)
+	enrollment, err := client.CreateSignerEnrollment(cmd.Context(), &pb.CreateSignerEnrollmentRequest{
+		SignerEnrollmentId: enrollmentID,
+		IdentityToken:      idToken,
 	})
 	if err != nil {
-		return fmt.Errorf("create signing key binding: %w", err)
+		return fmt.Errorf("create signer enrollment: %w", err)
 	}
 
 	pemData, err := marshalECPrivateKeyPEM(privateKey)
@@ -108,12 +77,28 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 		return fmt.Errorf("save signing key to keyring: %w", err)
 	}
 
-	fingerprint := sha256.Sum256(pubJWK)
-	fmt.Fprintf(cmd.OutOrStdout(), "Signing key enrolled successfully.\n")
-	fmt.Fprintf(cmd.OutOrStdout(), "  Binding ID:  %s\n", bindingID)
-	fmt.Fprintf(cmd.OutOrStdout(), "  Fingerprint: %s\n", base64.RawURLEncoding.EncodeToString(fingerprint[:16]))
+	sshPubKey, err := sshPublicKey(&privateKey.PublicKey)
+	if err != nil {
+		return fmt.Errorf("export SSH public key: %w", err)
+	}
+
+	fmt.Fprintf(cmd.OutOrStdout(), "Signer enrolled successfully.\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  Enrollment:       %s\n", enrollment.GetName())
+	fmt.Fprintf(cmd.OutOrStdout(), "  Registry subject: %s\n", enrollment.GetRegistrySubject())
+	fmt.Fprintf(cmd.OutOrStdout(), "\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "Your SSH signing public key (upload to GitHub → Settings → SSH and GPG keys → New SSH key, type \"Signing Key\"):\n\n")
+	fmt.Fprintf(cmd.OutOrStdout(), "  %s\n\n", sshPubKey)
+	fmt.Fprintf(cmd.OutOrStdout(), "Or visit: https://github.com/settings/ssh/new\n")
 
 	return nil
+}
+
+func sshPublicKey(pub *ecdsa.PublicKey) (string, error) {
+	sshPub, err := ssh.NewPublicKey(pub)
+	if err != nil {
+		return "", err
+	}
+	return string(ssh.MarshalAuthorizedKey(sshPub)), nil
 }
 
 func performEnrollmentOIDCFlow(cmd *cobra.Command, cfg auth.Config) (string, error) {
@@ -146,7 +131,7 @@ func performEnrollmentOIDCFlow(cmd *cobra.Command, cfg auth.Config) (string, err
 		oauth2.SetAuthURLParam("code_challenge_method", pkce.ChallengeMethod),
 	)
 
-	fmt.Fprintf(cmd.OutOrStdout(), "Opening browser for signing key enrollment...\n  %s\n\nWaiting for callback...\n", authURL)
+	fmt.Fprintf(cmd.OutOrStdout(), "Opening browser for signer enrollment...\n  %s\n\nWaiting for callback...\n", authURL)
 	if err := auth.OpenBrowser(authURL); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "Failed to open browser: %v\nPlease open the URL manually.\n", err)
 	}
@@ -169,7 +154,7 @@ func performEnrollmentOIDCFlow(cmd *cobra.Command, cfg auth.Config) (string, err
 		codeCh <- code
 		w.Header().Set("Content-Type", "text/html")
 		fmt.Fprint(w, `<!DOCTYPE html><html><body>
-<p>Signing key enrollment callback received!</p>
+<p>Signer enrollment callback received!</p>
 <script>window.close()</script>
 </body></html>`)
 	})
@@ -211,71 +196,6 @@ func performEnrollmentOIDCFlow(cmd *cobra.Command, cfg auth.Config) (string, err
 		return "", fmt.Errorf("no id_token in token response")
 	}
 	return idToken, nil
-}
-
-type keyBindingDoc struct {
-	PublicKeyJWK json.RawMessage `json:"public_key_jwk"`
-	Subject      string          `json:"subject"`
-	Issuer       string          `json:"issuer"`
-	EnrolledAt   string          `json:"enrolled_at"`
-}
-
-type jwtClaims struct {
-	Sub string `json:"sub"`
-	Iss string `json:"iss"`
-}
-
-func parseUnsafeJWTClaims(token string) (jwtClaims, error) {
-	parts := splitJWT(token)
-	if len(parts) != 3 {
-		return jwtClaims{}, fmt.Errorf("invalid JWT: expected 3 parts, got %d", len(parts))
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return jwtClaims{}, fmt.Errorf("decode JWT payload: %w", err)
-	}
-	var claims jwtClaims
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return jwtClaims{}, fmt.Errorf("unmarshal JWT claims: %w", err)
-	}
-	return claims, nil
-}
-
-func splitJWT(token string) []string {
-	var parts []string
-	start := 0
-	for i := 0; i < len(token); i++ {
-		if token[i] == '.' {
-			parts = append(parts, token[start:i])
-			start = i + 1
-		}
-	}
-	parts = append(parts, token[start:])
-	return parts
-}
-
-func ecPublicKeyToJWK(pub *ecdsa.PublicKey) ([]byte, error) {
-	byteLen := (pub.Curve.Params().BitSize + 7) / 8
-	xBytes := pub.X.Bytes()
-	yBytes := pub.Y.Bytes()
-
-	xPadded := make([]byte, byteLen)
-	yPadded := make([]byte, byteLen)
-	copy(xPadded[byteLen-len(xBytes):], xBytes)
-	copy(yPadded[byteLen-len(yBytes):], yBytes)
-
-	jwk := struct {
-		Kty string `json:"kty"`
-		Crv string `json:"crv"`
-		X   string `json:"x"`
-		Y   string `json:"y"`
-	}{
-		Kty: "EC",
-		Crv: "P-256",
-		X:   base64.RawURLEncoding.EncodeToString(xPadded),
-		Y:   base64.RawURLEncoding.EncodeToString(yPadded),
-	}
-	return json.Marshal(jwk)
 }
 
 func generateID() (string, error) {

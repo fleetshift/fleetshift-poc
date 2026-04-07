@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+// RegistrySubjectMapping configures how an ID token's claims are mapped
+// to a key registry subject (e.g. a GitHub username). The CEL expression
+// is evaluated over the token's claims map and must produce a string.
+message RegistrySubjectMapping {
+  // Identifies the external key registry (e.g. "github.com").
+  string registry_id = 1;
+
+  // CEL expression evaluated over the token claims map. The input
+  // variable is "claims" (map<string, dynamic>) and the result must
+  // be a string. Example: "claims.preferred_username".
+  string expression = 2;
+}

@@ -49,15 +49,15 @@ func seedDeployment(t *testing.T, store domain.Store, dep domain.Deployment) {
 	}
 }
 
-func seedKeyBinding(t *testing.T, store domain.Store, kb domain.SigningKeyBinding) {
+func seedSignerEnrollment(t *testing.T, store domain.Store, se domain.SignerEnrollment) {
 	t.Helper()
 	tx, err := store.Begin(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	if err := tx.SigningKeyBindings().Create(context.Background(), kb); err != nil {
-		t.Fatalf("seed key binding: %v", err)
+	if err := tx.SignerEnrollments().Create(context.Background(), se); err != nil {
+		t.Fatalf("seed signer enrollment: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -277,6 +277,10 @@ func (r *stubRegistry) RegisterOrchestration(_ *domain.OrchestrationWorkflowSpec
 }
 
 func (r *stubRegistry) RegisterCreateDeployment(_ *domain.CreateDeploymentWorkflowSpec) (domain.CreateDeploymentWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterProvisionIdP(_ *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
 	return nil, nil
 }
 
@@ -907,7 +911,6 @@ func testProvenance() *domain.Provenance {
 	return &domain.Provenance{
 		Sig: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "test-signer", Issuer: "https://issuer.example.com"},
-			PublicKey:      []byte("pub-key-bytes"),
 			ContentHash:    []byte("content-hash"),
 			SignatureBytes: []byte("sig-bytes"),
 		},
@@ -916,20 +919,18 @@ func testProvenance() *domain.Provenance {
 	}
 }
 
-func testKeyBinding(id domain.SigningKeyBindingID, subjectID domain.SubjectID) domain.SigningKeyBinding {
-	return domain.SigningKeyBinding{
+func testSignerEnrollment(id domain.SignerEnrollmentID, subjectID domain.SubjectID) domain.SignerEnrollment {
+	return domain.SignerEnrollment{
 		ID: id,
 		FederatedIdentity: domain.FederatedIdentity{
 			Subject: subjectID,
 			Issuer:  "https://issuer.example.com",
 		},
-		PublicKeyJWK:        json.RawMessage(`{"kty":"EC","crv":"P-256","x":"x","y":"y"}`),
-		Algorithm:           "ES256",
-		KeyBindingDoc:       []byte("test-binding-doc"),
-		KeyBindingSignature: []byte("test-binding-sig"),
-		IdentityToken:       "test-id-token",
-		CreatedAt:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		ExpiresAt:           time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
+		IdentityToken:   "test-id-token",
+		RegistrySubject: domain.RegistrySubject("gh-" + string(subjectID)),
+		RegistryID:      "github.com",
+		CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:       time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 }
 
@@ -945,7 +946,7 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 		Targets: []domain.TargetID{"t1"},
 	}
 
-	seedKeyBinding(t, store, testKeyBinding("kb-test", "test-signer"))
+	seedSignerEnrollment(t, store, testSignerEnrollment("se-test", "test-signer"))
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "attested-dep",
 		Generation:        1,
@@ -989,8 +990,8 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 	if att.Input.Sig.Signer != prov.Sig.Signer {
 		t.Errorf("Input.Sig.Signer = %v, want %v", att.Input.Sig.Signer, prov.Sig.Signer)
 	}
-	if att.Input.KeyBinding.ID != "kb-test" {
-		t.Errorf("Input.KeyBinding.ID = %q, want %q", att.Input.KeyBinding.ID, "kb-test")
+	if att.Input.Signer.RegistrySubject != "gh-test-signer" {
+		t.Errorf("Input.Signer.RegistrySubject = %q, want %q", att.Input.Signer.RegistrySubject, "gh-test-signer")
 	}
 	if string(att.Input.Content.ManifestStrategy.Type) != string(ms.Type) {
 		t.Errorf("Input.Content.ManifestStrategy.Type = %q, want %q",
@@ -1049,6 +1050,60 @@ func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 	}
 }
 
+// authFailingNoSignalDelivery returns [domain.DeliveryStateAuthFailed]
+// without calling signaler.Done. This reproduces the bug where the
+// kubernetes agent returns an early auth failure (e.g. missing
+// trust_bundle) without notifying the workflow, causing awaitDeliveries
+// to block indefinitely.
+type authFailingNoSignalDelivery struct{}
+
+func (authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	return domain.DeliveryResult{
+		State:   domain.DeliveryStateAuthFailed,
+		Message: "attestation verification failed: target has no trust_bundle property",
+	}, nil
+}
+
+func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.DeploymentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, authFailingNoSignalDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := wf.Run(rec, "d1")
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+		dep := getDeployment(t, store, "d1")
+		if dep.State != domain.DeploymentStatePausedAuth {
+			t.Errorf("State = %q, want paused_auth", dep.State)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("orchestration hung: deliver-to-target returned auth_failed without signaling Done, awaitDeliveries blocked forever")
+	}
+}
+
 func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testing.T) {
 	store, _ := setupStore(t)
 	prov := testProvenance()
@@ -1061,7 +1116,7 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 		Targets: []domain.TargetID{"new1"},
 	}
 
-	seedKeyBinding(t, store, testKeyBinding("kb-rm", "test-signer"))
+	seedSignerEnrollment(t, store, testSignerEnrollment("se-rm", "test-signer"))
 	seedDeployment(t, store, domain.Deployment{
 		ID:              "rm-attested",
 		Generation:      2,

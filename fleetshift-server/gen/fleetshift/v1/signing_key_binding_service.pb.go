@@ -25,17 +25,17 @@ var File_fleetshift_v1_signing_key_binding_service_proto protoreflect.FileDescri
 
 const file_fleetshift_v1_signing_key_binding_service_proto_rawDesc = "" +
 	"\n" +
-	"/fleetshift/v1/signing_key_binding_service.proto\x12\rfleetshift.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a'fleetshift/v1/signing_key_binding.proto\x1a6fleetshift/v1/create_signing_key_binding_request.proto2\xf8\x01\n" +
-	"\x18SigningKeyBindingService\x12\xdb\x01\n" +
-	"\x17CreateSigningKeyBinding\x12-.fleetshift.v1.CreateSigningKeyBindingRequest\x1a .fleetshift.v1.SigningKeyBinding\"o\xdaAKsigning_key_binding_id,key_binding_doc,key_binding_signature,identity_token\x82\xd3\xe4\x93\x02\x1b:\x01*\"\x16/v1/signingKeyBindingsBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"/fleetshift/v1/signing_key_binding_service.proto\x12\rfleetshift.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a'fleetshift/v1/signing_key_binding.proto\x1a6fleetshift/v1/create_signing_key_binding_request.proto2\xcb\x01\n" +
+	"\x17SignerEnrollmentService\x12\xaf\x01\n" +
+	"\x16CreateSignerEnrollment\x12,.fleetshift.v1.CreateSignerEnrollmentRequest\x1a\x1f.fleetshift.v1.SignerEnrollment\"F\xdaA#signer_enrollment_id,identity_token\x82\xd3\xe4\x93\x02\x1a:\x01*\"\x15/v1/signerEnrollmentsBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var file_fleetshift_v1_signing_key_binding_service_proto_goTypes = []any{
-	(*CreateSigningKeyBindingRequest)(nil), // 0: fleetshift.v1.CreateSigningKeyBindingRequest
-	(*SigningKeyBinding)(nil),              // 1: fleetshift.v1.SigningKeyBinding
+	(*CreateSignerEnrollmentRequest)(nil), // 0: fleetshift.v1.CreateSignerEnrollmentRequest
+	(*SignerEnrollment)(nil),              // 1: fleetshift.v1.SignerEnrollment
 }
 var file_fleetshift_v1_signing_key_binding_service_proto_depIdxs = []int32{
-	0, // 0: fleetshift.v1.SigningKeyBindingService.CreateSigningKeyBinding:input_type -> fleetshift.v1.CreateSigningKeyBindingRequest
-	1, // 1: fleetshift.v1.SigningKeyBindingService.CreateSigningKeyBinding:output_type -> fleetshift.v1.SigningKeyBinding
+	0, // 0: fleetshift.v1.SignerEnrollmentService.CreateSignerEnrollment:input_type -> fleetshift.v1.CreateSignerEnrollmentRequest
+	1, // 1: fleetshift.v1.SignerEnrollmentService.CreateSignerEnrollment:output_type -> fleetshift.v1.SignerEnrollment
 	1, // [1:2] is the sub-list for method output_type
 	0, // [0:1] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name

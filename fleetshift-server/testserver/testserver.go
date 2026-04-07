@@ -77,6 +77,20 @@ func Start(t *testing.T) string {
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	provSpec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods:      &sqlite.AuthMethodRepo{DB: db},
+		Discovery:        stubDiscovery{},
+		CreateDeployment: createWf,
+		TrustBundlePlacement: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+	}
+	provWf, err := reg.RegisterProvisionIdP(provSpec)
+	if err != nil {
+		t.Fatalf("RegisterProvisionIdP: %v", err)
+	}
+
 	deploymentSvc := &application.DeploymentService{
 		Store:         store,
 		CreateWF:      createWf,
@@ -85,8 +99,8 @@ func Start(t *testing.T) string {
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
 	authMethodSvc := &application.AuthMethodService{
-		Methods:   authMethodRepo,
-		Discovery: stubDiscovery{},
+		Methods:     authMethodRepo,
+		ProvisionWF: provWf,
 	}
 	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, stubVerifier{}, domain.NoOpAuthnObserver{})
 

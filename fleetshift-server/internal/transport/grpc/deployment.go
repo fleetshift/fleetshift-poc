@@ -252,7 +252,6 @@ func provenanceToProto(p *domain.Provenance) *pb.Provenance {
 				Subject: string(p.Sig.Signer.Subject),
 				Issuer:  string(p.Sig.Signer.Issuer),
 			},
-			PublicKey:      p.Sig.PublicKey,
 			ContentHash:    p.Sig.ContentHash,
 			SignatureBytes: p.Sig.SignatureBytes,
 		},

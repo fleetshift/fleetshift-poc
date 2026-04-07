@@ -532,13 +532,13 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 ) error {
 	policy := dep.RolloutStrategy.EffectiveVersionConflictPolicy()
 
-	var kb *SigningKeyBinding
+	var sa *SignerAssertion
 	if dep.Provenance != nil {
-		looked, err := lookupKeyBinding(record.Context(), s.Store, dep.Provenance)
+		looked, err := lookupSignerAssertion(record.Context(), s.Store, dep.Provenance)
 		if err != nil {
-			return fmt.Errorf("lookup key binding for attestation assembly: %w", err)
+			return fmt.Errorf("lookup signer enrollment for attestation assembly: %w", err)
 		}
-		kb = &looked
+		sa = &looked
 	}
 
 	for i, step := range plan.Steps {
@@ -551,8 +551,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					DeploymentID: deploymentID,
 					Auth:         dep.Auth,
 				}
-				if kb != nil {
-					in.Attestation = assembleRemoveAttestation(dep, *kb)
+				if sa != nil {
+					in.Attestation = assembleRemoveAttestation(dep, *sa)
 				}
 				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
@@ -561,6 +561,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 		}
 		if step.Deliver != nil {
 			var pending []DeliveryID
+			var syncResults []DeliveryResult
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
 					Spec:   dep.ManifestStrategy,
@@ -586,18 +587,33 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					Manifests:    manifests,
 					Auth:         dep.Auth,
 				}
-				if kb != nil {
-					in.Attestation = assembleDeliverAttestation(dep, manifests, *kb)
+				if sa != nil {
+					in.Attestation = assembleDeliverAttestation(dep, manifests, *sa)
 				}
-				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
+				result, err := RunActivity(record, s.DeliverToTarget(), in)
+				if err != nil {
 					return fmt.Errorf("deliver to target %s: %w", target.ID, err)
 				}
-				pending = append(pending, did)
+				switch result.State {
+				case DeliveryStateAccepted:
+					pending = append(pending, did)
+				case DeliveryStateAuthFailed:
+					return fmt.Errorf("%w: delivery %s: %s",
+						errAuthPaused, did, result.Message)
+				case DeliveryStateFailed:
+					return fmt.Errorf("delivery %s failed: %s",
+						did, result.Message)
+				default:
+					// Synchronous terminal state (e.g. Delivered): collect
+					// result directly without waiting for a signal.
+					syncResults = append(syncResults, result)
+				}
 			}
 			results, err := s.awaitDeliveries(record, pending)
 			if err != nil {
 				return err
 			}
+			results = append(results, syncResults...)
 			for _, result := range results {
 				if len(result.ProvisionedTargets) > 0 || len(result.ProducedSecrets) > 0 {
 					if _, err := RunActivity(record, s.ProcessDeliveryOutputs(), result); err != nil {
@@ -720,27 +736,32 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	return delta
 }
 
-func lookupKeyBinding(ctx context.Context, store Store, prov *Provenance) (SigningKeyBinding, error) {
+func lookupSignerAssertion(ctx context.Context, store Store, prov *Provenance) (SignerAssertion, error) {
 	tx, err := store.BeginReadOnly(ctx)
 	if err != nil {
-		return SigningKeyBinding{}, fmt.Errorf("begin read tx: %w", err)
+		return SignerAssertion{}, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	found, err := tx.SigningKeyBindings().ListBySubject(ctx, prov.Sig.Signer)
+	found, err := tx.SignerEnrollments().ListBySubject(ctx, prov.Sig.Signer)
 	if err != nil {
-		return SigningKeyBinding{}, fmt.Errorf("list key bindings: %w", err)
+		return SignerAssertion{}, fmt.Errorf("list signer enrollments: %w", err)
 	}
 	if len(found) == 0 {
-		return SigningKeyBinding{}, fmt.Errorf("no signing key binding found for %s / %s", prov.Sig.Signer.Subject, prov.Sig.Signer.Issuer)
+		return SignerAssertion{}, fmt.Errorf("no signer enrollment found for %s / %s", prov.Sig.Signer.Subject, prov.Sig.Signer.Issuer)
 	}
 	if err := tx.Commit(); err != nil {
-		return SigningKeyBinding{}, fmt.Errorf("commit read tx: %w", err)
+		return SignerAssertion{}, fmt.Errorf("commit read tx: %w", err)
 	}
-	return found[0], nil
+	enrollment := found[0]
+	return SignerAssertion{
+		IdentityToken:   enrollment.IdentityToken,
+		RegistryID:      enrollment.RegistryID,
+		RegistrySubject: enrollment.RegistrySubject,
+	}, nil
 }
 
-func assembleDeliverAttestation(dep Deployment, manifests []Manifest, kb SigningKeyBinding) *Attestation {
+func assembleDeliverAttestation(dep Deployment, manifests []Manifest, sa SignerAssertion) *Attestation {
 	prov := dep.Provenance
 	return &Attestation{
 		Input: SignedInput{
@@ -750,7 +771,7 @@ func assembleDeliverAttestation(dep Deployment, manifests []Manifest, kb Signing
 				PlacementStrategy: dep.PlacementStrategy,
 			},
 			Sig:                prov.Sig,
-			KeyBinding:         kb,
+			Signer:             sa,
 			ValidUntil:         prov.ValidUntil,
 			OutputConstraints:  prov.OutputConstraints,
 			ExpectedGeneration: prov.ExpectedGeneration,
@@ -761,7 +782,7 @@ func assembleDeliverAttestation(dep Deployment, manifests []Manifest, kb Signing
 	}
 }
 
-func assembleRemoveAttestation(dep Deployment, kb SigningKeyBinding) *Attestation {
+func assembleRemoveAttestation(dep Deployment, sa SignerAssertion) *Attestation {
 	prov := dep.Provenance
 	return &Attestation{
 		Input: SignedInput{
@@ -771,7 +792,7 @@ func assembleRemoveAttestation(dep Deployment, kb SigningKeyBinding) *Attestatio
 				PlacementStrategy: dep.PlacementStrategy,
 			},
 			Sig:                prov.Sig,
-			KeyBinding:         kb,
+			Signer:             sa,
 			ValidUntil:         prov.ValidUntil,
 			OutputConstraints:  prov.OutputConstraints,
 			ExpectedGeneration: prov.ExpectedGeneration,

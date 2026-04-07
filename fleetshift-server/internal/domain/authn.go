@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"crypto"
 	"time"
 )
 
@@ -48,13 +49,70 @@ type EndpointURL string
 
 // OIDCConfig holds the configuration for an OIDC authentication method.
 type OIDCConfig struct {
-	IssuerURL              IssuerURL
-	Audience               Audience
-	JWKSURI                EndpointURL // resolved from discovery
-	AuthorizationEndpoint  EndpointURL // resolved from discovery
-	TokenEndpoint          EndpointURL // resolved from discovery
-	KeyEnrollmentAudience  Audience    // audience for signing key enrollment ID tokens
+	IssuerURL             IssuerURL
+	Audience              Audience
+	JWKSURI               EndpointURL // resolved from discovery
+	AuthorizationEndpoint EndpointURL // resolved from discovery
+	TokenEndpoint         EndpointURL // resolved from discovery
+	KeyEnrollmentAudience Audience    // audience for signer enrollment ID tokens
+	// TODO: this could/should probably be multiple not one
+	RegistrySubjectMapping *RegistrySubjectMapping
 }
+
+// KeyRegistryID identifies a known external key registry.
+type KeyRegistryID string
+
+// KeyRegistryType enumerates the supported external key registry protocols.
+type KeyRegistryType string
+
+const (
+	// KeyRegistryTypeGitHub represents the GitHub SSH signing-key API.
+	KeyRegistryTypeGitHub KeyRegistryType = "github"
+)
+
+// KeyRegistry describes a known external key registry.
+type KeyRegistry struct {
+	ID       KeyRegistryID
+	Type     KeyRegistryType
+	Endpoint string // e.g. "https://api.github.com"
+}
+
+// BuiltInKeyRegistries returns the set of known public registries.
+// For the prototype only github.com is supported.
+func BuiltInKeyRegistries() map[KeyRegistryID]KeyRegistry {
+	return map[KeyRegistryID]KeyRegistry{
+		"github.com": {
+			ID:       "github.com",
+			Type:     KeyRegistryTypeGitHub,
+			Endpoint: "https://api.github.com",
+		},
+	}
+}
+
+// RegistrySubjectMapping configures how an ID token's claims are
+// mapped to a registry subject. The CEL expression is evaluated over
+// the token's claims map and must produce a string (for example a
+// GitHub username).
+type RegistrySubjectMapping struct {
+	RegistryID KeyRegistryID
+	Expression string // CEL expression; input variable is "claims" (map[string]any)
+}
+
+// TrustBundleEntry is a single issuer's trust configuration as
+// delivered to agents via the idp-trust-bundle resource type. Agents
+// use it to verify attestation identity tokens and derive registry
+// subjects. The kind agent serializes these into provisioned target
+// properties; the kubernetes agent deserializes them to build verifiers.
+type TrustBundleEntry struct {
+	IssuerURL              IssuerURL              `json:"issuer_url"`
+	JWKSURI                EndpointURL            `json:"jwks_uri"`
+	EnrollmentAudience     Audience               `json:"enrollment_audience"`
+	RegistrySubjectMapping *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
+}
+
+// TrustBundleResourceType is the [ResourceType] for IdP trust bundle
+// manifests delivered to agents.
+const TrustBundleResourceType ResourceType = "idp-trust-bundle"
 
 // OIDCMetadata is the resolved OIDC discovery document.
 type OIDCMetadata struct {
@@ -66,8 +124,6 @@ type OIDCMetadata struct {
 
 // RawToken is a verified JWT string. It has been validated by the
 // platform's authn layer and may be passed through to target APIs.
-//
-// TODO: encrypt at rest when persisted on deployments.
 type RawToken string
 
 // SubjectID identifies an authenticated subject within a single issuer.
@@ -116,28 +172,38 @@ type OIDCDiscoveryClient interface {
 	FetchMetadata(ctx context.Context, issuerURL IssuerURL) (OIDCMetadata, error)
 }
 
-// SigningKeyBindingID uniquely identifies a signing key binding.
-type SigningKeyBindingID string
+// RegistrySubject identifies a user within an external key registry
+// (e.g. a GitHub username). Derived from IdP claims via the configured
+// CEL [RegistrySubjectMapping] at enrollment time.
+type RegistrySubject string
 
-// SigningKeyBinding ties a user's ECDSA signing public key to their
-// IdP identity via a self-certifying key binding bundle. The bundle
-// is verified at enrollment time and stored for later use by the
-// delivery agent during attestation validation.
-type SigningKeyBinding struct {
-	ID SigningKeyBindingID
-	FederatedIdentity
-	PublicKeyJWK        []byte
-	Algorithm           string // e.g. "ES256"
-	KeyBindingDoc       []byte // canonical JSON signed by the user
-	KeyBindingSignature []byte // ECDSA signature over KeyBindingDoc
-	IdentityToken       RawToken
-	CreatedAt           time.Time
-	ExpiresAt           time.Time
+// RegistryClient fetches signing public keys for a subject from an
+// external key registry. Infrastructure implements this for each
+// [KeyRegistryType] (e.g. GitHub SSH signing keys).
+type RegistryClient interface {
+	FetchSigningKeys(ctx context.Context, endpoint string, subject RegistrySubject) ([]crypto.PublicKey, error)
 }
 
-// SigningKeyBindingRepository persists signing key bindings.
-type SigningKeyBindingRepository interface {
-	Create(ctx context.Context, binding SigningKeyBinding) error
-	Get(ctx context.Context, id SigningKeyBindingID) (SigningKeyBinding, error)
-	ListBySubject(ctx context.Context, identity FederatedIdentity) ([]SigningKeyBinding, error)
+// SignerEnrollmentID uniquely identifies a signer enrollment.
+type SignerEnrollmentID string
+
+// SignerEnrollment records that a user enrolled their signing identity
+// with the platform. The external key registry (identified by
+// RegistryID) is the authority for the user's public keys — there is
+// no self-signed key bundle.
+type SignerEnrollment struct {
+	ID SignerEnrollmentID
+	FederatedIdentity
+	IdentityToken   RawToken        // purpose-scoped enrollment ID token
+	RegistrySubject RegistrySubject // derived from CEL mapping at enrollment time
+	RegistryID      KeyRegistryID   // which registry holds the user's signing keys
+	CreatedAt       time.Time
+	ExpiresAt       time.Time
+}
+
+// SignerEnrollmentRepository persists signer enrollments.
+type SignerEnrollmentRepository interface {
+	Create(ctx context.Context, enrollment SignerEnrollment) error
+	Get(ctx context.Context, id SignerEnrollmentID) (SignerEnrollment, error)
+	ListBySubject(ctx context.Context, identity FederatedIdentity) ([]SignerEnrollment, error)
 }

@@ -8,8 +8,6 @@ import "google/protobuf/timestamp.proto";
 import "fleetshift/v1/manifest.proto";
 import "fleetshift/v1/manifest_strategy.proto";
 import "fleetshift/v1/placement_strategy.proto";
-import "fleetshift/v1/signing_key_binding.proto";
-
 // FederatedIdentity unambiguously identifies a subject by pairing
 // the issuer-scoped subject ID with the issuer URL that vouches for it.
 message FederatedIdentity {
@@ -18,12 +16,19 @@ message FederatedIdentity {
 }
 
 // Signature is a detached signature over a canonical content hash.
-// Matches the hybrid PoC's Signature dataclass.
 message Signature {
   FederatedIdentity signer = 1;
-  bytes public_key = 2;
-  bytes content_hash = 3;
-  bytes signature_bytes = 4;
+  bytes content_hash = 2;
+  bytes signature_bytes = 3;
+}
+
+// SignerAssertion carries the minimal data a delivery agent needs
+// to independently resolve a signer's public keys from an external
+// registry.
+message SignerAssertion {
+  string identity_token = 1;
+  string registry_id = 2;
+  string registry_subject = 3;
 }
 
 // OutputConstraint is a CEL predicate the delivery output must satisfy.
@@ -53,12 +58,12 @@ message DeploymentContent {
 }
 
 // SignedInput composes deployment content with its cryptographic proof.
-// Assembled at delivery time from stored Provenance + looked-up key
-// binding. Matches the hybrid PoC's SignedInput.
+// Assembled at delivery time from stored Provenance + signer assertion
+// derived from the enrollment record.
 message SignedInput {
   DeploymentContent content = 1;
   Signature signature = 2;
-  SigningKeyBinding key_binding = 3;
+  SignerAssertion signer = 3;
   google.protobuf.Timestamp valid_until = 4;
   repeated OutputConstraint output_constraints = 5;
   int64 expected_generation = 6;

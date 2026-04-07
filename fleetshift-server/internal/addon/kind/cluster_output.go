@@ -1,6 +1,7 @@
 package kind
 
 import (
+	"encoding/json"
 	"fmt"
 
 	"k8s.io/client-go/tools/clientcmd"
@@ -28,6 +29,11 @@ type ClusterOutput struct {
 	// token stored under that key.
 	SATokenRef domain.SecretRef
 	SAToken    []byte
+
+	// TrustBundles are the IdP trust configs to embed in the
+	// provisioned target's properties. Set by the kind agent from
+	// its in-memory trust store at provisioning time.
+	TrustBundles []domain.TrustBundleEntry
 }
 
 // Target returns a [domain.ProvisionedTarget] with connection info
@@ -43,6 +49,11 @@ func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	}
 	if o.SATokenRef != "" {
 		props["service_account_token_ref"] = string(o.SATokenRef)
+	}
+	if len(o.TrustBundles) > 0 {
+		if data, err := json.Marshal(o.TrustBundles); err == nil {
+			props["trust_bundle"] = string(data)
+		}
 	}
 	return domain.ProvisionedTarget{
 		ID:                    o.TargetID,

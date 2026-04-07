@@ -11,12 +11,14 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-// enrollKeyBinding creates a signing key binding in the store for the
-// given subject, returning the private key for signing.
-func enrollKeyBinding(t *testing.T, store domain.Store, subjectID domain.SubjectID, issuer domain.IssuerURL) *ecdsa.PrivateKey {
+// enrollSigner creates a signer enrollment in the store and registers
+// the private key's public key in the fake registry, returning the
+// private key for signing.
+func enrollSigner(t *testing.T, store domain.Store, fakeReg *keyregistry.Fake, subjectID domain.SubjectID, issuer domain.IssuerURL) *ecdsa.PrivateKey {
 	t.Helper()
 
 	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -24,22 +26,21 @@ func enrollKeyBinding(t *testing.T, store domain.Store, subjectID domain.Subject
 		t.Fatalf("generate key: %v", err)
 	}
 
-	pubJWK := ecPubKeyJWK(t, &privateKey.PublicKey)
+	registrySubject := domain.RegistrySubject("gh-" + string(subjectID))
+	fakeReg.Register("https://api.github.com", registrySubject, &privateKey.PublicKey)
 
 	now := time.Now().UTC()
-	binding := domain.SigningKeyBinding{
-		ID: "skb-test-1",
+	enrollment := domain.SignerEnrollment{
+		ID: "se-test-1",
 		FederatedIdentity: domain.FederatedIdentity{
 			Subject: subjectID,
 			Issuer:  issuer,
 		},
-		PublicKeyJWK:        pubJWK,
-		Algorithm:           "ES256",
-		KeyBindingDoc:       []byte(`{"subject":"` + string(subjectID) + `"}`),
-		KeyBindingSignature: []byte("placeholder-sig"),
-		IdentityToken:       "placeholder-token",
-		CreatedAt:           now,
-		ExpiresAt:           now.Add(365 * 24 * time.Hour),
+		IdentityToken:   "placeholder-token",
+		RegistrySubject: registrySubject,
+		RegistryID:      "github.com",
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(365 * 24 * time.Hour),
 	}
 
 	ctx := context.Background()
@@ -48,8 +49,8 @@ func enrollKeyBinding(t *testing.T, store domain.Store, subjectID domain.Subject
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	if err := tx.SigningKeyBindings().Create(ctx, binding); err != nil {
-		t.Fatalf("create signing key binding: %v", err)
+	if err := tx.SignerEnrollments().Create(ctx, enrollment); err != nil {
+		t.Fatalf("create signer enrollment: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -94,7 +95,7 @@ func TestCreateDeployment_WithSignature_AttachesProvenance(t *testing.T) {
 
 	subjectID := domain.SubjectID("user-1")
 	issuer := domain.IssuerURL("https://issuer.example.com")
-	privKey := enrollKeyBinding(t, h.store, subjectID, issuer)
+	privKey := enrollSigner(t, h.store, h.fakeReg, subjectID, issuer)
 
 	registerTargets(t, h, "t1")
 
@@ -162,7 +163,7 @@ func TestCreateDeployment_WithoutSignature_NoProvenance(t *testing.T) {
 	}
 }
 
-func TestCreateDeployment_WithSignature_NoKeyBinding_Fails(t *testing.T) {
+func TestCreateDeployment_WithSignature_NoEnrollment_Fails(t *testing.T) {
 	h := setup(t)
 
 	registerTargets(t, h, "t1")
@@ -199,7 +200,7 @@ func TestCreateDeployment_WithBadSignature_Fails(t *testing.T) {
 
 	subjectID := domain.SubjectID("user-1")
 	issuer := domain.IssuerURL("https://issuer.example.com")
-	enrollKeyBinding(t, h.store, subjectID, issuer)
+	enrollSigner(t, h.store, h.fakeReg, subjectID, issuer)
 
 	registerTargets(t, h, "t1")
 
@@ -263,7 +264,7 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 
 	subjectID := domain.SubjectID("user-1")
 	issuer := domain.IssuerURL("https://issuer.example.com")
-	privKey := enrollKeyBinding(t, h.store, subjectID, issuer)
+	privKey := enrollSigner(t, h.store, h.fakeReg, subjectID, issuer)
 
 	ms := defaultManifestStrategy()
 	ps := defaultPlacementStrategy()
@@ -362,7 +363,6 @@ func TestRepoRoundTrip_ProvenanceOnDeployment(t *testing.T) {
 		Provenance: &domain.Provenance{
 			Sig: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
-				PublicKey:      []byte("pubkey-bytes"),
 				ContentHash:    []byte("hash-bytes"),
 				SignatureBytes: []byte("sig-bytes"),
 			},
@@ -412,9 +412,6 @@ func TestRepoRoundTrip_ProvenanceOnDeployment(t *testing.T) {
 	}
 	if p.Sig.Signer.Issuer != "https://issuer.example.com" {
 		t.Errorf("Sig.Signer.Issuer = %q, want %q", p.Sig.Signer.Issuer, "https://issuer.example.com")
-	}
-	if string(p.Sig.PublicKey) != "pubkey-bytes" {
-		t.Errorf("Sig.PublicKey mismatch")
 	}
 	if string(p.Sig.ContentHash) != "hash-bytes" {
 		t.Errorf("Sig.ContentHash mismatch")

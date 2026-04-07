@@ -23,42 +23,37 @@ const (
 )
 
 // Request message for
-// [SigningKeyBindingService.CreateSigningKeyBinding][fleetshift.v1.SigningKeyBindingService.CreateSigningKeyBinding].
+// [SignerEnrollmentService.CreateSignerEnrollment][fleetshift.v1.SignerEnrollmentService.CreateSignerEnrollment].
 //
-// The caller provides the three components of a key binding bundle.
-// The server validates the bundle (ID token verification, proof of
-// possession, subject match) and extracts resource fields from it.
-type CreateSigningKeyBindingRequest struct {
+// The caller provides a purpose-scoped ID token. The server verifies
+// the token, evaluates the configured CEL claim mapping to derive the
+// registry subject, and persists the enrollment.
+type CreateSignerEnrollmentRequest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Client-assigned ID for the signing key binding, which becomes
+	// Client-assigned ID for the signer enrollment, which becomes
 	// the final component of the resource name.
-	SigningKeyBindingId string `protobuf:"bytes,1,opt,name=signing_key_binding_id,json=signingKeyBindingId,proto3" json:"signing_key_binding_id,omitempty"`
-	// Canonical JSON key binding document: {public_key_jwk, subject,
-	// issuer, enrolled_at}. Signed by the user's private key.
-	KeyBindingDoc []byte `protobuf:"bytes,2,opt,name=key_binding_doc,json=keyBindingDoc,proto3" json:"key_binding_doc,omitempty"`
-	// ECDSA-P256 signature over key_binding_doc (proof of possession).
-	KeyBindingSignature []byte `protobuf:"bytes,3,opt,name=key_binding_signature,json=keyBindingSignature,proto3" json:"key_binding_signature,omitempty"`
+	SignerEnrollmentId string `protobuf:"bytes,1,opt,name=signer_enrollment_id,json=signerEnrollmentId,proto3" json:"signer_enrollment_id,omitempty"`
 	// Purpose-scoped ID token from the tenant IdP, obtained via a
-	// dedicated OIDC client for key enrollment.
-	IdentityToken string `protobuf:"bytes,4,opt,name=identity_token,json=identityToken,proto3" json:"identity_token,omitempty"`
+	// dedicated OIDC client for signer enrollment.
+	IdentityToken string `protobuf:"bytes,2,opt,name=identity_token,json=identityToken,proto3" json:"identity_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *CreateSigningKeyBindingRequest) Reset() {
-	*x = CreateSigningKeyBindingRequest{}
+func (x *CreateSignerEnrollmentRequest) Reset() {
+	*x = CreateSignerEnrollmentRequest{}
 	mi := &file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *CreateSigningKeyBindingRequest) String() string {
+func (x *CreateSignerEnrollmentRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*CreateSigningKeyBindingRequest) ProtoMessage() {}
+func (*CreateSignerEnrollmentRequest) ProtoMessage() {}
 
-func (x *CreateSigningKeyBindingRequest) ProtoReflect() protoreflect.Message {
+func (x *CreateSignerEnrollmentRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -70,33 +65,19 @@ func (x *CreateSigningKeyBindingRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use CreateSigningKeyBindingRequest.ProtoReflect.Descriptor instead.
-func (*CreateSigningKeyBindingRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use CreateSignerEnrollmentRequest.ProtoReflect.Descriptor instead.
+func (*CreateSignerEnrollmentRequest) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *CreateSigningKeyBindingRequest) GetSigningKeyBindingId() string {
+func (x *CreateSignerEnrollmentRequest) GetSignerEnrollmentId() string {
 	if x != nil {
-		return x.SigningKeyBindingId
+		return x.SignerEnrollmentId
 	}
 	return ""
 }
 
-func (x *CreateSigningKeyBindingRequest) GetKeyBindingDoc() []byte {
-	if x != nil {
-		return x.KeyBindingDoc
-	}
-	return nil
-}
-
-func (x *CreateSigningKeyBindingRequest) GetKeyBindingSignature() []byte {
-	if x != nil {
-		return x.KeyBindingSignature
-	}
-	return nil
-}
-
-func (x *CreateSigningKeyBindingRequest) GetIdentityToken() string {
+func (x *CreateSignerEnrollmentRequest) GetIdentityToken() string {
 	if x != nil {
 		return x.IdentityToken
 	}
@@ -107,12 +88,10 @@ var File_fleetshift_v1_create_signing_key_binding_request_proto protoreflect.Fil
 
 const file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc = "" +
 	"\n" +
-	"6fleetshift/v1/create_signing_key_binding_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"\xec\x01\n" +
-	"\x1eCreateSigningKeyBindingRequest\x128\n" +
-	"\x16signing_key_binding_id\x18\x01 \x01(\tB\x03\xe0A\x02R\x13signingKeyBindingId\x12+\n" +
-	"\x0fkey_binding_doc\x18\x02 \x01(\fB\x03\xe0A\x02R\rkeyBindingDoc\x127\n" +
-	"\x15key_binding_signature\x18\x03 \x01(\fB\x03\xe0A\x02R\x13keyBindingSignature\x12*\n" +
-	"\x0eidentity_token\x18\x04 \x01(\tB\x03\xe0A\x02R\ridentityTokenBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"6fleetshift/v1/create_signing_key_binding_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"\x82\x01\n" +
+	"\x1dCreateSignerEnrollmentRequest\x125\n" +
+	"\x14signer_enrollment_id\x18\x01 \x01(\tB\x03\xe0A\x02R\x12signerEnrollmentId\x12*\n" +
+	"\x0eidentity_token\x18\x02 \x01(\tB\x03\xe0A\x02R\ridentityTokenBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescOnce sync.Once
@@ -128,7 +107,7 @@ func file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescGZIP() [
 
 var file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_fleetshift_v1_create_signing_key_binding_request_proto_goTypes = []any{
-	(*CreateSigningKeyBindingRequest)(nil), // 0: fleetshift.v1.CreateSigningKeyBindingRequest
+	(*CreateSignerEnrollmentRequest)(nil), // 0: fleetshift.v1.CreateSignerEnrollmentRequest
 }
 var file_fleetshift_v1_create_signing_key_binding_request_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type

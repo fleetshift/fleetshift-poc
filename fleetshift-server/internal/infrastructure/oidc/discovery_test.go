@@ -55,8 +55,8 @@ func TestVerifier_WithHTTPClient_SelfSignedCA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
-	if claims.ID != "user-456" {
-		t.Errorf("ID = %q, want %q", claims.ID, "user-456")
+	if claims.Subject != "user-456" {
+		t.Errorf("Subject = %q, want %q", claims.Subject, "user-456")
 	}
 }
 

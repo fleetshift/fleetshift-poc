@@ -101,10 +101,8 @@ func (s *authCaptureServer) ListDeployments(ctx context.Context, _ *pb.ListDeplo
 func setupAuthnTest(t *testing.T, repo *fakeAuthMethodRepo, verifier *fakeOIDCTokenVerifier) (pb.DeploymentServiceClient, *authCaptureServer) {
 	t.Helper()
 
-	discovery := newFakeOIDCDiscovery()
 	authMethodSvc := &application.AuthMethodService{
-		Methods:   repo,
-		Discovery: discovery,
+		Methods: repo,
 	}
 
 	interceptor := NewAuthnInterceptor(authMethodSvc, verifier, domain.NoOpAuthnObserver{})

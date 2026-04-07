@@ -8,6 +8,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sync"
 	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
@@ -57,6 +58,9 @@ type Agent struct {
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
+
+	trustMu      sync.RWMutex
+	trustBundles []domain.TrustBundleEntry
 }
 
 // AgentOption configures an [Agent].
@@ -112,13 +116,31 @@ func (a *Agent) agentObserver() AgentObserver {
 	return NoOpAgentObserver{}
 }
 
-// Deliver validates all manifests synchronously. If validation passes,
-// it returns [domain.DeliveryStateAccepted] immediately and performs
-// the actual cluster creation in a background goroutine. Kind's own
-// log output flows through the [domain.DeliverySignaler] via the
-// [observerLogger] adapter.
+// Deliver dispatches on manifest resource type. Trust-bundle manifests
+// are stored in memory synchronously. Cluster manifests follow the
+// existing async flow.
 func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	specs, err := a.validateManifests(manifests, auth)
+	var clusterManifests []domain.Manifest
+	for _, m := range manifests {
+		switch m.ResourceType {
+		case domain.TrustBundleResourceType:
+			if err := a.storeTrustBundle(m); err != nil {
+				return domain.DeliveryResult{
+					State:   domain.DeliveryStateFailed,
+					Message: fmt.Sprintf("store trust bundle: %v", err),
+				}, nil
+			}
+		default:
+			clusterManifests = append(clusterManifests, m)
+		}
+	}
+
+	if len(clusterManifests) == 0 {
+		go signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	}
+
+	specs, err := a.validateManifests(clusterManifests, auth)
 	if err != nil {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
 	}
@@ -135,6 +157,28 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.Deliv
 	go a.deliverAsync(ctx, provider, specs, auth, signaler)
 
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+// storeTrustBundle unmarshals and stores a trust bundle entry.
+func (a *Agent) storeTrustBundle(m domain.Manifest) error {
+	var entry domain.TrustBundleEntry
+	if err := json.Unmarshal(m.Raw, &entry); err != nil {
+		return fmt.Errorf("unmarshal trust bundle entry: %w", err)
+	}
+	a.trustMu.Lock()
+	defer a.trustMu.Unlock()
+	a.trustBundles = append(a.trustBundles, entry)
+	return nil
+}
+
+// TrustBundles returns a snapshot of the currently stored trust bundle
+// entries. Used by tests and the cluster provisioning flow.
+func (a *Agent) TrustBundles() []domain.TrustBundleEntry {
+	a.trustMu.RLock()
+	defer a.trustMu.RUnlock()
+	out := make([]domain.TrustBundleEntry, len(a.trustBundles))
+	copy(out, a.trustBundles)
+	return out
 }
 
 // verifyToken checks the caller's JWT when a verifier is configured.
@@ -273,10 +317,11 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 
 	targetID := domain.TargetID("k8s-" + spec.Name)
 	out := ClusterOutput{
-		TargetID:  targetID,
-		Name:      spec.Name,
-		APIServer: apiServer,
-		CACert:    caCert,
+		TargetID:     targetID,
+		Name:         spec.Name,
+		APIServer:    apiServer,
+		CACert:       caCert,
+		TrustBundles: a.TrustBundles(),
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{

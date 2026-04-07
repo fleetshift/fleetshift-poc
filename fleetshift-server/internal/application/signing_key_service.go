@@ -2,130 +2,112 @@ package application
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
-// SigningKeyService handles signing key enrollment by validating
-// key binding bundles and persisting them.
-type SigningKeyService struct {
+// SignerEnrollmentService handles signer enrollment by verifying the
+// ID token, evaluating the CEL claim mapping to derive the registry
+// subject, and persisting the enrollment.
+type SignerEnrollmentService struct {
 	Store       domain.Store
 	Verifier    domain.OIDCTokenVerifier
 	AuthMethods domain.AuthMethodRepository
 }
 
-// CreateSigningKeyBindingInput carries the three components of a
-// key binding bundle submitted by the client.
-type CreateSigningKeyBindingInput struct {
-	ID                  domain.SigningKeyBindingID
-	KeyBindingDoc       []byte
-	KeyBindingSignature []byte
-	IdentityToken       string
+// CreateSignerEnrollmentInput carries the data submitted by the
+// client to enroll a signer.
+type CreateSignerEnrollmentInput struct {
+	ID            domain.SignerEnrollmentID
+	IdentityToken string
 }
 
-// keyBindingDoc is the canonical JSON structure signed by the user.
-type keyBindingDoc struct {
-	PublicKeyJWK json.RawMessage `json:"public_key_jwk"`
-	Subject      string          `json:"subject"`
-	Issuer       string          `json:"issuer"`
-	EnrolledAt   string          `json:"enrolled_at"`
-}
-
-// Create validates a key binding bundle and stores it. The validation
-// steps are:
+// Create validates the enrollment ID token, evaluates the configured
+// CEL claim mapping to derive the registry subject, and persists a
+// [domain.SignerEnrollment].
 //
+// The validation steps are:
 //  1. Caller must be authenticated (Authorization header).
-//  2. Load the OIDC auth method to get the enrollment audience.
-//  3. Verify the bundle's identity token against IdP JWKS using the
-//     enrollment audience.
+//  2. Load the OIDC auth method to get the enrollment audience and
+//     registry subject mapping.
+//  3. Verify the ID token against IdP JWKS using the enrollment
+//     audience.
 //  4. Confirm the identity token's sub matches the caller's sub.
-//  5. Parse the key binding doc and extract the public key JWK.
-//  6. Verify the key binding signature against the public key.
-//  7. Persist the SigningKeyBinding.
-func (s *SigningKeyService) Create(ctx context.Context, in CreateSigningKeyBindingInput) (domain.SigningKeyBinding, error) {
+//  5. Evaluate the CEL claim mapping to derive the registry subject.
+//  6. Persist the SignerEnrollment.
+func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnrollmentInput) (domain.SignerEnrollment, error) {
 	ac := AuthFromContext(ctx)
 	if ac == nil || ac.Subject == nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
-			"%w: enrolling a signing key requires an authenticated caller",
+		return domain.SignerEnrollment{}, fmt.Errorf(
+			"%w: enrolling a signer requires an authenticated caller",
 			domain.ErrInvalidArgument)
 	}
 
 	if in.ID == "" {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
-			"%w: signing_key_binding_id is required",
+		return domain.SignerEnrollment{}, fmt.Errorf(
+			"%w: signer_enrollment_id is required",
 			domain.ErrInvalidArgument)
 	}
 
 	oidcConfig, err := s.loadEnrollmentConfig(ctx)
 	if err != nil {
-		return domain.SigningKeyBinding{}, err
+		return domain.SignerEnrollment{}, err
+	}
+
+	if oidcConfig.RegistrySubjectMapping == nil {
+		return domain.SignerEnrollment{}, fmt.Errorf(
+			"%w: no registry subject mapping configured on OIDC auth method",
+			domain.ErrInvalidArgument)
 	}
 
 	idTokenClaims, err := s.verifyIdentityToken(ctx, oidcConfig, in.IdentityToken)
 	if err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf("identity token verification failed: %w", err)
+		return domain.SignerEnrollment{}, fmt.Errorf("identity token verification failed: %w", err)
 	}
 
 	if idTokenClaims.Subject != ac.Subject.Subject {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
+		return domain.SignerEnrollment{}, fmt.Errorf(
 			"%w: identity token subject %q does not match caller %q",
 			domain.ErrInvalidArgument, idTokenClaims.Subject, ac.Subject.Subject)
 	}
 
-	var doc keyBindingDoc
-	if err := json.Unmarshal(in.KeyBindingDoc, &doc); err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
-			"%w: invalid key_binding_doc JSON: %v",
-			domain.ErrInvalidArgument, err)
-	}
-
-	pubKey, err := fscrypto.ParseECPublicKeyFromJWK(doc.PublicKeyJWK)
+	registrySubject, err := EvalClaimMapping(oidcConfig.RegistrySubjectMapping, in.IdentityToken)
 	if err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
-			"%w: invalid public key in key_binding_doc: %v",
-			domain.ErrInvalidArgument, err)
-	}
-
-	if err := fscrypto.VerifyECDSASignature(pubKey, in.KeyBindingDoc, in.KeyBindingSignature); err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf(
-			"%w: proof of possession verification failed: %v",
+		return domain.SignerEnrollment{}, fmt.Errorf(
+			"%w: claim mapping evaluation failed: %v",
 			domain.ErrInvalidArgument, err)
 	}
 
 	now := time.Now().UTC()
-	binding := domain.SigningKeyBinding{
-		ID:                in.ID,
+	enrollment := domain.SignerEnrollment{
+		ID:              in.ID,
 		FederatedIdentity: ac.Subject.FederatedIdentity,
-		PublicKeyJWK:        []byte(doc.PublicKeyJWK),
-		Algorithm:           "ES256",
-		KeyBindingDoc:       in.KeyBindingDoc,
-		KeyBindingSignature: in.KeyBindingSignature,
-		IdentityToken:       domain.RawToken(in.IdentityToken),
-		CreatedAt:           now,
-		ExpiresAt:           now.Add(365 * 24 * time.Hour), // TODO: make configurable
+		IdentityToken:   domain.RawToken(in.IdentityToken),
+		RegistrySubject: registrySubject,
+		RegistryID:      oidcConfig.RegistrySubjectMapping.RegistryID,
+		CreatedAt:       now,
+		ExpiresAt:       now.Add(365 * 24 * time.Hour), // TODO: make configurable
 	}
 
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf("begin tx: %w", err)
+		return domain.SignerEnrollment{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	if err := tx.SigningKeyBindings().Create(ctx, binding); err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf("persist signing key binding: %w", err)
+	if err := tx.SignerEnrollments().Create(ctx, enrollment); err != nil {
+		return domain.SignerEnrollment{}, fmt.Errorf("persist signer enrollment: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return domain.SigningKeyBinding{}, fmt.Errorf("commit: %w", err)
+		return domain.SignerEnrollment{}, fmt.Errorf("commit: %w", err)
 	}
 
-	return binding, nil
+	return enrollment, nil
 }
 
-func (s *SigningKeyService) loadEnrollmentConfig(ctx context.Context) (domain.OIDCConfig, error) {
+func (s *SignerEnrollmentService) loadEnrollmentConfig(ctx context.Context) (domain.OIDCConfig, error) {
 	methods, err := s.AuthMethods.List(ctx)
 	if err != nil {
 		return domain.OIDCConfig{}, fmt.Errorf("list auth methods: %w", err)
@@ -146,7 +128,7 @@ func (s *SigningKeyService) loadEnrollmentConfig(ctx context.Context) (domain.OI
 		"%w: no OIDC auth method configured", domain.ErrInvalidArgument)
 }
 
-func (s *SigningKeyService) verifyIdentityToken(ctx context.Context, oidcConfig domain.OIDCConfig, rawToken string) (domain.SubjectClaims, error) {
+func (s *SignerEnrollmentService) verifyIdentityToken(ctx context.Context, oidcConfig domain.OIDCConfig, rawToken string) (domain.SubjectClaims, error) {
 	enrollmentConfig := domain.OIDCConfig{
 		IssuerURL: oidcConfig.IssuerURL,
 		Audience:  oidcConfig.KeyEnrollmentAudience,
@@ -154,4 +136,3 @@ func (s *SigningKeyService) verifyIdentityToken(ctx context.Context, oidcConfig 
 	}
 	return s.Verifier.Verify(ctx, enrollmentConfig, rawToken)
 }
-

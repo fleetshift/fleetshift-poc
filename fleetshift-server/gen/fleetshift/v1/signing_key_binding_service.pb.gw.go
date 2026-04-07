@@ -35,9 +35,9 @@ var (
 	_ = metadata.Join
 )
 
-func request_SigningKeyBindingService_CreateSigningKeyBinding_0(ctx context.Context, marshaler runtime.Marshaler, client SigningKeyBindingServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func request_SignerEnrollmentService_CreateSignerEnrollment_0(ctx context.Context, marshaler runtime.Marshaler, client SignerEnrollmentServiceClient, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateSigningKeyBindingRequest
+		protoReq CreateSignerEnrollmentRequest
 		metadata runtime.ServerMetadata
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
@@ -46,55 +46,55 @@ func request_SigningKeyBindingService_CreateSigningKeyBinding_0(ctx context.Cont
 	if req.Body != nil {
 		_, _ = io.Copy(io.Discard, req.Body)
 	}
-	msg, err := client.CreateSigningKeyBinding(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
+	msg, err := client.CreateSignerEnrollment(ctx, &protoReq, grpc.Header(&metadata.HeaderMD), grpc.Trailer(&metadata.TrailerMD))
 	return msg, metadata, err
 }
 
-func local_request_SigningKeyBindingService_CreateSigningKeyBinding_0(ctx context.Context, marshaler runtime.Marshaler, server SigningKeyBindingServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
+func local_request_SignerEnrollmentService_CreateSignerEnrollment_0(ctx context.Context, marshaler runtime.Marshaler, server SignerEnrollmentServiceServer, req *http.Request, pathParams map[string]string) (proto.Message, runtime.ServerMetadata, error) {
 	var (
-		protoReq CreateSigningKeyBindingRequest
+		protoReq CreateSignerEnrollmentRequest
 		metadata runtime.ServerMetadata
 	)
 	if err := marshaler.NewDecoder(req.Body).Decode(&protoReq); err != nil && !errors.Is(err, io.EOF) {
 		return nil, metadata, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
-	msg, err := server.CreateSigningKeyBinding(ctx, &protoReq)
+	msg, err := server.CreateSignerEnrollment(ctx, &protoReq)
 	return msg, metadata, err
 }
 
-// RegisterSigningKeyBindingServiceHandlerServer registers the http handlers for service SigningKeyBindingService to "mux".
-// UnaryRPC     :call SigningKeyBindingServiceServer directly.
+// RegisterSignerEnrollmentServiceHandlerServer registers the http handlers for service SignerEnrollmentService to "mux".
+// UnaryRPC     :call SignerEnrollmentServiceServer directly.
 // StreamingRPC :currently unsupported pending https://github.com/grpc/grpc-go/issues/906.
-// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterSigningKeyBindingServiceHandlerFromEndpoint instead.
+// Note that using this registration option will cause many gRPC library features to stop working. Consider using RegisterSignerEnrollmentServiceHandlerFromEndpoint instead.
 // GRPC interceptors will not work for this type of registration. To use interceptors, you must use the "runtime.WithMiddlewares" option in the "runtime.NewServeMux" call.
-func RegisterSigningKeyBindingServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server SigningKeyBindingServiceServer) error {
-	mux.Handle(http.MethodPost, pattern_SigningKeyBindingService_CreateSigningKeyBinding_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+func RegisterSignerEnrollmentServiceHandlerServer(ctx context.Context, mux *runtime.ServeMux, server SignerEnrollmentServiceServer) error {
+	mux.Handle(http.MethodPost, pattern_SignerEnrollmentService_CreateSignerEnrollment_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		var stream runtime.ServerTransportStream
 		ctx = grpc.NewContextWithServerTransportStream(ctx, &stream)
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/fleetshift.v1.SigningKeyBindingService/CreateSigningKeyBinding", runtime.WithHTTPPathPattern("/v1/signingKeyBindings"))
+		annotatedContext, err := runtime.AnnotateIncomingContext(ctx, mux, req, "/fleetshift.v1.SignerEnrollmentService/CreateSignerEnrollment", runtime.WithHTTPPathPattern("/v1/signerEnrollments"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := local_request_SigningKeyBindingService_CreateSigningKeyBinding_0(annotatedContext, inboundMarshaler, server, req, pathParams)
+		resp, md, err := local_request_SignerEnrollmentService_CreateSignerEnrollment_0(annotatedContext, inboundMarshaler, server, req, pathParams)
 		md.HeaderMD, md.TrailerMD = metadata.Join(md.HeaderMD, stream.Header()), metadata.Join(md.TrailerMD, stream.Trailer())
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_SigningKeyBindingService_CreateSigningKeyBinding_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_SignerEnrollmentService_CreateSignerEnrollment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 
 	return nil
 }
 
-// RegisterSigningKeyBindingServiceHandlerFromEndpoint is same as RegisterSigningKeyBindingServiceHandler but
+// RegisterSignerEnrollmentServiceHandlerFromEndpoint is same as RegisterSignerEnrollmentServiceHandler but
 // automatically dials to "endpoint" and closes the connection when "ctx" gets done.
-func RegisterSigningKeyBindingServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
+func RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx context.Context, mux *runtime.ServeMux, endpoint string, opts []grpc.DialOption) (err error) {
 	conn, err := grpc.NewClient(endpoint, opts...)
 	if err != nil {
 		return err
@@ -113,45 +113,45 @@ func RegisterSigningKeyBindingServiceHandlerFromEndpoint(ctx context.Context, mu
 			}
 		}()
 	}()
-	return RegisterSigningKeyBindingServiceHandler(ctx, mux, conn)
+	return RegisterSignerEnrollmentServiceHandler(ctx, mux, conn)
 }
 
-// RegisterSigningKeyBindingServiceHandler registers the http handlers for service SigningKeyBindingService to "mux".
+// RegisterSignerEnrollmentServiceHandler registers the http handlers for service SignerEnrollmentService to "mux".
 // The handlers forward requests to the grpc endpoint over "conn".
-func RegisterSigningKeyBindingServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
-	return RegisterSigningKeyBindingServiceHandlerClient(ctx, mux, NewSigningKeyBindingServiceClient(conn))
+func RegisterSignerEnrollmentServiceHandler(ctx context.Context, mux *runtime.ServeMux, conn *grpc.ClientConn) error {
+	return RegisterSignerEnrollmentServiceHandlerClient(ctx, mux, NewSignerEnrollmentServiceClient(conn))
 }
 
-// RegisterSigningKeyBindingServiceHandlerClient registers the http handlers for service SigningKeyBindingService
-// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "SigningKeyBindingServiceClient".
-// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "SigningKeyBindingServiceClient"
+// RegisterSignerEnrollmentServiceHandlerClient registers the http handlers for service SignerEnrollmentService
+// to "mux". The handlers forward requests to the grpc endpoint over the given implementation of "SignerEnrollmentServiceClient".
+// Note: the gRPC framework executes interceptors within the gRPC handler. If the passed in "SignerEnrollmentServiceClient"
 // doesn't go through the normal gRPC flow (creating a gRPC client etc.) then it will be up to the passed in
-// "SigningKeyBindingServiceClient" to call the correct interceptors. This client ignores the HTTP middlewares.
-func RegisterSigningKeyBindingServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client SigningKeyBindingServiceClient) error {
-	mux.Handle(http.MethodPost, pattern_SigningKeyBindingService_CreateSigningKeyBinding_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
+// "SignerEnrollmentServiceClient" to call the correct interceptors. This client ignores the HTTP middlewares.
+func RegisterSignerEnrollmentServiceHandlerClient(ctx context.Context, mux *runtime.ServeMux, client SignerEnrollmentServiceClient) error {
+	mux.Handle(http.MethodPost, pattern_SignerEnrollmentService_CreateSignerEnrollment_0, func(w http.ResponseWriter, req *http.Request, pathParams map[string]string) {
 		ctx, cancel := context.WithCancel(req.Context())
 		defer cancel()
 		inboundMarshaler, outboundMarshaler := runtime.MarshalerForRequest(mux, req)
-		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/fleetshift.v1.SigningKeyBindingService/CreateSigningKeyBinding", runtime.WithHTTPPathPattern("/v1/signingKeyBindings"))
+		annotatedContext, err := runtime.AnnotateContext(ctx, mux, req, "/fleetshift.v1.SignerEnrollmentService/CreateSignerEnrollment", runtime.WithHTTPPathPattern("/v1/signerEnrollments"))
 		if err != nil {
 			runtime.HTTPError(ctx, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		resp, md, err := request_SigningKeyBindingService_CreateSigningKeyBinding_0(annotatedContext, inboundMarshaler, client, req, pathParams)
+		resp, md, err := request_SignerEnrollmentService_CreateSignerEnrollment_0(annotatedContext, inboundMarshaler, client, req, pathParams)
 		annotatedContext = runtime.NewServerMetadataContext(annotatedContext, md)
 		if err != nil {
 			runtime.HTTPError(annotatedContext, mux, outboundMarshaler, w, req, err)
 			return
 		}
-		forward_SigningKeyBindingService_CreateSigningKeyBinding_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
+		forward_SignerEnrollmentService_CreateSignerEnrollment_0(annotatedContext, mux, outboundMarshaler, w, req, resp, mux.GetForwardResponseOptions()...)
 	})
 	return nil
 }
 
 var (
-	pattern_SigningKeyBindingService_CreateSigningKeyBinding_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "signingKeyBindings"}, ""))
+	pattern_SignerEnrollmentService_CreateSignerEnrollment_0 = runtime.MustPattern(runtime.NewPattern(1, []int{2, 0, 2, 1}, []string{"v1", "signerEnrollments"}, ""))
 )
 
 var (
-	forward_SigningKeyBindingService_CreateSigningKeyBinding_0 = runtime.ForwardResponseMessage
+	forward_SignerEnrollmentService_CreateSignerEnrollment_0 = runtime.ForwardResponseMessage
 )

@@ -2,6 +2,8 @@ package application
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"time"
@@ -15,6 +17,7 @@ type DeploymentService struct {
 	Store         domain.Store
 	CreateWF      domain.CreateDeploymentWorkflow
 	Orchestration domain.OrchestrationWorkflow
+	KeyResolver   *KeyResolver
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -45,7 +48,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 		}
 		defer tx.Rollback()
 		prov, err := s.buildProvenance(
-			ctx, tx.SigningKeyBindings(), ac.Subject,
+			ctx, tx.SignerEnrollments(), ac.Subject,
 			in.ID, in.ManifestStrategy, in.PlacementStrategy,
 			in.ExpectedGeneration, in.UserSignature, in.ValidUntil,
 		)
@@ -157,7 +160,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 		}
 		nextGen := dep.Generation + 1
 		prov, err := s.buildProvenance(
-			ctx, tx.SigningKeyBindings(), ac.Subject,
+			ctx, tx.SignerEnrollments(), ac.Subject,
 			dep.ID, dep.ManifestStrategy, dep.PlacementStrategy,
 			nextGen, in.UserSignature, in.ValidUntil,
 		)
@@ -221,12 +224,12 @@ func (s *DeploymentService) Reconcile(ctx context.Context, id domain.DeploymentI
 	return err
 }
 
-// buildProvenance constructs [domain.Provenance] by reconstructing the
-// canonical signed envelope, looking up the caller's key binding, and
-// verifying the signature.
+// buildProvenance constructs [domain.Provenance] by looking up the
+// caller's signer enrollment, resolving public keys from the external
+// registry via [KeyResolver], and verifying the signature.
 func (s *DeploymentService) buildProvenance(
 	ctx context.Context,
-	bindings domain.SigningKeyBindingRepository,
+	enrollments domain.SignerEnrollmentRepository,
 	caller *domain.SubjectClaims,
 	id domain.DeploymentID,
 	ms domain.ManifestStrategySpec,
@@ -235,19 +238,19 @@ func (s *DeploymentService) buildProvenance(
 	userSig []byte,
 	validUntil time.Time,
 ) (*domain.Provenance, error) {
-	found, err := bindings.ListBySubject(ctx, caller.FederatedIdentity)
+	found, err := enrollments.ListBySubject(ctx, caller.FederatedIdentity)
 	if err != nil {
-		return nil, fmt.Errorf("list key bindings: %w", err)
+		return nil, fmt.Errorf("list signer enrollments: %w", err)
 	}
 	if len(found) == 0 {
-		return nil, fmt.Errorf("%w: no signing key binding found for %s", domain.ErrInvalidArgument, caller.Subject)
+		return nil, fmt.Errorf("%w: no signer enrollment found for %s", domain.ErrInvalidArgument, caller.Subject)
 	}
 
 	// TODO: just getting the first one?
-	binding := found[0]
+	enrollment := found[0]
 
-	if !binding.ExpiresAt.IsZero() && time.Now().After(binding.ExpiresAt) {
-		return nil, fmt.Errorf("%w: signing key binding %s has expired", domain.ErrInvalidArgument, binding.ID)
+	if !enrollment.ExpiresAt.IsZero() && time.Now().After(enrollment.ExpiresAt) {
+		return nil, fmt.Errorf("%w: signer enrollment %s has expired", domain.ErrInvalidArgument, enrollment.ID)
 	}
 
 	envelopeBytes, err := domain.BuildSignedInputEnvelope(id, ms, ps, validUntil, nil, generation)
@@ -256,25 +259,18 @@ func (s *DeploymentService) buildProvenance(
 	}
 	envelopeHash := domain.HashIntent(envelopeBytes)
 
-	pubKey, err := fscrypto.ParseECPublicKeyFromJWK(binding.PublicKeyJWK)
+	keys, err := s.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
 	if err != nil {
-		return nil, fmt.Errorf("parse public key: %w", err)
+		return nil, fmt.Errorf("resolve signing keys: %w", err)
 	}
 
-	if err := fscrypto.VerifyECDSASignature(pubKey, envelopeBytes, userSig); err != nil {
+	if err := verifySignatureAgainstKeySet(envelopeBytes, userSig, keys); err != nil {
 		return nil, fmt.Errorf("%w: signature verification failed", domain.ErrInvalidArgument)
 	}
-
-	ecdhKey, err := pubKey.ECDH()
-	if err != nil {
-		return nil, fmt.Errorf("convert public key to ECDH: %w", err)
-	}
-	pubKeyBytes := ecdhKey.Bytes()
 
 	return &domain.Provenance{
 		Sig: domain.Signature{
 			Signer:         caller.FederatedIdentity,
-			PublicKey:      pubKeyBytes,
 			ContentHash:    envelopeHash,
 			SignatureBytes: userSig,
 		},
@@ -282,6 +278,22 @@ func (s *DeploymentService) buildProvenance(
 		ExpectedGeneration: generation,
 		OutputConstraints:  nil,
 	}, nil
+}
+
+// verifySignatureAgainstKeySet tries each public key in the set until
+// one successfully verifies the ECDSA signature. Returns an error if
+// none succeed.
+func verifySignatureAgainstKeySet(doc, sig []byte, keys []crypto.PublicKey) error {
+	for _, k := range keys {
+		ecKey, ok := k.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if err := fscrypto.VerifyECDSASignature(ecKey, doc, sig); err == nil {
+			return nil
+		}
+	}
+	return fmt.Errorf("no key in the set verified the signature")
 }
 
 // Invalidate bumps the deployment's generation and triggers a

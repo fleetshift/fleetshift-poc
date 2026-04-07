@@ -38,8 +38,8 @@ func (t *storeTx) Targets() domain.TargetRepository        { return &TargetRepo{
 func (t *storeTx) Deployments() domain.DeploymentRepository { return &DeploymentRepo{DB: t.tx} }
 func (t *storeTx) Deliveries() domain.DeliveryRepository    { return &DeliveryRepo{DB: t.tx} }
 func (t *storeTx) Inventory() domain.InventoryRepository    { return &InventoryRepo{DB: t.tx} }
-func (t *storeTx) SigningKeyBindings() domain.SigningKeyBindingRepository {
-	return &SigningKeyBindingRepo{DB: t.tx}
+func (t *storeTx) SignerEnrollments() domain.SignerEnrollmentRepository {
+	return &SignerEnrollmentRepo{DB: t.tx}
 }
 
 func (t *storeTx) Commit() error {

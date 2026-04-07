@@ -46,6 +46,7 @@ type RegistryFactory func(t *testing.T) domain.Registry
 type workflows struct {
 	Orchestration    domain.OrchestrationWorkflow
 	CreateDeployment domain.CreateDeploymentWorkflow
+	ProvisionIdP     domain.ProvisionIdPWorkflow
 }
 
 // Run exercises the [domain.Registry] contract. It uses infraFactory
@@ -475,9 +476,24 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	provSpec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods:      stubAuthMethodRepo{},
+		Discovery:        stubDiscovery{},
+		CreateDeployment: createWf,
+		TrustBundlePlacement: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+	}
+	provWf, err := reg.RegisterProvisionIdP(provSpec)
+	if err != nil {
+		t.Fatalf("RegisterProvisionIdP: %v", err)
+	}
+
 	return workflows{
 		Orchestration:    orchWf,
 		CreateDeployment: createWf,
+		ProvisionIdP:     provWf,
 	}
 }
 
@@ -671,4 +687,25 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.D
 
 func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
 	return nil
+}
+
+// stubAuthMethodRepo is a no-op repository for contract test registration.
+type stubAuthMethodRepo struct{}
+
+func (stubAuthMethodRepo) Save(_ context.Context, _ domain.AuthMethod) error              { return nil }
+func (stubAuthMethodRepo) Get(_ context.Context, _ domain.AuthMethodID) (domain.AuthMethod, error) {
+	return domain.AuthMethod{}, domain.ErrNotFound
+}
+func (stubAuthMethodRepo) List(_ context.Context) ([]domain.AuthMethod, error) { return nil, nil }
+
+// stubDiscovery returns fixed endpoints for contract test registration.
+type stubDiscovery struct{}
+
+func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL) (domain.OIDCMetadata, error) {
+	return domain.OIDCMetadata{
+		Issuer:                issuerURL,
+		AuthorizationEndpoint: domain.EndpointURL(string(issuerURL) + "/authorize"),
+		TokenEndpoint:         domain.EndpointURL(string(issuerURL) + "/token"),
+		JWKSURI:               domain.EndpointURL(string(issuerURL) + "/jwks"),
+	}, nil
 }

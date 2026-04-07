@@ -1,4 +1,4 @@
-# REQUIRED GUIDANCE ON CODE CONVENTIONS
+# Rules for Agents
 
 For how to...
 

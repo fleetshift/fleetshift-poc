@@ -87,6 +87,10 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 	return &createDeploymentWorkflow{spec: spec}, nil
 }
 
+func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
+	return &provisionIdPWorkflow{spec: spec}, nil
+}
+
 // --- OrchestrationWorkflow ---
 
 type orchestrationWorkflow struct {
@@ -154,6 +158,27 @@ func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.Creat
 	}()
 
 	return &createExecution{id: "create-" + string(input.ID), done: done}, nil
+}
+
+// --- ProvisionIdPWorkflow ---
+
+type provisionIdPWorkflow struct {
+	spec *domain.ProvisionIdPWorkflowSpec
+}
+
+func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.ProvisionIdPInput) (domain.Execution[domain.AuthMethod], error) {
+	done := make(chan provisionResult, 1)
+
+	go func() {
+		record := &baseRecord{
+			id:  "provision-idp-" + string(input.AuthMethodID),
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, input)
+		done <- provisionResult{val: val, err: err}
+	}()
+
+	return &provisionExecution{id: "provision-idp-" + string(input.AuthMethodID), done: done}, nil
 }
 
 // --- shared base Record ---
@@ -298,9 +323,30 @@ func (e *createExecution) AwaitResult(ctx context.Context) (domain.Deployment, e
 	}
 }
 
+type provisionResult struct {
+	val domain.AuthMethod
+	err error
+}
+
+type provisionExecution struct {
+	id   string
+	done <-chan provisionResult
+}
+
+func (e *provisionExecution) WorkflowID() string { return e.id }
+func (e *provisionExecution) AwaitResult(ctx context.Context) (domain.AuthMethod, error) {
+	select {
+	case r := <-e.done:
+		return r.val, r.err
+	case <-ctx.Done():
+		return domain.AuthMethod{}, ctx.Err()
+	}
+}
+
 // Compile-time interface checks.
 var (
 	_ domain.Registry                 = (*Registry)(nil)
 	_ domain.OrchestrationWorkflow    = (*orchestrationWorkflow)(nil)
 	_ domain.CreateDeploymentWorkflow = (*createDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow     = (*provisionIdPWorkflow)(nil)
 )

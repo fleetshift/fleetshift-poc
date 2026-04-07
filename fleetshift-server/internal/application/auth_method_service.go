@@ -8,42 +8,35 @@ import (
 )
 
 // AuthMethodService manages authentication methods at runtime.
+// Create delegates to the [domain.ProvisionIdPWorkflow] which
+// atomically persists the auth method and starts a trust-bundle
+// deployment. Get and List read directly from the repository.
 type AuthMethodService struct {
-	Methods   domain.AuthMethodRepository
-	Discovery domain.OIDCDiscoveryClient
+	Methods     domain.AuthMethodRepository
+	ProvisionWF domain.ProvisionIdPWorkflow
 }
 
-// Create validates the auth method, resolves OIDC discovery metadata,
-// and persists it.
+// Create starts the ProvisionIdP workflow which resolves OIDC
+// discovery, persists the auth method, and creates a trust-bundle
+// deployment to distribute the IdP's trust configuration to agents.
 func (s *AuthMethodService) Create(ctx context.Context, id domain.AuthMethodID, method domain.AuthMethod) (domain.AuthMethod, error) {
 	if id == "" {
 		return domain.AuthMethod{}, fmt.Errorf("%w: auth method ID is required", domain.ErrInvalidArgument)
 	}
 
-	method.ID = id
-	if err := method.Validate(); err != nil {
-		return domain.AuthMethod{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
+	exec, err := s.ProvisionWF.Start(ctx, domain.ProvisionIdPInput{
+		AuthMethodID: id,
+		AuthMethod:   method,
+	})
+	if err != nil {
+		return domain.AuthMethod{}, fmt.Errorf("start provision-idp workflow: %w", err)
 	}
 
-	switch method.Type {
-	case domain.AuthMethodTypeOIDC:
-		if method.OIDC.IssuerURL == "" {
-			return domain.AuthMethod{}, fmt.Errorf("%w: issuer_url is required", domain.ErrInvalidArgument)
-		}
-		meta, err := s.Discovery.FetchMetadata(ctx, method.OIDC.IssuerURL)
-		if err != nil {
-			return domain.AuthMethod{}, fmt.Errorf("fetch OIDC discovery: %w", err)
-		}
-		method.OIDC.JWKSURI = meta.JWKSURI
-		method.OIDC.AuthorizationEndpoint = meta.AuthorizationEndpoint
-		method.OIDC.TokenEndpoint = meta.TokenEndpoint
-	
+	result, err := exec.AwaitResult(ctx)
+	if err != nil {
+		return domain.AuthMethod{}, fmt.Errorf("provision-idp workflow: %w", err)
 	}
-
-	if err := s.Methods.Save(ctx, method); err != nil {
-		return domain.AuthMethod{}, fmt.Errorf("save auth method: %w", err)
-	}
-	return method, nil
+	return result, nil
 }
 
 // Get retrieves an auth method by ID.

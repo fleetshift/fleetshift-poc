@@ -90,6 +90,7 @@ type Execution[T any] interface {
 type Registry interface {
 	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
 	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
+	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
 	SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
 }
 
@@ -107,6 +108,12 @@ type OrchestrationWorkflow interface {
 // that can start new instances. Returned by [Registry.RegisterCreateDeployment].
 type CreateDeploymentWorkflow interface {
 	Start(ctx context.Context, input CreateDeploymentInput) (Execution[Deployment], error)
+}
+
+// ProvisionIdPWorkflow is a registered provision-idp workflow that can
+// start new instances. Returned by [Registry.RegisterProvisionIdP].
+type ProvisionIdPWorkflow interface {
+	Start(ctx context.Context, input ProvisionIdPInput) (Execution[AuthMethod], error)
 }
 
 // NewActivity creates an [Activity] from a stable name and a function.

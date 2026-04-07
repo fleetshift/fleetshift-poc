@@ -10,30 +10,28 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-func TestSigningKeyBindingRepo_CreateAndGet(t *testing.T) {
+func TestSignerEnrollmentRepo_CreateAndGet(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	ctx := context.Background()
 
-	binding := domain.SigningKeyBinding{
-		ID: "skb-1",
+	enrollment := domain.SignerEnrollment{
+		ID: "se-1",
 		FederatedIdentity: domain.FederatedIdentity{
 			Subject: "user-1",
 			Issuer:  "https://issuer.example.com",
 		},
-		PublicKeyJWK:        []byte(`{"kty":"EC","crv":"P-256","x":"x","y":"y"}`),
-		Algorithm:           "ES256",
-		KeyBindingDoc:       []byte(`{"subject":"user-1"}`),
-		KeyBindingSignature: []byte("signature-bytes"),
-		IdentityToken:       "id-token-value",
-		CreatedAt:           time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC),
-		ExpiresAt:           time.Date(2027, 3, 11, 0, 0, 0, 0, time.UTC),
+		IdentityToken:   "id-token-value",
+		RegistrySubject: "ghuser1",
+		RegistryID:      "github.com",
+		CreatedAt:       time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:       time.Date(2027, 3, 11, 0, 0, 0, 0, time.UTC),
 	}
 
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	if err := tx.SigningKeyBindings().Create(ctx, binding); err != nil {
+	if err := tx.SignerEnrollments().Create(ctx, enrollment); err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -46,13 +44,13 @@ func TestSigningKeyBindingRepo_CreateAndGet(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	got, err := tx.SigningKeyBindings().Get(ctx, "skb-1")
+	got, err := tx.SignerEnrollments().Get(ctx, "se-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
 
-	if got.ID != "skb-1" {
-		t.Errorf("ID = %q, want %q", got.ID, "skb-1")
+	if got.ID != "se-1" {
+		t.Errorf("ID = %q, want %q", got.ID, "se-1")
 	}
 	if got.Subject != "user-1" {
 		t.Errorf("Subject = %q, want %q", got.Subject, "user-1")
@@ -60,15 +58,18 @@ func TestSigningKeyBindingRepo_CreateAndGet(t *testing.T) {
 	if got.Issuer != "https://issuer.example.com" {
 		t.Errorf("Issuer = %q, want %q", got.Issuer, "https://issuer.example.com")
 	}
-	if got.Algorithm != "ES256" {
-		t.Errorf("Algorithm = %q, want %q", got.Algorithm, "ES256")
-	}
 	if string(got.IdentityToken) != "id-token-value" {
 		t.Errorf("IdentityToken = %q, want %q", got.IdentityToken, "id-token-value")
 	}
+	if string(got.RegistrySubject) != "ghuser1" {
+		t.Errorf("RegistrySubject = %q, want %q", got.RegistrySubject, "ghuser1")
+	}
+	if string(got.RegistryID) != "github.com" {
+		t.Errorf("RegistryID = %q, want %q", got.RegistryID, "github.com")
+	}
 }
 
-func TestSigningKeyBindingRepo_GetNotFound(t *testing.T) {
+func TestSignerEnrollmentRepo_GetNotFound(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	ctx := context.Background()
 
@@ -78,37 +79,35 @@ func TestSigningKeyBindingRepo_GetNotFound(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	_, err = tx.SigningKeyBindings().Get(ctx, "nonexistent")
+	_, err = tx.SignerEnrollments().Get(ctx, "nonexistent")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }
 
-func TestSigningKeyBindingRepo_CreateDuplicate(t *testing.T) {
+func TestSignerEnrollmentRepo_CreateDuplicate(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	ctx := context.Background()
 
-	binding := domain.SigningKeyBinding{
-		ID: "skb-dup",
+	enrollment := domain.SignerEnrollment{
+		ID: "se-dup",
 		FederatedIdentity: domain.FederatedIdentity{
 			Subject: "user-1",
 			Issuer:  "https://issuer.example.com",
 		},
-		PublicKeyJWK:        []byte(`{}`),
-		Algorithm:           "ES256",
-		KeyBindingDoc:       []byte(`{}`),
-		KeyBindingSignature: []byte("sig"),
-		IdentityToken:       "tok",
-		CreatedAt:           time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		ExpiresAt:           time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
+		IdentityToken:   "tok",
+		RegistrySubject: "ghuser1",
+		RegistryID:      "github.com",
+		CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:       time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
 
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	if err := tx.SigningKeyBindings().Create(ctx, binding); err != nil {
-		t.Fatalf("first Create: %v", err)
+	if err := tx.SignerEnrollments().Create(ctx, enrollment); err != nil {
+		t.Fatalf("Create: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
@@ -120,62 +119,54 @@ func TestSigningKeyBindingRepo_CreateDuplicate(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	err = tx.SigningKeyBindings().Create(ctx, binding)
+	err = tx.SignerEnrollments().Create(ctx, enrollment)
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("expected ErrAlreadyExists, got: %v", err)
 	}
 }
 
-func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
+func TestSignerEnrollmentRepo_ListBySubject(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	ctx := context.Background()
 
-	bindings := []domain.SigningKeyBinding{
+	enrollments := []domain.SignerEnrollment{
 		{
-			ID: "skb-a",
+			ID: "se-a",
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "user-1",
 				Issuer:  "https://issuer.example.com",
 			},
-			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
-			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
-			IdentityToken: "tok-a",
+			IdentityToken: "tok-a", RegistrySubject: "ghuser1", RegistryID: "github.com",
 			CreatedAt: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 			ExpiresAt: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-b",
+			ID: "se-b",
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "user-1",
 				Issuer:  "https://issuer.example.com",
 			},
-			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
-			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
-			IdentityToken: "tok-b",
+			IdentityToken: "tok-b", RegistrySubject: "ghuser1", RegistryID: "github.com",
 			CreatedAt: time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC),
 			ExpiresAt: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-c",
+			ID: "se-c",
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "user-2",
 				Issuer:  "https://issuer.example.com",
 			},
-			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
-			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
-			IdentityToken: "tok-c",
+			IdentityToken: "tok-c", RegistrySubject: "ghuser2", RegistryID: "github.com",
 			CreatedAt: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 			ExpiresAt: time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC),
 		},
 		{
-			ID: "skb-d",
+			ID: "se-d",
 			FederatedIdentity: domain.FederatedIdentity{
 				Subject: "user-1",
 				Issuer:  "https://other-issuer.example.com",
 			},
-			PublicKeyJWK: []byte(`{}`), Algorithm: "ES256",
-			KeyBindingDoc: []byte(`{}`), KeyBindingSignature: []byte("sig"),
-			IdentityToken: "tok-d",
+			IdentityToken: "tok-d", RegistrySubject: "ghuser1", RegistryID: "github.com",
 			CreatedAt: time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC),
 			ExpiresAt: time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC),
 		},
@@ -185,9 +176,9 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
-	for _, b := range bindings {
-		if err := tx.SigningKeyBindings().Create(ctx, b); err != nil {
-			t.Fatalf("Create %s: %v", b.ID, err)
+	for _, e := range enrollments {
+		if err := tx.SignerEnrollments().Create(ctx, e); err != nil {
+			t.Fatalf("Create %s: %v", e.ID, err)
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -200,7 +191,7 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	got, err := tx.SigningKeyBindings().ListBySubject(ctx, domain.FederatedIdentity{
+	got, err := tx.SignerEnrollments().ListBySubject(ctx, domain.FederatedIdentity{
 		Subject: "user-1",
 		Issuer:  "https://issuer.example.com",
 	})
@@ -208,14 +199,14 @@ func TestSigningKeyBindingRepo_ListBySubject(t *testing.T) {
 		t.Fatalf("ListBySubject: %v", err)
 	}
 	if len(got) != 2 {
-		t.Fatalf("got %d bindings, want 2", len(got))
+		t.Fatalf("got %d enrollments, want 2", len(got))
 	}
 
-	ids := map[domain.SigningKeyBindingID]bool{}
-	for _, b := range got {
-		ids[b.ID] = true
+	ids := map[domain.SignerEnrollmentID]bool{}
+	for _, e := range got {
+		ids[e.ID] = true
 	}
-	if !ids["skb-a"] || !ids["skb-b"] {
-		t.Errorf("expected skb-a and skb-b, got %v", ids)
+	if !ids["se-a"] || !ids["se-b"] {
+		t.Errorf("expected se-a and se-b, got %v", ids)
 	}
 }

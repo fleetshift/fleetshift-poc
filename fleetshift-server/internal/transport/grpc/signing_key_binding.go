@@ -14,60 +14,56 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-const signingKeyBindingCollection = "signingKeyBindings/"
+const signerEnrollmentCollection = "signerEnrollments/"
 
-// SigningKeyBindingServer implements [pb.SigningKeyBindingServiceServer].
-type SigningKeyBindingServer struct {
-	pb.UnimplementedSigningKeyBindingServiceServer
-	SigningKeys *application.SigningKeyService
+// SignerEnrollmentServer implements [pb.SignerEnrollmentServiceServer].
+type SignerEnrollmentServer struct {
+	pb.UnimplementedSignerEnrollmentServiceServer
+	Enrollments *application.SignerEnrollmentService
 }
 
-func (s *SigningKeyBindingServer) CreateSigningKeyBinding(ctx context.Context, req *pb.CreateSigningKeyBindingRequest) (*pb.SigningKeyBinding, error) {
-	if req.GetSigningKeyBindingId() == "" {
-		return nil, status.Error(codes.InvalidArgument, "signing_key_binding_id is required")
+func (s *SignerEnrollmentServer) CreateSignerEnrollment(ctx context.Context, req *pb.CreateSignerEnrollmentRequest) (*pb.SignerEnrollment, error) {
+	if req.GetSignerEnrollmentId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "signer_enrollment_id is required")
 	}
 
-	binding, err := s.SigningKeys.Create(ctx, application.CreateSigningKeyBindingInput{
-		ID:                  domain.SigningKeyBindingID(req.GetSigningKeyBindingId()),
-		KeyBindingDoc:       req.GetKeyBindingDoc(),
-		KeyBindingSignature: req.GetKeyBindingSignature(),
-		IdentityToken:       req.GetIdentityToken(),
+	enrollment, err := s.Enrollments.Create(ctx, application.CreateSignerEnrollmentInput{
+		ID:            domain.SignerEnrollmentID(req.GetSignerEnrollmentId()),
+		IdentityToken: req.GetIdentityToken(),
 	})
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	return signingKeyBindingToProto(binding), nil
+	return signerEnrollmentToProto(enrollment), nil
 }
 
-func signingKeyBindingName(id domain.SigningKeyBindingID) string {
-	return signingKeyBindingCollection + string(id)
+func signerEnrollmentName(id domain.SignerEnrollmentID) string {
+	return signerEnrollmentCollection + string(id)
 }
 
-func parseSigningKeyBindingName(name string) (domain.SigningKeyBindingID, error) {
-	id, ok := strings.CutPrefix(name, signingKeyBindingCollection)
+func parseSignerEnrollmentName(name string) (domain.SignerEnrollmentID, error) {
+	id, ok := strings.CutPrefix(name, signerEnrollmentCollection)
 	if !ok || id == "" {
-		return "", fmt.Errorf("name must have format %s{id}", signingKeyBindingCollection)
+		return "", fmt.Errorf("name must have format %s{id}", signerEnrollmentCollection)
 	}
-	return domain.SigningKeyBindingID(id), nil
+	return domain.SignerEnrollmentID(id), nil
 }
 
-func signingKeyBindingToProto(b domain.SigningKeyBinding) *pb.SigningKeyBinding {
-	out := &pb.SigningKeyBinding{
-		Name:                signingKeyBindingName(b.ID),
-		Subject:             string(b.Subject),
-		Issuer:              string(b.Issuer),
-		PublicKeyJwk:        b.PublicKeyJWK,
-		Algorithm:           b.Algorithm,
-		KeyBindingDoc:       b.KeyBindingDoc,
-		KeyBindingSignature: b.KeyBindingSignature,
-		IdentityToken:       string(b.IdentityToken),
+func signerEnrollmentToProto(e domain.SignerEnrollment) *pb.SignerEnrollment {
+	out := &pb.SignerEnrollment{
+		Name:            signerEnrollmentName(e.ID),
+		Subject:         string(e.Subject),
+		Issuer:          string(e.Issuer),
+		IdentityToken:   string(e.IdentityToken),
+		RegistrySubject: string(e.RegistrySubject),
+		RegistryId:      string(e.RegistryID),
 	}
-	if !b.CreatedAt.IsZero() {
-		out.CreateTime = timestamppb.New(b.CreatedAt)
+	if !e.CreatedAt.IsZero() {
+		out.CreateTime = timestamppb.New(e.CreatedAt)
 	}
-	if !b.ExpiresAt.IsZero() {
-		out.ExpireTime = timestamppb.New(b.ExpiresAt)
+	if !e.ExpiresAt.IsZero() {
+		out.ExpireTime = timestamppb.New(e.ExpiresAt)
 	}
 	return out
 }

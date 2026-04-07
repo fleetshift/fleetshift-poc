@@ -87,6 +87,12 @@ func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
 			Audience:              domain.Audience(oc.GetAudience()),
 			KeyEnrollmentAudience: domain.Audience(oc.GetKeyEnrollmentAudience()),
 		}
+		if rsm := oc.GetRegistrySubjectMapping(); rsm != nil {
+			m.OIDC.RegistrySubjectMapping = &domain.RegistrySubjectMapping{
+				RegistryID: domain.KeyRegistryID(rsm.GetRegistryId()),
+				Expression: rsm.GetExpression(),
+			}
+		}
 	default:
 		return m, fmt.Errorf("unsupported auth method type: %v", p.GetType())
 	}
@@ -101,7 +107,7 @@ func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 	case domain.AuthMethodTypeOIDC:
 		out.Type = pb.AuthMethod_TYPE_OIDC
 		if m.OIDC != nil {
-			out.OidcConfig = &pb.OIDCConfig{
+			oc := &pb.OIDCConfig{
 				IssuerUrl:             string(m.OIDC.IssuerURL),
 				Audience:              string(m.OIDC.Audience),
 				AuthorizationEndpoint: string(m.OIDC.AuthorizationEndpoint),
@@ -109,6 +115,13 @@ func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 				JwksUri:               string(m.OIDC.JWKSURI),
 				KeyEnrollmentAudience: string(m.OIDC.KeyEnrollmentAudience),
 			}
+			if m.OIDC.RegistrySubjectMapping != nil {
+				oc.RegistrySubjectMapping = &pb.RegistrySubjectMapping{
+					RegistryId: string(m.OIDC.RegistrySubjectMapping.RegistryID),
+					Expression: m.OIDC.RegistrySubjectMapping.Expression,
+				}
+			}
+			out.OidcConfig = oc
 		}
 	}
 	return out

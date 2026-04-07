@@ -5,6 +5,7 @@ package fleetshift.v1;
 option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
 
 import "google/api/field_behavior.proto";
+import "fleetshift/v1/registry_subject_mapping.proto";
 
 // OIDCConfig holds OIDC-specific configuration for an authentication method.
 message OIDCConfig {
@@ -28,4 +29,9 @@ message OIDCConfig {
   // with this audience, isolating enrollment tokens from platform
   // access tokens and managed cluster tokens.
   string key_enrollment_audience = 6;
+
+  // Maps ID token claims to a key registry subject. When set, the
+  // delivery agent derives the registry subject from the signer's
+  // identity token using this mapping.
+  RegistrySubjectMapping registry_subject_mapping = 7;
 }

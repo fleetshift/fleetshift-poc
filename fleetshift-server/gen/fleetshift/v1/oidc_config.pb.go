@@ -40,8 +40,12 @@ type OIDCConfig struct {
 	// with this audience, isolating enrollment tokens from platform
 	// access tokens and managed cluster tokens.
 	KeyEnrollmentAudience string `protobuf:"bytes,6,opt,name=key_enrollment_audience,json=keyEnrollmentAudience,proto3" json:"key_enrollment_audience,omitempty"`
-	unknownFields         protoimpl.UnknownFields
-	sizeCache             protoimpl.SizeCache
+	// Maps ID token claims to a key registry subject. When set, the
+	// delivery agent derives the registry subject from the signer's
+	// identity token using this mapping.
+	RegistrySubjectMapping *RegistrySubjectMapping `protobuf:"bytes,7,opt,name=registry_subject_mapping,json=registrySubjectMapping,proto3" json:"registry_subject_mapping,omitempty"`
+	unknownFields          protoimpl.UnknownFields
+	sizeCache              protoimpl.SizeCache
 }
 
 func (x *OIDCConfig) Reset() {
@@ -116,11 +120,18 @@ func (x *OIDCConfig) GetKeyEnrollmentAudience() string {
 	return ""
 }
 
+func (x *OIDCConfig) GetRegistrySubjectMapping() *RegistrySubjectMapping {
+	if x != nil {
+		return x.RegistrySubjectMapping
+	}
+	return nil
+}
+
 var File_fleetshift_v1_oidc_config_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_oidc_config_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffleetshift/v1/oidc_config.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"\x87\x02\n" +
+	"\x1ffleetshift/v1/oidc_config.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a,fleetshift/v1/registry_subject_mapping.proto\"\xe8\x02\n" +
 	"\n" +
 	"OIDCConfig\x12\x1d\n" +
 	"\n" +
@@ -129,7 +140,8 @@ const file_fleetshift_v1_oidc_config_proto_rawDesc = "" +
 	"\x16authorization_endpoint\x18\x03 \x01(\tB\x03\xe0A\x03R\x15authorizationEndpoint\x12*\n" +
 	"\x0etoken_endpoint\x18\x04 \x01(\tB\x03\xe0A\x03R\rtokenEndpoint\x12\x1e\n" +
 	"\bjwks_uri\x18\x05 \x01(\tB\x03\xe0A\x03R\ajwksUri\x126\n" +
-	"\x17key_enrollment_audience\x18\x06 \x01(\tR\x15keyEnrollmentAudienceBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\x17key_enrollment_audience\x18\x06 \x01(\tR\x15keyEnrollmentAudience\x12_\n" +
+	"\x18registry_subject_mapping\x18\a \x01(\v2%.fleetshift.v1.RegistrySubjectMappingR\x16registrySubjectMappingBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_oidc_config_proto_rawDescOnce sync.Once
@@ -145,14 +157,16 @@ func file_fleetshift_v1_oidc_config_proto_rawDescGZIP() []byte {
 
 var file_fleetshift_v1_oidc_config_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_fleetshift_v1_oidc_config_proto_goTypes = []any{
-	(*OIDCConfig)(nil), // 0: fleetshift.v1.OIDCConfig
+	(*OIDCConfig)(nil),             // 0: fleetshift.v1.OIDCConfig
+	(*RegistrySubjectMapping)(nil), // 1: fleetshift.v1.RegistrySubjectMapping
 }
 var file_fleetshift_v1_oidc_config_proto_depIdxs = []int32{
-	0, // [0:0] is the sub-list for method output_type
-	0, // [0:0] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: fleetshift.v1.OIDCConfig.registry_subject_mapping:type_name -> fleetshift.v1.RegistrySubjectMapping
+	1, // [1:1] is the sub-list for method output_type
+	1, // [1:1] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_oidc_config_proto_init() }
@@ -160,6 +174,7 @@ func file_fleetshift_v1_oidc_config_proto_init() {
 	if File_fleetshift_v1_oidc_config_proto != nil {
 		return
 	}
+	file_fleetshift_v1_registry_subject_mapping_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

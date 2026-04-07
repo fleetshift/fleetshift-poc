@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -231,22 +230,23 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 }
 
 func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
-	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
-	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+	agent := kubernetes.NewAgent()
 
+	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
-			"api_server": "https://127.0.0.1:6443",
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": trustBundle,
 		},
 	}
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			KeyBinding: domain.SigningKeyBinding{
-				FederatedIdentity: domain.FederatedIdentity{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
 					Issuer: "https://untrusted.example.com",
 				},
 			},
@@ -262,9 +262,8 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
-	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
-	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testing.T) {
+	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
@@ -277,8 +276,78 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			KeyBinding: domain.SigningKeyBinding{
-				FederatedIdentity: domain.FederatedIdentity{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Deliver should not return error: %v", err)
+	}
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+}
+
+func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
+	agent := kubernetes.NewAgent()
+
+	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": trustBundle,
+		},
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	// First delivery builds and caches the verifier.
+	result1, _ := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if result1.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("first: State = %q, want AuthFailed", result1.State)
+	}
+
+	// Second delivery with same trust bundle should reuse cached verifier.
+	result2, _ := agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if result2.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("second: State = %q, want AuthFailed", result2.State)
+	}
+}
+
+func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
+	agent := kubernetes.NewAgent()
+
+	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": trustBundle,
+		},
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
 					Issuer: "https://untrusted.example.com",
 				},
 			},

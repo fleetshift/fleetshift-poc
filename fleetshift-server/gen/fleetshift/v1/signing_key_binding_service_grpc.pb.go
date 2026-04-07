@@ -19,110 +19,110 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	SigningKeyBindingService_CreateSigningKeyBinding_FullMethodName = "/fleetshift.v1.SigningKeyBindingService/CreateSigningKeyBinding"
+	SignerEnrollmentService_CreateSignerEnrollment_FullMethodName = "/fleetshift.v1.SignerEnrollmentService/CreateSignerEnrollment"
 )
 
-// SigningKeyBindingServiceClient is the client API for SigningKeyBindingService service.
+// SignerEnrollmentServiceClient is the client API for SignerEnrollmentService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// SigningKeyBindingService manages user signing key enrollments.
-type SigningKeyBindingServiceClient interface {
-	// CreateSigningKeyBinding enrolls a signing key by validating and
-	// storing a key binding bundle.
-	CreateSigningKeyBinding(ctx context.Context, in *CreateSigningKeyBindingRequest, opts ...grpc.CallOption) (*SigningKeyBinding, error)
+// SignerEnrollmentService manages user signer enrollments.
+type SignerEnrollmentServiceClient interface {
+	// CreateSignerEnrollment enrolls a signer by verifying the ID token
+	// and deriving the registry subject via CEL claim mapping.
+	CreateSignerEnrollment(ctx context.Context, in *CreateSignerEnrollmentRequest, opts ...grpc.CallOption) (*SignerEnrollment, error)
 }
 
-type signingKeyBindingServiceClient struct {
+type signerEnrollmentServiceClient struct {
 	cc grpc.ClientConnInterface
 }
 
-func NewSigningKeyBindingServiceClient(cc grpc.ClientConnInterface) SigningKeyBindingServiceClient {
-	return &signingKeyBindingServiceClient{cc}
+func NewSignerEnrollmentServiceClient(cc grpc.ClientConnInterface) SignerEnrollmentServiceClient {
+	return &signerEnrollmentServiceClient{cc}
 }
 
-func (c *signingKeyBindingServiceClient) CreateSigningKeyBinding(ctx context.Context, in *CreateSigningKeyBindingRequest, opts ...grpc.CallOption) (*SigningKeyBinding, error) {
+func (c *signerEnrollmentServiceClient) CreateSignerEnrollment(ctx context.Context, in *CreateSignerEnrollmentRequest, opts ...grpc.CallOption) (*SignerEnrollment, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SigningKeyBinding)
-	err := c.cc.Invoke(ctx, SigningKeyBindingService_CreateSigningKeyBinding_FullMethodName, in, out, cOpts...)
+	out := new(SignerEnrollment)
+	err := c.cc.Invoke(ctx, SignerEnrollmentService_CreateSignerEnrollment_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// SigningKeyBindingServiceServer is the server API for SigningKeyBindingService service.
-// All implementations must embed UnimplementedSigningKeyBindingServiceServer
+// SignerEnrollmentServiceServer is the server API for SignerEnrollmentService service.
+// All implementations must embed UnimplementedSignerEnrollmentServiceServer
 // for forward compatibility.
 //
-// SigningKeyBindingService manages user signing key enrollments.
-type SigningKeyBindingServiceServer interface {
-	// CreateSigningKeyBinding enrolls a signing key by validating and
-	// storing a key binding bundle.
-	CreateSigningKeyBinding(context.Context, *CreateSigningKeyBindingRequest) (*SigningKeyBinding, error)
-	mustEmbedUnimplementedSigningKeyBindingServiceServer()
+// SignerEnrollmentService manages user signer enrollments.
+type SignerEnrollmentServiceServer interface {
+	// CreateSignerEnrollment enrolls a signer by verifying the ID token
+	// and deriving the registry subject via CEL claim mapping.
+	CreateSignerEnrollment(context.Context, *CreateSignerEnrollmentRequest) (*SignerEnrollment, error)
+	mustEmbedUnimplementedSignerEnrollmentServiceServer()
 }
 
-// UnimplementedSigningKeyBindingServiceServer must be embedded to have
+// UnimplementedSignerEnrollmentServiceServer must be embedded to have
 // forward compatible implementations.
 //
 // NOTE: this should be embedded by value instead of pointer to avoid a nil
 // pointer dereference when methods are called.
-type UnimplementedSigningKeyBindingServiceServer struct{}
+type UnimplementedSignerEnrollmentServiceServer struct{}
 
-func (UnimplementedSigningKeyBindingServiceServer) CreateSigningKeyBinding(context.Context, *CreateSigningKeyBindingRequest) (*SigningKeyBinding, error) {
-	return nil, status.Error(codes.Unimplemented, "method CreateSigningKeyBinding not implemented")
+func (UnimplementedSignerEnrollmentServiceServer) CreateSignerEnrollment(context.Context, *CreateSignerEnrollmentRequest) (*SignerEnrollment, error) {
+	return nil, status.Error(codes.Unimplemented, "method CreateSignerEnrollment not implemented")
 }
-func (UnimplementedSigningKeyBindingServiceServer) mustEmbedUnimplementedSigningKeyBindingServiceServer() {
+func (UnimplementedSignerEnrollmentServiceServer) mustEmbedUnimplementedSignerEnrollmentServiceServer() {
 }
-func (UnimplementedSigningKeyBindingServiceServer) testEmbeddedByValue() {}
+func (UnimplementedSignerEnrollmentServiceServer) testEmbeddedByValue() {}
 
-// UnsafeSigningKeyBindingServiceServer may be embedded to opt out of forward compatibility for this service.
-// Use of this interface is not recommended, as added methods to SigningKeyBindingServiceServer will
+// UnsafeSignerEnrollmentServiceServer may be embedded to opt out of forward compatibility for this service.
+// Use of this interface is not recommended, as added methods to SignerEnrollmentServiceServer will
 // result in compilation errors.
-type UnsafeSigningKeyBindingServiceServer interface {
-	mustEmbedUnimplementedSigningKeyBindingServiceServer()
+type UnsafeSignerEnrollmentServiceServer interface {
+	mustEmbedUnimplementedSignerEnrollmentServiceServer()
 }
 
-func RegisterSigningKeyBindingServiceServer(s grpc.ServiceRegistrar, srv SigningKeyBindingServiceServer) {
-	// If the following call panics, it indicates UnimplementedSigningKeyBindingServiceServer was
+func RegisterSignerEnrollmentServiceServer(s grpc.ServiceRegistrar, srv SignerEnrollmentServiceServer) {
+	// If the following call panics, it indicates UnimplementedSignerEnrollmentServiceServer was
 	// embedded by pointer and is nil.  This will cause panics if an
 	// unimplemented method is ever invoked, so we test this at initialization
 	// time to prevent it from happening at runtime later due to I/O.
 	if t, ok := srv.(interface{ testEmbeddedByValue() }); ok {
 		t.testEmbeddedByValue()
 	}
-	s.RegisterService(&SigningKeyBindingService_ServiceDesc, srv)
+	s.RegisterService(&SignerEnrollmentService_ServiceDesc, srv)
 }
 
-func _SigningKeyBindingService_CreateSigningKeyBinding_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(CreateSigningKeyBindingRequest)
+func _SignerEnrollmentService_CreateSignerEnrollment_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(CreateSignerEnrollmentRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(SigningKeyBindingServiceServer).CreateSigningKeyBinding(ctx, in)
+		return srv.(SignerEnrollmentServiceServer).CreateSignerEnrollment(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: SigningKeyBindingService_CreateSigningKeyBinding_FullMethodName,
+		FullMethod: SignerEnrollmentService_CreateSignerEnrollment_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(SigningKeyBindingServiceServer).CreateSigningKeyBinding(ctx, req.(*CreateSigningKeyBindingRequest))
+		return srv.(SignerEnrollmentServiceServer).CreateSignerEnrollment(ctx, req.(*CreateSignerEnrollmentRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-// SigningKeyBindingService_ServiceDesc is the grpc.ServiceDesc for SigningKeyBindingService service.
+// SignerEnrollmentService_ServiceDesc is the grpc.ServiceDesc for SignerEnrollmentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
-var SigningKeyBindingService_ServiceDesc = grpc.ServiceDesc{
-	ServiceName: "fleetshift.v1.SigningKeyBindingService",
-	HandlerType: (*SigningKeyBindingServiceServer)(nil),
+var SignerEnrollmentService_ServiceDesc = grpc.ServiceDesc{
+	ServiceName: "fleetshift.v1.SignerEnrollmentService",
+	HandlerType: (*SignerEnrollmentServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "CreateSigningKeyBinding",
-			Handler:    _SigningKeyBindingService_CreateSigningKeyBinding_Handler,
+			MethodName: "CreateSignerEnrollment",
+			Handler:    _SignerEnrollmentService_CreateSignerEnrollment_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

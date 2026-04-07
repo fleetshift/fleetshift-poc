@@ -661,3 +661,118 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 		t.Errorf("probes[1].clusterName = %q, want %q", agentObs.probes[1].clusterName, "b")
 	}
 }
+
+func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
+	fp := newFakeProvider()
+	agent := kind.NewAgent(fakeFactory(fp))
+
+	trustEntry := domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks",
+		EnrollmentAudience: "fleetshift-enroll",
+		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+			RegistryID: "github.com",
+			Expression: "claims.preferred_username",
+		},
+	}
+	raw, err := json.Marshal(trustEntry)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	manifests := []domain.Manifest{{
+		ResourceType: domain.TrustBundleResourceType,
+		Raw:          raw,
+	}}
+
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Fatalf("State = %q, want Accepted", result.State)
+	}
+
+	done := <-obs.done
+	if done.State != domain.DeliveryStateDelivered {
+		t.Fatalf("async State = %q, want Delivered", done.State)
+	}
+
+	bundles := agent.TrustBundles()
+	if len(bundles) != 1 {
+		t.Fatalf("trust bundles len = %d, want 1", len(bundles))
+	}
+	if bundles[0].IssuerURL != "https://issuer.example.com" {
+		t.Errorf("issuer = %q", bundles[0].IssuerURL)
+	}
+	if bundles[0].RegistrySubjectMapping == nil || bundles[0].RegistrySubjectMapping.Expression != "claims.preferred_username" {
+		t.Errorf("registry subject mapping = %+v", bundles[0].RegistrySubjectMapping)
+	}
+}
+
+func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
+	fp := newFakeProvider()
+	agent := kind.NewAgent(fakeFactory(fp))
+
+	trustEntry := domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks",
+		EnrollmentAudience: "enroll",
+	}
+	trustRaw, _ := json.Marshal(trustEntry)
+
+	// First deliver a trust bundle.
+	trustManifests := []domain.Manifest{{
+		ResourceType: domain.TrustBundleResourceType,
+		Raw:          trustRaw,
+	}}
+	trustObs := newChannelDeliveryObserver()
+	trustSignaler := newChannelSignaler(trustObs)
+	_, _ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil, trustSignaler)
+	<-trustObs.done
+
+	// Now deliver a cluster spec.
+	spec := kind.ClusterSpec{Name: "trust-test"}
+	specRaw, _ := json.Marshal(spec)
+	clusterManifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          specRaw,
+	}}
+	clusterObs := newChannelDeliveryObserver()
+	clusterSignaler := newChannelSignaler(clusterObs)
+	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil, clusterSignaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Fatalf("State = %q, want Accepted", result.State)
+	}
+
+	done := <-clusterObs.done
+	if done.State != domain.DeliveryStateDelivered {
+		t.Fatalf("async State = %q (message: %s)", done.State, done.Message)
+	}
+
+	if len(done.ProvisionedTargets) != 1 {
+		t.Fatalf("provisioned targets len = %d, want 1", len(done.ProvisionedTargets))
+	}
+	pt := done.ProvisionedTargets[0]
+	trustJSON := pt.Properties["trust_bundle"]
+	if trustJSON == "" {
+		t.Fatal("provisioned target missing trust_bundle property")
+	}
+
+	var entries []domain.TrustBundleEntry
+	if err := json.Unmarshal([]byte(trustJSON), &entries); err != nil {
+		t.Fatalf("unmarshal trust_bundle: %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("entries len = %d, want 1", len(entries))
+	}
+	if entries[0].IssuerURL != "https://issuer.example.com" {
+		t.Errorf("issuer = %q", entries[0].IssuerURL)
+	}
+}

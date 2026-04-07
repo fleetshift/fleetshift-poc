@@ -23,52 +23,47 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// SigningKeyBinding ties a user's signing public key to their IdP
-// identity via a self-certifying key binding bundle. The bundle's
-// identity token is verified against the tenant IdP JWKS, and the
-// proof-of-possession signature proves the user controls the
-// corresponding private key.
-type SigningKeyBinding struct {
+// SignerEnrollment records that a user enrolled their signing identity
+// with the platform. The external key registry (identified by
+// registry_id) is the authority for the user's public keys.
+type SignerEnrollment struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Resource name. Format: signingKeyBindings/{signing_key_binding}
+	// Resource name. Format: signerEnrollments/{signer_enrollment}
 	Name string `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	// Subject identifier from the identity token (jwt.sub).
 	Subject string `protobuf:"bytes,2,opt,name=subject,proto3" json:"subject,omitempty"`
 	// OIDC issuer URL from the identity token (jwt.iss).
 	Issuer string `protobuf:"bytes,3,opt,name=issuer,proto3" json:"issuer,omitempty"`
-	// JWK-encoded public key.
-	PublicKeyJwk []byte `protobuf:"bytes,4,opt,name=public_key_jwk,json=publicKeyJwk,proto3" json:"public_key_jwk,omitempty"`
-	// Signing algorithm (e.g. "ES256").
-	Algorithm string `protobuf:"bytes,5,opt,name=algorithm,proto3" json:"algorithm,omitempty"`
-	// Canonical JSON key binding document that was signed.
-	KeyBindingDoc []byte `protobuf:"bytes,6,opt,name=key_binding_doc,json=keyBindingDoc,proto3" json:"key_binding_doc,omitempty"`
-	// ECDSA signature over key_binding_doc (proof of possession).
-	KeyBindingSignature []byte `protobuf:"bytes,7,opt,name=key_binding_signature,json=keyBindingSignature,proto3" json:"key_binding_signature,omitempty"`
 	// Purpose-scoped ID token from the tenant IdP, included in the
-	// bundle for delivery agent verification.
-	IdentityToken string `protobuf:"bytes,8,opt,name=identity_token,json=identityToken,proto3" json:"identity_token,omitempty"`
-	// When the key binding was created.
-	CreateTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
-	// When the key binding expires.
-	ExpireTime    *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
+	// enrollment for delivery agent verification.
+	IdentityToken string `protobuf:"bytes,4,opt,name=identity_token,json=identityToken,proto3" json:"identity_token,omitempty"`
+	// Registry subject derived from CEL claim mapping at enrollment time
+	// (e.g. a GitHub username).
+	RegistrySubject string `protobuf:"bytes,5,opt,name=registry_subject,json=registrySubject,proto3" json:"registry_subject,omitempty"`
+	// Which external key registry holds the user's signing keys.
+	RegistryId string `protobuf:"bytes,6,opt,name=registry_id,json=registryId,proto3" json:"registry_id,omitempty"`
+	// When the enrollment was created.
+	CreateTime *timestamppb.Timestamp `protobuf:"bytes,7,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
+	// When the enrollment expires.
+	ExpireTime    *timestamppb.Timestamp `protobuf:"bytes,8,opt,name=expire_time,json=expireTime,proto3" json:"expire_time,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *SigningKeyBinding) Reset() {
-	*x = SigningKeyBinding{}
+func (x *SignerEnrollment) Reset() {
+	*x = SignerEnrollment{}
 	mi := &file_fleetshift_v1_signing_key_binding_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *SigningKeyBinding) String() string {
+func (x *SignerEnrollment) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*SigningKeyBinding) ProtoMessage() {}
+func (*SignerEnrollment) ProtoMessage() {}
 
-func (x *SigningKeyBinding) ProtoReflect() protoreflect.Message {
+func (x *SignerEnrollment) ProtoReflect() protoreflect.Message {
 	mi := &file_fleetshift_v1_signing_key_binding_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -80,75 +75,61 @@ func (x *SigningKeyBinding) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use SigningKeyBinding.ProtoReflect.Descriptor instead.
-func (*SigningKeyBinding) Descriptor() ([]byte, []int) {
+// Deprecated: Use SignerEnrollment.ProtoReflect.Descriptor instead.
+func (*SignerEnrollment) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_signing_key_binding_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *SigningKeyBinding) GetName() string {
+func (x *SignerEnrollment) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *SigningKeyBinding) GetSubject() string {
+func (x *SignerEnrollment) GetSubject() string {
 	if x != nil {
 		return x.Subject
 	}
 	return ""
 }
 
-func (x *SigningKeyBinding) GetIssuer() string {
+func (x *SignerEnrollment) GetIssuer() string {
 	if x != nil {
 		return x.Issuer
 	}
 	return ""
 }
 
-func (x *SigningKeyBinding) GetPublicKeyJwk() []byte {
-	if x != nil {
-		return x.PublicKeyJwk
-	}
-	return nil
-}
-
-func (x *SigningKeyBinding) GetAlgorithm() string {
-	if x != nil {
-		return x.Algorithm
-	}
-	return ""
-}
-
-func (x *SigningKeyBinding) GetKeyBindingDoc() []byte {
-	if x != nil {
-		return x.KeyBindingDoc
-	}
-	return nil
-}
-
-func (x *SigningKeyBinding) GetKeyBindingSignature() []byte {
-	if x != nil {
-		return x.KeyBindingSignature
-	}
-	return nil
-}
-
-func (x *SigningKeyBinding) GetIdentityToken() string {
+func (x *SignerEnrollment) GetIdentityToken() string {
 	if x != nil {
 		return x.IdentityToken
 	}
 	return ""
 }
 
-func (x *SigningKeyBinding) GetCreateTime() *timestamppb.Timestamp {
+func (x *SignerEnrollment) GetRegistrySubject() string {
+	if x != nil {
+		return x.RegistrySubject
+	}
+	return ""
+}
+
+func (x *SignerEnrollment) GetRegistryId() string {
+	if x != nil {
+		return x.RegistryId
+	}
+	return ""
+}
+
+func (x *SignerEnrollment) GetCreateTime() *timestamppb.Timestamp {
 	if x != nil {
 		return x.CreateTime
 	}
 	return nil
 }
 
-func (x *SigningKeyBinding) GetExpireTime() *timestamppb.Timestamp {
+func (x *SignerEnrollment) GetExpireTime() *timestamppb.Timestamp {
 	if x != nil {
 		return x.ExpireTime
 	}
@@ -159,22 +140,20 @@ var File_fleetshift_v1_signing_key_binding_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_signing_key_binding_proto_rawDesc = "" +
 	"\n" +
-	"'fleetshift/v1/signing_key_binding.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x9c\x04\n" +
-	"\x11SigningKeyBinding\x12\x17\n" +
+	"'fleetshift/v1/signing_key_binding.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xb9\x03\n" +
+	"\x10SignerEnrollment\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x1d\n" +
 	"\asubject\x18\x02 \x01(\tB\x03\xe0A\x03R\asubject\x12\x1b\n" +
-	"\x06issuer\x18\x03 \x01(\tB\x03\xe0A\x03R\x06issuer\x12)\n" +
-	"\x0epublic_key_jwk\x18\x04 \x01(\fB\x03\xe0A\x03R\fpublicKeyJwk\x12!\n" +
-	"\talgorithm\x18\x05 \x01(\tB\x03\xe0A\x03R\talgorithm\x12+\n" +
-	"\x0fkey_binding_doc\x18\x06 \x01(\fB\x03\xe0A\x03R\rkeyBindingDoc\x127\n" +
-	"\x15key_binding_signature\x18\a \x01(\fB\x03\xe0A\x03R\x13keyBindingSignature\x12*\n" +
-	"\x0eidentity_token\x18\b \x01(\tB\x03\xe0A\x03R\ridentityToken\x12@\n" +
-	"\vcreate_time\x18\t \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
+	"\x06issuer\x18\x03 \x01(\tB\x03\xe0A\x03R\x06issuer\x12*\n" +
+	"\x0eidentity_token\x18\x04 \x01(\tB\x03\xe0A\x03R\ridentityToken\x12.\n" +
+	"\x10registry_subject\x18\x05 \x01(\tB\x03\xe0A\x03R\x0fregistrySubject\x12$\n" +
+	"\vregistry_id\x18\x06 \x01(\tB\x03\xe0A\x03R\n" +
+	"registryId\x12@\n" +
+	"\vcreate_time\x18\a \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
 	"createTime\x12@\n" +
-	"\vexpire_time\x18\n" +
-	" \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
-	"expireTime:N\xeaAK\n" +
-	"\x1ffleetshift.io/SigningKeyBinding\x12(signingKeyBindings/{signing_key_binding}BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\vexpire_time\x18\b \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x03R\n" +
+	"expireTime:J\xeaAG\n" +
+	"\x1efleetshift.io/SignerEnrollment\x12%signerEnrollments/{signer_enrollment}BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_signing_key_binding_proto_rawDescOnce sync.Once
@@ -190,12 +169,12 @@ func file_fleetshift_v1_signing_key_binding_proto_rawDescGZIP() []byte {
 
 var file_fleetshift_v1_signing_key_binding_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
 var file_fleetshift_v1_signing_key_binding_proto_goTypes = []any{
-	(*SigningKeyBinding)(nil),     // 0: fleetshift.v1.SigningKeyBinding
+	(*SignerEnrollment)(nil),      // 0: fleetshift.v1.SignerEnrollment
 	(*timestamppb.Timestamp)(nil), // 1: google.protobuf.Timestamp
 }
 var file_fleetshift_v1_signing_key_binding_proto_depIdxs = []int32{
-	1, // 0: fleetshift.v1.SigningKeyBinding.create_time:type_name -> google.protobuf.Timestamp
-	1, // 1: fleetshift.v1.SigningKeyBinding.expire_time:type_name -> google.protobuf.Timestamp
+	1, // 0: fleetshift.v1.SignerEnrollment.create_time:type_name -> google.protobuf.Timestamp
+	1, // 1: fleetshift.v1.SignerEnrollment.expire_time:type_name -> google.protobuf.Timestamp
 	2, // [2:2] is the sub-list for method output_type
 	2, // [2:2] is the sub-list for method input_type
 	2, // [2:2] is the sub-list for extension type_name

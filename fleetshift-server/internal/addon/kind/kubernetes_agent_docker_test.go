@@ -6,8 +6,8 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/base64"
 	"encoding/json"
+	"net/http"
 	"testing"
 	"time"
 
@@ -19,8 +19,9 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
@@ -283,7 +284,8 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		att := buildTestAttestation(t, "attested-dep", manifests)
 
 		agent := kubeaddon.NewAgent(
-			kubeaddon.WithAttestationVerifier(att.verifier),
+			kubeaddon.WithKeyResolver(att.keyResolver),
+			kubeaddon.WithHTTPClient(att.httpClient),
 			kubeaddon.WithVault(vault),
 		)
 		obs := newChannelDeliveryObserver()
@@ -292,7 +294,11 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		result, err := agent.Deliver(ctx, k8sTarget, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation, signaler)
+		targetWithTrust := k8sTarget
+		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
+		targetWithTrust.Properties["trust_bundle"] = att.trustBundleJSON
+
+		result, err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation, signaler)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
@@ -319,20 +325,24 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 	})
 
 	t.Run("AttestedDelivery_VerificationFailure", func(t *testing.T) {
-		v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
-		agent := kubeaddon.NewAgent(kubeaddon.WithAttestationVerifier(v))
+		agent := kubeaddon.NewAgent()
+
+		trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
+		targetWithTrust := k8sTarget
+		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
+		targetWithTrust.Properties["trust_bundle"] = trustBundle
 
 		bogusAtt := &domain.Attestation{
 			Input: domain.SignedInput{
-				KeyBinding: domain.SigningKeyBinding{
-					FederatedIdentity: domain.FederatedIdentity{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
 						Issuer: "https://untrusted.example.com",
 					},
 				},
 			},
 		}
 
-		result, err := agent.Deliver(context.Background(), k8sTarget, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt, &domain.DeliverySignaler{})
+		result, err := agent.Deliver(context.Background(), targetWithTrust, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt, &domain.DeliverySignaler{})
 		if err != nil {
 			t.Fatalf("Deliver should not return error: %v", err)
 		}
@@ -347,8 +357,10 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type testAttestationBundle struct {
-	attestation *domain.Attestation
-	verifier    *attestation.Verifier
+	attestation    *domain.Attestation
+	keyResolver    *application.KeyResolver
+	httpClient     *http.Client
+	trustBundleJSON string
 }
 
 func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []domain.Manifest) testAttestationBundle {
@@ -357,24 +369,21 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
 	signerID := domain.SubjectID("integration-user")
 	issuer := provider.IssuerURL()
+	registrySubject := domain.RegistrySubject("gh-integration-user")
 
 	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		t.Fatalf("generate key: %v", err)
 	}
 
-	pubKeyJWK := ecPubKeyToJWK(t, &privKey.PublicKey)
-	ecdhKey, err := privKey.PublicKey.ECDH()
-	if err != nil {
-		t.Fatalf("ECDH: %v", err)
-	}
-
 	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
 		Subject:  string(signerID),
 		Audience: "fleetshift-enroll",
+		Extra:    map[string]any{"preferred_username": registrySubject},
 	})
 
-	kbDoc, kbSig := buildKBDoc(t, privKey, signerID)
+	fakeReg := keyregistry.NewFake()
+	fakeReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
 
 	ms := domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyInline,
@@ -408,18 +417,13 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 			},
 			Sig: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
-				PublicKey:      ecdhKey.Bytes(),
 				ContentHash:    envelopeHash,
 				SignatureBytes: sigBytes,
 			},
-			KeyBinding: domain.SigningKeyBinding{
-				ID:                  "kb-integ",
-				FederatedIdentity:   domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
-				PublicKeyJWK:        pubKeyJWK,
-				Algorithm:           "ES256",
-				KeyBindingDoc:       kbDoc,
-				KeyBindingSignature: kbSig,
-				IdentityToken:       domain.RawToken(identityToken),
+			Signer: domain.SignerAssertion{
+				IdentityToken:   domain.RawToken(identityToken),
+				RegistryID:      "github.com",
+				RegistrySubject: registrySubject,
 			},
 			ValidUntil:         validUntil,
 			ExpectedGeneration: gen,
@@ -427,58 +431,40 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 		Output: &domain.PutManifests{Manifests: manifests},
 	}
 
-	jwksURI := string(issuer) + "/jwks"
-	verifier := attestation.NewVerifier(
-		map[domain.IssuerURL]attestation.TrustedIssuer{
-			issuer: {
-				JWKSURI:  domain.EndpointURL(jwksURI),
-				Audience: "fleetshift-enroll",
-			},
+	keyResolver := &application.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: fakeReg,
 		},
-		attestation.WithHTTPClient(provider.HTTPClient()),
-	)
+	}
 
-	return testAttestationBundle{attestation: att, verifier: verifier}
+	jwksURI := string(issuer) + "/jwks"
+	trustBundle := []domain.TrustBundleEntry{{
+		IssuerURL:          issuer,
+		JWKSURI:            domain.EndpointURL(jwksURI),
+		EnrollmentAudience: "fleetshift-enroll",
+		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+			RegistryID: "github.com",
+			Expression: `claims.preferred_username`,
+		},
+	}}
+	trustJSON, err := json.Marshal(trustBundle)
+	if err != nil {
+		t.Fatalf("marshal trust bundle: %v", err)
+	}
+
+	return testAttestationBundle{
+		attestation:     att,
+		keyResolver:     keyResolver,
+		httpClient:      provider.HTTPClient(),
+		trustBundleJSON: string(trustJSON),
+	}
 }
 
-func ecPubKeyToJWK(t *testing.T, pub *ecdsa.PublicKey) json.RawMessage {
-	t.Helper()
-	byteLen := (pub.Curve.Params().BitSize + 7) / 8
-	xBytes := make([]byte, byteLen)
-	yBytes := make([]byte, byteLen)
-	copy(xBytes[byteLen-len(pub.X.Bytes()):], pub.X.Bytes())
-	copy(yBytes[byteLen-len(pub.Y.Bytes()):], pub.Y.Bytes())
-	jwk := map[string]string{
-		"kty": "EC",
-		"crv": "P-256",
-		"x":   base64.RawURLEncoding.EncodeToString(xBytes),
-		"y":   base64.RawURLEncoding.EncodeToString(yBytes),
+func copyProps(src map[string]string) map[string]string {
+	dst := make(map[string]string, len(src))
+	for k, v := range src {
+		dst[k] = v
 	}
-	raw, err := json.Marshal(jwk)
-	if err != nil {
-		t.Fatalf("marshal JWK: %v", err)
-	}
-	return raw
-}
-
-func buildKBDoc(t *testing.T, privKey *ecdsa.PrivateKey, signerID domain.SubjectID) (doc, sig []byte) {
-	t.Helper()
-	ecdhKey, err := privKey.PublicKey.ECDH()
-	if err != nil {
-		t.Fatalf("ECDH: %v", err)
-	}
-	kbDoc := map[string]string{
-		"public_key": base64.RawURLEncoding.EncodeToString(ecdhKey.Bytes()),
-		"signer_id":  string(signerID),
-	}
-	docBytes, err := json.Marshal(kbDoc)
-	if err != nil {
-		t.Fatalf("marshal kb doc: %v", err)
-	}
-	hash := sha256.Sum256(docBytes)
-	sigBytes, err := ecdsa.SignASN1(rand.Reader, privKey, hash[:])
-	if err != nil {
-		t.Fatalf("sign kb doc: %v", err)
-	}
-	return docBytes, sigBytes
+	return dst
 }
