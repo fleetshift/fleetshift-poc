@@ -17,44 +17,6 @@ import (
 
 const hostedClusterNamespace = "clusters"
 
-// ClusterSpec describes the desired hosted cluster configuration.
-type ClusterSpec struct {
-	Name         string         `json:"name"`
-	InfraID      string         `json:"infraID"`
-	Region       string         `json:"region"`
-	BaseDomain   string         `json:"baseDomain"`
-	ReleaseImage string         `json:"releaseImage"`
-	NodePools    []NodePoolSpec `json:"nodePools"`
-}
-
-// NodePoolSpec describes a single node pool within a hosted cluster.
-type NodePoolSpec struct {
-	Name         string `json:"name"`
-	InstanceType string `json:"instanceType"`
-	Replicas     int32  `json:"replicas"`
-	Arch         string `json:"arch,omitempty"`
-	Zone         string `json:"zone,omitempty"`
-}
-
-// InfraOutput holds AWS infrastructure IDs produced by the infra provisioner.
-type InfraOutput struct {
-	VPCID            string   `json:"vpcID"`
-	PrivateSubnetIDs []string `json:"privateSubnetIDs"`
-	PublicSubnetIDs  []string `json:"publicSubnetIDs"`
-	Zones            []string `json:"zones"`
-}
-
-// IAMOutput holds IAM role ARNs produced by the IAM provisioner.
-type IAMOutput struct {
-	IngressARN              string `json:"ingressARN"`
-	ImageRegistryARN        string `json:"imageRegistryARN"`
-	StorageARN              string `json:"storageARN"`
-	NetworkARN              string `json:"networkARN"`
-	KubeCloudControllerARN  string `json:"kubeCloudControllerARN"`
-	NodePoolManagementARN   string `json:"nodePoolManagementARN"`
-	ControlPlaneOperatorARN string `json:"controlPlaneOperatorARN"`
-}
-
 // PlatformConfig holds secrets required for cluster provisioning.
 type PlatformConfig struct {
 	PullSecret []byte `json:"pullSecret"`
@@ -83,13 +45,13 @@ func BuildHostedCluster(spec ClusterSpec, infra InfraOutput, iam IAMOutput, _ Pl
 						VPC: infra.VPCID,
 					},
 					RolesRef: hyperv1.AWSRolesRef{
-						IngressARN:              iam.IngressARN,
-						ImageRegistryARN:        iam.ImageRegistryARN,
-						StorageARN:              iam.StorageARN,
-						NetworkARN:              iam.NetworkARN,
-						KubeCloudControllerARN:  iam.KubeCloudControllerARN,
-						NodePoolManagementARN:   iam.NodePoolManagementARN,
-						ControlPlaneOperatorARN: iam.ControlPlaneOperatorARN,
+						IngressARN:              iam.IngressRoleArn,
+						ImageRegistryARN:        iam.ImageRegistryRoleArn,
+						StorageARN:              iam.EBSCSIDriverRoleArn,
+						NetworkARN:              iam.CloudNetworkConfigControllerRoleArn,
+						KubeCloudControllerARN:  iam.CloudControllerRoleArn,
+						NodePoolManagementARN:   iam.NodePoolRoleArn,
+						ControlPlaneOperatorARN: iam.ControlPlaneOperatorRoleArn,
 					},
 				},
 			},
@@ -153,7 +115,11 @@ func BuildNodePools(spec ClusterSpec, infra InfraOutput) []hyperv1.NodePool {
 	for i, np := range spec.NodePools {
 		replicas := np.Replicas
 
-		subnetID := pickSubnet(i, np.Zone, infra)
+		zone := ""
+		if len(np.Zones) > 0 {
+			zone = np.Zones[0]
+		}
+		subnetID := pickSubnet(i, zone, infra)
 
 		pools[i] = hyperv1.NodePool{
 			ObjectMeta: metav1.ObjectMeta{

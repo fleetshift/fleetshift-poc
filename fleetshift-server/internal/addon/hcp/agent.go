@@ -26,8 +26,11 @@ const KubernetesTargetType domain.TargetType = "kubernetes"
 // agent.
 type ClusterSpec struct {
 	Name                     string         `json:"name"`
+	InfraID                  string         `json:"infraID,omitempty"`
 	RoleARN                  string         `json:"roleArn"`
 	Region                   string         `json:"region,omitempty"`
+	BaseDomain               string         `json:"baseDomain,omitempty"`
+	ReleaseImage             string         `json:"releaseImage,omitempty"`
 	NodePools                []NodePoolSpec `json:"nodePools"`
 	IDP                      *IDPSpec       `json:"idp,omitempty"`
 	ControlPlaneAvailability string         `json:"controlPlaneAvailability,omitempty"`
@@ -35,10 +38,11 @@ type ClusterSpec struct {
 
 // NodePoolSpec describes a node pool within an HCP cluster.
 type NodePoolSpec struct {
-	Name         string `json:"name"`
-	Replicas     int    `json:"replicas"`
-	InstanceType string `json:"instanceType,omitempty"`
-	Arch         string `json:"arch,omitempty"`
+	Name         string   `json:"name"`
+	Replicas     int32    `json:"replicas"`
+	InstanceType string   `json:"instanceType,omitempty"`
+	Arch         string   `json:"arch,omitempty"`
+	Zones        []string `json:"zones,omitempty"`
 }
 
 // IDPSpec configures an identity provider for the HCP cluster.

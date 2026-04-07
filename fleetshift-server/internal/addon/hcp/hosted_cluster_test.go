@@ -40,13 +40,13 @@ func defaultInfraOutput() InfraOutput {
 
 func defaultIAMOutput() IAMOutput {
 	return IAMOutput{
-		IngressARN:             "arn:aws:iam::123456789012:role/my-cluster-ingress",
-		ImageRegistryARN:       "arn:aws:iam::123456789012:role/my-cluster-image-registry",
-		StorageARN:             "arn:aws:iam::123456789012:role/my-cluster-storage",
-		NetworkARN:             "arn:aws:iam::123456789012:role/my-cluster-network",
-		KubeCloudControllerARN: "arn:aws:iam::123456789012:role/my-cluster-kube-cloud-controller",
-		NodePoolManagementARN:  "arn:aws:iam::123456789012:role/my-cluster-nodepool-mgmt",
-		ControlPlaneOperatorARN: "arn:aws:iam::123456789012:role/my-cluster-cpo",
+		IngressRoleArn:                     "arn:aws:iam::123456789012:role/my-cluster-ingress",
+		ImageRegistryRoleArn:               "arn:aws:iam::123456789012:role/my-cluster-image-registry",
+		EBSCSIDriverRoleArn:                "arn:aws:iam::123456789012:role/my-cluster-storage",
+		CloudNetworkConfigControllerRoleArn: "arn:aws:iam::123456789012:role/my-cluster-network",
+		CloudControllerRoleArn:             "arn:aws:iam::123456789012:role/my-cluster-kube-cloud-controller",
+		NodePoolRoleArn:                    "arn:aws:iam::123456789012:role/my-cluster-nodepool-mgmt",
+		ControlPlaneOperatorRoleArn:        "arn:aws:iam::123456789012:role/my-cluster-cpo",
 	}
 }
 
@@ -106,11 +106,11 @@ func TestBuildHostedCluster(t *testing.T) {
 
 	t.Run("aws_roles", func(t *testing.T) {
 		roles := hc.Spec.Platform.AWS.RolesRef
-		if roles.IngressARN != iam.IngressARN {
-			t.Errorf("IngressARN = %q, want %q", roles.IngressARN, iam.IngressARN)
+		if roles.IngressARN != iam.IngressRoleArn {
+			t.Errorf("IngressARN = %q, want %q", roles.IngressARN, iam.IngressRoleArn)
 		}
-		if roles.ControlPlaneOperatorARN != iam.ControlPlaneOperatorARN {
-			t.Errorf("ControlPlaneOperatorARN = %q, want %q", roles.ControlPlaneOperatorARN, iam.ControlPlaneOperatorARN)
+		if roles.ControlPlaneOperatorARN != iam.ControlPlaneOperatorRoleArn {
+			t.Errorf("ControlPlaneOperatorARN = %q, want %q", roles.ControlPlaneOperatorARN, iam.ControlPlaneOperatorRoleArn)
 		}
 	})
 
