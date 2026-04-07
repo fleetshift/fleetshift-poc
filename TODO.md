@@ -21,7 +21,7 @@
   - f(targets) -> targets (strategy)
 - Make sure workflows never leave a deployment permanently "stuck" without being reconciled – should always at least have a failure state but should really just keep retrying forever? ([FM-72](https://redhat.atlassian.net/browse/FM-72))
 
-## Implementation detail (nontrivial)
+## HCP Agent
 
 - Async delivery resilience: deliveries in Accepted/Progressing state are not
    recovered after a FleetShift process restart. The watching goroutine is lost
@@ -30,6 +30,19 @@
    phase takes 10-20 minutes. Options: persistent delivery state machine,
    reconciliation loop on startup that resumes in-flight deliveries, or
    workflow-engine-managed async steps instead of agent goroutines.
+- IAM policies are overly permissive for POC: several roles use `ec2:*`,
+   `s3:*`, `route53:*` with `Resource: "*"` (cloud-controller, node-pool,
+   control-plane-operator, cloud-network-config-controller in `aws_iam.go`).
+   Tighten to least-privilege before any shared-account or production use.
+- Hardcoded S3 OIDC thumbprint in `aws_iam.go` (`A9D53002E97E00E...`). AWS has
+   rotated this cert before. Either fetch dynamically or document as a
+   maintenance item.
+- No env var support for HCP CLI flags. Design spec lists `HCP_KUBECONFIG`,
+   `HCP_AWS_REGION`, `HCP_S3_BUCKET`, `HCP_PULL_SECRET` but `serve.go` only
+   uses cobra flags without env binding.
+
+## Implementation detail (nontrivial)
+
 - Not sure about the credential design (should we assume one raw token? what about other token types?)
 - The whole key binding doc should probably not travel on the deployment state
 - Not sure about how canonical deployment representation is calculated for signing (e.g. CLI coupling to strategy types)

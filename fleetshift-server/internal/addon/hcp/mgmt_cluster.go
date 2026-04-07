@@ -11,6 +11,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -65,7 +66,7 @@ func (m *kubeMgmtCluster) applyResources(ctx context.Context, hc hyperv1.HostedC
 	// Create secrets first (pull secret, SSH key, etcd encryption key).
 	for _, s := range secrets {
 		_, err := m.clientset.CoreV1().Secrets(s.Namespace).Create(ctx, &s, metav1.CreateOptions{})
-		if err != nil {
+		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create secret %s/%s: %w", s.Namespace, s.Name, err)
 		}
 	}
@@ -76,7 +77,7 @@ func (m *kubeMgmtCluster) applyResources(ctx context.Context, hc hyperv1.HostedC
 		return fmt.Errorf("convert HostedCluster to unstructured: %w", err)
 	}
 	_, err = m.dynamicClient.Resource(hostedClusterGVR).Namespace(hc.Namespace).Create(ctx, hcUnstructured, metav1.CreateOptions{})
-	if err != nil {
+	if err != nil && !apierrors.IsAlreadyExists(err) {
 		return fmt.Errorf("create HostedCluster %s: %w", hc.Name, err)
 	}
 
@@ -87,7 +88,7 @@ func (m *kubeMgmtCluster) applyResources(ctx context.Context, hc hyperv1.HostedC
 			return fmt.Errorf("convert NodePool to unstructured: %w", err)
 		}
 		_, err = m.dynamicClient.Resource(nodePoolGVR).Namespace(np.Namespace).Create(ctx, npUnstructured, metav1.CreateOptions{})
-		if err != nil {
+		if err != nil && !apierrors.IsAlreadyExists(err) {
 			return fmt.Errorf("create NodePool %s: %w", np.Name, err)
 		}
 	}
