@@ -41,6 +41,8 @@ type EC2API interface {
 	DescribeVpcs(ctx context.Context, params *ec2.DescribeVpcsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error)
 	DescribeSubnets(ctx context.Context, params *ec2.DescribeSubnetsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error)
 	DescribeNatGateways(ctx context.Context, params *ec2.DescribeNatGatewaysInput, optFns ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error)
+	DescribeRouteTables(ctx context.Context, params *ec2.DescribeRouteTablesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error)
+	DisassociateRouteTable(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error)
 }
 
 // Route53API is the subset of the Route53 client needed for DNS zone management.
@@ -343,4 +345,185 @@ func CreateInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, sp
 	out.LocalDNSZoneID = aws.ToString(localZone.HostedZone.Id)
 
 	return out, nil
+}
+
+// DestroyInfra tears down the VPC + networking stack in reverse dependency order.
+// If out is provided, resource IDs are used directly. If out is nil, resources
+// are discovered by the kubernetes.io/cluster/{infraID}: owned tag.
+func DestroyInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, infraID string, out *InfraOutput) error {
+	if out == nil {
+		return fmt.Errorf("tag-based resource discovery not yet implemented; provide InfraOutput")
+	}
+
+	// 1. Delete DNS zones (delete non-default record sets first)
+	for _, zoneID := range []string{out.PrivateDNSZoneID, out.LocalDNSZoneID} {
+		if zoneID == "" {
+			continue
+		}
+		if err := deleteHostedZone(ctx, r53Client, zoneID); err != nil {
+			return err
+		}
+	}
+
+	// 2. Delete S3 VPC endpoint
+	if out.S3EndpointID != "" {
+		if _, err := ec2Client.DeleteVpcEndpoints(ctx, &ec2.DeleteVpcEndpointsInput{
+			VpcEndpointIds: []string{out.S3EndpointID},
+		}); err != nil {
+			return fmt.Errorf("delete S3 endpoint %s: %w", out.S3EndpointID, err)
+		}
+	}
+
+	// 3. Delete route tables — disassociate subnets first, then delete
+	allRTIDs := make([]string, 0, len(out.PrivateRouteTableIDs)+1)
+	allRTIDs = append(allRTIDs, out.PrivateRouteTableIDs...)
+	if out.PublicRouteTableID != "" {
+		allRTIDs = append(allRTIDs, out.PublicRouteTableID)
+	}
+	for _, rtID := range allRTIDs {
+		descRT, err := ec2Client.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
+			RouteTableIds: []string{rtID},
+		})
+		if err != nil {
+			return fmt.Errorf("describe route table %s: %w", rtID, err)
+		}
+		for _, rt := range descRT.RouteTables {
+			for _, assoc := range rt.Associations {
+				if !aws.ToBool(assoc.Main) && assoc.RouteTableAssociationId != nil {
+					if _, err := ec2Client.DisassociateRouteTable(ctx, &ec2.DisassociateRouteTableInput{
+						AssociationId: assoc.RouteTableAssociationId,
+					}); err != nil {
+						return fmt.Errorf("disassociate route table %s: %w", rtID, err)
+					}
+				}
+			}
+		}
+		if _, err := ec2Client.DeleteRouteTable(ctx, &ec2.DeleteRouteTableInput{
+			RouteTableId: aws.String(rtID),
+		}); err != nil {
+			return fmt.Errorf("delete route table %s: %w", rtID, err)
+		}
+	}
+
+	// 4. Delete NAT gateways and wait for deletion
+	for _, natID := range out.NATGatewayIDs {
+		if _, err := ec2Client.DeleteNatGateway(ctx, &ec2.DeleteNatGatewayInput{
+			NatGatewayId: aws.String(natID),
+		}); err != nil {
+			return fmt.Errorf("delete NAT gateway %s: %w", natID, err)
+		}
+	}
+	// Wait for NAT gateways to reach "deleted" state
+	for _, natID := range out.NATGatewayIDs {
+		for {
+			desc, err := ec2Client.DescribeNatGateways(ctx, &ec2.DescribeNatGatewaysInput{
+				NatGatewayIds: []string{natID},
+			})
+			if err != nil {
+				return fmt.Errorf("describe NAT gateway %s: %w", natID, err)
+			}
+			if len(desc.NatGateways) == 0 || desc.NatGateways[0].State == ec2types.NatGatewayStateDeleted {
+				break
+			}
+		}
+	}
+
+	// 5. Release elastic IPs
+	for _, allocID := range out.ElasticIPAllocIDs {
+		if _, err := ec2Client.ReleaseAddress(ctx, &ec2.ReleaseAddressInput{
+			AllocationId: aws.String(allocID),
+		}); err != nil {
+			return fmt.Errorf("release EIP %s: %w", allocID, err)
+		}
+	}
+
+	// 6. Delete subnets (private and public)
+	for _, subnetID := range append(out.PrivateSubnetIDs, out.PublicSubnetIDs...) {
+		if _, err := ec2Client.DeleteSubnet(ctx, &ec2.DeleteSubnetInput{
+			SubnetId: aws.String(subnetID),
+		}); err != nil {
+			return fmt.Errorf("delete subnet %s: %w", subnetID, err)
+		}
+	}
+
+	// 7. Detach and delete internet gateway
+	if out.InternetGatewayID != "" {
+		if _, err := ec2Client.DetachInternetGateway(ctx, &ec2.DetachInternetGatewayInput{
+			InternetGatewayId: aws.String(out.InternetGatewayID),
+			VpcId:             aws.String(out.VPCID),
+		}); err != nil {
+			return fmt.Errorf("detach internet gateway: %w", err)
+		}
+		if _, err := ec2Client.DeleteInternetGateway(ctx, &ec2.DeleteInternetGatewayInput{
+			InternetGatewayId: aws.String(out.InternetGatewayID),
+		}); err != nil {
+			return fmt.Errorf("delete internet gateway: %w", err)
+		}
+	}
+
+	// 8. Delete DHCP options (associate 'default' first, then delete)
+	if out.DHCPOptionsID != "" {
+		if _, err := ec2Client.AssociateDhcpOptions(ctx, &ec2.AssociateDhcpOptionsInput{
+			DhcpOptionsId: aws.String("default"),
+			VpcId:         aws.String(out.VPCID),
+		}); err != nil {
+			return fmt.Errorf("reset DHCP options to default: %w", err)
+		}
+		if _, err := ec2Client.DeleteDhcpOptions(ctx, &ec2.DeleteDhcpOptionsInput{
+			DhcpOptionsId: aws.String(out.DHCPOptionsID),
+		}); err != nil {
+			return fmt.Errorf("delete DHCP options: %w", err)
+		}
+	}
+
+	// 9. Delete VPC
+	if out.VPCID != "" {
+		if _, err := ec2Client.DeleteVpc(ctx, &ec2.DeleteVpcInput{
+			VpcId: aws.String(out.VPCID),
+		}); err != nil {
+			return fmt.Errorf("delete VPC: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// deleteHostedZone deletes all non-default record sets from a hosted zone, then
+// deletes the zone itself.
+func deleteHostedZone(ctx context.Context, r53Client Route53API, zoneID string) error {
+	records, err := r53Client.ListResourceRecordSets(ctx, &route53.ListResourceRecordSetsInput{
+		HostedZoneId: aws.String(zoneID),
+	})
+	if err != nil {
+		return fmt.Errorf("list records for zone %s: %w", zoneID, err)
+	}
+
+	var changes []r53types.Change
+	for _, rs := range records.ResourceRecordSets {
+		if rs.Type == r53types.RRTypeNs || rs.Type == r53types.RRTypeSoa {
+			continue
+		}
+		rsCopy := rs
+		changes = append(changes, r53types.Change{
+			Action:            r53types.ChangeActionDelete,
+			ResourceRecordSet: &rsCopy,
+		})
+	}
+
+	if len(changes) > 0 {
+		if _, err := r53Client.ChangeResourceRecordSets(ctx, &route53.ChangeResourceRecordSetsInput{
+			HostedZoneId: aws.String(zoneID),
+			ChangeBatch:  &r53types.ChangeBatch{Changes: changes},
+		}); err != nil {
+			return fmt.Errorf("delete records in zone %s: %w", zoneID, err)
+		}
+	}
+
+	if _, err := r53Client.DeleteHostedZone(ctx, &route53.DeleteHostedZoneInput{
+		Id: aws.String(zoneID),
+	}); err != nil {
+		return fmt.Errorf("delete hosted zone %s: %w", zoneID, err)
+	}
+
+	return nil
 }

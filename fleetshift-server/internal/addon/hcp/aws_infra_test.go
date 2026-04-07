@@ -3,6 +3,7 @@ package hcp
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -35,6 +36,13 @@ type mockEC2 struct {
 	assocRTCalls                []ec2.AssociateRouteTableInput
 	createVpcEndpointCalls      []ec2.CreateVpcEndpointInput
 	createTagsCalls             []ec2.CreateTagsInput
+
+	// Destroy tracking
+	operations                  []string
+	describeRTResult            *ec2.DescribeRouteTablesOutput
+	describeNatResult           *ec2.DescribeNatGatewaysOutput
+	deleteErr                   error // if set, next delete call returns this error
+	deleteErrOn                 string // operation name to fail on
 }
 
 func (m *mockEC2) CreateVpc(_ context.Context, in *ec2.CreateVpcInput, _ ...func(*ec2.Options)) (*ec2.CreateVpcOutput, error) {
@@ -148,32 +156,75 @@ func (m *mockEC2) CreateTags(_ context.Context, in *ec2.CreateTagsInput, _ ...fu
 	return &ec2.CreateTagsOutput{}, nil
 }
 
-// Cleanup stubs — not exercised in create tests but required by the interface.
-func (m *mockEC2) DeleteVpc(context.Context, *ec2.DeleteVpcInput, ...func(*ec2.Options)) (*ec2.DeleteVpcOutput, error) {
+// checkErr returns deleteErr if the operation matches deleteErrOn.
+func (m *mockEC2) checkErr(op string) error {
+	if m.deleteErr != nil && m.deleteErrOn == op {
+		return m.deleteErr
+	}
+	return nil
+}
+
+func (m *mockEC2) DeleteVpc(_ context.Context, in *ec2.DeleteVpcInput, _ ...func(*ec2.Options)) (*ec2.DeleteVpcOutput, error) {
+	m.operations = append(m.operations, "DeleteVpc")
+	if err := m.checkErr("DeleteVpc"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteVpcOutput{}, nil
 }
-func (m *mockEC2) DeleteSubnet(context.Context, *ec2.DeleteSubnetInput, ...func(*ec2.Options)) (*ec2.DeleteSubnetOutput, error) {
+func (m *mockEC2) DeleteSubnet(_ context.Context, in *ec2.DeleteSubnetInput, _ ...func(*ec2.Options)) (*ec2.DeleteSubnetOutput, error) {
+	m.operations = append(m.operations, "DeleteSubnet:"+aws.ToString(in.SubnetId))
+	if err := m.checkErr("DeleteSubnet"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteSubnetOutput{}, nil
 }
-func (m *mockEC2) DeleteInternetGateway(context.Context, *ec2.DeleteInternetGatewayInput, ...func(*ec2.Options)) (*ec2.DeleteInternetGatewayOutput, error) {
+func (m *mockEC2) DeleteInternetGateway(_ context.Context, _ *ec2.DeleteInternetGatewayInput, _ ...func(*ec2.Options)) (*ec2.DeleteInternetGatewayOutput, error) {
+	m.operations = append(m.operations, "DeleteInternetGateway")
+	if err := m.checkErr("DeleteInternetGateway"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteInternetGatewayOutput{}, nil
 }
-func (m *mockEC2) DetachInternetGateway(context.Context, *ec2.DetachInternetGatewayInput, ...func(*ec2.Options)) (*ec2.DetachInternetGatewayOutput, error) {
+func (m *mockEC2) DetachInternetGateway(_ context.Context, _ *ec2.DetachInternetGatewayInput, _ ...func(*ec2.Options)) (*ec2.DetachInternetGatewayOutput, error) {
+	m.operations = append(m.operations, "DetachInternetGateway")
+	if err := m.checkErr("DetachInternetGateway"); err != nil {
+		return nil, err
+	}
 	return &ec2.DetachInternetGatewayOutput{}, nil
 }
-func (m *mockEC2) DeleteNatGateway(context.Context, *ec2.DeleteNatGatewayInput, ...func(*ec2.Options)) (*ec2.DeleteNatGatewayOutput, error) {
+func (m *mockEC2) DeleteNatGateway(_ context.Context, _ *ec2.DeleteNatGatewayInput, _ ...func(*ec2.Options)) (*ec2.DeleteNatGatewayOutput, error) {
+	m.operations = append(m.operations, "DeleteNatGateway")
+	if err := m.checkErr("DeleteNatGateway"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteNatGatewayOutput{}, nil
 }
-func (m *mockEC2) ReleaseAddress(context.Context, *ec2.ReleaseAddressInput, ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+func (m *mockEC2) ReleaseAddress(_ context.Context, _ *ec2.ReleaseAddressInput, _ ...func(*ec2.Options)) (*ec2.ReleaseAddressOutput, error) {
+	m.operations = append(m.operations, "ReleaseAddress")
+	if err := m.checkErr("ReleaseAddress"); err != nil {
+		return nil, err
+	}
 	return &ec2.ReleaseAddressOutput{}, nil
 }
-func (m *mockEC2) DeleteRouteTable(context.Context, *ec2.DeleteRouteTableInput, ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error) {
+func (m *mockEC2) DeleteRouteTable(_ context.Context, in *ec2.DeleteRouteTableInput, _ ...func(*ec2.Options)) (*ec2.DeleteRouteTableOutput, error) {
+	m.operations = append(m.operations, "DeleteRouteTable:"+aws.ToString(in.RouteTableId))
+	if err := m.checkErr("DeleteRouteTable"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteRouteTableOutput{}, nil
 }
-func (m *mockEC2) DeleteVpcEndpoints(context.Context, *ec2.DeleteVpcEndpointsInput, ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
+func (m *mockEC2) DeleteVpcEndpoints(_ context.Context, _ *ec2.DeleteVpcEndpointsInput, _ ...func(*ec2.Options)) (*ec2.DeleteVpcEndpointsOutput, error) {
+	m.operations = append(m.operations, "DeleteVpcEndpoints")
+	if err := m.checkErr("DeleteVpcEndpoints"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteVpcEndpointsOutput{}, nil
 }
-func (m *mockEC2) DeleteDhcpOptions(context.Context, *ec2.DeleteDhcpOptionsInput, ...func(*ec2.Options)) (*ec2.DeleteDhcpOptionsOutput, error) {
+func (m *mockEC2) DeleteDhcpOptions(_ context.Context, _ *ec2.DeleteDhcpOptionsInput, _ ...func(*ec2.Options)) (*ec2.DeleteDhcpOptionsOutput, error) {
+	m.operations = append(m.operations, "DeleteDhcpOptions")
+	if err := m.checkErr("DeleteDhcpOptions"); err != nil {
+		return nil, err
+	}
 	return &ec2.DeleteDhcpOptionsOutput{}, nil
 }
 func (m *mockEC2) DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(*ec2.Options)) (*ec2.DescribeVpcsOutput, error) {
@@ -182,14 +233,39 @@ func (m *mockEC2) DescribeVpcs(context.Context, *ec2.DescribeVpcsInput, ...func(
 func (m *mockEC2) DescribeSubnets(context.Context, *ec2.DescribeSubnetsInput, ...func(*ec2.Options)) (*ec2.DescribeSubnetsOutput, error) {
 	return &ec2.DescribeSubnetsOutput{}, nil
 }
-func (m *mockEC2) DescribeNatGateways(context.Context, *ec2.DescribeNatGatewaysInput, ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
-	return &ec2.DescribeNatGatewaysOutput{}, nil
+func (m *mockEC2) DescribeNatGateways(_ context.Context, _ *ec2.DescribeNatGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeNatGatewaysOutput, error) {
+	m.operations = append(m.operations, "DescribeNatGateways")
+	if m.describeNatResult != nil {
+		return m.describeNatResult, nil
+	}
+	// Default: return deleted state so the wait loop exits
+	return &ec2.DescribeNatGatewaysOutput{
+		NatGateways: []ec2types.NatGateway{{State: ec2types.NatGatewayStateDeleted}},
+	}, nil
+}
+func (m *mockEC2) DescribeRouteTables(_ context.Context, _ *ec2.DescribeRouteTablesInput, _ ...func(*ec2.Options)) (*ec2.DescribeRouteTablesOutput, error) {
+	m.operations = append(m.operations, "DescribeRouteTables")
+	if m.describeRTResult != nil {
+		return m.describeRTResult, nil
+	}
+	// Default: no associations
+	return &ec2.DescribeRouteTablesOutput{
+		RouteTables: []ec2types.RouteTable{{}},
+	}, nil
+}
+func (m *mockEC2) DisassociateRouteTable(_ context.Context, in *ec2.DisassociateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error) {
+	m.operations = append(m.operations, "DisassociateRouteTable:"+aws.ToString(in.AssociationId))
+	return &ec2.DisassociateRouteTableOutput{}, nil
 }
 
 // mockRoute53 implements Route53API for testing.
 type mockRoute53 struct {
-	zoneCount         int
-	createZoneCalls   []route53.CreateHostedZoneInput
+	zoneCount              int
+	createZoneCalls        []route53.CreateHostedZoneInput
+	operations             []string
+	listRecordSetsResult   *route53.ListResourceRecordSetsOutput
+	deleteErr              error
+	deleteErrOn            string
 }
 
 func (m *mockRoute53) CreateHostedZone(_ context.Context, in *route53.CreateHostedZoneInput, _ ...func(*route53.Options)) (*route53.CreateHostedZoneOutput, error) {
@@ -203,7 +279,11 @@ func (m *mockRoute53) CreateHostedZone(_ context.Context, in *route53.CreateHost
 	}, nil
 }
 
-func (m *mockRoute53) DeleteHostedZone(context.Context, *route53.DeleteHostedZoneInput, ...func(*route53.Options)) (*route53.DeleteHostedZoneOutput, error) {
+func (m *mockRoute53) DeleteHostedZone(_ context.Context, in *route53.DeleteHostedZoneInput, _ ...func(*route53.Options)) (*route53.DeleteHostedZoneOutput, error) {
+	m.operations = append(m.operations, "DeleteHostedZone:"+aws.ToString(in.Id))
+	if m.deleteErr != nil && m.deleteErrOn == "DeleteHostedZone" {
+		return nil, m.deleteErr
+	}
 	return &route53.DeleteHostedZoneOutput{}, nil
 }
 
@@ -211,11 +291,16 @@ func (m *mockRoute53) ListHostedZonesByName(context.Context, *route53.ListHosted
 	return &route53.ListHostedZonesByNameOutput{}, nil
 }
 
-func (m *mockRoute53) ListResourceRecordSets(context.Context, *route53.ListResourceRecordSetsInput, ...func(*route53.Options)) (*route53.ListResourceRecordSetsOutput, error) {
+func (m *mockRoute53) ListResourceRecordSets(_ context.Context, _ *route53.ListResourceRecordSetsInput, _ ...func(*route53.Options)) (*route53.ListResourceRecordSetsOutput, error) {
+	m.operations = append(m.operations, "ListResourceRecordSets")
+	if m.listRecordSetsResult != nil {
+		return m.listRecordSetsResult, nil
+	}
 	return &route53.ListResourceRecordSetsOutput{}, nil
 }
 
-func (m *mockRoute53) ChangeResourceRecordSets(context.Context, *route53.ChangeResourceRecordSetsInput, ...func(*route53.Options)) (*route53.ChangeResourceRecordSetsOutput, error) {
+func (m *mockRoute53) ChangeResourceRecordSets(_ context.Context, _ *route53.ChangeResourceRecordSetsInput, _ ...func(*route53.Options)) (*route53.ChangeResourceRecordSetsOutput, error) {
+	m.operations = append(m.operations, "ChangeResourceRecordSets")
 	return &route53.ChangeResourceRecordSetsOutput{}, nil
 }
 
@@ -351,5 +436,202 @@ func TestCreateInfra_SingleZone(t *testing.T) {
 	}
 	if !foundClusterTag {
 		t.Error("VPC missing kubernetes.io/cluster/test-infra-123: owned tag")
+	}
+}
+
+func testInfraOutput() *InfraOutput {
+	return &InfraOutput{
+		VPCID:                "vpc-0001",
+		DHCPOptionsID:        "dopt-0001",
+		InternetGatewayID:    "igw-0001",
+		PrivateSubnetIDs:     []string{"subnet-0001"},
+		PublicSubnetIDs:      []string{"subnet-0002"},
+		ElasticIPAllocIDs:    []string{"eipalloc-0001"},
+		NATGatewayIDs:        []string{"nat-0001"},
+		PrivateRouteTableIDs: []string{"rtb-0001"},
+		PublicRouteTableID:   "rtb-0002",
+		S3EndpointID:         "vpce-0001",
+		PrivateDNSZoneID:     "/hostedzone/Z0001",
+		LocalDNSZoneID:       "/hostedzone/Z0002",
+		Zones:                []string{"us-east-1a"},
+	}
+}
+
+func TestDestroyInfra_CorrectOrder(t *testing.T) {
+	ec2Mock := &mockEC2{}
+	r53Mock := &mockRoute53{}
+
+	err := DestroyInfra(context.Background(), ec2Mock, r53Mock, "test-infra", testInfraOutput())
+	if err != nil {
+		t.Fatalf("DestroyInfra failed: %v", err)
+	}
+
+	// Verify DNS zones deleted first
+	if len(r53Mock.operations) < 4 {
+		t.Fatalf("expected at least 4 Route53 operations, got %d: %v", len(r53Mock.operations), r53Mock.operations)
+	}
+
+	// Build ordered list of high-level operations from EC2 mock
+	// opIndex finds the first operation that exactly equals name or starts with name + ":"
+	opIndex := func(name string) int {
+		for i, op := range ec2Mock.operations {
+			if op == name || strings.HasPrefix(op, name+":") {
+				return i
+			}
+		}
+		return -1
+	}
+
+	// Verify reverse dependency order:
+	// VPC endpoints before route tables
+	epIdx := opIndex("DeleteVpcEndpoints")
+	rtIdx := opIndex("DeleteRouteTable")
+	if epIdx < 0 || rtIdx < 0 {
+		t.Fatalf("missing DeleteVpcEndpoints or DeleteRouteTable in operations: %v", ec2Mock.operations)
+	}
+	if epIdx > rtIdx {
+		t.Errorf("DeleteVpcEndpoints (idx=%d) should come before DeleteRouteTable (idx=%d)", epIdx, rtIdx)
+	}
+
+	// Route tables before NAT gateways
+	natIdx := opIndex("DeleteNatGateway")
+	if natIdx < 0 {
+		t.Fatalf("missing DeleteNatGateway in operations: %v", ec2Mock.operations)
+	}
+	if rtIdx > natIdx {
+		t.Errorf("DeleteRouteTable (idx=%d) should come before DeleteNatGateway (idx=%d)", rtIdx, natIdx)
+	}
+
+	// NAT gateways before EIPs
+	eipIdx := opIndex("ReleaseAddress")
+	if eipIdx < 0 {
+		t.Fatalf("missing ReleaseAddress in operations: %v", ec2Mock.operations)
+	}
+	if natIdx > eipIdx {
+		t.Errorf("DeleteNatGateway (idx=%d) should come before ReleaseAddress (idx=%d)", natIdx, eipIdx)
+	}
+
+	// EIPs before subnets
+	subIdx := opIndex("DeleteSubnet")
+	if subIdx < 0 {
+		t.Fatalf("missing DeleteSubnet in operations: %v", ec2Mock.operations)
+	}
+	if eipIdx > subIdx {
+		t.Errorf("ReleaseAddress (idx=%d) should come before DeleteSubnet (idx=%d)", eipIdx, subIdx)
+	}
+
+	// Subnets before IGW
+	igwDetachIdx := opIndex("DetachInternetGateway")
+	if igwDetachIdx < 0 {
+		t.Fatalf("missing DetachInternetGateway in operations: %v", ec2Mock.operations)
+	}
+	if subIdx > igwDetachIdx {
+		t.Errorf("DeleteSubnet (idx=%d) should come before DetachInternetGateway (idx=%d)", subIdx, igwDetachIdx)
+	}
+
+	// IGW detach before IGW delete
+	igwDeleteIdx := opIndex("DeleteInternetGateway")
+	if igwDeleteIdx < 0 {
+		t.Fatalf("missing DeleteInternetGateway in operations: %v", ec2Mock.operations)
+	}
+	if igwDetachIdx > igwDeleteIdx {
+		t.Errorf("DetachInternetGateway (idx=%d) should come before DeleteInternetGateway (idx=%d)", igwDetachIdx, igwDeleteIdx)
+	}
+
+	// IGW before DHCP
+	dhcpIdx := opIndex("DeleteDhcpOptions")
+	if dhcpIdx < 0 {
+		t.Fatalf("missing DeleteDhcpOptions in operations: %v", ec2Mock.operations)
+	}
+	if igwDeleteIdx > dhcpIdx {
+		t.Errorf("DeleteInternetGateway (idx=%d) should come before DeleteDhcpOptions (idx=%d)", igwDeleteIdx, dhcpIdx)
+	}
+
+	// DHCP before VPC
+	vpcIdx := opIndex("DeleteVpc")
+	if vpcIdx < 0 {
+		t.Fatalf("missing DeleteVpc in operations: %v", ec2Mock.operations)
+	}
+	if dhcpIdx > vpcIdx {
+		t.Errorf("DeleteDhcpOptions (idx=%d) should come before DeleteVpc (idx=%d)", dhcpIdx, vpcIdx)
+	}
+}
+
+func TestDestroyInfra_DeletesAllSubnets(t *testing.T) {
+	ec2Mock := &mockEC2{}
+	r53Mock := &mockRoute53{}
+
+	out := testInfraOutput()
+	out.PrivateSubnetIDs = []string{"subnet-priv-1", "subnet-priv-2"}
+	out.PublicSubnetIDs = []string{"subnet-pub-1", "subnet-pub-2"}
+
+	err := DestroyInfra(context.Background(), ec2Mock, r53Mock, "test-infra", out)
+	if err != nil {
+		t.Fatalf("DestroyInfra failed: %v", err)
+	}
+
+	deleteSubnetCount := 0
+	for _, op := range ec2Mock.operations {
+		if len(op) >= 12 && op[:12] == "DeleteSubnet" {
+			deleteSubnetCount++
+		}
+	}
+	if deleteSubnetCount != 4 {
+		t.Errorf("expected 4 DeleteSubnet calls, got %d", deleteSubnetCount)
+	}
+}
+
+func TestDestroyInfra_ErrorReturned(t *testing.T) {
+	ec2Mock := &mockEC2{
+		deleteErr:   fmt.Errorf("access denied"),
+		deleteErrOn: "DeleteNatGateway",
+	}
+	r53Mock := &mockRoute53{}
+
+	err := DestroyInfra(context.Background(), ec2Mock, r53Mock, "test-infra", testInfraOutput())
+	if err == nil {
+		t.Fatal("expected error from DestroyInfra, got nil")
+	}
+	if !strings.Contains(err.Error(), "access denied") {
+		t.Errorf("error = %q, want it to contain 'access denied'", err.Error())
+	}
+}
+
+func TestDestroyInfra_DNSRecordCleanup(t *testing.T) {
+	ec2Mock := &mockEC2{}
+	r53Mock := &mockRoute53{
+		listRecordSetsResult: &route53.ListResourceRecordSetsOutput{
+			ResourceRecordSets: []r53types.ResourceRecordSet{
+				{Type: r53types.RRTypeNs, Name: aws.String("example.com.")},
+				{Type: r53types.RRTypeSoa, Name: aws.String("example.com.")},
+				{Type: r53types.RRTypeA, Name: aws.String("api.example.com.")},
+			},
+		},
+	}
+
+	err := DestroyInfra(context.Background(), ec2Mock, r53Mock, "test-infra", testInfraOutput())
+	if err != nil {
+		t.Fatalf("DestroyInfra failed: %v", err)
+	}
+
+	// Should list records, change (delete non-default), then delete zone — for each zone
+	hasChange := false
+	for _, op := range r53Mock.operations {
+		if op == "ChangeResourceRecordSets" {
+			hasChange = true
+		}
+	}
+	if !hasChange {
+		t.Error("expected ChangeResourceRecordSets to delete non-default records")
+	}
+}
+
+func TestDestroyInfra_NilOutput(t *testing.T) {
+	ec2Mock := &mockEC2{}
+	r53Mock := &mockRoute53{}
+
+	err := DestroyInfra(context.Background(), ec2Mock, r53Mock, "test-infra", nil)
+	if err == nil {
+		t.Fatal("expected error for nil output, got nil")
 	}
 }

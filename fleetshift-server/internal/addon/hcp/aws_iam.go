@@ -300,3 +300,63 @@ func CreateIAM(ctx context.Context, iamClient IAMAPI, params IAMParams) (*IAMOut
 
 	return out, nil
 }
+
+// DestroyIAM removes all IAM resources created for an HCP cluster:
+// instance profile, 8 roles (with their inline policies), and OIDC provider.
+func DestroyIAM(ctx context.Context, iamClient IAMAPI, infraID string, out *IAMOutput) error {
+	profileName := infraID + "-worker"
+
+	// 1. Remove worker role from instance profile
+	if _, err := iamClient.RemoveRoleFromInstanceProfile(ctx, &iam.RemoveRoleFromInstanceProfileInput{
+		InstanceProfileName: aws.String(profileName),
+		RoleName:            aws.String(infraID + "-worker-role"),
+	}); err != nil {
+		return fmt.Errorf("remove role from instance profile: %w", err)
+	}
+
+	// 2. Delete instance profile
+	if _, err := iamClient.DeleteInstanceProfile(ctx, &iam.DeleteInstanceProfileInput{
+		InstanceProfileName: aws.String(profileName),
+	}); err != nil {
+		return fmt.Errorf("delete instance profile: %w", err)
+	}
+
+	// 3. Delete all 8 roles (delete inline policies first, then delete role)
+	for _, role := range roleDefinitions() {
+		roleName := infraID + "-" + role.suffix
+
+		// List and delete all inline policies
+		policiesOut, err := iamClient.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+			RoleName: aws.String(roleName),
+		})
+		if err != nil {
+			return fmt.Errorf("list policies for role %s: %w", roleName, err)
+		}
+		for _, policyName := range policiesOut.PolicyNames {
+			if _, err := iamClient.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
+				RoleName:   aws.String(roleName),
+				PolicyName: aws.String(policyName),
+			}); err != nil {
+				return fmt.Errorf("delete policy %s from role %s: %w", policyName, roleName, err)
+			}
+		}
+
+		// Delete the role
+		if _, err := iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
+			RoleName: aws.String(roleName),
+		}); err != nil {
+			return fmt.Errorf("delete role %s: %w", roleName, err)
+		}
+	}
+
+	// 4. Delete OIDC provider
+	if out != nil && out.OIDCProviderArn != "" {
+		if _, err := iamClient.DeleteOpenIDConnectProvider(ctx, &iam.DeleteOpenIDConnectProviderInput{
+			OpenIDConnectProviderArn: aws.String(out.OIDCProviderArn),
+		}); err != nil {
+			return fmt.Errorf("delete OIDC provider: %w", err)
+		}
+	}
+
+	return nil
+}

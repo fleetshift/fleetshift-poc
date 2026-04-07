@@ -90,7 +90,16 @@ func (m *mockIAM) RemoveRoleFromInstanceProfile(ctx context.Context, input *iam.
 }
 
 func (m *mockIAM) ListRolePolicies(ctx context.Context, input *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
-	return &iam.ListRolePoliciesOutput{}, nil
+	m.calls = append(m.calls, "ListRolePolicies:"+*input.RoleName)
+	// Return the policy that was put for this role (lookup from policiesPut)
+	var policyNames []string
+	for _, p := range m.policiesPut {
+		parts := strings.SplitN(p, "/", 2)
+		if parts[0] == *input.RoleName && len(parts) == 2 {
+			policyNames = append(policyNames, parts[1])
+		}
+	}
+	return &iam.ListRolePoliciesOutput{PolicyNames: policyNames}, nil
 }
 
 func (m *mockIAM) ListInstanceProfilesForRole(ctx context.Context, input *iam.ListInstanceProfilesForRoleInput, optFns ...func(*iam.Options)) (*iam.ListInstanceProfilesForRoleOutput, error) {
@@ -252,4 +261,154 @@ func TestCreateIAM_TrustPolicyReferencesOIDC(t *testing.T) {
 	if strEquals[expectedKey] != "system:serviceaccount:kube-system:test-sa" {
 		t.Errorf("condition %q = %v, want system:serviceaccount:kube-system:test-sa", expectedKey, strEquals[expectedKey])
 	}
+}
+
+func TestDestroyIAM_RemovesAllRolesAndOIDC(t *testing.T) {
+	mock := &mockIAM{}
+	params := IAMParams{
+		InfraID:  "test-infra",
+		Region:   "us-east-1",
+		S3Bucket: "my-oidc-bucket",
+	}
+
+	// First create IAM resources so the mock has policy data
+	out, err := CreateIAM(context.Background(), mock, params)
+	if err != nil {
+		t.Fatalf("CreateIAM failed: %v", err)
+	}
+
+	// Reset call tracking
+	mock.calls = nil
+
+	// Now destroy
+	err = DestroyIAM(context.Background(), mock, "test-infra", out)
+	if err != nil {
+		t.Fatalf("DestroyIAM failed: %v", err)
+	}
+
+	// Verify instance profile cleanup comes first
+	if len(mock.calls) < 2 {
+		t.Fatalf("expected at least 2 calls, got %d", len(mock.calls))
+	}
+	if mock.calls[0] != "RemoveRoleFromInstanceProfile" {
+		t.Errorf("first call = %q, want RemoveRoleFromInstanceProfile", mock.calls[0])
+	}
+	if mock.calls[1] != "DeleteInstanceProfile" {
+		t.Errorf("second call = %q, want DeleteInstanceProfile", mock.calls[1])
+	}
+
+	// Count role deletions
+	deleteRoleCount := 0
+	deletePolicyCount := 0
+	for _, call := range mock.calls {
+		if strings.HasPrefix(call, "DeleteRole:") {
+			deleteRoleCount++
+		}
+		if strings.HasPrefix(call, "DeleteRolePolicy:") {
+			deletePolicyCount++
+		}
+	}
+	if deleteRoleCount != 8 {
+		t.Errorf("expected 8 DeleteRole calls, got %d", deleteRoleCount)
+	}
+	if deletePolicyCount != 8 {
+		t.Errorf("expected 8 DeleteRolePolicy calls, got %d", deletePolicyCount)
+	}
+
+	// Verify OIDC provider deleted last
+	lastCall := mock.calls[len(mock.calls)-1]
+	if lastCall != "DeleteOpenIDConnectProvider" {
+		t.Errorf("last call = %q, want DeleteOpenIDConnectProvider", lastCall)
+	}
+}
+
+func TestDestroyIAM_PolicyDeletedBeforeRole(t *testing.T) {
+	mock := &mockIAM{}
+	params := IAMParams{
+		InfraID:  "test-infra",
+		Region:   "us-east-1",
+		S3Bucket: "my-oidc-bucket",
+	}
+
+	out, err := CreateIAM(context.Background(), mock, params)
+	if err != nil {
+		t.Fatalf("CreateIAM failed: %v", err)
+	}
+	mock.calls = nil
+
+	err = DestroyIAM(context.Background(), mock, "test-infra", out)
+	if err != nil {
+		t.Fatalf("DestroyIAM failed: %v", err)
+	}
+
+	// For each role, DeleteRolePolicy must come before DeleteRole
+	for _, role := range roleDefinitions() {
+		roleName := "test-infra-" + role.suffix
+		policyIdx := -1
+		roleIdx := -1
+		for i, call := range mock.calls {
+			if call == "DeleteRolePolicy:"+roleName {
+				policyIdx = i
+			}
+			if call == "DeleteRole:"+roleName {
+				roleIdx = i
+			}
+		}
+		if policyIdx < 0 {
+			t.Errorf("DeleteRolePolicy not called for %s", roleName)
+			continue
+		}
+		if roleIdx < 0 {
+			t.Errorf("DeleteRole not called for %s", roleName)
+			continue
+		}
+		if policyIdx > roleIdx {
+			t.Errorf("DeleteRolePolicy (idx=%d) should come before DeleteRole (idx=%d) for %s", policyIdx, roleIdx, roleName)
+		}
+	}
+}
+
+func TestDestroyIAM_ErrorReturned(t *testing.T) {
+	mock := &mockIAMWithError{
+		mockIAM:  &mockIAM{},
+		failOn:   "DeleteRole",
+		failErr:  fmt.Errorf("role in use"),
+	}
+	params := IAMParams{
+		InfraID:  "test-infra",
+		Region:   "us-east-1",
+		S3Bucket: "my-oidc-bucket",
+	}
+
+	// Create first so mock has policy data
+	out, err := CreateIAM(context.Background(), mock.mockIAM, params)
+	if err != nil {
+		t.Fatalf("CreateIAM failed: %v", err)
+	}
+
+	err = DestroyIAM(context.Background(), mock, "test-infra", out)
+	if err == nil {
+		t.Fatal("expected error from DestroyIAM, got nil")
+	}
+	if !strings.Contains(err.Error(), "role in use") {
+		t.Errorf("error = %q, want it to contain 'role in use'", err.Error())
+	}
+}
+
+// mockIAMWithError wraps mockIAM and returns an error for a specific operation.
+type mockIAMWithError struct {
+	*mockIAM
+	failOn  string
+	failErr error
+}
+
+func (m *mockIAMWithError) DeleteRole(ctx context.Context, input *iam.DeleteRoleInput, optFns ...func(*iam.Options)) (*iam.DeleteRoleOutput, error) {
+	if m.failOn == "DeleteRole" {
+		return nil, m.failErr
+	}
+	return m.mockIAM.DeleteRole(ctx, input, optFns...)
+}
+
+func (m *mockIAMWithError) ListRolePolicies(ctx context.Context, input *iam.ListRolePoliciesInput, optFns ...func(*iam.Options)) (*iam.ListRolePoliciesOutput, error) {
+	return m.mockIAM.ListRolePolicies(ctx, input, optFns...)
 }
