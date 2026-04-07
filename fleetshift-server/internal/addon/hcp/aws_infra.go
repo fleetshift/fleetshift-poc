@@ -3,6 +3,7 @@ package hcp
 import (
 	"context"
 	"fmt"
+	"net"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -47,6 +48,7 @@ type EC2API interface {
 	DescribeVpcEndpoints(ctx context.Context, params *ec2.DescribeVpcEndpointsInput, optFns ...func(*ec2.Options)) (*ec2.DescribeVpcEndpointsOutput, error)
 	DescribeAddresses(ctx context.Context, params *ec2.DescribeAddressesInput, optFns ...func(*ec2.Options)) (*ec2.DescribeAddressesOutput, error)
 	DisassociateRouteTable(ctx context.Context, params *ec2.DisassociateRouteTableInput, optFns ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error)
+	ReplaceRouteTableAssociation(ctx context.Context, params *ec2.ReplaceRouteTableAssociationInput, optFns ...func(*ec2.Options)) (*ec2.ReplaceRouteTableAssociationOutput, error)
 }
 
 // Route53API is the subset of the Route53 client needed for DNS zone management.
@@ -85,6 +87,12 @@ type InfraSpec struct {
 	Zones      []string
 }
 
+const (
+	// Subnet CIDRs use /20 to match HyperShift CLI — gives 4094 IPs per subnet.
+	basePublicSubnetCIDR  = "10.0.0.0/20"
+	basePrivateSubnetCIDR = "10.0.128.0/20"
+)
+
 func clusterTag(infraID string) ec2types.Tag {
 	return ec2types.Tag{
 		Key:   aws.String(fmt.Sprintf("kubernetes.io/cluster/%s", infraID)),
@@ -97,6 +105,22 @@ func nameTag(name string) ec2types.Tag {
 		Key:   aws.String("Name"),
 		Value: aws.String(name),
 	}
+}
+
+func elbTag(key string) ec2types.Tag {
+	return ec2types.Tag{
+		Key:   aws.String(key),
+		Value: aws.String("1"),
+	}
+}
+
+// dhcpDomainName returns the correct DHCP domain name for a region.
+// us-east-1 uses "ec2.internal"; all other regions use "{region}.compute.internal".
+func dhcpDomainName(region string) string {
+	if region == "us-east-1" {
+		return "ec2.internal"
+	}
+	return region + ".compute.internal"
 }
 
 // CreateInfra provisions the full VPC + networking stack for an HCP cluster.
@@ -132,7 +156,7 @@ func CreateInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, sp
 	// 2. DHCP Options
 	dhcpOut, err := ec2Client.CreateDhcpOptions(ctx, &ec2.CreateDhcpOptionsInput{
 		DhcpConfigurations: []ec2types.NewDhcpConfiguration{
-			{Key: aws.String("domain-name"), Values: []string{spec.Region + ".compute.internal"}},
+			{Key: aws.String("domain-name"), Values: []string{dhcpDomainName(spec.Region)}},
 			{Key: aws.String("domain-name-servers"), Values: []string{"AmazonProvidedDNS"}},
 		},
 		TagSpecifications: []ec2types.TagSpecification{{
@@ -171,17 +195,26 @@ func CreateInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, sp
 		return nil, fmt.Errorf("attach internet gateway: %w", err)
 	}
 
-	// 4. Per-zone: private subnet, public subnet, EIP, NAT GW, private route table
+	// 4. Per-zone: private subnet, public subnet, EIP, NAT GW, private route table.
+	// CIDRs use /20 (4094 IPs) to match HyperShift CLI:
+	//   Public:  10.0.0.0/20, 10.0.16.0/20, 10.0.32.0/20, ...
+	//   Private: 10.0.128.0/20, 10.0.144.0/20, 10.0.160.0/20, ...
+	_, pubNet, _ := net.ParseCIDR(basePublicSubnetCIDR)
+	_, privNet, _ := net.ParseCIDR(basePrivateSubnetCIDR)
+
 	for i, zone := range spec.Zones {
-		// Private subnet: 10.0.{i*2}.0/24
-		privCIDR := fmt.Sprintf("10.0.%d.0/24", i*2)
+		privCIDR := offsetCIDR(privNet, i)
 		privSubnet, err := ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
 			VpcId:            vpcOut.Vpc.VpcId,
 			CidrBlock:        aws.String(privCIDR),
 			AvailabilityZone: aws.String(zone),
 			TagSpecifications: []ec2types.TagSpecification{{
 				ResourceType: ec2types.ResourceTypeSubnet,
-				Tags:         []ec2types.Tag{tag, nameTag(fmt.Sprintf("%s-private-%s", spec.InfraID, zone))},
+				Tags: []ec2types.Tag{
+					tag,
+					nameTag(fmt.Sprintf("%s-private-%s", spec.InfraID, zone)),
+					elbTag("kubernetes.io/role/internal-elb"),
+				},
 			}},
 		})
 		if err != nil {
@@ -189,15 +222,18 @@ func CreateInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, sp
 		}
 		out.PrivateSubnetIDs = append(out.PrivateSubnetIDs, aws.ToString(privSubnet.Subnet.SubnetId))
 
-		// Public subnet: 10.0.{i*2+1}.0/24
-		pubCIDR := fmt.Sprintf("10.0.%d.0/24", i*2+1)
+		pubCIDR := offsetCIDR(pubNet, i)
 		pubSubnet, err := ec2Client.CreateSubnet(ctx, &ec2.CreateSubnetInput{
 			VpcId:            vpcOut.Vpc.VpcId,
 			CidrBlock:        aws.String(pubCIDR),
 			AvailabilityZone: aws.String(zone),
 			TagSpecifications: []ec2types.TagSpecification{{
 				ResourceType: ec2types.ResourceTypeSubnet,
-				Tags:         []ec2types.Tag{tag, nameTag(fmt.Sprintf("%s-public-%s", spec.InfraID, zone))},
+				Tags: []ec2types.Tag{
+					tag,
+					nameTag(fmt.Sprintf("%s-public-%s", spec.InfraID, zone)),
+					elbTag("kubernetes.io/role/elb"),
+				},
 			}},
 		})
 		if err != nil {
@@ -276,6 +312,32 @@ func CreateInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, sp
 		return nil, fmt.Errorf("create public route table: %w", err)
 	}
 	out.PublicRouteTableID = aws.ToString(pubRT.RouteTable.RouteTableId)
+
+	// Replace the VPC's main route table with the public one. This ensures
+	// unassociated subnets route through the IGW by default, matching
+	// HyperShift CLI behavior.
+	mainRTs, err := ec2Client.DescribeRouteTables(ctx, &ec2.DescribeRouteTablesInput{
+		Filters: []ec2types.Filter{
+			{Name: aws.String("vpc-id"), Values: []string{out.VPCID}},
+			{Name: aws.String("association.main"), Values: []string{"true"}},
+		},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("describe main route table: %w", err)
+	}
+	if len(mainRTs.RouteTables) > 0 {
+		for _, assoc := range mainRTs.RouteTables[0].Associations {
+			if aws.ToBool(assoc.Main) && assoc.RouteTableAssociationId != nil {
+				if _, err := ec2Client.ReplaceRouteTableAssociation(ctx, &ec2.ReplaceRouteTableAssociationInput{
+					RouteTableId:  aws.String(out.PublicRouteTableID),
+					AssociationId: assoc.RouteTableAssociationId,
+				}); err != nil {
+					return nil, fmt.Errorf("replace main route table: %w", err)
+				}
+				break
+			}
+		}
+	}
 
 	// Default route via IGW
 	if _, err := ec2Client.CreateRoute(ctx, &ec2.CreateRouteInput{
@@ -627,6 +689,17 @@ func discoverInfra(ctx context.Context, ec2Client EC2API, r53Client Route53API, 
 	}
 
 	return out, nil
+}
+
+// offsetCIDR returns a /20 CIDR block offset by n * /20 from the base network.
+// For example, offsetCIDR(10.0.0.0/20, 0) = "10.0.0.0/20",
+// offsetCIDR(10.0.0.0/20, 1) = "10.0.16.0/20".
+func offsetCIDR(base *net.IPNet, n int) string {
+	ip := make(net.IP, len(base.IP))
+	copy(ip, base.IP)
+	// /20 = 4096 IPs = 16 in the third octet
+	ip[2] = ip[2] + byte(n*16)
+	return fmt.Sprintf("%s/20", ip)
 }
 
 // hasNameTagContaining checks if a tag list has a Name tag containing the substring.

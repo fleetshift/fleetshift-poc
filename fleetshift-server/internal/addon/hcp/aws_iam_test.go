@@ -252,7 +252,7 @@ func TestCreateIAM_TrustPolicyReferencesOIDC(t *testing.T) {
 	// Verify trust policy structure
 	oidcArn := "arn:aws:iam::123456789012:oidc-provider/test"
 	issuer := "my-bucket.s3.us-east-1.amazonaws.com/test-infra"
-	tp := trustPolicy(oidcArn, issuer, "kube-system", "test-sa")
+	tp := trustPolicy(oidcArn, issuer, [][2]string{{"kube-system", "test-sa"}})
 
 	var doc map[string]any
 	if err := json.Unmarshal([]byte(tp), &doc); err != nil {
@@ -357,7 +357,7 @@ func TestDestroyIAM_PolicyDeletedBeforeRole(t *testing.T) {
 	}
 
 	// For each role, DeleteRolePolicy must come before DeleteRole
-	for _, role := range roleDefinitions() {
+	for _, role := range oidcRoleDefinitions() {
 		roleName := "test-infra-" + role.suffix
 		policyIdx := -1
 		roleIdx := -1

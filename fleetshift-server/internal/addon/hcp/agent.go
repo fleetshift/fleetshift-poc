@@ -258,6 +258,14 @@ func (a *Agent) deliverAsync(ctx context.Context, specs []ClusterSpec, signaler 
 }
 
 func (a *Agent) deliverCluster(ctx context.Context, spec ClusterSpec, signaler *domain.DeliverySignaler) (*ClusterOutput, bool) {
+	// Apply defaults that other functions depend on.
+	if spec.InfraID == "" {
+		spec.InfraID = spec.Name
+	}
+	if spec.Region == "" {
+		spec.Region = a.config.AWSRegion
+	}
+
 	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, spec.Name)
 	defer probe.End()
 
@@ -269,9 +277,9 @@ func (a *Agent) deliverCluster(ctx context.Context, spec ClusterSpec, signaler *
 	infraSpec := InfraSpec{
 		Name:       spec.Name,
 		InfraID:    spec.InfraID,
-		Region:     a.region(spec),
+		Region:     spec.Region,
 		BaseDomain: spec.BaseDomain,
-		Zones:      defaultZones(a.region(spec)),
+		Zones:      collectZones(spec),
 	}
 	infra, err := CreateInfra(ctx, a.ec2, a.route53, infraSpec)
 	if err != nil {
@@ -288,7 +296,7 @@ func (a *Agent) deliverCluster(ctx context.Context, spec ClusterSpec, signaler *
 	})
 	iamParams := IAMParams{
 		InfraID:  spec.InfraID,
-		Region:   a.region(spec),
+		Region:   spec.Region,
 		S3Bucket: a.config.S3Bucket,
 	}
 	iamOut, err := CreateIAM(ctx, a.iam, iamParams)
@@ -395,15 +403,23 @@ func failDelivery(ctx context.Context, signaler *domain.DeliverySignaler, format
 	})
 }
 
-func (a *Agent) region(spec ClusterSpec) string {
-	if spec.Region != "" {
-		return spec.Region
+// collectZones gathers unique availability zones from all node pools in
+// the spec. If none are specified, returns a single default zone.
+func collectZones(spec ClusterSpec) []string {
+	seen := make(map[string]struct{})
+	var zones []string
+	for _, np := range spec.NodePools {
+		for _, z := range np.Zones {
+			if _, ok := seen[z]; !ok {
+				seen[z] = struct{}{}
+				zones = append(zones, z)
+			}
+		}
 	}
-	return a.config.AWSRegion
-}
-
-func defaultZones(region string) []string {
-	return []string{region + "a"}
+	if len(zones) == 0 {
+		return []string{spec.Region + "a"}
+	}
+	return zones
 }
 
 // extractClusterConnInfo parses a kubeconfig to extract API server and CA cert.

@@ -144,7 +144,7 @@ func (m *kubeMgmtCluster) deleteNodePools(ctx context.Context, spec ClusterSpec)
 	for _, np := range spec.NodePools {
 		poolName := spec.Name + "-" + np.Name
 		err := m.dynamicClient.Resource(nodePoolGVR).Namespace(hostedClusterNamespace).Delete(ctx, poolName, metav1.DeleteOptions{})
-		if err != nil {
+		if err != nil && !apierrors.IsNotFound(err) {
 			return fmt.Errorf("delete NodePool %q: %w", poolName, err)
 		}
 	}
@@ -152,7 +152,11 @@ func (m *kubeMgmtCluster) deleteNodePools(ctx context.Context, spec ClusterSpec)
 }
 
 func (m *kubeMgmtCluster) deleteHostedCluster(ctx context.Context, name string) error {
-	return m.dynamicClient.Resource(hostedClusterGVR).Namespace(hostedClusterNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	err := m.dynamicClient.Resource(hostedClusterGVR).Namespace(hostedClusterNamespace).Delete(ctx, name, metav1.DeleteOptions{})
+	if apierrors.IsNotFound(err) {
+		return nil
+	}
+	return err
 }
 
 func (m *kubeMgmtCluster) waitForDeletion(ctx context.Context, name string) error {
@@ -164,9 +168,11 @@ func (m *kubeMgmtCluster) waitForDeletion(ctx context.Context, name string) erro
 		}
 
 		_, err := m.dynamicClient.Resource(hostedClusterGVR).Namespace(hostedClusterNamespace).Get(ctx, name, metav1.GetOptions{})
-		if err != nil {
-			// Resource is gone.
+		if apierrors.IsNotFound(err) {
 			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("check HostedCluster %q deletion: %w", name, err)
 		}
 
 		time.Sleep(10 * time.Second)

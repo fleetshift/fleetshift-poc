@@ -62,8 +62,21 @@ func oidcIssuerURL(s3Bucket, region, infraID string) string {
 }
 
 // trustPolicy builds an IAM trust policy that allows the OIDC provider to
-// assume the role for the given service account.
-func trustPolicy(oidcProviderArn, oidcIssuer, namespace, saName string) string {
+// assume the role for the given service accounts.
+func trustPolicy(oidcProviderArn, oidcIssuer string, serviceAccounts [][2]string) string {
+	subs := make([]string, len(serviceAccounts))
+	for i, sa := range serviceAccounts {
+		subs[i] = "system:serviceaccount:" + sa[0] + ":" + sa[1]
+	}
+
+	// AWS expects a string when there's one SA, an array when multiple.
+	var subValue any
+	if len(subs) == 1 {
+		subValue = subs[0]
+	} else {
+		subValue = subs
+	}
+
 	doc := map[string]any{
 		"Version": "2012-10-17",
 		"Statement": []map[string]any{
@@ -74,8 +87,8 @@ func trustPolicy(oidcProviderArn, oidcIssuer, namespace, saName string) string {
 				},
 				"Action": "sts:AssumeRoleWithWebIdentity",
 				"Condition": map[string]any{
-					"StringEquals": map[string]string{
-						oidcIssuer + ":sub": "system:serviceaccount:" + namespace + ":" + saName,
+					"StringEquals": map[string]any{
+						oidcIssuer + ":sub": subValue,
 					},
 				},
 			},
@@ -91,8 +104,10 @@ func inlinePolicy(doc map[string]any) string {
 	return string(b)
 }
 
-// roleDefinitions returns the 8 IAM role definitions for an HCP cluster.
-func roleDefinitions() []roleSpec {
+// oidcRoleDefinitions returns the 7 OIDC-federated IAM role definitions.
+// The worker role is NOT included here — it uses an EC2 service principal
+// trust policy, not OIDC federation.
+func oidcRoleDefinitions() []roleSpec {
 	return []roleSpec{
 		{
 			suffix:     "cloud-controller",
@@ -192,34 +207,48 @@ func roleDefinitions() []roleSpec {
 				},
 			},
 		},
-		{
-			suffix:     "worker-role",
-			policyName: "worker-role-policy",
-			policy: map[string]any{
-				"Version": "2012-10-17",
-				"Statement": []map[string]any{
-					{
-						"Effect":   "Allow",
-						"Action":   []string{"ec2:DescribeInstances", "ec2:DescribeRegions"},
-						"Resource": "*",
-					},
-				},
-			},
-		},
 	}
 }
 
-// serviceAccountForRole maps role suffix to the namespace and SA name used
-// in the OIDC trust policy.
-var serviceAccountForRole = map[string][2]string{
-	"cloud-controller":                {"kube-system", "aws-cloud-controller-manager"},
-	"node-pool":                       {"kube-system", "capa-controller-manager"},
-	"control-plane-operator":          {"kube-system", "control-plane-operator"},
-	"cloud-network-config-controller": {"openshift-cloud-network-config-controller", "cloud-network-config-controller"},
-	"openshift-ingress":               {"openshift-ingress-operator", "ingress-operator"},
-	"openshift-image-registry":        {"openshift-image-registry", "cluster-image-registry-operator"},
-	"aws-ebs-csi-driver-controller":   {"openshift-cluster-csi-drivers", "aws-ebs-csi-driver-controller-sa"},
-	"worker-role":                     {"kube-system", "worker"},
+// workerRolePolicy is the inline permission policy for the worker role.
+var workerRolePolicy = map[string]any{
+	"Version": "2012-10-17",
+	"Statement": []map[string]any{
+		{
+			"Effect":   "Allow",
+			"Action":   []string{"ec2:DescribeInstances", "ec2:DescribeRegions"},
+			"Resource": "*",
+		},
+	},
+}
+
+// workerAssumeRolePolicy allows EC2 instances to assume the worker role.
+// This is different from OIDC roles — worker nodes are EC2 instances, not
+// pods, so they use the ec2.amazonaws.com service principal.
+const workerAssumeRolePolicy = `{
+	"Version": "2012-10-17",
+	"Statement": [
+		{
+			"Action": "sts:AssumeRole",
+			"Principal": {
+				"Service": "ec2.amazonaws.com"
+			},
+			"Effect": "Allow",
+			"Sid": ""
+		}
+	]
+}`
+
+// serviceAccountForRole maps OIDC role suffix to the namespace and SA
+// names used in the trust policy. Some roles require multiple SAs.
+var serviceAccountForRole = map[string][][2]string{
+	"cloud-controller":                {{"kube-system", "kube-controller-manager"}},
+	"node-pool":                       {{"kube-system", "capa-controller-manager"}},
+	"control-plane-operator":          {{"kube-system", "control-plane-operator"}},
+	"cloud-network-config-controller": {{"openshift-cloud-network-config-controller", "cloud-network-config-controller"}},
+	"openshift-ingress":               {{"openshift-ingress-operator", "ingress-operator"}},
+	"openshift-image-registry":        {{"openshift-image-registry", "cluster-image-registry-operator"}, {"openshift-image-registry", "registry"}},
+	"aws-ebs-csi-driver-controller":   {{"openshift-cluster-csi-drivers", "aws-ebs-csi-driver-controller-sa"}},
 }
 
 // CreateIAM creates the OIDC provider, 8 IAM roles with trust policies and
@@ -240,8 +269,8 @@ func CreateIAM(ctx context.Context, iamClient IAMAPI, params IAMParams) (*IAMOut
 	}
 	out.OIDCProviderArn = *oidcOut.OpenIDConnectProviderArn
 
-	// 2. Create 8 IAM roles with trust policies and inline permissions
-	roles := roleDefinitions()
+	// 2. Create 7 OIDC-federated roles with trust policies and inline permissions.
+	roles := oidcRoleDefinitions()
 	roleArnSetters := []func(string){
 		func(arn string) { out.CloudControllerRoleArn = arn },
 		func(arn string) { out.NodePoolRoleArn = arn },
@@ -250,16 +279,15 @@ func CreateIAM(ctx context.Context, iamClient IAMAPI, params IAMParams) (*IAMOut
 		func(arn string) { out.IngressRoleArn = arn },
 		func(arn string) { out.ImageRegistryRoleArn = arn },
 		func(arn string) { out.EBSCSIDriverRoleArn = arn },
-		func(arn string) { out.WorkerRoleArn = arn },
 	}
 
 	for i, role := range roles {
 		roleName := params.InfraID + "-" + role.suffix
-		sa := serviceAccountForRole[role.suffix]
+		sas := serviceAccountForRole[role.suffix]
 
 		roleOut, err := iamClient.CreateRole(ctx, &iam.CreateRoleInput{
 			RoleName:                 aws.String(roleName),
-			AssumeRolePolicyDocument: aws.String(trustPolicy(out.OIDCProviderArn, oidcIssuer, sa[0], sa[1])),
+			AssumeRolePolicyDocument: aws.String(trustPolicy(out.OIDCProviderArn, oidcIssuer, sas)),
 			Tags: []iamtypes.Tag{
 				{Key: aws.String("kubernetes.io/cluster/" + params.InfraID), Value: aws.String("owned")},
 			},
@@ -279,7 +307,23 @@ func CreateIAM(ctx context.Context, iamClient IAMAPI, params IAMParams) (*IAMOut
 		}
 	}
 
-	// 3. Create worker instance profile and add the worker role
+	// 3. Create worker role with EC2 service principal trust policy.
+	// Worker nodes are EC2 instances, not pods — they need ec2.amazonaws.com
+	// as the principal, not OIDC federation.
+	workerRoleName := params.InfraID + "-worker-role"
+	workerRoleOut, err := iamClient.CreateRole(ctx, &iam.CreateRoleInput{
+		RoleName:                 aws.String(workerRoleName),
+		AssumeRolePolicyDocument: aws.String(workerAssumeRolePolicy),
+		Tags: []iamtypes.Tag{
+			{Key: aws.String("kubernetes.io/cluster/" + params.InfraID), Value: aws.String("owned")},
+		},
+	})
+	if err != nil {
+		return out, fmt.Errorf("create worker role: %w", err)
+	}
+	out.WorkerRoleArn = *workerRoleOut.Role.Arn
+
+	// 4. Create worker instance profile and add the worker role.
 	profileName := params.InfraID + "-worker"
 	_, err = iamClient.CreateInstanceProfile(ctx, &iam.CreateInstanceProfileInput{
 		InstanceProfileName: aws.String(profileName),
@@ -294,10 +338,20 @@ func CreateIAM(ctx context.Context, iamClient IAMAPI, params IAMParams) (*IAMOut
 
 	_, err = iamClient.AddRoleToInstanceProfile(ctx, &iam.AddRoleToInstanceProfileInput{
 		InstanceProfileName: aws.String(profileName),
-		RoleName:            aws.String(params.InfraID + "-worker-role"),
+		RoleName:            aws.String(workerRoleName),
 	})
 	if err != nil {
 		return out, fmt.Errorf("add worker role to instance profile: %w", err)
+	}
+
+	// 5. Add inline policy to worker role.
+	_, err = iamClient.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
+		RoleName:       aws.String(workerRoleName),
+		PolicyName:     aws.String(profileName + "-policy"),
+		PolicyDocument: aws.String(inlinePolicy(workerRolePolicy)),
+	})
+	if err != nil {
+		return out, fmt.Errorf("put worker role policy: %w", err)
 	}
 
 	return out, nil
@@ -323,8 +377,30 @@ func DestroyIAM(ctx context.Context, iamClient IAMAPI, infraID string, out *IAMO
 		return fmt.Errorf("delete instance profile: %w", err)
 	}
 
-	// 3. Delete all 8 roles (delete inline policies first, then delete role)
-	for _, role := range roleDefinitions() {
+	// 3. Delete worker role (inline policies first, then role)
+	workerRoleName := infraID + "-worker-role"
+	workerPolicies, err := iamClient.ListRolePolicies(ctx, &iam.ListRolePoliciesInput{
+		RoleName: aws.String(workerRoleName),
+	})
+	if err != nil {
+		return fmt.Errorf("list policies for worker role: %w", err)
+	}
+	for _, policyName := range workerPolicies.PolicyNames {
+		if _, err := iamClient.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
+			RoleName:   aws.String(workerRoleName),
+			PolicyName: aws.String(policyName),
+		}); err != nil {
+			return fmt.Errorf("delete policy %s from worker role: %w", policyName, err)
+		}
+	}
+	if _, err := iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
+		RoleName: aws.String(workerRoleName),
+	}); err != nil {
+		return fmt.Errorf("delete worker role: %w", err)
+	}
+
+	// 4. Delete all 7 OIDC roles (delete inline policies first, then delete role)
+	for _, role := range oidcRoleDefinitions() {
 		roleName := infraID + "-" + role.suffix
 
 		// List and delete all inline policies

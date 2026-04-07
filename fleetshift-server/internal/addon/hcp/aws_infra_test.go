@@ -248,9 +248,15 @@ func (m *mockEC2) DescribeRouteTables(_ context.Context, _ *ec2.DescribeRouteTab
 	if m.describeRTResult != nil {
 		return m.describeRTResult, nil
 	}
-	// Default: no associations
+	// Default: return a main association so ReplaceRouteTableAssociation works.
 	return &ec2.DescribeRouteTablesOutput{
-		RouteTables: []ec2types.RouteTable{{}},
+		RouteTables: []ec2types.RouteTable{{
+			RouteTableId: aws.String("rtb-main"),
+			Associations: []ec2types.RouteTableAssociation{{
+				Main:                    aws.Bool(true),
+				RouteTableAssociationId: aws.String("rtbassoc-main"),
+			}},
+		}},
 	}, nil
 }
 func (m *mockEC2) DescribeInternetGateways(_ context.Context, _ *ec2.DescribeInternetGatewaysInput, _ ...func(*ec2.Options)) (*ec2.DescribeInternetGatewaysOutput, error) {
@@ -265,6 +271,11 @@ func (m *mockEC2) DescribeAddresses(_ context.Context, _ *ec2.DescribeAddressesI
 func (m *mockEC2) DisassociateRouteTable(_ context.Context, in *ec2.DisassociateRouteTableInput, _ ...func(*ec2.Options)) (*ec2.DisassociateRouteTableOutput, error) {
 	m.operations = append(m.operations, "DisassociateRouteTable:"+aws.ToString(in.AssociationId))
 	return &ec2.DisassociateRouteTableOutput{}, nil
+}
+
+func (m *mockEC2) ReplaceRouteTableAssociation(_ context.Context, _ *ec2.ReplaceRouteTableAssociationInput, _ ...func(*ec2.Options)) (*ec2.ReplaceRouteTableAssociationOutput, error) {
+	m.operations = append(m.operations, "ReplaceRouteTableAssociation")
+	return &ec2.ReplaceRouteTableAssociationOutput{}, nil
 }
 
 // mockRoute53 implements Route53API for testing.
@@ -366,11 +377,11 @@ func TestCreateInfra_SingleZone(t *testing.T) {
 	if len(ec2Mock.createSubnetCalls) != 2 {
 		t.Fatalf("expected 2 CreateSubnet calls, got %d", len(ec2Mock.createSubnetCalls))
 	}
-	if aws.ToString(ec2Mock.createSubnetCalls[0].CidrBlock) != "10.0.0.0/24" {
-		t.Errorf("private subnet CIDR = %q, want 10.0.0.0/24", aws.ToString(ec2Mock.createSubnetCalls[0].CidrBlock))
+	if aws.ToString(ec2Mock.createSubnetCalls[0].CidrBlock) != "10.0.128.0/20" {
+		t.Errorf("private subnet CIDR = %q, want 10.0.128.0/20", aws.ToString(ec2Mock.createSubnetCalls[0].CidrBlock))
 	}
-	if aws.ToString(ec2Mock.createSubnetCalls[1].CidrBlock) != "10.0.1.0/24" {
-		t.Errorf("public subnet CIDR = %q, want 10.0.1.0/24", aws.ToString(ec2Mock.createSubnetCalls[1].CidrBlock))
+	if aws.ToString(ec2Mock.createSubnetCalls[1].CidrBlock) != "10.0.0.0/20" {
+		t.Errorf("public subnet CIDR = %q, want 10.0.0.0/20", aws.ToString(ec2Mock.createSubnetCalls[1].CidrBlock))
 	}
 	if len(out.PrivateSubnetIDs) != 1 || len(out.PublicSubnetIDs) != 1 {
 		t.Errorf("expected 1 private + 1 public subnet, got %d + %d", len(out.PrivateSubnetIDs), len(out.PublicSubnetIDs))
