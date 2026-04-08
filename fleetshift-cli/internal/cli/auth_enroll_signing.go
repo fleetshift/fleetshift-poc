@@ -28,11 +28,15 @@ func newAuthEnrollSigningCmd(ctx *cmdContext) *cobra.Command {
 client to get a purpose-scoped ID token, and submits the token to the
 server to create a signer enrollment. The private key is stored in the
 OS keyring. The public key is exported in SSH format for the user to
-upload to GitHub as a signing key.`,
+upload to GitHub as a signing key.
+
+Use --reuse-key to re-enroll with an existing key pair already stored
+in the OS keyring (e.g. after a server-side reset or team change).`,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			return runAuthEnrollSigning(cmd, ctx)
 		},
 	}
+	cmd.Flags().Bool("reuse-key", false, "reuse the signing key already stored in the OS keyring instead of generating a new one")
 	return cmd
 }
 
@@ -45,9 +49,10 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 		return fmt.Errorf("no key enrollment client ID configured (set --key-enrollment-client-id during 'fleetctl auth setup')")
 	}
 
-	privateKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	reuseKey, _ := cmd.Flags().GetBool("reuse-key")
+	privateKey, generated, err := acquireSigningKey(reuseKey)
 	if err != nil {
-		return fmt.Errorf("generate key pair: %w", err)
+		return err
 	}
 
 	idToken, err := performEnrollmentOIDCFlow(cmd, cfg)
@@ -69,12 +74,14 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 		return fmt.Errorf("create signer enrollment: %w", err)
 	}
 
-	pemData, err := marshalECPrivateKeyPEM(privateKey)
-	if err != nil {
-		return fmt.Errorf("marshal private key: %w", err)
-	}
-	if err := auth.SaveSigningKey(pemData); err != nil {
-		return fmt.Errorf("save signing key to keyring: %w", err)
+	if generated {
+		pemData, err := marshalECPrivateKeyPEM(privateKey)
+		if err != nil {
+			return fmt.Errorf("marshal private key: %w", err)
+		}
+		if err := auth.SaveSigningKey(pemData); err != nil {
+			return fmt.Errorf("save signing key to keyring: %w", err)
+		}
 	}
 
 	sshPubKey, err := sshPublicKey(&privateKey.PublicKey)
@@ -91,6 +98,25 @@ func runAuthEnrollSigning(cmd *cobra.Command, ctx *cmdContext) error {
 	fmt.Fprintf(cmd.OutOrStdout(), "Or visit: https://github.com/settings/ssh/new\n")
 
 	return nil
+}
+
+// acquireSigningKey either loads an existing key from the keyring (when
+// reuseKey is true) or generates a fresh ECDSA P-256 key pair. The
+// generated return value indicates whether the key was newly created and
+// needs to be persisted to the keyring.
+func acquireSigningKey(reuseKey bool) (key *ecdsa.PrivateKey, generated bool, err error) {
+	if reuseKey {
+		key, err = loadSigningPrivateKey()
+		if err != nil {
+			return nil, false, fmt.Errorf("reuse existing signing key: %w", err)
+		}
+		return key, false, nil
+	}
+	key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, false, fmt.Errorf("generate key pair: %w", err)
+	}
+	return key, true, nil
 }
 
 func sshPublicKey(pub *ecdsa.PublicKey) (string, error) {
