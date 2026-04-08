@@ -2,6 +2,8 @@
 
 ## Design
 
+Areas where we need to design something and don't currently have a complete enough design to start working with.
+
 - Incorporate "root" service account (locked up keys, rarely used) best practice? ([FM-43](https://redhat.atlassian.net/browse/FM-43))
 - Look at workload identity federation kinds of techniques for authenticating the platform or authenticating agents ([FM-20](https://redhat.atlassian.net/browse/FM-20), [FM-37](https://redhat.atlassian.net/browse/FM-37), [FM-47](https://redhat.atlassian.net/browse/FM-47))
 - Should RBAC "push" (bootstrapping) be done by deployments in which the pool is everything in that workspace? And then new clusters are new targets which trigger the pipeline again? This is pretty elegant and follows existing authorization model. ([FM-41](https://redhat.atlassian.net/browse/FM-41))

@@ -380,7 +380,7 @@ func generateServerCert(t *testing.T, caCert *x509.Certificate, caKey *ecdsa.Pri
 		NotAfter:     time.Now().Add(24 * time.Hour),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"localhost", "host.docker.internal"},
+		DNSNames:     []string{"localhost", "host.docker.internal", "host.containers.internal"},
 		IPAddresses:  ips,
 	}
 

@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
-	"os/exec"
-	"strings"
+	"os"
 	"testing"
 	"time"
 
@@ -23,45 +22,30 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 )
 
+// containerHostAddr returns the hostname (or IP) that kind containers
+// use to reach the test host. By default this is "host.docker.internal",
+// which both Docker Desktop and Podman resolve to the host gateway.
+//
+// Set KIND_HOST_ADDR to override when the default doesn't work (e.g.,
+// older Docker Engine on Linux, or a dual-runtime environment).
+func containerHostAddr(t *testing.T) (host string, extraSANIPs []net.IP) {
+	t.Helper()
+	host = os.Getenv("KIND_HOST_ADDR")
+	if host == "" {
+		host = "host.docker.internal"
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		extraSANIPs = []net.IP{ip}
+	}
+	return host, extraSANIPs
+}
+
 // oidcClusterResult holds the outputs of createOIDCCluster.
 type oidcClusterResult struct {
 	ClusterName string
 	IDP         *oidctest.Provider
 	IssuerURL   domain.IssuerURL
 	Kubeconfig  string
-}
-
-// dockerHostIP returns the gateway IP of the Docker "kind" network, which
-// is the address kind containers use to reach the host. We resolve this
-// dynamically instead of relying on host.docker.internal because that DNS
-// name may resolve to an unreachable IP when another DNS resolver (e.g.,
-// Podman) is present on the host.
-func dockerHostIP(t *testing.T) string {
-	t.Helper()
-
-	// Ensure the "kind" network exists. kind creates it on first use,
-	// but we need the gateway IP before cluster creation for TLS SANs.
-	_ = exec.Command("docker", "network", "create", "kind").Run()
-
-	// Try each IPAM config entry; the IPv4 gateway is typically at
-	// index 0 or 1 depending on whether IPv6 is also configured.
-	for _, idx := range []string{"0", "1"} {
-		out, err := exec.Command("docker", "network", "inspect", "kind",
-			"--format", fmt.Sprintf("{{(index .IPAM.Config %s).Gateway}}", idx)).CombinedOutput()
-		if err != nil {
-			continue
-		}
-		ip := strings.TrimSpace(string(out))
-		if ip == "" || ip == "<no value>" {
-			continue
-		}
-		// Skip IPv6 addresses.
-		if net.ParseIP(ip) != nil && net.ParseIP(ip).To4() != nil {
-			return ip
-		}
-	}
-	t.Fatal("could not determine Docker host IP from kind network")
-	return ""
 }
 
 // createOIDCCluster creates a kind cluster with OIDC trust derived from
@@ -78,14 +62,14 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	t.Cleanup(func() { _ = checker.Delete(clusterName, "") })
 	_ = checker.Delete(clusterName, "")
 
-	hostIP := dockerHostIP(t)
+	hostAddr, extraSANIPs := containerHostAddr(t)
 
 	idp := oidctest.Start(t,
 		oidctest.WithListenAddress("0.0.0.0:0"),
 		oidctest.WithAudience(string(auth.Audience[0])),
-		oidctest.WithExtraSANIPs(net.ParseIP(hostIP)),
+		oidctest.WithExtraSANIPs(extraSANIPs...),
 	)
-	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostIP, idp.Port()))
+	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostAddr, idp.Port()))
 	idp.SetIssuerURL(dockerIssuer)
 
 	auth.Caller.Issuer = dockerIssuer

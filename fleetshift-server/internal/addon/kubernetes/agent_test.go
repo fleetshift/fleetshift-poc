@@ -393,22 +393,23 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 }
 
 func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
-	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
-	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+	agent := kubernetes.NewAgent()
 
+	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
-			"api_server": "https://127.0.0.1:6443",
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": trustBundle,
 		},
 	}
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			KeyBinding: domain.SigningKeyBinding{
-				FederatedIdentity: domain.FederatedIdentity{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
 					Issuer: "https://untrusted.example.com",
 				},
 			},
@@ -424,8 +425,8 @@ func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_WithAttestation_FallsBackWithoutVerifier(t *testing.T) {
-	agent := kubernetes.NewAgent() // no verifier
+func TestAgent_Remove_WithAttestation_NoTrustBundle_ReturnsError(t *testing.T) {
+	agent := kubernetes.NewAgent()
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
@@ -436,10 +437,21 @@ func TestAgent_Remove_WithAttestation_FallsBackWithoutVerifier(t *testing.T) {
 		},
 	}
 
-	// With attestation but no verifier, falls back to token passthrough.
-	// Empty manifests = no-op, should succeed via passthrough.
-	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.Attestation{}, &domain.DeliverySignaler{})
-	if err != nil {
-		t.Fatalf("Remove with attestation but no verifier should fall back to passthrough: %v", err)
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected error for missing trust_bundle, got nil")
+	}
+	if !strings.Contains(err.Error(), "trust_bundle") {
+		t.Errorf("expected trust_bundle error, got: %v", err)
 	}
 }

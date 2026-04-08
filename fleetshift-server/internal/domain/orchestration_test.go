@@ -1266,7 +1266,7 @@ func (authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInf
 	}, nil
 }
 
-func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -1368,6 +1368,145 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	}
 	if rm.DeploymentID != "rm-attested" {
 		t.Errorf("RemoveByDeploymentId.DeploymentID = %q, want %q", rm.DeploymentID, "rm-attested")
+	}
+}
+
+func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testing.T) {
+	store, _ := setupStore(t)
+	prov := testProvenance()
+
+	seedSignerEnrollment(t, store, testSignerEnrollment("se-del", "test-signer"))
+	seedDeployment(t, store, domain.Deployment{
+		ID:              "del-attested",
+		Generation:      2,
+		ResolvedTargets: []domain.TargetID{"t1", "t2"},
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1", "t2"},
+		},
+		Auth: domain.DeliveryAuth{
+			Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "test-signer"}},
+		},
+		Provenance: prov,
+		State:      domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
+		domain.TargetInfo{ID: "t2", Name: "t2", Type: "test"},
+	)
+	seedDelivery(t, store, domain.Delivery{
+		ID: "del-attested:t1", DeploymentID: "del-attested", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+	seedDelivery(t, store, domain.Delivery{
+		ID: "del-attested:t2", DeploymentID: "del-attested", TargetID: "t2",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	simple := &simpleRecord{ctx: context.Background(), events: events}
+	capRec := &attestationCapturingRecord{delegate: simple}
+
+	_, err := wf.Run(capRec, "del-attested")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	capRec.mu.Lock()
+	removes := capRec.removes
+	capRec.mu.Unlock()
+
+	if len(removes) != 2 {
+		t.Fatalf("expected 2 remove inputs (one per target), got %d", len(removes))
+	}
+
+	for i, rm := range removes {
+		if rm.Attestation == nil {
+			t.Errorf("remove[%d]: Attestation is nil; expected attestation with signer assertion", i)
+			continue
+		}
+		att := rm.Attestation
+		if att.Input.Content.DeploymentID != "del-attested" {
+			t.Errorf("remove[%d]: DeploymentID = %q, want %q", i, att.Input.Content.DeploymentID, "del-attested")
+		}
+		if att.Input.Signer.RegistrySubject != "gh-test-signer" {
+			t.Errorf("remove[%d]: RegistrySubject = %q, want %q", i, att.Input.Signer.RegistrySubject, "gh-test-signer")
+		}
+		rmOut, ok := att.Output.(*domain.RemoveByDeploymentId)
+		if !ok {
+			t.Errorf("remove[%d]: Output is %T, want *RemoveByDeploymentId", i, att.Output)
+			continue
+		}
+		if rmOut.DeploymentID != "del-attested" {
+			t.Errorf("remove[%d]: RemoveByDeploymentId.DeploymentID = %q, want %q",
+				i, rmOut.DeploymentID, "del-attested")
+		}
+	}
+
+	// Verify the deployment record was hard-deleted.
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "del-attested")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got: %v", err)
+	}
+}
+
+func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
+	store, _ := setupStore(t)
+
+	seedDeployment(t, store, domain.Deployment{
+		ID:              "del-no-prov",
+		Generation:      2,
+		ResolvedTargets: []domain.TargetID{"t1"},
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+		State: domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+	seedDelivery(t, store, domain.Delivery{
+		ID: "del-no-prov:t1", DeploymentID: "del-no-prov", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	simple := &simpleRecord{ctx: context.Background(), events: events}
+	capRec := &attestationCapturingRecord{delegate: simple}
+
+	_, err := wf.Run(capRec, "del-no-prov")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	capRec.mu.Lock()
+	removes := capRec.removes
+	capRec.mu.Unlock()
+
+	if len(removes) != 1 {
+		t.Fatalf("expected 1 remove input, got %d", len(removes))
+	}
+	if removes[0].Attestation != nil {
+		t.Error("Attestation should be nil for deployments without provenance")
 	}
 }
 

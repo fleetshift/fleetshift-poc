@@ -259,13 +259,18 @@ func deliveryStateForError(err error) domain.DeliveryState {
 }
 
 // Remove deletes all manifested resources from the target cluster.
-// When an attestation is provided and the agent has a verifier,
-// the attestation is verified and platform credentials are used.
-// Otherwise falls back to token passthrough (auth.Token).
+// When an attestation is provided the agent verifies it against the
+// target's trust bundle (same dynamic, per-target verification as
+// Deliver) and uses platform credentials. Otherwise falls back to
+// token passthrough (auth.Token).
 // Resources that are already gone (404) are silently skipped.
 func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, _ *domain.DeliverySignaler) error {
-	if att != nil && a.verifier != nil {
-		if err := a.verifier.Verify(ctx, att); err != nil {
+	if att != nil {
+		v, err := a.verifierForTarget(target)
+		if err != nil {
+			return fmt.Errorf("build verifier for target %q: %w", target.ID, err)
+		}
+		if err := v.Verify(ctx, att); err != nil {
 			return fmt.Errorf("attestation verification failed: %w", err)
 		}
 		cfg, err := a.buildPlatformRESTConfig(ctx, target)
