@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -94,6 +96,7 @@ func ParseConfig(data []byte) (*ClusterConfig, error) {
 	}
 
 	applyDefaults(cfg)
+	expandPaths(cfg)
 
 	if err := validate(cfg); err != nil {
 		return nil, err
@@ -170,6 +173,25 @@ func validate(cfg *ClusterConfig) error {
 		return fmt.Errorf("pull_secret_file is required")
 	}
 	return nil
+}
+
+// expandTilde replaces a leading ~ with the user's home directory.
+func expandTilde(path string) string {
+	if strings.HasPrefix(path, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return path
+		}
+		return filepath.Join(home, path[2:])
+	}
+	return path
+}
+
+// expandPaths resolves ~ in all file path fields.
+func expandPaths(cfg *ClusterConfig) {
+	cfg.PullSecretFile = expandTilde(cfg.PullSecretFile)
+	cfg.SSHPublicKeyFile = expandTilde(cfg.SSHPublicKeyFile)
+	cfg.Platform.AWS.Credentials.CredentialsFile = expandTilde(cfg.Platform.AWS.Credentials.CredentialsFile)
 }
 
 // hasCredentials checks if at least one credential mode is configured
