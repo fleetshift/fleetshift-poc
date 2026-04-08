@@ -1,0 +1,41 @@
+cluster:
+  name: full-cluster
+  base_domain: prod.example.com
+  version: "4.20"
+
+platform:
+  aws:
+    region: eu-west-1
+    credentials:
+      access_key_id: "AKIAIOSFODNN7EXAMPLE"
+      secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+    tags:
+      environment: staging
+      team: platform
+
+control_plane:
+  replicas: 3
+  instance_type: m6a.2xlarge
+  root_volume:
+    size_gb: 200
+    type: gp3
+
+compute:
+  replicas: 5
+  instance_type: m5.xlarge
+  root_volume:
+    size_gb: 300
+    type: gp3
+
+networking:
+  cluster_network: 10.128.0.0/14
+  service_network: 172.30.0.0/16
+  machine_network: 10.0.0.0/16
+  host_prefix: 23
+
+pull_secret_file: /tmp/pull-secret.json
+ssh_public_key_file: /tmp/id_rsa.pub
+
+release_image: quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64
+fips: false
+publish: External
