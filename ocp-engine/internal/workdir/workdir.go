@@ -143,7 +143,7 @@ func (w *WorkDir) LogPath() string {
 
 // MarkPhaseComplete creates a marker file indicating the phase has completed
 func (w *WorkDir) MarkPhaseComplete(phase string) error {
-	markerPath := filepath.Join(w.Path, ".phase-"+phase)
+	markerPath := filepath.Join(w.Path, "_phase_"+phase+"_complete")
 	if err := os.WriteFile(markerPath, []byte(""), 0644); err != nil {
 		return fmt.Errorf("write phase marker: %w", err)
 	}
@@ -152,7 +152,7 @@ func (w *WorkDir) MarkPhaseComplete(phase string) error {
 
 // IsPhaseComplete checks if a phase marker file exists
 func (w *WorkDir) IsPhaseComplete(phase string) bool {
-	markerPath := filepath.Join(w.Path, ".phase-"+phase)
+	markerPath := filepath.Join(w.Path, "_phase_"+phase+"_complete")
 	_, err := os.Stat(markerPath)
 	return err == nil
 }
