@@ -37,18 +37,20 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 )
 
 type serveFlags struct {
-	grpcAddr   string
-	httpAddr   string
-	dbPath     string
-	logLevel   string
-	logFormat  string
-	oidcCAFile string
+	grpcAddr         string
+	httpAddr         string
+	dbPath           string
+	logLevel         string
+	logFormat        string
+	logLevelOverride string
+	oidcCAFile       string
 }
 
 func newServeCmd() *cobra.Command {
@@ -65,6 +67,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.dbPath, "db", "fleetshift.db", "SQLite database path")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().StringVar(&f.logFormat, "log-format", "text", "log format (text, json)")
+	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
 	return cmd
 }
@@ -86,7 +89,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	router := delivery.NewRoutingDeliveryService()
 
-	logger, err := buildLogger(f.logLevel, f.logFormat)
+	logger, err := buildLogger(f.logLevel, f.logFormat, f.logLevelOverride)
 	if err != nil {
 		return err
 	}
@@ -118,7 +121,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// built (see below). The router is only consulted at delivery time.
 
 	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath,
-		wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger)),
+		wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
 	)
 	wfWorker := worker.New(wfBackend, nil)
 	wfClient := client.New(wfBackend)
@@ -347,31 +350,77 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	return nil
 }
 
-func buildLogger(level, format string) (*slog.Logger, error) {
-	var lv slog.Level
-	switch strings.ToLower(level) {
-	case "debug":
-		lv = slog.LevelDebug
-	case "info", "":
-		lv = slog.LevelInfo
-	case "warn":
-		lv = slog.LevelWarn
-	case "error":
-		lv = slog.LevelError
-	default:
-		return nil, fmt.Errorf("unknown log level %q (valid: debug, info, warn, error)", level)
+func buildLogger(level, format, overrideSpec string) (*slog.Logger, error) {
+	base, err := parseLevel(level)
+	if err != nil {
+		return nil, err
 	}
 
-	opts := &slog.HandlerOptions{Level: lv}
-	var handler slog.Handler
+	overrides, err := parseLevelOverrides(overrideSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	// The inner handler's level must be the minimum of the base and all
+	// overrides so it never prematurely rejects records an override wants.
+	innerLevel := base
+	for _, lvl := range overrides {
+		if lvl < innerLevel {
+			innerLevel = lvl
+		}
+	}
+
+	opts := &slog.HandlerOptions{Level: innerLevel}
+	var inner slog.Handler
 	switch strings.ToLower(format) {
 	case "json":
-		handler = slog.NewJSONHandler(os.Stderr, opts)
+		inner = slog.NewJSONHandler(os.Stderr, opts)
 	case "text", "":
-		handler = slog.NewTextHandler(os.Stderr, opts)
+		inner = slog.NewTextHandler(os.Stderr, opts)
 	default:
 		return nil, fmt.Errorf("unknown log format %q (valid: text, json)", format)
 	}
 
+	handler := slogutil.NewLevelOverrideHandler(inner, base, overrides)
 	return slog.New(handler), nil
+}
+
+func parseLevel(s string) (slog.Level, error) {
+	switch strings.ToLower(s) {
+	case "debug":
+		return slog.LevelDebug, nil
+	case "info", "":
+		return slog.LevelInfo, nil
+	case "warn":
+		return slog.LevelWarn, nil
+	case "error":
+		return slog.LevelError, nil
+	default:
+		return 0, fmt.Errorf("unknown log level %q (valid: debug, info, warn, error)", s)
+	}
+}
+
+// parseLevelOverrides parses a comma-separated string of component=level
+// pairs (e.g. "deployment=debug,authn=warn").
+func parseLevelOverrides(spec string) (map[slogutil.ComponentName]slog.Level, error) {
+	if spec == "" {
+		return nil, nil
+	}
+	overrides := make(map[slogutil.ComponentName]slog.Level)
+	for _, entry := range strings.Split(spec, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		k, v, ok := strings.Cut(entry, "=")
+		if !ok {
+			return nil, fmt.Errorf("invalid log level override %q: expected component=level", entry)
+		}
+		lvl, err := parseLevel(v)
+		if err != nil {
+			return nil, fmt.Errorf("invalid log level override %q: %w", entry, err)
+		}
+		overrides[slogutil.ComponentName(k)] = lvl
+	}
+	return overrides, nil
 }
