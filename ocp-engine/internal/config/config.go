@@ -60,7 +60,7 @@ type AWSCredentials struct {
 
 // NodePoolSpec defines a node pool (control plane or compute)
 type NodePoolSpec struct {
-	Replicas     int        `yaml:"replicas"`
+	Replicas     *int       `yaml:"replicas"`
 	InstanceType string     `yaml:"instance_type"`
 	RootVolume   VolumeSpec `yaml:"root_volume"`
 }
@@ -108,8 +108,9 @@ func ParseConfig(data []byte) (*ClusterConfig, error) {
 // applyDefaults fills in default values for unset fields
 func applyDefaults(cfg *ClusterConfig) {
 	// Control plane defaults
-	if cfg.ControlPlane.Replicas == 0 {
-		cfg.ControlPlane.Replicas = 3
+	if cfg.ControlPlane.Replicas == nil {
+		three := 3
+		cfg.ControlPlane.Replicas = &three
 	}
 	if cfg.ControlPlane.InstanceType == "" {
 		cfg.ControlPlane.InstanceType = "m6a.xlarge"
@@ -122,8 +123,9 @@ func applyDefaults(cfg *ClusterConfig) {
 	}
 
 	// Compute defaults
-	if cfg.Compute.Replicas == 0 {
-		cfg.Compute.Replicas = 3
+	if cfg.Compute.Replicas == nil {
+		three := 3
+		cfg.Compute.Replicas = &three
 	}
 	if cfg.Compute.InstanceType == "" {
 		cfg.Compute.InstanceType = "m6a.xlarge"

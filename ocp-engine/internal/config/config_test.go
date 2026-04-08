@@ -52,8 +52,8 @@ func TestLoadConfig_AppliesDefaults(t *testing.T) {
 	}
 
 	// Check defaults for control plane
-	if cfg.ControlPlane.Replicas != 3 {
-		t.Errorf("expected control_plane.replicas=3, got %d", cfg.ControlPlane.Replicas)
+	if cfg.ControlPlane.Replicas == nil || *cfg.ControlPlane.Replicas != 3 {
+		t.Errorf("expected control_plane.replicas=3, got %v", cfg.ControlPlane.Replicas)
 	}
 	if cfg.ControlPlane.InstanceType != "m6a.xlarge" {
 		t.Errorf("expected control_plane.instance_type=m6a.xlarge, got %s", cfg.ControlPlane.InstanceType)
@@ -66,8 +66,8 @@ func TestLoadConfig_AppliesDefaults(t *testing.T) {
 	}
 
 	// Check defaults for compute
-	if cfg.Compute.Replicas != 3 {
-		t.Errorf("expected compute.replicas=3, got %d", cfg.Compute.Replicas)
+	if cfg.Compute.Replicas == nil || *cfg.Compute.Replicas != 3 {
+		t.Errorf("expected compute.replicas=3, got %v", cfg.Compute.Replicas)
 	}
 	if cfg.Compute.InstanceType != "m6a.xlarge" {
 		t.Errorf("expected compute.instance_type=m6a.xlarge, got %s", cfg.Compute.InstanceType)
@@ -133,8 +133,8 @@ func TestLoadConfig_Full(t *testing.T) {
 		t.Errorf("expected control_plane.root_volume.size_gb=200, got %d", cfg.ControlPlane.RootVolume.SizeGB)
 	}
 
-	if cfg.Compute.Replicas != 5 {
-		t.Errorf("expected compute.replicas=5, got %d", cfg.Compute.Replicas)
+	if cfg.Compute.Replicas == nil || *cfg.Compute.Replicas != 5 {
+		t.Errorf("expected compute.replicas=5, got %v", cfg.Compute.Replicas)
 	}
 	if cfg.Compute.InstanceType != "m5.xlarge" {
 		t.Errorf("expected compute.instance_type=m5.xlarge, got %s", cfg.Compute.InstanceType)

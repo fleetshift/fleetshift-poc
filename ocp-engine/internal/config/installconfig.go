@@ -41,7 +41,7 @@ type icAWS struct {
 // icMachinePool represents a machine pool (control plane or compute)
 type icMachinePool struct {
 	Name     string         `yaml:"name,omitempty"`
-	Replicas int            `yaml:"replicas"`
+	Replicas *int           `yaml:"replicas"`
 	Platform icPoolPlatform `yaml:"platform"`
 }
 
