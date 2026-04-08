@@ -97,10 +97,10 @@ func (*RemoveByDeploymentId) deliveryOutput() {}
 // JSON codec. A discriminator field (OutputType) tells the decoder which
 // concrete DeliveryOutput variant to instantiate.
 type attestationJSON struct {
-	Input                SignedInput            `json:"Input"`
-	OutputType           string                 `json:"OutputType"`
-	PutManifests         *PutManifests          `json:"PutManifests,omitempty"`
-	RemoveByDeploymentId *RemoveByDeploymentId  `json:"RemoveByDeploymentId,omitempty"`
+	Input                SignedInput           `json:"Input"`
+	OutputType           string                `json:"OutputType"`
+	PutManifests         *PutManifests         `json:"PutManifests,omitempty"`
+	RemoveByDeploymentId *RemoveByDeploymentId `json:"RemoveByDeploymentId,omitempty"`
 }
 
 func (a Attestation) MarshalJSON() ([]byte, error) {

@@ -34,7 +34,7 @@ type storeTx struct {
 	done bool
 }
 
-func (t *storeTx) Targets() domain.TargetRepository        { return &TargetRepo{DB: t.tx} }
+func (t *storeTx) Targets() domain.TargetRepository         { return &TargetRepo{DB: t.tx} }
 func (t *storeTx) Deployments() domain.DeploymentRepository { return &DeploymentRepo{DB: t.tx} }
 func (t *storeTx) Deliveries() domain.DeliveryRepository    { return &DeliveryRepo{DB: t.tx} }
 func (t *storeTx) Inventory() domain.InventoryRepository    { return &InventoryRepo{DB: t.tx} }

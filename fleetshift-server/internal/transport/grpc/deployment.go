@@ -129,11 +129,11 @@ func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploym
 		rs = &v
 	}
 	in := domain.CreateDeploymentInput{
-		ID:                domain.DeploymentID(req.GetDeploymentId()),
-		ManifestStrategy:  ms,
-		PlacementStrategy: ps,
-		RolloutStrategy:   rs,
-		UserSignature:     req.GetUserSignature(),
+		ID:                 domain.DeploymentID(req.GetDeploymentId()),
+		ManifestStrategy:   ms,
+		PlacementStrategy:  ps,
+		RolloutStrategy:    rs,
+		UserSignature:      req.GetUserSignature(),
 		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
 	}
 	if req.GetValidUntil() != nil {
@@ -271,7 +271,6 @@ func provenanceToProto(p *domain.Provenance) *pb.Provenance {
 
 	return prov
 }
-
 
 func deploymentStateToProto(s domain.DeploymentState) pb.Deployment_State {
 	switch s {

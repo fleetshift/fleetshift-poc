@@ -181,6 +181,42 @@ func TestVerifyAttestation_Expired(t *testing.T) {
 	}
 }
 
+func TestVerifyAttestation_ExpiredIdentityToken_StillPasses(t *testing.T) {
+	h := setupHarness(t)
+
+	expiredToken := h.provider.IssueToken(t, oidctest.TokenClaims{
+		Subject:  string(h.signerID),
+		Audience: "fleetshift-enroll",
+		Expiry:   -time.Hour,
+		Extra:    map[string]any{"preferred_username": h.registrySubject},
+	})
+
+	att := h.buildValidAttestation(t)
+	att.Input.Signer.IdentityToken = domain.RawToken(expiredToken)
+
+	if err := h.verifier.Verify(context.Background(), att); err != nil {
+		t.Fatalf("expected expired identity token to be accepted (only signature matters), got: %v", err)
+	}
+}
+
+func TestVerifyAttestation_WrongAudience_Rejected(t *testing.T) {
+	h := setupHarness(t)
+
+	wrongAudToken := h.provider.IssueToken(t, oidctest.TokenClaims{
+		Subject:  string(h.signerID),
+		Audience: "wrong-audience",
+		Extra:    map[string]any{"preferred_username": h.registrySubject},
+	})
+
+	att := h.buildValidAttestation(t)
+	att.Input.Signer.IdentityToken = domain.RawToken(wrongAudToken)
+
+	err := h.verifier.Verify(context.Background(), att)
+	if err == nil {
+		t.Fatal("expected verification to fail for wrong audience")
+	}
+}
+
 func TestVerifyAttestation_SignerSubjectMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)

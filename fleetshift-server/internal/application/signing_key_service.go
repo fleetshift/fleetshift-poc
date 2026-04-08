@@ -82,13 +82,13 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 
 	now := time.Now().UTC()
 	enrollment := domain.SignerEnrollment{
-		ID:              in.ID,
+		ID:                in.ID,
 		FederatedIdentity: ac.Subject.FederatedIdentity,
-		IdentityToken:   domain.RawToken(in.IdentityToken),
-		RegistrySubject: registrySubject,
-		RegistryID:      oidcConfig.RegistrySubjectMapping.RegistryID,
-		CreatedAt:       now,
-		ExpiresAt:       now.Add(365 * 24 * time.Hour), // TODO: make configurable
+		IdentityToken:     domain.RawToken(in.IdentityToken),
+		RegistrySubject:   registrySubject,
+		RegistryID:        oidcConfig.RegistrySubjectMapping.RegistryID,
+		CreatedAt:         now,
+		ExpiresAt:         now.Add(365 * 24 * time.Hour), // TODO: make configurable
 	}
 
 	tx, err := s.Store.Begin(ctx)
