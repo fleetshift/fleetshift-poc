@@ -119,7 +119,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	// Step 7: Determine release image
 	releaseImage := cfg.ReleaseImage
 	if releaseImage == "" {
-		releaseImage = "quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64"
+		releaseImage = "quay.io/openshift-release-dev/ocp-release:4.20.18-multi"
 	}
 
 	// Step 8: Create Installer instance
