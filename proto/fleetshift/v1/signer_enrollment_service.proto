@@ -6,8 +6,8 @@ option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/
 
 import "google/api/annotations.proto";
 import "google/api/client.proto";
-import "fleetshift/v1/signing_key_binding.proto";
-import "fleetshift/v1/create_signing_key_binding_request.proto";
+import "fleetshift/v1/signer_enrollment.proto";
+import "fleetshift/v1/create_signer_enrollment_request.proto";
 
 // SignerEnrollmentService manages user signer enrollments.
 service SignerEnrollmentService {

@@ -2,7 +2,7 @@
 // versions:
 // - protoc-gen-go-grpc v1.6.1
 // - protoc             (unknown)
-// source: fleetshift/v1/signing_key_binding_service.proto
+// source: fleetshift/v1/signer_enrollment_service.proto
 
 package fleetshiftv1
 
@@ -126,5 +126,5 @@ var SignerEnrollmentService_ServiceDesc = grpc.ServiceDesc{
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
-	Metadata: "fleetshift/v1/signing_key_binding_service.proto",
+	Metadata: "fleetshift/v1/signer_enrollment_service.proto",
 }

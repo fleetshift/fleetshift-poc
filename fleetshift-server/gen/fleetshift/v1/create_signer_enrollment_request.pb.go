@@ -2,7 +2,7 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: fleetshift/v1/create_signing_key_binding_request.proto
+// source: fleetshift/v1/create_signer_enrollment_request.proto
 
 package fleetshiftv1
 
@@ -42,7 +42,7 @@ type CreateSignerEnrollmentRequest struct {
 
 func (x *CreateSignerEnrollmentRequest) Reset() {
 	*x = CreateSignerEnrollmentRequest{}
-	mi := &file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes[0]
+	mi := &file_fleetshift_v1_create_signer_enrollment_request_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -54,7 +54,7 @@ func (x *CreateSignerEnrollmentRequest) String() string {
 func (*CreateSignerEnrollmentRequest) ProtoMessage() {}
 
 func (x *CreateSignerEnrollmentRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes[0]
+	mi := &file_fleetshift_v1_create_signer_enrollment_request_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -67,7 +67,7 @@ func (x *CreateSignerEnrollmentRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CreateSignerEnrollmentRequest.ProtoReflect.Descriptor instead.
 func (*CreateSignerEnrollmentRequest) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescGZIP(), []int{0}
+	return file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *CreateSignerEnrollmentRequest) GetSignerEnrollmentId() string {
@@ -84,32 +84,32 @@ func (x *CreateSignerEnrollmentRequest) GetIdentityToken() string {
 	return ""
 }
 
-var File_fleetshift_v1_create_signing_key_binding_request_proto protoreflect.FileDescriptor
+var File_fleetshift_v1_create_signer_enrollment_request_proto protoreflect.FileDescriptor
 
-const file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc = "" +
+const file_fleetshift_v1_create_signer_enrollment_request_proto_rawDesc = "" +
 	"\n" +
-	"6fleetshift/v1/create_signing_key_binding_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"\x82\x01\n" +
+	"4fleetshift/v1/create_signer_enrollment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"\x82\x01\n" +
 	"\x1dCreateSignerEnrollmentRequest\x125\n" +
 	"\x14signer_enrollment_id\x18\x01 \x01(\tB\x03\xe0A\x02R\x12signerEnrollmentId\x12*\n" +
 	"\x0eidentity_token\x18\x02 \x01(\tB\x03\xe0A\x02R\ridentityTokenBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
-	file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescOnce sync.Once
-	file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescData []byte
+	file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescOnce sync.Once
+	file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescData []byte
 )
 
-func file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescGZIP() []byte {
-	file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescOnce.Do(func() {
-		file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc), len(file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc)))
+func file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescGZIP() []byte {
+	file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescOnce.Do(func() {
+		file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_fleetshift_v1_create_signer_enrollment_request_proto_rawDesc), len(file_fleetshift_v1_create_signer_enrollment_request_proto_rawDesc)))
 	})
-	return file_fleetshift_v1_create_signing_key_binding_request_proto_rawDescData
+	return file_fleetshift_v1_create_signer_enrollment_request_proto_rawDescData
 }
 
-var file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
-var file_fleetshift_v1_create_signing_key_binding_request_proto_goTypes = []any{
+var file_fleetshift_v1_create_signer_enrollment_request_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_fleetshift_v1_create_signer_enrollment_request_proto_goTypes = []any{
 	(*CreateSignerEnrollmentRequest)(nil), // 0: fleetshift.v1.CreateSignerEnrollmentRequest
 }
-var file_fleetshift_v1_create_signing_key_binding_request_proto_depIdxs = []int32{
+var file_fleetshift_v1_create_signer_enrollment_request_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for method output_type
 	0, // [0:0] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -117,26 +117,26 @@ var file_fleetshift_v1_create_signing_key_binding_request_proto_depIdxs = []int3
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_fleetshift_v1_create_signing_key_binding_request_proto_init() }
-func file_fleetshift_v1_create_signing_key_binding_request_proto_init() {
-	if File_fleetshift_v1_create_signing_key_binding_request_proto != nil {
+func init() { file_fleetshift_v1_create_signer_enrollment_request_proto_init() }
+func file_fleetshift_v1_create_signer_enrollment_request_proto_init() {
+	if File_fleetshift_v1_create_signer_enrollment_request_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc), len(file_fleetshift_v1_create_signing_key_binding_request_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fleetshift_v1_create_signer_enrollment_request_proto_rawDesc), len(file_fleetshift_v1_create_signer_enrollment_request_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   1,
 			NumExtensions: 0,
 			NumServices:   0,
 		},
-		GoTypes:           file_fleetshift_v1_create_signing_key_binding_request_proto_goTypes,
-		DependencyIndexes: file_fleetshift_v1_create_signing_key_binding_request_proto_depIdxs,
-		MessageInfos:      file_fleetshift_v1_create_signing_key_binding_request_proto_msgTypes,
+		GoTypes:           file_fleetshift_v1_create_signer_enrollment_request_proto_goTypes,
+		DependencyIndexes: file_fleetshift_v1_create_signer_enrollment_request_proto_depIdxs,
+		MessageInfos:      file_fleetshift_v1_create_signer_enrollment_request_proto_msgTypes,
 	}.Build()
-	File_fleetshift_v1_create_signing_key_binding_request_proto = out.File
-	file_fleetshift_v1_create_signing_key_binding_request_proto_goTypes = nil
-	file_fleetshift_v1_create_signing_key_binding_request_proto_depIdxs = nil
+	File_fleetshift_v1_create_signer_enrollment_request_proto = out.File
+	file_fleetshift_v1_create_signer_enrollment_request_proto_goTypes = nil
+	file_fleetshift_v1_create_signer_enrollment_request_proto_depIdxs = nil
 }
