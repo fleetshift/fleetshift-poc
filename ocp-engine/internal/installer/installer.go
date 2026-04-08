@@ -7,19 +7,24 @@ import (
 )
 
 type Installer struct {
-	WorkDir       string
-	InstallerPath string
-	ReleaseImage  string
-	AWSEnv        map[string]string
+	WorkDir        string
+	InstallerPath  string
+	ReleaseImage   string
+	PullSecretFile string
+	AWSEnv         map[string]string
 }
 
 func (i *Installer) buildExtractArgs() []string {
-	return []string{
+	args := []string{
 		"adm", "release", "extract",
 		"--command=openshift-install",
 		"--to=" + i.WorkDir,
-		i.ReleaseImage,
 	}
+	if i.PullSecretFile != "" {
+		args = append(args, "--registry-config="+i.PullSecretFile)
+	}
+	args = append(args, i.ReleaseImage)
+	return args
 }
 
 func (i *Installer) buildInstallerArgs(subcommand ...string) []string {

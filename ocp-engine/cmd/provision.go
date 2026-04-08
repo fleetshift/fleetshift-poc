@@ -124,10 +124,11 @@ func runProvision(cmd *cobra.Command, args []string) error {
 
 	// Step 8: Create Installer instance
 	inst := &installer.Installer{
-		WorkDir:       wd.Path,
-		InstallerPath: wd.InstallerPath(),
-		ReleaseImage:  releaseImage,
-		AWSEnv:        awsEnv,
+		WorkDir:        wd.Path,
+		InstallerPath:  wd.InstallerPath(),
+		ReleaseImage:   releaseImage,
+		PullSecretFile: cfg.PullSecretFile,
+		AWSEnv:         awsEnv,
 	}
 
 	logPath := wd.LogPath()
