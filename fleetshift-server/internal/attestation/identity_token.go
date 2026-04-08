@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"slices"
 	"sync"
 
 	"github.com/lestrrat-go/httprc/v3"
@@ -72,16 +73,19 @@ func (v *Verifier) verifyIdentityToken(ctx context.Context, rawToken string, iss
 		return fmt.Errorf("fetch JWKS for %s: %w", issuer.JWKSURI, err)
 	}
 
-	opts := []jwt.ParseOption{
+	tok, err := jwt.ParseString(rawToken,
 		jwt.WithKeySet(keySet),
-	}
-	if issuer.Audience != "" {
-		opts = append(opts, jwt.WithAudience(string(issuer.Audience)))
-	}
-
-	_, err = jwt.ParseString(rawToken, opts...)
+		jwt.WithValidate(false),
+	)
 	if err != nil {
 		return fmt.Errorf("parse/verify identity token: %w", err)
+	}
+
+	if issuer.Audience != "" {
+		aud, _ := tok.Audience()
+		if !slices.Contains(aud, string(issuer.Audience)) {
+			return fmt.Errorf("identity token audience %v does not contain %q", aud, issuer.Audience)
+		}
 	}
 	return nil
 }
