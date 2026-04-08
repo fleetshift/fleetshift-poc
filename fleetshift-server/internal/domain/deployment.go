@@ -81,15 +81,6 @@ func NewPausedAuthResult(id DeploymentID, auth DeliveryAuth) ReconciliationResul
 	}
 }
 
-// NewDeletedResult builds a result after all deliveries have been
-// removed during a delete pipeline.
-func NewDeletedResult(id DeploymentID) ReconciliationResult {
-	return ReconciliationResult{
-		DeploymentID: id,
-		State:        DeploymentStateDeleting,
-	}
-}
-
 // ApplyReconciliationResult merges the observable state produced by a
 // reconciliation workflow onto this deployment. Bookkeeping fields
 // (Generation, ObservedGeneration) are left untouched so that

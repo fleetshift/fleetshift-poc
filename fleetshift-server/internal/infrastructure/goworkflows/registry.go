@@ -66,6 +66,8 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs()) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration()) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CompleteReconciliation()) },
+		func() error { return registerActivity(r.Worker, invokers, spec.DeleteDeploymentRecord()) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CleanupProvisionedTargets()) },
 	} {
 		if err := reg(); err != nil {
 			return nil, err

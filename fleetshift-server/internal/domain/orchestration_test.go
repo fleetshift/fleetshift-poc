@@ -3,6 +3,8 @@ package domain_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -135,6 +137,22 @@ func getDelivery(t *testing.T, store domain.Store, id domain.DeliveryID) domain.
 		t.Fatalf("get delivery %q: %v", id, err)
 	}
 	return d
+}
+
+func seedDelivery(t *testing.T, store domain.Store, d domain.Delivery) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := tx.Deliveries().Put(ctx, d); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -296,7 +314,7 @@ func (noopDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.D
 	return result, nil
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -314,7 +332,7 @@ func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ doma
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -336,7 +354,7 @@ func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -355,8 +373,22 @@ func (d *outputProducingDelivery) Deliver(ctx context.Context, _ domain.TargetIn
 	return result, nil
 }
 
-func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
+}
+
+type failingRemoveDelivery struct {
+	err error
+}
+
+func (f *failingRemoveDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
+	signaler.Done(ctx, result)
+	return result, nil
+}
+
+func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+	return f.err
 }
 
 type authFailingDelivery struct{}
@@ -370,7 +402,7 @@ func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ d
 	return result, nil
 }
 
-func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -388,7 +420,7 @@ func (d *recordingDelivery) Deliver(ctx context.Context, target domain.TargetInf
 	return result, nil
 }
 
-func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 
@@ -714,6 +746,16 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
 		domain.TargetInfo{ID: "t2", Name: "t2", Type: "test"},
 	)
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t1", DeploymentID: "d1", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t2", DeploymentID: "d1", TargetID: "t2",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
 
 	events := make(chan domain.DeploymentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{}, events)
@@ -737,12 +779,172 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		t.Errorf("expected 2 remove-from-target, got %d (activities: %v)", removeCount, names)
 	}
 
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got: %v", err)
+	}
+}
+
+func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
+		domain.TargetInfo{ID: "t2", Name: "t2", Type: "test"},
+	)
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t1", DeploymentID: "d1", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t2", DeploymentID: "d1", TargetID: "t2",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	_, err := wf.Run(rec, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got: %v", err)
+	}
+	deliveries, err := tx.Deliveries().ListByDeployment(context.Background(), "d1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(deliveries) != 0 {
+		t.Errorf("expected 0 delivery records, got %d", len(deliveries))
+	}
+}
+
+func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   nil,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic},
+		State:             domain.DeploymentStateDeleting,
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	_, err := wf.Run(rec, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound after delete, got: %v", err)
+	}
+}
+
+func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
+		domain.TargetInfo{ID: "t2", Name: "t2", Type: "test"},
+	)
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t1", DeploymentID: "d1", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{}, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	_, err := wf.Run(rec, "d1")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	_, err = tx.Deployments().Get(context.Background(), "d1")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
+	}
+}
+
+func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
+	store, _ := setupStore(t)
+	seedDeployment(t, store, domain.Deployment{
+		ID:                "d1",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.DeploymentStateDeleting,
+	})
+	seedTargets(t, store,
+		domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"},
+	)
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t1", DeploymentID: "d1", TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	})
+
+	failingAgent := &failingRemoveDelivery{err: fmt.Errorf("network timeout")}
+	events := make(chan domain.DeploymentEvent, 16)
+	wf := newTestWorkflow(store, failingAgent, events)
+
+	rec := &simpleRecord{ctx: context.Background(), events: events}
+	_, err := wf.Run(rec, "d1")
+	if err == nil {
+		t.Fatal("expected error from Remove failure")
+	}
+
 	dep := getDeployment(t, store, "d1")
 	if dep.State != domain.DeploymentStateDeleting {
 		t.Errorf("State = %q, want deleting", dep.State)
-	}
-	if len(dep.ResolvedTargets) != 0 {
-		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets)
 	}
 }
 

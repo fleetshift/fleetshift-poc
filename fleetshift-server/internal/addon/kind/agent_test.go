@@ -25,6 +25,7 @@ type fakeProvider struct {
 	createErr error
 	logger    log.Logger
 	created   chan string // receives cluster name after each Create; buffered
+	deleted   []string    // tracks deleted cluster names
 }
 
 func newFakeProvider() *fakeProvider {
@@ -51,6 +52,7 @@ func (p *fakeProvider) Create(name string, opts ...cluster.CreateOption) error {
 func (p *fakeProvider) Delete(name, _ string) error {
 	p.mu.Lock()
 	delete(p.clusters, name)
+	p.deleted = append(p.deleted, name)
 	p.mu.Unlock()
 	return nil
 }
@@ -235,14 +237,41 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_IsNoopForNow(t *testing.T) {
+func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["dev-cluster"] = nil
+	provider.clusters["my-cluster"] = nil
 	agent := kind.NewAgent(fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
-	if err := agent.Remove(context.Background(), target, "d1:k1", nop); err != nil {
+	manifests := []domain.Manifest{{
+		Raw: json.RawMessage(`{"name":"my-cluster"}`),
+	}}
+
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
+	if err != nil {
 		t.Fatalf("Remove: %v", err)
+	}
+
+	if len(provider.deleted) != 1 || provider.deleted[0] != "my-cluster" {
+		t.Errorf("deleted = %v, want [my-cluster]", provider.deleted)
+	}
+}
+
+func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
+	provider := newFakeProvider()
+	// cluster doesn't exist
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	manifests := []domain.Manifest{{
+		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
+	}}
+
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
+	}
+
+	if len(provider.deleted) != 0 {
+		t.Errorf("should not have called Delete, but deleted = %v", provider.deleted)
 	}
 }
 

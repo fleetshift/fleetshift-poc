@@ -25,33 +25,37 @@ var File_fleetshift_v1_deployment_service_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_deployment_service_proto_rawDesc = "" +
 	"\n" +
-	"&fleetshift/v1/deployment_service.proto\x12\rfleetshift.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1efleetshift/v1/deployment.proto\x1a-fleetshift/v1/create_deployment_request.proto\x1a*fleetshift/v1/get_deployment_request.proto\x1a,fleetshift/v1/list_deployments_request.proto\x1a-fleetshift/v1/list_deployments_response.proto\x1a-fleetshift/v1/resume_deployment_request.proto2\xab\x04\n" +
+	"&fleetshift/v1/deployment_service.proto\x12\rfleetshift.v1\x1a\x1cgoogle/api/annotations.proto\x1a\x17google/api/client.proto\x1a\x1efleetshift/v1/deployment.proto\x1a-fleetshift/v1/create_deployment_request.proto\x1a*fleetshift/v1/get_deployment_request.proto\x1a,fleetshift/v1/list_deployments_request.proto\x1a-fleetshift/v1/list_deployments_response.proto\x1a-fleetshift/v1/resume_deployment_request.proto\x1a-fleetshift/v1/delete_deployment_request.proto2\xab\x05\n" +
 	"\x11DeploymentService\x12\x95\x01\n" +
 	"\x10CreateDeployment\x12&.fleetshift.v1.CreateDeploymentRequest\x1a\x19.fleetshift.v1.Deployment\">\xdaA\x18deployment,deployment_id\x82\xd3\xe4\x93\x02\x1d:\n" +
 	"deployment\"\x0f/v1/deployments\x12x\n" +
 	"\rGetDeployment\x12#.fleetshift.v1.GetDeploymentRequest\x1a\x19.fleetshift.v1.Deployment\"'\xdaA\x04name\x82\xd3\xe4\x93\x02\x1a\x12\x18/v1/{name=deployments/*}\x12y\n" +
 	"\x0fListDeployments\x12%.fleetshift.v1.ListDeploymentsRequest\x1a&.fleetshift.v1.ListDeploymentsResponse\"\x17\x82\xd3\xe4\x93\x02\x11\x12\x0f/v1/deployments\x12\x88\x01\n" +
-	"\x10ResumeDeployment\x12&.fleetshift.v1.ResumeDeploymentRequest\x1a\x19.fleetshift.v1.Deployment\"1\xdaA\x04name\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/{name=deployments/*}:resumeBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\x10ResumeDeployment\x12&.fleetshift.v1.ResumeDeploymentRequest\x1a\x19.fleetshift.v1.Deployment\"1\xdaA\x04name\x82\xd3\xe4\x93\x02$:\x01*\"\x1f/v1/{name=deployments/*}:resume\x12~\n" +
+	"\x10DeleteDeployment\x12&.fleetshift.v1.DeleteDeploymentRequest\x1a\x19.fleetshift.v1.Deployment\"'\xdaA\x04name\x82\xd3\xe4\x93\x02\x1a*\x18/v1/{name=deployments/*}BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var file_fleetshift_v1_deployment_service_proto_goTypes = []any{
 	(*CreateDeploymentRequest)(nil), // 0: fleetshift.v1.CreateDeploymentRequest
 	(*GetDeploymentRequest)(nil),    // 1: fleetshift.v1.GetDeploymentRequest
 	(*ListDeploymentsRequest)(nil),  // 2: fleetshift.v1.ListDeploymentsRequest
 	(*ResumeDeploymentRequest)(nil), // 3: fleetshift.v1.ResumeDeploymentRequest
-	(*Deployment)(nil),              // 4: fleetshift.v1.Deployment
-	(*ListDeploymentsResponse)(nil), // 5: fleetshift.v1.ListDeploymentsResponse
+	(*DeleteDeploymentRequest)(nil), // 4: fleetshift.v1.DeleteDeploymentRequest
+	(*Deployment)(nil),              // 5: fleetshift.v1.Deployment
+	(*ListDeploymentsResponse)(nil), // 6: fleetshift.v1.ListDeploymentsResponse
 }
 var file_fleetshift_v1_deployment_service_proto_depIdxs = []int32{
 	0, // 0: fleetshift.v1.DeploymentService.CreateDeployment:input_type -> fleetshift.v1.CreateDeploymentRequest
 	1, // 1: fleetshift.v1.DeploymentService.GetDeployment:input_type -> fleetshift.v1.GetDeploymentRequest
 	2, // 2: fleetshift.v1.DeploymentService.ListDeployments:input_type -> fleetshift.v1.ListDeploymentsRequest
 	3, // 3: fleetshift.v1.DeploymentService.ResumeDeployment:input_type -> fleetshift.v1.ResumeDeploymentRequest
-	4, // 4: fleetshift.v1.DeploymentService.CreateDeployment:output_type -> fleetshift.v1.Deployment
-	4, // 5: fleetshift.v1.DeploymentService.GetDeployment:output_type -> fleetshift.v1.Deployment
-	5, // 6: fleetshift.v1.DeploymentService.ListDeployments:output_type -> fleetshift.v1.ListDeploymentsResponse
-	4, // 7: fleetshift.v1.DeploymentService.ResumeDeployment:output_type -> fleetshift.v1.Deployment
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
+	4, // 4: fleetshift.v1.DeploymentService.DeleteDeployment:input_type -> fleetshift.v1.DeleteDeploymentRequest
+	5, // 5: fleetshift.v1.DeploymentService.CreateDeployment:output_type -> fleetshift.v1.Deployment
+	5, // 6: fleetshift.v1.DeploymentService.GetDeployment:output_type -> fleetshift.v1.Deployment
+	6, // 7: fleetshift.v1.DeploymentService.ListDeployments:output_type -> fleetshift.v1.ListDeploymentsResponse
+	5, // 8: fleetshift.v1.DeploymentService.ResumeDeployment:output_type -> fleetshift.v1.Deployment
+	5, // 9: fleetshift.v1.DeploymentService.DeleteDeployment:output_type -> fleetshift.v1.Deployment
+	5, // [5:10] is the sub-list for method output_type
+	0, // [0:5] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
 	0, // [0:0] is the sub-list for extension extendee
 	0, // [0:0] is the sub-list for field type_name
@@ -68,6 +72,7 @@ func file_fleetshift_v1_deployment_service_proto_init() {
 	file_fleetshift_v1_list_deployments_request_proto_init()
 	file_fleetshift_v1_list_deployments_response_proto_init()
 	file_fleetshift_v1_resume_deployment_request_proto_init()
+	file_fleetshift_v1_delete_deployment_request_proto_init()
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{

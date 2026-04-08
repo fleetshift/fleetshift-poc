@@ -12,6 +12,7 @@ import "fleetshift/v1/get_deployment_request.proto";
 import "fleetshift/v1/list_deployments_request.proto";
 import "fleetshift/v1/list_deployments_response.proto";
 import "fleetshift/v1/resume_deployment_request.proto";
+import "fleetshift/v1/delete_deployment_request.proto";
 
 // DeploymentService manages deployment resources.
 service DeploymentService {
@@ -47,6 +48,14 @@ service DeploymentService {
     option (google.api.http) = {
       post: "/v1/{name=deployments/*}:resume"
       body: "*"
+    };
+    option (google.api.method_signature) = "name";
+  }
+
+  // DeleteDeployment marks a deployment for deletion and begins teardown.
+  rpc DeleteDeployment(DeleteDeploymentRequest) returns (Deployment) {
+    option (google.api.http) = {
+      delete: "/v1/{name=deployments/*}"
     };
     option (google.api.method_signature) = "name";
   }

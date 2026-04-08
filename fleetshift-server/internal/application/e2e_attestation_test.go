@@ -166,8 +166,8 @@ func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.Targ
 	return a.inner.Deliver(ctx, target, id, manifests, auth, att, signaler)
 }
 
-func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, signaler *domain.DeliverySignaler) error {
-	return a.inner.Remove(ctx, target, id, signaler)
+func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) error {
+	return a.inner.Remove(ctx, target, id, manifests, auth, att, signaler)
 }
 
 func (a *capturingDeliveryAgent) capturedAttestation() *domain.Attestation {

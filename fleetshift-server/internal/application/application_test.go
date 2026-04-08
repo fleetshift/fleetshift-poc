@@ -283,16 +283,87 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 
 	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
 
-	if err := h.deployments.Delete(ctx, "d1"); err != nil {
+	dep, err := h.deployments.Delete(ctx, "d1")
+	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
+	if dep.State != domain.DeploymentStateDeleting {
+		t.Errorf("returned State = %q, want deleting", dep.State)
+	}
 
-	dep := awaitCondition(ctx, t, h.store, "d1", func(dep domain.Deployment) bool {
-		return dep.State == domain.DeploymentStateDeleting && dep.ObservedGeneration >= dep.Generation
+	// Verify the deployment is persisted in Deleting state.
+	persisted, err := queryDeployment(ctx, t, h.store, "d1")
+	if err != nil {
+		t.Fatalf("query deployment after delete: %v", err)
+	}
+	if persisted.State != domain.DeploymentStateDeleting {
+		t.Errorf("persisted State = %q, want deleting", persisted.State)
+	}
+}
+
+func TestDeleteDeployment_ReturnsSnapshot(t *testing.T) {
+	h := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	registerTargets(t, h, "t1")
+
+	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "d1",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	if len(dep.ResolvedTargets) != 0 {
-		t.Errorf("expected 0 resolved targets after delete reconciliation, got %d", len(dep.ResolvedTargets))
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
+
+	dep, err := h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if dep.State != domain.DeploymentStateDeleting {
+		t.Errorf("State = %q, want deleting", dep.State)
+	}
+	if dep.ID != "d1" {
+		t.Errorf("ID = %q, want d1", dep.ID)
+	}
+}
+
+func TestDeleteDeployment_Idempotent(t *testing.T) {
+	h := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	registerTargets(t, h, "t1")
+
+	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "d1",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.DeploymentStateActive)
+
+	_, err = h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+
+	// Second delete on same (now Deleting) deployment should not error.
+	_, err = h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("second Delete (idempotent): %v", err)
 	}
 }
 
@@ -437,7 +508,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 	return result, nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

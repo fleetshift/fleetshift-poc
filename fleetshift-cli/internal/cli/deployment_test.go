@@ -89,6 +89,21 @@ func (s *fakeDeploymentServer) ListDeployments(_ context.Context, _ *pb.ListDepl
 	return &pb.ListDeploymentsResponse{Deployments: deps}, nil
 }
 
+func (s *fakeDeploymentServer) DeleteDeployment(_ context.Context, req *pb.DeleteDeploymentRequest) (*pb.Deployment, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	dep, ok := s.deployments[req.GetName()]
+	if !ok {
+		return nil, status.Errorf(codes.NotFound, "deployment %q not found", req.GetName())
+	}
+
+	dep.State = pb.Deployment_STATE_DELETING
+	dep.Reconciling = true
+	delete(s.deployments, req.GetName())
+	return dep, nil
+}
+
 func (s *fakeDeploymentServer) ResumeDeployment(_ context.Context, req *pb.ResumeDeploymentRequest) (*pb.Deployment, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -344,5 +359,41 @@ func TestDeploymentResume_NotFound(t *testing.T) {
 	_, err := runCLIErr(t, "--server", addr, "deployment", "resume", "nonexistent")
 	if err == nil {
 		t.Error("resume nonexistent should fail")
+	}
+}
+
+func TestDeploymentDelete(t *testing.T) {
+	addr := startFakeServer(t)
+	manifestFile := writeManifestFile(t, `{"data":"x"}`)
+
+	runCLI(t,
+		"--server", addr,
+		"deployment", "create",
+		"--id", "to-delete",
+		"--manifest-file", manifestFile,
+		"--resource-type", "test.resource",
+		"--placement-type", "all",
+	)
+
+	out := runCLI(t, "--server", addr, "deployment", "delete", "to-delete")
+	if !strings.Contains(out, "deployments/to-delete") {
+		t.Errorf("delete output should contain deployment name, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Deleting") {
+		t.Errorf("delete output should show Deleting state, got:\n%s", out)
+	}
+
+	// Deployment should be gone.
+	_, err := runCLIErr(t, "--server", addr, "deployment", "get", "to-delete")
+	if err == nil {
+		t.Error("get after delete should fail")
+	}
+}
+
+func TestDeploymentDelete_NotFound(t *testing.T) {
+	addr := startFakeServer(t)
+	_, err := runCLIErr(t, "--server", addr, "deployment", "delete", "nonexistent")
+	if err == nil {
+		t.Error("delete nonexistent should fail")
 	}
 }

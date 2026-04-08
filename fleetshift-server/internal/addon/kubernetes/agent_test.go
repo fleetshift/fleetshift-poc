@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -136,12 +137,37 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_IsNoop(t *testing.T) {
+func TestAgent_Remove_MissingAPIServer(t *testing.T) {
 	agent := kubernetes.NewAgent()
 
-	target := domain.TargetInfo{ID: "k8s-test", Type: kubernetes.TargetType, Name: "test-cluster"}
-	if err := agent.Remove(context.Background(), target, "d1", &domain.DeliverySignaler{}); err != nil {
-		t.Fatalf("Remove: %v", err)
+	target := domain.TargetInfo{
+		ID:         "k8s-test",
+		Type:       kubernetes.TargetType,
+		Name:       "test-cluster",
+		Properties: map[string]string{},
+	}
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected error for missing api_server")
+	}
+}
+
+func TestAgent_Remove_EmptyManifests(t *testing.T) {
+	agent := kubernetes.NewAgent()
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	}
+
+	// Remove with empty manifests should succeed (no-op)
+	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, &domain.DeliverySignaler{}); err != nil {
+		t.Fatalf("Remove with empty manifests: %v", err)
 	}
 }
 
@@ -366,3 +392,54 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 	}
 }
 
+func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
+	v := attestation.NewVerifier(map[domain.IssuerURL]attestation.TrustedIssuer{})
+	agent := kubernetes.NewAgent(kubernetes.WithAttestationVerifier(v))
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			KeyBinding: domain.SigningKeyBinding{
+				FederatedIdentity: domain.FederatedIdentity{
+					Issuer: "https://untrusted.example.com",
+				},
+			},
+		},
+	}
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected attestation verification error, got nil")
+	}
+	if !strings.Contains(err.Error(), "attestation verification failed") {
+		t.Errorf("expected attestation verification error, got: %v", err)
+	}
+}
+
+func TestAgent_Remove_WithAttestation_FallsBackWithoutVerifier(t *testing.T) {
+	agent := kubernetes.NewAgent() // no verifier
+
+	target := domain.TargetInfo{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	}
+
+	// With attestation but no verifier, falls back to token passthrough.
+	// Empty manifests = no-op, should succeed via passthrough.
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, &domain.Attestation{}, &domain.DeliverySignaler{})
+	if err != nil {
+		t.Fatalf("Remove with attestation but no verifier should fall back to passthrough: %v", err)
+	}
+}

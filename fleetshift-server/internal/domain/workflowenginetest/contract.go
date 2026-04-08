@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -203,16 +204,32 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 
-		deleteDeploymentAndDeliveries(ctx, t, infra, "d1")
+		// Delete via the application service, which transitions
+		// to Deleting, bumps generation, and triggers reconciliation.
+		depSvc := &application.DeploymentService{
+			Store:         infra.Store,
+			Orchestration: wfs.Orchestration,
+		}
+		if _, err := depSvc.Delete(ctx, "d1"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		// Poll until the deployment record is gone.
+		for {
+			_, err := queryDeployment(ctx, t, infra, "d1")
+			if errors.Is(err, domain.ErrNotFound) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting for deployment to be deleted")
+			case <-time.After(50 * time.Millisecond):
+			}
+		}
 
 		records := queryDeliveries(ctx, t, infra, "d1")
 		if len(records) != 0 {
 			t.Fatalf("expected 0 delivery records after delete, got %d", len(records))
-		}
-
-		_, err = queryDeployment(ctx, t, infra, "d1")
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("expected ErrNotFound after delete, got: %v", err)
 		}
 	})
 
@@ -598,17 +615,6 @@ func queryDeployment(ctx context.Context, t *testing.T, infra Infra, id domain.D
 	return tx.Deployments().Get(ctx, id)
 }
 
-func deleteDeploymentAndDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID) {
-	t.Helper()
-	tx, err := infra.Store.Begin(ctx)
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	defer tx.Rollback()
-	must(t, tx.Deliveries().DeleteByDeployment(ctx, depID))
-	must(t, tx.Deployments().Delete(ctx, depID))
-	must(t, tx.Commit())
-}
 
 func seedDeployment(ctx context.Context, t *testing.T, infra Infra, dep domain.Deployment) {
 	t.Helper()
@@ -685,7 +691,7 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.D
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
+func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

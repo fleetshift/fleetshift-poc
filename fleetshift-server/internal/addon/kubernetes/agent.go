@@ -232,6 +232,22 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, cf
 	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
+// deleteManifests deletes Kubernetes resources described by manifests.
+// Resources that are already gone (404) are silently skipped.
+func (a *Agent) deleteManifests(ctx context.Context, cfg *rest.Config, manifests []domain.Manifest) error {
+	ap, err := newApplierFromConfig(cfg)
+	if err != nil {
+		return fmt.Errorf("build kubernetes client: %w", err)
+	}
+
+	for i, m := range manifests {
+		if err := ap.delete(ctx, m.Raw); err != nil {
+			return fmt.Errorf("delete manifest %d: %w", i+1, err)
+		}
+	}
+	return nil
+}
+
 // deliveryStateForError returns [domain.DeliveryStateAuthFailed] for
 // Kubernetes API authentication/authorization errors (401/403), and
 // [domain.DeliveryStateFailed] for everything else.
@@ -242,10 +258,28 @@ func deliveryStateForError(err error) domain.DeliveryState {
 	return domain.DeliveryStateFailed
 }
 
-// Remove is a no-op for now.
-// TODO: implement resource pruning on removal
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ *domain.DeliverySignaler) error {
-	return nil
+// Remove deletes all manifested resources from the target cluster.
+// When an attestation is provided and the agent has a verifier,
+// the attestation is verified and platform credentials are used.
+// Otherwise falls back to token passthrough (auth.Token).
+// Resources that are already gone (404) are silently skipped.
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, _ *domain.DeliverySignaler) error {
+	if att != nil && a.verifier != nil {
+		if err := a.verifier.Verify(ctx, att); err != nil {
+			return fmt.Errorf("attestation verification failed: %w", err)
+		}
+		cfg, err := a.buildPlatformRESTConfig(ctx, target)
+		if err != nil {
+			return fmt.Errorf("build platform REST config: %w", err)
+		}
+		return a.deleteManifests(ctx, cfg, manifests)
+	}
+
+	cfg, err := buildRESTConfig(target, auth.Token)
+	if err != nil {
+		return fmt.Errorf("build REST config: %w", err)
+	}
+	return a.deleteManifests(ctx, cfg, manifests)
 }
 
 // buildPlatformRESTConfig builds a REST config from target properties
@@ -362,5 +396,37 @@ func (a *applier) apply(ctx context.Context, raw json.RawMessage) error {
 		return fmt.Errorf("apply %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
 	}
 
+	return nil
+}
+
+func (a *applier) delete(ctx context.Context, raw json.RawMessage) error {
+	obj := &unstructured.Unstructured{}
+	if err := obj.UnmarshalJSON(raw); err != nil {
+		return fmt.Errorf("parse manifest: %w", err)
+	}
+
+	gvk := obj.GroupVersionKind()
+	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
+	if err != nil {
+		return fmt.Errorf("resolve GVR for %s: %w", gvk, err)
+	}
+
+	var dr dynamic.ResourceInterface
+	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
+		ns := obj.GetNamespace()
+		if ns == "" {
+			ns = "default"
+		}
+		dr = a.client.Resource(mapping.Resource).Namespace(ns)
+	} else {
+		dr = a.client.Resource(mapping.Resource)
+	}
+
+	if err := dr.Delete(ctx, obj.GetName(), metav1.DeleteOptions{}); err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("delete %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
+	}
 	return nil
 }
