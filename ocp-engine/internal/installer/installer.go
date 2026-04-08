@@ -2,6 +2,7 @@ package installer
 
 import (
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 )
@@ -68,8 +69,11 @@ func RunCommand(binary string, args []string, env []string, logPath string) erro
 		return fmt.Errorf("opening log file: %w", err)
 	}
 	defer logFile.Close()
-	cmd.Stdout = logFile
-	cmd.Stderr = logFile
+
+	// Stream output to both the log file and stderr so the user sees progress
+	cmd.Stdout = io.MultiWriter(logFile, os.Stderr)
+	cmd.Stderr = io.MultiWriter(logFile, os.Stderr)
+
 	if env != nil {
 		cmd.Env = env
 	}
