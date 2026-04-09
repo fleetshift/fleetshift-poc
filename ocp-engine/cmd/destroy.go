@@ -16,18 +16,14 @@ import (
 var destroyCmd = &cobra.Command{
 	Use:   "destroy",
 	Short: "Destroy an existing OpenShift cluster",
-	Long:  "Tears down a cluster using the metadata and installer binary from the work directory",
+	Long:  "Tears down a cluster using the metadata, installer binary, and credentials from the work directory",
 	RunE:  runDestroy,
 }
 
-var (
-	destroyWorkDir    string
-	destroyConfigPath string
-)
+var destroyWorkDir string
 
 func init() {
 	destroyCmd.Flags().StringVar(&destroyWorkDir, "work-dir", "", "Path to work directory (required)")
-	destroyCmd.Flags().StringVar(&destroyConfigPath, "config", "", "Path to cluster configuration file (optional, for AWS credentials)")
 	destroyCmd.MarkFlagRequired("work-dir")
 	rootCmd.AddCommand(destroyCmd)
 }
@@ -56,17 +52,14 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return output.WriteError(os.Stdout, "workdir_error", fmt.Errorf("failed to read infra ID from metadata.json: %w", err), false)
 	}
 
-	// Resolve AWS credentials from config (if provided) or use ambient
-	var awsEnv map[string]string
-	if destroyConfigPath != "" {
-		cfg, err := config.LoadConfig(destroyConfigPath)
-		if err != nil {
-			return output.WriteError(os.Stdout, "config_error", err, false)
-		}
-		awsEnv, err = credentials.ResolveFromConfig(&cfg.Engine.Credentials)
-		if err != nil {
-			return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
-		}
+	// Resolve AWS credentials from the cluster.yaml copied during provision
+	cfg, err := config.LoadConfig(wd.ClusterConfigPath())
+	if err != nil {
+		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to load cluster.yaml from work-dir: %w", err), false)
+	}
+	awsEnv, err := credentials.ResolveFromConfig(&cfg.Engine.Credentials)
+	if err != nil {
+		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
 	}
 
 	inst := &installer.Installer{

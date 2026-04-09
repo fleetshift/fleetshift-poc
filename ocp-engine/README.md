@@ -159,13 +159,14 @@ ocp-engine status --work-dir <path>
 Destroy a cluster and clean up all AWS resources.
 
 ```
-ocp-engine destroy --work-dir <path> [--config <path>]
+ocp-engine destroy --work-dir <path>
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--work-dir` | Yes | Path to work directory (must contain `metadata.json` and `openshift-install`) |
-| `--config` | No | Path to `cluster.yaml` for AWS credentials. If omitted, uses ambient credentials (env vars, instance profile). |
+| `--work-dir` | Yes | Path to work directory (must contain `metadata.json`, `openshift-install`, and `cluster.yaml`) |
+
+Credentials are read from the `cluster.yaml` that was copied into the work directory during provision.
 
 ### `ocp-engine gen-config`
 

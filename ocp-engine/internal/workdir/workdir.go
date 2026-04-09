@@ -134,6 +134,11 @@ func (w *WorkDir) InstallerPath() string {
 	return filepath.Join(w.Path, "openshift-install")
 }
 
+// ClusterConfigPath returns the path to the copied cluster.yaml
+func (w *WorkDir) ClusterConfigPath() string {
+	return filepath.Join(w.Path, "cluster.yaml")
+}
+
 // InstallConfigPath returns the path to install-config.yaml
 func (w *WorkDir) InstallConfigPath() string {
 	return filepath.Join(w.Path, "install-config.yaml")
