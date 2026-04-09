@@ -3,7 +3,6 @@ package cmd
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/credentials"
@@ -36,93 +35,39 @@ func init() {
 }
 
 func runProvision(cmd *cobra.Command, args []string) error {
-	// Step 1: Validate prerequisites
 	if err := prereq.Validate(); err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "prereq_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"prereq_error", err, false)
 	}
 
-	// Step 2: Load config
 	cfg, err := config.LoadConfig(provisionConfigPath)
 	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "config_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"config_error", err, false)
 	}
 
-	// Step 3: Init work directory
 	wd, err := workdir.Init(provisionWorkDir)
 	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"workdir_error", err, false)
 	}
 
-	// Step 4: Lock work directory
 	if err := wd.Lock(); err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "already_running",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"already_running", err, false)
 	}
 	defer wd.Unlock()
 
-	// Step 5: Copy cluster.yaml to work-dir
-	clusterYAMLPath := filepath.Join(wd.Path, "cluster.yaml")
-	clusterYAMLData, err := os.ReadFile(provisionConfigPath)
-	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "config_error",
-			Message:         fmt.Sprintf("failed to read config file for copying: %v", err),
-			RequiresDestroy: false,
-		})
-		return err
-	}
-	if err := os.WriteFile(clusterYAMLPath, clusterYAMLData, 0644); err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         fmt.Sprintf("failed to copy cluster.yaml to work-dir: %v", err),
-			RequiresDestroy: false,
-		})
-		return err
+	if err := wd.CopyClusterConfig(provisionConfigPath); err != nil {
+		return output.WriteError(os.Stdout,"workdir_error", err, false)
 	}
 
-	// Step 6: Resolve AWS credentials
-	awsEnv, err := credentials.Resolve(credentials.AWSCredentials{
-		AccessKeyID:     cfg.Platform.AWS.Credentials.AccessKeyID,
-		SecretAccessKey: cfg.Platform.AWS.Credentials.SecretAccessKey,
-		CredentialsFile: cfg.Platform.AWS.Credentials.CredentialsFile,
-		Profile:         cfg.Platform.AWS.Credentials.Profile,
-		RoleARN:         cfg.Platform.AWS.Credentials.RoleARN,
-	})
+	awsEnv, err := credentials.ResolveFromConfig(&cfg.Platform.AWS.Credentials)
 	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "config_error",
-			Message:         fmt.Sprintf("failed to resolve AWS credentials: %v", err),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
 	}
 
-	// Step 7: Determine release image
 	releaseImage := cfg.ReleaseImage
 	if releaseImage == "" {
 		releaseImage = "quay.io/openshift-release-dev/ocp-release:4.20.18-multi"
 	}
 
-	// Step 8: Create Installer instance
 	inst := &installer.Installer{
 		WorkDir:        wd.Path,
 		InstallerPath:  wd.InstallerPath(),
@@ -134,7 +79,6 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	logPath := wd.LogPath()
 	phases := phase.AllPhases()
 
-	// Step 9: Build phase function map and run phases sequentially
 	phaseFns := map[string]func() error{
 		"extract": func() error {
 			return inst.Extract(logPath)
@@ -161,8 +105,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		if wd.IsPhaseComplete(p.Name) {
 			continue
 		}
-		fn := phaseFns[p.Name]
-		if err := phase.RunPhase(p, fn, os.Stdout); err != nil {
+		if err := phase.RunPhase(p, phaseFns[p.Name], os.Stdout); err != nil {
 			output.WriteErrorResult(os.Stdout, output.ErrorResult{
 				Category:        "phase_error",
 				Phase:           p.Name,
@@ -176,9 +119,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		wd.MarkPhaseComplete(p.Name)
 	}
 
-	// Step 10: Output success
 	infraID, _ := wd.InfraID()
-
 	output.WriteProvisionResult(os.Stdout, output.ProvisionResult{
 		Status:  "succeeded",
 		InfraID: infraID,

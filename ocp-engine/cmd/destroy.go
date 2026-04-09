@@ -33,104 +33,53 @@ func init() {
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
-	// Step 1: Open work directory
 	wd, err := workdir.Open(destroyWorkDir)
 	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"workdir_error", err, false)
 	}
 
-	// Step 2: Check HasMetadata
 	if !wd.HasMetadata() {
-		err := fmt.Errorf("metadata.json not found in work-dir; cannot destroy cluster without metadata")
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("metadata.json not found in work-dir; cannot destroy cluster without metadata"), false)
 	}
 
-	// Step 3: Check HasInstaller
 	if !wd.HasInstaller() {
-		err := fmt.Errorf("openshift-install binary not found in work-dir; cannot destroy cluster")
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("openshift-install binary not found in work-dir; cannot destroy cluster"), false)
 	}
 
-	// Step 4: Lock work directory
 	if err := wd.Lock(); err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "already_running",
-			Message:         err.Error(),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"already_running", err, false)
 	}
 	defer wd.Unlock()
 
-	// Step 5: Get infraID
 	infraID, err := wd.InfraID()
 	if err != nil {
-		output.WriteErrorResult(os.Stdout, output.ErrorResult{
-			Category:        "workdir_error",
-			Message:         fmt.Sprintf("failed to read infra ID from metadata.json: %v", err),
-			RequiresDestroy: false,
-		})
-		return err
+		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("failed to read infra ID from metadata.json: %w", err), false)
 	}
 
-	// Step 6: Resolve AWS credentials from config (if provided) or use ambient
+	// Resolve AWS credentials from config (if provided) or use ambient
 	var awsEnv map[string]string
 	if destroyConfigPath != "" {
 		cfg, err := config.LoadConfig(destroyConfigPath)
 		if err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "config_error",
-				Message:         err.Error(),
-				RequiresDestroy: false,
-			})
-			return err
+			return output.WriteError(os.Stdout,"config_error", err, false)
 		}
-		awsEnv, err = credentials.Resolve(credentials.AWSCredentials{
-			AccessKeyID:     cfg.Platform.AWS.Credentials.AccessKeyID,
-			SecretAccessKey: cfg.Platform.AWS.Credentials.SecretAccessKey,
-			CredentialsFile: cfg.Platform.AWS.Credentials.CredentialsFile,
-			Profile:         cfg.Platform.AWS.Credentials.Profile,
-			RoleARN:         cfg.Platform.AWS.Credentials.RoleARN,
-		})
+		awsEnv, err = credentials.ResolveFromConfig(&cfg.Platform.AWS.Credentials)
 		if err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "config_error",
-				Message:         fmt.Sprintf("failed to resolve AWS credentials: %v", err),
-				RequiresDestroy: false,
-			})
-			return err
+			return output.WriteError(os.Stdout,"config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
 		}
 	}
 
-	// Step 7: Create Installer instance
 	inst := &installer.Installer{
 		WorkDir:       wd.Path,
 		InstallerPath: wd.InstallerPath(),
 		AWSEnv:        awsEnv,
 	}
 
-	// Step 8: Time the destroy and call inst.DestroyCluster
 	logPath := wd.LogPath()
 	start := time.Now()
 	err = inst.DestroyCluster(logPath)
 	elapsed := int(time.Since(start).Seconds())
 
-	// Step 9: Write DestroyResult
 	if err != nil {
 		output.WriteDestroyResult(os.Stdout, output.DestroyResult{
 			Action:         "destroy",

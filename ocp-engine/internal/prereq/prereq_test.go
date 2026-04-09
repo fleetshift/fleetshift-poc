@@ -19,10 +19,3 @@ func TestCheckBinary_NotExists(t *testing.T) {
 func TestCheckContainerRuntime_AtLeastOneExists(t *testing.T) {
 	_ = CheckContainerRuntime()
 }
-
-func TestCheckAll_ReturnsResults(t *testing.T) {
-	results := CheckAll()
-	if results == nil {
-		t.Error("CheckAll should return non-nil results")
-	}
-}

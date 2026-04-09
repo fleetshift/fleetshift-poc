@@ -1,6 +1,10 @@
 package credentials
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/ocp-engine/internal/config"
+)
 
 type AWSCredentials struct {
 	AccessKeyID     string
@@ -28,4 +32,15 @@ func Resolve(creds AWSCredentials) (map[string]string, error) {
 	}
 
 	return env, nil
+}
+
+// ResolveFromConfig resolves AWS credentials directly from a parsed config.
+func ResolveFromConfig(c *config.AWSCredentials) (map[string]string, error) {
+	return Resolve(AWSCredentials{
+		AccessKeyID:     c.AccessKeyID,
+		SecretAccessKey: c.SecretAccessKey,
+		CredentialsFile: c.CredentialsFile,
+		Profile:         c.Profile,
+		RoleARN:         c.RoleARN,
+	})
 }

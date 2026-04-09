@@ -63,6 +63,16 @@ func WriteErrorResult(w io.Writer, r ErrorResult) {
 	writeJSON(w, r)
 }
 
+// WriteError is a convenience wrapper that writes an ErrorResult and returns the error.
+func WriteError(w io.Writer, category string, err error, requiresDestroy bool) error {
+	WriteErrorResult(w, ErrorResult{
+		Category:        category,
+		Message:         err.Error(),
+		RequiresDestroy: requiresDestroy,
+	})
+	return err
+}
+
 func WriteStatusResult(w io.Writer, r StatusResult) {
 	writeJSON(w, r)
 }

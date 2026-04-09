@@ -106,37 +106,26 @@ func ParseConfig(data []byte) (*ClusterConfig, error) {
 	return cfg, nil
 }
 
+func applyNodePoolDefaults(pool *NodePoolSpec) {
+	if pool.Replicas == nil {
+		three := 3
+		pool.Replicas = &three
+	}
+	if pool.InstanceType == "" {
+		pool.InstanceType = "m6a.xlarge"
+	}
+	if pool.RootVolume.SizeGB == 0 {
+		pool.RootVolume.SizeGB = 120
+	}
+	if pool.RootVolume.Type == "" {
+		pool.RootVolume.Type = "gp3"
+	}
+}
+
 // applyDefaults fills in default values for unset fields
 func applyDefaults(cfg *ClusterConfig) {
-	// Control plane defaults
-	if cfg.ControlPlane.Replicas == nil {
-		three := 3
-		cfg.ControlPlane.Replicas = &three
-	}
-	if cfg.ControlPlane.InstanceType == "" {
-		cfg.ControlPlane.InstanceType = "m6a.xlarge"
-	}
-	if cfg.ControlPlane.RootVolume.SizeGB == 0 {
-		cfg.ControlPlane.RootVolume.SizeGB = 120
-	}
-	if cfg.ControlPlane.RootVolume.Type == "" {
-		cfg.ControlPlane.RootVolume.Type = "gp3"
-	}
-
-	// Compute defaults
-	if cfg.Compute.Replicas == nil {
-		three := 3
-		cfg.Compute.Replicas = &three
-	}
-	if cfg.Compute.InstanceType == "" {
-		cfg.Compute.InstanceType = "m6a.xlarge"
-	}
-	if cfg.Compute.RootVolume.SizeGB == 0 {
-		cfg.Compute.RootVolume.SizeGB = 120
-	}
-	if cfg.Compute.RootVolume.Type == "" {
-		cfg.Compute.RootVolume.Type = "gp3"
-	}
+	applyNodePoolDefaults(&cfg.ControlPlane)
+	applyNodePoolDefaults(&cfg.Compute)
 
 	// Networking defaults
 	if cfg.Networking.ClusterNetwork == "" {
