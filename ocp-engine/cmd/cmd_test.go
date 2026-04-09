@@ -22,6 +22,7 @@ func TestGenConfig_EndToEnd(t *testing.T) {
 	psPath := filepath.Join(tmpDir, "pull-secret.json")
 	os.WriteFile(psPath, []byte(`{"auths":{}}`), 0644)
 
+	// Config goes directly in the cluster directory (which is the work dir)
 	configPath := filepath.Join(tmpDir, "cluster.yaml")
 	configYAML := `
 ocp_engine:
@@ -37,10 +38,9 @@ platform:
     region: us-east-1
 `
 	os.WriteFile(configPath, []byte(configYAML), 0644)
-	workDir := filepath.Join(tmpDir, "work")
 
-	// Run gen-config
-	cmd := exec.Command(binPath, "gen-config", "--config", configPath, "--work-dir", workDir)
+	// Run gen-config -- work dir is derived from config's parent directory
+	cmd := exec.Command(binPath, "gen-config", "--config", configPath)
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("gen-config failed: %v\noutput: %s", err, out)
@@ -55,18 +55,13 @@ platform:
 		t.Errorf("status = %v, want complete", result["status"])
 	}
 
-	// Verify install-config.yaml was created
-	icData, err := os.ReadFile(filepath.Join(workDir, "install-config.yaml"))
+	// Verify install-config.yaml was created in the same directory
+	icData, err := os.ReadFile(filepath.Join(tmpDir, "install-config.yaml"))
 	if err != nil {
 		t.Fatalf("install-config.yaml not created: %v", err)
 	}
 	if len(icData) == 0 {
 		t.Error("install-config.yaml is empty")
-	}
-
-	// Verify cluster.yaml was copied
-	if _, err := os.Stat(filepath.Join(workDir, "cluster.yaml")); err != nil {
-		t.Error("cluster.yaml not copied to work-dir")
 	}
 }
 

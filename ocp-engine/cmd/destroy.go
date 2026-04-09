@@ -52,7 +52,7 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return output.WriteError(os.Stdout, "workdir_error", fmt.Errorf("failed to read infra ID from metadata.json: %w", err), false)
 	}
 
-	// Resolve AWS credentials from the cluster.yaml copied during provision
+	// Resolve AWS credentials from cluster.yaml in the work directory
 	cfg, err := config.LoadConfig(wd.ClusterConfigPath())
 	if err != nil {
 		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to load cluster.yaml from work-dir: %w", err), false)

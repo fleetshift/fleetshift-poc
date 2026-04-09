@@ -29,10 +29,16 @@ sudo mv ocp-engine /usr/local/bin/
 
 ## Quick Start
 
-### 1. Create a cluster config
+### 1. Create a cluster directory with config
+
+Each cluster gets its own directory. The `cluster.yaml` config file lives inside it, and all artifacts (installer binary, manifests, kubeconfig) are written alongside it.
+
+```bash
+mkdir -p clusters/my-cluster
+```
 
 ```yaml
-# cluster.yaml
+# clusters/my-cluster/cluster.yaml
 ocp_engine:
   pull_secret_file: /path/to/pull-secret.json
   ssh_public_key_file: ~/.ssh/id_rsa.pub
@@ -53,15 +59,15 @@ The `ocp_engine` section holds engine-specific settings (credentials, file paths
 ### 2. Validate configuration (dry run)
 
 ```bash
-ocp-engine gen-config --config cluster.yaml --work-dir /clusters/my-cluster
+ocp-engine gen-config --config clusters/my-cluster/cluster.yaml
 ```
 
-This generates `install-config.yaml` in the work directory without creating any AWS resources. Inspect it to verify your settings.
+This generates `install-config.yaml` in the cluster directory without creating any AWS resources. Inspect it to verify your settings.
 
 ### 3. Provision the cluster
 
 ```bash
-ocp-engine provision --config cluster.yaml --work-dir /clusters/my-cluster
+ocp-engine provision --config clusters/my-cluster/cluster.yaml
 ```
 
 This runs through 5 phases and takes approximately 30-45 minutes:
@@ -84,17 +90,17 @@ Each phase outputs a JSON line to stdout on completion:
 {"phase":"cluster","status":"complete","elapsed_seconds":2100}
 ```
 
-On success, your kubeconfig is at `/clusters/my-cluster/auth/kubeconfig`:
+On success, your kubeconfig is at `clusters/my-cluster/auth/kubeconfig`:
 
 ```bash
-export KUBECONFIG=/clusters/my-cluster/auth/kubeconfig
+export KUBECONFIG=clusters/my-cluster/auth/kubeconfig
 oc get nodes
 ```
 
 ### 4. Check status
 
 ```bash
-ocp-engine status --work-dir /clusters/my-cluster
+ocp-engine status --work-dir clusters/my-cluster
 ```
 
 Returns structured JSON:
@@ -112,7 +118,7 @@ Returns structured JSON:
 ### 5. Destroy the cluster
 
 ```bash
-ocp-engine destroy --work-dir /clusters/my-cluster
+ocp-engine destroy --work-dir clusters/my-cluster
 ```
 
 This runs `openshift-install destroy cluster`, which finds all AWS resources tagged with `kubernetes.io/cluster/<infraID>: owned` and deletes them. Destroy is idempotent -- safe to run multiple times.
@@ -121,16 +127,15 @@ This runs `openshift-install destroy cluster`, which finds all AWS resources tag
 
 ### `ocp-engine provision`
 
-Provision a new OCP cluster on AWS.
+Provision a new OCP cluster on AWS. The parent directory of the config file is used as the cluster directory for all artifacts.
 
 ```
-ocp-engine provision --config <path> --work-dir <path>
+ocp-engine provision --config <path>
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--config` | Yes | Path to `cluster.yaml` configuration file |
-| `--work-dir` | Yes | Path to work directory for this cluster (created if it doesn't exist) |
+| `--config` | Yes | Path to `cluster.yaml`. Parent directory is used as the cluster directory. |
 
 ### `ocp-engine status`
 
@@ -164,22 +169,19 @@ ocp-engine destroy --work-dir <path>
 
 | Flag | Required | Description |
 |---|---|---|
-| `--work-dir` | Yes | Path to work directory (must contain `metadata.json`, `openshift-install`, and `cluster.yaml`) |
-
-Credentials are read from the `cluster.yaml` that was copied into the work directory during provision.
+| `--work-dir` | Yes | Path to cluster directory (must contain `metadata.json`, `openshift-install`, and `cluster.yaml`) |
 
 ### `ocp-engine gen-config`
 
 Generate `install-config.yaml` without running any install phases. Useful for validating configuration.
 
 ```
-ocp-engine gen-config --config <path> --work-dir <path>
+ocp-engine gen-config --config <path>
 ```
 
 | Flag | Required | Description |
 |---|---|---|
-| `--config` | Yes | Path to `cluster.yaml` configuration file |
-| `--work-dir` | Yes | Path to work directory (created if it doesn't exist) |
+| `--config` | Yes | Path to `cluster.yaml`. Parent directory is used as the cluster directory. |
 
 ## Configuration Reference
 
@@ -274,13 +276,13 @@ credentials:
 
 All fields outside `ocp_engine` are written directly to `install-config.yaml`. This means any option supported by `openshift-install` works without waiting for ocp-engine to explicitly support it -- subnets, proxy, custom AMIs, feature gates, etc. See the [OpenShift install-config reference](https://docs.openshift.com/container-platform/4.20/installing/installing_aws/ipi/installing-aws-customizations.html) for all available fields.
 
-## Work Directory
+## Cluster Directory
 
-Each cluster gets its own work directory containing all artifacts:
+Each cluster gets its own directory containing the config and all artifacts:
 
 ```
-/clusters/my-cluster/
-  cluster.yaml              # Input config (copied)
+clusters/my-cluster/
+  cluster.yaml              # Your config file
   install-config.yaml       # Generated install config
   openshift-install         # Cached binary from release image
   manifests/                # Generated by openshift-install
@@ -331,30 +333,34 @@ All errors are returned as structured JSON on stdout:
 ### Handling Failures
 
 **Failed before `cluster` phase** (`requires_destroy: false`):
-No AWS resources were created. Delete the work directory and retry.
+No AWS resources were created. Delete the cluster directory and retry.
 
 ```bash
-rm -rf /clusters/my-cluster
-ocp-engine provision --config cluster.yaml --work-dir /clusters/my-cluster
+rm -rf clusters/my-cluster
+mkdir clusters/my-cluster
+cp cluster.yaml clusters/my-cluster/
+ocp-engine provision --config clusters/my-cluster/cluster.yaml
 ```
 
 **Failed during `cluster` phase** (`requires_destroy: true`):
 AWS resources may exist. Destroy before retrying.
 
 ```bash
-ocp-engine destroy --work-dir /clusters/my-cluster
-# Then retry with a fresh work directory
-ocp-engine provision --config cluster.yaml --work-dir /clusters/my-cluster-2
+ocp-engine destroy --work-dir clusters/my-cluster
+# Then retry with a fresh cluster directory
+mkdir clusters/my-cluster-2
+cp cluster.yaml clusters/my-cluster-2/
+ocp-engine provision --config clusters/my-cluster-2/cluster.yaml
 ```
 
 ## Running Multiple Clusters
 
-Each cluster uses its own work directory. Run as many as you want in parallel:
+Each cluster uses its own directory. Run as many as you want in parallel:
 
 ```bash
-ocp-engine provision --config cluster-a.yaml --work-dir /clusters/a &
-ocp-engine provision --config cluster-b.yaml --work-dir /clusters/b &
-ocp-engine provision --config cluster-c.yaml --work-dir /clusters/c &
+ocp-engine provision --config clusters/a/cluster.yaml &
+ocp-engine provision --config clusters/b/cluster.yaml &
+ocp-engine provision --config clusters/c/cluster.yaml &
 wait
 ```
 
@@ -387,17 +393,21 @@ The engine just does what it's told and returns structured results. Parse the JS
 
 ```bash
 #!/bin/bash
-output=$(ocp-engine provision --config cluster.yaml --work-dir /clusters/001 2>/dev/null)
+CLUSTER_DIR="clusters/001"
+mkdir -p "$CLUSTER_DIR"
+cp cluster.yaml "$CLUSTER_DIR/"
+
+output=$(ocp-engine provision --config "$CLUSTER_DIR/cluster.yaml" 2>/dev/null)
 exit_code=$?
 
 if [ $exit_code -eq 0 ]; then
     echo "Cluster provisioned successfully"
-    kubeconfig="/clusters/001/auth/kubeconfig"
+    kubeconfig="$CLUSTER_DIR/auth/kubeconfig"
 else
     requires_destroy=$(echo "$output" | tail -1 | jq -r '.requires_destroy // false')
     if [ "$requires_destroy" = "true" ]; then
         echo "Provision failed with AWS resources created. Destroying..."
-        ocp-engine destroy --work-dir /clusters/001
+        ocp-engine destroy --work-dir "$CLUSTER_DIR"
     else
         echo "Provision failed before AWS resources were created. Safe to retry."
     fi

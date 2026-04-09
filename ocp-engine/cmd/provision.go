@@ -3,6 +3,7 @@ package cmd
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/credentials"
@@ -17,20 +18,15 @@ import (
 var provisionCmd = &cobra.Command{
 	Use:   "provision",
 	Short: "Provision a new OpenShift cluster",
-	Long:  "Executes the complete cluster provisioning workflow through all phases (extract, install-config, manifests, ignition, cluster)",
+	Long:  "Executes the complete cluster provisioning workflow through all phases (extract, install-config, manifests, ignition, cluster). The directory containing the config file is used as the work directory.",
 	RunE:  runProvision,
 }
 
-var (
-	provisionConfigPath string
-	provisionWorkDir    string
-)
+var provisionConfigPath string
 
 func init() {
-	provisionCmd.Flags().StringVar(&provisionConfigPath, "config", "", "Path to cluster configuration file (required)")
-	provisionCmd.Flags().StringVar(&provisionWorkDir, "work-dir", "", "Path to work directory (required)")
+	provisionCmd.Flags().StringVar(&provisionConfigPath, "config", "", "Path to cluster.yaml (required). Parent directory is used as work directory.")
 	provisionCmd.MarkFlagRequired("config")
-	provisionCmd.MarkFlagRequired("work-dir")
 	rootCmd.AddCommand(provisionCmd)
 }
 
@@ -44,7 +40,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return output.WriteError(os.Stdout, "config_error", err, false)
 	}
 
-	wd, err := workdir.Init(provisionWorkDir)
+	wd, err := workdir.Open(filepath.Dir(provisionConfigPath))
 	if err != nil {
 		return output.WriteError(os.Stdout, "workdir_error", err, false)
 	}
@@ -53,10 +49,6 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return output.WriteError(os.Stdout, "already_running", err, false)
 	}
 	defer wd.Unlock()
-
-	if err := wd.CopyClusterConfig(provisionConfigPath); err != nil {
-		return output.WriteError(os.Stdout, "workdir_error", err, false)
-	}
 
 	awsEnv, err := credentials.ResolveFromConfig(&cfg.Engine.Credentials)
 	if err != nil {

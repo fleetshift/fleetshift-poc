@@ -149,18 +149,6 @@ func (w *WorkDir) LogPath() string {
 	return filepath.Join(w.Path, ".openshift_install.log")
 }
 
-// CopyClusterConfig copies the source cluster.yaml into the work directory
-func (w *WorkDir) CopyClusterConfig(sourcePath string) error {
-	data, err := os.ReadFile(sourcePath)
-	if err != nil {
-		return fmt.Errorf("read config file: %w", err)
-	}
-	if err := os.WriteFile(filepath.Join(w.Path, "cluster.yaml"), data, 0644); err != nil {
-		return fmt.Errorf("copy cluster.yaml: %w", err)
-	}
-	return nil
-}
-
 // MarkPhaseComplete creates a marker file indicating the phase has completed
 func (w *WorkDir) MarkPhaseComplete(phaseName string) error {
 	markerPath := filepath.Join(w.Path, "_phase_"+phaseName+"_complete")
