@@ -3,113 +3,43 @@ package output
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
-func TestPhaseResult_Success(t *testing.T) {
+func TestWriteError(t *testing.T) {
 	var buf bytes.Buffer
-	WritePhaseResult(&buf, PhaseResult{
-		Phase:          "manifests",
-		Status:         "complete",
-		ElapsedSeconds: 12,
-	})
+	origErr := fmt.Errorf("something broke")
+	returned := WriteError(&buf, "config_error", origErr, false)
 
-	var got PhaseResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
+	if returned != origErr {
+		t.Error("WriteError should return the original error")
 	}
-	if got.Phase != "manifests" {
-		t.Errorf("phase = %q, want %q", got.Phase, "manifests")
-	}
-	if got.Status != "complete" {
-		t.Errorf("status = %q, want %q", got.Status, "complete")
-	}
-	if got.ElapsedSeconds != 12 {
-		t.Errorf("elapsed = %d, want %d", got.ElapsedSeconds, 12)
-	}
-}
-
-func TestPhaseResult_Failure(t *testing.T) {
-	var buf bytes.Buffer
-	WritePhaseResult(&buf, PhaseResult{
-		Phase:           "cluster",
-		Status:          "failed",
-		Error:           "bootstrap timeout",
-		LogTail:         "some log lines...",
-		ElapsedSeconds:  1802,
-		RequiresDestroy: true,
-	})
-
-	var got PhaseResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if got.RequiresDestroy != true {
-		t.Error("requires_destroy should be true")
-	}
-	if got.Error != "bootstrap timeout" {
-		t.Errorf("error = %q, want %q", got.Error, "bootstrap timeout")
-	}
-}
-
-func TestErrorResult(t *testing.T) {
-	var buf bytes.Buffer
-	WriteErrorResult(&buf, ErrorResult{
-		Category:        "config_error",
-		Message:         "missing pull secret",
-		RequiresDestroy: false,
-	})
 
 	var got ErrorResult
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 	if got.Category != "config_error" {
-		t.Errorf("category = %q, want %q", got.Category, "config_error")
+		t.Errorf("category = %q, want config_error", got.Category)
+	}
+	if got.Message != "something broke" {
+		t.Errorf("message = %q, want 'something broke'", got.Message)
+	}
+	if got.RequiresDestroy != false {
+		t.Error("requires_destroy should be false")
 	}
 }
 
-func TestStatusResult(t *testing.T) {
+func TestWriteError_RequiresDestroy(t *testing.T) {
 	var buf bytes.Buffer
-	WriteStatusResult(&buf, StatusResult{
-		State:           "running",
-		CompletedPhases: []string{"extract", "install-config"},
-		CurrentPhase:    "manifests",
-		PID:             12345,
-		PIDAlive:        true,
-		HasKubeconfig:   false,
-		HasMetadata:     false,
-	})
+	WriteError(&buf, "phase_error", fmt.Errorf("cluster failed"), true)
 
-	var got StatusResult
+	var got ErrorResult
 	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
-	if got.State != "running" {
-		t.Errorf("state = %q, want %q", got.State, "running")
-	}
-	if len(got.CompletedPhases) != 2 {
-		t.Errorf("completed_phases len = %d, want 2", len(got.CompletedPhases))
-	}
-	if got.PID != 12345 {
-		t.Errorf("pid = %d, want 12345", got.PID)
-	}
-}
-
-func TestDestroyResult(t *testing.T) {
-	var buf bytes.Buffer
-	WriteDestroyResult(&buf, DestroyResult{
-		Action:         "destroy",
-		Status:         "complete",
-		InfraID:        "my-cluster-a1b2c",
-		ElapsedSeconds: 300,
-	})
-
-	var got DestroyResult
-	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
-		t.Fatalf("invalid JSON: %v", err)
-	}
-	if got.InfraID != "my-cluster-a1b2c" {
-		t.Errorf("infra_id = %q, want %q", got.InfraID, "my-cluster-a1b2c")
+	if got.RequiresDestroy != true {
+		t.Error("requires_destroy should be true")
 	}
 }

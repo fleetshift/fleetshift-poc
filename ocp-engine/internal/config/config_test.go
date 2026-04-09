@@ -350,3 +350,58 @@ pull_secret_file: /tmp/pull-secret.json
 	}
 }
 
+func TestExpandTilde(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("cannot determine home directory")
+	}
+
+	result := expandTilde("~/some/path")
+	expected := filepath.Join(home, "some/path")
+	if result != expected {
+		t.Errorf("expandTilde(~/some/path) = %q, want %q", result, expected)
+	}
+}
+
+func TestExpandTilde_NoTilde(t *testing.T) {
+	result := expandTilde("/absolute/path")
+	if result != "/absolute/path" {
+		t.Errorf("expandTilde should not modify absolute path, got %q", result)
+	}
+}
+
+func TestComputeReplicasZero(t *testing.T) {
+	yamlData := `cluster:
+  name: compact
+  base_domain: example.com
+  version: "4.20"
+platform:
+  aws:
+    region: us-east-1
+    credentials:
+      access_key_id: "test"
+      secret_access_key: "test"
+compute:
+  replicas: 0
+pull_secret_file: /tmp/pull-secret.json
+`
+	tmpfile, err := os.CreateTemp("", "test-*.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tmpfile.Name())
+	tmpfile.Write([]byte(yamlData))
+	tmpfile.Close()
+
+	cfg, err := LoadConfig(tmpfile.Name())
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.Compute.Replicas == nil {
+		t.Fatal("compute.replicas should not be nil")
+	}
+	if *cfg.Compute.Replicas != 0 {
+		t.Errorf("compute.replicas = %d, want 0 (compact cluster)", *cfg.Compute.Replicas)
+	}
+}
+

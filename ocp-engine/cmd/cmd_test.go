@@ -15,13 +15,7 @@ func projectRoot() string {
 }
 
 func TestGenConfig_EndToEnd(t *testing.T) {
-	// Build the binary
-	binPath := filepath.Join(t.TempDir(), "ocp-engine")
-	build := exec.Command("go", "build", "-o", binPath)
-	build.Dir = projectRoot()
-	if out, err := build.CombinedOutput(); err != nil {
-		t.Fatalf("build failed: %v\n%s", err, out)
-	}
+	binPath := buildBinary(t)
 
 	// Create test config with real pull secret file
 	tmpDir := t.TempDir()
@@ -76,13 +70,19 @@ pull_secret_file: ` + psPath + `
 	}
 }
 
-func TestStatus_EmptyWorkDir(t *testing.T) {
+func buildBinary(t *testing.T) string {
+	t.Helper()
 	binPath := filepath.Join(t.TempDir(), "ocp-engine")
 	build := exec.Command("go", "build", "-o", binPath)
 	build.Dir = projectRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}
+	return binPath
+}
+
+func TestStatus_EmptyWorkDir(t *testing.T) {
+	binPath := buildBinary(t)
 
 	workDir := t.TempDir()
 	cmd := exec.Command(binPath, "status", "--work-dir", workDir)
@@ -97,5 +97,53 @@ func TestStatus_EmptyWorkDir(t *testing.T) {
 	}
 	if result["state"] != "empty" {
 		t.Errorf("state = %v, want empty", result["state"])
+	}
+}
+
+func TestStatus_NonexistentWorkDir(t *testing.T) {
+	binPath := buildBinary(t)
+
+	cmd := exec.Command(binPath, "status", "--work-dir", "/tmp/nonexistent-ocp-test-dir")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("status should exit 0 for nonexistent dir: %v\noutput: %s", err, out)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if result["state"] != "empty" {
+		t.Errorf("state = %v, want empty", result["state"])
+	}
+}
+
+func TestStatus_Succeeded(t *testing.T) {
+	binPath := buildBinary(t)
+
+	workDir := t.TempDir()
+	// Create all phase markers
+	for _, phase := range []string{"extract", "install-config", "manifests", "ignition", "cluster"} {
+		os.WriteFile(filepath.Join(workDir, "_phase_"+phase+"_complete"), []byte(""), 0644)
+	}
+	// Create kubeconfig
+	os.MkdirAll(filepath.Join(workDir, "auth"), 0755)
+	os.WriteFile(filepath.Join(workDir, "auth", "kubeconfig"), []byte("apiVersion: v1"), 0644)
+
+	cmd := exec.Command(binPath, "status", "--work-dir", workDir)
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("status failed: %v\noutput: %s", err, out)
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(out, &result); err != nil {
+		t.Fatalf("invalid JSON: %v\n%s", err, out)
+	}
+	if result["state"] != "succeeded" {
+		t.Errorf("state = %v, want succeeded", result["state"])
+	}
+	if result["has_kubeconfig"] != true {
+		t.Error("has_kubeconfig should be true")
 	}
 }

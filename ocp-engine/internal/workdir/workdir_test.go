@@ -119,6 +119,38 @@ func TestHasInstaller(t *testing.T) {
 	}
 }
 
+func TestCopyClusterConfig(t *testing.T) {
+	dir := t.TempDir()
+	w, _ := Init(dir)
+
+	// Create a source config file
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "cluster.yaml")
+	os.WriteFile(srcPath, []byte("cluster:\n  name: test\n"), 0644)
+
+	if err := w.CopyClusterConfig(srcPath); err != nil {
+		t.Fatalf("CopyClusterConfig: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "cluster.yaml"))
+	if err != nil {
+		t.Fatalf("cluster.yaml not copied: %v", err)
+	}
+	if string(data) != "cluster:\n  name: test\n" {
+		t.Errorf("content mismatch: got %q", string(data))
+	}
+}
+
+func TestCopyClusterConfig_MissingSource(t *testing.T) {
+	dir := t.TempDir()
+	w, _ := Init(dir)
+
+	err := w.CopyClusterConfig("/nonexistent/path/cluster.yaml")
+	if err == nil {
+		t.Error("expected error for missing source file")
+	}
+}
+
 func TestCompletedPhases(t *testing.T) {
 	dir := t.TempDir()
 	w, _ := Init(dir)

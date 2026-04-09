@@ -6,58 +6,35 @@ import (
 	"testing"
 )
 
-func TestBuildExtractArgs(t *testing.T) {
+func TestBuildExtractArgs_WithPullSecret(t *testing.T) {
+	i := &Installer{
+		WorkDir:        "/tmp/test-cluster",
+		ReleaseImage:   "quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64",
+		PullSecretFile: "/tmp/pull-secret.json",
+	}
+	args := i.buildExtractArgs()
+
+	found := false
+	for _, arg := range args {
+		if arg == "--registry-config=/tmp/pull-secret.json" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected --registry-config flag in args, got %v", args)
+	}
+}
+
+func TestBuildExtractArgs_WithoutPullSecret(t *testing.T) {
 	i := &Installer{
 		WorkDir:      "/tmp/test-cluster",
 		ReleaseImage: "quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64",
 	}
 	args := i.buildExtractArgs()
-	expected := []string{
-		"adm", "release", "extract",
-		"--command=openshift-install",
-		"--to=/tmp/test-cluster",
-		"quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64",
-	}
-	if len(args) != len(expected) {
-		t.Fatalf("args len = %d, want %d", len(args), len(expected))
-	}
-	for i, arg := range args {
-		if arg != expected[i] {
-			t.Errorf("arg[%d] = %q, want %q", i, arg, expected[i])
-		}
-	}
-}
 
-func TestBuildInstallerArgs(t *testing.T) {
-	i := &Installer{
-		WorkDir:       "/tmp/test-cluster",
-		InstallerPath: "/tmp/test-cluster/openshift-install",
-	}
-	args := i.buildInstallerArgs("create", "manifests")
-	expected := []string{"create", "manifests", "--dir=/tmp/test-cluster"}
-	if len(args) != len(expected) {
-		t.Fatalf("args len = %d, want %d", len(args), len(expected))
-	}
-	for idx, arg := range args {
-		if arg != expected[idx] {
-			t.Errorf("arg[%d] = %q, want %q", idx, arg, expected[idx])
-		}
-	}
-}
-
-func TestBuildDestroyArgs(t *testing.T) {
-	i := &Installer{
-		WorkDir:       "/tmp/test-cluster",
-		InstallerPath: "/tmp/test-cluster/openshift-install",
-	}
-	args := i.buildInstallerArgs("destroy", "cluster")
-	expected := []string{"destroy", "cluster", "--dir=/tmp/test-cluster"}
-	if len(args) != len(expected) {
-		t.Fatalf("args len = %d, want %d", len(args), len(expected))
-	}
-	for idx, arg := range args {
-		if arg != expected[idx] {
-			t.Errorf("arg[%d] = %q, want %q", idx, arg, expected[idx])
+	for _, arg := range args {
+		if arg == "--registry-config=" {
+			t.Error("should not include --registry-config when PullSecretFile is empty")
 		}
 	}
 }

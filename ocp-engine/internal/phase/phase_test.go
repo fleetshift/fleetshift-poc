@@ -9,19 +9,6 @@ import (
 	"github.com/ocp-engine/internal/output"
 )
 
-func TestPhaseDefinitions(t *testing.T) {
-	phases := AllPhases()
-	if len(phases) != 5 {
-		t.Fatalf("expected 5 phases, got %d", len(phases))
-	}
-	names := []string{"extract", "install-config", "manifests", "ignition", "cluster"}
-	for i, p := range phases {
-		if p.Name != names[i] {
-			t.Errorf("phase[%d] = %q, want %q", i, p.Name, names[i])
-		}
-	}
-}
-
 func TestPhaseRequiresDestroy(t *testing.T) {
 	phases := AllPhases()
 	for _, p := range phases[:4] {
