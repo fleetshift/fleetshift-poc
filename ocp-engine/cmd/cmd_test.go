@@ -24,17 +24,17 @@ func TestGenConfig_EndToEnd(t *testing.T) {
 
 	configPath := filepath.Join(tmpDir, "cluster.yaml")
 	configYAML := `
-cluster:
+ocp_engine:
+  pull_secret_file: ` + psPath + `
+  credentials:
+    access_key_id: "AKIATEST"
+    secret_access_key: "secrettest"
+baseDomain: test.example.com
+metadata:
   name: smoke-test
-  base_domain: test.example.com
-  version: "4.20"
 platform:
   aws:
     region: us-east-1
-    credentials:
-      access_key_id: "AKIATEST"
-      secret_access_key: "secrettest"
-pull_secret_file: ` + psPath + `
 `
 	os.WriteFile(configPath, []byte(configYAML), 0644)
 	workDir := filepath.Join(tmpDir, "work")

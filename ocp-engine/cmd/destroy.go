@@ -35,25 +35,25 @@ func init() {
 func runDestroy(cmd *cobra.Command, args []string) error {
 	wd, err := workdir.Open(destroyWorkDir)
 	if err != nil {
-		return output.WriteError(os.Stdout,"workdir_error", err, false)
+		return output.WriteError(os.Stdout, "workdir_error", err, false)
 	}
 
 	if !wd.HasMetadata() {
-		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("metadata.json not found in work-dir; cannot destroy cluster without metadata"), false)
+		return output.WriteError(os.Stdout, "workdir_error", fmt.Errorf("metadata.json not found in work-dir; cannot destroy cluster without metadata"), false)
 	}
 
 	if !wd.HasInstaller() {
-		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("openshift-install binary not found in work-dir; cannot destroy cluster"), false)
+		return output.WriteError(os.Stdout, "workdir_error", fmt.Errorf("openshift-install binary not found in work-dir; cannot destroy cluster"), false)
 	}
 
 	if err := wd.Lock(); err != nil {
-		return output.WriteError(os.Stdout,"already_running", err, false)
+		return output.WriteError(os.Stdout, "already_running", err, false)
 	}
 	defer wd.Unlock()
 
 	infraID, err := wd.InfraID()
 	if err != nil {
-		return output.WriteError(os.Stdout,"workdir_error", fmt.Errorf("failed to read infra ID from metadata.json: %w", err), false)
+		return output.WriteError(os.Stdout, "workdir_error", fmt.Errorf("failed to read infra ID from metadata.json: %w", err), false)
 	}
 
 	// Resolve AWS credentials from config (if provided) or use ambient
@@ -61,11 +61,11 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	if destroyConfigPath != "" {
 		cfg, err := config.LoadConfig(destroyConfigPath)
 		if err != nil {
-			return output.WriteError(os.Stdout,"config_error", err, false)
+			return output.WriteError(os.Stdout, "config_error", err, false)
 		}
-		awsEnv, err = credentials.ResolveFromConfig(&cfg.Platform.AWS.Credentials)
+		awsEnv, err = credentials.ResolveFromConfig(&cfg.Engine.Credentials)
 		if err != nil {
-			return output.WriteError(os.Stdout,"config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
+			return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
 		}
 	}
 

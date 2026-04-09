@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strings"
 	"testing"
+
+	"gopkg.in/yaml.v3"
 )
 
 func getTestdataPath(filename string) string {
@@ -21,82 +23,26 @@ func TestLoadConfig_Minimal(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	// Check required fields
-	if cfg.Cluster.Name != "test-cluster" {
-		t.Errorf("expected name=test-cluster, got %s", cfg.Cluster.Name)
+	// Check engine fields
+	if cfg.Engine.PullSecretFile != "/tmp/pull-secret.json" {
+		t.Errorf("pull_secret_file = %q, want /tmp/pull-secret.json", cfg.Engine.PullSecretFile)
 	}
-	if cfg.Cluster.BaseDomain != "example.com" {
-		t.Errorf("expected base_domain=example.com, got %s", cfg.Cluster.BaseDomain)
-	}
-	if cfg.Cluster.Version != "4.20" {
-		t.Errorf("expected version=4.20, got %s", cfg.Cluster.Version)
-	}
-	if cfg.Platform.AWS.Region != "us-east-1" {
-		t.Errorf("expected region=us-east-1, got %s", cfg.Platform.AWS.Region)
-	}
-	if cfg.Platform.AWS.Credentials.AccessKeyID != "AKIAIOSFODNN7EXAMPLE" {
-		t.Errorf("expected access_key_id=AKIAIOSFODNN7EXAMPLE, got %s", cfg.Platform.AWS.Credentials.AccessKeyID)
-	}
-	if cfg.Platform.AWS.Credentials.SecretAccessKey != "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY" {
-		t.Errorf("expected secret_access_key to match, got %s", cfg.Platform.AWS.Credentials.SecretAccessKey)
-	}
-	if cfg.PullSecretFile != "/tmp/pull-secret.json" {
-		t.Errorf("expected pull_secret_file=/tmp/pull-secret.json, got %s", cfg.PullSecretFile)
-	}
-}
-
-func TestLoadConfig_AppliesDefaults(t *testing.T) {
-	path := getTestdataPath("cluster-minimal.yaml")
-	cfg, err := LoadConfig(path)
-	if err != nil {
-		t.Fatalf("LoadConfig() error = %v", err)
+	if cfg.Engine.Credentials.AccessKeyID != "AKIAIOSFODNN7EXAMPLE" {
+		t.Errorf("access_key_id = %q, want AKIAIOSFODNN7EXAMPLE", cfg.Engine.Credentials.AccessKeyID)
 	}
 
-	// Check defaults for control plane
-	if cfg.ControlPlane.Replicas == nil || *cfg.ControlPlane.Replicas != 3 {
-		t.Errorf("expected control_plane.replicas=3, got %v", cfg.ControlPlane.Replicas)
+	// Check install-config pass-through
+	if cfg.InstallConfig["baseDomain"] != "example.com" {
+		t.Errorf("baseDomain = %v, want example.com", cfg.InstallConfig["baseDomain"])
 	}
-	if cfg.ControlPlane.InstanceType != "m6a.xlarge" {
-		t.Errorf("expected control_plane.instance_type=m6a.xlarge, got %s", cfg.ControlPlane.InstanceType)
+	metadata := cfg.InstallConfig["metadata"].(map[string]any)
+	if metadata["name"] != "test-cluster" {
+		t.Errorf("metadata.name = %v, want test-cluster", metadata["name"])
 	}
-	if cfg.ControlPlane.RootVolume.SizeGB != 120 {
-		t.Errorf("expected control_plane.root_volume.size_gb=120, got %d", cfg.ControlPlane.RootVolume.SizeGB)
-	}
-	if cfg.ControlPlane.RootVolume.Type != "gp3" {
-		t.Errorf("expected control_plane.root_volume.type=gp3, got %s", cfg.ControlPlane.RootVolume.Type)
-	}
-
-	// Check defaults for compute
-	if cfg.Compute.Replicas == nil || *cfg.Compute.Replicas != 3 {
-		t.Errorf("expected compute.replicas=3, got %v", cfg.Compute.Replicas)
-	}
-	if cfg.Compute.InstanceType != "m6a.xlarge" {
-		t.Errorf("expected compute.instance_type=m6a.xlarge, got %s", cfg.Compute.InstanceType)
-	}
-	if cfg.Compute.RootVolume.SizeGB != 120 {
-		t.Errorf("expected compute.root_volume.size_gb=120, got %d", cfg.Compute.RootVolume.SizeGB)
-	}
-	if cfg.Compute.RootVolume.Type != "gp3" {
-		t.Errorf("expected compute.root_volume.type=gp3, got %s", cfg.Compute.RootVolume.Type)
-	}
-
-	// Check defaults for networking
-	if cfg.Networking.ClusterNetwork != "10.128.0.0/14" {
-		t.Errorf("expected networking.cluster_network=10.128.0.0/14, got %s", cfg.Networking.ClusterNetwork)
-	}
-	if cfg.Networking.ServiceNetwork != "172.30.0.0/16" {
-		t.Errorf("expected networking.service_network=172.30.0.0/16, got %s", cfg.Networking.ServiceNetwork)
-	}
-	if cfg.Networking.MachineNetwork != "10.0.0.0/16" {
-		t.Errorf("expected networking.machine_network=10.0.0.0/16, got %s", cfg.Networking.MachineNetwork)
-	}
-	if cfg.Networking.HostPrefix != 23 {
-		t.Errorf("expected networking.host_prefix=23, got %d", cfg.Networking.HostPrefix)
-	}
-
-	// Check default publish
-	if cfg.Publish != "External" {
-		t.Errorf("expected publish=External, got %s", cfg.Publish)
+	platform := cfg.InstallConfig["platform"].(map[string]any)
+	aws := platform["aws"].(map[string]any)
+	if aws["region"] != "us-east-1" {
+		t.Errorf("platform.aws.region = %v, want us-east-1", aws["region"])
 	}
 }
 
@@ -107,54 +53,39 @@ func TestLoadConfig_Full(t *testing.T) {
 		t.Fatalf("LoadConfig() error = %v", err)
 	}
 
-	// Check cluster info
-	if cfg.Cluster.Name != "full-cluster" {
-		t.Errorf("expected name=full-cluster, got %s", cfg.Cluster.Name)
+	// Check engine fields
+	if cfg.Engine.SSHPublicKeyFile != "/tmp/id_rsa.pub" {
+		t.Errorf("ssh_public_key_file = %q, want /tmp/id_rsa.pub", cfg.Engine.SSHPublicKeyFile)
 	}
-	if cfg.Cluster.BaseDomain != "prod.example.com" {
-		t.Errorf("expected base_domain=prod.example.com, got %s", cfg.Cluster.BaseDomain)
-	}
-
-	// Check platform
-	if cfg.Platform.AWS.Region != "eu-west-1" {
-		t.Errorf("expected region=eu-west-1, got %s", cfg.Platform.AWS.Region)
-	}
-	if cfg.Platform.AWS.Tags["environment"] != "staging" {
-		t.Errorf("expected tags.environment=staging, got %s", cfg.Platform.AWS.Tags["environment"])
-	}
-	if cfg.Platform.AWS.Tags["team"] != "platform" {
-		t.Errorf("expected tags.team=platform, got %s", cfg.Platform.AWS.Tags["team"])
+	if cfg.Engine.ReleaseImage != "quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64" {
+		t.Errorf("release_image = %q", cfg.Engine.ReleaseImage)
 	}
 
-	// Check overridden values
-	if cfg.ControlPlane.InstanceType != "m6a.2xlarge" {
-		t.Errorf("expected control_plane.instance_type=m6a.2xlarge, got %s", cfg.ControlPlane.InstanceType)
+	// Check install-config pass-through
+	if cfg.InstallConfig["baseDomain"] != "prod.example.com" {
+		t.Errorf("baseDomain = %v, want prod.example.com", cfg.InstallConfig["baseDomain"])
 	}
-	if cfg.ControlPlane.RootVolume.SizeGB != 200 {
-		t.Errorf("expected control_plane.root_volume.size_gb=200, got %d", cfg.ControlPlane.RootVolume.SizeGB)
+	if cfg.InstallConfig["publish"] != "External" {
+		t.Errorf("publish = %v, want External", cfg.InstallConfig["publish"])
 	}
-
-	if cfg.Compute.Replicas == nil || *cfg.Compute.Replicas != 5 {
-		t.Errorf("expected compute.replicas=5, got %v", cfg.Compute.Replicas)
-	}
-	if cfg.Compute.InstanceType != "m5.xlarge" {
-		t.Errorf("expected compute.instance_type=m5.xlarge, got %s", cfg.Compute.InstanceType)
-	}
-	if cfg.Compute.RootVolume.SizeGB != 300 {
-		t.Errorf("expected compute.root_volume.size_gb=300, got %d", cfg.Compute.RootVolume.SizeGB)
+	if cfg.InstallConfig["fips"] != false {
+		t.Errorf("fips = %v, want false", cfg.InstallConfig["fips"])
 	}
 
-	if cfg.SSHPublicKeyFile != "/tmp/id_rsa.pub" {
-		t.Errorf("expected ssh_public_key_file=/tmp/id_rsa.pub, got %s", cfg.SSHPublicKeyFile)
+	// ocp_engine should not leak into install-config
+	if _, ok := cfg.InstallConfig["ocp_engine"]; ok {
+		t.Error("ocp_engine should be stripped from install-config pass-through")
 	}
-	if cfg.ReleaseImage != "quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64" {
-		t.Errorf("expected release_image to match, got %s", cfg.ReleaseImage)
+}
+
+func TestLoadConfig_OcpEngineStripped(t *testing.T) {
+	path := getTestdataPath("cluster-minimal.yaml")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig() error = %v", err)
 	}
-	if cfg.FIPS != false {
-		t.Errorf("expected fips=false, got %v", cfg.FIPS)
-	}
-	if cfg.Publish != "External" {
-		t.Errorf("expected publish=External, got %s", cfg.Publish)
+	if _, ok := cfg.InstallConfig["ocp_engine"]; ok {
+		t.Error("ocp_engine key should be removed from InstallConfig")
 	}
 }
 
@@ -165,94 +96,82 @@ func TestLoadConfig_MissingRequiredFields(t *testing.T) {
 		errContains string
 	}{
 		{
-			name: "missing cluster name",
-			yaml: `cluster:
-  base_domain: example.com
-  version: "4.20"
+			name: "missing pull_secret_file",
+			yaml: `ocp_engine:
+  credentials:
+    access_key_id: "test"
+    secret_access_key: "test"
+baseDomain: example.com
+metadata:
+  name: test
 platform:
   aws:
     region: us-east-1
-    credentials:
-      access_key_id: "test"
-      secret_access_key: "test"
-pull_secret_file: /tmp/pull-secret.json
 `,
-			errContains: "cluster.name",
-		},
-		{
-			name: "missing base domain",
-			yaml: `cluster:
-  name: test
-  version: "4.20"
-platform:
-  aws:
-    region: us-east-1
-    credentials:
-      access_key_id: "test"
-      secret_access_key: "test"
-pull_secret_file: /tmp/pull-secret.json
-`,
-			errContains: "cluster.base_domain",
-		},
-		{
-			name: "missing region",
-			yaml: `cluster:
-  name: test
-  base_domain: example.com
-  version: "4.20"
-platform:
-  aws:
-    credentials:
-      access_key_id: "test"
-      secret_access_key: "test"
-pull_secret_file: /tmp/pull-secret.json
-`,
-			errContains: "platform.aws.region",
+			errContains: "pull_secret_file",
 		},
 		{
 			name: "missing credentials",
-			yaml: `cluster:
+			yaml: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+baseDomain: example.com
+metadata:
   name: test
-  base_domain: example.com
-  version: "4.20"
 platform:
   aws:
     region: us-east-1
-pull_secret_file: /tmp/pull-secret.json
 `,
 			errContains: "credentials",
 		},
 		{
-			name: "missing pull_secret_file",
-			yaml: `cluster:
+			name: "missing baseDomain",
+			yaml: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "test"
+    secret_access_key: "test"
+metadata:
   name: test
-  base_domain: example.com
-  version: "4.20"
 platform:
   aws:
     region: us-east-1
-    credentials:
-      access_key_id: "test"
-      secret_access_key: "test"
 `,
-			errContains: "pull_secret_file",
+			errContains: "baseDomain",
+		},
+		{
+			name: "missing metadata.name",
+			yaml: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "test"
+    secret_access_key: "test"
+baseDomain: example.com
+platform:
+  aws:
+    region: us-east-1
+`,
+			errContains: "metadata.name",
+		},
+		{
+			name: "missing platform.aws.region",
+			yaml: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "test"
+    secret_access_key: "test"
+baseDomain: example.com
+metadata:
+  name: test
+platform:
+  aws: {}
+`,
+			errContains: "platform.aws.region",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpfile, err := os.CreateTemp("", "test-*.yaml")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.Remove(tmpfile.Name())
-
-			if _, err := tmpfile.Write([]byte(tt.yaml)); err != nil {
-				t.Fatal(err)
-			}
-			tmpfile.Close()
-
-			_, err = LoadConfig(tmpfile.Name())
+			_, err := ParseConfig([]byte(tt.yaml))
 			if err == nil {
 				t.Errorf("expected error containing %q, got nil", tt.errContains)
 			} else if !strings.Contains(err.Error(), tt.errContains) {
@@ -263,83 +182,55 @@ platform:
 }
 
 func TestLoadConfig_CredentialModes(t *testing.T) {
+	base := `baseDomain: example.com
+metadata:
+  name: test
+platform:
+  aws:
+    region: us-east-1
+`
 	tests := []struct {
-		name string
-		yaml string
+		name   string
+		engine string
 	}{
 		{
-			name: "inline credentials",
-			yaml: `cluster:
-  name: test
-  base_domain: example.com
-  version: "4.20"
-platform:
-  aws:
-    region: us-east-1
-    credentials:
-      access_key_id: "AKIAIOSFODNN7EXAMPLE"
-      secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-pull_secret_file: /tmp/pull-secret.json
+			name: "inline",
+			engine: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "AKIA"
+    secret_access_key: "secret"
 `,
 		},
 		{
-			name: "file credentials",
-			yaml: `cluster:
-  name: test
-  base_domain: example.com
-  version: "4.20"
-platform:
-  aws:
-    region: us-east-1
-    credentials:
-      credentials_file: /home/user/.aws/credentials
-pull_secret_file: /tmp/pull-secret.json
+			name: "file",
+			engine: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    credentials_file: /home/user/.aws/credentials
 `,
 		},
 		{
-			name: "profile credentials",
-			yaml: `cluster:
-  name: test
-  base_domain: example.com
-  version: "4.20"
-platform:
-  aws:
-    region: us-east-1
-    credentials:
-      profile: default
-pull_secret_file: /tmp/pull-secret.json
+			name: "profile",
+			engine: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    profile: default
 `,
 		},
 		{
-			name: "STS credentials",
-			yaml: `cluster:
-  name: test
-  base_domain: example.com
-  version: "4.20"
-platform:
-  aws:
-    region: us-east-1
-    credentials:
-      role_arn: "arn:aws:iam::123456789012:role/OCPRole"
-pull_secret_file: /tmp/pull-secret.json
+			name: "role_arn",
+			engine: `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    role_arn: "arn:aws:iam::123456789012:role/OCPRole"
 `,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tmpfile, err := os.CreateTemp("", "test-*.yaml")
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer os.Remove(tmpfile.Name())
-
-			if _, err := tmpfile.Write([]byte(tt.yaml)); err != nil {
-				t.Fatal(err)
-			}
-			tmpfile.Close()
-
-			cfg, err := LoadConfig(tmpfile.Name())
+			cfg, err := ParseConfig([]byte(tt.engine + base))
 			if err != nil {
 				t.Errorf("expected no error, got %v", err)
 			}
@@ -370,38 +261,154 @@ func TestExpandTilde_NoTilde(t *testing.T) {
 	}
 }
 
-func TestComputeReplicasZero(t *testing.T) {
-	yamlData := `cluster:
-  name: compact
-  base_domain: example.com
-  version: "4.20"
+func TestPassThroughFieldsPreserved(t *testing.T) {
+	yaml := `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "test"
+    secret_access_key: "test"
+baseDomain: example.com
+metadata:
+  name: test
 platform:
   aws:
     region: us-east-1
-    credentials:
-      access_key_id: "test"
-      secret_access_key: "test"
-compute:
-  replicas: 0
-pull_secret_file: /tmp/pull-secret.json
+    subnets:
+      - subnet-abc123
+proxy:
+  httpProxy: http://proxy:8080
+credentialsMode: Mint
 `
-	tmpfile, err := os.CreateTemp("", "test-*.yaml")
+	cfg, err := ParseConfig([]byte(yaml))
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("ParseConfig: %v", err)
 	}
-	defer os.Remove(tmpfile.Name())
-	tmpfile.Write([]byte(yamlData))
-	tmpfile.Close()
 
-	cfg, err := LoadConfig(tmpfile.Name())
-	if err != nil {
-		t.Fatalf("LoadConfig: %v", err)
+	// Fields that would have been "Not Yet Exposed" before should pass through
+	if cfg.InstallConfig["credentialsMode"] != "Mint" {
+		t.Errorf("credentialsMode not preserved: %v", cfg.InstallConfig["credentialsMode"])
 	}
-	if cfg.Compute.Replicas == nil {
-		t.Fatal("compute.replicas should not be nil")
+	proxy, ok := cfg.InstallConfig["proxy"].(map[string]any)
+	if !ok {
+		t.Fatal("proxy section not preserved")
 	}
-	if *cfg.Compute.Replicas != 0 {
-		t.Errorf("compute.replicas = %d, want 0 (compact cluster)", *cfg.Compute.Replicas)
+	if proxy["httpProxy"] != "http://proxy:8080" {
+		t.Errorf("proxy.httpProxy = %v", proxy["httpProxy"])
 	}
 }
 
+// --- GenerateInstallConfig tests ---
+
+func loadMinimalWithPullSecret(t *testing.T) *ClusterConfig {
+	t.Helper()
+
+	pullSecretFile, err := os.CreateTemp("", "pull-secret-*.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Remove(pullSecretFile.Name()) })
+	pullSecretFile.Write([]byte(`{"auths":{}}`))
+	pullSecretFile.Close()
+
+	path := getTestdataPath("cluster-minimal.yaml")
+	cfg, err := LoadConfig(path)
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	cfg.Engine.PullSecretFile = pullSecretFile.Name()
+	return cfg
+}
+
+func TestGenerateInstallConfig_InlinesPullSecret(t *testing.T) {
+	cfg := loadMinimalWithPullSecret(t)
+
+	result, err := GenerateInstallConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateInstallConfig: %v", err)
+	}
+
+	var ic map[string]any
+	if err := yaml.Unmarshal(result, &ic); err != nil {
+		t.Fatalf("invalid YAML: %v", err)
+	}
+	if ic["pullSecret"] != `{"auths":{}}` {
+		t.Errorf("pullSecret = %v, want {\"auths\":{}}", ic["pullSecret"])
+	}
+}
+
+func TestGenerateInstallConfig_SetsApiVersion(t *testing.T) {
+	cfg := loadMinimalWithPullSecret(t)
+	delete(cfg.InstallConfig, "apiVersion")
+
+	result, err := GenerateInstallConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateInstallConfig: %v", err)
+	}
+
+	var ic map[string]any
+	yaml.Unmarshal(result, &ic)
+	if ic["apiVersion"] != "v1" {
+		t.Errorf("apiVersion = %v, want v1", ic["apiVersion"])
+	}
+}
+
+func TestGenerateInstallConfig_InlinesSSHKey(t *testing.T) {
+	cfg := loadMinimalWithPullSecret(t)
+
+	sshKeyFile, err := os.CreateTemp("", "id_rsa-*.pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(sshKeyFile.Name())
+	sshKey := "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC test@example.com"
+	sshKeyFile.Write([]byte(sshKey))
+	sshKeyFile.Close()
+
+	cfg.Engine.SSHPublicKeyFile = sshKeyFile.Name()
+
+	result, err := GenerateInstallConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateInstallConfig: %v", err)
+	}
+
+	var ic map[string]any
+	yaml.Unmarshal(result, &ic)
+	if ic["sshKey"] != sshKey {
+		t.Errorf("sshKey = %v, want %s", ic["sshKey"], sshKey)
+	}
+}
+
+func TestGenerateInstallConfig_PreservesPassThrough(t *testing.T) {
+	cfg := loadMinimalWithPullSecret(t)
+
+	result, err := GenerateInstallConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateInstallConfig: %v", err)
+	}
+
+	var ic map[string]any
+	yaml.Unmarshal(result, &ic)
+
+	if ic["baseDomain"] != "example.com" {
+		t.Errorf("baseDomain = %v, want example.com", ic["baseDomain"])
+	}
+	metadata := ic["metadata"].(map[string]any)
+	if metadata["name"] != "test-cluster" {
+		t.Errorf("metadata.name = %v, want test-cluster", metadata["name"])
+	}
+}
+
+func TestGenerateInstallConfig_NoOcpEngineInOutput(t *testing.T) {
+	cfg := loadMinimalWithPullSecret(t)
+
+	result, err := GenerateInstallConfig(cfg)
+	if err != nil {
+		t.Fatalf("GenerateInstallConfig: %v", err)
+	}
+
+	var ic map[string]any
+	yaml.Unmarshal(result, &ic)
+	if _, ok := ic["ocp_engine"]; ok {
+		t.Error("ocp_engine should not appear in generated install-config")
+	}
+}

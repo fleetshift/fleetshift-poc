@@ -9,75 +9,28 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ClusterConfig represents the complete cluster configuration
-type ClusterConfig struct {
-	Cluster                   ClusterSpec    `yaml:"cluster"`
-	Platform                  PlatformSpec   `yaml:"platform"`
-	ControlPlane              NodePoolSpec   `yaml:"control_plane"`
-	Compute                   NodePoolSpec   `yaml:"compute"`
-	Networking                NetworkingSpec `yaml:"networking"`
+// EngineConfig holds ocp-engine-specific configuration (not part of install-config.yaml)
+type EngineConfig struct {
+	ReleaseImage              string         `yaml:"release_image"`
 	PullSecretFile            string         `yaml:"pull_secret_file"`
 	SSHPublicKeyFile          string         `yaml:"ssh_public_key_file"`
-	ReleaseImage              string         `yaml:"release_image"`
 	AdditionalTrustBundleFile string         `yaml:"additional_trust_bundle_file"`
-	FIPS                      bool           `yaml:"fips"`
-	Publish                   string         `yaml:"publish"`
-}
-
-// ClusterSpec defines cluster metadata
-type ClusterSpec struct {
-	Name       string `yaml:"name"`
-	BaseDomain string `yaml:"base_domain"`
-	Version    string `yaml:"version"`
-}
-
-// PlatformSpec defines platform-specific configuration
-type PlatformSpec struct {
-	AWS AWSSpec `yaml:"aws"`
-}
-
-// AWSSpec defines AWS-specific configuration
-type AWSSpec struct {
-	Region      string            `yaml:"region"`
-	Credentials AWSCredentials    `yaml:"credentials"`
-	Tags        map[string]string `yaml:"tags"`
+	Credentials               AWSCredentials `yaml:"credentials"`
 }
 
 // AWSCredentials defines various credential modes
 type AWSCredentials struct {
-	// Inline credentials
 	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
-
-	// File-based credentials
 	CredentialsFile string `yaml:"credentials_file"`
-
-	// Profile-based credentials
-	Profile string `yaml:"profile"`
-
-	// STS role
-	RoleARN string `yaml:"role_arn"`
+	Profile         string `yaml:"profile"`
+	RoleARN         string `yaml:"role_arn"`
 }
 
-// NodePoolSpec defines a node pool (control plane or compute)
-type NodePoolSpec struct {
-	Replicas     *int       `yaml:"replicas"`
-	InstanceType string     `yaml:"instance_type"`
-	RootVolume   VolumeSpec `yaml:"root_volume"`
-}
-
-// VolumeSpec defines volume configuration
-type VolumeSpec struct {
-	SizeGB int    `yaml:"size_gb"`
-	Type   string `yaml:"type"`
-}
-
-// NetworkingSpec defines networking configuration
-type NetworkingSpec struct {
-	ClusterNetwork string `yaml:"cluster_network"`
-	ServiceNetwork string `yaml:"service_network"`
-	MachineNetwork string `yaml:"machine_network"`
-	HostPrefix     int    `yaml:"host_prefix"`
+// ClusterConfig holds the full parsed configuration
+type ClusterConfig struct {
+	Engine        EngineConfig
+	InstallConfig map[string]any
 }
 
 // LoadConfig reads and parses a config file from disk
@@ -89,80 +42,63 @@ func LoadConfig(path string) (*ClusterConfig, error) {
 	return ParseConfig(data)
 }
 
-// ParseConfig parses YAML config data, applies defaults, and validates
+// ParseConfig parses YAML config data, extracts the ocp_engine section, and validates
 func ParseConfig(data []byte) (*ClusterConfig, error) {
-	cfg := &ClusterConfig{}
-	if err := yaml.Unmarshal(data, cfg); err != nil {
+	var raw map[string]any
+	if err := yaml.Unmarshal(data, &raw); err != nil {
 		return nil, fmt.Errorf("failed to parse YAML: %w", err)
 	}
 
-	applyDefaults(cfg)
-	expandPaths(cfg)
+	// Extract and parse ocp_engine section
+	var engine EngineConfig
+	if engineRaw, ok := raw["ocp_engine"]; ok {
+		engineBytes, err := yaml.Marshal(engineRaw)
+		if err != nil {
+			return nil, fmt.Errorf("failed to re-marshal ocp_engine section: %w", err)
+		}
+		if err := yaml.Unmarshal(engineBytes, &engine); err != nil {
+			return nil, fmt.Errorf("failed to parse ocp_engine section: %w", err)
+		}
+		delete(raw, "ocp_engine")
+	}
 
-	if err := validate(cfg); err != nil {
+	expandPaths(&engine)
+
+	if err := validate(&engine, raw); err != nil {
 		return nil, err
 	}
 
-	return cfg, nil
+	return &ClusterConfig{
+		Engine:        engine,
+		InstallConfig: raw,
+	}, nil
 }
 
-func applyNodePoolDefaults(pool *NodePoolSpec) {
-	if pool.Replicas == nil {
-		three := 3
-		pool.Replicas = &three
+// validate checks that required fields are present
+func validate(engine *EngineConfig, ic map[string]any) error {
+	if engine.PullSecretFile == "" {
+		return fmt.Errorf("ocp_engine.pull_secret_file is required")
 	}
-	if pool.InstanceType == "" {
-		pool.InstanceType = "m6a.xlarge"
+	if !hasCredentials(&engine.Credentials) {
+		return fmt.Errorf("ocp_engine.credentials is required (at least one credential mode must be set)")
 	}
-	if pool.RootVolume.SizeGB == 0 {
-		pool.RootVolume.SizeGB = 120
+	if _, ok := ic["baseDomain"]; !ok {
+		return fmt.Errorf("baseDomain is required")
 	}
-	if pool.RootVolume.Type == "" {
-		pool.RootVolume.Type = "gp3"
+	metadata, ok := ic["metadata"].(map[string]any)
+	if !ok || metadata["name"] == nil {
+		return fmt.Errorf("metadata.name is required")
 	}
-}
-
-// applyDefaults fills in default values for unset fields
-func applyDefaults(cfg *ClusterConfig) {
-	applyNodePoolDefaults(&cfg.ControlPlane)
-	applyNodePoolDefaults(&cfg.Compute)
-
-	// Networking defaults
-	if cfg.Networking.ClusterNetwork == "" {
-		cfg.Networking.ClusterNetwork = "10.128.0.0/14"
+	platform, ok := ic["platform"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("platform is required")
 	}
-	if cfg.Networking.ServiceNetwork == "" {
-		cfg.Networking.ServiceNetwork = "172.30.0.0/16"
+	aws, ok := platform["aws"].(map[string]any)
+	if !ok {
+		return fmt.Errorf("platform.aws is required")
 	}
-	if cfg.Networking.MachineNetwork == "" {
-		cfg.Networking.MachineNetwork = "10.0.0.0/16"
-	}
-	if cfg.Networking.HostPrefix == 0 {
-		cfg.Networking.HostPrefix = 23
-	}
-
-	// Publish default
-	if cfg.Publish == "" {
-		cfg.Publish = "External"
-	}
-}
-
-// validate checks that all required fields are set
-func validate(cfg *ClusterConfig) error {
-	if cfg.Cluster.Name == "" {
-		return fmt.Errorf("cluster.name is required")
-	}
-	if cfg.Cluster.BaseDomain == "" {
-		return fmt.Errorf("cluster.base_domain is required")
-	}
-	if cfg.Platform.AWS.Region == "" {
+	if _, ok := aws["region"]; !ok {
 		return fmt.Errorf("platform.aws.region is required")
-	}
-	if !hasCredentials(&cfg.Platform.AWS.Credentials) {
-		return fmt.Errorf("platform.aws.credentials is required (at least one credential mode must be set)")
-	}
-	if cfg.PullSecretFile == "" {
-		return fmt.Errorf("pull_secret_file is required")
 	}
 	return nil
 }
@@ -180,11 +116,11 @@ func expandTilde(path string) string {
 }
 
 // expandPaths resolves ~ in all file path fields.
-func expandPaths(cfg *ClusterConfig) {
-	cfg.PullSecretFile = expandTilde(cfg.PullSecretFile)
-	cfg.SSHPublicKeyFile = expandTilde(cfg.SSHPublicKeyFile)
-	cfg.AdditionalTrustBundleFile = expandTilde(cfg.AdditionalTrustBundleFile)
-	cfg.Platform.AWS.Credentials.CredentialsFile = expandTilde(cfg.Platform.AWS.Credentials.CredentialsFile)
+func expandPaths(engine *EngineConfig) {
+	engine.PullSecretFile = expandTilde(engine.PullSecretFile)
+	engine.SSHPublicKeyFile = expandTilde(engine.SSHPublicKeyFile)
+	engine.AdditionalTrustBundleFile = expandTilde(engine.AdditionalTrustBundleFile)
+	engine.Credentials.CredentialsFile = expandTilde(engine.Credentials.CredentialsFile)
 }
 
 // hasCredentials checks if at least one credential mode is configured
@@ -193,4 +129,38 @@ func hasCredentials(c *AWSCredentials) bool {
 		c.CredentialsFile != "" ||
 		c.Profile != "" ||
 		c.RoleARN != ""
+}
+
+// GenerateInstallConfig produces a valid install-config.yaml by inlining
+// file contents into the pass-through install-config map.
+func GenerateInstallConfig(cfg *ClusterConfig) ([]byte, error) {
+	ic := cfg.InstallConfig
+
+	if _, ok := ic["apiVersion"]; !ok {
+		ic["apiVersion"] = "v1"
+	}
+
+	pullSecretData, err := os.ReadFile(cfg.Engine.PullSecretFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read pull secret file: %w", err)
+	}
+	ic["pullSecret"] = strings.TrimSpace(string(pullSecretData))
+
+	if cfg.Engine.SSHPublicKeyFile != "" {
+		sshKeyData, err := os.ReadFile(cfg.Engine.SSHPublicKeyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read SSH public key file: %w", err)
+		}
+		ic["sshKey"] = strings.TrimSpace(string(sshKeyData))
+	}
+
+	if cfg.Engine.AdditionalTrustBundleFile != "" {
+		trustBundleData, err := os.ReadFile(cfg.Engine.AdditionalTrustBundleFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read additional trust bundle file: %w", err)
+		}
+		ic["additionalTrustBundle"] = strings.TrimSpace(string(trustBundleData))
+	}
+
+	return yaml.Marshal(ic)
 }

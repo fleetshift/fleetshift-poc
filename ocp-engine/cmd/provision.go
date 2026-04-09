@@ -36,34 +36,34 @@ func init() {
 
 func runProvision(cmd *cobra.Command, args []string) error {
 	if err := prereq.Validate(); err != nil {
-		return output.WriteError(os.Stdout,"prereq_error", err, false)
+		return output.WriteError(os.Stdout, "prereq_error", err, false)
 	}
 
 	cfg, err := config.LoadConfig(provisionConfigPath)
 	if err != nil {
-		return output.WriteError(os.Stdout,"config_error", err, false)
+		return output.WriteError(os.Stdout, "config_error", err, false)
 	}
 
 	wd, err := workdir.Init(provisionWorkDir)
 	if err != nil {
-		return output.WriteError(os.Stdout,"workdir_error", err, false)
+		return output.WriteError(os.Stdout, "workdir_error", err, false)
 	}
 
 	if err := wd.Lock(); err != nil {
-		return output.WriteError(os.Stdout,"already_running", err, false)
+		return output.WriteError(os.Stdout, "already_running", err, false)
 	}
 	defer wd.Unlock()
 
 	if err := wd.CopyClusterConfig(provisionConfigPath); err != nil {
-		return output.WriteError(os.Stdout,"workdir_error", err, false)
+		return output.WriteError(os.Stdout, "workdir_error", err, false)
 	}
 
-	awsEnv, err := credentials.ResolveFromConfig(&cfg.Platform.AWS.Credentials)
+	awsEnv, err := credentials.ResolveFromConfig(&cfg.Engine.Credentials)
 	if err != nil {
-		return output.WriteError(os.Stdout,"config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
+		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
 	}
 
-	releaseImage := cfg.ReleaseImage
+	releaseImage := cfg.Engine.ReleaseImage
 	if releaseImage == "" {
 		releaseImage = "quay.io/openshift-release-dev/ocp-release:4.20.18-multi"
 	}
@@ -72,7 +72,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		WorkDir:        wd.Path,
 		InstallerPath:  wd.InstallerPath(),
 		ReleaseImage:   releaseImage,
-		PullSecretFile: cfg.PullSecretFile,
+		PullSecretFile: cfg.Engine.PullSecretFile,
 		AWSEnv:         awsEnv,
 	}
 
