@@ -109,6 +109,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if oidcCABundle != nil {
 		kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
 	}
+	if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
+		kindOpts = append(kindOpts, kindaddon.WithContainerHost(containerHost))
+		logger.Info("kind agent: rewriting localhost OIDC issuer URLs to " + containerHost)
+	}
+	if httpsPort := os.Getenv("OIDC_HTTPS_PORT"); httpsPort != "" {
+		kindOpts = append(kindOpts, kindaddon.WithOIDCHTTPSPort(httpsPort))
+		logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
+	}
 	kindAgent := kindaddon.NewAgent(
 		func(logger kindlog.Logger) kindaddon.ClusterProvider {
 			return cluster.NewProvider(cluster.ProviderWithLogger(logger))

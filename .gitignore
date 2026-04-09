@@ -39,6 +39,7 @@ go.work.sum
 *.db
 *.db-shm
 *.db-wal
+data/
 
 *.pyc
 **/__pycache__/
@@ -46,3 +47,4 @@ go.work.sum
 
 # Local test certs
 *.pem
+keycloak/certs/
