@@ -11,16 +11,17 @@ import (
 
 // ClusterConfig represents the complete cluster configuration
 type ClusterConfig struct {
-	Cluster          ClusterSpec    `yaml:"cluster"`
-	Platform         PlatformSpec   `yaml:"platform"`
-	ControlPlane     NodePoolSpec   `yaml:"control_plane"`
-	Compute          NodePoolSpec   `yaml:"compute"`
-	Networking       NetworkingSpec `yaml:"networking"`
-	PullSecretFile   string         `yaml:"pull_secret_file"`
-	SSHPublicKeyFile string         `yaml:"ssh_public_key_file"`
-	ReleaseImage     string         `yaml:"release_image"`
-	FIPS             bool           `yaml:"fips"`
-	Publish          string         `yaml:"publish"`
+	Cluster                   ClusterSpec    `yaml:"cluster"`
+	Platform                  PlatformSpec   `yaml:"platform"`
+	ControlPlane              NodePoolSpec   `yaml:"control_plane"`
+	Compute                   NodePoolSpec   `yaml:"compute"`
+	Networking                NetworkingSpec `yaml:"networking"`
+	PullSecretFile            string         `yaml:"pull_secret_file"`
+	SSHPublicKeyFile          string         `yaml:"ssh_public_key_file"`
+	ReleaseImage              string         `yaml:"release_image"`
+	AdditionalTrustBundleFile string         `yaml:"additional_trust_bundle_file"`
+	FIPS                      bool           `yaml:"fips"`
+	Publish                   string         `yaml:"publish"`
 }
 
 // ClusterSpec defines cluster metadata
@@ -55,7 +56,7 @@ type AWSCredentials struct {
 	Profile string `yaml:"profile"`
 
 	// STS role
-	STSRoleARN string `yaml:"sts_role_arn"`
+	RoleARN string `yaml:"role_arn"`
 }
 
 // NodePoolSpec defines a node pool (control plane or compute)
@@ -193,6 +194,7 @@ func expandTilde(path string) string {
 func expandPaths(cfg *ClusterConfig) {
 	cfg.PullSecretFile = expandTilde(cfg.PullSecretFile)
 	cfg.SSHPublicKeyFile = expandTilde(cfg.SSHPublicKeyFile)
+	cfg.AdditionalTrustBundleFile = expandTilde(cfg.AdditionalTrustBundleFile)
 	cfg.Platform.AWS.Credentials.CredentialsFile = expandTilde(cfg.Platform.AWS.Credentials.CredentialsFile)
 }
 
@@ -201,5 +203,5 @@ func hasCredentials(c *AWSCredentials) bool {
 	return c.AccessKeyID != "" ||
 		c.CredentialsFile != "" ||
 		c.Profile != "" ||
-		c.STSRoleARN != ""
+		c.RoleARN != ""
 }

@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -254,7 +255,7 @@ platform:
 			_, err = LoadConfig(tmpfile.Name())
 			if err == nil {
 				t.Errorf("expected error containing %q, got nil", tt.errContains)
-			} else if !contains(err.Error(), tt.errContains) {
+			} else if !strings.Contains(err.Error(), tt.errContains) {
 				t.Errorf("expected error containing %q, got %v", tt.errContains, err)
 			}
 		})
@@ -319,7 +320,7 @@ platform:
   aws:
     region: us-east-1
     credentials:
-      sts_role_arn: "arn:aws:iam::123456789012:role/OCPRole"
+      role_arn: "arn:aws:iam::123456789012:role/OCPRole"
 pull_secret_file: /tmp/pull-secret.json
 `,
 		},
@@ -349,16 +350,3 @@ pull_secret_file: /tmp/pull-secret.json
 	}
 }
 
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}

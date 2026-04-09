@@ -20,7 +20,8 @@ type installConfig struct {
 	Compute    []icMachinePool `yaml:"compute"`
 	ControlPlane icMachinePool `yaml:"controlPlane"`
 	Networking icNetworking `yaml:"networking"`
-	FIPS       bool         `yaml:"fips,omitempty"`
+	FIPS                  bool   `yaml:"fips,omitempty"`
+	AdditionalTrustBundle string `yaml:"additionalTrustBundle,omitempty"`
 }
 
 // icMetadata represents the metadata section
@@ -94,6 +95,16 @@ func GenerateInstallConfig(cfg *ClusterConfig) ([]byte, error) {
 		sshKey = strings.TrimSpace(string(sshKeyData))
 	}
 
+	// Optionally read additional trust bundle from file
+	var additionalTrustBundle string
+	if cfg.AdditionalTrustBundleFile != "" {
+		trustBundleData, err := os.ReadFile(cfg.AdditionalTrustBundleFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read additional trust bundle file: %w", err)
+		}
+		additionalTrustBundle = strings.TrimSpace(string(trustBundleData))
+	}
+
 	// Build the install-config struct
 	ic := installConfig{
 		APIVersion: "v1",
@@ -151,7 +162,8 @@ func GenerateInstallConfig(cfg *ClusterConfig) ([]byte, error) {
 				},
 			},
 		},
-		FIPS: cfg.FIPS,
+		FIPS:                  cfg.FIPS,
+		AdditionalTrustBundle: additionalTrustBundle,
 	}
 
 	// Marshal to YAML

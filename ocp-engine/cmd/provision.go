@@ -105,7 +105,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		SecretAccessKey: cfg.Platform.AWS.Credentials.SecretAccessKey,
 		CredentialsFile: cfg.Platform.AWS.Credentials.CredentialsFile,
 		Profile:         cfg.Platform.AWS.Credentials.Profile,
-		RoleARN:         cfg.Platform.AWS.Credentials.STSRoleARN,
+		RoleARN:         cfg.Platform.AWS.Credentials.RoleARN,
 	})
 	if err != nil {
 		output.WriteErrorResult(os.Stdout, output.ErrorResult{
@@ -134,108 +134,55 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	logPath := wd.LogPath()
 	phases := phase.AllPhases()
 
-	// Step 9: Run phases sequentially
-	// Phase 0: extract
-	if !wd.IsPhaseComplete(phases[0].Name) {
-		if err := phase.RunPhase(phases[0], func() error {
+	// Step 9: Build phase function map and run phases sequentially
+	phaseFns := map[string]func() error{
+		"extract": func() error {
 			return inst.Extract(logPath)
-		}, os.Stdout); err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "phase_error",
-				Phase:           phases[0].Name,
-				Message:         err.Error(),
-				LogTail:         wd.LogTail(50),
-				RequiresDestroy: false,
-			})
-			return err
-		}
-		wd.MarkPhaseComplete(phases[0].Name)
-	}
-
-	// Phase 1: install-config
-	if !wd.IsPhaseComplete(phases[1].Name) {
-		if err := phase.RunPhase(phases[1], func() error {
+		},
+		"install-config": func() error {
 			installConfigData, err := config.GenerateInstallConfig(cfg)
 			if err != nil {
 				return fmt.Errorf("generate install-config: %w", err)
 			}
-			return os.WriteFile(wd.InstallConfigPath(), installConfigData, 0644)
-		}, os.Stdout); err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "phase_error",
-				Phase:           phases[1].Name,
-				Message:         err.Error(),
-				LogTail:         wd.LogTail(50),
-				RequiresDestroy: false,
-			})
-			return err
-		}
-		wd.MarkPhaseComplete(phases[1].Name)
-	}
-
-	// Phase 2: manifests
-	if !wd.IsPhaseComplete(phases[2].Name) {
-		if err := phase.RunPhase(phases[2], func() error {
+			return os.WriteFile(wd.InstallConfigPath(), installConfigData, 0600)
+		},
+		"manifests": func() error {
 			return inst.CreateManifests(logPath)
-		}, os.Stdout); err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "phase_error",
-				Phase:           phases[2].Name,
-				Message:         err.Error(),
-				LogTail:         wd.LogTail(50),
-				RequiresDestroy: false,
-			})
-			return err
-		}
-		wd.MarkPhaseComplete(phases[2].Name)
-	}
-
-	// Phase 3: ignition
-	if !wd.IsPhaseComplete(phases[3].Name) {
-		if err := phase.RunPhase(phases[3], func() error {
+		},
+		"ignition": func() error {
 			return inst.CreateIgnitionConfigs(logPath)
-		}, os.Stdout); err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
-				Category:        "phase_error",
-				Phase:           phases[3].Name,
-				Message:         err.Error(),
-				LogTail:         wd.LogTail(50),
-				RequiresDestroy: false,
-			})
-			return err
-		}
-		wd.MarkPhaseComplete(phases[3].Name)
+		},
+		"cluster": func() error {
+			return inst.CreateCluster(logPath)
+		},
 	}
 
-	// Phase 4: cluster
-	if !wd.IsPhaseComplete(phases[4].Name) {
-		if err := phase.RunPhase(phases[4], func() error {
-			return inst.CreateCluster(logPath)
-		}, os.Stdout); err != nil {
-			// Phase 4 failure requires destroy
+	for _, p := range phases {
+		if wd.IsPhaseComplete(p.Name) {
+			continue
+		}
+		fn := phaseFns[p.Name]
+		if err := phase.RunPhase(p, fn, os.Stdout); err != nil {
 			output.WriteErrorResult(os.Stdout, output.ErrorResult{
 				Category:        "phase_error",
-				Phase:           phases[4].Name,
+				Phase:           p.Name,
 				Message:         err.Error(),
 				LogTail:         wd.LogTail(50),
 				HasMetadata:     wd.HasMetadata(),
-				RequiresDestroy: true,
+				RequiresDestroy: p.RequiresDestroyOnFailure,
 			})
 			return err
 		}
-		wd.MarkPhaseComplete(phases[4].Name)
+		wd.MarkPhaseComplete(p.Name)
 	}
 
-	// Step 10: Get infra ID and output success
+	// Step 10: Output success
 	infraID, _ := wd.InfraID()
 
-	output.WritePhaseResult(os.Stdout, output.PhaseResult{
-		Phase:  "provision",
-		Status: "succeeded",
+	output.WriteProvisionResult(os.Stdout, output.ProvisionResult{
+		Status:  "succeeded",
+		InfraID: infraID,
 	})
-
-	// Also output infra_id in a structured way (using error result structure for JSON output)
-	fmt.Fprintf(os.Stdout, `{"status":"succeeded","infra_id":"%s"}`+"\n", infraID)
 
 	return nil
 }

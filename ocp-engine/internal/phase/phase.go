@@ -12,6 +12,16 @@ type Phase struct {
 	RequiresDestroyOnFailure bool
 }
 
+// PhaseNames returns just the phase name strings in canonical order.
+func PhaseNames() []string {
+	phases := AllPhases()
+	names := make([]string, len(phases))
+	for i, p := range phases {
+		names[i] = p.Name
+	}
+	return names
+}
+
 func AllPhases() []Phase {
 	return []Phase{
 		{Name: "extract", RequiresDestroyOnFailure: false},

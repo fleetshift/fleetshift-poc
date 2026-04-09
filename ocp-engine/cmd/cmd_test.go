@@ -5,14 +5,20 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+func projectRoot() string {
+	_, thisFile, _, _ := runtime.Caller(0)
+	return filepath.Join(filepath.Dir(thisFile), "..")
+}
 
 func TestGenConfig_EndToEnd(t *testing.T) {
 	// Build the binary
 	binPath := filepath.Join(t.TempDir(), "ocp-engine")
 	build := exec.Command("go", "build", "-o", binPath)
-	build.Dir = "/Repos/fleetshift-poc_mshort/ocp-engine"
+	build.Dir = projectRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}
@@ -73,7 +79,7 @@ pull_secret_file: ` + psPath + `
 func TestStatus_EmptyWorkDir(t *testing.T) {
 	binPath := filepath.Join(t.TempDir(), "ocp-engine")
 	build := exec.Command("go", "build", "-o", binPath)
-	build.Dir = "/Repos/fleetshift-poc_mshort/ocp-engine"
+	build.Dir = projectRoot()
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build failed: %v\n%s", err, out)
 	}

@@ -4,6 +4,7 @@ import (
 	"os"
 
 	"github.com/ocp-engine/internal/output"
+	"github.com/ocp-engine/internal/phase"
 	"github.com/ocp-engine/internal/workdir"
 	"github.com/spf13/cobra"
 )
@@ -23,9 +24,6 @@ func init() {
 	rootCmd.AddCommand(statusCmd)
 }
 
-// allPhases defines the canonical order of phases
-var allPhases = []string{"extract", "install-config", "manifests", "ignition", "cluster"}
-
 // nextPhase returns the first phase not in the completed set
 func nextPhase(completed []string) string {
 	completedSet := make(map[string]bool)
@@ -33,7 +31,7 @@ func nextPhase(completed []string) string {
 		completedSet[p] = true
 	}
 
-	for _, p := range allPhases {
+	for _, p := range phase.PhaseNames() {
 		if !completedSet[p] {
 			return p
 		}
@@ -46,14 +44,14 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	// Step 1: Open work directory
 	wd, err := workdir.Open(statusWorkDir)
 	if err != nil {
+		// Directory doesn't exist -- this is a valid "empty" state, not an error
 		output.WriteStatusResult(os.Stdout, output.StatusResult{
 			State:           "empty",
 			CompletedPhases: []string{},
-			Error:           err.Error(),
 			HasKubeconfig:   false,
 			HasMetadata:     false,
 		})
-		return err
+		return nil
 	}
 
 	// Step 2: Get completed phases

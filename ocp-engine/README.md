@@ -158,12 +158,13 @@ ocp-engine status --work-dir <path>
 Destroy a cluster and clean up all AWS resources.
 
 ```
-ocp-engine destroy --work-dir <path>
+ocp-engine destroy --work-dir <path> [--config <path>]
 ```
 
 | Flag | Required | Description |
 |---|---|---|
 | `--work-dir` | Yes | Path to work directory (must contain `metadata.json` and `openshift-install`) |
+| `--config` | No | Path to `cluster.yaml` for AWS credentials. If omitted, uses ambient credentials (env vars, instance profile). |
 
 ### `ocp-engine gen-config`
 
@@ -424,7 +425,7 @@ These options are configurable via `cluster.yaml` today:
 | `pull_secret_file` | string | Yes | -- | Path to Red Hat pull secret JSON file. |
 | `ssh_public_key_file` | string | No | -- | Path to SSH public key for node access. |
 | `release_image` | string | No | `quay.io/...ocp-release:4.20.18-multi` | OCP release image to extract installer from. |
-| `additional_trust_bundle_file` | string | No | -- | Path to custom CA certificate bundle (PEM). |
+| `additional_trust_bundle_file` | string | No | -- | Path to PEM-encoded CA bundle injected into cluster nodes. Required when using a corporate proxy with TLS inspection, private registries with internal CAs, or disconnected/air-gapped installs with mirror registries. |
 | `fips` | bool | No | `false` | Enable FIPS 140-2 compliant cryptography. |
 | `publish` | string | No | `External` | `External` (public API/Ingress) or `Internal` (VPC-only). |
 

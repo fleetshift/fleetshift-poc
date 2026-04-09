@@ -66,7 +66,7 @@ func runGenConfig(cmd *cobra.Command, args []string) error {
 	}
 
 	// Step 4: Write install-config.yaml to work-dir
-	if err := os.WriteFile(wd.InstallConfigPath(), installConfigData, 0644); err != nil {
+	if err := os.WriteFile(wd.InstallConfigPath(), installConfigData, 0600); err != nil {
 		output.WriteErrorResult(os.Stdout, output.ErrorResult{
 			Category:        "workdir_error",
 			Message:         fmt.Sprintf("failed to write install-config.yaml: %v", err),

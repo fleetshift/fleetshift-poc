@@ -35,6 +35,11 @@ type StatusResult struct {
 	Error           string   `json:"error,omitempty"`
 }
 
+type ProvisionResult struct {
+	Status  string `json:"status"`
+	InfraID string `json:"infra_id,omitempty"`
+}
+
 type DestroyResult struct {
 	Action         string `json:"action"`
 	Status         string `json:"status"`
@@ -59,6 +64,10 @@ func WriteErrorResult(w io.Writer, r ErrorResult) {
 }
 
 func WriteStatusResult(w io.Writer, r StatusResult) {
+	writeJSON(w, r)
+}
+
+func WriteProvisionResult(w io.Writer, r ProvisionResult) {
 	writeJSON(w, r)
 }
 

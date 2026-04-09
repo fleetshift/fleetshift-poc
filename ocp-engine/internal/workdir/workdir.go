@@ -8,14 +8,14 @@ import (
 	"strconv"
 	"strings"
 	"syscall"
-)
 
-// allPhases defines the canonical order of OpenShift installation phases
-var allPhases = []string{"extract", "install-config", "manifests", "ignition", "cluster"}
+	"github.com/ocp-engine/internal/phase"
+)
 
 // WorkDir represents a cluster-specific working directory
 type WorkDir struct {
-	Path string
+	Path     string
+	lockFile *os.File
 }
 
 // Init creates a new work directory (or opens an existing one)
@@ -34,40 +34,43 @@ func Open(path string) (*WorkDir, error) {
 	return &WorkDir{Path: path}, nil
 }
 
-// Lock writes a PID file to claim exclusive access to the work directory
+// Lock acquires an exclusive file lock on the work directory using flock
 func (w *WorkDir) Lock() error {
-	pidFile := filepath.Join(w.Path, ".pid")
+	pidFile := filepath.Join(w.Path, "_pid")
 
-	// Check if already locked
-	if pid, alive, err := w.ReadPID(); err == nil {
-		if alive {
-			return fmt.Errorf("work-dir is locked by PID %d", pid)
-		}
-		// PID file exists but process is dead, clean it up
-		os.Remove(pidFile)
+	f, err := os.OpenFile(pidFile, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("open lock file: %w", err)
 	}
 
-	// Write our PID
-	pid := os.Getpid()
-	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(pid)), 0644); err != nil {
-		return fmt.Errorf("write PID file: %w", err)
+	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		f.Close()
+		return fmt.Errorf("work-dir is locked by another process")
 	}
+
+	// Write our PID for status inspection
+	f.Truncate(0)
+	fmt.Fprintf(f, "%d", os.Getpid())
+	f.Sync()
+	w.lockFile = f
 
 	return nil
 }
 
-// Unlock removes the PID file to release the lock
+// Unlock releases the file lock and removes the PID file
 func (w *WorkDir) Unlock() error {
-	pidFile := filepath.Join(w.Path, ".pid")
-	if err := os.Remove(pidFile); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("remove PID file: %w", err)
+	if w.lockFile != nil {
+		syscall.Flock(int(w.lockFile.Fd()), syscall.LOCK_UN)
+		w.lockFile.Close()
+		os.Remove(filepath.Join(w.Path, "_pid"))
+		w.lockFile = nil
 	}
 	return nil
 }
 
 // ReadPID reads the PID from the lock file and checks if the process is alive
 func (w *WorkDir) ReadPID() (int, bool, error) {
-	pidFile := filepath.Join(w.Path, ".pid")
+	pidFile := filepath.Join(w.Path, "_pid")
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
 		return 0, false, err
@@ -142,8 +145,8 @@ func (w *WorkDir) LogPath() string {
 }
 
 // MarkPhaseComplete creates a marker file indicating the phase has completed
-func (w *WorkDir) MarkPhaseComplete(phase string) error {
-	markerPath := filepath.Join(w.Path, "_phase_"+phase+"_complete")
+func (w *WorkDir) MarkPhaseComplete(phaseName string) error {
+	markerPath := filepath.Join(w.Path, "_phase_"+phaseName+"_complete")
 	if err := os.WriteFile(markerPath, []byte(""), 0644); err != nil {
 		return fmt.Errorf("write phase marker: %w", err)
 	}
@@ -151,8 +154,8 @@ func (w *WorkDir) MarkPhaseComplete(phase string) error {
 }
 
 // IsPhaseComplete checks if a phase marker file exists
-func (w *WorkDir) IsPhaseComplete(phase string) bool {
-	markerPath := filepath.Join(w.Path, "_phase_"+phase+"_complete")
+func (w *WorkDir) IsPhaseComplete(phaseName string) bool {
+	markerPath := filepath.Join(w.Path, "_phase_"+phaseName+"_complete")
 	_, err := os.Stat(markerPath)
 	return err == nil
 }
@@ -160,9 +163,9 @@ func (w *WorkDir) IsPhaseComplete(phase string) bool {
 // CompletedPhases returns an ordered list of completed phases
 func (w *WorkDir) CompletedPhases() []string {
 	var completed []string
-	for _, phase := range allPhases {
-		if w.IsPhaseComplete(phase) {
-			completed = append(completed, phase)
+	for _, p := range phase.AllPhases() {
+		if w.IsPhaseComplete(p.Name) {
+			completed = append(completed, p.Name)
 		}
 	}
 	return completed

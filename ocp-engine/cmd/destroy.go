@@ -5,6 +5,8 @@ import (
 	"os"
 	"time"
 
+	"github.com/ocp-engine/internal/config"
+	"github.com/ocp-engine/internal/credentials"
 	"github.com/ocp-engine/internal/installer"
 	"github.com/ocp-engine/internal/output"
 	"github.com/ocp-engine/internal/workdir"
@@ -18,10 +20,14 @@ var destroyCmd = &cobra.Command{
 	RunE:  runDestroy,
 }
 
-var destroyWorkDir string
+var (
+	destroyWorkDir    string
+	destroyConfigPath string
+)
 
 func init() {
 	destroyCmd.Flags().StringVar(&destroyWorkDir, "work-dir", "", "Path to work directory (required)")
+	destroyCmd.Flags().StringVar(&destroyConfigPath, "config", "", "Path to cluster configuration file (optional, for AWS credentials)")
 	destroyCmd.MarkFlagRequired("work-dir")
 	rootCmd.AddCommand(destroyCmd)
 }
@@ -82,20 +88,49 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Step 6: Create Installer instance
+	// Step 6: Resolve AWS credentials from config (if provided) or use ambient
+	var awsEnv map[string]string
+	if destroyConfigPath != "" {
+		cfg, err := config.LoadConfig(destroyConfigPath)
+		if err != nil {
+			output.WriteErrorResult(os.Stdout, output.ErrorResult{
+				Category:        "config_error",
+				Message:         err.Error(),
+				RequiresDestroy: false,
+			})
+			return err
+		}
+		awsEnv, err = credentials.Resolve(credentials.AWSCredentials{
+			AccessKeyID:     cfg.Platform.AWS.Credentials.AccessKeyID,
+			SecretAccessKey: cfg.Platform.AWS.Credentials.SecretAccessKey,
+			CredentialsFile: cfg.Platform.AWS.Credentials.CredentialsFile,
+			Profile:         cfg.Platform.AWS.Credentials.Profile,
+			RoleARN:         cfg.Platform.AWS.Credentials.RoleARN,
+		})
+		if err != nil {
+			output.WriteErrorResult(os.Stdout, output.ErrorResult{
+				Category:        "config_error",
+				Message:         fmt.Sprintf("failed to resolve AWS credentials: %v", err),
+				RequiresDestroy: false,
+			})
+			return err
+		}
+	}
+
+	// Step 7: Create Installer instance
 	inst := &installer.Installer{
 		WorkDir:       wd.Path,
 		InstallerPath: wd.InstallerPath(),
-		AWSEnv:        nil, // Will use ambient credentials
+		AWSEnv:        awsEnv,
 	}
 
-	// Step 7: Time the destroy and call inst.DestroyCluster
+	// Step 8: Time the destroy and call inst.DestroyCluster
 	logPath := wd.LogPath()
 	start := time.Now()
 	err = inst.DestroyCluster(logPath)
 	elapsed := int(time.Since(start).Seconds())
 
-	// Step 8: Write DestroyResult
+	// Step 9: Write DestroyResult
 	if err != nil {
 		output.WriteDestroyResult(os.Stdout, output.DestroyResult{
 			Action:         "destroy",
