@@ -1,0 +1,134 @@
+{
+  "realm": "fleetshift",
+  "enabled": true,
+  "sslRequired": "none",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "editUsernameAllowed": false,
+  "bruteForceProtected": false,
+  "roles": {
+    "realm": [
+      {
+        "name": "ops",
+        "description": "Operations persona — manages clusters and infrastructure"
+      },
+      {
+        "name": "dev",
+        "description": "Developer persona — manages applications"
+      }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "fleetshift-ui",
+      "name": "FleetShift UI",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:4000/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:4000"
+      ],
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "web-origins",
+        "profile",
+        "roles",
+        "email"
+      ],
+      "protocolMappers": [
+        {
+          "name": "audience-mapper",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "fleetshift-ui",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "fleetshift-cli",
+      "name": "FleetShift CLI",
+      "enabled": true,
+      "publicClient": true,
+      "directAccessGrantsEnabled": true,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "redirectUris": [
+        "http://localhost:8888/callback"
+      ],
+      "protocol": "openid-connect",
+      "defaultClientScopes": [
+        "profile",
+        "roles",
+        "email"
+      ],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true",
+        "oidc.ciba.grant.enabled": "false"
+      }
+    }
+  ],
+  "users": [
+    {
+      "username": "ops",
+      "email": "ops@fleetshift.local",
+      "firstName": "Ops",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ops"]
+    },
+    {
+      "username": "dev",
+      "email": "dev@fleetshift.local",
+      "firstName": "Dev",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["dev"]
+    },
+    {
+      "username": "admin",
+      "email": "admin@fleetshift.local",
+      "firstName": "Admin",
+      "lastName": "User",
+      "enabled": true,
+      "emailVerified": true,
+      "credentials": [
+        {
+          "type": "password",
+          "value": "test",
+          "temporary": false
+        }
+      ],
+      "realmRoles": ["ops", "dev"]
+    }
+  ]
+}
