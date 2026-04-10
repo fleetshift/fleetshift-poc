@@ -1,6 +1,6 @@
-# FleetShift POC
+# FleetShift
 
-Management plane server and CLI for multi-cluster Kubernetes orchestration.
+Experimental, prototype management plane server and CLI for multi-cluster Kubernetes orchestration.
 
 ## Repository structure
 

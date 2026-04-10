@@ -60,8 +60,8 @@ type Agent struct {
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
-	containerHost string // hostname containers use to reach the host machine (replaces localhost)
-	oidcHTTPSPort string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
+	containerHost   string // hostname containers use to reach the host machine (replaces localhost)
+	oidcHTTPSPort   string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -334,16 +334,19 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		return nil, true
 	}
 
-	// Internal kubeconfig (container IP:6443) — used for in-container operations
-	// (RBAC bootstrap, platform SA) where 127.0.0.1 would be unreachable.
-	internalKC, err := provider.KubeConfig(spec.Name, true)
-	if err != nil {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventWarning,
-			Message: fmt.Sprintf("get internal kubeconfig for %q: %v", spec.Name, err),
-		})
-		// Fall back to external kubeconfig (works when not in Docker).
-		internalKC = kc
+	// When the server runs inside Docker, 127.0.0.1 in the external
+	// kubeconfig is unreachable. Use the internal kubeconfig (container
+	// IP:6443) for RBAC bootstrap and platform SA creation.
+	internalKC := kc
+	if a.containerHost != "" {
+		if ikc, err := provider.KubeConfig(spec.Name, true); err != nil {
+			signaler.Emit(ctx, domain.DeliveryEvent{
+				Kind:    domain.DeliveryEventWarning,
+				Message: fmt.Sprintf("get internal kubeconfig for %q: %v (using external)", spec.Name, err),
+			})
+		} else {
+			internalKC = ikc
+		}
 	}
 
 	if auth.Caller != nil {
