@@ -1,0 +1,46 @@
+ocp_engine:
+  pull_secret_file: /tmp/pull-secret.json
+  ssh_public_key_file: /tmp/id_rsa.pub
+  release_image: quay.io/openshift-release-dev/ocp-release:4.20.0-x86_64
+  credentials:
+    access_key_id: "AKIAIOSFODNN7EXAMPLE"
+    secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+apiVersion: v1
+baseDomain: prod.example.com
+metadata:
+  name: full-cluster
+platform:
+  aws:
+    region: eu-west-1
+    tags:
+      environment: staging
+      team: platform
+controlPlane:
+  name: master
+  replicas: 3
+  platform:
+    aws:
+      type: m6a.2xlarge
+      rootVolume:
+        size: 200
+        type: gp3
+compute:
+  - name: worker
+    replicas: 5
+    platform:
+      aws:
+        type: m5.xlarge
+        rootVolume:
+          size: 300
+          type: gp3
+networking:
+  clusterNetwork:
+    - cidr: 10.128.0.0/14
+      hostPrefix: 23
+  serviceNetwork:
+    - 172.30.0.0/16
+  machineNetwork:
+    - cidr: 10.0.0.0/16
+publish: External
+fips: false

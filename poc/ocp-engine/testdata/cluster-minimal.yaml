@@ -1,0 +1,12 @@
+ocp_engine:
+  pull_secret_file: /tmp/pull-secret.json
+  credentials:
+    access_key_id: "AKIAIOSFODNN7EXAMPLE"
+    secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+baseDomain: example.com
+metadata:
+  name: test-cluster
+platform:
+  aws:
+    region: us-east-1
