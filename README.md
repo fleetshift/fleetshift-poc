@@ -10,6 +10,7 @@ fleetshift-cli/      fleetctl CLI client
 proto/               Protobuf service definitions
 keycloak/            Keycloak realm config and cert generation script
 docs/                Architecture and design docs
+poc/                 Isolated proofs of concept
 ```
 
 ## Quick start (Docker Compose)
