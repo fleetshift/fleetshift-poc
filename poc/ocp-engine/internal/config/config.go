@@ -22,6 +22,7 @@ type EngineConfig struct {
 type AWSCredentials struct {
 	AccessKeyID     string `yaml:"access_key_id"`
 	SecretAccessKey string `yaml:"secret_access_key"`
+	SessionToken    string `yaml:"session_token"`
 	CredentialsFile string `yaml:"credentials_file"`
 	Profile         string `yaml:"profile"`
 	RoleARN         string `yaml:"role_arn"`

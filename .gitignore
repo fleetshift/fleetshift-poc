@@ -46,3 +46,5 @@ go.work.sum
 
 # Local test certs
 *.pem
+
+.claude_state

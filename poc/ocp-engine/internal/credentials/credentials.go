@@ -9,6 +9,7 @@ import (
 type AWSCredentials struct {
 	AccessKeyID     string
 	SecretAccessKey string
+	SessionToken    string
 	CredentialsFile string
 	Profile         string
 	RoleARN         string
@@ -21,6 +22,9 @@ func Resolve(creds AWSCredentials) (map[string]string, error) {
 	case creds.AccessKeyID != "" && creds.SecretAccessKey != "":
 		env["AWS_ACCESS_KEY_ID"] = creds.AccessKeyID
 		env["AWS_SECRET_ACCESS_KEY"] = creds.SecretAccessKey
+		if creds.SessionToken != "" {
+			env["AWS_SESSION_TOKEN"] = creds.SessionToken
+		}
 	case creds.CredentialsFile != "":
 		env["AWS_SHARED_CREDENTIALS_FILE"] = creds.CredentialsFile
 	case creds.Profile != "":
@@ -39,6 +43,7 @@ func ResolveFromConfig(c *config.AWSCredentials) (map[string]string, error) {
 	return Resolve(AWSCredentials{
 		AccessKeyID:     c.AccessKeyID,
 		SecretAccessKey: c.SecretAccessKey,
+		SessionToken:    c.SessionToken,
 		CredentialsFile: c.CredentialsFile,
 		Profile:         c.Profile,
 		RoleARN:         c.RoleARN,
