@@ -176,3 +176,42 @@ func TestCopyConfig_SourceMissing(t *testing.T) {
 		t.Fatal("expected error for missing source, got nil")
 	}
 }
+
+func TestBackupInstallConfig(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	content := []byte("apiVersion: v1\nbaseDomain: example.com\n")
+	if err := os.WriteFile(wd.InstallConfigPath(), content, 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := wd.BackupInstallConfig(); err != nil {
+		t.Fatalf("BackupInstallConfig failed: %v", err)
+	}
+
+	bakPath := filepath.Join(dir, "install-config.yaml.bak")
+	got, err := os.ReadFile(bakPath)
+	if err != nil {
+		t.Fatalf("reading backup: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("backup content = %q, want %q", got, content)
+	}
+}
+
+func TestBackupInstallConfig_NoInstallConfig(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = wd.BackupInstallConfig()
+	if err == nil {
+		t.Fatal("expected error when install-config.yaml missing, got nil")
+	}
+}

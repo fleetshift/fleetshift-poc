@@ -88,6 +88,9 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			return os.WriteFile(wd.InstallConfigPath(), installConfigData, 0600)
 		},
 		"manifests": func() error {
+			if err := wd.BackupInstallConfig(); err != nil {
+				return fmt.Errorf("backup install-config: %w", err)
+			}
 			return inst.CreateManifests(logPath)
 		},
 		"ignition": func() error {

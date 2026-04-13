@@ -152,6 +152,21 @@ func (w *WorkDir) CopyConfig(srcPath string) error {
 	return nil
 }
 
+// BackupInstallConfig copies install-config.yaml to install-config.yaml.bak
+// Must be called before the manifests phase, which deletes install-config.yaml.
+func (w *WorkDir) BackupInstallConfig() error {
+	src := w.InstallConfigPath()
+	data, err := os.ReadFile(src)
+	if err != nil {
+		return fmt.Errorf("read install-config.yaml for backup: %w", err)
+	}
+	dst := filepath.Join(w.Path, "install-config.yaml.bak")
+	if err := os.WriteFile(dst, data, 0600); err != nil {
+		return fmt.Errorf("write install-config.yaml.bak: %w", err)
+	}
+	return nil
+}
+
 // InstallConfigPath returns the path to install-config.yaml
 func (w *WorkDir) InstallConfigPath() string {
 	return filepath.Join(w.Path, "install-config.yaml")
