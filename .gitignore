@@ -39,6 +39,7 @@ go.work.sum
 *.db
 *.db-shm
 *.db-wal
+data/
 
 *.pyc
 **/__pycache__/
@@ -48,3 +49,4 @@ go.work.sum
 *.pem
 
 .claude_state
+keycloak/certs/
