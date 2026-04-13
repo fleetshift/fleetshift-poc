@@ -115,7 +115,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			continue
 		}
 		if err := phase.RunPhase(p, fn, os.Stdout, provisionAttempt); err != nil {
-			output.WriteErrorResult(os.Stdout, output.ErrorResult{
+			errResult := output.ErrorResult{
 				Category:        "phase_error",
 				Phase:           p.Name,
 				Message:         err.Error(),
@@ -123,7 +123,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 				HasMetadata:     wd.HasMetadata(),
 				RequiresDestroy: p.RequiresDestroyOnFailure,
 				Attempt:         provisionAttempt,
-			})
+			}
+			// For cluster phase, parse failure reason from logs
+			if p.Name == "cluster" {
+				fullLog := readFullLog(logPath)
+				errResult.FailureReason, errResult.FailureMessage = logpipeline.ParseFailureReason(fullLog)
+			}
+			output.WriteErrorResult(os.Stdout, errResult)
 			return err
 		}
 		wd.MarkPhaseComplete(p.Name)
@@ -137,4 +143,12 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	})
 
 	return nil
+}
+
+func readFullLog(path string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return string(data)
 }
