@@ -62,6 +62,12 @@ type DestroyResult struct {
 	ElapsedSeconds int    `json:"elapsed_seconds"`
 }
 
+type MilestoneEvent struct {
+	Event          string `json:"event"`
+	ElapsedSeconds int    `json:"elapsed_seconds"`
+	Attempt        int    `json:"attempt,omitempty"`
+}
+
 func writeJSON(w io.Writer, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -100,4 +106,8 @@ func WriteProvisionResult(w io.Writer, r ProvisionResult) {
 
 func WriteDestroyResult(w io.Writer, r DestroyResult) {
 	writeJSON(w, r)
+}
+
+func WriteMilestoneEvent(w io.Writer, e MilestoneEvent) {
+	writeJSON(w, e)
 }
