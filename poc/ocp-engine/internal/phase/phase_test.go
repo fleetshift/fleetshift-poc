@@ -11,12 +11,12 @@ import (
 
 func TestPhaseRequiresDestroy(t *testing.T) {
 	phases := AllPhases()
-	for _, p := range phases[:4] {
+	for _, p := range phases[:5] {
 		if p.RequiresDestroyOnFailure {
 			t.Errorf("phase %q should not require destroy on failure", p.Name)
 		}
 	}
-	if !phases[4].RequiresDestroyOnFailure {
+	if !phases[5].RequiresDestroyOnFailure {
 		t.Error("cluster phase should require destroy on failure")
 	}
 }
@@ -27,7 +27,7 @@ func TestRunPhase_Success(t *testing.T) {
 		Name:                     "test-phase",
 		RequiresDestroyOnFailure: false,
 	}
-	err := RunPhase(p, func() error { return nil }, &buf)
+	err := RunPhase(p, func() error { return nil }, &buf, 1)
 	if err != nil {
 		t.Fatalf("RunPhase: %v", err)
 	}
@@ -51,7 +51,7 @@ func TestRunPhase_Failure(t *testing.T) {
 	}
 	err := RunPhase(p, func() error {
 		return fmt.Errorf("bootstrap timeout")
-	}, &buf)
+	}, &buf, 1)
 	if err == nil {
 		t.Fatal("expected error from RunPhase")
 	}

@@ -24,6 +24,7 @@ func PhaseNames() []string {
 
 func AllPhases() []Phase {
 	return []Phase{
+		{Name: "preflight", RequiresDestroyOnFailure: false},
 		{Name: "extract", RequiresDestroyOnFailure: false},
 		{Name: "install-config", RequiresDestroyOnFailure: false},
 		{Name: "manifests", RequiresDestroyOnFailure: false},
@@ -32,7 +33,7 @@ func AllPhases() []Phase {
 	}
 }
 
-func RunPhase(p Phase, fn func() error, w io.Writer) error {
+func RunPhase(p Phase, fn func() error, w io.Writer, attempt int) error {
 	start := time.Now()
 	err := fn()
 	elapsed := int(time.Since(start).Seconds())
@@ -43,6 +44,7 @@ func RunPhase(p Phase, fn func() error, w io.Writer) error {
 			Error:           err.Error(),
 			ElapsedSeconds:  elapsed,
 			RequiresDestroy: p.RequiresDestroyOnFailure,
+			Attempt:         attempt,
 		})
 		return err
 	}
@@ -50,6 +52,7 @@ func RunPhase(p Phase, fn func() error, w io.Writer) error {
 		Phase:          p.Name,
 		Status:         "complete",
 		ElapsedSeconds: elapsed,
+		Attempt:        attempt,
 	})
 	return nil
 }

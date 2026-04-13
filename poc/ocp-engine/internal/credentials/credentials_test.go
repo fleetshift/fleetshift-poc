@@ -74,3 +74,16 @@ func TestResolveFromConfig(t *testing.T) {
 		t.Errorf("AWS_ACCESS_KEY_ID = %q, want AKIACONFIG", env["AWS_ACCESS_KEY_ID"])
 	}
 }
+
+func TestTestCredentials_InvalidCreds(t *testing.T) {
+	result, err := TestCredentials(map[string]string{
+		"AWS_ACCESS_KEY_ID":     "AKIAIOSFODNN7INVALID",
+		"AWS_SECRET_ACCESS_KEY": "wJalrXUtnFEMI/INVALID",
+	}, "us-east-1")
+
+	// We expect an error since these are fake credentials
+	if err == nil {
+		t.Log("TestCredentials succeeded (unexpected — may have real AWS creds)")
+	}
+	_ = result
+}

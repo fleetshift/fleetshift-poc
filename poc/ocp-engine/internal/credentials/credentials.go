@@ -1,8 +1,13 @@
 package credentials
 
 import (
+	"context"
 	"fmt"
+	"os"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	awscreds "github.com/aws/aws-sdk-go-v2/credentials"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/ocp-engine/internal/config"
 )
 
@@ -48,4 +53,55 @@ func ResolveFromConfig(c *config.AWSCredentials) (map[string]string, error) {
 		Profile:         c.Profile,
 		RoleARN:         c.RoleARN,
 	})
+}
+
+// STSIdentity holds the result of a GetCallerIdentity check.
+type STSIdentity struct {
+	Account string
+	ARN     string
+}
+
+// TestCredentials validates AWS credentials by calling STS GetCallerIdentity.
+// awsEnv is the resolved credential env vars. region is the target AWS region.
+func TestCredentials(awsEnv map[string]string, region string) (*STSIdentity, error) {
+	ctx := context.Background()
+
+	var opts []func(*awsconfig.LoadOptions) error
+	opts = append(opts, awsconfig.WithRegion(region))
+
+	// Apply credential env vars
+	if keyID, ok := awsEnv["AWS_ACCESS_KEY_ID"]; ok {
+		secretKey := awsEnv["AWS_SECRET_ACCESS_KEY"]
+		opts = append(opts, awsconfig.WithCredentialsProvider(
+			awscreds.NewStaticCredentialsProvider(keyID, secretKey, ""),
+		))
+	} else if profile, ok := awsEnv["AWS_PROFILE"]; ok {
+		opts = append(opts, awsconfig.WithSharedConfigProfile(profile))
+	} else if credsFile, ok := awsEnv["AWS_SHARED_CREDENTIALS_FILE"]; ok {
+		os.Setenv("AWS_SHARED_CREDENTIALS_FILE", credsFile)
+		defer os.Unsetenv("AWS_SHARED_CREDENTIALS_FILE")
+	}
+
+	cfg, err := awsconfig.LoadDefaultConfig(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("load AWS config: %w", err)
+	}
+
+	client := sts.NewFromConfig(cfg)
+	result, err := client.GetCallerIdentity(ctx, &sts.GetCallerIdentityInput{})
+	if err != nil {
+		return nil, fmt.Errorf("AWS credentials invalid: %w", err)
+	}
+
+	return &STSIdentity{
+		Account: derefString(result.Account),
+		ARN:     derefString(result.Arn),
+	}, nil
+}
+
+func derefString(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
 }

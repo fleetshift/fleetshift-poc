@@ -413,3 +413,16 @@ else
     fi
 fi
 ```
+
+## Future Considerations
+
+Features not yet implemented but worth considering for future iterations:
+
+- **STS assume-role** — Cross-account AWS provisioning via `sts:AssumeRole` with ExternalID. The config field (`role_arn`) exists but is not yet implemented.
+- **S3 log upload** — Upload install logs and gathered diagnostics to S3 for post-mortem analysis.
+- **Failure log gathering** — Run `openshift-install gather bootstrap` or `oc adm must-gather` on install failure to collect detailed diagnostic logs.
+- **Manifest injection** — Copy custom manifests into the work directory between the manifests and ignition phases for cluster customization (security hardening, network policies, OIDC integration).
+- **Day-2 operations** — SyncSets, MachinePool management, hibernation, certificate rotation.
+- **Multi-platform support** — Extend beyond AWS to Azure, GCP, vSphere, etc.
+- **Platform retry logic** — Currently the platform is responsible for retry decisions. Consider whether the engine should support built-in retry strategies.
+- **On-disk log scrubbing** — The raw `.openshift_install.log` file is written directly by `openshift-install` and may contain secrets (AWS keys, passwords). The log pipeline scrubs output sent to stderr and JSON events, but the raw log file on disk is not scrubbed. Consider whether to scrub the file in place after install completes, write a parallel scrubbed copy, or leave as-is with access controls.

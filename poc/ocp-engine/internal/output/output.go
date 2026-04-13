@@ -12,15 +12,20 @@ type PhaseResult struct {
 	LogTail         string `json:"log_tail,omitempty"`
 	ElapsedSeconds  int    `json:"elapsed_seconds"`
 	RequiresDestroy bool   `json:"requires_destroy,omitempty"`
+	Attempt         int    `json:"attempt,omitempty"`
 }
 
 type ErrorResult struct {
-	Category        string `json:"category"`
-	Phase           string `json:"phase,omitempty"`
-	Message         string `json:"message"`
-	LogTail         string `json:"log_tail,omitempty"`
-	HasMetadata     bool   `json:"has_metadata,omitempty"`
-	RequiresDestroy bool   `json:"requires_destroy"`
+	Category          string `json:"category"`
+	Phase             string `json:"phase,omitempty"`
+	Message           string `json:"message"`
+	FailureReason     string `json:"failure_reason,omitempty"`
+	FailureMessage    string `json:"failure_message,omitempty"`
+	LogTail           string `json:"log_tail,omitempty"`
+	HasMetadata       bool   `json:"has_metadata,omitempty"`
+	RequiresDestroy   bool   `json:"requires_destroy"`
+	RecoveryAttempted bool   `json:"recovery_attempted,omitempty"`
+	Attempt           int    `json:"attempt,omitempty"`
 }
 
 type StatusResult struct {
@@ -35,9 +40,24 @@ type StatusResult struct {
 	Error           string   `json:"error,omitempty"`
 }
 
+type PreflightResult struct {
+	Phase          string `json:"phase"`
+	Status         string `json:"status"`
+	AWSAccount     string `json:"aws_account,omitempty"`
+	AWSARN         string `json:"aws_arn,omitempty"`
+	DNSWarning     string `json:"dns_warning,omitempty"`
+	ElapsedSeconds int    `json:"elapsed_seconds"`
+	Attempt        int    `json:"attempt,omitempty"`
+}
+
 type ProvisionResult struct {
-	Status  string `json:"status"`
-	InfraID string `json:"infra_id,omitempty"`
+	Status            string `json:"status"`
+	InfraID           string `json:"infra_id,omitempty"`
+	ClusterID         string `json:"cluster_id,omitempty"`
+	HasKubeconfig     bool   `json:"has_kubeconfig,omitempty"`
+	RecoveryAttempted bool   `json:"recovery_attempted,omitempty"`
+	ElapsedSeconds    int    `json:"elapsed_seconds,omitempty"`
+	Attempt           int    `json:"attempt,omitempty"`
 }
 
 type DestroyResult struct {
@@ -47,6 +67,12 @@ type DestroyResult struct {
 	Error          string `json:"error,omitempty"`
 	LogTail        string `json:"log_tail,omitempty"`
 	ElapsedSeconds int    `json:"elapsed_seconds"`
+}
+
+type MilestoneEvent struct {
+	Event          string `json:"event"`
+	ElapsedSeconds int    `json:"elapsed_seconds"`
+	Attempt        int    `json:"attempt,omitempty"`
 }
 
 func writeJSON(w io.Writer, v any) {
@@ -73,6 +99,10 @@ func WriteError(w io.Writer, category string, err error, requiresDestroy bool) e
 	return err
 }
 
+func WritePreflightResult(w io.Writer, r PreflightResult) {
+	writeJSON(w, r)
+}
+
 func WriteStatusResult(w io.Writer, r StatusResult) {
 	writeJSON(w, r)
 }
@@ -83,4 +113,8 @@ func WriteProvisionResult(w io.Writer, r ProvisionResult) {
 
 func WriteDestroyResult(w io.Writer, r DestroyResult) {
 	writeJSON(w, r)
+}
+
+func WriteMilestoneEvent(w io.Writer, e MilestoneEvent) {
+	writeJSON(w, e)
 }

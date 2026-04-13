@@ -1,9 +1,12 @@
 package installer
 
 import (
+	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestBuildExtractArgs_WithPullSecret(t *testing.T) {
@@ -84,5 +87,28 @@ func TestRunCommand_Failure(t *testing.T) {
 	err := RunCommand("false", nil, nil, logFile)
 	if err == nil {
 		t.Error("RunCommand should fail for 'false' command")
+	}
+}
+
+func TestRunCommandWithContext_Timeout(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	logPath := filepath.Join(t.TempDir(), "test.log")
+	err := RunCommandWithContext(ctx, "sleep", []string{"10"}, nil, logPath)
+	if err == nil {
+		t.Fatal("expected timeout error, got nil")
+	}
+	if !strings.Contains(err.Error(), "deadline") && !strings.Contains(err.Error(), "killed") && !strings.Contains(err.Error(), "signal") {
+		t.Errorf("error should indicate timeout/kill, got: %v", err)
+	}
+}
+
+func TestRunCommandWithContext_Success(t *testing.T) {
+	ctx := context.Background()
+	logPath := filepath.Join(t.TempDir(), "test.log")
+	err := RunCommandWithContext(ctx, "echo", []string{"hello"}, nil, logPath)
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
 	}
 }

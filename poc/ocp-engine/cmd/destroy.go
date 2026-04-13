@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"time"
@@ -21,10 +22,12 @@ var destroyCmd = &cobra.Command{
 }
 
 var destroyWorkDir string
+var destroyTimeout time.Duration
 
 func init() {
 	destroyCmd.Flags().StringVar(&destroyWorkDir, "work-dir", "", "Path to work directory (required)")
 	destroyCmd.MarkFlagRequired("work-dir")
+	destroyCmd.Flags().DurationVar(&destroyTimeout, "timeout", 1*time.Hour, "Total timeout for destroy operation")
 	rootCmd.AddCommand(destroyCmd)
 }
 
@@ -68,9 +71,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		AWSEnv:        awsEnv,
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), destroyTimeout)
+	defer cancel()
+
 	logPath := wd.LogPath()
 	start := time.Now()
-	err = inst.DestroyCluster(logPath)
+	err = inst.DestroyClusterWithContext(ctx, logPath)
 	elapsed := int(time.Since(start).Seconds())
 
 	if err != nil {

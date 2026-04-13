@@ -43,3 +43,36 @@ func TestWriteError_RequiresDestroy(t *testing.T) {
 		t.Error("requires_destroy should be true")
 	}
 }
+
+func TestPhaseResult_IncludesAttempt(t *testing.T) {
+	var buf bytes.Buffer
+	WritePhaseResult(&buf, PhaseResult{
+		Phase:          "cluster",
+		Status:         "complete",
+		ElapsedSeconds: 100,
+		Attempt:        2,
+	})
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["attempt"] != float64(2) {
+		t.Errorf("attempt = %v, want 2", got["attempt"])
+	}
+}
+
+func TestProvisionResult_IncludesAttempt(t *testing.T) {
+	var buf bytes.Buffer
+	WriteProvisionResult(&buf, ProvisionResult{
+		Status:  "succeeded",
+		InfraID: "test-abc",
+		Attempt: 3,
+	})
+	var got map[string]any
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if got["attempt"] != float64(3) {
+		t.Errorf("attempt = %v, want 3", got["attempt"])
+	}
+}
