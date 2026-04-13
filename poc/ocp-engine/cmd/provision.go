@@ -50,6 +50,11 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	}
 	defer wd.Unlock()
 
+	// Copy cluster.yaml to work-dir so destroy can find it later
+	if err := wd.CopyConfig(provisionConfigPath); err != nil {
+		return output.WriteError(os.Stdout, "workdir_error", err, false)
+	}
+
 	awsEnv, err := credentials.ResolveFromConfig(&cfg.Engine.Credentials)
 	if err != nil {
 		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)

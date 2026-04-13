@@ -139,6 +139,19 @@ func (w *WorkDir) ClusterConfigPath() string {
 	return filepath.Join(w.Path, "cluster.yaml")
 }
 
+// CopyConfig copies the source config file into the work directory as cluster.yaml
+func (w *WorkDir) CopyConfig(srcPath string) error {
+	data, err := os.ReadFile(srcPath)
+	if err != nil {
+		return fmt.Errorf("read source config: %w", err)
+	}
+	dstPath := w.ClusterConfigPath()
+	if err := os.WriteFile(dstPath, data, 0600); err != nil {
+		return fmt.Errorf("write config to work-dir: %w", err)
+	}
+	return nil
+}
+
 // InstallConfigPath returns the path to install-config.yaml
 func (w *WorkDir) InstallConfigPath() string {
 	return filepath.Join(w.Path, "install-config.yaml")

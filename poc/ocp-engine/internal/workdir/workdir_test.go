@@ -136,3 +136,43 @@ func TestCompletedPhases(t *testing.T) {
 		t.Errorf("phases = %v, want [extract install-config]", phases)
 	}
 }
+
+func TestCopyConfig(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srcDir := t.TempDir()
+	srcPath := filepath.Join(srcDir, "cluster.yaml")
+	content := []byte("baseDomain: example.com\n")
+	if err := os.WriteFile(srcPath, content, 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := wd.CopyConfig(srcPath); err != nil {
+		t.Fatalf("CopyConfig failed: %v", err)
+	}
+
+	got, err := os.ReadFile(wd.ClusterConfigPath())
+	if err != nil {
+		t.Fatalf("reading copied config: %v", err)
+	}
+	if string(got) != string(content) {
+		t.Errorf("copied content = %q, want %q", got, content)
+	}
+}
+
+func TestCopyConfig_SourceMissing(t *testing.T) {
+	dir := t.TempDir()
+	wd, err := Init(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	err = wd.CopyConfig("/nonexistent/cluster.yaml")
+	if err == nil {
+		t.Fatal("expected error for missing source, got nil")
+	}
+}
