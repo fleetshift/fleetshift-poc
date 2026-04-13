@@ -11,12 +11,12 @@ import (
 
 func TestPhaseRequiresDestroy(t *testing.T) {
 	phases := AllPhases()
-	for _, p := range phases[:4] {
+	for _, p := range phases[:5] {
 		if p.RequiresDestroyOnFailure {
 			t.Errorf("phase %q should not require destroy on failure", p.Name)
 		}
 	}
-	if !phases[4].RequiresDestroyOnFailure {
+	if !phases[5].RequiresDestroyOnFailure {
 		t.Error("cluster phase should require destroy on failure")
 	}
 }

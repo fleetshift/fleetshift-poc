@@ -6,11 +6,10 @@ import (
 	"path/filepath"
 
 	"github.com/ocp-engine/internal/config"
-	"github.com/ocp-engine/internal/credentials"
 	"github.com/ocp-engine/internal/installer"
 	"github.com/ocp-engine/internal/output"
 	"github.com/ocp-engine/internal/phase"
-	"github.com/ocp-engine/internal/prereq"
+	"github.com/ocp-engine/internal/preflight"
 	"github.com/ocp-engine/internal/workdir"
 	"github.com/spf13/cobra"
 )
@@ -33,10 +32,6 @@ func init() {
 }
 
 func runProvision(cmd *cobra.Command, args []string) error {
-	if err := prereq.Validate(); err != nil {
-		return output.WriteError(os.Stdout, "prereq_error", err, false)
-	}
-
 	cfg, err := config.LoadConfig(provisionConfigPath)
 	if err != nil {
 		return output.WriteError(os.Stdout, "config_error", err, false)
@@ -57,10 +52,12 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		return output.WriteError(os.Stdout, "workdir_error", err, false)
 	}
 
-	awsEnv, err := credentials.ResolveFromConfig(&cfg.Engine.Credentials)
+	// Run preflight checks (validates config, files, credentials, DNS)
+	awsEnv, err := preflight.RunPreflight(cfg, os.Stdout, provisionAttempt)
 	if err != nil {
-		return output.WriteError(os.Stdout, "config_error", fmt.Errorf("failed to resolve AWS credentials: %w", err), false)
+		return output.WriteError(os.Stdout, "prereq_error", err, false)
 	}
+	wd.MarkPhaseComplete("preflight")
 
 	releaseImage := cfg.Engine.ReleaseImage
 	if releaseImage == "" {
@@ -76,7 +73,6 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	}
 
 	logPath := wd.LogPath()
-	phases := phase.AllPhases()
 
 	phaseFns := map[string]func() error{
 		"extract": func() error {
@@ -103,11 +99,18 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		},
 	}
 
-	for _, p := range phases {
+	for _, p := range phase.AllPhases() {
+		if p.Name == "preflight" {
+			continue // already ran above
+		}
 		if wd.IsPhaseComplete(p.Name) {
 			continue
 		}
-		if err := phase.RunPhase(p, phaseFns[p.Name], os.Stdout, provisionAttempt); err != nil {
+		fn, ok := phaseFns[p.Name]
+		if !ok {
+			continue
+		}
+		if err := phase.RunPhase(p, fn, os.Stdout, provisionAttempt); err != nil {
 			output.WriteErrorResult(os.Stdout, output.ErrorResult{
 				Category:        "phase_error",
 				Phase:           p.Name,

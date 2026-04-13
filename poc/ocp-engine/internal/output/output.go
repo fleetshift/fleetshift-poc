@@ -37,6 +37,16 @@ type StatusResult struct {
 	Error           string   `json:"error,omitempty"`
 }
 
+type PreflightResult struct {
+	Phase          string `json:"phase"`
+	Status         string `json:"status"`
+	AWSAccount     string `json:"aws_account,omitempty"`
+	AWSARN         string `json:"aws_arn,omitempty"`
+	DNSWarning     string `json:"dns_warning,omitempty"`
+	ElapsedSeconds int    `json:"elapsed_seconds"`
+	Attempt        int    `json:"attempt,omitempty"`
+}
+
 type ProvisionResult struct {
 	Status  string `json:"status"`
 	InfraID string `json:"infra_id,omitempty"`
@@ -74,6 +84,10 @@ func WriteError(w io.Writer, category string, err error, requiresDestroy bool) e
 		RequiresDestroy: requiresDestroy,
 	})
 	return err
+}
+
+func WritePreflightResult(w io.Writer, r PreflightResult) {
+	writeJSON(w, r)
 }
 
 func WriteStatusResult(w io.Writer, r StatusResult) {

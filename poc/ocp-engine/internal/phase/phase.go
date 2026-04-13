@@ -24,6 +24,7 @@ func PhaseNames() []string {
 
 func AllPhases() []Phase {
 	return []Phase{
+		{Name: "preflight", RequiresDestroyOnFailure: false},
 		{Name: "extract", RequiresDestroyOnFailure: false},
 		{Name: "install-config", RequiresDestroyOnFailure: false},
 		{Name: "manifests", RequiresDestroyOnFailure: false},
