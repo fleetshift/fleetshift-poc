@@ -19,6 +19,8 @@ type ErrorResult struct {
 	Category        string `json:"category"`
 	Phase           string `json:"phase,omitempty"`
 	Message         string `json:"message"`
+	FailureReason   string `json:"failure_reason,omitempty"`
+	FailureMessage  string `json:"failure_message,omitempty"`
 	LogTail         string `json:"log_tail,omitempty"`
 	HasMetadata     bool   `json:"has_metadata,omitempty"`
 	RequiresDestroy bool   `json:"requires_destroy"`
