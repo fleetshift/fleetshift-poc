@@ -39,8 +39,17 @@ func newCallbackClient() (*callback.Client, error) {
 	if callbackURL == "" {
 		return nil, nil // not configured — stdout JSON mode
 	}
-	if clusterID == "" || callbackToken == "" {
-		return nil, fmt.Errorf("--cluster-id and --callback-token are required when --callback-url is set")
+	if clusterID == "" {
+		return nil, fmt.Errorf("--cluster-id is required when --callback-url is set")
 	}
-	return callback.New(callbackURL, clusterID, callbackToken)
+
+	// Read token from env var first, fall back to CLI flag
+	token := os.Getenv("OCP_CALLBACK_TOKEN")
+	if token == "" {
+		token = callbackToken
+	}
+	if token == "" {
+		return nil, fmt.Errorf("OCP_CALLBACK_TOKEN env var or --callback-token flag is required when --callback-url is set")
+	}
+	return callback.New(callbackURL, clusterID, token)
 }
