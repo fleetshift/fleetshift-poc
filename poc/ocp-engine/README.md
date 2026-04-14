@@ -426,3 +426,312 @@ Features not yet implemented but worth considering for future iterations:
 - **Multi-platform support** — Extend beyond AWS to Azure, GCP, vSphere, etc.
 - **Platform retry logic** — Currently the platform is responsible for retry decisions. Consider whether the engine should support built-in retry strategies.
 - **On-disk log scrubbing** — The raw `.openshift_install.log` file is written directly by `openshift-install` and may contain secrets (AWS keys, passwords). The log pipeline scrubs output sent to stderr and JSON events, but the raw log file on disk is not scrubbed. Consider whether to scrub the file in place after install completes, write a parallel scrubbed copy, or leave as-is with access controls.
+
+### FleetShift Integration
+
+- **gRPC callback** — Add `--callback-url` and `--cluster-id` flags. ocp-engine reports phase results, milestones, completion, and failures to the calling platform via gRPC. This replaces stdout JSON parsing for inter-process communication when running as a container. Callback authentication via short-lived per-provision tokens scoped to the cluster ID.
+- **CCO STS mode (ccoctl)** — Automate the `ccoctl aws create-all` workflow as part of the provision pipeline. Extract `ccoctl` from the release image, extract CredentialsRequest manifests, run `ccoctl aws create-all` to create S3 bucket (OIDC discovery + JWKS), IAM OIDC provider, and per-operator IAM roles. Set `credentialsMode: Manual` and inject ccoctl output manifests at the manifests phase. On destroy, run `ccoctl aws delete` to clean up IAM OIDC provider, IAM roles, and S3 bucket. This eliminates all long-lived AWS keys from the cluster.
+- **Single STS session credential mechanism** — The OCP agent calls `AssumeRoleWithWebIdentity` once with the caller's valid OIDC token, requesting a 2-hour STS session (`DurationSeconds=7200`). The resulting credentials are passed as env vars (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) to the ocp-engine subprocess. The 2-hour window comfortably covers any provision (~45 min) or destroy (~30 min). No token files, no refresh goroutines, no stored refresh tokens. The IAM role's `MaxSessionDuration` must be set to at least 7200 seconds. If the management server is compromised, the attacker gets at most the in-flight STS session with no ability to refresh or extend it.
+- **External OIDC manifest injection** — Inject the OpenShift `Authentication` CR (`type: OIDC`), CA bundle ConfigMap, and client Secret as manifests during the manifests phase. This configures external OIDC on the cluster at install time, avoiding a 20-minute post-install kube-apiserver rollout. The cluster comes up with external OIDC already configured.
+- **Break-glass kubeadmin kubeconfig** — When external OIDC is configured at install time, the kubeadmin password no longer works (OAuth server is disabled). The kubeadmin kubeconfig (certificate-based auth) still works and should be stored in vault as a break-glass emergency credential. If the OIDC provider goes down and the platform SA token expires, this is the only way into the cluster.
+
+### Credential Lifecycle
+
+- **Just-in-time credential acquisition** — Long-term goal is zero stored credentials. AWS credentials acquired via STS `AssumeRoleWithWebIdentity` using the caller's OIDC token. Pull secret acquired via Red Hat SSO token exchange (`POST /api/accounts_mgmt/v1/access_token`). SSH key auto-generated per provision. All credentials discarded after use. Only `infra_id`, `cluster_id`, and `region` are persisted (in target properties, not vault).
+- **Pluggable credential provider interface** — `CredentialProvider` abstraction with implementations for passthrough (initial, dev/testing) and SSO/JIT (future production). The OCP agent resolves credentials through the provider — doesn't know or care how they're obtained.
+- **Red Hat SSO pull secret flow** — Proven working via `ocm` CLI: device code flow against `sso.redhat.com`, exchange access token for pull secret via `api.openshift.com`. Currently uses the `ocm-cli` client ID (Red Hat's public OAuth client for their CLI tool). This works but is not ideal for production — we're impersonating another tool's client. Red Hat could change its scopes, rate limits, or redirect URIs without notice. For production, register `fleetshift` as its own OAuth client with Red Hat SSO (requires coordination with Red Hat). This is a client ID swap — no architectural changes needed.
+- **AWS credential provider options** — (A) AWS SSO / Identity Center login with `sso:GetRoleCredentials`, (B) Keycloak OIDC federation with `sts:AssumeRoleWithWebIdentity` (no extra login step — user's Keycloak token IS their AWS auth). Option B is preferred for production as it eliminates the separate AWS login step.
+
+### Containerization
+
+- **Separate container/pod per deployment** — ocp-engine runs as an ephemeral container, one per cluster provision. FleetShift server orchestrates and receives results via gRPC callback. Container only needs network access to FleetShift's callback endpoint and to AWS APIs. No database access.
+- **Podman / same-pod deployment** — Near-term: run in podman alongside fleetshift-server containers in the same pod. ocp-engine container communicates with fleetshift-server via localhost gRPC.
+- **Kubernetes deployment** — Longer-term: fleetshift-server as a Deployment, spawns ocp-engine as Jobs or Pods per provision. Credentials injected via Kubernetes Secrets as env vars or projected volumes.
+- **In-memory credential handling** — Production containers should never write credentials to persistent filesystem. Use tmpfs mounts for work directories containing install-config.yaml and ignition configs (which contain baked-in pull secret and SSH key).
+
+### AWS IAM Setup for JIT/SSO Credential Flow
+
+To use the just-in-time credential flow (no stored AWS credentials), two AWS resources must be created once per AWS account. This allows fleetshift users to exchange their OIDC token (from the management plane IdP, e.g., Keycloak) for temporary AWS credentials via `AssumeRoleWithWebIdentity`.
+
+**This is separate from the per-cluster OIDC providers that `ccoctl` creates for cluster operators.** The setup below is for the management plane → AWS trust relationship. The `ccoctl` OIDC providers are created automatically per cluster during provisioning.
+
+#### Step 1: Register your IdP as an IAM OIDC Identity Provider
+
+This tells AWS "trust tokens from this issuer." One per AWS account.
+
+```bash
+# Get your IdP's TLS certificate thumbprint
+# Replace with your IdP's URL
+IDP_URL="https://keycloak.example.com/realms/master"
+
+# Get thumbprint (SHA1 of the root CA cert for the IdP's TLS)
+openssl s_client -connect keycloak.example.com:443 -servername keycloak.example.com \
+  < /dev/null 2>/dev/null | openssl x509 -fingerprint -noout -sha1 \
+  | sed 's/://g' | cut -d= -f2
+
+# Register the OIDC provider in AWS IAM
+aws iam create-open-id-connect-provider \
+  --url "$IDP_URL" \
+  --client-id-list "fleetshift" \
+  --thumbprint-list "<thumbprint from above>"
+```
+
+**Parameters:**
+- `--url` — Your IdP's issuer URL. Must match the `iss` claim in the OIDC tokens exactly.
+- `--client-id-list` — The OAuth client ID(s) that fleetshift uses. Must match the `aud` claim in the tokens. Can list multiple.
+- `--thumbprint-list` — SHA1 fingerprint of the root CA certificate for the IdP's HTTPS endpoint. AWS uses this to verify the JWKS endpoint is authentic.
+
+**Verify:**
+```bash
+aws iam list-open-id-connect-providers
+# Should show: arn:aws:iam::<account>:oidc-provider/keycloak.example.com/realms/master
+```
+
+#### Step 2: Create an IAM Role with trust policy + permissions
+
+The trust policy controls WHO can assume the role (which IdP, which users/groups). The permissions policy controls WHAT the role can do in AWS.
+
+```bash
+aws iam create-role \
+  --role-name OCP-Provisioner \
+  --assume-role-policy-document file://trust-policy.json
+```
+
+**trust-policy.json:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "Federated": "arn:aws:iam::<ACCOUNT_ID>:oidc-provider/keycloak.example.com/realms/master"
+      },
+      "Action": "sts:AssumeRoleWithWebIdentity",
+      "Condition": {
+        "StringEquals": {
+          "keycloak.example.com/realms/master:aud": "fleetshift"
+        }
+      }
+    }
+  ]
+}
+```
+
+**Scoping the trust policy (who can assume the role):**
+
+Allow all authenticated users from the IdP:
+```json
+"Condition": {
+  "StringEquals": {
+    "keycloak.example.com/realms/master:aud": "fleetshift"
+  }
+}
+```
+
+Restrict to specific users:
+```json
+"Condition": {
+  "StringEquals": {
+    "keycloak.example.com/realms/master:aud": "fleetshift",
+    "keycloak.example.com/realms/master:sub": "user1@example.com"
+  }
+}
+```
+
+Restrict to users matching a pattern (e.g., group-based sub claims):
+```json
+"Condition": {
+  "StringEquals": {
+    "keycloak.example.com/realms/master:aud": "fleetshift"
+  },
+  "StringLike": {
+    "keycloak.example.com/realms/master:sub": "platform-team:*"
+  }
+}
+```
+
+**Attach permissions policy:**
+```bash
+aws iam put-role-policy \
+  --role-name OCP-Provisioner \
+  --policy-name ocp-provision-permissions \
+  --policy-document file://permissions-policy.json
+```
+
+**permissions-policy.json** (covers openshift-install IPI + ccoctl requirements):
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "EC2",
+      "Effect": "Allow",
+      "Action": "ec2:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ELB",
+      "Effect": "Allow",
+      "Action": "elasticloadbalancing:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "Route53",
+      "Effect": "Allow",
+      "Action": "route53:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3",
+      "Effect": "Allow",
+      "Action": "s3:*",
+      "Resource": "*"
+    },
+    {
+      "Sid": "IAMForCCOAndInstaller",
+      "Effect": "Allow",
+      "Action": [
+        "iam:CreateRole",
+        "iam:DeleteRole",
+        "iam:GetRole",
+        "iam:ListRoles",
+        "iam:PutRolePolicy",
+        "iam:DeleteRolePolicy",
+        "iam:ListRolePolicies",
+        "iam:CreateOpenIDConnectProvider",
+        "iam:DeleteOpenIDConnectProvider",
+        "iam:GetOpenIDConnectProvider",
+        "iam:ListOpenIDConnectProviders",
+        "iam:TagOpenIDConnectProvider",
+        "iam:CreateUser",
+        "iam:DeleteUser",
+        "iam:GetUser",
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:TagRole",
+        "iam:TagUser",
+        "iam:CreateInstanceProfile",
+        "iam:DeleteInstanceProfile",
+        "iam:AddRoleToInstanceProfile",
+        "iam:RemoveRoleFromInstanceProfile",
+        "iam:GetInstanceProfile",
+        "iam:PassRole",
+        "iam:ListAttachedRolePolicies",
+        "iam:SimulatePrincipalPolicy"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Sid": "STS",
+      "Effect": "Allow",
+      "Action": "sts:AssumeRole",
+      "Resource": "*"
+    },
+    {
+      "Sid": "ResourceTagging",
+      "Effect": "Allow",
+      "Action": "tag:GetResources",
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+#### Step 3: Verify the setup
+
+**Test the OIDC federation manually:**
+```bash
+# Get an OIDC token from your IdP (method depends on your IdP)
+# For Keycloak, you can use the token endpoint:
+TOKEN=$(curl -s -X POST \
+  "https://keycloak.example.com/realms/master/protocol/openid-connect/token" \
+  -d "grant_type=password&client_id=fleetshift&username=<user>&password=<pass>" \
+  | jq -r .access_token)
+
+# Try to assume the role
+aws sts assume-role-with-web-identity \
+  --role-arn "arn:aws:iam::<ACCOUNT_ID>:role/OCP-Provisioner" \
+  --role-session-name "test-session" \
+  --web-identity-token "$TOKEN"
+```
+
+**Expected output:**
+```json
+{
+  "Credentials": {
+    "AccessKeyId": "ASIA...",
+    "SecretAccessKey": "...",
+    "SessionToken": "...",
+    "Expiration": "2026-04-13T23:00:00Z"
+  },
+  "AssumedRoleUser": {
+    "AssumedRoleId": "AROA...:test-session",
+    "Arn": "arn:aws:sts::<ACCOUNT_ID>:assumed-role/OCP-Provisioner/test-session"
+  }
+}
+```
+
+**If it fails**, check:
+- OIDC provider URL matches `iss` claim in token exactly (trailing slashes matter)
+- Client ID in IAM OIDC provider matches `aud` claim in token
+- Thumbprint is correct (re-extract if IdP cert was rotated)
+- Trust policy `Federated` ARN matches the OIDC provider ARN
+- Trust policy conditions match the token's claims
+
+#### Step 4: Register the target in fleetshift
+
+```bash
+# The target stores the role ARN and region — not credentials
+fleetctl target register \
+  --id ocp-aws-dev-east \
+  --type ocp \
+  --name "AWS Dev us-east-1" \
+  --property region=us-east-1 \
+  --property role_arn=arn:aws:iam::<ACCOUNT_ID>:role/OCP-Provisioner \
+  --property account_id=<ACCOUNT_ID>
+```
+
+#### Summary: What exists in AWS
+
+| Resource | Count | Contains secrets? | Purpose |
+|---|---|---|---|
+| IAM OIDC Identity Provider | 1 per account | No — just issuer URL + thumbprint | Tells AWS to trust your IdP |
+| IAM Role (OCP-Provisioner) | 1 per account/team/env | No — just trust policy + permissions | Defines who can assume + what they can do |
+
+No AWS credentials are stored in fleetshift, ocp-engine, or vault. The IAM role ARN is infrastructure configuration, not a secret.
+
+#### Runtime flow
+
+```
+User logs into fleetshift UI (Keycloak OIDC)
+    │ gets OIDC token (short-lived, e.g., 15 min)
+    ▼
+User creates deployment targeting "ocp-aws-dev-east"
+    │
+    ▼
+OCP Agent reads target properties: role_arn, region
+    │
+    ▼
+AssumeRoleWithWebIdentity(user's OIDC token, role_arn)
+    │
+    ▼
+AWS validates:
+  ✓ Is keycloak.example.com a registered OIDC provider?
+  ✓ Is the token signature valid against Keycloak's JWKS?
+  ✓ Does the audience claim match ("fleetshift")?
+  ✓ Does the trust policy allow this subject?
+    │
+    ▼
+AWS returns: temporary AccessKeyID + SecretAccessKey + SessionToken (1 hour)
+    │
+    ▼
+Written to web identity token file → openshift-install uses it
+    │ SDK auto-refreshes by re-reading the file
+    ▼
+Credentials discarded when provision/destroy completes
+```
+
+### Security: Work Directory Credential Hygiene
+
+- **Audit work directory for secrets** — The ocp-engine work directory contains sensitive data written by `openshift-install`: `install-config.yaml` (pull secret, SSH key), `auth/kubeconfig`, `auth/kubeadmin-password`, `.openshift_install.log` (may contain AWS keys), and ignition configs (embedded pull secret). These must be identified and scrubbed or discarded as soon as they are no longer needed — do not leave credentials on disk after the operation completes. The platform (FleetShift OCP agent) is responsible for extracting what it needs (infra_id, cluster_id, kubeconfig for bootstrap), then cleaning up the work directory. For containerized deployments, use ephemeral storage (tmpfs, emptyDir) so credentials are destroyed when the container exits.
