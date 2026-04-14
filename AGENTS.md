@@ -4,6 +4,7 @@ For how to...
 - generate and lint gRPC / proto, see docs/buf.md
 - design APIs, see docs/api-design.md
 - understand the domain, API, and architectural context, see docs/design/architecture.md
+- understand the authentication model, see docs/design/authentication.md and poc/attestation/hybrid/README.md
 
 Rules:
 - Never remove TODO comments unless it is truly no longer relevant (e.g. implemented or obsolete)
