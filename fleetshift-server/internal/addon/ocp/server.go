@@ -4,19 +4,30 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"os"
 
 	"google.golang.org/grpc"
 
 	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 )
 
-// Start launches the addon's internal callback gRPC server on the
-// given address. The server uses its own token-auth interceptor —
-// it does not share auth with the main fleetshift-server.
+const defaultCallbackAddr = ":50052"
+
+// Start launches the addon's internal callback gRPC server. The
+// listen address is read from OCP_CALLBACK_ADDR env var, falling
+// back to ":50052". Pass a non-empty addr to override (useful for
+// tests with ":0" for a random port).
 //
-// Use "host:0" to bind to a random available port (useful for tests).
 // After Start returns, CallbackAddr() returns the resolved address.
-func (a *Agent) Start(callbackAddr string) error {
+func (a *Agent) Start(addr ...string) error {
+	callbackAddr := os.Getenv("OCP_CALLBACK_ADDR")
+	if callbackAddr == "" {
+		callbackAddr = defaultCallbackAddr
+	}
+	if len(addr) > 0 && addr[0] != "" {
+		callbackAddr = addr[0]
+	}
+
 	lis, err := net.Listen("tcp", callbackAddr)
 	if err != nil {
 		return fmt.Errorf("ocp callback: listen %s: %w", callbackAddr, err)

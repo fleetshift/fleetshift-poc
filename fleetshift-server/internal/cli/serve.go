@@ -52,7 +52,6 @@ type serveFlags struct {
 	logFormat        string
 	logLevelOverride string
 	oidcCAFile       string
-	ocpCallbackAddr  string
 }
 
 func newServeCmd() *cobra.Command {
@@ -71,7 +70,6 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.logFormat, "log-format", "text", "log format (text, json)")
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
-	cmd.Flags().StringVar(&f.ocpCallbackAddr, "ocp-callback-addr", ":50052", "OCP addon callback listen address")
 	return cmd
 }
 
@@ -154,7 +152,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		ocpaddon.WithTokenSigner(callbackSigner),
 		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
 	)
-	if err := ocpAgent.Start(f.ocpCallbackAddr); err != nil {
+	if err := ocpAgent.Start(); err != nil {
 		return fmt.Errorf("start ocp agent: %w", err)
 	}
 	defer ocpAgent.Shutdown(ctx)
