@@ -138,9 +138,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		ocpaddon.WithVault(vault),
 		ocpaddon.WithCredentialProvider(ocpCredProvider),
 		ocpaddon.WithTokenSigner(callbackSigner),
-		ocpaddon.WithOIDCConfig(ocpaddon.OIDCProviderConfig{
-			// Will be populated from flags/config in future
-		}),
 		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
 	)
 	router.Register(ocpaddon.TargetType, ocpAgent)
