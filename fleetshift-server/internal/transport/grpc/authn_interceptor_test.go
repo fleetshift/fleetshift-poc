@@ -159,9 +159,9 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
-			IssuerURL:             "https://issuer.example.com",
-			Audience:              "test-audience",
-			JWKSURI:               "https://issuer.example.com/jwks",
+			IssuerURL: "https://issuer.example.com",
+			Audience:  "test-audience",
+			JWKSURI:   "https://issuer.example.com/jwks",
 
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
@@ -210,9 +210,9 @@ func TestAuthnInterceptor_InvalidToken_Unauthenticated(t *testing.T) {
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
-			IssuerURL:             "https://issuer.example.com",
-			Audience:              "test-audience",
-			JWKSURI:               "https://issuer.example.com/jwks",
+			IssuerURL: "https://issuer.example.com",
+			Audience:  "test-audience",
+			JWKSURI:   "https://issuer.example.com/jwks",
 
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
@@ -308,9 +308,9 @@ func TestAuthnInterceptor_NoToken_WithMethodsConfigured(t *testing.T) {
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
-			IssuerURL:             "https://issuer.example.com",
-			Audience:              "test-audience",
-			JWKSURI:               "https://issuer.example.com/jwks",
+			IssuerURL: "https://issuer.example.com",
+			Audience:  "test-audience",
+			JWKSURI:   "https://issuer.example.com/jwks",
 
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",

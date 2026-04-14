@@ -425,8 +425,8 @@ func (o *recordingDeliveryObserver) Completed(ctx context.Context, _ domain.Deli
 // recordingAgentObserver captures [kind.ClusterDeliverProbe] events.
 type recordingAgentObserver struct {
 	kind.NoOpAgentObserver
-	mu      sync.Mutex
-	probes  []*recordingClusterProbe
+	mu     sync.Mutex
+	probes []*recordingClusterProbe
 }
 
 func (o *recordingAgentObserver) ClusterDeliverStarted(ctx context.Context, clusterName string) (context.Context, kind.ClusterDeliverProbe) {

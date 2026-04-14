@@ -89,4 +89,3 @@ type DeliveryEvent struct {
 	Message   string
 	Detail    json.RawMessage
 }
-

@@ -65,10 +65,10 @@ func (NoOpAuthnObserver) Authenticate(ctx context.Context, _ AuthnRequestInfo) (
 // NoOpAuthnProbe is an [AuthnProbe] that discards all calls.
 type NoOpAuthnProbe struct{}
 
-func (NoOpAuthnProbe) MethodsLoaded(int)                      {}
-func (NoOpAuthnProbe) CredentialMissing(AuthMethodType)        {}
+func (NoOpAuthnProbe) MethodsLoaded(int)                                {}
+func (NoOpAuthnProbe) CredentialMissing(AuthMethodType)                 {}
 func (NoOpAuthnProbe) VerifyingCredential(AuthMethodID, AuthMethodType) {}
-func (NoOpAuthnProbe) Authenticated(AuthMethodType, SubjectClaims)     {}
-func (NoOpAuthnProbe) Anonymous()                              {}
-func (NoOpAuthnProbe) Error(error)                             {}
-func (NoOpAuthnProbe) End()                                    {}
+func (NoOpAuthnProbe) Authenticated(AuthMethodType, SubjectClaims)      {}
+func (NoOpAuthnProbe) Anonymous()                                       {}
+func (NoOpAuthnProbe) Error(error)                                      {}
+func (NoOpAuthnProbe) End()                                             {}

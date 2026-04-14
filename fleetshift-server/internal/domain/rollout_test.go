@@ -11,7 +11,7 @@ func TestImmediateRollout_EmitsRemoveThenDeliverSteps(t *testing.T) {
 	r := &domain.ImmediateRollout{}
 	delta := domain.TargetDelta{
 		Removed:   []domain.TargetInfo{{ID: "gone"}},
-		Added:    []domain.TargetInfo{{ID: "t1"}, {ID: "t2"}},
+		Added:     []domain.TargetInfo{{ID: "t1"}, {ID: "t2"}},
 		Unchanged: []domain.TargetInfo{{ID: "t3"}},
 	}
 	plan, err := r.Plan(context.Background(), delta)

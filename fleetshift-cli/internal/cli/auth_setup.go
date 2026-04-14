@@ -11,15 +11,15 @@ import (
 )
 
 type authSetupFlags struct {
-	issuerURL                string
-	clientID                 string
-	scopes                   string
-	methodID                 string
-	audience                 string
-	keyEnrollmentClientID    string
-	oidcCAFile               string
-	registryID               string
-	registrySubjectExpr      string
+	issuerURL             string
+	clientID              string
+	scopes                string
+	methodID              string
+	audience              string
+	keyEnrollmentClientID string
+	oidcCAFile            string
+	registryID            string
+	registrySubjectExpr   string
 }
 
 func newAuthSetupCmd(ctx *cmdContext) *cobra.Command {

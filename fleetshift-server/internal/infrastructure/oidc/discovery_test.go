@@ -59,4 +59,3 @@ func TestVerifier_WithHTTPClient_SelfSignedCA(t *testing.T) {
 		t.Errorf("Subject = %q, want %q", claims.Subject, "user-456")
 	}
 }
-

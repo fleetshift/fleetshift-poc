@@ -615,7 +615,6 @@ func queryDeployment(ctx context.Context, t *testing.T, infra Infra, id domain.D
 	return tx.Deployments().Get(ctx, id)
 }
 
-
 func seedDeployment(ctx context.Context, t *testing.T, infra Infra, dep domain.Deployment) {
 	t.Helper()
 	if dep.UID == "" {
@@ -698,7 +697,7 @@ func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.De
 // stubAuthMethodRepo is a no-op repository for contract test registration.
 type stubAuthMethodRepo struct{}
 
-func (stubAuthMethodRepo) Save(_ context.Context, _ domain.AuthMethod) error              { return nil }
+func (stubAuthMethodRepo) Save(_ context.Context, _ domain.AuthMethod) error { return nil }
 func (stubAuthMethodRepo) Get(_ context.Context, _ domain.AuthMethodID) (domain.AuthMethod, error) {
 	return domain.AuthMethod{}, domain.ErrNotFound
 }

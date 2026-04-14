@@ -22,11 +22,11 @@ type ProvisionIdPInput struct {
 // Pass this spec to [Registry.RegisterProvisionIdP] to obtain a
 // [ProvisionIdPWorkflow] that can start instances.
 type ProvisionIdPWorkflowSpec struct {
-	AuthMethods            AuthMethodRepository
-	Discovery              OIDCDiscoveryClient
-	CreateDeployment       CreateDeploymentWorkflow
-	TrustBundlePlacement   PlacementStrategySpec
-	Now                    func() time.Time
+	AuthMethods          AuthMethodRepository
+	Discovery            OIDCDiscoveryClient
+	CreateDeployment     CreateDeploymentWorkflow
+	TrustBundlePlacement PlacementStrategySpec
+	Now                  func() time.Time
 }
 
 func (s *ProvisionIdPWorkflowSpec) now() time.Time {

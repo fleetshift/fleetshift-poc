@@ -15,13 +15,13 @@ const KubernetesTargetType domain.TargetType = "kubernetes"
 // credentials (ServiceAccount token, kubeconfig, SSH key), and OCP
 // cluster metadata (InfraID, ClusterID, Region).
 type ClusterOutput struct {
-	TargetID   domain.TargetID
-	Name       string
-	APIServer  string // e.g. "https://api.example.openshiftapps.com:6443"
-	CACert     []byte // PEM-encoded cluster CA certificate
-	InfraID    string // OCP infrastructure ID
-	ClusterID  string // OCP cluster UUID
-	Region     string // cloud region (e.g. "us-east-1")
+	TargetID  domain.TargetID
+	Name      string
+	APIServer string // e.g. "https://api.example.openshiftapps.com:6443"
+	CACert    []byte // PEM-encoded cluster CA certificate
+	InfraID   string // OCP infrastructure ID
+	ClusterID string // OCP cluster UUID
+	Region    string // cloud region (e.g. "us-east-1")
 
 	// SATokenRef and SAToken are set when platform SA bootstrapping
 	// succeeds. SATokenRef is a vault key; SAToken is the raw bearer

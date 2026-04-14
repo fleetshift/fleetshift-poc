@@ -230,7 +230,7 @@ type activityRecord struct {
 	TargetID domain.TargetID
 }
 
-func (r *recordingRecord) ID() string              { return r.delegate.ID() }
+func (r *recordingRecord) ID() string               { return r.delegate.ID() }
 func (r *recordingRecord) Context() context.Context { return r.ctx }
 
 func (r *recordingRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
@@ -267,7 +267,7 @@ type simpleRecord struct {
 	events <-chan domain.DeploymentEvent
 }
 
-func (r *simpleRecord) ID() string              { return "test-simple" }
+func (r *simpleRecord) ID() string               { return "test-simple" }
 func (r *simpleRecord) Context() context.Context { return r.ctx }
 func (r *simpleRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	return activity.Run(r.ctx, in)
@@ -996,8 +996,8 @@ type afterLoadBumpGenRecord struct {
 	loaded   bool
 }
 
-func (r *afterLoadBumpGenRecord) ID() string              { return r.delegate.ID() }
-func (r *afterLoadBumpGenRecord) Context() context.Context { return r.delegate.Context() }
+func (r *afterLoadBumpGenRecord) ID() string                    { return r.delegate.ID() }
+func (r *afterLoadBumpGenRecord) Context() context.Context      { return r.delegate.Context() }
 func (r *afterLoadBumpGenRecord) Await(sig string) (any, error) { return r.delegate.Await(sig) }
 
 func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
@@ -1089,7 +1089,7 @@ type attestationCapturingRecord struct {
 	removes  []domain.RemoveInput
 }
 
-func (r *attestationCapturingRecord) ID() string              { return r.delegate.ID() }
+func (r *attestationCapturingRecord) ID() string               { return r.delegate.ID() }
 func (r *attestationCapturingRecord) Context() context.Context { return r.delegate.Context() }
 func (r *attestationCapturingRecord) Await(sig string) (any, error) {
 	return r.delegate.Await(sig)
@@ -1320,9 +1320,9 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 
 	seedSignerEnrollment(t, store, testSignerEnrollment("se-rm", "test-signer"))
 	seedDeployment(t, store, domain.Deployment{
-		ID:              "rm-attested",
-		Generation:      2,
-		ResolvedTargets: []domain.TargetID{"old1"},
+		ID:                "rm-attested",
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"old1"},
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		Auth: domain.DeliveryAuth{

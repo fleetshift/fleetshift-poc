@@ -8,14 +8,14 @@ import (
 
 func TestClusterOutput_Target(t *testing.T) {
 	output := ClusterOutput{
-		TargetID:      "target-123",
-		Name:          "test-cluster",
-		APIServer:     "https://api.test.example.com:6443",
-		CACert:        []byte("-----BEGIN CERTIFICATE-----\ntest-ca\n-----END CERTIFICATE-----"),
-		SATokenRef:    "vault/sa-token-ref",
-		InfraID:       "test-infra-id",
-		ClusterID:     "test-cluster-uuid",
-		Region:        "us-east-1",
+		TargetID:   "target-123",
+		Name:       "test-cluster",
+		APIServer:  "https://api.test.example.com:6443",
+		CACert:     []byte("-----BEGIN CERTIFICATE-----\ntest-ca\n-----END CERTIFICATE-----"),
+		SATokenRef: "vault/sa-token-ref",
+		InfraID:    "test-infra-id",
+		ClusterID:  "test-cluster-uuid",
+		Region:     "us-east-1",
 	}
 
 	target := output.Target()

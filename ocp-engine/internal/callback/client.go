@@ -13,17 +13,17 @@ import (
 
 // CompletionData holds the artifacts produced by a successful provision.
 type CompletionData struct {
-	InfraID, ClusterUUID, APIServer, Region string
+	InfraID, ClusterUUID, APIServer, Region                       string
 	Kubeconfig, CACert, SSHPrivateKey, SSHPublicKey, MetadataJSON []byte
-	RecoveryAttempted                                              bool
-	ElapsedSeconds, Attempt                                        int32
+	RecoveryAttempted                                             bool
+	ElapsedSeconds, Attempt                                       int32
 }
 
 // FailureData describes a terminal provision failure.
 type FailureData struct {
 	Phase, FailureReason, FailureMessage, LogTail string
-	RequiresDestroy, RecoveryAttempted             bool
-	Attempt                                        int32
+	RequiresDestroy, RecoveryAttempted            bool
+	Attempt                                       int32
 }
 
 // Client wraps the generated OCPEngineCallbackServiceClient with convenience
