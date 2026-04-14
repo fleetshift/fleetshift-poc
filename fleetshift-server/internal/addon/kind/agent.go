@@ -60,8 +60,8 @@ type Agent struct {
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
-	containerHost   string // hostname containers use to reach the host machine (replaces localhost)
-	oidcHTTPSPort   string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
+	containerHost string // hostname containers use to reach the host machine (replaces localhost)
+	oidcHTTPSPort string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry

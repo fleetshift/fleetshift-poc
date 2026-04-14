@@ -50,11 +50,11 @@ func (NoOpAgentObserver) ClusterDeliverStarted(ctx context.Context, _ string) (c
 // NoOpClusterDeliverProbe is a [ClusterDeliverProbe] that discards all calls.
 type NoOpClusterDeliverProbe struct{}
 
-func (NoOpClusterDeliverProbe) CredentialsResolved(string) {}
-func (NoOpClusterDeliverProbe) PhaseCompleted(string, int) {}
-func (NoOpClusterDeliverProbe) BootstrapCompleted()        {}
-func (NoOpClusterDeliverProbe) Error(error)                {}
-func (NoOpClusterDeliverProbe) End()                       {}
+func (NoOpClusterDeliverProbe) CredentialsResolved(string)   {}
+func (NoOpClusterDeliverProbe) PhaseCompleted(string, int)   {}
+func (NoOpClusterDeliverProbe) BootstrapCompleted()          {}
+func (NoOpClusterDeliverProbe) Error(error)                  {}
+func (NoOpClusterDeliverProbe) End()                         {}
 
 // SlogAgentObserver is an [AgentObserver] that logs via [slog].
 type SlogAgentObserver struct {

@@ -131,3 +131,4 @@ func (p *SSOCredentialProvider) ResolvePullSecret(ctx context.Context, req PullS
 
 	return body, nil
 }
+

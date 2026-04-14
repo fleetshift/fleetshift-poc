@@ -4,11 +4,11 @@ package domain
 type TargetState string
 
 const (
-	TargetStateDiscovered   TargetState = "discovered"
+	TargetStateDiscovered  TargetState = "discovered"
 	TargetStateInitializing TargetState = "initializing"
-	TargetStateReady        TargetState = "ready"
-	TargetStateDraining     TargetState = "draining"
-	TargetStateTerminated   TargetState = "terminated"
+	TargetStateReady       TargetState = "ready"
+	TargetStateDraining    TargetState = "draining"
+	TargetStateTerminated  TargetState = "terminated"
 )
 
 // TargetInfo describes a registered target. It is the full state the platform
@@ -94,3 +94,4 @@ func ResolvedTargetInfos(resolved []PlacementTarget, pool []TargetInfo) []Target
 	}
 	return out
 }
+

@@ -6,11 +6,11 @@ import "time"
 type DeploymentState string
 
 const (
-	DeploymentStateCreating   DeploymentState = "creating"
-	DeploymentStateActive     DeploymentState = "active"
-	DeploymentStateDeleting   DeploymentState = "deleting"
-	DeploymentStateFailed     DeploymentState = "failed"
-	DeploymentStatePausedAuth DeploymentState = "paused_auth"
+	DeploymentStateCreating    DeploymentState = "creating"
+	DeploymentStateActive      DeploymentState = "active"
+	DeploymentStateDeleting    DeploymentState = "deleting"
+	DeploymentStateFailed      DeploymentState = "failed"
+	DeploymentStatePausedAuth  DeploymentState = "paused_auth"
 )
 
 // Generation is a monotonically increasing counter on a [Deployment].
@@ -20,20 +20,20 @@ type Generation int64
 
 // Deployment is the composition of manifest, placement, and rollout strategies.
 type Deployment struct {
-	ID                 DeploymentID
-	UID                string
-	ManifestStrategy   ManifestStrategySpec
-	PlacementStrategy  PlacementStrategySpec
-	RolloutStrategy    *RolloutStrategySpec // nil means immediate
-	ResolvedTargets    []TargetID
-	State              DeploymentState
-	Auth               DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
-	Provenance         *Provenance  // nil for token-passthrough deployments
-	Generation         Generation   // incremented on every mutation; starts at 1
-	ObservedGeneration Generation   // last generation fully reconciled by a workflow
-	CreatedAt          time.Time
-	UpdatedAt          time.Time
-	Etag               string
+	ID                DeploymentID
+	UID               string
+	ManifestStrategy  ManifestStrategySpec
+	PlacementStrategy PlacementStrategySpec
+	RolloutStrategy   *RolloutStrategySpec // nil means immediate
+	ResolvedTargets   []TargetID
+	State             DeploymentState
+	Auth              DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
+	Provenance        *Provenance  // nil for token-passthrough deployments
+	Generation         Generation  // incremented on every mutation; starts at 1
+	ObservedGeneration Generation  // last generation fully reconciled by a workflow
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+	Etag              string
 }
 
 // BumpGeneration increments the deployment's generation counter.

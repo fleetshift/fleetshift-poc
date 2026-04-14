@@ -13,7 +13,7 @@ type stubRecord struct {
 	ctx context.Context
 }
 
-func (r *stubRecord) ID() string               { return "create-test" }
+func (r *stubRecord) ID() string              { return "create-test" }
 func (r *stubRecord) Context() context.Context { return r.ctx }
 func (r *stubRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	return activity.Run(r.ctx, in)
@@ -36,7 +36,7 @@ type immediateExecution[T any] struct {
 	val T
 }
 
-func (e *immediateExecution[T]) WorkflowID() string                       { return "fake" }
+func (e *immediateExecution[T]) WorkflowID() string                        { return "fake" }
 func (e *immediateExecution[T]) AwaitResult(_ context.Context) (T, error) { return e.val, nil }
 
 func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) {

@@ -104,9 +104,9 @@ type RegistrySubjectMapping struct {
 // subjects. The kind agent serializes these into provisioned target
 // properties; the kubernetes agent deserializes them to build verifiers.
 type TrustBundleEntry struct {
-	IssuerURL              IssuerURL               `json:"issuer_url"`
-	JWKSURI                EndpointURL             `json:"jwks_uri"`
-	EnrollmentAudience     Audience                `json:"enrollment_audience"`
+	IssuerURL              IssuerURL              `json:"issuer_url"`
+	JWKSURI                EndpointURL            `json:"jwks_uri"`
+	EnrollmentAudience     Audience               `json:"enrollment_audience"`
 	RegistrySubjectMapping *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
 }
 

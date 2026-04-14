@@ -27,10 +27,10 @@ func newAuthInspectTokenCmd(ctx *cmdContext) *cobra.Command {
 }
 
 type tokenInspection struct {
-	TokenType   string           `json:"token_type"`
-	Expiry      time.Time        `json:"expiry"`
-	Status      string           `json:"status"`
-	HasRefresh  bool             `json:"has_refresh_token"`
+	TokenType   string          `json:"token_type"`
+	Expiry      time.Time       `json:"expiry"`
+	Status      string          `json:"status"`
+	HasRefresh  bool            `json:"has_refresh_token"`
 	AccessToken *auth.DecodedJWT `json:"access_token,omitempty"`
 	IDToken     *auth.DecodedJWT `json:"id_token,omitempty"`
 }

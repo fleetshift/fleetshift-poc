@@ -318,7 +318,7 @@ func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
 func (p *Provider) handleDiscovery(w http.ResponseWriter, _ *http.Request) {
 	doc := map[string]string{
 		"issuer":                 p.issuerURL,
-		"jwks_uri":               p.issuerURL + "/jwks",
+		"jwks_uri":              p.issuerURL + "/jwks",
 		"authorization_endpoint": p.issuerURL + "/authorize",
 		"token_endpoint":         p.issuerURL + "/token",
 	}
@@ -340,12 +340,12 @@ func generateCA(t *testing.T) (*x509.Certificate, *ecdsa.PrivateKey) {
 	}
 
 	template := &x509.Certificate{
-		SerialNumber:          big.NewInt(1),
-		Subject:               pkix.Name{CommonName: "oidctest-ca"},
-		NotBefore:             time.Now().Add(-time.Minute),
-		NotAfter:              time.Now().Add(24 * time.Hour),
-		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-		IsCA:                  true,
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "oidctest-ca"},
+		NotBefore:    time.Now().Add(-time.Minute),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:         true,
 		BasicConstraintsValid: true,
 	}
 

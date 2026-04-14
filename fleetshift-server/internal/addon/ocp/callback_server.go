@@ -14,8 +14,8 @@ import (
 )
 
 type provisionState struct {
-	done       chan struct{}
-	closeOnce  sync.Once
+	done      chan struct{}
+	closeOnce sync.Once
 	completion *fleetshiftv1.OCPEngineCompletionRequest
 	failure    *fleetshiftv1.OCPEngineFailureRequest
 }

@@ -136,3 +136,4 @@ func TestGenerateSSHKey(t *testing.T) {
 		t.Error("private key should be in PEM/OpenSSH format")
 	}
 }
+

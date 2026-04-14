@@ -49,9 +49,9 @@ func (NoOpDeploymentObserver) RunStarted(ctx context.Context, _ DeploymentID) (c
 // NoOpDeploymentRunProbe is a [DeploymentRunProbe] that discards all events.
 type NoOpDeploymentRunProbe struct{}
 
-func (NoOpDeploymentRunProbe) EventReceived(DeploymentEvent)                     {}
-func (NoOpDeploymentRunProbe) StateChanged(DeploymentState)                      {}
-func (NoOpDeploymentRunProbe) ManifestsFiltered(TargetInfo, int, int)            {}
+func (NoOpDeploymentRunProbe) EventReceived(DeploymentEvent)        {}
+func (NoOpDeploymentRunProbe) StateChanged(DeploymentState)         {}
+func (NoOpDeploymentRunProbe) ManifestsFiltered(TargetInfo, int, int)       {}
 func (NoOpDeploymentRunProbe) DeliveryOutputsProcessed([]ProvisionedTarget, int) {}
-func (NoOpDeploymentRunProbe) Error(error)                                       {}
-func (NoOpDeploymentRunProbe) End()                                              {}
+func (NoOpDeploymentRunProbe) Error(error)                                  {}
+func (NoOpDeploymentRunProbe) End()                                         {}

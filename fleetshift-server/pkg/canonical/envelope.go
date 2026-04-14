@@ -26,9 +26,9 @@ type Manifest struct {
 
 // PlacementStrategy is the canonical representation of a placement strategy.
 type PlacementStrategy struct {
-	Type        string
-	Targets     []string
-	MatchLabels map[string]string
+	Type           string
+	Targets        []string
+	MatchLabels    map[string]string
 }
 
 // OutputConstraint is a CEL predicate signed with the input.
