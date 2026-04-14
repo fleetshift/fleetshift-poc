@@ -11,35 +11,35 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 
-	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 )
 
 // startCallbackGRPCServer starts a real gRPC server with the callback service
 // registered and returns the listener address. This exercises the full gRPC
 // stack (serialization, metadata propagation, interceptors) rather than
 // calling server methods directly.
-func startCallbackGRPCServer(t *testing.T, server fleetshiftv1.OCPEngineCallbackServiceServer) string {
+func startCallbackGRPCServer(t *testing.T, server ocpv1.CallbackServiceServer) string {
 	t.Helper()
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	srv := grpc.NewServer()
-	fleetshiftv1.RegisterOCPEngineCallbackServiceServer(srv, server)
+	ocpv1.RegisterCallbackServiceServer(srv, server)
 	go srv.Serve(lis)
 	t.Cleanup(srv.GracefulStop)
 	return lis.Addr().String()
 }
 
 // dialCallback creates a gRPC client connection to the callback server.
-func dialCallback(t *testing.T, addr string) fleetshiftv1.OCPEngineCallbackServiceClient {
+func dialCallback(t *testing.T, addr string) ocpv1.CallbackServiceClient {
 	t.Helper()
 	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
 	t.Cleanup(func() { conn.Close() })
-	return fleetshiftv1.NewOCPEngineCallbackServiceClient(conn)
+	return ocpv1.NewCallbackServiceClient(conn)
 }
 
 // outgoingToken attaches a bearer token to outgoing gRPC metadata,
@@ -63,7 +63,7 @@ func TestCallbackIntegration_PhaseResult(t *testing.T) {
 	token, _ := signer.Sign(clusterID, 2*time.Hour)
 	ctx := outgoingToken(context.Background(), token)
 
-	_, err = client.ReportPhaseResult(ctx, &fleetshiftv1.OCPEnginePhaseResultRequest{
+	_, err = client.ReportPhaseResult(ctx, &ocpv1.PhaseResultRequest{
 		ClusterId:      clusterID,
 		Phase:          "extract",
 		Status:         "complete",
@@ -87,7 +87,7 @@ func TestCallbackIntegration_Milestone(t *testing.T) {
 	token, _ := signer.Sign(clusterID, 2*time.Hour)
 	ctx := outgoingToken(context.Background(), token)
 
-	_, err := client.ReportMilestone(ctx, &fleetshiftv1.OCPEngineMilestoneRequest{
+	_, err := client.ReportMilestone(ctx, &ocpv1.MilestoneRequest{
 		ClusterId:      clusterID,
 		Event:          "bootstrap_complete",
 		ElapsedSeconds: 300,
@@ -111,7 +111,7 @@ func TestCallbackIntegration_CompletionSignalsDone(t *testing.T) {
 	token, _ := signer.Sign(clusterID, 2*time.Hour)
 	ctx := outgoingToken(context.Background(), token)
 
-	_, err := client.ReportCompletion(ctx, &fleetshiftv1.OCPEngineCompletionRequest{
+	_, err := client.ReportCompletion(ctx, &ocpv1.CompletionRequest{
 		ClusterId:   clusterID,
 		InfraId:     "infra-abc",
 		ClusterUuid: "uuid-123",
@@ -158,7 +158,7 @@ func TestCallbackIntegration_FailureSignalsDone(t *testing.T) {
 	token, _ := signer.Sign(clusterID, 2*time.Hour)
 	ctx := outgoingToken(context.Background(), token)
 
-	_, err := client.ReportFailure(ctx, &fleetshiftv1.OCPEngineFailureRequest{
+	_, err := client.ReportFailure(ctx, &ocpv1.FailureRequest{
 		ClusterId:       clusterID,
 		Phase:           "cluster",
 		FailureReason:   "aws_quota",

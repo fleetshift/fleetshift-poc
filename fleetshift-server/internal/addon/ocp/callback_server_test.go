@@ -10,7 +10,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 )
 
 func newTestCallbackServer(t *testing.T) (*callbackServer, *CallbackTokenSigner, *sync.Map) {
@@ -42,7 +42,7 @@ func TestCallbackServer_ReportCompletion(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	req := &fleetshiftv1.OCPEngineCompletionRequest{
+	req := &ocpv1.CompletionRequest{
 		ClusterId: clusterID,
 		InfraId:   "infra-123",
 		ApiServer: "https://api.test.example.com:6443",
@@ -77,7 +77,7 @@ func TestCallbackServer_ReportFailure(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	req := &fleetshiftv1.OCPEngineFailureRequest{
+	req := &ocpv1.FailureRequest{
 		ClusterId:      clusterID,
 		Phase:          "bootstrap",
 		FailureReason:  "timeout",
@@ -113,7 +113,7 @@ func TestCallbackServer_ReportPhaseResult(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	req := &fleetshiftv1.OCPEnginePhaseResultRequest{
+	req := &ocpv1.PhaseResultRequest{
 		ClusterId: clusterID,
 		Phase:     "infrastructure",
 		Status:    "completed",
@@ -143,7 +143,7 @@ func TestCallbackServer_ReportMilestone(t *testing.T) {
 		t.Fatalf("Sign: %v", err)
 	}
 
-	req := &fleetshiftv1.OCPEngineMilestoneRequest{
+	req := &ocpv1.MilestoneRequest{
 		ClusterId: clusterID,
 		Event:     "control_plane_ready",
 	}
@@ -162,7 +162,7 @@ func TestCallbackServer_MissingToken(t *testing.T) {
 	clusterID := "test-cluster"
 	provisions.Store(clusterID, &provisionState{done: make(chan struct{})})
 
-	_, err := server.ReportCompletion(context.Background(), &fleetshiftv1.OCPEngineCompletionRequest{
+	_, err := server.ReportCompletion(context.Background(), &ocpv1.CompletionRequest{
 		ClusterId: clusterID,
 	})
 	if err == nil {
@@ -178,7 +178,7 @@ func TestCallbackServer_InvalidToken(t *testing.T) {
 	clusterID := "test-cluster"
 	provisions.Store(clusterID, &provisionState{done: make(chan struct{})})
 
-	_, err := server.ReportCompletion(ctxWithToken("not-a-jwt"), &fleetshiftv1.OCPEngineCompletionRequest{
+	_, err := server.ReportCompletion(ctxWithToken("not-a-jwt"), &ocpv1.CompletionRequest{
 		ClusterId: clusterID,
 	})
 	if err == nil {
@@ -195,7 +195,7 @@ func TestCallbackServer_WrongClusterID(t *testing.T) {
 	provisions.Store("cluster-b", &provisionState{done: make(chan struct{})})
 
 	token, _ := signer.Sign("cluster-a", 2*time.Hour)
-	_, err := server.ReportCompletion(ctxWithToken(token), &fleetshiftv1.OCPEngineCompletionRequest{
+	_, err := server.ReportCompletion(ctxWithToken(token), &ocpv1.CompletionRequest{
 		ClusterId: "cluster-b",
 	})
 	if err == nil {
@@ -223,14 +223,14 @@ func TestCallbackServer_ConcurrentCompletionAndFailure(t *testing.T) {
 	// channel (no panic from double-close), and the state must be consistent.
 	done := make(chan struct{}, 2)
 	go func() {
-		server.ReportCompletion(ctx, &fleetshiftv1.OCPEngineCompletionRequest{
+		server.ReportCompletion(ctx, &ocpv1.CompletionRequest{
 			ClusterId: clusterID,
 			InfraId:   "infra-concurrent",
 		})
 		done <- struct{}{}
 	}()
 	go func() {
-		server.ReportFailure(ctx, &fleetshiftv1.OCPEngineFailureRequest{
+		server.ReportFailure(ctx, &ocpv1.FailureRequest{
 			ClusterId:      clusterID,
 			Phase:          "bootstrap",
 			FailureMessage: "race condition test",
@@ -263,7 +263,7 @@ func TestCallbackServer_UnknownCluster(t *testing.T) {
 	server, signer, _ := newTestCallbackServer(t)
 	token, _ := signer.Sign("unknown-cluster", 2*time.Hour)
 
-	_, err := server.ReportCompletion(ctxWithToken(token), &fleetshiftv1.OCPEngineCompletionRequest{
+	_, err := server.ReportCompletion(ctxWithToken(token), &ocpv1.CompletionRequest{
 		ClusterId: "unknown-cluster",
 	})
 	if err == nil {

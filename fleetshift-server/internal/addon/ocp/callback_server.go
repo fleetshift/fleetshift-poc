@@ -9,7 +9,7 @@ import (
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 
-	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 )
 
 type provisionState struct {
@@ -17,12 +17,12 @@ type provisionState struct {
 	closeOnce sync.Once
 
 	mu         sync.Mutex
-	completion *fleetshiftv1.OCPEngineCompletionRequest
-	failure    *fleetshiftv1.OCPEngineFailureRequest
+	completion *ocpv1.CompletionRequest
+	failure    *ocpv1.FailureRequest
 }
 
 type callbackServer struct {
-	fleetshiftv1.UnimplementedOCPEngineCallbackServiceServer
+	ocpv1.UnimplementedCallbackServiceServer
 	provisions    *sync.Map
 	tokenVerifier *CallbackTokenSigner
 }
@@ -57,21 +57,21 @@ func (s *callbackServer) getProvision(clusterID string) (*provisionState, error)
 	return state, nil
 }
 
-func (s *callbackServer) ReportPhaseResult(ctx context.Context, req *fleetshiftv1.OCPEnginePhaseResultRequest) (*fleetshiftv1.OCPEngineAck, error) {
+func (s *callbackServer) ReportPhaseResult(ctx context.Context, req *ocpv1.PhaseResultRequest) (*ocpv1.Ack, error) {
 	if _, err := s.authenticateCallback(ctx, req.ClusterId); err != nil {
 		return nil, err
 	}
-	return &fleetshiftv1.OCPEngineAck{}, nil
+	return &ocpv1.Ack{}, nil
 }
 
-func (s *callbackServer) ReportMilestone(ctx context.Context, req *fleetshiftv1.OCPEngineMilestoneRequest) (*fleetshiftv1.OCPEngineAck, error) {
+func (s *callbackServer) ReportMilestone(ctx context.Context, req *ocpv1.MilestoneRequest) (*ocpv1.Ack, error) {
 	if _, err := s.authenticateCallback(ctx, req.ClusterId); err != nil {
 		return nil, err
 	}
-	return &fleetshiftv1.OCPEngineAck{}, nil
+	return &ocpv1.Ack{}, nil
 }
 
-func (s *callbackServer) ReportCompletion(ctx context.Context, req *fleetshiftv1.OCPEngineCompletionRequest) (*fleetshiftv1.OCPEngineAck, error) {
+func (s *callbackServer) ReportCompletion(ctx context.Context, req *ocpv1.CompletionRequest) (*ocpv1.Ack, error) {
 	state, err := s.authenticateCallback(ctx, req.ClusterId)
 	if err != nil {
 		return nil, err
@@ -80,10 +80,10 @@ func (s *callbackServer) ReportCompletion(ctx context.Context, req *fleetshiftv1
 	state.completion = req
 	state.mu.Unlock()
 	state.closeOnce.Do(func() { close(state.done) })
-	return &fleetshiftv1.OCPEngineAck{}, nil
+	return &ocpv1.Ack{}, nil
 }
 
-func (s *callbackServer) ReportFailure(ctx context.Context, req *fleetshiftv1.OCPEngineFailureRequest) (*fleetshiftv1.OCPEngineAck, error) {
+func (s *callbackServer) ReportFailure(ctx context.Context, req *ocpv1.FailureRequest) (*ocpv1.Ack, error) {
 	state, err := s.authenticateCallback(ctx, req.ClusterId)
 	if err != nil {
 		return nil, err
@@ -92,7 +92,7 @@ func (s *callbackServer) ReportFailure(ctx context.Context, req *fleetshiftv1.OC
 	state.failure = req
 	state.mu.Unlock()
 	state.closeOnce.Do(func() { close(state.done) })
-	return &fleetshiftv1.OCPEngineAck{}, nil
+	return &ocpv1.Ack{}, nil
 }
 
 func extractCallbackToken(ctx context.Context) string {

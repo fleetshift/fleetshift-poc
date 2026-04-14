@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
 	github.com/cschleiden/go-workflows v1.4.1
 	github.com/dbos-inc/dbos-transact-golang v0.11.0
+	github.com/fleetshift/fleetshift-poc/gen v0.0.0-00010101000000-000000000000
 	github.com/google/cel-go v0.27.0
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0
@@ -21,7 +22,7 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.40.0
 	golang.org/x/crypto v0.50.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260226221140-a57be14db171
-	google.golang.org/grpc v1.79.1
+	google.golang.org/grpc v1.80.0
 	google.golang.org/protobuf v1.36.11
 	gopkg.in/yaml.v3 v3.0.1
 	k8s.io/api v0.35.2

@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -97,16 +97,6 @@ func NewAgent(opts ...AgentOption) *Agent {
 	return a
 }
 
-// CallbackServer returns the gRPC callback service implementation that
-// ocp-engine subprocesses report to. The returned server shares the
-// provisions map with the agent, so callbacks signal the correct
-// in-flight delivery.
-func (a *Agent) CallbackServer() fleetshiftv1.OCPEngineCallbackServiceServer {
-	return &callbackServer{
-		provisions:    &a.provisions,
-		tokenVerifier: a.tokenSigner,
-	}
-}
 
 // Deliver implements [domain.DeliveryAgent.Deliver]. It parses the
 // cluster spec from manifests, resolves credentials, writes cluster.yaml,
@@ -342,7 +332,7 @@ func (a *Agent) deliverAsync(
 func (a *Agent) handleCompletion(
 	ctx context.Context,
 	clusterName string,
-	completion *fleetshiftv1.OCPEngineCompletionRequest,
+	completion *ocpv1.CompletionRequest,
 	sshPrivateKey []byte,
 	auth domain.DeliveryAuth,
 ) (*ClusterOutput, error) {
