@@ -6,6 +6,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/ocp-engine/internal/callback"
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/credentials"
 	"github.com/ocp-engine/internal/installer"
@@ -32,6 +33,15 @@ func init() {
 }
 
 func runDestroy(cmd *cobra.Command, args []string) error {
+	// Create callback client (nil when --callback-url is not set)
+	cb, err := newCallbackClient()
+	if err != nil {
+		return output.WriteError(os.Stdout, "callback_error", err, false)
+	}
+	if cb != nil {
+		defer cb.Close()
+	}
+
 	wd, err := workdir.Open(destroyWorkDir)
 	if err != nil {
 		return output.WriteError(os.Stdout, "workdir_error", err, false)
@@ -88,6 +98,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 			LogTail:        wd.LogTail(50),
 			ElapsedSeconds: elapsed,
 		})
+		reportFailure(cb, ctx, callback.FailureData{
+			Phase:          "destroy",
+			FailureReason:  "destroy_failed",
+			FailureMessage: err.Error(),
+			LogTail:        wd.LogTail(50),
+		})
 		return err
 	}
 
@@ -96,6 +112,12 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		Status:         "succeeded",
 		InfraID:        infraID,
 		ElapsedSeconds: elapsed,
+	})
+
+	// Report successful destroy via callback
+	reportCompletion(cb, ctx, callback.CompletionData{
+		InfraID:        infraID,
+		ElapsedSeconds: int32(elapsed),
 	})
 
 	return nil

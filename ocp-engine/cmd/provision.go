@@ -2,12 +2,14 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 
 	"github.com/ocp-engine/internal/artifacts"
+	"github.com/ocp-engine/internal/callback"
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/installer"
 	"github.com/ocp-engine/internal/logpipeline"
@@ -16,6 +18,7 @@ import (
 	"github.com/ocp-engine/internal/preflight"
 	"github.com/ocp-engine/internal/workdir"
 	"github.com/spf13/cobra"
+	"gopkg.in/yaml.v3"
 )
 
 var provisionCmd = &cobra.Command{
@@ -33,7 +36,7 @@ func init() {
 	provisionCmd.Flags().StringVar(&provisionConfigPath, "config", "", "Path to cluster.yaml (required). Parent directory is used as work directory.")
 	provisionCmd.MarkFlagRequired("config")
 	provisionCmd.Flags().IntVar(&provisionAttempt, "attempt", 1, "Attempt number for retry tracking (metadata only, no engine behavior change)")
-	provisionCmd.Flags().DurationVar(&provisionTimeout, "timeout", 3*time.Hour, "Total timeout for all provision phases")
+	provisionCmd.Flags().DurationVar(&provisionTimeout, "timeout", 2*time.Hour, "Total timeout for all provision phases")
 	rootCmd.AddCommand(provisionCmd)
 }
 
@@ -47,6 +50,15 @@ func runProvision(cmd *cobra.Command, args []string) error {
 	cfg, err := config.LoadConfig(provisionConfigPath)
 	if err != nil {
 		return output.WriteError(os.Stdout, "config_error", err, false)
+	}
+
+	// Create callback client (nil when --callback-url is not set)
+	cb, err := newCallbackClient()
+	if err != nil {
+		return output.WriteError(os.Stdout, "callback_error", err, false)
+	}
+	if cb != nil {
+		defer cb.Close()
 	}
 
 	wd, err := workdir.Open(filepath.Dir(provisionConfigPath))
@@ -125,7 +137,10 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		if !ok {
 			continue
 		}
+		phaseStart := time.Now()
 		if err := phase.RunPhase(p, fn, os.Stdout, provisionAttempt); err != nil {
+			phaseElapsed := int32(time.Since(phaseStart).Seconds())
+
 			// For cluster phase: attempt bootstrap-aware recovery
 			if p.Name == "cluster" && pipeline != nil && pipeline.BootstrapComplete() {
 				fmt.Fprintln(os.Stderr, "Bootstrap complete — attempting recovery with wait-for install-complete")
@@ -134,6 +149,7 @@ func runProvision(cmd *cobra.Command, args []string) error {
 					// Recovery succeeded — mark phase complete and continue
 					wd.MarkPhaseComplete(p.Name)
 					recoveryAttempted = true
+					reportPhaseResult(cb, ctx, p.Name, "complete", phaseElapsed, "", int32(provisionAttempt))
 					continue
 				}
 				fmt.Fprintf(os.Stderr, "Recovery failed: %v\n", recoveryErr)
@@ -155,9 +171,22 @@ func runProvision(cmd *cobra.Command, args []string) error {
 				errResult.FailureReason, errResult.FailureMessage = logpipeline.ParseFailureReason(fullLog)
 			}
 			output.WriteErrorResult(os.Stdout, errResult)
+
+			// Report phase failure and terminal failure via callback
+			reportPhaseResult(cb, ctx, p.Name, "failed", phaseElapsed, err.Error(), int32(provisionAttempt))
+			reportFailure(cb, ctx, callback.FailureData{
+				Phase:             p.Name,
+				FailureReason:     errResult.FailureReason,
+				FailureMessage:    errResult.FailureMessage,
+				LogTail:           errResult.LogTail,
+				RequiresDestroy:   p.RequiresDestroyOnFailure,
+				RecoveryAttempted: pipeline != nil && pipeline.BootstrapComplete(),
+				Attempt:           int32(provisionAttempt),
+			})
 			return err
 		}
 		wd.MarkPhaseComplete(p.Name)
+		reportPhaseResult(cb, ctx, p.Name, "complete", int32(time.Since(phaseStart).Seconds()), "", int32(provisionAttempt))
 	}
 
 	// Post-install artifact validation
@@ -168,6 +197,13 @@ func runProvision(cmd *cobra.Command, args []string) error {
 			Message:         fmt.Sprintf("install succeeded but artifact validation failed: %s", err),
 			RequiresDestroy: true,
 			Attempt:         provisionAttempt,
+		})
+		reportFailure(cb, ctx, callback.FailureData{
+			Phase:           "validation",
+			FailureReason:   "artifact_validation_failed",
+			FailureMessage:  err.Error(),
+			RequiresDestroy: true,
+			Attempt:         int32(provisionAttempt),
 		})
 		return err
 	}
@@ -183,6 +219,31 @@ func runProvision(cmd *cobra.Command, args []string) error {
 		Attempt:           provisionAttempt,
 	})
 
+	// Report completion via callback with artifact data
+	if cb != nil {
+		region := extractRegion(cfg)
+		apiServer, caCert := extractKubeconfigData(filepath.Join(wd.Path, "auth", "kubeconfig"))
+		kubeconfig, _ := os.ReadFile(filepath.Join(wd.Path, "auth", "kubeconfig"))
+		metadataJSON, _ := os.ReadFile(filepath.Join(wd.Path, "metadata.json"))
+		sshPrivKey, _ := os.ReadFile(filepath.Join(wd.Path, "auth", "ssh-privatekey"))
+		sshPubKey, _ := readSSHPublicKey(cfg)
+
+		reportCompletion(cb, ctx, callback.CompletionData{
+			InfraID:           artifactResult.InfraID,
+			ClusterUUID:       artifactResult.ClusterID,
+			APIServer:         apiServer,
+			Region:            region,
+			Kubeconfig:        kubeconfig,
+			CACert:            caCert,
+			SSHPrivateKey:     sshPrivKey,
+			SSHPublicKey:      sshPubKey,
+			MetadataJSON:      metadataJSON,
+			RecoveryAttempted: recoveryAttempted,
+			ElapsedSeconds:    int32(elapsed),
+			Attempt:           int32(provisionAttempt),
+		})
+	}
+
 	return nil
 }
 
@@ -192,4 +253,94 @@ func readFullLog(path string) string {
 		return ""
 	}
 	return string(data)
+}
+
+// extractRegion pulls the AWS region from the parsed cluster config.
+func extractRegion(cfg *config.ClusterConfig) string {
+	platform, ok := cfg.InstallConfig["platform"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	aws, ok := platform["aws"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	region, _ := aws["region"].(string)
+	return region
+}
+
+// extractKubeconfigData reads a kubeconfig file and extracts the API server
+// URL and CA certificate (PEM bytes). Returns empty values on any error.
+func extractKubeconfigData(kubeconfigPath string) (apiServer string, caCert []byte) {
+	data, err := os.ReadFile(kubeconfigPath)
+	if err != nil {
+		return "", nil
+	}
+
+	// Parse kubeconfig YAML to extract cluster server and CA data
+	var kc struct {
+		Clusters []struct {
+			Cluster struct {
+				Server                   string `yaml:"server"`
+				CertificateAuthorityData string `yaml:"certificate-authority-data"`
+			} `yaml:"cluster"`
+		} `yaml:"clusters"`
+	}
+
+	if err := yaml.Unmarshal(data, &kc); err != nil {
+		return "", nil
+	}
+
+	if len(kc.Clusters) == 0 {
+		return "", nil
+	}
+
+	apiServer = kc.Clusters[0].Cluster.Server
+
+	if kc.Clusters[0].Cluster.CertificateAuthorityData != "" {
+		decoded, err := base64.StdEncoding.DecodeString(kc.Clusters[0].Cluster.CertificateAuthorityData)
+		if err == nil {
+			caCert = decoded
+		}
+	}
+
+	return apiServer, caCert
+}
+
+// readSSHPublicKey reads the SSH public key from the config's referenced file.
+func readSSHPublicKey(cfg *config.ClusterConfig) ([]byte, error) {
+	if cfg.Engine.SSHPublicKeyFile == "" {
+		return nil, nil
+	}
+	return os.ReadFile(cfg.Engine.SSHPublicKeyFile)
+}
+
+// reportPhaseResult is a nil-safe wrapper that reports a phase result via callback.
+func reportPhaseResult(cb *callback.Client, ctx context.Context, phaseName, status string, elapsed int32, errMsg string, attempt int32) {
+	if cb == nil {
+		return
+	}
+	if err := cb.ReportPhaseResult(ctx, phaseName, status, elapsed, errMsg, attempt); err != nil {
+		fmt.Fprintf(os.Stderr, "callback: ReportPhaseResult(%s): %v\n", phaseName, err)
+	}
+}
+
+// reportFailure is a nil-safe wrapper that reports a terminal failure via callback.
+func reportFailure(cb *callback.Client, ctx context.Context, data callback.FailureData) {
+	if cb == nil {
+		return
+	}
+	if err := cb.ReportFailure(ctx, data); err != nil {
+		fmt.Fprintf(os.Stderr, "callback: ReportFailure: %v\n", err)
+	}
+}
+
+// reportCompletion is a nil-safe wrapper that reports completion via callback.
+func reportCompletion(cb *callback.Client, ctx context.Context, data callback.CompletionData) {
+	if cb == nil {
+		return
+	}
+	if err := cb.ReportCompletion(ctx, data); err != nil {
+		fmt.Fprintf(os.Stderr, "callback: ReportCompletion: %v\n", err)
+	}
 }
