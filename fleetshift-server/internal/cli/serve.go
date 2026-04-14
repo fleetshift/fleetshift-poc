@@ -31,6 +31,7 @@ import (
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
+	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -51,6 +52,7 @@ type serveFlags struct {
 	logFormat        string
 	logLevelOverride string
 	oidcCAFile       string
+	ocpEngineBinary  string
 }
 
 func newServeCmd() *cobra.Command {
@@ -69,6 +71,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.logFormat, "log-format", "text", "log format (text, json)")
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
+	cmd.Flags().StringVar(&f.ocpEngineBinary, "ocp-engine-binary", "ocp-engine", "Path to the ocp-engine binary")
 	return cmd
 }
 
@@ -125,6 +128,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	)
 	router.Register(kindaddon.TargetType, kindAgent)
 
+	// --- OCP agent ---
+	ocpCredProvider := &ocpaddon.PassthroughCredentialProvider{}
+	ocpAgent := ocpaddon.NewAgent(
+		ocpaddon.WithEngineBinary(f.ocpEngineBinary),
+		ocpaddon.WithCallbackAddr(f.grpcAddr),
+		ocpaddon.WithVault(vault),
+		ocpaddon.WithCredentialProvider(ocpCredProvider),
+		ocpaddon.WithOIDCConfig(ocpaddon.OIDCProviderConfig{
+			// Will be populated from flags/config in future
+		}),
+		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
+	)
+	router.Register(ocpaddon.TargetType, ocpAgent)
+
 	// Kubernetes agent is registered after the attestation verifier is
 	// built (see below). The router is only consulted at delivery time.
 
@@ -172,6 +189,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
 	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 		return fmt.Errorf("seed kind target: %w", err)
+	}
+
+	if err := targetSvc.Register(ctx, domain.TargetInfo{
+		ID:   "ocp-aws",
+		Type: ocpaddon.TargetType,
+		Name: "AWS OCP Provider",
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		logger.Warn("seed ocp-aws target", "error", err)
 	}
 
 	workerCtx, workerCancel := context.WithCancel(ctx)
@@ -291,6 +316,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
+	pb.RegisterOCPCallbackServiceServer(grpcServer, ocpAgent.CallbackServer())
 	reflection.Register(grpcServer)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
