@@ -83,8 +83,15 @@ func WithProvisionTimeout(d time.Duration) AgentOption {
 }
 
 // NewAgent returns an Agent configured with the given options.
-// Default engineBinary is read from OCP_ENGINE_BINARY env var,
-// falling back to "ocp-engine" (PATH lookup).
+//
+// Defaults read from environment (overridable via options):
+//   - OCP_ENGINE_BINARY: path to ocp-engine binary (default: "ocp-engine")
+//   - AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN:
+//     used by the default PassthroughCredentialProvider
+//   - OCP_PULL_SECRET_FILE: path to pull secret JSON file
+//
+// The callback token signer is created automatically if not provided
+// via WithTokenSigner.
 func NewAgent(opts ...AgentOption) *Agent {
 	engineBinary := os.Getenv("OCP_ENGINE_BINARY")
 	if engineBinary == "" {
@@ -97,6 +104,36 @@ func NewAgent(opts ...AgentOption) *Agent {
 	for _, o := range opts {
 		o(a)
 	}
+
+	// Default credential provider from environment if not set via option
+	if a.credentials == nil {
+		var pullSecret []byte
+		if ps := os.Getenv("OCP_PULL_SECRET_FILE"); ps != "" {
+			data, err := os.ReadFile(ps)
+			if err != nil {
+				slog.Warn("failed to read OCP pull secret file", "path", ps, "error", err)
+			} else {
+				pullSecret = data
+			}
+		}
+		a.credentials = &PassthroughCredentialProvider{
+			AWSAccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
+			AWSSecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
+			AWSSessionToken:    os.Getenv("AWS_SESSION_TOKEN"),
+			PullSecret:         pullSecret,
+		}
+	}
+
+	// Default callback token signer if not set via option
+	if a.tokenSigner == nil {
+		signer, err := NewCallbackTokenSigner()
+		if err != nil {
+			slog.Error("failed to create callback token signer", "error", err)
+		} else {
+			a.tokenSigner = signer
+		}
+	}
+
 	return a
 }
 

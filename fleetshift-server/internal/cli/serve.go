@@ -127,29 +127,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	// --- OCP agent ---
-	callbackSigner, err := ocpaddon.NewCallbackTokenSigner()
-	if err != nil {
-		return fmt.Errorf("create callback token signer: %w", err)
-	}
-
-	var ocpPullSecret []byte
-	if ps := os.Getenv("OCP_PULL_SECRET_FILE"); ps != "" {
-		var err error
-		ocpPullSecret, err = os.ReadFile(ps)
-		if err != nil {
-			return fmt.Errorf("read pull secret file %s: %w", ps, err)
-		}
-	}
-	ocpCredProvider := &ocpaddon.PassthroughCredentialProvider{
-		AWSAccessKeyID:     os.Getenv("AWS_ACCESS_KEY_ID"),
-		AWSSecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY"),
-		AWSSessionToken:    os.Getenv("AWS_SESSION_TOKEN"),
-		PullSecret:         ocpPullSecret,
-	}
 	ocpAgent := ocpaddon.NewAgent(
 		ocpaddon.WithVault(vault),
-		ocpaddon.WithCredentialProvider(ocpCredProvider),
-		ocpaddon.WithTokenSigner(callbackSigner),
 		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
 	)
 	if err := ocpAgent.Start(); err != nil {
