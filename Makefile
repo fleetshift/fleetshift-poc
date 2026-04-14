@@ -27,4 +27,5 @@ test-ocp-engine: ## Run ocp-engine tests
 	cd ocp-engine && go test ./...
 
 generate: ## Generate protobuf and gRPC code
-	buf generate
+	buf generate --path proto/fleetshift
+	buf generate --template buf.gen.ocp.yaml --path proto/ocp/v1

@@ -2,9 +2,9 @@
 // versions:
 // 	protoc-gen-go v1.36.11
 // 	protoc        (unknown)
-// source: fleetshift/v1/ocp_engine_callback_service.proto
+// source: ocp/v1/callback_service.proto
 
-package fleetshiftv1
+package ocpv1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -21,7 +21,7 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-type OCPEnginePhaseResultRequest struct {
+type PhaseResultRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ClusterId      string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	Phase          string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
@@ -33,21 +33,21 @@ type OCPEnginePhaseResultRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *OCPEnginePhaseResultRequest) Reset() {
-	*x = OCPEnginePhaseResultRequest{}
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[0]
+func (x *PhaseResultRequest) Reset() {
+	*x = PhaseResultRequest{}
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OCPEnginePhaseResultRequest) String() string {
+func (x *PhaseResultRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OCPEnginePhaseResultRequest) ProtoMessage() {}
+func (*PhaseResultRequest) ProtoMessage() {}
 
-func (x *OCPEnginePhaseResultRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[0]
+func (x *PhaseResultRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -58,54 +58,54 @@ func (x *OCPEnginePhaseResultRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OCPEnginePhaseResultRequest.ProtoReflect.Descriptor instead.
-func (*OCPEnginePhaseResultRequest) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP(), []int{0}
+// Deprecated: Use PhaseResultRequest.ProtoReflect.Descriptor instead.
+func (*PhaseResultRequest) Descriptor() ([]byte, []int) {
+	return file_ocp_v1_callback_service_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *OCPEnginePhaseResultRequest) GetClusterId() string {
+func (x *PhaseResultRequest) GetClusterId() string {
 	if x != nil {
 		return x.ClusterId
 	}
 	return ""
 }
 
-func (x *OCPEnginePhaseResultRequest) GetPhase() string {
+func (x *PhaseResultRequest) GetPhase() string {
 	if x != nil {
 		return x.Phase
 	}
 	return ""
 }
 
-func (x *OCPEnginePhaseResultRequest) GetStatus() string {
+func (x *PhaseResultRequest) GetStatus() string {
 	if x != nil {
 		return x.Status
 	}
 	return ""
 }
 
-func (x *OCPEnginePhaseResultRequest) GetElapsedSeconds() int32 {
+func (x *PhaseResultRequest) GetElapsedSeconds() int32 {
 	if x != nil {
 		return x.ElapsedSeconds
 	}
 	return 0
 }
 
-func (x *OCPEnginePhaseResultRequest) GetError() string {
+func (x *PhaseResultRequest) GetError() string {
 	if x != nil {
 		return x.Error
 	}
 	return ""
 }
 
-func (x *OCPEnginePhaseResultRequest) GetAttempt() int32 {
+func (x *PhaseResultRequest) GetAttempt() int32 {
 	if x != nil {
 		return x.Attempt
 	}
 	return 0
 }
 
-type OCPEngineMilestoneRequest struct {
+type MilestoneRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	ClusterId      string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	Event          string                 `protobuf:"bytes,2,opt,name=event,proto3" json:"event,omitempty"`
@@ -115,21 +115,21 @@ type OCPEngineMilestoneRequest struct {
 	sizeCache      protoimpl.SizeCache
 }
 
-func (x *OCPEngineMilestoneRequest) Reset() {
-	*x = OCPEngineMilestoneRequest{}
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[1]
+func (x *MilestoneRequest) Reset() {
+	*x = MilestoneRequest{}
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OCPEngineMilestoneRequest) String() string {
+func (x *MilestoneRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OCPEngineMilestoneRequest) ProtoMessage() {}
+func (*MilestoneRequest) ProtoMessage() {}
 
-func (x *OCPEngineMilestoneRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[1]
+func (x *MilestoneRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -140,40 +140,40 @@ func (x *OCPEngineMilestoneRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OCPEngineMilestoneRequest.ProtoReflect.Descriptor instead.
-func (*OCPEngineMilestoneRequest) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP(), []int{1}
+// Deprecated: Use MilestoneRequest.ProtoReflect.Descriptor instead.
+func (*MilestoneRequest) Descriptor() ([]byte, []int) {
+	return file_ocp_v1_callback_service_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *OCPEngineMilestoneRequest) GetClusterId() string {
+func (x *MilestoneRequest) GetClusterId() string {
 	if x != nil {
 		return x.ClusterId
 	}
 	return ""
 }
 
-func (x *OCPEngineMilestoneRequest) GetEvent() string {
+func (x *MilestoneRequest) GetEvent() string {
 	if x != nil {
 		return x.Event
 	}
 	return ""
 }
 
-func (x *OCPEngineMilestoneRequest) GetElapsedSeconds() int32 {
+func (x *MilestoneRequest) GetElapsedSeconds() int32 {
 	if x != nil {
 		return x.ElapsedSeconds
 	}
 	return 0
 }
 
-func (x *OCPEngineMilestoneRequest) GetAttempt() int32 {
+func (x *MilestoneRequest) GetAttempt() int32 {
 	if x != nil {
 		return x.Attempt
 	}
 	return 0
 }
 
-type OCPEngineCompletionRequest struct {
+type CompletionRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ClusterId         string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	InfraId           string                 `protobuf:"bytes,2,opt,name=infra_id,json=infraId,proto3" json:"infra_id,omitempty"`
@@ -192,21 +192,21 @@ type OCPEngineCompletionRequest struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *OCPEngineCompletionRequest) Reset() {
-	*x = OCPEngineCompletionRequest{}
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[2]
+func (x *CompletionRequest) Reset() {
+	*x = CompletionRequest{}
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OCPEngineCompletionRequest) String() string {
+func (x *CompletionRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OCPEngineCompletionRequest) ProtoMessage() {}
+func (*CompletionRequest) ProtoMessage() {}
 
-func (x *OCPEngineCompletionRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[2]
+func (x *CompletionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -217,103 +217,103 @@ func (x *OCPEngineCompletionRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OCPEngineCompletionRequest.ProtoReflect.Descriptor instead.
-func (*OCPEngineCompletionRequest) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP(), []int{2}
+// Deprecated: Use CompletionRequest.ProtoReflect.Descriptor instead.
+func (*CompletionRequest) Descriptor() ([]byte, []int) {
+	return file_ocp_v1_callback_service_proto_rawDescGZIP(), []int{2}
 }
 
-func (x *OCPEngineCompletionRequest) GetClusterId() string {
+func (x *CompletionRequest) GetClusterId() string {
 	if x != nil {
 		return x.ClusterId
 	}
 	return ""
 }
 
-func (x *OCPEngineCompletionRequest) GetInfraId() string {
+func (x *CompletionRequest) GetInfraId() string {
 	if x != nil {
 		return x.InfraId
 	}
 	return ""
 }
 
-func (x *OCPEngineCompletionRequest) GetClusterUuid() string {
+func (x *CompletionRequest) GetClusterUuid() string {
 	if x != nil {
 		return x.ClusterUuid
 	}
 	return ""
 }
 
-func (x *OCPEngineCompletionRequest) GetApiServer() string {
+func (x *CompletionRequest) GetApiServer() string {
 	if x != nil {
 		return x.ApiServer
 	}
 	return ""
 }
 
-func (x *OCPEngineCompletionRequest) GetKubeconfig() []byte {
+func (x *CompletionRequest) GetKubeconfig() []byte {
 	if x != nil {
 		return x.Kubeconfig
 	}
 	return nil
 }
 
-func (x *OCPEngineCompletionRequest) GetCaCert() []byte {
+func (x *CompletionRequest) GetCaCert() []byte {
 	if x != nil {
 		return x.CaCert
 	}
 	return nil
 }
 
-func (x *OCPEngineCompletionRequest) GetSshPrivateKey() []byte {
+func (x *CompletionRequest) GetSshPrivateKey() []byte {
 	if x != nil {
 		return x.SshPrivateKey
 	}
 	return nil
 }
 
-func (x *OCPEngineCompletionRequest) GetSshPublicKey() []byte {
+func (x *CompletionRequest) GetSshPublicKey() []byte {
 	if x != nil {
 		return x.SshPublicKey
 	}
 	return nil
 }
 
-func (x *OCPEngineCompletionRequest) GetRegion() string {
+func (x *CompletionRequest) GetRegion() string {
 	if x != nil {
 		return x.Region
 	}
 	return ""
 }
 
-func (x *OCPEngineCompletionRequest) GetMetadataJson() []byte {
+func (x *CompletionRequest) GetMetadataJson() []byte {
 	if x != nil {
 		return x.MetadataJson
 	}
 	return nil
 }
 
-func (x *OCPEngineCompletionRequest) GetRecoveryAttempted() bool {
+func (x *CompletionRequest) GetRecoveryAttempted() bool {
 	if x != nil {
 		return x.RecoveryAttempted
 	}
 	return false
 }
 
-func (x *OCPEngineCompletionRequest) GetElapsedSeconds() int32 {
+func (x *CompletionRequest) GetElapsedSeconds() int32 {
 	if x != nil {
 		return x.ElapsedSeconds
 	}
 	return 0
 }
 
-func (x *OCPEngineCompletionRequest) GetAttempt() int32 {
+func (x *CompletionRequest) GetAttempt() int32 {
 	if x != nil {
 		return x.Attempt
 	}
 	return 0
 }
 
-type OCPEngineFailureRequest struct {
+type FailureRequest struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
 	ClusterId         string                 `protobuf:"bytes,1,opt,name=cluster_id,json=clusterId,proto3" json:"cluster_id,omitempty"`
 	Phase             string                 `protobuf:"bytes,2,opt,name=phase,proto3" json:"phase,omitempty"`
@@ -327,21 +327,21 @@ type OCPEngineFailureRequest struct {
 	sizeCache         protoimpl.SizeCache
 }
 
-func (x *OCPEngineFailureRequest) Reset() {
-	*x = OCPEngineFailureRequest{}
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[3]
+func (x *FailureRequest) Reset() {
+	*x = FailureRequest{}
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OCPEngineFailureRequest) String() string {
+func (x *FailureRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OCPEngineFailureRequest) ProtoMessage() {}
+func (*FailureRequest) ProtoMessage() {}
 
-func (x *OCPEngineFailureRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[3]
+func (x *FailureRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -352,88 +352,88 @@ func (x *OCPEngineFailureRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OCPEngineFailureRequest.ProtoReflect.Descriptor instead.
-func (*OCPEngineFailureRequest) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP(), []int{3}
+// Deprecated: Use FailureRequest.ProtoReflect.Descriptor instead.
+func (*FailureRequest) Descriptor() ([]byte, []int) {
+	return file_ocp_v1_callback_service_proto_rawDescGZIP(), []int{3}
 }
 
-func (x *OCPEngineFailureRequest) GetClusterId() string {
+func (x *FailureRequest) GetClusterId() string {
 	if x != nil {
 		return x.ClusterId
 	}
 	return ""
 }
 
-func (x *OCPEngineFailureRequest) GetPhase() string {
+func (x *FailureRequest) GetPhase() string {
 	if x != nil {
 		return x.Phase
 	}
 	return ""
 }
 
-func (x *OCPEngineFailureRequest) GetFailureReason() string {
+func (x *FailureRequest) GetFailureReason() string {
 	if x != nil {
 		return x.FailureReason
 	}
 	return ""
 }
 
-func (x *OCPEngineFailureRequest) GetFailureMessage() string {
+func (x *FailureRequest) GetFailureMessage() string {
 	if x != nil {
 		return x.FailureMessage
 	}
 	return ""
 }
 
-func (x *OCPEngineFailureRequest) GetLogTail() string {
+func (x *FailureRequest) GetLogTail() string {
 	if x != nil {
 		return x.LogTail
 	}
 	return ""
 }
 
-func (x *OCPEngineFailureRequest) GetRequiresDestroy() bool {
+func (x *FailureRequest) GetRequiresDestroy() bool {
 	if x != nil {
 		return x.RequiresDestroy
 	}
 	return false
 }
 
-func (x *OCPEngineFailureRequest) GetRecoveryAttempted() bool {
+func (x *FailureRequest) GetRecoveryAttempted() bool {
 	if x != nil {
 		return x.RecoveryAttempted
 	}
 	return false
 }
 
-func (x *OCPEngineFailureRequest) GetAttempt() int32 {
+func (x *FailureRequest) GetAttempt() int32 {
 	if x != nil {
 		return x.Attempt
 	}
 	return 0
 }
 
-type OCPEngineAck struct {
+type Ack struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *OCPEngineAck) Reset() {
-	*x = OCPEngineAck{}
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[4]
+func (x *Ack) Reset() {
+	*x = Ack{}
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *OCPEngineAck) String() string {
+func (x *Ack) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*OCPEngineAck) ProtoMessage() {}
+func (*Ack) ProtoMessage() {}
 
-func (x *OCPEngineAck) ProtoReflect() protoreflect.Message {
-	mi := &file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes[4]
+func (x *Ack) ProtoReflect() protoreflect.Message {
+	mi := &file_ocp_v1_callback_service_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -444,31 +444,31 @@ func (x *OCPEngineAck) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use OCPEngineAck.ProtoReflect.Descriptor instead.
-func (*OCPEngineAck) Descriptor() ([]byte, []int) {
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP(), []int{4}
+// Deprecated: Use Ack.ProtoReflect.Descriptor instead.
+func (*Ack) Descriptor() ([]byte, []int) {
+	return file_ocp_v1_callback_service_proto_rawDescGZIP(), []int{4}
 }
 
-var File_fleetshift_v1_ocp_engine_callback_service_proto protoreflect.FileDescriptor
+var File_ocp_v1_callback_service_proto protoreflect.FileDescriptor
 
-const file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc = "" +
+const file_ocp_v1_callback_service_proto_rawDesc = "" +
 	"\n" +
-	"/fleetshift/v1/ocp_engine_callback_service.proto\x12\rfleetshift.v1\"\xc3\x01\n" +
-	"\x1bOCPEnginePhaseResultRequest\x12\x1d\n" +
+	"\x1docp/v1/callback_service.proto\x12\x06ocp.v1\"\xba\x01\n" +
+	"\x12PhaseResultRequest\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12\x16\n" +
 	"\x06status\x18\x03 \x01(\tR\x06status\x12'\n" +
 	"\x0felapsed_seconds\x18\x04 \x01(\x05R\x0eelapsedSeconds\x12\x14\n" +
 	"\x05error\x18\x05 \x01(\tR\x05error\x12\x18\n" +
-	"\aattempt\x18\x06 \x01(\x05R\aattempt\"\x93\x01\n" +
-	"\x19OCPEngineMilestoneRequest\x12\x1d\n" +
+	"\aattempt\x18\x06 \x01(\x05R\aattempt\"\x8a\x01\n" +
+	"\x10MilestoneRequest\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x14\n" +
 	"\x05event\x18\x02 \x01(\tR\x05event\x12'\n" +
 	"\x0felapsed_seconds\x18\x03 \x01(\x05R\x0eelapsedSeconds\x12\x18\n" +
-	"\aattempt\x18\x04 \x01(\x05R\aattempt\"\xce\x03\n" +
-	"\x1aOCPEngineCompletionRequest\x12\x1d\n" +
+	"\aattempt\x18\x04 \x01(\x05R\aattempt\"\xc5\x03\n" +
+	"\x11CompletionRequest\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x19\n" +
 	"\binfra_id\x18\x02 \x01(\tR\ainfraId\x12!\n" +
@@ -486,8 +486,8 @@ const file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc = "" +
 	" \x01(\fR\fmetadataJson\x12-\n" +
 	"\x12recovery_attempted\x18\v \x01(\bR\x11recoveryAttempted\x12'\n" +
 	"\x0felapsed_seconds\x18\f \x01(\x05R\x0eelapsedSeconds\x12\x18\n" +
-	"\aattempt\x18\r \x01(\x05R\aattempt\"\xad\x02\n" +
-	"\x17OCPEngineFailureRequest\x12\x1d\n" +
+	"\aattempt\x18\r \x01(\x05R\aattempt\"\xa4\x02\n" +
+	"\x0eFailureRequest\x12\x1d\n" +
 	"\n" +
 	"cluster_id\x18\x01 \x01(\tR\tclusterId\x12\x14\n" +
 	"\x05phase\x18\x02 \x01(\tR\x05phase\x12%\n" +
@@ -496,43 +496,43 @@ const file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc = "" +
 	"\blog_tail\x18\x05 \x01(\tR\alogTail\x12)\n" +
 	"\x10requires_destroy\x18\x06 \x01(\bR\x0frequiresDestroy\x12-\n" +
 	"\x12recovery_attempted\x18\a \x01(\bR\x11recoveryAttempted\x12\x18\n" +
-	"\aattempt\x18\b \x01(\x05R\aattempt\"\x0e\n" +
-	"\fOCPEngineAck2\x84\x03\n" +
-	"\x18OCPEngineCallbackService\x12\\\n" +
-	"\x11ReportPhaseResult\x12*.fleetshift.v1.OCPEnginePhaseResultRequest\x1a\x1b.fleetshift.v1.OCPEngineAck\x12X\n" +
-	"\x0fReportMilestone\x12(.fleetshift.v1.OCPEngineMilestoneRequest\x1a\x1b.fleetshift.v1.OCPEngineAck\x12Z\n" +
-	"\x10ReportCompletion\x12).fleetshift.v1.OCPEngineCompletionRequest\x1a\x1b.fleetshift.v1.OCPEngineAck\x12T\n" +
-	"\rReportFailure\x12&.fleetshift.v1.OCPEngineFailureRequest\x1a\x1b.fleetshift.v1.OCPEngineAckBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\aattempt\x18\b \x01(\x05R\aattempt\"\x05\n" +
+	"\x03Ack2\xfb\x01\n" +
+	"\x0fCallbackService\x12<\n" +
+	"\x11ReportPhaseResult\x12\x1a.ocp.v1.PhaseResultRequest\x1a\v.ocp.v1.Ack\x128\n" +
+	"\x0fReportMilestone\x12\x18.ocp.v1.MilestoneRequest\x1a\v.ocp.v1.Ack\x12:\n" +
+	"\x10ReportCompletion\x12\x19.ocp.v1.CompletionRequest\x1a\v.ocp.v1.Ack\x124\n" +
+	"\rReportFailure\x12\x16.ocp.v1.FailureRequest\x1a\v.ocp.v1.AckB7Z5github.com/fleetshift/fleetshift-poc/gen/ocp/v1;ocpv1b\x06proto3"
 
 var (
-	file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescOnce sync.Once
-	file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescData []byte
+	file_ocp_v1_callback_service_proto_rawDescOnce sync.Once
+	file_ocp_v1_callback_service_proto_rawDescData []byte
 )
 
-func file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescGZIP() []byte {
-	file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescOnce.Do(func() {
-		file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc), len(file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc)))
+func file_ocp_v1_callback_service_proto_rawDescGZIP() []byte {
+	file_ocp_v1_callback_service_proto_rawDescOnce.Do(func() {
+		file_ocp_v1_callback_service_proto_rawDescData = protoimpl.X.CompressGZIP(unsafe.Slice(unsafe.StringData(file_ocp_v1_callback_service_proto_rawDesc), len(file_ocp_v1_callback_service_proto_rawDesc)))
 	})
-	return file_fleetshift_v1_ocp_engine_callback_service_proto_rawDescData
+	return file_ocp_v1_callback_service_proto_rawDescData
 }
 
-var file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
-var file_fleetshift_v1_ocp_engine_callback_service_proto_goTypes = []any{
-	(*OCPEnginePhaseResultRequest)(nil), // 0: fleetshift.v1.OCPEnginePhaseResultRequest
-	(*OCPEngineMilestoneRequest)(nil),   // 1: fleetshift.v1.OCPEngineMilestoneRequest
-	(*OCPEngineCompletionRequest)(nil),  // 2: fleetshift.v1.OCPEngineCompletionRequest
-	(*OCPEngineFailureRequest)(nil),     // 3: fleetshift.v1.OCPEngineFailureRequest
-	(*OCPEngineAck)(nil),                // 4: fleetshift.v1.OCPEngineAck
+var file_ocp_v1_callback_service_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_ocp_v1_callback_service_proto_goTypes = []any{
+	(*PhaseResultRequest)(nil), // 0: ocp.v1.PhaseResultRequest
+	(*MilestoneRequest)(nil),   // 1: ocp.v1.MilestoneRequest
+	(*CompletionRequest)(nil),  // 2: ocp.v1.CompletionRequest
+	(*FailureRequest)(nil),     // 3: ocp.v1.FailureRequest
+	(*Ack)(nil),                // 4: ocp.v1.Ack
 }
-var file_fleetshift_v1_ocp_engine_callback_service_proto_depIdxs = []int32{
-	0, // 0: fleetshift.v1.OCPEngineCallbackService.ReportPhaseResult:input_type -> fleetshift.v1.OCPEnginePhaseResultRequest
-	1, // 1: fleetshift.v1.OCPEngineCallbackService.ReportMilestone:input_type -> fleetshift.v1.OCPEngineMilestoneRequest
-	2, // 2: fleetshift.v1.OCPEngineCallbackService.ReportCompletion:input_type -> fleetshift.v1.OCPEngineCompletionRequest
-	3, // 3: fleetshift.v1.OCPEngineCallbackService.ReportFailure:input_type -> fleetshift.v1.OCPEngineFailureRequest
-	4, // 4: fleetshift.v1.OCPEngineCallbackService.ReportPhaseResult:output_type -> fleetshift.v1.OCPEngineAck
-	4, // 5: fleetshift.v1.OCPEngineCallbackService.ReportMilestone:output_type -> fleetshift.v1.OCPEngineAck
-	4, // 6: fleetshift.v1.OCPEngineCallbackService.ReportCompletion:output_type -> fleetshift.v1.OCPEngineAck
-	4, // 7: fleetshift.v1.OCPEngineCallbackService.ReportFailure:output_type -> fleetshift.v1.OCPEngineAck
+var file_ocp_v1_callback_service_proto_depIdxs = []int32{
+	0, // 0: ocp.v1.CallbackService.ReportPhaseResult:input_type -> ocp.v1.PhaseResultRequest
+	1, // 1: ocp.v1.CallbackService.ReportMilestone:input_type -> ocp.v1.MilestoneRequest
+	2, // 2: ocp.v1.CallbackService.ReportCompletion:input_type -> ocp.v1.CompletionRequest
+	3, // 3: ocp.v1.CallbackService.ReportFailure:input_type -> ocp.v1.FailureRequest
+	4, // 4: ocp.v1.CallbackService.ReportPhaseResult:output_type -> ocp.v1.Ack
+	4, // 5: ocp.v1.CallbackService.ReportMilestone:output_type -> ocp.v1.Ack
+	4, // 6: ocp.v1.CallbackService.ReportCompletion:output_type -> ocp.v1.Ack
+	4, // 7: ocp.v1.CallbackService.ReportFailure:output_type -> ocp.v1.Ack
 	4, // [4:8] is the sub-list for method output_type
 	0, // [0:4] is the sub-list for method input_type
 	0, // [0:0] is the sub-list for extension type_name
@@ -540,26 +540,26 @@ var file_fleetshift_v1_ocp_engine_callback_service_proto_depIdxs = []int32{
 	0, // [0:0] is the sub-list for field type_name
 }
 
-func init() { file_fleetshift_v1_ocp_engine_callback_service_proto_init() }
-func file_fleetshift_v1_ocp_engine_callback_service_proto_init() {
-	if File_fleetshift_v1_ocp_engine_callback_service_proto != nil {
+func init() { file_ocp_v1_callback_service_proto_init() }
+func file_ocp_v1_callback_service_proto_init() {
+	if File_ocp_v1_callback_service_proto != nil {
 		return
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
-			RawDescriptor: unsafe.Slice(unsafe.StringData(file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc), len(file_fleetshift_v1_ocp_engine_callback_service_proto_rawDesc)),
+			RawDescriptor: unsafe.Slice(unsafe.StringData(file_ocp_v1_callback_service_proto_rawDesc), len(file_ocp_v1_callback_service_proto_rawDesc)),
 			NumEnums:      0,
 			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
-		GoTypes:           file_fleetshift_v1_ocp_engine_callback_service_proto_goTypes,
-		DependencyIndexes: file_fleetshift_v1_ocp_engine_callback_service_proto_depIdxs,
-		MessageInfos:      file_fleetshift_v1_ocp_engine_callback_service_proto_msgTypes,
+		GoTypes:           file_ocp_v1_callback_service_proto_goTypes,
+		DependencyIndexes: file_ocp_v1_callback_service_proto_depIdxs,
+		MessageInfos:      file_ocp_v1_callback_service_proto_msgTypes,
 	}.Build()
-	File_fleetshift_v1_ocp_engine_callback_service_proto = out.File
-	file_fleetshift_v1_ocp_engine_callback_service_proto_goTypes = nil
-	file_fleetshift_v1_ocp_engine_callback_service_proto_depIdxs = nil
+	File_ocp_v1_callback_service_proto = out.File
+	file_ocp_v1_callback_service_proto_goTypes = nil
+	file_ocp_v1_callback_service_proto_depIdxs = nil
 }

@@ -1,17 +1,17 @@
 syntax = "proto3";
 
-package fleetshift.v1;
+package ocp.v1;
 
-option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+option go_package = "github.com/fleetshift/fleetshift-poc/gen/ocp/v1;ocpv1";
 
-service OCPEngineCallbackService {
-  rpc ReportPhaseResult(OCPEnginePhaseResultRequest) returns (OCPEngineAck);
-  rpc ReportMilestone(OCPEngineMilestoneRequest) returns (OCPEngineAck);
-  rpc ReportCompletion(OCPEngineCompletionRequest) returns (OCPEngineAck);
-  rpc ReportFailure(OCPEngineFailureRequest) returns (OCPEngineAck);
+service CallbackService {
+  rpc ReportPhaseResult(PhaseResultRequest) returns (Ack);
+  rpc ReportMilestone(MilestoneRequest) returns (Ack);
+  rpc ReportCompletion(CompletionRequest) returns (Ack);
+  rpc ReportFailure(FailureRequest) returns (Ack);
 }
 
-message OCPEnginePhaseResultRequest {
+message PhaseResultRequest {
   string cluster_id = 1;
   string phase = 2;
   string status = 3;
@@ -20,14 +20,14 @@ message OCPEnginePhaseResultRequest {
   int32 attempt = 6;
 }
 
-message OCPEngineMilestoneRequest {
+message MilestoneRequest {
   string cluster_id = 1;
   string event = 2;
   int32 elapsed_seconds = 3;
   int32 attempt = 4;
 }
 
-message OCPEngineCompletionRequest {
+message CompletionRequest {
   string cluster_id = 1;
   string infra_id = 2;
   string cluster_uuid = 3;
@@ -43,7 +43,7 @@ message OCPEngineCompletionRequest {
   int32 attempt = 13;
 }
 
-message OCPEngineFailureRequest {
+message FailureRequest {
   string cluster_id = 1;
   string phase = 2;
   string failure_reason = 3;
@@ -54,4 +54,4 @@ message OCPEngineFailureRequest {
   int32 attempt = 8;
 }
 
-message OCPEngineAck {}
+message Ack {}
