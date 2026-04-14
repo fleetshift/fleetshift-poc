@@ -2,7 +2,6 @@ package ocp
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"sync"
 
@@ -16,6 +15,8 @@ import (
 type provisionState struct {
 	done      chan struct{}
 	closeOnce sync.Once
+
+	mu         sync.Mutex
 	completion *fleetshiftv1.OCPEngineCompletionRequest
 	failure    *fleetshiftv1.OCPEngineFailureRequest
 }
@@ -47,11 +48,11 @@ func (s *callbackServer) authenticateCallback(ctx context.Context, requestCluste
 func (s *callbackServer) getProvision(clusterID string) (*provisionState, error) {
 	val, ok := s.provisions.Load(clusterID)
 	if !ok {
-		return nil, fmt.Errorf("unknown cluster ID: %s", clusterID)
+		return nil, status.Errorf(codes.NotFound, "unknown cluster ID: %s", clusterID)
 	}
 	state, ok := val.(*provisionState)
 	if !ok {
-		return nil, fmt.Errorf("invalid provision state for cluster ID: %s", clusterID)
+		return nil, status.Errorf(codes.Internal, "invalid provision state for cluster ID: %s", clusterID)
 	}
 	return state, nil
 }
@@ -75,7 +76,9 @@ func (s *callbackServer) ReportCompletion(ctx context.Context, req *fleetshiftv1
 	if err != nil {
 		return nil, err
 	}
+	state.mu.Lock()
 	state.completion = req
+	state.mu.Unlock()
 	state.closeOnce.Do(func() { close(state.done) })
 	return &fleetshiftv1.OCPEngineAck{}, nil
 }
@@ -85,7 +88,9 @@ func (s *callbackServer) ReportFailure(ctx context.Context, req *fleetshiftv1.OC
 	if err != nil {
 		return nil, err
 	}
+	state.mu.Lock()
 	state.failure = req
+	state.mu.Unlock()
 	state.closeOnce.Do(func() { close(state.done) })
 	return &fleetshiftv1.OCPEngineAck{}, nil
 }

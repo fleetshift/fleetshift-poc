@@ -213,3 +213,92 @@ func TestBuildClusterYAML_WithInstallConfig(t *testing.T) {
 		t.Errorf("credentialsMode was overwritten")
 	}
 }
+
+func TestBuildClusterYAML_BaseKeysCannotBeOverridden(t *testing.T) {
+	spec := &ClusterSpec{
+		Name:       "real-cluster",
+		BaseDomain: "real.example.com",
+		InstallConfig: map[string]any{
+			"baseDomain":      "evil.example.com",
+			"credentialsMode": "Passthrough",
+			"metadata":        map[string]any{"name": "evil-cluster"},
+			"ocp_engine":      map[string]any{"pull_secret_file": "/etc/shadow"},
+			"sshKey":          "ssh-rsa EVIL",
+		},
+	}
+
+	yamlBytes, err := BuildClusterYAML(spec, "us-east-1", "/safe/pull-secret.json", "ssh-ed25519 SAFE")
+	if err != nil {
+		t.Fatalf("BuildClusterYAML failed: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(yamlBytes, &result); err != nil {
+		t.Fatalf("generated YAML is invalid: %v", err)
+	}
+
+	if result["baseDomain"] != "real.example.com" {
+		t.Errorf("baseDomain was overridden: got %v", result["baseDomain"])
+	}
+	if result["credentialsMode"] != "Manual" {
+		t.Errorf("credentialsMode was overridden: got %v", result["credentialsMode"])
+	}
+	if result["sshKey"] != "ssh-ed25519 SAFE" {
+		t.Errorf("sshKey was overridden: got %v", result["sshKey"])
+	}
+
+	metadata := result["metadata"].(map[string]any)
+	if metadata["name"] != "real-cluster" {
+		t.Errorf("metadata.name was overridden: got %v", metadata["name"])
+	}
+
+	ocpEngine := result["ocp_engine"].(map[string]any)
+	if ocpEngine["pull_secret_file"] != "/safe/pull-secret.json" {
+		t.Errorf("ocp_engine.pull_secret_file was overridden: got %v", ocpEngine["pull_secret_file"])
+	}
+}
+
+func TestBuildClusterYAML_PlatformDeepMerge(t *testing.T) {
+	spec := &ClusterSpec{
+		Name:       "test-cluster",
+		BaseDomain: "example.com",
+		InstallConfig: map[string]any{
+			"platform": map[string]any{
+				"aws": map[string]any{
+					"region": "should-be-ignored",
+					"subnets": []any{
+						"subnet-aaa",
+						"subnet-bbb",
+					},
+				},
+			},
+		},
+	}
+
+	yamlBytes, err := BuildClusterYAML(spec, "us-west-2", "/pull-secret.json", "ssh-ed25519 KEY")
+	if err != nil {
+		t.Fatalf("BuildClusterYAML failed: %v", err)
+	}
+
+	var result map[string]any
+	if err := yaml.Unmarshal(yamlBytes, &result); err != nil {
+		t.Fatalf("generated YAML is invalid: %v", err)
+	}
+
+	platform := result["platform"].(map[string]any)
+	aws := platform["aws"].(map[string]any)
+
+	// region must be the authoritative value, not the user-provided one
+	if aws["region"] != "us-west-2" {
+		t.Errorf("platform.aws.region was overridden: got %v", aws["region"])
+	}
+
+	// user-provided subnets should be preserved
+	subnets, ok := aws["subnets"].([]any)
+	if !ok || len(subnets) != 2 {
+		t.Fatalf("expected 2 subnets, got %v", aws["subnets"])
+	}
+	if subnets[0] != "subnet-aaa" || subnets[1] != "subnet-bbb" {
+		t.Errorf("unexpected subnets: %v", subnets)
+	}
+}

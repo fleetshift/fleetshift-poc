@@ -62,34 +62,51 @@ func ParseClusterSpec(manifests []domain.Manifest) (*ClusterSpec, error) {
 // - platform.aws.region from the region parameter
 // - sshKey from sshPublicKey parameter
 // - All fields from spec.InstallConfig merged in (pass-through fields)
+//
+// InstallConfig fields are applied first, then base keys are set on top,
+// so base keys (baseDomain, credentialsMode, metadata, ocp_engine, sshKey)
+// are always authoritative. The platform key is deep-merged so that
+// user-provided platform fields (e.g. platform.aws.type) coexist with
+// the base region without clobbering each other.
 func BuildClusterYAML(spec *ClusterSpec, region, pullSecretFile, sshPublicKey string) ([]byte, error) {
-	// Start with base structure
-	config := map[string]any{
-		"ocp_engine": map[string]any{
-			"pull_secret_file": pullSecretFile,
-		},
-		"baseDomain":      spec.BaseDomain,
-		"credentialsMode": "Manual",
-		"metadata": map[string]any{
-			"name": spec.Name,
-		},
-		"platform": map[string]any{
-			"aws": map[string]any{
-				"region": region,
-			},
-		},
-		"sshKey": sshPublicKey,
+	// Apply InstallConfig pass-through fields first
+	config := make(map[string]any, len(spec.InstallConfig)+6)
+	for key, value := range spec.InstallConfig {
+		config[key] = value
+	}
+
+	// Set base keys on top — these are authoritative and cannot be
+	// overridden by InstallConfig.
+	config["ocp_engine"] = map[string]any{
+		"pull_secret_file": pullSecretFile,
+	}
+	config["baseDomain"] = spec.BaseDomain
+	config["credentialsMode"] = "Manual"
+	config["metadata"] = map[string]any{
+		"name": spec.Name,
+	}
+	config["sshKey"] = sshPublicKey
+
+	// Deep-merge platform: preserve user-provided platform fields (e.g.
+	// platform.aws.type) while ensuring region is always set.
+	basePlatformAWS := map[string]any{"region": region}
+	if userPlatform, ok := config["platform"].(map[string]any); ok {
+		if userAWS, ok := userPlatform["aws"].(map[string]any); ok {
+			for k, v := range userAWS {
+				if _, reserved := basePlatformAWS[k]; !reserved {
+					basePlatformAWS[k] = v
+				}
+			}
+		}
+	}
+	config["platform"] = map[string]any{
+		"aws": basePlatformAWS,
 	}
 
 	// Add release_image to ocp_engine section if specified
 	if spec.ReleaseImage != "" {
 		ocpEngine := config["ocp_engine"].(map[string]any)
 		ocpEngine["release_image"] = spec.ReleaseImage
-	}
-
-	// Merge in InstallConfig pass-through fields
-	for key, value := range spec.InstallConfig {
-		config[key] = value
 	}
 
 	// Marshal to YAML

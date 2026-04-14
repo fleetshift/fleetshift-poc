@@ -4,6 +4,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/lestrrat-go/jwx/v3/jwa"
+	"github.com/lestrrat-go/jwx/v3/jwt"
 )
 
 func TestCallbackTokenSigner_RoundTrip(t *testing.T) {
@@ -50,7 +53,7 @@ func TestCallbackTokenSigner_WrongAudience(t *testing.T) {
 		t.Fatalf("NewCallbackTokenSigner: %v", err)
 	}
 
-	token := signer.signWithAudience(t, "aud-cluster", "wrong-audience", 5*time.Minute)
+	token := signWithAudience(t, signer, "aud-cluster", "wrong-audience", 5*time.Minute)
 
 	_, err = signer.Verify(token)
 	if err == nil {
@@ -77,6 +80,29 @@ func TestCallbackTokenSigner_DifferentSignerRejects(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when verifying with different signer, got nil")
 	}
+}
+
+// signWithAudience is a test helper that signs a token with a custom audience
+// instead of the default callbackAudience. This enables wrong-audience tests.
+func signWithAudience(t *testing.T, s *CallbackTokenSigner, clusterID, audience string, duration time.Duration) string {
+	t.Helper()
+
+	tok, err := jwt.NewBuilder().
+		Subject(clusterID).
+		Audience([]string{audience}).
+		IssuedAt(time.Now()).
+		Expiration(time.Now().Add(duration)).
+		Build()
+	if err != nil {
+		t.Fatalf("signWithAudience: build token: %v", err)
+	}
+
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), s.privKey))
+	if err != nil {
+		t.Fatalf("signWithAudience: sign token: %v", err)
+	}
+
+	return string(signed)
 }
 
 func TestCallbackTokenSigner_TamperedToken(t *testing.T) {

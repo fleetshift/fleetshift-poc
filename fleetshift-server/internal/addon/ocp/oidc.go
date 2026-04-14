@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"strings"
 	"text/template"
+
+	"gopkg.in/yaml.v3"
 )
 
 // OIDCProviderConfig holds configuration for generating OIDC authentication manifests
@@ -101,7 +103,7 @@ metadata:
   name: fleetshift-oidc-secret
   namespace: openshift-config
 stringData:
-  clientSecret: "{{ .ClientSecret }}"
+  clientSecret: {{ .ClientSecretQuoted }}
 `
 
 type authCRData struct {
@@ -117,7 +119,7 @@ type caConfigMapData struct {
 }
 
 type clientSecretData struct {
-	ClientSecret string
+	ClientSecretQuoted string
 }
 
 func generateAuthenticationCR(cfg OIDCProviderConfig) ([]byte, error) {
@@ -166,8 +168,15 @@ func generateClientSecret(clientSecret string) ([]byte, error) {
 		return nil, err
 	}
 
+	// Use yaml.Marshal to produce a properly quoted/escaped scalar,
+	// then trim the trailing newline it appends.
+	quoted, err := yaml.Marshal(clientSecret)
+	if err != nil {
+		return nil, fmt.Errorf("marshal client secret: %w", err)
+	}
+
 	data := clientSecretData{
-		ClientSecret: clientSecret,
+		ClientSecretQuoted: strings.TrimSpace(string(quoted)),
 	}
 
 	var buf bytes.Buffer

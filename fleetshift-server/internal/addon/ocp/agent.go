@@ -20,14 +20,15 @@ import (
 // out to ocp-engine for provisioning, receives completion callbacks via
 // gRPC, and bootstraps platform credentials on the new cluster.
 type Agent struct {
-	engineBinary string
-	callbackAddr string
-	vault        domain.Vault
-	credentials  CredentialProvider
-	oidcConfig   OIDCProviderConfig
-	observer     AgentObserver
-	tokenSigner  *CallbackTokenSigner
-	provisions   sync.Map // clusterID → *provisionState
+	engineBinary     string
+	callbackAddr     string
+	vault            domain.Vault
+	credentials      CredentialProvider
+	oidcConfig       OIDCProviderConfig
+	observer         AgentObserver
+	tokenSigner      *CallbackTokenSigner
+	provisionTimeout time.Duration
+	provisions       sync.Map // clusterID → *provisionState
 }
 
 // AgentOption configures an [Agent].
@@ -70,6 +71,12 @@ func WithObserver(o AgentObserver) AgentOption {
 // verifying callback JWTs.
 func WithTokenSigner(s *CallbackTokenSigner) AgentOption {
 	return func(a *Agent) { a.tokenSigner = s }
+}
+
+// WithProvisionTimeout sets the timeout for cluster provisioning.
+// Defaults to 2h (matching defaultProvisionSTSDuration).
+func WithProvisionTimeout(d time.Duration) AgentOption {
+	return func(a *Agent) { a.provisionTimeout = d }
 }
 
 // NewAgent returns an Agent configured with the given options.
@@ -219,7 +226,7 @@ func (a *Agent) deliverAsync(
 	defer os.RemoveAll(workDir)
 
 	// Generate callback JWT
-	token, err := a.tokenSigner.Sign(clusterID, provisionTimeout())
+	token, err := a.tokenSigner.Sign(clusterID, a.effectiveProvisionTimeout())
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -228,7 +235,7 @@ func (a *Agent) deliverAsync(
 		return
 	}
 
-	timeout := "2h"
+	timeout := fmt.Sprintf("%ds", int(a.effectiveProvisionTimeout().Seconds()))
 
 	// Build and run ocp-engine subprocess
 	cmd := exec.CommandContext(ctx, a.engineBinary,
@@ -287,16 +294,22 @@ func (a *Agent) deliverAsync(
 		return
 	}
 
-	// Process callback result
-	if state.failure != nil {
+	// Process callback result (lock protects against concurrent
+	// completion/failure writes from the callback server).
+	state.mu.Lock()
+	failure := state.failure
+	completion := state.completion
+	state.mu.Unlock()
+
+	if failure != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("ocp-engine failed in phase %s: %s", state.failure.GetPhase(), state.failure.GetFailureMessage()),
+			Message: fmt.Sprintf("ocp-engine failed in phase %s: %s", failure.GetPhase(), failure.GetFailureMessage()),
 		})
 		return
 	}
 
-	if state.completion == nil {
+	if completion == nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: "callback received but no completion data",
@@ -305,7 +318,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	// Handle successful completion
-	output, err := a.handleCompletion(ctx, clusterID, state.completion, sshPrivateKey, auth)
+	output, err := a.handleCompletion(ctx, clusterID, completion, sshPrivateKey, auth)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -348,6 +361,7 @@ func (a *Agent) handleCompletion(
 		targetID,
 		auth.Caller,
 		issuerURL,
+		0, // use default token expiry
 	)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap cluster: %w", err)
@@ -480,8 +494,12 @@ func (a *Agent) Remove(
 	return nil
 }
 
-// provisionTimeout returns the default provision timeout as a duration.
-func provisionTimeout() time.Duration {
+// effectiveProvisionTimeout returns the configured provision timeout,
+// falling back to defaultProvisionSTSDuration (2h).
+func (a *Agent) effectiveProvisionTimeout() time.Duration {
+	if a.provisionTimeout > 0 {
+		return a.provisionTimeout
+	}
 	return defaultProvisionSTSDuration
 }
 

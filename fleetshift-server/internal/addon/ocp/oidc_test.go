@@ -349,6 +349,52 @@ func TestGenerateOIDCManifests_NoCLIClient(t *testing.T) {
 	}
 }
 
+func TestGenerateOIDCManifests_ClientSecretSpecialChars(t *testing.T) {
+	tests := []struct {
+		name   string
+		secret string
+	}{
+		{"double quotes", `secret-with-"quotes"`},
+		{"backslash", `secret\with\backslashes`},
+		{"colon", `secret: with colon`},
+		{"newline", "secret\nwith\nnewlines"},
+		{"yaml special", `{not: yaml}`},
+		{"hash", `secret # not a comment`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := OIDCProviderConfig{
+				IssuerURL:    "https://keycloak.example.com/realms/openshift",
+				Audiences:    []string{"openshift"},
+				ClientSecret: tt.secret,
+			}
+
+			manifests, err := GenerateOIDCManifests(cfg)
+			if err != nil {
+				t.Fatalf("GenerateOIDCManifests failed: %v", err)
+			}
+
+			secretYAML, ok := manifests["cluster-oidc-client-secret.yaml"]
+			if !ok {
+				t.Fatal("missing cluster-oidc-client-secret.yaml")
+			}
+
+			// The generated YAML must parse cleanly
+			var secret map[string]any
+			if err := yaml.Unmarshal(secretYAML, &secret); err != nil {
+				t.Fatalf("generated YAML is invalid for secret %q: %v", tt.secret, err)
+			}
+
+			// The round-tripped value must match the original
+			stringData := secret["stringData"].(map[string]any)
+			if stringData["clientSecret"] != tt.secret {
+				t.Errorf("round-trip mismatch: got %q, want %q", stringData["clientSecret"], tt.secret)
+			}
+		})
+	}
+}
+
 func TestGenerateOIDCManifests_NoClientSecret(t *testing.T) {
 	cfg := OIDCProviderConfig{
 		IssuerURL:    "https://keycloak.example.com/realms/openshift",

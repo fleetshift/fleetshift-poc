@@ -108,8 +108,9 @@ func (p *SSOCredentialProvider) ResolvePullSecret(ctx context.Context, req PullS
 	}
 	defer resp.Body.Close()
 
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
+	// Read response body (limit to 1 MiB to prevent memory exhaustion)
+	const maxPullSecretSize = 1 << 20
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPullSecretSize))
 	if err != nil {
 		return nil, fmt.Errorf("failed to read pull secret response: %w", err)
 	}

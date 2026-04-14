@@ -191,6 +191,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("seed kind target: %w", err)
 	}
 
+	if err := targetSvc.Register(ctx, domain.TargetInfo{
+		ID:                    "ocp-aws",
+		Type:                  ocpaddon.TargetType,
+		Name:                  "OCP on AWS",
+		AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
+	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
+		return fmt.Errorf("seed ocp-aws target: %w", err)
+	}
+
 	workerCtx, workerCancel := context.WithCancel(ctx)
 	defer workerCancel()
 	if err := wfWorker.Start(workerCtx); err != nil {

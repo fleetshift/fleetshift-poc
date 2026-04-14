@@ -16,9 +16,9 @@ import (
 )
 
 const (
-	platformSAName      = "fleetshift-platform"
-	platformNamespace   = "fleetshift-system"
-	platformTokenExpiry = 24 * 3600 // seconds
+	platformSAName             = "fleetshift-platform"
+	platformNamespace          = "fleetshift-system"
+	defaultPlatformTokenExpiry = 24 * 3600 // seconds
 )
 
 // BootstrapResult contains the vault references and credentials generated
@@ -34,16 +34,17 @@ type BootstrapResult struct {
 // cluster using the kubeadmin kubeconfig. It creates the fleetshift-system
 // namespace, provisions a ServiceAccount with cluster-admin privileges,
 // optionally grants cluster-admin to the caller via OIDC username binding,
-// and generates a 24-hour bearer token for the platform ServiceAccount.
+// and generates a bearer token for the platform ServiceAccount.
 //
-// The returned [BootstrapResult] contains vault secret references suitable
-// for persisting credentials via [domain.ProducedSecret].
+// tokenExpirySeconds controls the SA token lifetime. Pass 0 to use the
+// default (24 hours).
 func BootstrapCluster(
 	ctx context.Context,
 	kubeconfig []byte,
 	targetID domain.TargetID,
 	caller *domain.SubjectClaims,
 	issuerURL domain.IssuerURL,
+	tokenExpirySeconds int64,
 ) (*BootstrapResult, error) {
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
@@ -113,11 +114,15 @@ func BootstrapCluster(
 		}
 	}
 
-	// 5. Generate a 24h bearer token for the SA via TokenRequest API
+	// 5. Generate a bearer token for the SA via TokenRequest API
+	expiry := int64(tokenExpirySeconds)
+	if expiry <= 0 {
+		expiry = defaultPlatformTokenExpiry
+	}
 	tokenReq, err := client.CoreV1().ServiceAccounts(platformNamespace).CreateToken(
 		ctx, platformSAName, &authv1.TokenRequest{
 			Spec: authv1.TokenRequestSpec{
-				ExpirationSeconds: ptr.To[int64](platformTokenExpiry),
+				ExpirationSeconds: ptr.To(expiry),
 			},
 		}, metav1.CreateOptions{})
 	if err != nil {

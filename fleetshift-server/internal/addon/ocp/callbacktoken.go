@@ -4,7 +4,6 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/lestrrat-go/jwx/v3/jwa"
@@ -88,25 +87,3 @@ func (s *CallbackTokenSigner) Verify(tokenString string) (string, error) {
 	return sub, nil
 }
 
-// signWithAudience is a test helper that signs a token with a custom audience
-// instead of the default callbackAudience. This enables wrong-audience tests.
-func (s *CallbackTokenSigner) signWithAudience(t *testing.T, clusterID, audience string, duration time.Duration) string {
-	t.Helper()
-
-	tok, err := jwt.NewBuilder().
-		Subject(clusterID).
-		Audience([]string{audience}).
-		IssuedAt(time.Now()).
-		Expiration(time.Now().Add(duration)).
-		Build()
-	if err != nil {
-		t.Fatalf("signWithAudience: build token: %v", err)
-	}
-
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.EdDSA(), s.privKey))
-	if err != nil {
-		t.Fatalf("signWithAudience: sign token: %v", err)
-	}
-
-	return string(signed)
-}

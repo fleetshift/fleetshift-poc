@@ -206,6 +206,59 @@ func TestCallbackServer_WrongClusterID(t *testing.T) {
 	}
 }
 
+func TestCallbackServer_ConcurrentCompletionAndFailure(t *testing.T) {
+	server, signer, provisions := newTestCallbackServer(t)
+	clusterID := "concurrent-test"
+	state := &provisionState{done: make(chan struct{})}
+	provisions.Store(clusterID, state)
+
+	token, err := signer.Sign(clusterID, 2*time.Hour)
+	if err != nil {
+		t.Fatalf("Sign: %v", err)
+	}
+
+	ctx := ctxWithToken(token)
+
+	// Fire completion and failure concurrently — only one should close the
+	// channel (no panic from double-close), and the state must be consistent.
+	done := make(chan struct{}, 2)
+	go func() {
+		server.ReportCompletion(ctx, &fleetshiftv1.OCPEngineCompletionRequest{
+			ClusterId: clusterID,
+			InfraId:   "infra-concurrent",
+		})
+		done <- struct{}{}
+	}()
+	go func() {
+		server.ReportFailure(ctx, &fleetshiftv1.OCPEngineFailureRequest{
+			ClusterId:      clusterID,
+			Phase:          "bootstrap",
+			FailureMessage: "race condition test",
+		})
+		done <- struct{}{}
+	}()
+
+	<-done
+	<-done
+
+	// The done channel must be closed exactly once (no panic)
+	select {
+	case <-state.done:
+	default:
+		t.Error("expected done channel to be closed")
+	}
+
+	// At least one of completion or failure must be set
+	state.mu.Lock()
+	hasCompletion := state.completion != nil
+	hasFailure := state.failure != nil
+	state.mu.Unlock()
+
+	if !hasCompletion && !hasFailure {
+		t.Error("expected at least one of completion or failure to be set")
+	}
+}
+
 func TestCallbackServer_UnknownCluster(t *testing.T) {
 	server, signer, _ := newTestCallbackServer(t)
 	token, _ := signer.Sign("unknown-cluster", 2*time.Hour)
@@ -215,5 +268,8 @@ func TestCallbackServer_UnknownCluster(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for unknown cluster")
+	}
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.NotFound {
+		t.Errorf("code = %v, want NotFound", status.Code(err))
 	}
 }
