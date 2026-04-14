@@ -14,7 +14,8 @@ import (
 )
 
 type provisionState struct {
-	done       chan struct{}
+	done      chan struct{}
+	closeOnce sync.Once
 	completion *fleetshiftv1.OCPCompletionRequest
 	failure    *fleetshiftv1.OCPFailureRequest
 }
@@ -75,7 +76,7 @@ func (s *callbackServer) ReportCompletion(ctx context.Context, req *fleetshiftv1
 		return nil, err
 	}
 	state.completion = req
-	close(state.done)
+	state.closeOnce.Do(func() { close(state.done) })
 	return &fleetshiftv1.OCPAck{}, nil
 }
 
@@ -85,7 +86,7 @@ func (s *callbackServer) ReportFailure(ctx context.Context, req *fleetshiftv1.OC
 		return nil, err
 	}
 	state.failure = req
-	close(state.done)
+	state.closeOnce.Do(func() { close(state.done) })
 	return &fleetshiftv1.OCPAck{}, nil
 }
 

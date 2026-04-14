@@ -333,7 +333,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	// Handle successful completion
-	output, err := a.handleCompletion(ctx, state.completion, sshPrivateKey, auth)
+	output, err := a.handleCompletion(ctx, clusterID, state.completion, sshPrivateKey, auth)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -356,6 +356,7 @@ func (a *Agent) deliverAsync(
 // [ClusterOutput] from the completion callback data.
 func (a *Agent) handleCompletion(
 	ctx context.Context,
+	clusterName string,
 	completion *fleetshiftv1.OCPCompletionRequest,
 	sshPrivateKey []byte,
 	auth domain.DeliveryAuth,
@@ -383,7 +384,7 @@ func (a *Agent) handleCompletion(
 	// Build ClusterOutput
 	output := &ClusterOutput{
 		TargetID:      targetID,
-		Name:          completion.GetClusterId(),
+		Name:          clusterName,
 		APIServer:     completion.GetApiServer(),
 		CACert:        completion.GetCaCert(),
 		InfraID:       completion.GetInfraId(),
@@ -466,7 +467,7 @@ func (a *Agent) Remove(
 	// 5. Run ocp-engine destroy
 	cmd := exec.CommandContext(ctx, a.engineBinary,
 		"destroy",
-		"--dir", workDir,
+		"--work-dir", workDir,
 	)
 	cmd.Env = append(os.Environ(), awsCreds.Env()...)
 	cmd.Stdout = os.Stderr
