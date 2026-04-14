@@ -178,56 +178,24 @@ func (a *Agent) Deliver(
 		}, nil
 	}
 
-	// 7. Create temp work directory
-	workDir, err := os.MkdirTemp("", fmt.Sprintf("ocp-provision-%s-", clusterID))
+	// 7. Prepare work directory with pull secret and cluster.yaml
+	configPath, workDir, err := prepareWorkDir(clusterID, spec, region, pullSecret, sshPublicKey)
 	if err != nil {
 		probe.Error(err)
 		return domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("create work directory: %v", err),
+			Message: err.Error(),
 		}, nil
 	}
 
-	// 8. Write pull secret to temp file
-	pullSecretFile := filepath.Join(workDir, "pull-secret.json")
-	if err := os.WriteFile(pullSecretFile, pullSecret, 0600); err != nil {
-		os.RemoveAll(workDir)
-		probe.Error(err)
-		return domain.DeliveryResult{
-			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("write pull secret: %v", err),
-		}, nil
-	}
-
-	// 9. Build cluster.yaml
-	clusterYAML, err := BuildClusterYAML(spec, region, pullSecretFile, strings.TrimSpace(string(sshPublicKey)))
-	if err != nil {
-		os.RemoveAll(workDir)
-		probe.Error(err)
-		return domain.DeliveryResult{
-			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("build cluster.yaml: %v", err),
-		}, nil
-	}
-
-	configPath := filepath.Join(workDir, "cluster.yaml")
-	if err := os.WriteFile(configPath, clusterYAML, 0600); err != nil {
-		os.RemoveAll(workDir)
-		probe.Error(err)
-		return domain.DeliveryResult{
-			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("write cluster.yaml: %v", err),
-		}, nil
-	}
-
-	// 10. Register provisionState
+	// 8. Register provisionState
 	state := &provisionState{done: make(chan struct{})}
 	a.provisions.Store(clusterID, state)
 
-	// 11. Launch background goroutine
+	// 9. Launch background goroutine
 	go a.deliverAsync(ctx, clusterID, configPath, workDir, awsCreds, sshPrivateKey, auth, signaler, state)
 
-	// 12. Return accepted
+	// 10. Return accepted
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
@@ -447,21 +415,8 @@ func (a *Agent) Remove(
 	defer os.RemoveAll(workDir)
 
 	// 4. Write reconstructed metadata.json from target properties
-	metadata := map[string]any{
-		"infraID":   infraID,
-		"clusterID": clusterID,
-		"aws": map[string]any{
-			"region":     region,
-			"identifier": []map[string]string{{"infraID": infraID}},
-		},
-	}
-	metadataJSON, err := json.Marshal(metadata)
-	if err != nil {
-		return fmt.Errorf("marshal metadata.json: %w", err)
-	}
-	metadataPath := filepath.Join(workDir, "metadata.json")
-	if err := os.WriteFile(metadataPath, metadataJSON, 0600); err != nil {
-		return fmt.Errorf("write metadata.json: %w", err)
+	if err := writeDestroyMetadata(workDir, infraID, clusterID, region); err != nil {
+		return err
 	}
 
 	// 5. Run ocp-engine destroy
@@ -524,4 +479,52 @@ func (a *Agent) Remove(
 // provisionTimeout returns the default provision timeout as a duration.
 func provisionTimeout() time.Duration {
 	return defaultProvisionSTSDuration
+}
+
+// prepareWorkDir creates a temp directory containing the pull secret and
+// cluster.yaml config. Returns the config file path and work directory.
+// The caller is responsible for cleaning up the work directory.
+func prepareWorkDir(clusterID string, spec *ClusterSpec, region string, pullSecret, sshPublicKey []byte) (configPath, workDir string, err error) {
+	workDir, err = os.MkdirTemp("", "ocp-provision-"+clusterID+"-")
+	if err != nil {
+		return "", "", fmt.Errorf("create work directory: %w", err)
+	}
+
+	pullSecretFile := filepath.Join(workDir, "pull-secret.json")
+	if err := os.WriteFile(pullSecretFile, pullSecret, 0600); err != nil {
+		os.RemoveAll(workDir)
+		return "", "", fmt.Errorf("write pull secret: %w", err)
+	}
+
+	clusterYAML, err := BuildClusterYAML(spec, region, pullSecretFile, strings.TrimSpace(string(sshPublicKey)))
+	if err != nil {
+		os.RemoveAll(workDir)
+		return "", "", fmt.Errorf("build cluster.yaml: %w", err)
+	}
+
+	configPath = filepath.Join(workDir, "cluster.yaml")
+	if err := os.WriteFile(configPath, clusterYAML, 0600); err != nil {
+		os.RemoveAll(workDir)
+		return "", "", fmt.Errorf("write cluster.yaml: %w", err)
+	}
+
+	return configPath, workDir, nil
+}
+
+// writeDestroyMetadata writes a reconstructed metadata.json to the work
+// directory for ocp-engine destroy.
+func writeDestroyMetadata(workDir, infraID, clusterID, region string) error {
+	metadata := map[string]any{
+		"infraID":   infraID,
+		"clusterID": clusterID,
+		"aws": map[string]any{
+			"region":     region,
+			"identifier": []map[string]string{{"infraID": infraID}},
+		},
+	}
+	metadataJSON, err := json.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("marshal metadata.json: %w", err)
+	}
+	return os.WriteFile(filepath.Join(workDir, "metadata.json"), metadataJSON, 0600)
 }

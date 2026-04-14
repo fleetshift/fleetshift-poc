@@ -18,19 +18,22 @@ type CCOctlOrchestrator struct {
 	AWSEnv     []string // AWS credential env vars (from AWSCredentials.Env())
 }
 
-// ExtractCCOctl extracts the ccoctl binary from the release image.
-// Runs: oc adm release extract --command=ccoctl --to=<WorkDir> --registry-config=<pullSecret> <image>
-// Sets o.BinaryPath to <WorkDir>/ccoctl
-func (o *CCOctlOrchestrator) ExtractCCOctl(ctx context.Context, releaseImage, pullSecretFile string) error {
-	cmd := exec.CommandContext(ctx, "oc", "adm", "release", "extract",
-		"--command=ccoctl",
-		fmt.Sprintf("--to=%s", o.WorkDir),
-		fmt.Sprintf("--registry-config=%s", pullSecretFile),
-		releaseImage,
-	)
+// configureCmd applies the orchestrator's AWS env and stderr routing to a command.
+func (o *CCOctlOrchestrator) configureCmd(cmd *exec.Cmd) {
 	cmd.Env = append(os.Environ(), o.AWSEnv...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
+}
+
+// ExtractCCOctl extracts the ccoctl binary from the release image.
+func (o *CCOctlOrchestrator) ExtractCCOctl(ctx context.Context, releaseImage, pullSecretFile string) error {
+	cmd := exec.CommandContext(ctx, "oc", "adm", "release", "extract",
+		"--command=ccoctl",
+		"--to", o.WorkDir,
+		"--registry-config", pullSecretFile,
+		releaseImage,
+	)
+	o.configureCmd(cmd)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to extract ccoctl binary: %w", err)
@@ -41,9 +44,6 @@ func (o *CCOctlOrchestrator) ExtractCCOctl(ctx context.Context, releaseImage, pu
 }
 
 // ExtractCredentialsRequests extracts CredentialsRequests from the release image.
-// Creates <WorkDir>/credrequests/ directory.
-// Runs: oc adm release extract --credentials-requests --cloud=aws --to=<credrequests> --registry-config=<pullSecret> <image>
-// Returns the credrequests directory path.
 func (o *CCOctlOrchestrator) ExtractCredentialsRequests(ctx context.Context, releaseImage, pullSecretFile string) (string, error) {
 	credReqDir := filepath.Join(o.WorkDir, "credrequests")
 	if err := os.MkdirAll(credReqDir, 0755); err != nil {
@@ -53,13 +53,11 @@ func (o *CCOctlOrchestrator) ExtractCredentialsRequests(ctx context.Context, rel
 	cmd := exec.CommandContext(ctx, "oc", "adm", "release", "extract",
 		"--credentials-requests",
 		"--cloud=aws",
-		fmt.Sprintf("--to=%s", credReqDir),
-		fmt.Sprintf("--registry-config=%s", pullSecretFile),
+		"--to", credReqDir,
+		"--registry-config", pullSecretFile,
 		releaseImage,
 	)
-	cmd.Env = append(os.Environ(), o.AWSEnv...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	o.configureCmd(cmd)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to extract credentials requests: %w", err)
@@ -69,9 +67,6 @@ func (o *CCOctlOrchestrator) ExtractCredentialsRequests(ctx context.Context, rel
 }
 
 // CreateAll runs ccoctl aws create-all to create AWS OIDC resources.
-// Creates <WorkDir>/ccoctl-output/ directory.
-// Runs: ccoctl aws create-all --name=<name> --region=<region> --credentials-requests-dir=<dir> --output-dir=<output>
-// Returns the output directory path.
 func (o *CCOctlOrchestrator) CreateAll(ctx context.Context, clusterName, region, credReqDir string) (string, error) {
 	outputDir := filepath.Join(o.WorkDir, "ccoctl-output")
 	if err := os.MkdirAll(outputDir, 0755); err != nil {
@@ -80,9 +75,7 @@ func (o *CCOctlOrchestrator) CreateAll(ctx context.Context, clusterName, region,
 
 	args := ccoctlCreateAllArgs(clusterName, region, credReqDir, outputDir)
 	cmd := exec.CommandContext(ctx, o.BinaryPath, args...)
-	cmd.Env = append(os.Environ(), o.AWSEnv...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	o.configureCmd(cmd)
 
 	if err := cmd.Run(); err != nil {
 		return "", fmt.Errorf("failed to run ccoctl aws create-all: %w", err)
@@ -92,17 +85,13 @@ func (o *CCOctlOrchestrator) CreateAll(ctx context.Context, clusterName, region,
 }
 
 // InjectManifests copies ccoctl output manifests and TLS files to the installer directory.
-// Copies <output>/manifests/* to <installer>/manifests/
-// Copies <output>/tls/* to <installer>/tls/
 func (o *CCOctlOrchestrator) InjectManifests(ccoctlOutputDir, installerDir string) error {
-	// Copy manifests directory
 	manifestsSrc := filepath.Join(ccoctlOutputDir, "manifests")
 	manifestsDst := filepath.Join(installerDir, "manifests")
 	if err := copyDir(manifestsSrc, manifestsDst); err != nil {
 		return fmt.Errorf("failed to copy manifests: %w", err)
 	}
 
-	// Copy tls directory
 	tlsSrc := filepath.Join(ccoctlOutputDir, "tls")
 	tlsDst := filepath.Join(installerDir, "tls")
 	if err := copyDir(tlsSrc, tlsDst); err != nil {
@@ -113,13 +102,10 @@ func (o *CCOctlOrchestrator) InjectManifests(ccoctlOutputDir, installerDir strin
 }
 
 // Delete runs ccoctl aws delete to clean up AWS resources.
-// Runs: ccoctl aws delete --name=<name> --region=<region>
 func (o *CCOctlOrchestrator) Delete(ctx context.Context, clusterName, region string) error {
 	args := ccoctlDeleteArgs(clusterName, region)
 	cmd := exec.CommandContext(ctx, o.BinaryPath, args...)
-	cmd.Env = append(os.Environ(), o.AWSEnv...)
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
+	o.configureCmd(cmd)
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("failed to run ccoctl aws delete: %w", err)
@@ -128,32 +114,25 @@ func (o *CCOctlOrchestrator) Delete(ctx context.Context, clusterName, region str
 	return nil
 }
 
-// ccoctlCreateAllArgs builds the argument list for ccoctl aws create-all.
 func ccoctlCreateAllArgs(name, region, credReqDir, outputDir string) []string {
 	return []string{
-		"aws",
-		"create-all",
-		fmt.Sprintf("--name=%s", name),
-		fmt.Sprintf("--region=%s", region),
-		fmt.Sprintf("--credentials-requests-dir=%s", credReqDir),
-		fmt.Sprintf("--output-dir=%s", outputDir),
+		"aws", "create-all",
+		"--name", name,
+		"--region", region,
+		"--credentials-requests-dir", credReqDir,
+		"--output-dir", outputDir,
 	}
 }
 
-// ccoctlDeleteArgs builds the argument list for ccoctl aws delete.
 func ccoctlDeleteArgs(name, region string) []string {
 	return []string{
-		"aws",
-		"delete",
-		fmt.Sprintf("--name=%s", name),
-		fmt.Sprintf("--region=%s", region),
+		"aws", "delete",
+		"--name", name,
+		"--region", region,
 	}
 }
 
-// copyDir recursively copies a directory from src to dst.
-// Creates dst if it doesn't exist.
 func copyDir(src, dst string) error {
-	// Get source directory info
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("failed to stat source directory: %w", err)
@@ -163,29 +142,24 @@ func copyDir(src, dst string) error {
 		return fmt.Errorf("source is not a directory: %s", src)
 	}
 
-	// Create destination directory
 	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
 		return fmt.Errorf("failed to create destination directory: %w", err)
 	}
 
-	// Read source directory entries
 	entries, err := os.ReadDir(src)
 	if err != nil {
 		return fmt.Errorf("failed to read source directory: %w", err)
 	}
 
-	// Copy each entry
 	for _, entry := range entries {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
 		if entry.IsDir() {
-			// Recursively copy subdirectory
 			if err := copyDir(srcPath, dstPath); err != nil {
 				return err
 			}
 		} else {
-			// Copy file
 			if err := copyFile(srcPath, dstPath); err != nil {
 				return err
 			}
@@ -195,7 +169,6 @@ func copyDir(src, dst string) error {
 	return nil
 }
 
-// copyFile copies a single file from src to dst.
 func copyFile(src, dst string) error {
 	srcFile, err := os.Open(src)
 	if err != nil {

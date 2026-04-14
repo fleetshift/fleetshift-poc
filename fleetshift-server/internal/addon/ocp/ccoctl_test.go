@@ -15,12 +15,11 @@ func TestCCOctlCreateAllArgs(t *testing.T) {
 	)
 
 	want := []string{
-		"aws",
-		"create-all",
-		"--name=test-cluster",
-		"--region=us-east-1",
-		"--credentials-requests-dir=/path/to/credrequests",
-		"--output-dir=/path/to/output",
+		"aws", "create-all",
+		"--name", "test-cluster",
+		"--region", "us-east-1",
+		"--credentials-requests-dir", "/path/to/credrequests",
+		"--output-dir", "/path/to/output",
 	}
 
 	if len(args) != len(want) {
@@ -38,10 +37,9 @@ func TestCCOctlDeleteArgs(t *testing.T) {
 	args := ccoctlDeleteArgs("test-cluster", "us-west-2")
 
 	want := []string{
-		"aws",
-		"delete",
-		"--name=test-cluster",
-		"--region=us-west-2",
+		"aws", "delete",
+		"--name", "test-cluster",
+		"--region", "us-west-2",
 	}
 
 	if len(args) != len(want) {

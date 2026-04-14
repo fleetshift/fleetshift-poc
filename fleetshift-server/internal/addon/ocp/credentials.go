@@ -21,11 +21,14 @@ type AWSCredentials struct {
 // Env returns credentials as environment variable strings suitable for
 // subprocess execution.
 func (c *AWSCredentials) Env() []string {
-	return []string{
-		fmt.Sprintf("AWS_ACCESS_KEY_ID=%s", c.AccessKeyID),
-		fmt.Sprintf("AWS_SECRET_ACCESS_KEY=%s", c.SecretAccessKey),
-		fmt.Sprintf("AWS_SESSION_TOKEN=%s", c.SessionToken),
+	env := []string{
+		"AWS_ACCESS_KEY_ID=" + c.AccessKeyID,
+		"AWS_SECRET_ACCESS_KEY=" + c.SecretAccessKey,
 	}
+	if c.SessionToken != "" {
+		env = append(env, "AWS_SESSION_TOKEN="+c.SessionToken)
+	}
+	return env
 }
 
 // AWSCredentialRequest requests AWS credentials for a specific region and role.

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -18,28 +17,23 @@ import (
 const (
 	defaultProvisionSTSDuration = 2 * time.Hour
 	defaultDestroySTSDuration   = 1 * time.Hour
-	rhSSOTokenEndpoint          = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/token"
-	rhSSODeviceEndpoint         = "https://sso.redhat.com/auth/realms/redhat-external/protocol/openid-connect/auth/device"
 	rhPullSecretEndpoint        = "https://api.openshift.com/api/accounts_mgmt/v1/access_token"
-	rhSSOClientID               = "ocm-cli"
 )
 
 // SSOCredentialProvider exchanges caller OIDC tokens for temporary AWS
 // credentials via AssumeRoleWithWebIdentity and acquires pull secrets via
-// Red Hat SSO device code flow.
+// Red Hat SSO.
 type SSOCredentialProvider struct {
 	STSDuration time.Duration // override default STS session duration (0 = use default)
 	HTTPClient  *http.Client  // override for testing
 }
 
-// DeviceCodeResponse represents the response from Red Hat SSO device code endpoint.
-type DeviceCodeResponse struct {
-	DeviceCode              string `json:"device_code"`
-	UserCode                string `json:"user_code"`
-	VerificationURI         string `json:"verification_uri"`
-	VerificationURIComplete string `json:"verification_uri_complete"`
-	ExpiresIn               int    `json:"expires_in"`
-	Interval                int    `json:"interval"`
+// httpClient returns the configured HTTP client, or a default with a 30s timeout.
+func (p *SSOCredentialProvider) httpClient() *http.Client {
+	if p.HTTPClient != nil {
+		return p.HTTPClient
+	}
+	return &http.Client{Timeout: 30 * time.Second}
 }
 
 // ResolveAWS exchanges the caller's OIDC token for temporary AWS credentials
@@ -96,10 +90,7 @@ func (p *SSOCredentialProvider) ResolvePullSecret(ctx context.Context, req PullS
 		return nil, fmt.Errorf("auth token is required")
 	}
 
-	client := p.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
+	client := p.httpClient()
 
 	// Create POST request with empty JSON body
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rhPullSecretEndpoint, strings.NewReader("{}"))
@@ -141,125 +132,3 @@ func (p *SSOCredentialProvider) ResolvePullSecret(ctx context.Context, req PullS
 	return body, nil
 }
 
-// InitiateDeviceCodeFlow starts the Red Hat SSO device code flow for CLI authentication.
-func (p *SSOCredentialProvider) InitiateDeviceCodeFlow(ctx context.Context) (*DeviceCodeResponse, error) {
-	client := p.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	// Prepare form data
-	data := url.Values{}
-	data.Set("client_id", rhSSOClientID)
-	data.Set("scope", "openid")
-
-	// Create POST request
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rhSSODeviceEndpoint, strings.NewReader(data.Encode()))
-	if err != nil {
-		return nil, fmt.Errorf("failed to create device code request: %w", err)
-	}
-
-	httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	// Execute request
-	resp, err := client.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("failed to initiate device code flow: %w", err)
-	}
-	defer resp.Body.Close()
-
-	// Read response body
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read device code response: %w", err)
-	}
-
-	// Check status code
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("device code request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var deviceResp DeviceCodeResponse
-	if err := json.Unmarshal(body, &deviceResp); err != nil {
-		return nil, fmt.Errorf("failed to parse device code response: %w", err)
-	}
-
-	return &deviceResp, nil
-}
-
-// PollForToken polls the Red Hat SSO token endpoint until the user completes
-// authentication or the device code expires.
-func (p *SSOCredentialProvider) PollForToken(ctx context.Context, deviceCode string, interval int) (string, error) {
-	client := p.HTTPClient
-	if client == nil {
-		client = http.DefaultClient
-	}
-
-	ticker := time.NewTicker(time.Duration(interval) * time.Second)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return "", fmt.Errorf("polling cancelled: %w", ctx.Err())
-		case <-ticker.C:
-			// Prepare form data
-			data := url.Values{}
-			data.Set("client_id", rhSSOClientID)
-			data.Set("grant_type", "urn:ietf:params:oauth:grant-type:device_code")
-			data.Set("device_code", deviceCode)
-
-			// Create POST request
-			httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rhSSOTokenEndpoint, strings.NewReader(data.Encode()))
-			if err != nil {
-				return "", fmt.Errorf("failed to create token request: %w", err)
-			}
-
-			httpReq.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-			// Execute request
-			resp, err := client.Do(httpReq)
-			if err != nil {
-				return "", fmt.Errorf("failed to poll for token: %w", err)
-			}
-
-			// Read response body
-			body, err := io.ReadAll(resp.Body)
-			resp.Body.Close()
-			if err != nil {
-				return "", fmt.Errorf("failed to read token response: %w", err)
-			}
-
-			// Parse response
-			var tokenResp map[string]interface{}
-			if err := json.Unmarshal(body, &tokenResp); err != nil {
-				return "", fmt.Errorf("failed to parse token response: %w", err)
-			}
-
-			// Check for error
-			if errCode, ok := tokenResp["error"].(string); ok {
-				switch errCode {
-				case "authorization_pending":
-					// User hasn't completed auth yet, continue polling
-					continue
-				case "slow_down":
-					// Increase polling interval as requested by server
-					ticker.Reset(time.Duration(interval+5) * time.Second)
-					continue
-				default:
-					// Other errors are terminal
-					errDesc := tokenResp["error_description"]
-					return "", fmt.Errorf("token request failed: %s - %v", errCode, errDesc)
-				}
-			}
-
-			// Success - extract access token
-			if accessToken, ok := tokenResp["access_token"].(string); ok {
-				return accessToken, nil
-			}
-
-			return "", fmt.Errorf("token response missing access_token field")
-		}
-	}
-}
