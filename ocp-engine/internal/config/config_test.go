@@ -412,3 +412,50 @@ func TestGenerateInstallConfig_NoOcpEngineInOutput(t *testing.T) {
 		t.Error("ocp_engine should not appear in generated install-config")
 	}
 }
+
+func TestParseConfig_CCOSTSMode(t *testing.T) {
+	yamlData := `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "AKIA"
+    secret_access_key: "secret"
+  cco_sts_mode: true
+baseDomain: example.com
+metadata:
+  name: test
+platform:
+  aws:
+    region: us-east-1
+`
+	cfg, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	if !cfg.Engine.CCOSTSMode {
+		t.Errorf("CCOSTSMode = false, want true")
+	}
+}
+
+func TestParseConfig_CCOSTSModeDefault(t *testing.T) {
+	yamlData := `ocp_engine:
+  pull_secret_file: /tmp/ps.json
+  credentials:
+    access_key_id: "AKIA"
+    secret_access_key: "secret"
+baseDomain: example.com
+metadata:
+  name: test
+platform:
+  aws:
+    region: us-east-1
+`
+	cfg, err := ParseConfig([]byte(yamlData))
+	if err != nil {
+		t.Fatalf("ParseConfig: %v", err)
+	}
+
+	if cfg.Engine.CCOSTSMode {
+		t.Errorf("CCOSTSMode = true, want false (default)")
+	}
+}

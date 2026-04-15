@@ -16,6 +16,7 @@ type EngineConfig struct {
 	SSHPublicKeyFile          string         `yaml:"ssh_public_key_file"`
 	AdditionalTrustBundleFile string         `yaml:"additional_trust_bundle_file"`
 	Credentials               AWSCredentials `yaml:"credentials"`
+	CCOSTSMode                bool           `yaml:"cco_sts_mode"`
 }
 
 // AWSCredentials defines various credential modes
