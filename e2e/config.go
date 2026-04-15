@@ -35,11 +35,11 @@ func LoadConfig() (*Config, error) {
 	loadEnvFile(".env")
 
 	cfg := &Config{
-		KeycloakIssuer:     requireEnv("E2E_KEYCLOAK_ISSUER"),
-		KeycloakClientID:   requireEnv("E2E_KEYCLOAK_CLIENT_ID"),
-		RoleARN:            requireEnv("E2E_ROLE_ARN"),
-		RHSSOIssuer:        requireEnv("E2E_RH_SSO_ISSUER"),
-		RHSSOClientID:      requireEnv("E2E_RH_SSO_CLIENT_ID"),
+		KeycloakIssuer:     os.Getenv("E2E_KEYCLOAK_ISSUER"),
+		KeycloakClientID:   os.Getenv("E2E_KEYCLOAK_CLIENT_ID"),
+		RoleARN:            os.Getenv("E2E_ROLE_ARN"),
+		RHSSOIssuer:        os.Getenv("E2E_RH_SSO_ISSUER"),
+		RHSSOClientID:      os.Getenv("E2E_RH_SSO_CLIENT_ID"),
 		BaseDomain:         envOr("E2E_BASE_DOMAIN", "aws-acm-cluster-virt.devcluster.openshift.com"),
 		Region:             envOr("E2E_REGION", "us-west-2"),
 		ReleaseImage:       envOr("E2E_RELEASE_IMAGE", "quay.io/openshift-release-dev/ocp-release:4.20.18-x86_64"),
@@ -48,21 +48,21 @@ func LoadConfig() (*Config, error) {
 		ClusterName:        generateClusterName(),
 	}
 
+	required := []struct {
+		value string
+		name  string
+	}{
+		{cfg.KeycloakIssuer, "E2E_KEYCLOAK_ISSUER"},
+		{cfg.KeycloakClientID, "E2E_KEYCLOAK_CLIENT_ID"},
+		{cfg.RoleARN, "E2E_ROLE_ARN"},
+		{cfg.RHSSOIssuer, "E2E_RH_SSO_ISSUER"},
+		{cfg.RHSSOClientID, "E2E_RH_SSO_CLIENT_ID"},
+	}
 	var missing []string
-	if cfg.KeycloakIssuer == "" {
-		missing = append(missing, "E2E_KEYCLOAK_ISSUER")
-	}
-	if cfg.KeycloakClientID == "" {
-		missing = append(missing, "E2E_KEYCLOAK_CLIENT_ID")
-	}
-	if cfg.RoleARN == "" {
-		missing = append(missing, "E2E_ROLE_ARN")
-	}
-	if cfg.RHSSOIssuer == "" {
-		missing = append(missing, "E2E_RH_SSO_ISSUER")
-	}
-	if cfg.RHSSOClientID == "" {
-		missing = append(missing, "E2E_RH_SSO_CLIENT_ID")
+	for _, r := range required {
+		if r.value == "" {
+			missing = append(missing, r.name)
+		}
 	}
 	if len(missing) > 0 {
 		return nil, fmt.Errorf("missing required env vars: %s\nCopy .env.example to .env and fill in values", strings.Join(missing, ", "))
@@ -100,10 +100,6 @@ func loadEnvFile(path string) {
 			os.Setenv(key, value)
 		}
 	}
-}
-
-func requireEnv(key string) string {
-	return os.Getenv(key)
 }
 
 func envOr(key, fallback string) string {

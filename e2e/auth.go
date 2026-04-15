@@ -24,18 +24,18 @@ type DeviceCodeResponse struct {
 }
 
 // TokenResponse holds the response from the token endpoint.
+// The Error field is set on pending/failed responses during the device code flow.
 type TokenResponse struct {
 	AccessToken  string `json:"access_token"`
 	TokenType    string `json:"token_type"`
 	ExpiresIn    int    `json:"expires_in"`
 	RefreshToken string `json:"refresh_token"`
 	IDToken      string `json:"id_token"`
+	Error        string `json:"error,omitempty"`
 }
 
-// OIDCDiscovery holds the relevant fields from an OpenID Connect discovery document.
+// OIDCDiscovery holds the endpoints needed for the device code flow.
 type OIDCDiscovery struct {
-	Issuer                      string `json:"issuer"`
-	AuthorizationEndpoint       string `json:"authorization_endpoint"`
 	TokenEndpoint               string `json:"token_endpoint"`
 	DeviceAuthorizationEndpoint string `json:"device_authorization_endpoint"`
 }
@@ -143,14 +143,12 @@ func pollForToken(ctx context.Context, tokenEndpoint, clientID, deviceCode strin
 			return nil, fmt.Errorf("reading token response: %w", err)
 		}
 
-		// Parse error response — OAuth device code flow returns 400 with
-		// an error field while the user hasn't authenticated yet.
-		var errResp struct {
-			Error string `json:"error"`
+		var token TokenResponse
+		if err := json.Unmarshal(body, &token); err != nil {
+			return nil, fmt.Errorf("decoding token response: %w", err)
 		}
-		_ = json.Unmarshal(body, &errResp)
 
-		switch errResp.Error {
+		switch token.Error {
 		case "authorization_pending":
 			continue
 		case "slow_down":
@@ -159,16 +157,10 @@ func pollForToken(ctx context.Context, tokenEndpoint, clientID, deviceCode strin
 		case "expired_token":
 			return nil, fmt.Errorf("device code expired before user authenticated")
 		case "":
-			// No error — success
+			return &token, nil
 		default:
-			return nil, fmt.Errorf("token endpoint error: %s", errResp.Error)
+			return nil, fmt.Errorf("token endpoint error: %s", token.Error)
 		}
-
-		var token TokenResponse
-		if err := json.Unmarshal(body, &token); err != nil {
-			return nil, fmt.Errorf("decoding token response: %w", err)
-		}
-		return &token, nil
 	}
 }
 
@@ -211,40 +203,40 @@ func DeviceCodeLogin(ctx context.Context, issuer, clientID, scope, label string)
 
 // FetchPullSecret uses the provided access token (from Red Hat SSO) to fetch
 // the pull secret from the OpenShift accounts API.
-func FetchPullSecret(ctx context.Context, accessToken string) (string, error) {
+func FetchPullSecret(ctx context.Context, accessToken string) ([]byte, error) {
 	const pullSecretURL = "https://api.openshift.com/api/accounts_mgmt/v1/access_token"
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, pullSecretURL, strings.NewReader("{}"))
 	if err != nil {
-		return "", fmt.Errorf("creating pull secret request: %w", err)
+		return nil, fmt.Errorf("creating pull secret request: %w", err)
 	}
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("fetching pull secret: %w", err)
+		return nil, fmt.Errorf("fetching pull secret: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return "", fmt.Errorf("pull secret API returned status %d: %s", resp.StatusCode, string(body))
+		return nil, fmt.Errorf("pull secret API returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MiB limit
 	if err != nil {
-		return "", fmt.Errorf("reading pull secret response: %w", err)
+		return nil, fmt.Errorf("reading pull secret response: %w", err)
 	}
 
 	// Validate that the response contains an "auths" field.
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal(body, &parsed); err != nil {
-		return "", fmt.Errorf("pull secret is not valid JSON: %w", err)
+		return nil, fmt.Errorf("pull secret is not valid JSON: %w", err)
 	}
 	if _, ok := parsed["auths"]; !ok {
-		return "", fmt.Errorf("pull secret response missing 'auths' field")
+		return nil, fmt.Errorf("pull secret response missing 'auths' field")
 	}
 
-	return string(body), nil
+	return body, nil
 }

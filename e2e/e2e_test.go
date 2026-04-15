@@ -100,7 +100,7 @@ func TestE2E(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fetch pull secret: %v", err)
 		}
-		pullSecret = []byte(ps)
+		pullSecret = ps
 		t.Logf("Pull secret fetched (%d bytes)", len(pullSecret))
 	})
 
@@ -546,11 +546,11 @@ func printClusterWarning(cfg *Config) {
 // Helper: validateDeployment
 // ---------------------------------------------------------------------------
 
-func validateDeployment(t *testing.T, binDir string, cfg *Config) {
+func getDeploymentProperties(t *testing.T, binDir, clusterName string) map[string]interface{} {
 	t.Helper()
 
 	fleetctl := filepath.Join(binDir, "fleetctl")
-	cmd := exec.Command(fleetctl, "deployment", "get", cfg.ClusterName, "-o", "json")
+	cmd := exec.Command(fleetctl, "deployment", "get", clusterName, "-o", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("fleetctl deployment get: %v", err)
@@ -561,14 +561,11 @@ func validateDeployment(t *testing.T, binDir string, cfg *Config) {
 		t.Fatalf("parse deployment JSON: %v", err)
 	}
 
-	// Check deployment state contains "ACTIVE" (case-insensitive).
 	state, _ := dep["state"].(string)
 	if !strings.Contains(strings.ToUpper(state), "ACTIVE") {
 		t.Fatalf("deployment state is %q, expected to contain ACTIVE", state)
 	}
-	t.Logf("Deployment state: %s", state)
 
-	// Extract provisioned_targets[0].properties.
 	targets, ok := dep["provisioned_targets"].([]interface{})
 	if !ok || len(targets) == 0 {
 		t.Fatalf("no provisioned_targets in deployment")
@@ -581,6 +578,14 @@ func validateDeployment(t *testing.T, binDir string, cfg *Config) {
 	if !ok {
 		t.Fatalf("provisioned_targets[0].properties is not an object")
 	}
+	return props
+}
+
+func validateDeployment(t *testing.T, binDir string, cfg *Config) {
+	t.Helper()
+
+	props := getDeploymentProperties(t, binDir, cfg.ClusterName)
+	t.Logf("Deployment state: ACTIVE")
 
 	// Check required property keys exist.
 	requiredKeys := []string{
@@ -618,25 +623,7 @@ func validateClusterOIDC(t *testing.T, cfg *Config, token *TokenResponse) {
 		t.Skip("Keycloak token not available")
 	}
 
-	// Get api_server and ca_cert from deployment.
-	fleetctl := filepath.Join(binDir, "fleetctl")
-	cmd := exec.Command(fleetctl, "deployment", "get", cfg.ClusterName, "-o", "json")
-	out, err := cmd.Output()
-	if err != nil {
-		t.Fatalf("fleetctl deployment get: %v", err)
-	}
-
-	var dep map[string]interface{}
-	if err := json.Unmarshal(out, &dep); err != nil {
-		t.Fatalf("parse deployment JSON: %v", err)
-	}
-
-	targets, _ := dep["provisioned_targets"].([]interface{})
-	if len(targets) == 0 {
-		t.Fatalf("no provisioned_targets in deployment")
-	}
-	target, _ := targets[0].(map[string]interface{})
-	props, _ := target["properties"].(map[string]interface{})
+	props := getDeploymentProperties(t, binDir, cfg.ClusterName)
 	apiServer, _ := props["api_server"].(string)
 	caCert, _ := props["ca_cert"].(string)
 
@@ -871,12 +858,16 @@ func validateCleanup(t *testing.T, cfg *Config) {
 	if err != nil {
 		t.Fatalf("list OIDC providers: %v", err)
 	}
+	orphanedOIDC := 0
 	for _, p := range oidcOut.OpenIDConnectProviderList {
 		if p.Arn != nil && strings.Contains(*p.Arn, cfg.ClusterName) {
 			t.Errorf("found orphaned OIDC provider: %s", *p.Arn)
+			orphanedOIDC++
 		}
 	}
-	t.Logf("  No orphaned OIDC providers")
+	if orphanedOIDC == 0 {
+		t.Log("  No orphaned OIDC providers")
+	}
 
 	// 3. Check no S3 buckets containing the cluster name.
 	t.Log("Checking for orphaned S3 buckets...")
@@ -885,15 +876,20 @@ func validateCleanup(t *testing.T, cfg *Config) {
 	if err != nil {
 		t.Fatalf("list S3 buckets: %v", err)
 	}
+	orphanedBuckets := 0
 	for _, b := range bucketsOut.Buckets {
 		if b.Name != nil && strings.Contains(*b.Name, cfg.ClusterName) {
 			t.Errorf("found orphaned S3 bucket: %s", *b.Name)
+			orphanedBuckets++
 		}
 	}
-	t.Logf("  No orphaned S3 buckets")
+	if orphanedBuckets == 0 {
+		t.Log("  No orphaned S3 buckets")
+	}
 
 	// 4. Check no IAM roles containing the cluster name.
 	t.Log("Checking for orphaned IAM roles...")
+	orphanedRoles := 0
 	var marker *string
 	for {
 		rolesOut, err := iamClient.ListRoles(ctx, &iamsvc.ListRolesInput{
@@ -905,6 +901,7 @@ func validateCleanup(t *testing.T, cfg *Config) {
 		for _, r := range rolesOut.Roles {
 			if r.RoleName != nil && strings.Contains(*r.RoleName, cfg.ClusterName) {
 				t.Errorf("found orphaned IAM role: %s", *r.RoleName)
+				orphanedRoles++
 			}
 		}
 		if !rolesOut.IsTruncated {
@@ -912,7 +909,9 @@ func validateCleanup(t *testing.T, cfg *Config) {
 		}
 		marker = rolesOut.Marker
 	}
-	t.Logf("  No orphaned IAM roles")
+	if orphanedRoles == 0 {
+		t.Log("  No orphaned IAM roles")
+	}
 }
 
 // ---------------------------------------------------------------------------

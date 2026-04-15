@@ -21,7 +21,6 @@ func TestDiscoverOIDC(t *testing.T) {
 			return
 		}
 		json.NewEncoder(w).Encode(OIDCDiscovery{
-			Issuer:                      srv.URL,
 			TokenEndpoint:               srv.URL + "/token",
 			DeviceAuthorizationEndpoint: srv.URL + "/device",
 		})
@@ -43,7 +42,6 @@ func TestDiscoverOIDC(t *testing.T) {
 func TestDiscoverOIDC_NoDeviceEndpoint(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(OIDCDiscovery{
-			Issuer:        "https://example.com",
 			TokenEndpoint: "https://example.com/token",
 			// DeviceAuthorizationEndpoint intentionally omitted
 		})
