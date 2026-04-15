@@ -38,11 +38,10 @@ var (
 )
 
 func TestE2E(t *testing.T) {
-	// Unlock the OS keyring for headless environments (containers, SSH).
-	// fleetctl stores tokens in the GNOME keyring via D-Bus Secret Service.
-	unlockKeyring(t)
-
 	// Setup: find repo root, load config, generate cluster name.
+	// NOTE: The keyring must be unlocked BEFORE this process starts
+	// (dbus-launch + gnome-keyring-daemon in the Makefile) because
+	// godbus/dbus caches the D-Bus connection at first use.
 	repoRoot = findRepoRoot(t)
 	binDir = filepath.Join(repoRoot, "bin")
 
@@ -998,37 +997,3 @@ func validateCleanup(t *testing.T, cfg *Config) {
 
 func strPtr(s string) *string { return &s }
 
-// ---------------------------------------------------------------------------
-// Helper: unlockKeyring
-// ---------------------------------------------------------------------------
-
-// unlockKeyring starts a fresh D-Bus session and unlocks the GNOME keyring
-// so that fleetctl can store/load tokens. Always starts a new session to
-// avoid issues with stale or locked keyrings from previous sessions.
-func unlockKeyring(t *testing.T) {
-	t.Helper()
-
-	// Always start a fresh D-Bus session for a clean keyring.
-	out, err := exec.Command("dbus-launch", "--sh-syntax").Output()
-	if err != nil {
-		t.Fatalf("dbus-launch failed: %v (install dbus-x11)", err)
-	}
-	for _, line := range strings.Split(string(out), "\n") {
-		if k, v, ok := strings.Cut(line, "="); ok {
-			v = strings.TrimRight(v, ";")
-			v = strings.Trim(v, "'")
-			os.Setenv(k, v)
-		}
-	}
-	t.Logf("D-Bus session: %s", os.Getenv("DBUS_SESSION_BUS_ADDRESS"))
-
-	// Unlock the default keyring with an empty password.
-	cmd := exec.Command("gnome-keyring-daemon", "--unlock", "--components=secrets")
-	cmd.Stdin = strings.NewReader("")
-	cmd.Stdout = os.Stderr
-	cmd.Stderr = os.Stderr
-	if err := cmd.Run(); err != nil {
-		t.Fatalf("gnome-keyring-daemon unlock failed: %v (install gnome-keyring)", err)
-	}
-	t.Log("Keyring unlocked")
-}

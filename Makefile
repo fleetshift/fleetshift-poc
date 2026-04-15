@@ -27,7 +27,9 @@ test-ocp-engine: ## Run ocp-engine tests
 	cd ocp-engine && go test ./...
 
 test-e2e: build ## Run E2E tests (requires .env config and interactive auth)
-	cd e2e && go test -tags e2e -timeout 3h -v
+	@eval "$$(dbus-launch --sh-syntax)" && \
+		echo "" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>&1 && \
+		cd e2e && go test -tags e2e -timeout 3h -v
 
 generate: ## Generate protobuf and gRPC code
 	buf generate --path proto/fleetshift
