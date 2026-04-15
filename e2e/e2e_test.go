@@ -295,7 +295,7 @@ func startServer(t, parentT *testing.T, binDir, repoRoot string, cfg *Config) {
 		"OCP_CREDENTIAL_MODE=sso",
 		"OCP_PULL_SECRET_FILE="+psFile,
 	)
-	serverLogPath := filepath.Join(dbDir, "server.log")
+	serverLogPath := "/tmp/fleetshift-e2e-server.log"
 	serverLog, err := os.Create(serverLogPath)
 	if err != nil {
 		t.Fatalf("create server log: %v", err)
