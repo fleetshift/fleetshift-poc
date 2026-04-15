@@ -216,6 +216,8 @@ func (a *Agent) Deliver(
 		sshPrivateKey: sshPrivateKey,
 		auth:          auth,
 		roleARN:       roleARN,
+		releaseImage:  spec.ReleaseImage,
+		ccostsMode:    true, // always STS mode for OCP agent
 	}
 	go a.deliverAsync(ctx, req, signaler, state)
 
@@ -232,6 +234,8 @@ type provisionRequest struct {
 	sshPrivateKey []byte
 	auth          domain.DeliveryAuth
 	roleARN       string
+	releaseImage  string
+	ccostsMode    bool
 }
 
 // cleanupProvision removes the work directory and provisions entry.
@@ -367,7 +371,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	// Handle successful completion
-	output, err := a.handleCompletion(ctx, req.clusterID, completion, req.sshPrivateKey, req.auth, req.roleARN)
+	output, err := a.handleCompletion(ctx, req.clusterID, completion, req.sshPrivateKey, req.auth, req.roleARN, req.releaseImage, req.ccostsMode)
 	if err != nil {
 		state.mu.Lock()
 		state.workDir = req.workDir
@@ -399,6 +403,8 @@ func (a *Agent) handleCompletion(
 	sshPrivateKey []byte,
 	auth domain.DeliveryAuth,
 	roleARN string,
+	releaseImage string,
+	ccostsMode bool,
 ) (*ClusterOutput, error) {
 	targetID := domain.TargetID("k8s-" + completion.GetInfraId())
 
@@ -425,6 +431,8 @@ func (a *Agent) handleCompletion(
 		ClusterID:     completion.GetClusterUuid(),
 		Region:        completion.GetRegion(),
 		RoleARN:       roleARN,
+		ReleaseImage:  releaseImage,
+		CCOSTSMode:    ccostsMode,
 		SATokenRef:    bootstrapResult.SATokenRef,
 		SAToken:       bootstrapResult.SAToken,
 		KubeconfigRef: bootstrapResult.KubeconfigRef,
@@ -542,12 +550,56 @@ func (a *Agent) removeByTargetProperties(ctx context.Context, target domain.Targ
 		return err
 	}
 
-	// 5. Run ocp-engine destroy
+	// 5. Write cluster.yaml so ocp-engine knows about STS mode
+	ccostsMode := target.Properties["cco_sts_mode"] == "true"
+	releaseImage := target.Properties["release_image"]
+	clusterName := target.Name
+
+	// 6. Run ocp-engine destroy
 	if err := a.runDestroy(ctx, workDir, awsCreds); err != nil {
 		return err
 	}
 
-	// 6. Clean up vault entries
+	// 7. Clean up ccoctl resources (OIDC provider, IAM roles, S3 bucket)
+	if ccostsMode && clusterName != "" {
+		ccoctlPath, lookErr := exec.LookPath("ccoctl")
+		if lookErr != nil && releaseImage != "" {
+			// Extract ccoctl from release image
+			slog.Info("ccoctl not on PATH, extracting from release image...", "release_image", releaseImage)
+			pullSecretFile := filepath.Join(workDir, "pull-secret.json")
+			if _, statErr := os.Stat(pullSecretFile); os.IsNotExist(statErr) {
+				if ps, psErr := a.credentials.ResolvePullSecret(ctx, PullSecretRequest{Auth: auth}); psErr == nil {
+					os.WriteFile(pullSecretFile, ps, 0600)
+				}
+			}
+			extractCmd := exec.CommandContext(ctx, "oc", "adm", "release", "extract",
+				"--command=ccoctl", "--to", workDir,
+				"--registry-config", pullSecretFile, releaseImage)
+			extractCmd.Env = append(os.Environ(), awsCreds.Env()...)
+			if extractErr := extractCmd.Run(); extractErr != nil {
+				slog.Warn("failed to extract ccoctl for cleanup", "error", extractErr)
+			} else {
+				ccoctlPath = filepath.Join(workDir, "ccoctl")
+			}
+		}
+
+		if ccoctlPath != "" {
+			deleteCmd := exec.CommandContext(ctx, ccoctlPath,
+				"aws", "delete", "--name", clusterName, "--region", region)
+			deleteCmd.Env = append(os.Environ(), awsCreds.Env()...)
+			deleteCmd.Stdout = os.Stderr
+			deleteCmd.Stderr = os.Stderr
+			if deleteErr := deleteCmd.Run(); deleteErr != nil {
+				slog.Warn("ccoctl aws delete failed (IAM resources may need manual cleanup)",
+					"error", deleteErr, "cluster", clusterName, "region", region)
+			}
+		} else {
+			slog.Warn("ccoctl binary not available, skipping IAM cleanup",
+				"cluster", clusterName, "region", region)
+		}
+	}
+
+	// 8. Clean up vault entries
 	targetID := domain.TargetID("k8s-" + infraID)
 	if a.vault != nil {
 		vaultRefs := []domain.SecretRef{

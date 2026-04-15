@@ -21,8 +21,10 @@ type ClusterOutput struct {
 	CACert     []byte // PEM-encoded cluster CA certificate
 	InfraID    string // OCP infrastructure ID
 	ClusterID  string // OCP cluster UUID
-	Region     string // cloud region (e.g. "us-east-1")
-	RoleARN    string // AWS IAM role ARN used for provisioning
+	Region       string // cloud region (e.g. "us-east-1")
+	RoleARN      string // AWS IAM role ARN used for provisioning
+	ReleaseImage string // OCP release image used for provisioning
+	CCOSTSMode   bool   // whether CCO STS mode was used
 
 	// SATokenRef and SAToken are set when platform SA bootstrapping
 	// succeeds. SATokenRef is a vault key; SAToken is the raw bearer
@@ -66,6 +68,12 @@ func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	}
 	if o.RoleARN != "" {
 		props["role_arn"] = o.RoleARN
+	}
+	if o.ReleaseImage != "" {
+		props["release_image"] = o.ReleaseImage
+	}
+	if o.CCOSTSMode {
+		props["cco_sts_mode"] = "true"
 	}
 	return domain.ProvisionedTarget{
 		ID:                    o.TargetID,
