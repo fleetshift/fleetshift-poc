@@ -124,12 +124,16 @@ func TestE2E(t *testing.T) {
 		setupAuth(t, binDir, cfg)
 	})
 
-	step("05_CreateDeployment", func(t *testing.T) {
+	step("05_EnrollSigningKey", func(t *testing.T) {
+		enrollSigningKey(t, binDir)
+	})
+
+	step("06_CreateDeployment", func(t *testing.T) {
 		createDeployment(t, binDir, cfg)
 		provisioned = true
 	})
 
-	step("06_WaitForProvision", func(t *testing.T) {
+	step("07_WaitForProvision", func(t *testing.T) {
 		state := waitForProvision(t, binDir, cfg, 60*time.Minute)
 		if state != "STATE_ACTIVE" {
 			t.Fatalf("provision ended in state %s, expected STATE_ACTIVE", state)
@@ -137,19 +141,19 @@ func TestE2E(t *testing.T) {
 		t.Logf("Deployment reached STATE_ACTIVE")
 	})
 
-	step("07_ValidateDeployment", func(t *testing.T) {
+	step("08_ValidateDeployment", func(t *testing.T) {
 		validateDeployment(t, binDir, cfg)
 	})
 
-	step("08_ValidateClusterOIDC", func(t *testing.T) {
+	step("09_ValidateClusterOIDC", func(t *testing.T) {
 		validateClusterOIDC(t, cfg, keycloakToken)
 	})
 
-	step("09_DestroyDeployment", func(t *testing.T) {
+	step("10_DestroyDeployment", func(t *testing.T) {
 		destroyDeployment(t, binDir, cfg)
 	})
 
-	step("10_ValidateCleanup", func(t *testing.T) {
+	step("11_ValidateCleanup", func(t *testing.T) {
 		validateCleanup(t, cfg)
 	})
 }
@@ -396,6 +400,9 @@ func setupAuth(t *testing.T, binDir string, cfg *Config) {
 		"--client-id", cfg.KeycloakClientID,
 		"--scopes", "openid,profile,email",
 		"--audience", cfg.KeycloakClientID,
+		"--key-enrollment-client-id", cfg.EnrollmentClientID,
+		"--registry-id", "github.com",
+		"--registry-subject-expression", "claims.github_username",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -406,6 +413,42 @@ func setupAuth(t *testing.T, binDir string, cfg *Config) {
 		t.Fatalf("fleetctl auth setup: %v", err)
 	}
 	t.Logf("Auth setup complete")
+}
+
+func enrollSigningKey(t *testing.T, binDir string) {
+	t.Helper()
+
+	fleetctl := filepath.Join(binDir, "fleetctl")
+
+	fmt.Println()
+	fmt.Println("=== Signing Key Enrollment ===")
+	fmt.Println("This will open a browser for the enrollment client.")
+	fmt.Println("Log in with your Keycloak credentials.")
+	fmt.Println()
+
+	cmd := exec.Command(fleetctl, "auth", "enroll-signing")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	cmd.Stdin = os.Stdin
+
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("fleetctl auth enroll-signing: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Println("  ================================================================")
+	fmt.Println("  ACTION REQUIRED: Add your SSH signing key to GitHub")
+	fmt.Println("  ================================================================")
+	fmt.Println()
+	fmt.Println("  The public key was printed above by enroll-signing.")
+	fmt.Println("  Copy it, then:")
+	fmt.Println()
+	fmt.Println("    1. Go to https://github.com/settings/keys")
+	fmt.Println("    2. Click 'New SSH key', set type to 'Signing Key'")
+	fmt.Println("    3. Paste the key and save")
+	fmt.Println()
+	fmt.Print("  Press Enter when done...")
+	fmt.Scanln()
 }
 
 // ---------------------------------------------------------------------------
@@ -452,6 +495,7 @@ func createDeployment(t *testing.T, binDir string, cfg *Config) {
 		"--resource-type", "api.ocp.cluster",
 		"--placement-type", "static",
 		"--target-ids", "ocp-aws",
+		"--sign",
 	)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

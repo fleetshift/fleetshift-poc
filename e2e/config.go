@@ -13,11 +13,13 @@ import (
 
 type Config struct {
 	// SSO
-	KeycloakIssuer   string
-	KeycloakClientID string
-	RoleARN          string
-	RHSSOIssuer      string
-	RHSSOClientID    string
+	KeycloakIssuer       string
+	KeycloakClientID     string
+	EnrollmentClientID   string
+	GithubUsername        string
+	RoleARN              string
+	RHSSOIssuer          string
+	RHSSOClientID        string
 
 	// Cluster
 	BaseDomain         string
@@ -37,6 +39,8 @@ func LoadConfig() (*Config, error) {
 	cfg := &Config{
 		KeycloakIssuer:     os.Getenv("E2E_KEYCLOAK_ISSUER"),
 		KeycloakClientID:   os.Getenv("E2E_KEYCLOAK_CLIENT_ID"),
+		EnrollmentClientID: envOr("E2E_ENROLLMENT_CLIENT_ID", "fleetshift-signing"),
+		GithubUsername:     os.Getenv("E2E_GITHUB_USERNAME"),
 		RoleARN:            os.Getenv("E2E_ROLE_ARN"),
 		RHSSOIssuer:        os.Getenv("E2E_RH_SSO_ISSUER"),
 		RHSSOClientID:      os.Getenv("E2E_RH_SSO_CLIENT_ID"),
@@ -56,6 +60,7 @@ func LoadConfig() (*Config, error) {
 		{cfg.KeycloakClientID, "E2E_KEYCLOAK_CLIENT_ID"},
 		{cfg.RoleARN, "E2E_ROLE_ARN"},
 		{cfg.RHSSOIssuer, "E2E_RH_SSO_ISSUER"},
+		{cfg.GithubUsername, "E2E_GITHUB_USERNAME"},
 		{cfg.RHSSOClientID, "E2E_RH_SSO_CLIENT_ID"},
 	}
 	var missing []string
