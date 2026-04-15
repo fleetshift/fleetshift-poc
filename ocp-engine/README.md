@@ -468,6 +468,12 @@ Without these steps, the upgrade can stall because new operators cannot obtain A
 
 For fleetshift, automating this pre-upgrade step is future work — not in scope for the initial CCO STS mode integration.
 
+### Failed Provision Cleanup — Known Limitations
+
+- **Disk space from retained work directories** — When a provision fails after creating AWS infrastructure, the work directory (~600MB: openshift-install binary + ignition configs) is retained on disk for cleanup by `Remove()`. On a server handling many failed provisions without timely deletes, disk could fill. Mitigated by the fact that successful deletes clean up the directory, and work directories are in `/tmp` which typically has OS-level cleanup policies. A future improvement could add periodic garbage collection of stale work directories.
+
+- **Cluster name uniqueness** — The deterministic work directory path (`/tmp/ocp-provision-<clusterName>/`) assumes cluster names are unique. Two concurrent provisions with the same cluster name would share a work directory and corrupt each other's state. This is already enforced at the DNS level — duplicate cluster names collide on Route53 — but could be explicitly validated in the agent.
+
 ### Credential Lifecycle
 
 - **Just-in-time credential acquisition** — Long-term goal is zero stored credentials. AWS credentials acquired via STS `AssumeRoleWithWebIdentity` using the caller's OIDC token. Pull secret acquired via Red Hat SSO token exchange (`POST /api/accounts_mgmt/v1/access_token`). SSH key auto-generated per provision. All credentials discarded after use. Only `infra_id`, `cluster_id`, and `region` are persisted (in target properties, not vault).
