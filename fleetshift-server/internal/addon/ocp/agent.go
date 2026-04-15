@@ -161,6 +161,15 @@ func (a *Agent) Deliver(
 	}
 	probe.CredentialsResolved("aws")
 
+	// Validate credential/mode coupling
+	if err := validateCredentialModeCoupling(awsCreds, spec.EffectiveCCOSTSMode()); err != nil {
+		probe.Error(err)
+		return domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: err.Error(),
+		}, nil
+	}
+
 	// 5. Resolve pull secret
 	pullSecret, err := a.credentials.ResolvePullSecret(ctx, PullSecretRequest{
 		Auth: auth,
@@ -507,6 +516,18 @@ func (a *Agent) effectiveProvisionTimeout() time.Duration {
 		return a.provisionTimeout
 	}
 	return defaultProvisionSTSDuration
+}
+
+// validateCredentialModeCoupling ensures STS temporary credentials are
+// not used with mint mode. STS creds expire — if CCO uses them as root
+// creds for minting, the cluster degrades after the session expires.
+func validateCredentialModeCoupling(creds *AWSCredentials, ccostsMode bool) error {
+	if !ccostsMode && creds.SessionToken != "" {
+		return fmt.Errorf(
+			"STS temporary credentials cannot be used with mint mode (cco_sts_mode: false); " +
+				"use long-lived IAM keys or enable cco_sts_mode")
+	}
+	return nil
 }
 
 // prepareWorkDir creates a temp directory containing the pull secret and

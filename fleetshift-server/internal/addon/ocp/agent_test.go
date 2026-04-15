@@ -109,3 +109,36 @@ func TestWriteDestroyMetadata(t *testing.T) {
 		t.Errorf("region = %v, want us-west-2", aws["region"])
 	}
 }
+
+func TestValidateCredentialModeCoupling_RejectSTSWithMintMode(t *testing.T) {
+	creds := &AWSCredentials{
+		AccessKeyID:     "ASIA",
+		SecretAccessKey: "secret",
+		SessionToken:    "sts-session-token",
+	}
+	err := validateCredentialModeCoupling(creds, false)
+	if err == nil {
+		t.Fatal("expected error: STS creds with mint mode should be rejected")
+	}
+}
+
+func TestValidateCredentialModeCoupling_AllowSTSWithSTSMode(t *testing.T) {
+	creds := &AWSCredentials{
+		AccessKeyID:     "ASIA",
+		SecretAccessKey: "secret",
+		SessionToken:    "sts-session-token",
+	}
+	if err := validateCredentialModeCoupling(creds, true); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestValidateCredentialModeCoupling_AllowLongLivedWithMintMode(t *testing.T) {
+	creds := &AWSCredentials{
+		AccessKeyID:     "AKIA",
+		SecretAccessKey: "secret",
+	}
+	if err := validateCredentialModeCoupling(creds, false); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
