@@ -194,7 +194,17 @@ The test prints a warning banner with the cluster name. There are three ways to 
 fleetctl deployment delete <cluster-name>
 ```
 
-**Option 2: Server is down — use ocp-engine**
+**Option 2: Work dir still exists (ideal)**
+
+If the ocp-engine work directory still exists (check `/tmp/ocp-provision-<cluster-name>/`), this is the simplest and most complete cleanup — it destroys both cluster infrastructure and ccoctl resources in one command:
+
+```bash
+bin/ocp-engine destroy --work-dir /tmp/ocp-provision-<cluster-name>
+```
+
+This works because the work dir has the installer binary, ccoctl binary, metadata.json, and cluster.yaml with `cco_sts_mode: true`. AWS credentials are read from environment or the cluster.yaml.
+
+**Option 3: Work dir is gone — rebuild manually**
 
 ```bash
 # Set up a destroy work directory
@@ -251,7 +261,7 @@ oc adm release extract --command=ccoctl \
 $WORK_DIR/ccoctl aws delete --name=$CLUSTER_NAME --region=$REGION
 ```
 
-**Option 3: Direct openshift-install (no ocp-engine)**
+**Option 4: Direct openshift-install (no ocp-engine)**
 
 ```bash
 # Same setup as Option 2, then:
