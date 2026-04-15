@@ -11,12 +11,12 @@ import (
 
 func TestPhaseRequiresDestroy(t *testing.T) {
 	phases := AllPhases()
-	for _, p := range phases[:5] {
+	for _, p := range phases[:6] {
 		if p.RequiresDestroyOnFailure {
 			t.Errorf("phase %q should not require destroy on failure", p.Name)
 		}
 	}
-	if !phases[5].RequiresDestroyOnFailure {
+	if !phases[6].RequiresDestroyOnFailure {
 		t.Error("cluster phase should require destroy on failure")
 	}
 }
@@ -68,4 +68,59 @@ func TestRunPhase_Failure(t *testing.T) {
 	if result.Error != "bootstrap timeout" {
 		t.Errorf("error = %q, want bootstrap timeout", result.Error)
 	}
+}
+
+func TestAllPhases_CCOctlBetweenExtractAndInstallConfig(t *testing.T) {
+	phases := AllPhases()
+
+	// Find positions of extract, ccoctl, and install-config
+	extractIdx := -1
+	ccoctlIdx := -1
+	installConfigIdx := -1
+
+	for i, p := range phases {
+		switch p.Name {
+		case "extract":
+			extractIdx = i
+		case "ccoctl":
+			ccoctlIdx = i
+		case "install-config":
+			installConfigIdx = i
+		}
+	}
+
+	if ccoctlIdx == -1 {
+		t.Fatal("ccoctl phase not found in AllPhases()")
+	}
+
+	if extractIdx == -1 {
+		t.Fatal("extract phase not found in AllPhases()")
+	}
+
+	if installConfigIdx == -1 {
+		t.Fatal("install-config phase not found in AllPhases()")
+	}
+
+	if ccoctlIdx <= extractIdx {
+		t.Errorf("ccoctl phase at index %d should come after extract phase at index %d", ccoctlIdx, extractIdx)
+	}
+
+	if ccoctlIdx >= installConfigIdx {
+		t.Errorf("ccoctl phase at index %d should come before install-config phase at index %d", ccoctlIdx, installConfigIdx)
+	}
+}
+
+func TestAllPhases_CCOctlDoesNotRequireDestroy(t *testing.T) {
+	phases := AllPhases()
+
+	for _, p := range phases {
+		if p.Name == "ccoctl" {
+			if p.RequiresDestroyOnFailure {
+				t.Error("ccoctl phase should not require destroy on failure")
+			}
+			return
+		}
+	}
+
+	t.Fatal("ccoctl phase not found in AllPhases()")
 }

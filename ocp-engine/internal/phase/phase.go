@@ -26,6 +26,7 @@ func AllPhases() []Phase {
 	return []Phase{
 		{Name: "preflight", RequiresDestroyOnFailure: false},
 		{Name: "extract", RequiresDestroyOnFailure: false},
+		{Name: "ccoctl", RequiresDestroyOnFailure: false},
 		{Name: "install-config", RequiresDestroyOnFailure: false},
 		{Name: "manifests", RequiresDestroyOnFailure: false},
 		{Name: "ignition", RequiresDestroyOnFailure: false},
