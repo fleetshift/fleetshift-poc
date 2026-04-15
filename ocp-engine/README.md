@@ -437,6 +437,37 @@ Features not yet implemented but worth considering for future iterations:
 - **Callback observability wiring** — The callback server receives `ReportPhaseResult` and `ReportMilestone` data from ocp-engine but currently discards it (returns ACK without logging or emitting metrics). The `AgentObserver` / `ClusterDeliverProbe` interfaces exist with a slog implementation, but they are only called from the agent's `Deliver()` method — not from the callback server. To get real-time phase progress and milestone logging during OCP provisions, the `provisionState` struct needs to hold a reference to the active `ClusterDeliverProbe`, and the callback server needs to call `probe.PhaseCompleted()` in `ReportPhaseResult` and log milestones in `ReportMilestone`. This mirrors the Kind agent pattern where the observer is called inline during delivery, but adapted for the async callback model.
 - **Callback authentication** — The current `generateCallbackToken` is a placeholder returning a predictable string. The callback server does not validate tokens. Additionally, the callback service is registered on the same gRPC server as the authn interceptor, which expects real OIDC JWTs — meaning callbacks will be rejected with `UNAUTHENTICATED` at runtime. Three fixes needed: (1) exempt the callback service from the OIDC interceptor (separate gRPC server/port or interceptor skip list), (2) generate a real JWT using the server's signing key with claims `{cluster_id, exp}`, (3) validate the JWT in the callback server before processing reports.
 
+### CCO STS Mode — Upgrade Considerations
+
+When upgrading a CCO STS mode cluster (e.g., 4.21 → 4.22), the new OCP release may introduce new operators that need their own IAM roles, or change the permissions existing operators require. In mint mode, CCO handles this automatically by minting new IAM users from the root credential. In STS mode, there is no root credential — each operator uses OIDC federation with a pre-created IAM role.
+
+Before upgrading a STS-mode cluster, the following steps are required:
+
+1. Extract `CredentialsRequest` manifests from the **new** release image:
+   ```bash
+   oc adm release extract --credentials-requests --cloud=aws \
+     --to=credrequests-new/ \
+     quay.io/openshift-release-dev/ocp-release:4.22.0-multi
+   ```
+
+2. Run `ccoctl aws create-iam-roles` to create or update IAM roles for the new requirements:
+   ```bash
+   ccoctl aws create-iam-roles \
+     --name <cluster-name> \
+     --region <region> \
+     --credentials-requests-dir credrequests-new/ \
+     --output-dir ccoctl-output/
+   ```
+
+3. Apply the updated credential secrets to the cluster:
+   ```bash
+   oc apply -f ccoctl-output/manifests/
+   ```
+
+Without these steps, the upgrade can stall because new operators cannot obtain AWS credentials. This is documented in the [OCP docs for manual mode with STS](https://docs.openshift.com/container-platform/latest/authentication/managing_cloud_provider_credentials/cco-mode-sts.html).
+
+For fleetshift, automating this pre-upgrade step is future work — not in scope for the initial CCO STS mode integration.
+
 ### Credential Lifecycle
 
 - **Just-in-time credential acquisition** — Long-term goal is zero stored credentials. AWS credentials acquired via STS `AssumeRoleWithWebIdentity` using the caller's OIDC token. Pull secret acquired via Red Hat SSO token exchange (`POST /api/accounts_mgmt/v1/access_token`). SSH key auto-generated per provision. All credentials discarded after use. Only `infra_id`, `cluster_id`, and `region` are persisted (in target properties, not vault).
