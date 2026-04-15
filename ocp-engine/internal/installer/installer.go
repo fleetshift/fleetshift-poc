@@ -45,6 +45,12 @@ func (i *Installer) buildEnv() []string {
 	return env
 }
 
+// BuildEnv returns the installer's environment variables for use by
+// external commands that need the same AWS credentials.
+func (i *Installer) BuildEnv() []string {
+	return i.buildEnv()
+}
+
 func (i *Installer) Extract(logPath string) error {
 	return RunCommand("oc", i.buildExtractArgs(), i.buildEnv(), logPath)
 }

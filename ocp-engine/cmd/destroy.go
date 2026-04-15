@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/ocp-engine/internal/callback"
+	"github.com/ocp-engine/internal/ccoctl"
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/credentials"
 	"github.com/ocp-engine/internal/installer"
@@ -107,6 +108,34 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Clean up ccoctl resources (IAM OIDC provider, roles, S3 bucket)
+	if cfg.Engine.CCOSTSMode {
+		ccoctlBinary := ccoctl.BinaryPath(wd.Path)
+		clusterName := extractDestroyClusterName(cfg)
+		region := extractDestroyRegion(cfg)
+
+		if _, statErr := os.Stat(ccoctlBinary); os.IsNotExist(statErr) {
+			if cfg.Engine.ReleaseImage != "" && cfg.Engine.PullSecretFile != "" {
+				fmt.Fprintln(os.Stderr, "ccoctl binary not found, extracting from release image...")
+				extractErr := installer.RunCommand("oc",
+					ccoctl.ExtractBinaryArgs(wd.Path, cfg.Engine.PullSecretFile, cfg.Engine.ReleaseImage),
+					inst.BuildEnv(), logPath)
+				if extractErr != nil {
+					fmt.Fprintf(os.Stderr, "warning: failed to extract ccoctl for cleanup: %v\n", extractErr)
+				}
+			}
+		}
+
+		if _, statErr := os.Stat(ccoctlBinary); statErr == nil {
+			deleteArgs := ccoctl.DeleteArgs(clusterName, region)
+			if deleteErr := installer.RunCommand(ccoctlBinary, deleteArgs, inst.BuildEnv(), logPath); deleteErr != nil {
+				fmt.Fprintf(os.Stderr, "warning: ccoctl aws delete failed: %v\n", deleteErr)
+			}
+		} else {
+			fmt.Fprintln(os.Stderr, "warning: ccoctl binary not available, skipping IAM cleanup")
+		}
+	}
+
 	output.WriteDestroyResult(os.Stdout, output.DestroyResult{
 		Action:         "destroy",
 		Status:         "succeeded",
@@ -121,4 +150,26 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	})
 
 	return nil
+}
+
+func extractDestroyClusterName(cfg *config.ClusterConfig) string {
+	metadata, ok := cfg.InstallConfig["metadata"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	name, _ := metadata["name"].(string)
+	return name
+}
+
+func extractDestroyRegion(cfg *config.ClusterConfig) string {
+	platform, ok := cfg.InstallConfig["platform"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	aws, ok := platform["aws"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	region, _ := aws["region"].(string)
+	return region
 }
