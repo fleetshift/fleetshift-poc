@@ -11,6 +11,7 @@ import (
 	"github.com/ocp-engine/internal/config"
 	"github.com/ocp-engine/internal/credentials"
 	"github.com/ocp-engine/internal/installer"
+	"github.com/ocp-engine/internal/logpipeline"
 	"github.com/ocp-engine/internal/output"
 	"github.com/ocp-engine/internal/workdir"
 	"github.com/spf13/cobra"
@@ -86,9 +87,16 @@ func runDestroy(cmd *cobra.Command, args []string) error {
 	defer cancel()
 
 	logPath := wd.LogPath()
+
+	// Start log pipeline for real-time progress output during destroy
+	pipeline := logpipeline.NewPipeline(logPath, os.Stdout, os.Stderr, 1)
+	pipeline.Start()
+
 	start := time.Now()
 	err = inst.DestroyClusterWithContext(ctx, logPath)
 	elapsed := int(time.Since(start).Seconds())
+
+	pipeline.Stop()
 
 	if err != nil {
 		output.WriteDestroyResult(os.Stdout, output.DestroyResult{
