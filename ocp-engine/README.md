@@ -813,3 +813,22 @@ ocp-engine's logging has three output channels that need better integration:
 - Apply log scrubbing consistently across all phases, not just the cluster phase
 - Provide a way to retrieve provision logs via the API after the work dir is cleaned up (e.g., store log tail in the delivery result or vault)
 - Add structured logging to ocp-engine itself (currently uses fmt.Fprintf to stderr) so log levels and components are filterable
+
+### Secret Management for OCP Addon
+
+The OCP addon currently receives secrets via environment variables and files:
+
+- `OCP_PULL_SECRET_FILE` — Red Hat pull secret loaded from a file at server startup
+- `OCP_CONSOLE_CLIENT_SECRET` — OIDC client secret for the OCP web console (planned)
+
+These secrets flow through the agent into provisioned clusters (pull secret in install-config, console secret in an openshift-config Secret manifest). The current approach works for the POC but has security concerns that need to be addressed before production:
+
+1. **Environment variables are visible** — `OCP_CONSOLE_CLIENT_SECRET` in env vars is readable via `/proc/<pid>/environ` or `docker inspect`. In production, the addon should run as its own pod with secrets mounted from Kubernetes Secrets.
+
+2. **Pull secret file persists on disk** — The pull secret file pointed to by `OCP_PULL_SECRET_FILE` lives on the host filesystem. In production, it should be mounted from a Kubernetes Secret into the addon pod's tmpfs.
+
+3. **Console client secret in manifests** — The console OIDC client secret is written into an extra-manifest YAML file in the work directory before being injected into the installer. This file should be scrubbed after the manifests phase consumes it.
+
+4. **No secret rotation** — The console client secret and pull secret are static. Production deployments should support rotation without restarting the server.
+
+**Production target:** When the addon runs as its own pod, all secrets should come from Kubernetes Secrets mounted into the pod, never from env vars or host files. The pod spec handles lifecycle, rotation (via secret controller), and cleanup (tmpfs).
