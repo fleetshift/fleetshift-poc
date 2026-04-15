@@ -628,6 +628,8 @@ func waitForProvision(t *testing.T, binDir string, cfg *Config, timeout time.Dur
 		if dep.State != lastState {
 			t.Logf("[%s] State: %s -> %s", elapsed(start), lastState, dep.State)
 			lastState = dep.State
+		} else {
+			t.Logf("[%s] Still %s...", elapsed(start), dep.State)
 		}
 
 		switch dep.State {
