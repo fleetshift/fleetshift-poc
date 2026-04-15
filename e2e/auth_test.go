@@ -82,7 +82,7 @@ func TestPollForToken_Success(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	token, err := pollForToken(context.Background(), srv.URL+"/token", "test-client", "test-device-code", 0)
+	token, err := pollForToken(context.Background(), srv.URL+"/token", "test-client", "test-device-code", "", 0)
 	if err != nil {
 		t.Fatalf("pollForToken failed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestPollForToken_Expired(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := pollForToken(context.Background(), srv.URL+"/token", "test-client", "test-device-code", 0)
+	_, err := pollForToken(context.Background(), srv.URL+"/token", "test-client", "test-device-code", "", 0)
 	if err == nil {
 		t.Fatal("expected error for expired token")
 	}

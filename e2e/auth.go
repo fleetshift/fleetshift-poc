@@ -4,6 +4,9 @@ package e2e
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -72,51 +75,69 @@ func discoverOIDC(ctx context.Context, issuer string) (*OIDCDiscovery, error) {
 	return &doc, nil
 }
 
+// generatePKCE creates a PKCE code verifier and S256 challenge.
+func generatePKCE() (verifier, challenge string) {
+	b := make([]byte, 32)
+	rand.Read(b)
+	verifier = base64.RawURLEncoding.EncodeToString(b)
+	h := sha256.Sum256([]byte(verifier))
+	challenge = base64.RawURLEncoding.EncodeToString(h[:])
+	return verifier, challenge
+}
+
 // startDeviceCodeFlow initiates the device code flow by posting to the device
-// authorization endpoint. It returns the device code response with instructions
-// for the user to authenticate.
-func startDeviceCodeFlow(ctx context.Context, deviceEndpoint, clientID, scope string) (*DeviceCodeResponse, error) {
+// authorization endpoint. It includes PKCE parameters (required by some
+// providers like Red Hat SSO). Returns the device code response and the PKCE
+// code verifier (needed when polling for the token).
+func startDeviceCodeFlow(ctx context.Context, deviceEndpoint, clientID, scope string) (*DeviceCodeResponse, string, error) {
+	verifier, challenge := generatePKCE()
+
 	data := url.Values{
-		"client_id": {clientID},
-		"scope":     {scope},
+		"client_id":             {clientID},
+		"scope":                 {scope},
+		"code_challenge_method": {"S256"},
+		"code_challenge":        {challenge},
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, deviceEndpoint, strings.NewReader(data.Encode()))
 	if err != nil {
-		return nil, fmt.Errorf("creating device code request: %w", err)
+		return nil, "", fmt.Errorf("creating device code request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("requesting device code: %w", err)
+		return nil, "", fmt.Errorf("requesting device code: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return nil, fmt.Errorf("device auth endpoint returned status %d: %s", resp.StatusCode, string(body))
+		return nil, "", fmt.Errorf("device auth endpoint returned status %d: %s", resp.StatusCode, string(body))
 	}
 
 	var dcr DeviceCodeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&dcr); err != nil {
-		return nil, fmt.Errorf("decoding device code response: %w", err)
+		return nil, "", fmt.Errorf("decoding device code response: %w", err)
 	}
 
 	if dcr.Interval == 0 {
 		dcr.Interval = 5
 	}
 
-	return &dcr, nil
+	return &dcr, verifier, nil
 }
 
 // pollForToken polls the token endpoint until the user completes authentication,
 // the device code expires, or the context is cancelled.
-func pollForToken(ctx context.Context, tokenEndpoint, clientID, deviceCode string, interval int) (*TokenResponse, error) {
+func pollForToken(ctx context.Context, tokenEndpoint, clientID, deviceCode, codeVerifier string, interval int) (*TokenResponse, error) {
 	data := url.Values{
 		"grant_type":  {"urn:ietf:params:oauth:grant-type:device_code"},
 		"client_id":   {clientID},
 		"device_code": {deviceCode},
+	}
+	if codeVerifier != "" {
+		data.Set("code_verifier", codeVerifier)
 	}
 
 	for {
@@ -176,7 +197,7 @@ func DeviceCodeLogin(ctx context.Context, issuer, clientID, scope, label string)
 		return nil, fmt.Errorf("OIDC discovery: %w", err)
 	}
 
-	dcr, err := startDeviceCodeFlow(ctx, doc.DeviceAuthorizationEndpoint, clientID, scope)
+	dcr, codeVerifier, err := startDeviceCodeFlow(ctx, doc.DeviceAuthorizationEndpoint, clientID, scope)
 	if err != nil {
 		return nil, fmt.Errorf("device code flow: %w", err)
 	}
@@ -192,7 +213,7 @@ func DeviceCodeLogin(ctx context.Context, issuer, clientID, scope, label string)
 
 	fmt.Printf("\nWaiting for login (expires in %ds)...\n", dcr.ExpiresIn)
 
-	token, err := pollForToken(ctx, doc.TokenEndpoint, clientID, dcr.DeviceCode, dcr.Interval)
+	token, err := pollForToken(ctx, doc.TokenEndpoint, clientID, dcr.DeviceCode, codeVerifier, dcr.Interval)
 	if err != nil {
 		return nil, err
 	}

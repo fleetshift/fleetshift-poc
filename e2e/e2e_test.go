@@ -37,6 +37,10 @@ var (
 )
 
 func TestE2E(t *testing.T) {
+	// Unlock the OS keyring for headless environments (containers, SSH).
+	// fleetctl stores tokens in the GNOME keyring via D-Bus Secret Service.
+	unlockKeyring(t)
+
 	// Setup: find repo root, load config, generate cluster name.
 	repoRoot = findRepoRoot(t)
 	binDir = filepath.Join(repoRoot, "bin")
@@ -59,7 +63,21 @@ func TestE2E(t *testing.T) {
 		}
 	})
 
-	t.Run("01_Build", func(t *testing.T) {
+	// step gates each subtest — if a prior step failed, skip the rest.
+	step := func(name string, fn func(t *testing.T)) {
+		if failed {
+			t.Run(name, func(t *testing.T) { t.Skip("skipped due to prior failure") })
+			return
+		}
+		t.Run(name, func(t *testing.T) {
+			fn(t)
+			if t.Failed() {
+				failed = true
+			}
+		})
+	}
+
+	step("01_Build", func(t *testing.T) {
 		buildBinaries(t, repoRoot, binDir)
 	})
 
@@ -68,7 +86,7 @@ func TestE2E(t *testing.T) {
 	// need the server running. The pull secret must be available when the
 	// server starts because SSOCredentialProvider caches it at init time.
 
-	t.Run("02_KeycloakLogin", func(t *testing.T) {
+	step("02_KeycloakLogin", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -82,10 +100,7 @@ func TestE2E(t *testing.T) {
 		storeTokenForFleetctl(t, token)
 	})
 
-	t.Run("03_RedHatSSOLogin", func(t *testing.T) {
-		if keycloakToken == nil {
-			t.Skip("Keycloak login not completed")
-		}
+	step("03_RedHatSSOLogin", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -104,43 +119,37 @@ func TestE2E(t *testing.T) {
 		t.Logf("Pull secret fetched (%d bytes)", len(pullSecret))
 	})
 
-	t.Run("04_StartServer", func(t *testing.T) {
-		if pullSecret == nil {
-			t.Skip("pull secret not acquired")
-		}
+	step("04_StartServer", func(t *testing.T) {
 		startServer(t, binDir, repoRoot, cfg)
-
-		// Register auth method on server (requires server to be running)
 		setupAuth(t, binDir, cfg)
 	})
 
-	t.Run("05_CreateDeployment", func(t *testing.T) {
+	step("05_CreateDeployment", func(t *testing.T) {
 		createDeployment(t, binDir, cfg)
 		provisioned = true
 	})
 
-	t.Run("06_WaitForProvision", func(t *testing.T) {
+	step("06_WaitForProvision", func(t *testing.T) {
 		state := waitForProvision(t, binDir, cfg, 60*time.Minute)
 		if state != "STATE_ACTIVE" {
-			failed = true
 			t.Fatalf("provision ended in state %s, expected STATE_ACTIVE", state)
 		}
 		t.Logf("Deployment reached STATE_ACTIVE")
 	})
 
-	t.Run("07_ValidateDeployment", func(t *testing.T) {
+	step("07_ValidateDeployment", func(t *testing.T) {
 		validateDeployment(t, binDir, cfg)
 	})
 
-	t.Run("08_ValidateClusterOIDC", func(t *testing.T) {
+	step("08_ValidateClusterOIDC", func(t *testing.T) {
 		validateClusterOIDC(t, cfg, keycloakToken)
 	})
 
-	t.Run("09_DestroyDeployment", func(t *testing.T) {
+	step("09_DestroyDeployment", func(t *testing.T) {
 		destroyDeployment(t, binDir, cfg)
 	})
 
-	t.Run("10_ValidateCleanup", func(t *testing.T) {
+	step("10_ValidateCleanup", func(t *testing.T) {
 		validateCleanup(t, cfg)
 	})
 }
@@ -919,3 +928,37 @@ func validateCleanup(t *testing.T, cfg *Config) {
 // ---------------------------------------------------------------------------
 
 func strPtr(s string) *string { return &s }
+
+// ---------------------------------------------------------------------------
+// Helper: unlockKeyring
+// ---------------------------------------------------------------------------
+
+// unlockKeyring starts a D-Bus session and unlocks the GNOME keyring so that
+// fleetctl can store/load tokens. In headless environments (containers, SSH
+// sessions) the default keyring is locked and go-keyring calls fail.
+func unlockKeyring(t *testing.T) {
+	t.Helper()
+
+	// Start a D-Bus session if one isn't running.
+	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
+		out, err := exec.Command("dbus-launch", "--sh-syntax").Output()
+		if err != nil {
+			t.Logf("Warning: dbus-launch failed: %v (keyring may not work)", err)
+			return
+		}
+		for _, line := range strings.Split(string(out), "\n") {
+			if k, v, ok := strings.Cut(line, "="); ok {
+				v = strings.TrimRight(v, ";")
+				v = strings.Trim(v, "'")
+				os.Setenv(k, v)
+			}
+		}
+	}
+
+	// Unlock the default keyring with an empty password.
+	cmd := exec.Command("gnome-keyring-daemon", "--unlock", "--components=secrets")
+	cmd.Stdin = strings.NewReader("")
+	if err := cmd.Run(); err != nil {
+		t.Logf("Warning: gnome-keyring-daemon unlock failed: %v (keyring may not work)", err)
+	}
+}
