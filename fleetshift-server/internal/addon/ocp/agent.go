@@ -403,7 +403,7 @@ func (a *Agent) handleCompletion(
 }
 
 // Remove implements [domain.DeliveryAgent.Remove]. It destroys the OCP
-// cluster via ocp-engine destroy, cleans up ccoctl IAM resources, and
+// cluster via ocp-engine destroy (which handles ccoctl IAM cleanup) and
 // removes vault entries.
 func (a *Agent) Remove(
 	ctx context.Context,
@@ -465,30 +465,7 @@ func (a *Agent) Remove(
 		return fmt.Errorf("ocp-engine destroy failed: %w", err)
 	}
 
-	// 6. Run ccoctl delete to clean up IAM resources (log warning if fails)
-	clusterName := target.Name
-	if clusterName == "" {
-		clusterName = infraID
-	}
-	cco := &CCOctlOrchestrator{
-		WorkDir: workDir,
-		AWSEnv:  awsCreds.Env(),
-	}
-	// ccoctl binary path may not be available during destroy; attempt
-	// deletion only if ccoctl is on PATH.
-	ccoPath, ccoErr := exec.LookPath("ccoctl")
-	if ccoErr == nil {
-		cco.BinaryPath = ccoPath
-		if err := cco.Delete(ctx, clusterName, region); err != nil {
-			slog.Warn("ccoctl delete failed (IAM resources may need manual cleanup)",
-				"error", err,
-				"cluster", clusterName,
-				"region", region,
-			)
-		}
-	}
-
-	// 7. Clean up vault entries
+	// 6. Clean up vault entries
 	targetID := domain.TargetID("k8s-" + infraID)
 	if a.vault != nil {
 		vaultRefs := []domain.SecretRef{
