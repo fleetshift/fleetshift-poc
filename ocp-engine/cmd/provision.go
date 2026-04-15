@@ -156,7 +156,9 @@ func runProvision(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("inject ccoctl manifests: %w", err)
 				}
 			}
-			// Inject any extra manifests placed by the calling agent
+			// Inject any extra manifests placed by the calling agent.
+			// If an extra manifest conflicts with an existing one (same
+			// apiVersion/kind/name), merge them instead of overwriting.
 			extraDir := filepath.Join(wd.Path, "extra-manifests")
 			if entries, err := os.ReadDir(extraDir); err == nil {
 				manifestsDir := filepath.Join(wd.Path, "manifests")
@@ -165,11 +167,21 @@ func runProvision(cmd *cobra.Command, args []string) error {
 						continue
 					}
 					src := filepath.Join(extraDir, entry.Name())
-					dst := filepath.Join(manifestsDir, entry.Name())
 					data, readErr := os.ReadFile(src)
 					if readErr != nil {
 						return fmt.Errorf("read extra manifest %s: %w", entry.Name(), readErr)
 					}
+
+					// Check for Authentication CR conflict with ccoctl's manifest
+					if isAuthenticationCR(data) {
+						if err := mergeAuthenticationCR(manifestsDir, data); err != nil {
+							return fmt.Errorf("merge Authentication CR: %w", err)
+						}
+						fmt.Fprintf(os.Stderr, "Merged extra manifest into existing Authentication CR\n")
+						continue
+					}
+
+					dst := filepath.Join(manifestsDir, entry.Name())
 					if writeErr := os.WriteFile(dst, data, 0600); writeErr != nil {
 						return fmt.Errorf("write extra manifest %s: %w", entry.Name(), writeErr)
 					}
