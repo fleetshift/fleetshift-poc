@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -475,7 +476,7 @@ func enrollSigningKey(t *testing.T, binDir string) {
 	fmt.Println("    3. Paste the key and save")
 	fmt.Println()
 	fmt.Print("  Press Enter when done...")
-	fmt.Scanln()
+	bufio.NewReader(os.Stdin).ReadBytes('\n')
 }
 
 // ---------------------------------------------------------------------------
