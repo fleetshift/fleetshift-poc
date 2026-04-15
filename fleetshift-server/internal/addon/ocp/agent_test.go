@@ -110,35 +110,29 @@ func TestWriteDestroyMetadata(t *testing.T) {
 	}
 }
 
-func TestValidateCredentialModeCoupling_RejectSTSWithMintMode(t *testing.T) {
-	creds := &AWSCredentials{
-		AccessKeyID:     "ASIA",
-		SecretAccessKey: "secret",
-		SessionToken:    "sts-session-token",
+func TestValidateCredentialModeCoupling(t *testing.T) {
+	tests := []struct {
+		name      string
+		token     string
+		stsMode   bool
+		wantError bool
+	}{
+		{"STS creds + mint mode = rejected", "sts-session-token", false, true},
+		{"STS creds + STS mode = allowed", "sts-session-token", true, false},
+		{"long-lived keys + mint mode = allowed", "", false, false},
+		{"long-lived keys + STS mode = allowed", "", true, false},
 	}
-	err := validateCredentialModeCoupling(creds, false)
-	if err == nil {
-		t.Fatal("expected error: STS creds with mint mode should be rejected")
-	}
-}
-
-func TestValidateCredentialModeCoupling_AllowSTSWithSTSMode(t *testing.T) {
-	creds := &AWSCredentials{
-		AccessKeyID:     "ASIA",
-		SecretAccessKey: "secret",
-		SessionToken:    "sts-session-token",
-	}
-	if err := validateCredentialModeCoupling(creds, true); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-}
-
-func TestValidateCredentialModeCoupling_AllowLongLivedWithMintMode(t *testing.T) {
-	creds := &AWSCredentials{
-		AccessKeyID:     "AKIA",
-		SecretAccessKey: "secret",
-	}
-	if err := validateCredentialModeCoupling(creds, false); err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			creds := &AWSCredentials{
+				AccessKeyID:     "AKIA",
+				SecretAccessKey: "secret",
+				SessionToken:    tt.token,
+			}
+			err := validateCredentialModeCoupling(creds, tt.stsMode)
+			if (err != nil) != tt.wantError {
+				t.Errorf("validateCredentialModeCoupling() error = %v, wantError = %v", err, tt.wantError)
+			}
+		})
 	}
 }

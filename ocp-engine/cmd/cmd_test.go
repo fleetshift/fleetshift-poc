@@ -8,7 +8,6 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ocp-engine/internal/config"
 )
 
 func projectRoot() string {
@@ -193,28 +192,3 @@ func TestExtractKubeconfigData_Empty(t *testing.T) {
 	}
 }
 
-func TestClusterConfig_Region(t *testing.T) {
-	cfg := &config.ClusterConfig{
-		InstallConfig: map[string]any{
-			"platform": map[string]any{
-				"aws": map[string]any{
-					"region": "eu-west-1",
-				},
-			},
-		},
-	}
-
-	if got := cfg.Region(); got != "eu-west-1" {
-		t.Errorf("Region() = %q, want %q", got, "eu-west-1")
-	}
-}
-
-func TestClusterConfig_Region_Missing(t *testing.T) {
-	cfg := &config.ClusterConfig{
-		InstallConfig: map[string]any{},
-	}
-
-	if got := cfg.Region(); got != "" {
-		t.Errorf("Region() = %q, want empty", got)
-	}
-}

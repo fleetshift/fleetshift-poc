@@ -413,6 +413,44 @@ func TestGenerateInstallConfig_NoOcpEngineInOutput(t *testing.T) {
 	}
 }
 
+func TestClusterConfig_ClusterName(t *testing.T) {
+	cfg := &ClusterConfig{
+		InstallConfig: map[string]any{
+			"metadata": map[string]any{"name": "my-cluster"},
+		},
+	}
+	if got := cfg.ClusterName(); got != "my-cluster" {
+		t.Errorf("ClusterName() = %q, want %q", got, "my-cluster")
+	}
+}
+
+func TestClusterConfig_ClusterName_Missing(t *testing.T) {
+	cfg := &ClusterConfig{InstallConfig: map[string]any{}}
+	if got := cfg.ClusterName(); got != "" {
+		t.Errorf("ClusterName() = %q, want empty", got)
+	}
+}
+
+func TestClusterConfig_Region(t *testing.T) {
+	cfg := &ClusterConfig{
+		InstallConfig: map[string]any{
+			"platform": map[string]any{
+				"aws": map[string]any{"region": "eu-west-1"},
+			},
+		},
+	}
+	if got := cfg.Region(); got != "eu-west-1" {
+		t.Errorf("Region() = %q, want %q", got, "eu-west-1")
+	}
+}
+
+func TestClusterConfig_Region_Missing(t *testing.T) {
+	cfg := &ClusterConfig{InstallConfig: map[string]any{}}
+	if got := cfg.Region(); got != "" {
+		t.Errorf("Region() = %q, want empty", got)
+	}
+}
+
 func TestParseConfig_CCOSTSMode(t *testing.T) {
 	yamlData := `ocp_engine:
   pull_secret_file: /tmp/ps.json
