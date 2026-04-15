@@ -306,12 +306,10 @@ func buildBinaries(t *testing.T, repoRoot, binDir string) {
 func startServer(t, parentT *testing.T, binDir, repoRoot string, cfg *Config) {
 	t.Helper()
 
-	// Use a manual temp dir so it survives beyond this subtest.
-	dbDir, err := os.MkdirTemp("", "fleetshift-e2e-")
-	if err != nil {
-		t.Fatalf("create temp dir: %v", err)
-	}
-	parentT.Cleanup(func() { os.RemoveAll(dbDir) })
+	// Use a fixed path so the DB survives test failure for debugging.
+	// The tester can restart the server with the same DB to inspect state.
+	dbDir := "/tmp/fleetshift-e2e-data"
+	os.MkdirAll(dbDir, 0o755)
 	dbPath := filepath.Join(dbDir, "fleetshift-e2e.db")
 
 	// Write the pull secret file. This is populated before the server starts
