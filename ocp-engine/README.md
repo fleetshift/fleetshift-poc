@@ -774,3 +774,42 @@ Credentials discarded when provision/destroy completes
 ### Security: Work Directory Credential Hygiene
 
 - **Audit work directory for secrets** — The ocp-engine work directory contains sensitive data written by `openshift-install`: `install-config.yaml` (pull secret, SSH key), `auth/kubeconfig`, `auth/kubeadmin-password`, `.openshift_install.log` (may contain AWS keys), and ignition configs (embedded pull secret). These must be identified and scrubbed or discarded as soon as they are no longer needed — do not leave credentials on disk after the operation completes. The platform (FleetShift OCP agent) is responsible for extracting what it needs (infra_id, cluster_id, kubeconfig for bootstrap), then cleaning up the work directory. For containerized deployments, use ephemeral storage (tmpfs, emptyDir) so credentials are destroyed when the container exits.
+
+---
+
+## TODO
+
+### Work Directory Lifecycle and Credential Handling
+
+The work directory (`/tmp/ocp-provision-<cluster-name>/`) currently has several issues that need to be addressed:
+
+1. **Agent deletes work dir too early** — The OCP agent's `deliverAsync` runs `defer os.RemoveAll(req.workDir)`, which deletes the work dir when provisioning completes (success or failure). This removes the installer log, kubeconfig, and metadata before post-provision debugging can happen. On failure, the work dir should be retained for debugging. On success, key artifacts should be extracted before cleanup.
+
+2. **Sensitive files need explicit handling** — The work dir contains several files with credentials that need individual attention:
+   - `install-config.yaml` — contains inlined pull secret and SSH key. Should be deleted after the `install-config` phase consumes it (openshift-install already deletes it, but `install-config.yaml.bak` persists).
+   - `auth/kubeconfig` — kubeadmin kubeconfig with client certificate. Extracted by the agent for bootstrap, then should be scrubbed.
+   - `auth/kubeadmin-password` — plaintext password. Should be scrubbed after bootstrap.
+   - `.openshift_install.log` — may contain AWS access keys in error messages. Should be retained for debugging but scrubbed of credentials.
+   - `pull-secret.json` — Red Hat registry credentials. Should be deleted after the `install-config` phase.
+   - `cluster.yaml` — contains AWS credential configuration. Should be deleted after provision completes.
+
+3. **Containerized deployments** — When running in a container, the work dir should use tmpfs or emptyDir so credentials are destroyed when the container exits, even on unexpected termination. This is not yet implemented.
+
+### Logging Architecture
+
+ocp-engine's logging has three output channels that need better integration:
+
+1. **JSON events on stdout** — Phase results (`{"phase":"extract","status":"complete",...}`), milestones (`{"event":"bootstrap_complete",...}`), and final result. These are structured and machine-readable. The agent parses these via the gRPC callback. This works well.
+
+2. **Scrubbed installer logs on stderr** — The `logpipeline` package tails `.openshift_install.log`, scrubs sensitive data, and writes to stderr. This is useful for real-time monitoring but has issues:
+   - When running as a subprocess (spawned by the agent), stderr goes to the agent's stderr, which goes to the fleetshift-server log. The installer's debug-level output floods the server log (~3000+ lines per provision).
+   - The log pipeline runs only during the `cluster` phase. Earlier phases (extract, ccoctl, manifests) write to stderr via `RunCommand` which does `io.MultiWriter(logFile, os.Stderr)` — no scrubbing, no structured output.
+   - Phase-specific logs (ccoctl output, manifest generation) are mixed with installer logs in `.openshift_install.log` with no separation.
+
+3. **Raw installer log file** — `.openshift_install.log` in the work dir. This is the authoritative log but it's deleted with the work dir (see above). The agent should extract and persist relevant portions before cleanup.
+
+**Improvements needed:**
+- Separate installer debug logs from the server log (write to a dedicated file, not server stderr)
+- Apply log scrubbing consistently across all phases, not just the cluster phase
+- Provide a way to retrieve provision logs via the API after the work dir is cleaned up (e.g., store log tail in the delivery result or vault)
+- Add structured logging to ocp-engine itself (currently uses fmt.Fprintf to stderr) so log levels and components are filterable
