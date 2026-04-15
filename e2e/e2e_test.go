@@ -24,12 +24,7 @@ var (
 	binDir        string
 	repoRoot      string
 	serverCmd     *exec.Cmd
-	infraID       string // set after provision
-
-	// pullSecretFile is the path to the pull secret file consumed by the
-	// server. It is written with an empty placeholder in startServer and
-	// overwritten with the real secret in step 04.
-	pullSecretFile string
+	infraID   string // set after provision
 )
 
 func TestE2E(t *testing.T) {
@@ -59,11 +54,12 @@ func TestE2E(t *testing.T) {
 		buildBinaries(t, repoRoot, binDir)
 	})
 
-	t.Run("02_StartServer", func(t *testing.T) {
-		startServer(t, binDir, repoRoot, cfg)
-	})
+	// Steps 02-03: Authenticate before starting the server. The SSO logins
+	// talk to external identity providers (Keycloak, Red Hat SSO) and don't
+	// need the server running. The pull secret must be available when the
+	// server starts because SSOCredentialProvider caches it at init time.
 
-	t.Run("03_KeycloakLogin", func(t *testing.T) {
+	t.Run("02_KeycloakLogin", func(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -74,12 +70,13 @@ func TestE2E(t *testing.T) {
 			t.Fatalf("Keycloak device code login: %v", err)
 		}
 		keycloakToken = token
-
 		storeTokenForFleetctl(t, token)
-		setupAuth(t, binDir, cfg)
 	})
 
-	t.Run("04_RedHatSSOLogin", func(t *testing.T) {
+	t.Run("03_RedHatSSOLogin", func(t *testing.T) {
+		if keycloakToken == nil {
+			t.Skip("Keycloak login not completed")
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
@@ -96,15 +93,16 @@ func TestE2E(t *testing.T) {
 		}
 		pullSecret = []byte(ps)
 		t.Logf("Pull secret fetched (%d bytes)", len(pullSecret))
+	})
 
-		// Overwrite the placeholder pull secret file so the server picks up
-		// the real credentials for subsequent provision requests.
-		if pullSecretFile != "" {
-			if err := os.WriteFile(pullSecretFile, pullSecret, 0o600); err != nil {
-				t.Fatalf("overwrite pull secret file: %v", err)
-			}
-			t.Logf("Pull secret written to %s", pullSecretFile)
+	t.Run("04_StartServer", func(t *testing.T) {
+		if pullSecret == nil {
+			t.Skip("pull secret not acquired")
 		}
+		startServer(t, binDir, repoRoot, cfg)
+
+		// Register auth method on server (requires server to be running)
+		setupAuth(t, binDir, cfg)
 	})
 
 	t.Run("05_CreateDeployment", func(t *testing.T) {
@@ -233,13 +231,16 @@ func startServer(t *testing.T, binDir, repoRoot string, cfg *Config) {
 	dbDir := t.TempDir()
 	dbPath := filepath.Join(dbDir, "fleetshift-e2e.db")
 
-	// Write an empty placeholder pull secret file. This will be overwritten
-	// with real credentials in step 04.
+	// Write the pull secret file. This is populated before the server starts
+	// because SSOCredentialProvider caches it at init time.
 	psFile := filepath.Join(dbDir, "pull-secret.json")
-	if err := os.WriteFile(psFile, []byte("{}"), 0o600); err != nil {
-		t.Fatalf("write placeholder pull secret: %v", err)
+	psData := pullSecret
+	if len(psData) == 0 {
+		psData = []byte("{}")
 	}
-	pullSecretFile = psFile
+	if err := os.WriteFile(psFile, psData, 0o600); err != nil {
+		t.Fatalf("write pull secret: %v", err)
+	}
 
 	engineBin := filepath.Join(binDir, "ocp-engine")
 	serverBin := filepath.Join(binDir, "fleetshift")
