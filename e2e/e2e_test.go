@@ -320,8 +320,9 @@ func startServer(t, parentT *testing.T, binDir, repoRoot string, cfg *Config) {
 	t.Helper()
 
 	// Use a fixed path so the DB survives test failure for debugging.
-	// The tester can restart the server with the same DB to inspect state.
+	// Clean slate each run to avoid stale deployments from previous runs.
 	dbDir := "/tmp/fleetshift-e2e-data"
+	os.RemoveAll(dbDir)
 	os.MkdirAll(dbDir, 0o755)
 	dbPath := filepath.Join(dbDir, "fleetshift-e2e.db")
 
