@@ -64,16 +64,20 @@ func TestE2E(t *testing.T) {
 	})
 
 	// step gates each subtest — if a prior step failed, skip the rest.
+	// Uses defer because t.Fatalf calls runtime.Goexit(), so code after
+	// fn(t) never runs without defer.
 	step := func(name string, fn func(t *testing.T)) {
 		if failed {
 			t.Run(name, func(t *testing.T) { t.Skip("skipped due to prior failure") })
 			return
 		}
 		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if t.Failed() {
+					failed = true
+				}
+			}()
 			fn(t)
-			if t.Failed() {
-				failed = true
-			}
 		})
 	}
 
@@ -119,9 +123,10 @@ func TestE2E(t *testing.T) {
 		t.Logf("Pull secret fetched (%d bytes)", len(pullSecret))
 	})
 
-	step("04_StartServer", func(t *testing.T) {
-		startServer(t, binDir, repoRoot, cfg)
-		setupAuth(t, binDir, cfg)
+	step("04_StartServer", func(st *testing.T) {
+		// Pass the parent t for cleanup so the server survives across subtests.
+		startServer(st, t, binDir, repoRoot, cfg)
+		setupAuth(st, binDir, cfg)
 	})
 
 	step("05_EnrollSigningKey", func(t *testing.T) {
@@ -246,11 +251,15 @@ func buildBinaries(t *testing.T, repoRoot, binDir string) {
 // Helper: startServer
 // ---------------------------------------------------------------------------
 
-func startServer(t *testing.T, binDir, repoRoot string, cfg *Config) {
+func startServer(t, parentT *testing.T, binDir, repoRoot string, cfg *Config) {
 	t.Helper()
 
-	// Create a temp directory for the database.
-	dbDir := t.TempDir()
+	// Use a manual temp dir so it survives beyond this subtest.
+	dbDir, err := os.MkdirTemp("", "fleetshift-e2e-")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	parentT.Cleanup(func() { os.RemoveAll(dbDir) })
 	dbPath := filepath.Join(dbDir, "fleetshift-e2e.db")
 
 	// Write the pull secret file. This is populated before the server starts
@@ -286,9 +295,9 @@ func startServer(t *testing.T, binDir, repoRoot string, cfg *Config) {
 		t.Fatalf("start server: %v", err)
 	}
 
-	t.Cleanup(func() {
+	parentT.Cleanup(func() {
 		if serverCmd != nil && serverCmd.Process != nil {
-			t.Logf("Stopping fleetshift-server (pid %d)...", serverCmd.Process.Pid)
+			parentT.Logf("Stopping fleetshift-server (pid %d)...", serverCmd.Process.Pid)
 			_ = serverCmd.Process.Signal(os.Interrupt)
 
 			done := make(chan error, 1)
@@ -297,12 +306,12 @@ func startServer(t *testing.T, binDir, repoRoot string, cfg *Config) {
 			select {
 			case err := <-done:
 				if err != nil {
-					t.Logf("Server exited with: %v", err)
+					parentT.Logf("Server exited with: %v", err)
 				} else {
-					t.Logf("Server stopped cleanly")
+					parentT.Logf("Server stopped cleanly")
 				}
 			case <-time.After(10 * time.Second):
-				t.Logf("Server did not exit in 10s, killing...")
+				parentT.Logf("Server did not exit in 10s, killing...")
 				_ = serverCmd.Process.Kill()
 			}
 		}
@@ -978,32 +987,33 @@ func strPtr(s string) *string { return &s }
 // Helper: unlockKeyring
 // ---------------------------------------------------------------------------
 
-// unlockKeyring starts a D-Bus session and unlocks the GNOME keyring so that
-// fleetctl can store/load tokens. In headless environments (containers, SSH
-// sessions) the default keyring is locked and go-keyring calls fail.
+// unlockKeyring starts a fresh D-Bus session and unlocks the GNOME keyring
+// so that fleetctl can store/load tokens. Always starts a new session to
+// avoid issues with stale or locked keyrings from previous sessions.
 func unlockKeyring(t *testing.T) {
 	t.Helper()
 
-	// Start a D-Bus session if one isn't running.
-	if os.Getenv("DBUS_SESSION_BUS_ADDRESS") == "" {
-		out, err := exec.Command("dbus-launch", "--sh-syntax").Output()
-		if err != nil {
-			t.Logf("Warning: dbus-launch failed: %v (keyring may not work)", err)
-			return
-		}
-		for _, line := range strings.Split(string(out), "\n") {
-			if k, v, ok := strings.Cut(line, "="); ok {
-				v = strings.TrimRight(v, ";")
-				v = strings.Trim(v, "'")
-				os.Setenv(k, v)
-			}
+	// Always start a fresh D-Bus session for a clean keyring.
+	out, err := exec.Command("dbus-launch", "--sh-syntax").Output()
+	if err != nil {
+		t.Fatalf("dbus-launch failed: %v (install dbus-x11)", err)
+	}
+	for _, line := range strings.Split(string(out), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			v = strings.TrimRight(v, ";")
+			v = strings.Trim(v, "'")
+			os.Setenv(k, v)
 		}
 	}
+	t.Logf("D-Bus session: %s", os.Getenv("DBUS_SESSION_BUS_ADDRESS"))
 
 	// Unlock the default keyring with an empty password.
 	cmd := exec.Command("gnome-keyring-daemon", "--unlock", "--components=secrets")
 	cmd.Stdin = strings.NewReader("")
+	cmd.Stdout = os.Stderr
+	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		t.Logf("Warning: gnome-keyring-daemon unlock failed: %v (keyring may not work)", err)
+		t.Fatalf("gnome-keyring-daemon unlock failed: %v (install gnome-keyring)", err)
 	}
+	t.Log("Keyring unlocked")
 }
