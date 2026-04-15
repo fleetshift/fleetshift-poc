@@ -26,7 +26,6 @@ type Agent struct {
 	callbackAddr     string
 	vault            domain.Vault
 	credentials      CredentialProvider
-	oidcConfig       OIDCProviderConfig
 	observer         AgentObserver
 	tokenSigner      *CallbackTokenSigner
 	provisionTimeout time.Duration
@@ -36,17 +35,6 @@ type Agent struct {
 
 // AgentOption configures an [Agent].
 type AgentOption func(*Agent)
-
-// WithEngineBinary sets the path to the ocp-engine binary.
-func WithEngineBinary(path string) AgentOption {
-	return func(a *Agent) { a.engineBinary = path }
-}
-
-// WithCallbackAddr sets the gRPC callback address that ocp-engine
-// will use to report completion/failure (e.g. "localhost:9443").
-func WithCallbackAddr(addr string) AgentOption {
-	return func(a *Agent) { a.callbackAddr = addr }
-}
 
 // WithVault sets the [domain.Vault] used for storing cluster secrets.
 func WithVault(v domain.Vault) AgentOption {
@@ -59,12 +47,6 @@ func WithCredentialProvider(p CredentialProvider) AgentOption {
 	return func(a *Agent) { a.credentials = p }
 }
 
-// WithOIDCConfig sets the OIDC provider configuration used for
-// generating authentication manifests on provisioned clusters.
-func WithOIDCConfig(cfg OIDCProviderConfig) AgentOption {
-	return func(a *Agent) { a.oidcConfig = cfg }
-}
-
 // WithObserver sets the [AgentObserver] for delivery lifecycle events.
 func WithObserver(o AgentObserver) AgentOption {
 	return func(a *Agent) { a.observer = o }
@@ -74,12 +56,6 @@ func WithObserver(o AgentObserver) AgentOption {
 // verifying callback JWTs.
 func WithTokenSigner(s *CallbackTokenSigner) AgentOption {
 	return func(a *Agent) { a.tokenSigner = s }
-}
-
-// WithProvisionTimeout sets the timeout for cluster provisioning.
-// Defaults to 2h (matching defaultProvisionSTSDuration).
-func WithProvisionTimeout(d time.Duration) AgentOption {
-	return func(a *Agent) { a.provisionTimeout = d }
 }
 
 // NewAgent returns an Agent configured with the given options.
@@ -222,30 +198,45 @@ func (a *Agent) Deliver(
 	a.provisions.Store(clusterID, state)
 
 	// 9. Launch background goroutine
-	go a.deliverAsync(ctx, clusterID, configPath, workDir, awsCreds, sshPrivateKey, auth, signaler, state, roleARN)
+	req := provisionRequest{
+		clusterID:     clusterID,
+		configPath:    configPath,
+		workDir:       workDir,
+		awsCreds:      awsCreds,
+		sshPrivateKey: sshPrivateKey,
+		auth:          auth,
+		roleARN:       roleARN,
+	}
+	go a.deliverAsync(ctx, req, signaler, state)
 
 	// 10. Return accepted
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
+// provisionRequest bundles the parameters for an async provision.
+type provisionRequest struct {
+	clusterID     string
+	configPath    string
+	workDir       string
+	awsCreds      *AWSCredentials
+	sshPrivateKey []byte
+	auth          domain.DeliveryAuth
+	roleARN       string
+}
+
 // deliverAsync runs ocp-engine and waits for the callback or process exit.
 func (a *Agent) deliverAsync(
 	ctx context.Context,
-	clusterID string,
-	configPath string,
-	workDir string,
-	awsCreds *AWSCredentials,
-	sshPrivateKey []byte,
-	auth domain.DeliveryAuth,
+	req provisionRequest,
 	signaler *domain.DeliverySignaler,
 	state *provisionState,
-	roleARN string,
 ) {
-	defer a.provisions.Delete(clusterID)
-	defer os.RemoveAll(workDir)
+	defer a.provisions.Delete(req.clusterID)
+	defer os.RemoveAll(req.workDir)
 
 	// Generate callback JWT
-	token, err := a.tokenSigner.Sign(clusterID, a.effectiveProvisionTimeout())
+	provTimeout := a.effectiveProvisionTimeout()
+	token, err := a.tokenSigner.Sign(req.clusterID, provTimeout)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -254,17 +245,17 @@ func (a *Agent) deliverAsync(
 		return
 	}
 
-	timeout := fmt.Sprintf("%ds", int(a.effectiveProvisionTimeout().Seconds()))
+	timeout := fmt.Sprintf("%ds", int(provTimeout.Seconds()))
 
 	// Build and run ocp-engine subprocess
 	cmd := exec.CommandContext(ctx, a.engineBinary,
 		"provision",
-		"--config", configPath,
+		"--config", req.configPath,
 		"--timeout", timeout,
 		"--callback-url", a.callbackAddr,
-		"--cluster-id", clusterID,
+		"--cluster-id", req.clusterID,
 	)
-	cmd.Env = append(os.Environ(), awsCreds.Env()...)
+	cmd.Env = append(os.Environ(), req.awsCreds.Env()...)
 	cmd.Env = append(cmd.Env, "OCP_CALLBACK_TOKEN="+token)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
@@ -337,7 +328,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	// Handle successful completion
-	output, err := a.handleCompletion(ctx, clusterID, completion, sshPrivateKey, auth, roleARN)
+	output, err := a.handleCompletion(ctx, req.clusterID, completion, req.sshPrivateKey, req.auth, req.roleARN)
 	if err != nil {
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
@@ -348,7 +339,7 @@ func (a *Agent) deliverAsync(
 
 	result := domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
-		Message:            fmt.Sprintf("OCP cluster %s provisioned successfully", clusterID),
+		Message:            fmt.Sprintf("OCP cluster %s provisioned successfully", req.clusterID),
 		ProvisionedTargets: []domain.ProvisionedTarget{output.Target()},
 		ProducedSecrets:    output.Secrets(),
 	}
@@ -368,20 +359,14 @@ func (a *Agent) handleCompletion(
 ) (*ClusterOutput, error) {
 	targetID := domain.TargetID("k8s-" + completion.GetInfraId())
 
-	// Determine issuer URL from OIDC config
-	var issuerURL domain.IssuerURL
-	if a.oidcConfig.IssuerURL != "" {
-		issuerURL = domain.IssuerURL(a.oidcConfig.IssuerURL)
-	}
-
 	// Bootstrap the cluster: create namespace, SA, RBAC, generate token
 	bootstrapResult, err := BootstrapCluster(
 		ctx,
 		completion.GetKubeconfig(),
 		targetID,
 		auth.Caller,
-		issuerURL,
-		0, // use default token expiry
+		"", // OIDC issuer URL — configured externally when needed
+		0,  // use default token expiry
 	)
 	if err != nil {
 		return nil, fmt.Errorf("bootstrap cluster: %w", err)
@@ -532,22 +517,24 @@ func prepareWorkDir(clusterID string, spec *ClusterSpec, region string, pullSecr
 	if err != nil {
 		return "", "", fmt.Errorf("create work directory: %w", err)
 	}
+	defer func() {
+		if err != nil {
+			os.RemoveAll(workDir)
+		}
+	}()
 
 	pullSecretFile := filepath.Join(workDir, "pull-secret.json")
-	if err := os.WriteFile(pullSecretFile, pullSecret, 0600); err != nil {
-		os.RemoveAll(workDir)
+	if err = os.WriteFile(pullSecretFile, pullSecret, 0600); err != nil {
 		return "", "", fmt.Errorf("write pull secret: %w", err)
 	}
 
 	clusterYAML, err := BuildClusterYAML(spec, region, pullSecretFile, strings.TrimSpace(string(sshPublicKey)))
 	if err != nil {
-		os.RemoveAll(workDir)
 		return "", "", fmt.Errorf("build cluster.yaml: %w", err)
 	}
 
 	configPath = filepath.Join(workDir, "cluster.yaml")
-	if err := os.WriteFile(configPath, clusterYAML, 0600); err != nil {
-		os.RemoveAll(workDir)
+	if err = os.WriteFile(configPath, clusterYAML, 0600); err != nil {
 		return "", "", fmt.Errorf("write cluster.yaml: %w", err)
 	}
 

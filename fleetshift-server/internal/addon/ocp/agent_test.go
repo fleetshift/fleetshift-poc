@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"testing"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -65,21 +64,11 @@ func TestPrepareWorkDir_InvalidSpec(t *testing.T) {
 }
 
 func TestEffectiveProvisionTimeout(t *testing.T) {
-	t.Run("default", func(t *testing.T) {
-		a := NewAgent()
-		got := a.effectiveProvisionTimeout()
-		if got != defaultProvisionSTSDuration {
-			t.Errorf("got %v, want %v", got, defaultProvisionSTSDuration)
-		}
-	})
-
-	t.Run("custom", func(t *testing.T) {
-		a := NewAgent(WithProvisionTimeout(30 * time.Minute))
-		got := a.effectiveProvisionTimeout()
-		if got != 30*time.Minute {
-			t.Errorf("got %v, want 30m", got)
-		}
-	})
+	a := NewAgent()
+	got := a.effectiveProvisionTimeout()
+	if got != defaultProvisionSTSDuration {
+		t.Errorf("got %v, want %v", got, defaultProvisionSTSDuration)
+	}
 }
 
 func TestWriteDestroyMetadata(t *testing.T) {
