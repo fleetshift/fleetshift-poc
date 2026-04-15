@@ -233,6 +233,12 @@ type provisionRequest struct {
 	roleARN       string
 }
 
+// cleanupProvision removes the work directory and provisions entry.
+func (a *Agent) cleanupProvision(clusterID, workDir string) {
+	os.RemoveAll(workDir)
+	a.provisions.Delete(clusterID)
+}
+
 // deliverAsync runs ocp-engine and waits for the callback or process exit.
 func (a *Agent) deliverAsync(
 	ctx context.Context,
@@ -240,13 +246,11 @@ func (a *Agent) deliverAsync(
 	signaler *domain.DeliverySignaler,
 	state *provisionState,
 ) {
-	defer a.provisions.Delete(req.clusterID)
-	defer os.RemoveAll(req.workDir)
-
 	// Generate callback JWT
 	provTimeout := a.effectiveProvisionTimeout()
 	token, err := a.tokenSigner.Sign(req.clusterID, provTimeout)
 	if err != nil {
+		a.cleanupProvision(req.clusterID, req.workDir)
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("generate callback token: %v", err),
@@ -271,6 +275,7 @@ func (a *Agent) deliverAsync(
 
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
+		a.cleanupProvision(req.clusterID, req.workDir)
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("start ocp-engine: %v", err),
@@ -299,6 +304,14 @@ func (a *Agent) deliverAsync(
 			if err != nil {
 				msg = fmt.Sprintf("ocp-engine exited with error: %v", err)
 			}
+			metadataPath := filepath.Join(req.workDir, "metadata.json")
+			if _, statErr := os.Stat(metadataPath); os.IsNotExist(statErr) {
+				a.cleanupProvision(req.clusterID, req.workDir)
+			} else {
+				state.mu.Lock()
+				state.workDir = req.workDir
+				state.mu.Unlock()
+			}
 			signaler.Done(ctx, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: msg,
@@ -306,6 +319,14 @@ func (a *Agent) deliverAsync(
 			return
 		}
 	case <-ctx.Done():
+		metadataPath := filepath.Join(req.workDir, "metadata.json")
+		if _, statErr := os.Stat(metadataPath); os.IsNotExist(statErr) {
+			a.cleanupProvision(req.clusterID, req.workDir)
+		} else {
+			state.mu.Lock()
+			state.workDir = req.workDir
+			state.mu.Unlock()
+		}
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("context cancelled: %v", ctx.Err()),
@@ -321,6 +342,13 @@ func (a *Agent) deliverAsync(
 	state.mu.Unlock()
 
 	if failure != nil {
+		if failure.GetRequiresDestroy() {
+			state.mu.Lock()
+			state.workDir = req.workDir
+			state.mu.Unlock()
+		} else {
+			a.cleanupProvision(req.clusterID, req.workDir)
+		}
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("ocp-engine failed in phase %s: %s", failure.GetPhase(), failure.GetFailureMessage()),
@@ -329,6 +357,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	if completion == nil {
+		a.cleanupProvision(req.clusterID, req.workDir)
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: "callback received but no completion data",
@@ -339,6 +368,9 @@ func (a *Agent) deliverAsync(
 	// Handle successful completion
 	output, err := a.handleCompletion(ctx, req.clusterID, completion, req.sshPrivateKey, req.auth, req.roleARN)
 	if err != nil {
+		state.mu.Lock()
+		state.workDir = req.workDir
+		state.mu.Unlock()
 		signaler.Done(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("post-provision bootstrap failed: %v", err),
@@ -353,6 +385,7 @@ func (a *Agent) deliverAsync(
 		ProducedSecrets:    output.Secrets(),
 	}
 
+	a.cleanupProvision(req.clusterID, req.workDir)
 	signaler.Done(ctx, result)
 }
 
