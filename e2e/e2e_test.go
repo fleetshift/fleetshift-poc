@@ -3,6 +3,7 @@
 package e2e
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -14,7 +15,15 @@ import (
 	"testing"
 	"time"
 
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	ec2svc "github.com/aws/aws-sdk-go-v2/service/ec2"
+	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
+	iamsvc "github.com/aws/aws-sdk-go-v2/service/iam"
+	s3svc "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/zalando/go-keyring"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 )
 
 var (
@@ -534,25 +543,380 @@ func printClusterWarning(cfg *Config) {
 }
 
 // ---------------------------------------------------------------------------
-// Placeholder functions — filled in by subsequent tasks
+// Helper: validateDeployment
 // ---------------------------------------------------------------------------
 
 func validateDeployment(t *testing.T, binDir string, cfg *Config) {
 	t.Helper()
-	t.Log("TODO: validateDeployment — will be implemented in Task 5")
+
+	fleetctl := filepath.Join(binDir, "fleetctl")
+	cmd := exec.Command(fleetctl, "deployment", "get", cfg.ClusterName, "-o", "json")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("fleetctl deployment get: %v", err)
+	}
+
+	var dep map[string]interface{}
+	if err := json.Unmarshal(out, &dep); err != nil {
+		t.Fatalf("parse deployment JSON: %v", err)
+	}
+
+	// Check deployment state contains "ACTIVE" (case-insensitive).
+	state, _ := dep["state"].(string)
+	if !strings.Contains(strings.ToUpper(state), "ACTIVE") {
+		t.Fatalf("deployment state is %q, expected to contain ACTIVE", state)
+	}
+	t.Logf("Deployment state: %s", state)
+
+	// Extract provisioned_targets[0].properties.
+	targets, ok := dep["provisioned_targets"].([]interface{})
+	if !ok || len(targets) == 0 {
+		t.Fatalf("no provisioned_targets in deployment")
+	}
+	target, ok := targets[0].(map[string]interface{})
+	if !ok {
+		t.Fatalf("provisioned_targets[0] is not an object")
+	}
+	props, ok := target["properties"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("provisioned_targets[0].properties is not an object")
+	}
+
+	// Check required property keys exist.
+	requiredKeys := []string{
+		"api_server", "infra_id", "cluster_id", "region",
+		"role_arn", "ca_cert", "service_account_token_ref",
+	}
+	for _, key := range requiredKeys {
+		if _, exists := props[key]; !exists {
+			t.Errorf("missing required property: %s", key)
+		}
+	}
+
+	// Verify region and role_arn match config.
+	if region, _ := props["region"].(string); region != cfg.Region {
+		t.Errorf("region mismatch: got %q, want %q", region, cfg.Region)
+	}
+	if roleARN, _ := props["role_arn"].(string); roleARN != cfg.RoleARN {
+		t.Errorf("role_arn mismatch: got %q, want %q", roleARN, cfg.RoleARN)
+	}
+
+	// Set package-level infraID.
+	infraID, _ = props["infra_id"].(string)
+	t.Logf("infra_id: %s", infraID)
+	t.Logf("api_server: %s", props["api_server"])
 }
+
+// ---------------------------------------------------------------------------
+// Helper: validateClusterOIDC
+// ---------------------------------------------------------------------------
 
 func validateClusterOIDC(t *testing.T, cfg *Config, token *TokenResponse) {
 	t.Helper()
-	t.Log("TODO: validateClusterOIDC — will be implemented in Task 6")
+
+	if token == nil {
+		t.Skip("Keycloak token not available")
+	}
+
+	// Get api_server and ca_cert from deployment.
+	fleetctl := filepath.Join(binDir, "fleetctl")
+	cmd := exec.Command(fleetctl, "deployment", "get", cfg.ClusterName, "-o", "json")
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("fleetctl deployment get: %v", err)
+	}
+
+	var dep map[string]interface{}
+	if err := json.Unmarshal(out, &dep); err != nil {
+		t.Fatalf("parse deployment JSON: %v", err)
+	}
+
+	targets, _ := dep["provisioned_targets"].([]interface{})
+	if len(targets) == 0 {
+		t.Fatalf("no provisioned_targets in deployment")
+	}
+	target, _ := targets[0].(map[string]interface{})
+	props, _ := target["properties"].(map[string]interface{})
+	apiServer, _ := props["api_server"].(string)
+	caCert, _ := props["ca_cert"].(string)
+
+	if apiServer == "" {
+		t.Fatalf("api_server is empty")
+	}
+
+	// Build rest.Config with OIDC bearer token.
+	restCfg := &rest.Config{
+		Host:        apiServer,
+		BearerToken: token.AccessToken,
+		TLSClientConfig: rest.TLSClientConfig{
+			CAData: []byte(caCert),
+		},
+	}
+
+	clientset, err := kubernetes.NewForConfig(restCfg)
+	if err != nil {
+		t.Fatalf("create kubernetes client: %v", err)
+	}
+
+	ctx := context.Background()
+
+	// 1. Check nodes are accessible and at least one is Ready.
+	t.Log("Checking nodes via OIDC auth...")
+	nodes, err := clientset.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatalf("list nodes (OIDC auth failed?): %v", err)
+	}
+	if len(nodes.Items) == 0 {
+		t.Fatalf("no nodes found")
+	}
+
+	readyCount := 0
+	for _, node := range nodes.Items {
+		for _, cond := range node.Status.Conditions {
+			if cond.Type == "Ready" && cond.Status == "True" {
+				readyCount++
+			}
+		}
+	}
+	t.Logf("Nodes: %d total, %d Ready", len(nodes.Items), readyCount)
+	if readyCount == 0 {
+		t.Fatalf("no nodes in Ready state")
+	}
+
+	// 2. Check kube-system/aws-creds secret does NOT exist (proves STS mode).
+	t.Log("Checking kube-system/aws-creds does NOT exist (STS mode)...")
+	_, err = clientset.CoreV1().Secrets("kube-system").Get(ctx, "aws-creds", metav1.GetOptions{})
+	if err == nil {
+		t.Fatalf("kube-system/aws-creds secret exists — cluster is NOT in STS mode")
+	}
+	t.Log("kube-system/aws-creds absent (STS mode confirmed)")
+
+	// 3. Check operator credential secrets contain role_arn, not aws_access_key_id.
+	t.Log("Checking operator credential secrets for STS role_arn...")
+	stsSecrets := []struct {
+		namespace string
+		name      string
+	}{
+		{"openshift-cloud-credential-operator", "cloud-credential-operator-iam-ro-creds"},
+		{"openshift-machine-api", "aws-cloud-credentials"},
+		{"openshift-ingress-operator", "cloud-credentials"},
+		{"openshift-cluster-csi-drivers", "ebs-cloud-credentials"},
+		{"openshift-image-registry", "installer-cloud-credentials"},
+	}
+	for _, s := range stsSecrets {
+		secret, err := clientset.CoreV1().Secrets(s.namespace).Get(ctx, s.name, metav1.GetOptions{})
+		if err != nil {
+			t.Errorf("get secret %s/%s: %v", s.namespace, s.name, err)
+			continue
+		}
+
+		credData := secret.Data["credentials"]
+		if len(credData) == 0 {
+			t.Errorf("secret %s/%s has no 'credentials' key", s.namespace, s.name)
+			continue
+		}
+
+		if !bytes.Contains(credData, []byte("role_arn")) {
+			t.Errorf("secret %s/%s credentials missing role_arn", s.namespace, s.name)
+		}
+		if bytes.Contains(credData, []byte("aws_access_key_id")) {
+			t.Errorf("secret %s/%s credentials contains aws_access_key_id (not STS)", s.namespace, s.name)
+		}
+		t.Logf("  %s/%s: STS credentials confirmed", s.namespace, s.name)
+	}
+
+	// 4. Check key operator pods are Running.
+	t.Log("Checking operator pods...")
+	operatorPods := []struct {
+		namespace string
+		label     string
+		desc      string
+	}{
+		{"openshift-machine-api", "api=clusterapi", "machine-api"},
+		{"openshift-ingress-operator", "name=ingress-operator", "ingress-operator"},
+		{"openshift-cluster-csi-drivers", "app=aws-ebs-csi-driver-controller", "ebs-csi-driver"},
+		{"openshift-image-registry", "name=cluster-image-registry-operator", "image-registry-operator"},
+		{"openshift-cloud-network-config-controller", "app=cloud-network-config-controller", "cloud-network-config"},
+	}
+	for _, op := range operatorPods {
+		pods, err := clientset.CoreV1().Pods(op.namespace).List(ctx, metav1.ListOptions{
+			LabelSelector: op.label,
+		})
+		if err != nil {
+			t.Errorf("list pods in %s (label %s): %v", op.namespace, op.label, err)
+			continue
+		}
+		if len(pods.Items) == 0 {
+			t.Errorf("no pods found in %s with label %s", op.namespace, op.label)
+			continue
+		}
+
+		allRunning := true
+		for _, pod := range pods.Items {
+			if pod.Status.Phase != "Running" {
+				allRunning = false
+				t.Errorf("pod %s/%s is %s, expected Running", op.namespace, pod.Name, pod.Status.Phase)
+			}
+		}
+		if allRunning {
+			t.Logf("  %s: %d pod(s) Running", op.desc, len(pods.Items))
+		}
+	}
 }
+
+// ---------------------------------------------------------------------------
+// Helper: destroyDeployment
+// ---------------------------------------------------------------------------
 
 func destroyDeployment(t *testing.T, binDir string, cfg *Config) {
 	t.Helper()
-	t.Log("TODO: destroyDeployment — will be implemented in Task 7")
+
+	fleetctl := filepath.Join(binDir, "fleetctl")
+
+	// Initiate deletion.
+	cmd := exec.Command(fleetctl, "deployment", "delete", cfg.ClusterName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	t.Logf("Running: fleetctl deployment delete %s", cfg.ClusterName)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("fleetctl deployment delete: %v", err)
+	}
+	t.Logf("Delete initiated, polling for removal...")
+
+	// Poll until the deployment is gone or fails.
+	start := time.Now()
+	timeout := 30 * time.Minute
+	pollInterval := 15 * time.Second
+	deadline := time.Now().Add(timeout)
+
+	for time.Now().Before(deadline) {
+		time.Sleep(pollInterval)
+
+		getCmd := exec.Command(fleetctl, "deployment", "get", cfg.ClusterName, "-o", "json")
+		out, err := getCmd.Output()
+		if err != nil {
+			// Command failed — deployment is likely gone.
+			t.Logf("[%s] Deployment not found (destroy complete)", elapsed(start))
+			return
+		}
+
+		var dep struct {
+			State string `json:"state"`
+		}
+		if err := json.Unmarshal(out, &dep); err != nil {
+			t.Logf("[%s] parse error: %v", elapsed(start), err)
+			continue
+		}
+
+		if strings.Contains(strings.ToUpper(dep.State), "FAILED") {
+			t.Fatalf("[%s] Destroy failed: state is %s", elapsed(start), dep.State)
+		}
+
+		t.Logf("[%s] Destroy in progress (state: %s)", elapsed(start), dep.State)
+	}
+
+	t.Fatalf("[%s] Timed out waiting for destroy to complete", elapsed(start))
 }
+
+// ---------------------------------------------------------------------------
+// Helper: validateCleanup
+// ---------------------------------------------------------------------------
 
 func validateCleanup(t *testing.T, cfg *Config) {
 	t.Helper()
-	t.Log("TODO: validateCleanup — will be implemented in Task 7")
+
+	if infraID == "" {
+		t.Skip("infraID not set, skipping cleanup validation")
+	}
+
+	ctx := context.Background()
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.Region))
+	if err != nil {
+		t.Fatalf("load AWS config: %v", err)
+	}
+
+	// 1. Check no EC2 instances with the cluster tag.
+	t.Log("Checking for orphaned EC2 instances...")
+	ec2Client := ec2svc.NewFromConfig(awsCfg)
+	ec2Out, err := ec2Client.DescribeInstances(ctx, &ec2svc.DescribeInstancesInput{
+		Filters: []ec2types.Filter{
+			{
+				Name:   strPtr(fmt.Sprintf("tag:kubernetes.io/cluster/%s", infraID)),
+				Values: []string{"owned", "shared"},
+			},
+			{
+				Name:   strPtr("instance-state-name"),
+				Values: []string{"running", "pending", "stopping", "stopped"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("describe EC2 instances: %v", err)
+	}
+	instanceCount := 0
+	for _, r := range ec2Out.Reservations {
+		instanceCount += len(r.Instances)
+	}
+	if instanceCount > 0 {
+		t.Errorf("found %d orphaned EC2 instances with tag kubernetes.io/cluster/%s", instanceCount, infraID)
+	} else {
+		t.Logf("  No orphaned EC2 instances")
+	}
+
+	// 2. Check no IAM OIDC providers containing the cluster name.
+	t.Log("Checking for orphaned IAM OIDC providers...")
+	iamClient := iamsvc.NewFromConfig(awsCfg)
+	oidcOut, err := iamClient.ListOpenIDConnectProviders(ctx, &iamsvc.ListOpenIDConnectProvidersInput{})
+	if err != nil {
+		t.Fatalf("list OIDC providers: %v", err)
+	}
+	for _, p := range oidcOut.OpenIDConnectProviderList {
+		if p.Arn != nil && strings.Contains(*p.Arn, cfg.ClusterName) {
+			t.Errorf("found orphaned OIDC provider: %s", *p.Arn)
+		}
+	}
+	t.Logf("  No orphaned OIDC providers")
+
+	// 3. Check no S3 buckets containing the cluster name.
+	t.Log("Checking for orphaned S3 buckets...")
+	s3Client := s3svc.NewFromConfig(awsCfg)
+	bucketsOut, err := s3Client.ListBuckets(ctx, &s3svc.ListBucketsInput{})
+	if err != nil {
+		t.Fatalf("list S3 buckets: %v", err)
+	}
+	for _, b := range bucketsOut.Buckets {
+		if b.Name != nil && strings.Contains(*b.Name, cfg.ClusterName) {
+			t.Errorf("found orphaned S3 bucket: %s", *b.Name)
+		}
+	}
+	t.Logf("  No orphaned S3 buckets")
+
+	// 4. Check no IAM roles containing the cluster name.
+	t.Log("Checking for orphaned IAM roles...")
+	var marker *string
+	for {
+		rolesOut, err := iamClient.ListRoles(ctx, &iamsvc.ListRolesInput{
+			Marker: marker,
+		})
+		if err != nil {
+			t.Fatalf("list IAM roles: %v", err)
+		}
+		for _, r := range rolesOut.Roles {
+			if r.RoleName != nil && strings.Contains(*r.RoleName, cfg.ClusterName) {
+				t.Errorf("found orphaned IAM role: %s", *r.RoleName)
+			}
+		}
+		if !rolesOut.IsTruncated {
+			break
+		}
+		marker = rolesOut.Marker
+	}
+	t.Logf("  No orphaned IAM roles")
 }
+
+// ---------------------------------------------------------------------------
+// Helper: strPtr
+// ---------------------------------------------------------------------------
+
+func strPtr(s string) *string { return &s }
