@@ -92,7 +92,7 @@ func BootstrapCluster(
 	// 4. If caller is not nil and has Email, create ClusterRoleBinding for OIDC user
 	if caller != nil {
 		if emails, ok := caller.Extra["email"]; ok && len(emails) > 0 {
-			oidcUsername := emails[0]
+			oidcUsername := fmt.Sprintf("oidc:%s", emails[0])
 
 			_, err = client.RbacV1().ClusterRoleBindings().Create(ctx, &rbacv1.ClusterRoleBinding{
 				ObjectMeta: metav1.ObjectMeta{Name: "fleetshift-caller-admin"},

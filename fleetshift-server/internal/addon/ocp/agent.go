@@ -58,6 +58,7 @@ func WithTokenSigner(s *CallbackTokenSigner) AgentOption {
 	return func(a *Agent) { a.tokenSigner = s }
 }
 
+
 // NewAgent returns an Agent configured with the given options.
 //
 // Defaults read from environment (overridable via options):
@@ -193,7 +194,7 @@ func (a *Agent) Deliver(
 	}
 
 	// 7. Prepare work directory with pull secret and cluster.yaml
-	configPath, workDir, err := prepareWorkDir(clusterID, spec, region, pullSecret, sshPublicKey)
+	configPath, workDir, err := prepareWorkDir(clusterID, spec, region, pullSecret, sshPublicKey, auth)
 	if err != nil {
 		probe.Error(err)
 		return domain.DeliveryResult{
@@ -611,7 +612,7 @@ func provisionWorkDirPath(clusterID string) string {
 // prepareWorkDir creates a temp directory containing the pull secret and
 // cluster.yaml config. Returns the config file path and work directory.
 // The caller is responsible for cleaning up the work directory.
-func prepareWorkDir(clusterID string, spec *ClusterSpec, region string, pullSecret, sshPublicKey []byte) (configPath, workDir string, err error) {
+func prepareWorkDir(clusterID string, spec *ClusterSpec, region string, pullSecret, sshPublicKey []byte, auth domain.DeliveryAuth) (configPath, workDir string, err error) {
 	workDir = provisionWorkDirPath(clusterID)
 	if err = os.MkdirAll(workDir, 0755); err != nil {
 		return "", "", fmt.Errorf("create work directory: %w", err)
@@ -635,6 +636,39 @@ func prepareWorkDir(clusterID string, spec *ClusterSpec, region string, pullSecr
 	configPath = filepath.Join(workDir, "cluster.yaml")
 	if err = os.WriteFile(configPath, clusterYAML, 0600); err != nil {
 		return "", "", fmt.Errorf("write cluster.yaml: %w", err)
+	}
+
+	// Write OIDC authentication manifests for injection during the manifests phase.
+	// Derive the OIDC provider config from the caller's auth context — the issuer
+	// URL comes from the caller's federated identity, the audience from the
+	// delivery auth.
+	if auth.Caller != nil && auth.Caller.Issuer != "" {
+		var audiences []string
+		for _, aud := range auth.Audience {
+			audiences = append(audiences, string(aud))
+		}
+		clientID := ""
+		if len(audiences) > 0 {
+			clientID = audiences[0]
+		}
+		oidcCfg := OIDCProviderConfig{
+			IssuerURL:   string(auth.Caller.Issuer),
+			Audiences:   audiences,
+			CLIClientID: clientID,
+		}
+		extraDir := filepath.Join(workDir, "extra-manifests")
+		if err = os.MkdirAll(extraDir, 0755); err != nil {
+			return "", "", fmt.Errorf("create extra-manifests dir: %w", err)
+		}
+		manifests, genErr := GenerateOIDCManifests(oidcCfg)
+		if genErr != nil {
+			return "", "", fmt.Errorf("generate OIDC manifests: %w", genErr)
+		}
+		for filename, content := range manifests {
+			if err = os.WriteFile(filepath.Join(extraDir, filename), content, 0600); err != nil {
+				return "", "", fmt.Errorf("write OIDC manifest %s: %w", filename, err)
+			}
+		}
 	}
 
 	return configPath, workDir, nil

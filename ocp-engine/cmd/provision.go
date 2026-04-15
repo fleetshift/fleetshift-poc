@@ -156,6 +156,26 @@ func runProvision(cmd *cobra.Command, args []string) error {
 					return fmt.Errorf("inject ccoctl manifests: %w", err)
 				}
 			}
+			// Inject any extra manifests placed by the calling agent
+			extraDir := filepath.Join(wd.Path, "extra-manifests")
+			if entries, err := os.ReadDir(extraDir); err == nil {
+				manifestsDir := filepath.Join(wd.Path, "manifests")
+				for _, entry := range entries {
+					if entry.IsDir() {
+						continue
+					}
+					src := filepath.Join(extraDir, entry.Name())
+					dst := filepath.Join(manifestsDir, entry.Name())
+					data, readErr := os.ReadFile(src)
+					if readErr != nil {
+						return fmt.Errorf("read extra manifest %s: %w", entry.Name(), readErr)
+					}
+					if writeErr := os.WriteFile(dst, data, 0600); writeErr != nil {
+						return fmt.Errorf("write extra manifest %s: %w", entry.Name(), writeErr)
+					}
+					fmt.Fprintf(os.Stderr, "Injected extra manifest: %s\n", entry.Name())
+				}
+			}
 			return nil
 		},
 		"ignition": func() error {

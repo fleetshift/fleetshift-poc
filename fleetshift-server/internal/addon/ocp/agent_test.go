@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"gopkg.in/yaml.v3"
 )
 
@@ -20,7 +22,7 @@ func TestPrepareWorkDir(t *testing.T) {
 	pullSecret := []byte(`{"auths":{}}`)
 	sshPubKey := []byte("ssh-ed25519 AAAAC3test")
 
-	configPath, workDir, err := prepareWorkDir("test-cluster", spec, "us-east-1", pullSecret, sshPubKey)
+	configPath, workDir, err := prepareWorkDir("test-cluster", spec, "us-east-1", pullSecret, sshPubKey, domain.DeliveryAuth{})
 	if err != nil {
 		t.Fatalf("prepareWorkDir: %v", err)
 	}
@@ -154,7 +156,7 @@ func TestPrepareWorkDir_DeterministicPath(t *testing.T) {
 		RoleARN:    "arn:aws:iam::123:role/test",
 	}
 
-	_, workDir, err := prepareWorkDir("det-test", spec, "us-east-1", []byte(`{"auths":{}}`), []byte("ssh-ed25519 KEY"))
+	_, workDir, err := prepareWorkDir("det-test", spec, "us-east-1", []byte(`{"auths":{}}`), []byte("ssh-ed25519 KEY"), domain.DeliveryAuth{})
 	if err != nil {
 		t.Fatalf("prepareWorkDir: %v", err)
 	}
@@ -163,5 +165,78 @@ func TestPrepareWorkDir_DeterministicPath(t *testing.T) {
 	expected := filepath.Join(os.TempDir(), "ocp-provision-det-test")
 	if workDir != expected {
 		t.Errorf("workDir = %q, want %q", workDir, expected)
+	}
+}
+
+func TestPrepareWorkDir_OIDCManifests(t *testing.T) {
+	spec := &ClusterSpec{
+		Name:       "oidc-test",
+		BaseDomain: "example.com",
+		Region:     "us-east-1",
+		RoleARN:    "arn:aws:iam::123:role/test",
+	}
+
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-123",
+				Issuer:  "https://keycloak.example.com/realms/fleetshift",
+			},
+			Extra: map[string][]string{
+				"email": {"user@example.com"},
+			},
+		},
+		Audience: []domain.Audience{"fleetshift-cli"},
+	}
+
+	_, workDir, err := prepareWorkDir("oidc-test", spec, "us-east-1", []byte(`{"auths":{}}`), []byte("ssh-ed25519 KEY"), auth)
+	if err != nil {
+		t.Fatalf("prepareWorkDir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	// Verify extra-manifests directory was created
+	extraDir := filepath.Join(workDir, "extra-manifests")
+	if _, err := os.Stat(extraDir); err != nil {
+		t.Fatalf("extra-manifests dir not found: %v", err)
+	}
+
+	// Verify Authentication CR was written
+	authFile := filepath.Join(extraDir, "cluster-authentication-oidc.yaml")
+	data, err := os.ReadFile(authFile)
+	if err != nil {
+		t.Fatalf("read auth manifest: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "type: OIDC") {
+		t.Error("auth manifest missing 'type: OIDC'")
+	}
+	if !strings.Contains(content, "https://keycloak.example.com/realms/fleetshift") {
+		t.Error("auth manifest missing issuer URL")
+	}
+	if !strings.Contains(content, "fleetshift-cli") {
+		t.Error("auth manifest missing audience/client ID")
+	}
+}
+
+func TestPrepareWorkDir_NoOIDCWithoutCaller(t *testing.T) {
+	spec := &ClusterSpec{
+		Name:       "no-oidc-test",
+		BaseDomain: "example.com",
+		Region:     "us-east-1",
+		RoleARN:    "arn:aws:iam::123:role/test",
+	}
+
+	// Empty auth — no caller, no OIDC manifests should be generated
+	_, workDir, err := prepareWorkDir("no-oidc-test", spec, "us-east-1", []byte(`{"auths":{}}`), []byte("ssh-ed25519 KEY"), domain.DeliveryAuth{})
+	if err != nil {
+		t.Fatalf("prepareWorkDir: %v", err)
+	}
+	defer os.RemoveAll(workDir)
+
+	extraDir := filepath.Join(workDir, "extra-manifests")
+	if _, err := os.Stat(extraDir); !os.IsNotExist(err) {
+		t.Error("extra-manifests dir should not exist when no caller is present")
 	}
 }
