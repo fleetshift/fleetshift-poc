@@ -31,7 +31,7 @@ func TestEnvOr(t *testing.T) {
 func TestLoadConfig_MissingRequired(t *testing.T) {
 	for _, key := range []string{
 		"E2E_KEYCLOAK_ISSUER", "E2E_KEYCLOAK_CLIENT_ID",
-		"E2E_ROLE_ARN", "E2E_RH_SSO_ISSUER", "E2E_RH_SSO_CLIENT_ID",
+		"E2E_ROLE_ARN", "E2E_RH_SSO_ISSUER",
 	} {
 		t.Setenv(key, "")
 	}

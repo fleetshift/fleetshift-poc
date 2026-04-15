@@ -105,7 +105,7 @@ func TestE2E(t *testing.T) {
 		defer cancel()
 
 		token, err := DeviceCodeLogin(ctx,
-			cfg.RHSSOIssuer, cfg.RHSSOClientID,
+			cfg.RHSSOIssuer, "ocm-cli",
 			"openid", "Red Hat SSO Login")
 		if err != nil {
 			t.Fatalf("Red Hat SSO device code login: %v", err)

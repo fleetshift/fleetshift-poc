@@ -18,7 +18,6 @@ type Config struct {
 	EnrollmentClientID   string
 	RoleARN              string
 	RHSSOIssuer          string
-	RHSSOClientID        string
 
 	// Cluster
 	BaseDomain         string
@@ -41,7 +40,6 @@ func LoadConfig() (*Config, error) {
 		EnrollmentClientID: envOr("E2E_ENROLLMENT_CLIENT_ID", "fleetshift-signing"),
 		RoleARN:            os.Getenv("E2E_ROLE_ARN"),
 		RHSSOIssuer:        os.Getenv("E2E_RH_SSO_ISSUER"),
-		RHSSOClientID:      os.Getenv("E2E_RH_SSO_CLIENT_ID"),
 		BaseDomain:         envOr("E2E_BASE_DOMAIN", "aws-acm-cluster-virt.devcluster.openshift.com"),
 		Region:             envOr("E2E_REGION", "us-west-2"),
 		ReleaseImage:       envOr("E2E_RELEASE_IMAGE", "quay.io/openshift-release-dev/ocp-release:4.20.18-x86_64"),
@@ -58,7 +56,6 @@ func LoadConfig() (*Config, error) {
 		{cfg.KeycloakClientID, "E2E_KEYCLOAK_CLIENT_ID"},
 		{cfg.RoleARN, "E2E_ROLE_ARN"},
 		{cfg.RHSSOIssuer, "E2E_RH_SSO_ISSUER"},
-		{cfg.RHSSOClientID, "E2E_RH_SSO_CLIENT_ID"},
 	}
 	var missing []string
 	for _, r := range required {
