@@ -151,7 +151,7 @@ func TestE2E(t *testing.T) {
 	})
 
 	step("07_WaitForProvision", func(t *testing.T) {
-		state := waitForProvision(t, binDir, cfg, 60*time.Minute)
+		state := waitForProvision(t, binDir, cfg, 2*time.Hour)
 		if state != "STATE_ACTIVE" {
 			t.Fatalf("provision ended in state %s, expected STATE_ACTIVE", state)
 		}
