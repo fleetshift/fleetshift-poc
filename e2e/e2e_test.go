@@ -194,6 +194,25 @@ func TestE2E(t *testing.T) {
 	step("12_ValidateCleanup", func(t *testing.T) {
 		validateCleanup(t, cfg)
 	})
+
+	// On failure, keep the server running so the tester can debug with fleetctl.
+	if failed {
+		fmt.Println()
+		fmt.Println("  ================================================================")
+		fmt.Println("  TEST FAILED — Server still running for debugging")
+		fmt.Println("  ================================================================")
+		fmt.Println()
+		fmt.Println("  fleetshift-server is still running on :50051 / :8080")
+		fmt.Println("  You can inspect state with:")
+		fmt.Println("    fleetctl deployment list")
+		fmt.Println("    fleetctl deployment get <name> -o json")
+		fmt.Println()
+		fmt.Print("  Press Enter to shut down the server and exit...")
+		if tty, err := os.Open("/dev/tty"); err == nil {
+			bufio.NewReader(tty).ReadBytes('\n')
+			tty.Close()
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
