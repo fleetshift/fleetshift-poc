@@ -1037,12 +1037,19 @@ func ensureKeyring(t *testing.T) {
 		}
 	}
 
-	// Unlock keyring in the new D-Bus session.
+	// Unlock keyring in the new D-Bus session. Capture GNOME_KEYRING_CONTROL
+	// from its output — the daemon sets this to its socket path.
 	unlockCmd := exec.Command("gnome-keyring-daemon", "--unlock", "--components=secrets")
 	unlockCmd.Stdin = strings.NewReader("")
 	unlockCmd.Env = env
-	if err := unlockCmd.Run(); err != nil {
+	unlockOut, err := unlockCmd.Output()
+	if err != nil {
 		t.Fatalf("gnome-keyring-daemon unlock failed (install gnome-keyring): %v", err)
+	}
+	for _, line := range strings.Split(string(unlockOut), "\n") {
+		if k, v, ok := strings.Cut(line, "="); ok {
+			env = append(env, k+"="+v)
+		}
 	}
 
 	// Re-exec this test with the D-Bus env set and a marker to avoid infinite loop.
