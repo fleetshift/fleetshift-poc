@@ -127,10 +127,26 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	// --- OCP agent ---
-	ocpAgent := ocpaddon.NewAgent(
+	ocpOpts := []ocpaddon.AgentOption{
 		ocpaddon.WithVault(vault),
 		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
-	)
+	}
+	if os.Getenv("OCP_CREDENTIAL_MODE") == "sso" {
+		var pullSecret []byte
+		if ps := os.Getenv("OCP_PULL_SECRET_FILE"); ps != "" {
+			data, err := os.ReadFile(ps)
+			if err != nil {
+				return fmt.Errorf("read OCP pull secret file: %w", err)
+			}
+			pullSecret = data
+			logger.Info("OCP agent: pull secret loaded from file", "path", ps)
+		}
+		ocpOpts = append(ocpOpts, ocpaddon.WithCredentialProvider(&ocpaddon.SSOCredentialProvider{
+			PullSecret: pullSecret,
+		}))
+		logger.Info("OCP agent: using SSO credential mode (Keycloak JWT → STS)")
+	}
+	ocpAgent := ocpaddon.NewAgent(ocpOpts...)
 	if err := ocpAgent.Start(); err != nil {
 		return fmt.Errorf("start ocp agent: %w", err)
 	}
