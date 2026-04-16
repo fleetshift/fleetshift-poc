@@ -115,10 +115,10 @@ func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 				JwksUri:               string(m.OIDC.JWKSURI),
 				KeyEnrollmentAudience: string(m.OIDC.KeyEnrollmentAudience),
 			}
-			if m.OIDC.RegistrySubjectMapping != nil {
+			if rsm := m.OIDC.RegistrySubjectMapping; rsm != nil {
 				oc.RegistrySubjectMapping = &pb.RegistrySubjectMapping{
-					RegistryId: string(m.OIDC.RegistrySubjectMapping.RegistryID),
-					Expression: m.OIDC.RegistrySubjectMapping.Expression,
+					RegistryId: string(rsm.RegistryID),
+					Expression: rsm.Expression,
 				}
 			}
 			out.OidcConfig = oc

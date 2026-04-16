@@ -65,7 +65,53 @@ func (c *GitHubClient) FetchSigningKeys(ctx context.Context, endpoint string, su
 		}
 		out = append(out, pub)
 	}
+
+	if len(out) == 0 {
+		// Check if the user has authentication keys — common mistake
+		// is adding as "Authentication Key" instead of "Signing Key".
+		if hasAuthKeys, _ := c.hasAuthenticationKeys(ctx, endpoint, subject); hasAuthKeys {
+			return nil, fmt.Errorf(
+				"github user %q has SSH authentication keys but no signing keys — "+
+					"the key was likely added as an Authentication Key instead of a Signing Key; "+
+					"go to https://github.com/settings/keys, remove it, and re-add with Key type set to \"Signing Key\"",
+				subject)
+		}
+	}
+
 	return out, nil
+}
+
+// hasAuthenticationKeys checks whether the GitHub user has any SSH
+// authentication keys via GET /users/{username}/keys. This is used
+// to produce a better error message when a user mistakenly adds
+// their key as an authentication key instead of a signing key.
+func (c *GitHubClient) hasAuthenticationKeys(ctx context.Context, endpoint string, subject domain.RegistrySubject) (bool, error) {
+	url := fmt.Sprintf("%s/users/%s/keys", strings.TrimRight(endpoint, "/"), string(subject))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+
+	client := c.HTTP
+	if client == nil {
+		client = http.DefaultClient
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil
+	}
+
+	var keys []githubSSHKey
+	if err := json.NewDecoder(resp.Body).Decode(&keys); err != nil {
+		return false, err
+	}
+	return len(keys) > 0, nil
 }
 
 // parseSSHPublicKey extracts a [crypto.PublicKey] from an SSH
