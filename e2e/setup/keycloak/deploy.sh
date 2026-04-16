@@ -5,12 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAMESPACE="keycloak-prod"
 KEYCLOAK_CR_NAME="keycloak"
 ACME_EMAIL="${ACME_EMAIL:-}"
+FRESH_CERT="${FRESH_CERT:-false}"
 BASE_DOMAINS=()
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --base-domain) BASE_DOMAINS+=("$2"); shift 2 ;;
+    --fresh-cert) FRESH_CERT=true; shift ;;
     *) break ;;
   esac
 done
@@ -95,31 +97,26 @@ else
     info "cert-manager is fully ready."
 fi
 
-# --- Step 4: Create ClusterIssuer + Certificate ---
-USE_LETSENCRYPT=true
+# --- Step 4: TLS certificate ---
+# Priority: 1) restore from backup  2) Let's Encrypt (first deploy only)  3) self-signed
+# Use --fresh-cert to skip backup and force a new Let's Encrypt request.
+CERT_READY=false
 
-if [[ -z "$ACME_EMAIL" ]]; then
-    warn "ACME_EMAIL not set. Skipping Let's Encrypt."
-    USE_LETSENCRYPT=false
-fi
-
-# Restore TLS cert from backup if available (avoids Let's Encrypt rate limits)
-if oc get secret keycloak-tls-backup -n cert-manager-operator &>/dev/null; then
+if [[ "$FRESH_CERT" != "true" ]] && oc get secret keycloak-tls-backup -n cert-manager-operator &>/dev/null; then
     info "Restoring TLS certificate from backup..."
     oc get secret keycloak-tls-backup -n cert-manager-operator -o json \
         | jq 'del(.metadata.namespace, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp)' \
         | jq '.metadata.name = "keycloak-tls"' \
         | oc apply -n "${NAMESPACE}" -f -
-    info "TLS certificate restored. Skipping Let's Encrypt."
-    USE_LETSENCRYPT=false
+    info "TLS certificate restored from backup."
+    CERT_READY=true
 fi
 
-if [[ "$USE_LETSENCRYPT" == "true" ]]; then
-    info "Creating Let's Encrypt ClusterIssuer..."
+if [[ "$CERT_READY" != "true" && -n "$ACME_EMAIL" ]]; then
+    info "No backup found. Requesting certificate from Let's Encrypt..."
     sed "s|ACME_EMAIL|${ACME_EMAIL}|g" "${SCRIPT_DIR}/manifests/cluster-issuer.yaml" \
         | oc apply -f -
 
-    info "Creating TLS certificate for ${KEYCLOAK_HOST}..."
     sed "s|KEYCLOAK_HOST|${KEYCLOAK_HOST}|g" "${SCRIPT_DIR}/manifests/certificate.yaml" \
         | oc apply -n "${NAMESPACE}" -f -
 
@@ -131,26 +128,24 @@ if [[ "$USE_LETSENCRYPT" == "true" ]]; then
             -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "")
         if [[ "$cert_ready" == "True" ]]; then
             info "TLS certificate issued successfully."
+            CERT_READY=true
             break
         fi
         sleep 10
         cert_elapsed=$((cert_elapsed + 10))
     done
-    if [[ $cert_elapsed -ge $cert_timeout ]]; then
+    if [[ "$CERT_READY" != "true" ]]; then
         warn "Let's Encrypt certificate not issued within timeout."
-        warn "Generating self-signed certificate as fallback."
-        USE_LETSENCRYPT=false
         oc delete certificate keycloak-tls -n "${NAMESPACE}" --ignore-not-found
     fi
 fi
 
-# If Let's Encrypt failed or was skipped, create a self-signed TLS cert.
-# The RHBK operator uses passthrough TLS, so Keycloak always needs a cert.
-if [[ "$USE_LETSENCRYPT" != "true" ]]; then
+# Last resort: self-signed certificate
+if [[ "$CERT_READY" != "true" ]]; then
     if oc get secret keycloak-tls -n "${NAMESPACE}" &>/dev/null; then
-        info "Self-signed TLS secret already exists, skipping..."
+        info "TLS secret already exists, skipping..."
     else
-        info "Creating self-signed TLS certificate for ${KEYCLOAK_HOST}..."
+        warn "Generating self-signed certificate (browser will show warning)..."
         TMPDIR=$(mktemp -d)
         openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
             -keyout "${TMPDIR}/tls.key" -out "${TMPDIR}/tls.crt" \
@@ -161,7 +156,7 @@ if [[ "$USE_LETSENCRYPT" != "true" ]]; then
             --cert="${TMPDIR}/tls.crt" --key="${TMPDIR}/tls.key" \
             -n "${NAMESPACE}"
         rm -rf "${TMPDIR}"
-        info "Self-signed TLS certificate created."
+        warn "Self-signed TLS certificate created."
     fi
 fi
 
@@ -377,8 +372,8 @@ echo "    ops / ${OPS_PASSWORD}"
 echo "    dev / ${DEV_PASSWORD}"
 echo "    admin / ${ADMIN_USER_PASSWORD}"
 echo ""
-if [[ "$USE_LETSENCRYPT" == "true" ]]; then
-    echo "  TLS: Let's Encrypt certificate"
+if [[ "$CERT_READY" == "true" ]]; then
+    echo "  TLS: Trusted certificate (restored from backup or issued by CA)"
 else
     echo "  TLS: Self-signed certificate (browser will show warning)"
 fi
