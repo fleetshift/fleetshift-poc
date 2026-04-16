@@ -48,7 +48,7 @@ info "Checking prerequisites..."
 command -v oc &>/dev/null || error "'oc' CLI not found in PATH."
 command -v jq &>/dev/null || error "'jq' not found in PATH."
 command -v openssl &>/dev/null || error "'openssl' not found in PATH."
-oc whoami &>/dev/null || error "Not logged in to OpenShift. Run 'oc login' first."
+timeout 5 oc whoami &>/dev/null || error "Not logged in to OpenShift. Run 'oc login' first."
 
 APPS_DOMAIN=$(oc get ingresses.config/cluster -o jsonpath='{.spec.domain}')
 [[ -n "$APPS_DOMAIN" ]] || error "Could not determine cluster apps domain."

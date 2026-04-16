@@ -13,7 +13,7 @@ info()  { echo -e "${GREEN}[INFO]${NC} $*"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $*"; }
 error() { echo -e "${RED}[ERROR]${NC} $*"; exit 1; }
 
-oc whoami &>/dev/null || error "Not logged in to OpenShift. Run 'oc login' first."
+timeout 5 oc whoami &>/dev/null || error "Not logged in to OpenShift. Run 'oc login' first."
 
 echo ""
 echo "This will remove the Keycloak deployment from namespace '${NAMESPACE}'."
