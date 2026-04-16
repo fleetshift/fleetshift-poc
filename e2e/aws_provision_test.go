@@ -646,19 +646,19 @@ func waitForProvision(t *testing.T, binDir string, cfg *Config, timeout time.Dur
 			lastHeartbeat = time.Now()
 		}
 
+		// Continuously snapshot the work dir while provisioning.
+		// The agent deletes it shortly after success (issue 006),
+		// so we keep an up-to-date copy rather than racing at the end.
+		srcDir := filepath.Join(os.TempDir(), "ocp-provision-"+cfg.ClusterName)
+		dstDir := srcDir + "_BACKUP"
+		if _, err := os.Stat(srcDir); err == nil {
+			os.RemoveAll(dstDir)
+			exec.Command("cp", "-a", srcDir, dstDir).Run()
+		}
+
 		switch dep.State {
 		case "STATE_ACTIVE":
 			t.Logf("[%s] Deployment is active", elapsed(start))
-			// Snapshot the work dir immediately — the agent deletes it
-			// shortly after reporting success (issue 006).
-			srcDir := filepath.Join(os.TempDir(), "ocp-provision-"+cfg.ClusterName)
-			dstDir := srcDir + "_BACKUP"
-			os.RemoveAll(dstDir)
-			if err := exec.Command("cp", "-a", srcDir, dstDir).Run(); err != nil {
-				t.Logf("Could not snapshot work dir: %v", err)
-			} else {
-				t.Logf("Work dir snapshot saved to %s", dstDir)
-			}
 			return dep.State
 		case "STATE_FAILED":
 			t.Fatalf("[%s] Deployment failed", elapsed(start))
