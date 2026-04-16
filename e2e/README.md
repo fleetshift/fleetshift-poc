@@ -117,7 +117,7 @@ After validation, the test pauses for **manual inspection** before destroying th
 |------|---------|
 | `/tmp/fleetshift-e2e-server.log` | Server log (always preserved) |
 | `/tmp/fleetshift-e2e-data/` | DB dir (preserved for post-mortem, cleaned next run) |
-| `/tmp/fleetshift-e2e-workdir/` | Copy of work dir (best-effort, may not exist if agent cleaned up first) |
+| `/tmp/ocp-provision-<cluster-name>_BACKUP/` | Snapshot of work dir (taken at STATE_ACTIVE, before agent deletes original) |
 
 ### Configuration
 
@@ -190,21 +190,31 @@ The test prints a warning banner with the cluster name. There are three ways to 
 
 **Option 1: fleetshift-server is still running**
 
+> **Warning:** `fleetctl deployment delete` is currently broken for OCP clusters (issue 011).
+> The destroy fails because target properties (infra_id, region, etc.) are stored on the
+> provisioned target, not the delivery target. Use Option 2 instead.
+
 ```bash
 fleetctl deployment delete <cluster-name>
 ```
 
-**Option 2: Work dir still exists (ideal)**
+**Option 2: Work dir backup exists (recommended)**
 
-If the ocp-engine work directory still exists (check `/tmp/ocp-provision-<cluster-name>/`), this is the simplest and most complete cleanup — it destroys both cluster infrastructure and ccoctl resources in one command:
+The test snapshots the work dir to `/tmp/ocp-provision-<cluster-name>_BACKUP/` when the deployment reaches STATE_ACTIVE. This is the simplest and most complete cleanup — it destroys both cluster infrastructure and ccoctl resources in one command.
+
+AWS credentials must be available as environment variables:
 
 ```bash
-bin/ocp-engine destroy --work-dir /tmp/ocp-provision-<cluster-name>
+export AWS_ACCESS_KEY_ID=$(aws configure get aws_access_key_id)
+export AWS_SECRET_ACCESS_KEY=$(aws configure get aws_secret_access_key)
+export AWS_SESSION_TOKEN=$(aws configure get aws_session_token)
+
+bin/ocp-engine destroy --work-dir /tmp/ocp-provision-<cluster-name>_BACKUP
 ```
 
-This works because the work dir has the installer binary, ccoctl binary, metadata.json, and cluster.yaml with `cco_sts_mode: true`. AWS credentials are read from environment or the cluster.yaml.
-
 **Option 3: Work dir is gone — rebuild manually**
+
+If neither the original work dir nor the `_BACKUP` copy exists:
 
 ```bash
 # Set up a destroy work directory
