@@ -2,6 +2,7 @@ package ocp
 
 import (
 	"context"
+	"log/slog"
 	"strings"
 	"sync"
 
@@ -60,23 +61,29 @@ func (s *callbackServer) getProvision(clusterID string) (*provisionState, error)
 
 func (s *callbackServer) ReportPhaseResult(ctx context.Context, req *ocpv1.PhaseResultRequest) (*ocpv1.Ack, error) {
 	if _, err := s.authenticateCallback(ctx, req.ClusterId); err != nil {
+		slog.Warn("callback: ReportPhaseResult auth failed", "cluster", req.ClusterId, "error", err)
 		return nil, err
 	}
+	slog.Info("callback: phase result", "cluster", req.ClusterId, "phase", req.Phase, "status", req.Status)
 	return &ocpv1.Ack{}, nil
 }
 
 func (s *callbackServer) ReportMilestone(ctx context.Context, req *ocpv1.MilestoneRequest) (*ocpv1.Ack, error) {
 	if _, err := s.authenticateCallback(ctx, req.ClusterId); err != nil {
+		slog.Warn("callback: ReportMilestone auth failed", "cluster", req.ClusterId, "error", err)
 		return nil, err
 	}
+	slog.Info("callback: milestone", "cluster", req.ClusterId, "event", req.Event)
 	return &ocpv1.Ack{}, nil
 }
 
 func (s *callbackServer) ReportCompletion(ctx context.Context, req *ocpv1.CompletionRequest) (*ocpv1.Ack, error) {
 	state, err := s.authenticateCallback(ctx, req.ClusterId)
 	if err != nil {
+		slog.Warn("callback: ReportCompletion auth failed", "cluster", req.ClusterId, "error", err)
 		return nil, err
 	}
+	slog.Info("callback: completion", "cluster", req.ClusterId, "infra_id", req.InfraId)
 	state.mu.Lock()
 	state.completion = req
 	state.mu.Unlock()
@@ -87,8 +94,10 @@ func (s *callbackServer) ReportCompletion(ctx context.Context, req *ocpv1.Comple
 func (s *callbackServer) ReportFailure(ctx context.Context, req *ocpv1.FailureRequest) (*ocpv1.Ack, error) {
 	state, err := s.authenticateCallback(ctx, req.ClusterId)
 	if err != nil {
+		slog.Warn("callback: ReportFailure auth failed", "cluster", req.ClusterId, "error", err)
 		return nil, err
 	}
+	slog.Info("callback: failure", "cluster", req.ClusterId, "phase", req.Phase, "reason", req.FailureReason)
 	state.mu.Lock()
 	state.failure = req
 	state.mu.Unlock()
