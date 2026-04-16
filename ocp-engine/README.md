@@ -771,6 +771,15 @@ Written to web identity token file → openshift-install uses it
 Credentials discarded when provision/destroy completes
 ```
 
+### Security: OCP Callback Token
+
+The OCP delivery agent passes a short-lived callback JWT to the ocp-engine subprocess via the `OCP_CALLBACK_TOKEN` environment variable. On Linux, environment variables of a running process are readable via `/proc/{pid}/environ` by any process running as the same OS user. This is mitigated by:
+
+- The token is an ephemeral ED25519-signed JWT scoped to a single cluster ID
+- The token has a 2-hour expiry matching the STS session duration
+- The signing key is generated in-memory at server startup and never persisted
+- The callback endpoint validates both the token signature and cluster ID match
+
 ### Security: Work Directory Credential Hygiene
 
 - **Audit work directory for secrets** — The ocp-engine work directory contains sensitive data written by `openshift-install`: `install-config.yaml` (pull secret, SSH key), `auth/kubeconfig`, `auth/kubeadmin-password`, `.openshift_install.log` (may contain AWS keys), and ignition configs (embedded pull secret). These must be identified and scrubbed or discarded as soon as they are no longer needed — do not leave credentials on disk after the operation completes. The platform (FleetShift OCP agent) is responsible for extracting what it needs (infra_id, cluster_id, kubeconfig for bootstrap), then cleaning up the work directory. For containerized deployments, use ephemeral storage (tmpfs, emptyDir) so credentials are destroyed when the container exits.
