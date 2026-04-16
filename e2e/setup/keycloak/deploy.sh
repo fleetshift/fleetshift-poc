@@ -99,7 +99,18 @@ fi
 USE_LETSENCRYPT=true
 
 if [[ -z "$ACME_EMAIL" ]]; then
-    warn "ACME_EMAIL not set. Skipping Let's Encrypt — will use cluster wildcard cert."
+    warn "ACME_EMAIL not set. Skipping Let's Encrypt."
+    USE_LETSENCRYPT=false
+fi
+
+# Restore TLS cert from backup if available (avoids Let's Encrypt rate limits)
+if oc get secret keycloak-tls-backup -n cert-manager-operator &>/dev/null; then
+    info "Restoring TLS certificate from backup..."
+    oc get secret keycloak-tls-backup -n cert-manager-operator -o json \
+        | jq 'del(.metadata.namespace, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp)' \
+        | jq '.metadata.name = "keycloak-tls"' \
+        | oc apply -n "${NAMESPACE}" -f -
+    info "TLS certificate restored. Skipping Let's Encrypt."
     USE_LETSENCRYPT=false
 fi
 
@@ -127,9 +138,30 @@ if [[ "$USE_LETSENCRYPT" == "true" ]]; then
     done
     if [[ $cert_elapsed -ge $cert_timeout ]]; then
         warn "Let's Encrypt certificate not issued within timeout."
-        warn "Falling back to cluster wildcard cert."
+        warn "Generating self-signed certificate as fallback."
         USE_LETSENCRYPT=false
         oc delete certificate keycloak-tls -n "${NAMESPACE}" --ignore-not-found
+    fi
+fi
+
+# If Let's Encrypt failed or was skipped, create a self-signed TLS cert.
+# The RHBK operator uses passthrough TLS, so Keycloak always needs a cert.
+if [[ "$USE_LETSENCRYPT" != "true" ]]; then
+    if oc get secret keycloak-tls -n "${NAMESPACE}" &>/dev/null; then
+        info "Self-signed TLS secret already exists, skipping..."
+    else
+        info "Creating self-signed TLS certificate for ${KEYCLOAK_HOST}..."
+        TMPDIR=$(mktemp -d)
+        openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
+            -keyout "${TMPDIR}/tls.key" -out "${TMPDIR}/tls.crt" \
+            -days 365 -nodes \
+            -subj "/CN=keycloak" \
+            -addext "subjectAltName=DNS:${KEYCLOAK_HOST}" 2>/dev/null
+        oc create secret tls keycloak-tls \
+            --cert="${TMPDIR}/tls.crt" --key="${TMPDIR}/tls.key" \
+            -n "${NAMESPACE}"
+        rm -rf "${TMPDIR}"
+        info "Self-signed TLS certificate created."
     fi
 fi
 
@@ -181,14 +213,8 @@ oc wait --for=condition=Ready pod/postgres-0 -n "${NAMESPACE}" --timeout=180s
 
 # --- Step 8: Deploy Keycloak ---
 info "Deploying Keycloak..."
-if [[ "$USE_LETSENCRYPT" == "true" ]]; then
-    sed "s|KEYCLOAK_HOST|${KEYCLOAK_HOST}|g" "${SCRIPT_DIR}/manifests/keycloak.yaml" \
-        | oc apply -n "${NAMESPACE}" -f -
-else
-    sed "s|KEYCLOAK_HOST|${KEYCLOAK_HOST}|g" "${SCRIPT_DIR}/manifests/keycloak.yaml" \
-        | sed '/tlsSecret/d' | sed '/^  http:$/d' \
-        | oc apply -n "${NAMESPACE}" -f -
-fi
+sed "s|KEYCLOAK_HOST|${KEYCLOAK_HOST}|g" "${SCRIPT_DIR}/manifests/keycloak.yaml" \
+    | oc apply -n "${NAMESPACE}" -f -
 
 info "Waiting for Keycloak to be ready (this may take a few minutes)..."
 oc wait --for=condition=Ready keycloak/"${KEYCLOAK_CR_NAME}" \
@@ -354,7 +380,7 @@ echo ""
 if [[ "$USE_LETSENCRYPT" == "true" ]]; then
     echo "  TLS: Let's Encrypt certificate"
 else
-    echo "  TLS: Cluster wildcard certificate"
+    echo "  TLS: Self-signed certificate (browser will show warning)"
 fi
 echo ""
 echo "=========================================="

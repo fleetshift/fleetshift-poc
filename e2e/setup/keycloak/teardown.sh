@@ -41,25 +41,35 @@ oc delete service postgres -n "${NAMESPACE}" --ignore-not-found
 info "Deleting PostgreSQL PVC..."
 oc delete pvc postgres-data-postgres-0 -n "${NAMESPACE}" --ignore-not-found
 
-# Step 4: Delete secrets
+# Step 4: Preserve TLS cert (avoid Let's Encrypt rate limits on re-deploy)
+if oc get secret keycloak-tls -n "${NAMESPACE}" &>/dev/null; then
+    info "Backing up TLS certificate to keycloak-tls-backup secret in cert-manager-operator namespace..."
+    oc get secret keycloak-tls -n "${NAMESPACE}" -o json \
+        | jq 'del(.metadata.namespace, .metadata.resourceVersion, .metadata.uid, .metadata.creationTimestamp, .metadata.ownerReferences)' \
+        | jq '.metadata.name = "keycloak-tls-backup"' \
+        | oc apply -n cert-manager-operator -f -
+    info "TLS certificate backed up."
+fi
+
+# Step 5: Delete secrets
 info "Deleting secrets..."
 oc delete secret keycloak-db-credentials -n "${NAMESPACE}" --ignore-not-found
 oc delete secret "${KEYCLOAK_CR_NAME}-initial-admin" -n "${NAMESPACE}" --ignore-not-found
 oc delete secret keycloak-tls -n "${NAMESPACE}" --ignore-not-found
 
-# Step 5: Delete TLS resources
+# Step 6: Delete TLS resources
 info "Deleting Certificate..."
 oc delete certificate keycloak-tls -n "${NAMESPACE}" --ignore-not-found
 info "Deleting ClusterIssuer..."
 oc delete clusterissuer letsencrypt-prod --ignore-not-found
 
-# Step 6: Delete namespace
+# Step 7: Delete namespace
 info "Deleting namespace ${NAMESPACE}..."
 oc delete namespace "${NAMESPACE}" --ignore-not-found
 info "Waiting for namespace deletion..."
 oc wait --for=delete namespace/"${NAMESPACE}" --timeout=120s 2>/dev/null || true
 
-# Step 7: Optionally uninstall operators
+# Step 8: Optionally uninstall operators
 echo ""
 read -rp "Uninstall cert-manager operator? (y/N): " remove_cm
 if [[ "$remove_cm" =~ ^[Yy]$ ]]; then
