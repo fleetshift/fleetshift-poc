@@ -49,6 +49,17 @@ func GenerateOIDCManifests(cfg OIDCProviderConfig) (map[string][]byte, error) {
 		manifests["cluster-oidc-client-secret.yaml"] = secretYAML
 	}
 
+	// Always generate the router-certs placeholder secret.
+	// Workaround: with External OIDC (spec.type: OIDC), the OAuth server is
+	// not deployed, so the authentication operator's routercerts controller
+	// never syncs the ingress wildcard cert into openshift-authentication.
+	// The ConfigObserver still checks for this secret and sets Degraded=True
+	// if missing, which blocks the installer's cluster initialization wait.
+	// Pre-creating an empty secret satisfies the existence check.
+	// See: https://github.com/openshift/cluster-authentication-operator/pull/740
+	//      commit 557cdc5 ("routercerts: remove operands if external OIDC config is available")
+	manifests["cluster-authentication-router-certs.yaml"] = []byte(routerCertsPlaceholder)
+
 	return manifests, nil
 }
 
@@ -114,6 +125,17 @@ metadata:
   namespace: openshift-config
 stringData:
   clientSecret: {{ .ClientSecretQuoted }}
+`
+
+// routerCertsPlaceholder is an empty Secret that prevents the authentication
+// operator's ConfigObserver from going Degraded on External OIDC clusters.
+// See GenerateOIDCManifests for full explanation.
+const routerCertsPlaceholder = `apiVersion: v1
+kind: Secret
+metadata:
+  name: v4-0-config-system-router-certs
+  namespace: openshift-authentication
+type: Opaque
 `
 
 type authCRData struct {

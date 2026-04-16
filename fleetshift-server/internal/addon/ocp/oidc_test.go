@@ -26,9 +26,9 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z8Q==
 		t.Fatalf("GenerateOIDCManifests failed: %v", err)
 	}
 
-	// Should produce 3 manifests
-	if len(manifests) != 3 {
-		t.Fatalf("expected 3 manifests, got %d", len(manifests))
+	// Should produce 4 manifests (auth CR, CA configmap, client secret, router-certs placeholder)
+	if len(manifests) != 4 {
+		t.Fatalf("expected 4 manifests, got %d", len(manifests))
 	}
 
 	t.Run("AuthenticationCR", func(t *testing.T) {
@@ -187,6 +187,36 @@ MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA0Z8Q==
 		}
 	})
 
+	t.Run("RouterCertsPlaceholder", func(t *testing.T) {
+		rcYAML, ok := manifests["cluster-authentication-router-certs.yaml"]
+		if !ok {
+			t.Fatal("missing cluster-authentication-router-certs.yaml")
+		}
+
+		var secret map[string]any
+		if err := yaml.Unmarshal(rcYAML, &secret); err != nil {
+			t.Fatalf("invalid YAML in router-certs manifest: %v", err)
+		}
+
+		if secret["apiVersion"] != "v1" {
+			t.Errorf("unexpected apiVersion: %v", secret["apiVersion"])
+		}
+		if secret["kind"] != "Secret" {
+			t.Errorf("unexpected kind: %v", secret["kind"])
+		}
+
+		rcMetadata, ok := secret["metadata"].(map[string]any)
+		if !ok {
+			t.Fatal("missing or invalid metadata")
+		}
+		if rcMetadata["name"] != "v4-0-config-system-router-certs" {
+			t.Errorf("unexpected secret name: %v", rcMetadata["name"])
+		}
+		if rcMetadata["namespace"] != "openshift-authentication" {
+			t.Errorf("unexpected secret namespace: %v", rcMetadata["namespace"])
+		}
+	})
+
 	t.Run("ClientSecret", func(t *testing.T) {
 		secretYAML, ok := manifests["cluster-oidc-client-secret.yaml"]
 		if !ok {
@@ -238,9 +268,9 @@ func TestGenerateOIDCManifests_NoCABundle(t *testing.T) {
 		t.Fatalf("GenerateOIDCManifests failed: %v", err)
 	}
 
-	// Should produce only 1 manifest (auth CR)
-	if len(manifests) != 1 {
-		t.Fatalf("expected 1 manifest, got %d", len(manifests))
+	// Should produce 2 manifests (auth CR + router-certs placeholder)
+	if len(manifests) != 2 {
+		t.Fatalf("expected 2 manifests, got %d", len(manifests))
 	}
 
 	// Should have auth manifest
@@ -407,9 +437,9 @@ func TestGenerateOIDCManifests_NoClientSecret(t *testing.T) {
 		t.Fatalf("GenerateOIDCManifests failed: %v", err)
 	}
 
-	// Should only have auth manifest
-	if len(manifests) != 1 {
-		t.Fatalf("expected 1 manifest, got %d", len(manifests))
+	// Should have auth manifest + router-certs placeholder
+	if len(manifests) != 2 {
+		t.Fatalf("expected 2 manifests, got %d", len(manifests))
 	}
 
 	// Should NOT have client secret manifest
