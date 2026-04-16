@@ -14,7 +14,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -201,8 +200,8 @@ func TestAWSProvision(t *testing.T) {
 		fmt.Println("  Take your time to inspect the cluster. When done,")
 		fmt.Println("  press Enter to destroy the cluster and clean up AWS resources.")
 		fmt.Println()
-		fmt.Print("  Press Enter to destroy...")
-		waitForTTYEnter(t)
+		fmt.Print("  Type 'yes' to destroy: ")
+		waitForTTYConfirm(t)
 	})
 
 	step("11_DestroyDeployment", func(t *testing.T) {
@@ -225,8 +224,8 @@ func TestAWSProvision(t *testing.T) {
 		fmt.Println("    fleetctl deployment list")
 		fmt.Println("    fleetctl deployment get <name> -o json")
 		fmt.Println()
-		fmt.Print("  Press Enter to shut down the server and exit...")
-		waitForTTYEnter(t)
+		fmt.Print("  Type 'yes' to shut down: ")
+		waitForTTYConfirm(t)
 	}
 }
 
@@ -530,8 +529,8 @@ func enrollSigningKey(t *testing.T, binDir string) {
 	fmt.Println("    2. Click 'New SSH key', set type to 'Signing Key'")
 	fmt.Println("    3. Paste the key and save")
 	fmt.Println()
-	fmt.Print("  Press Enter when done...")
-	waitForTTYEnter(t)
+	fmt.Print("  Type 'yes' when done: ")
+	waitForTTYConfirm(t)
 }
 
 // ---------------------------------------------------------------------------
@@ -671,27 +670,21 @@ func elapsed(start time.Time) string {
 	return fmt.Sprintf("%02d:%02d", mins, secs)
 }
 
-// waitForTTYEnter opens /dev/tty, flushes any stale input (e.g. leftover
-// Enter from prior interactive steps), and blocks until the user presses Enter.
-func waitForTTYEnter(t *testing.T) {
+// waitForTTYConfirm opens /dev/tty and reads lines until the user types "yes".
+// Stale input (empty newlines from prior interactive steps) is harmlessly ignored.
+func waitForTTYConfirm(t *testing.T) {
 	t.Helper()
 	tty, err := os.Open("/dev/tty")
 	if err != nil {
 		t.Fatalf("cannot open /dev/tty: %v", err)
 	}
 	defer tty.Close()
-
-	// Drain stale input by switching to non-blocking mode.
-	syscall.SetNonblock(int(tty.Fd()), true)
-	discard := make([]byte, 256)
-	for {
-		if _, err := tty.Read(discard); err != nil {
-			break
+	scanner := bufio.NewScanner(tty)
+	for scanner.Scan() {
+		if strings.TrimSpace(scanner.Text()) == "yes" {
+			return
 		}
 	}
-	syscall.SetNonblock(int(tty.Fd()), false)
-
-	bufio.NewReader(tty).ReadBytes('\n')
 }
 
 // ---------------------------------------------------------------------------
