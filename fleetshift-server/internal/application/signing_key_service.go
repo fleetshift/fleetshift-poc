@@ -56,7 +56,8 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		return domain.SignerEnrollment{}, err
 	}
 
-	if oidcConfig.RegistrySubjectMapping == nil {
+	mapping := oidcConfig.RegistrySubjectMapping
+	if mapping == nil {
 		return domain.SignerEnrollment{}, fmt.Errorf(
 			"%w: no registry subject mapping configured on OIDC auth method",
 			domain.ErrInvalidArgument)
@@ -73,12 +74,14 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 			domain.ErrInvalidArgument, idTokenClaims.Subject, ac.Subject.Subject)
 	}
 
-	registrySubject, err := EvalClaimMapping(oidcConfig.RegistrySubjectMapping, in.IdentityToken)
+	registrySubject, err := EvalClaimMapping(mapping, in.IdentityToken)
 	if err != nil {
 		return domain.SignerEnrollment{}, fmt.Errorf(
 			"%w: claim mapping evaluation failed: %v",
 			domain.ErrInvalidArgument, err)
 	}
+
+	registryID := mapping.RegistryID
 
 	now := time.Now().UTC()
 	enrollment := domain.SignerEnrollment{
@@ -86,7 +89,7 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		FederatedIdentity: ac.Subject.FederatedIdentity,
 		IdentityToken:     domain.RawToken(in.IdentityToken),
 		RegistrySubject:   registrySubject,
-		RegistryID:        oidcConfig.RegistrySubjectMapping.RegistryID,
+		RegistryID:        registryID,
 		CreatedAt:         now,
 		ExpiresAt:         now.Add(365 * 24 * time.Hour), // TODO: make configurable
 	}

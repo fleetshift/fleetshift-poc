@@ -55,7 +55,6 @@ type OIDCConfig struct {
 	AuthorizationEndpoint EndpointURL // resolved from discovery
 	TokenEndpoint         EndpointURL // resolved from discovery
 	KeyEnrollmentAudience Audience    // audience for signer enrollment ID tokens
-	// TODO: this could/should probably be multiple not one
 	RegistrySubjectMapping *RegistrySubjectMapping
 }
 
@@ -68,6 +67,9 @@ type KeyRegistryType string
 const (
 	// KeyRegistryTypeGitHub represents the GitHub SSH signing-key API.
 	KeyRegistryTypeGitHub KeyRegistryType = "github"
+
+	// KeyRegistryTypeKeycloak represents a Keycloak user-attribute registry.
+	KeyRegistryTypeKeycloak KeyRegistryType = "keycloak"
 )
 
 // KeyRegistry describes a known external key registry.
@@ -78,13 +80,17 @@ type KeyRegistry struct {
 }
 
 // BuiltInKeyRegistries returns the set of known public registries.
-// For the prototype only github.com is supported.
 func BuiltInKeyRegistries() map[KeyRegistryID]KeyRegistry {
 	return map[KeyRegistryID]KeyRegistry{
 		"github.com": {
 			ID:       "github.com",
 			Type:     KeyRegistryTypeGitHub,
 			Endpoint: "https://api.github.com",
+		},
+		"keycloak": {
+			ID:       "keycloak",
+			Type:     KeyRegistryTypeKeycloak,
+			Endpoint: "", // resolved from OIDC issuer at runtime
 		},
 	}
 }

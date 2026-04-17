@@ -269,8 +269,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	keyResolver := &application.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
-			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
+			domain.KeyRegistryTypeGitHub:    &keyregistry.GitHubClient{},
+			domain.KeyRegistryTypeKeycloak: &keyregistry.KeycloakClient{
+				AdminUsername: os.Getenv("KC_ADMIN_USERNAME"),
+				AdminPassword: os.Getenv("KC_ADMIN_PASSWORD"),
+			},
 		},
+		AuthMethods: authMethodRepo,
 	}
 
 	deploymentSvc := &application.DeploymentService{

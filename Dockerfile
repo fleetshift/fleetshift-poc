@@ -2,14 +2,15 @@ FROM golang:1.25 AS builder
 
 WORKDIR /src
 
-# Copy go.mod/go.sum for both modules to cache deps
-# CLI has a replace directive pointing to ../fleetshift-server
+# Copy go.mod/go.sum for all modules to cache deps
+COPY gen/go.mod gen/go.sum ./gen/
 COPY fleetshift-server/go.mod fleetshift-server/go.sum ./fleetshift-server/
 COPY fleetshift-cli/go.mod fleetshift-cli/go.sum ./fleetshift-cli/
 RUN cd fleetshift-server && go mod download && \
     cd ../fleetshift-cli && go mod download
 
-# Copy all source (server, cli, proto)
+# Copy all source
+COPY gen/ ./gen/
 COPY fleetshift-server/ ./fleetshift-server/
 COPY fleetshift-cli/ ./fleetshift-cli/
 COPY proto/ ./proto/
