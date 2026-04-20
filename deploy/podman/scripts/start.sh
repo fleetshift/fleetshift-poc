@@ -52,7 +52,7 @@ echo "==> Starting FleetShift stack (demo_mode=$DEMO_MODE)"
 COMPOSE_PROFILES="$COMPOSE_PROFILES" \
 REALM_JSON="$REALM_JSON" \
 PODMAN_SOCKET="$PODMAN_SOCKET" \
-  docker compose -f "$COMPOSE_DIR/docker-compose.yml" --env-file "$DEPLOY_DIR/.env" up -d
+  podman compose -f "$COMPOSE_DIR/docker-compose.yml" --env-file "$DEPLOY_DIR/.env" up -d
 
 echo ""
 echo "==> FleetShift stack is starting!"

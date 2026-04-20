@@ -1,7 +1,7 @@
 .PHONY: help up down clean restart-% logs logs-% status reset-keycloak
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
-COMPOSE := docker compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml
+COMPOSE := podman compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_%-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -31,6 +31,6 @@ status: ## Show running FleetShift containers
 reset-keycloak: ## Wipe Keycloak state and re-import realm (generates new passwords)
 	$(COMPOSE) --profile demo stop keycloak
 	$(COMPOSE) --profile demo rm -f keycloak
-	docker volume rm fleetshift_keycloak-certs 2>/dev/null || docker volume rm keycloak-certs 2>/dev/null || true
+	podman volume rm fleetshift_keycloak-certs 2>/dev/null || podman volume rm keycloak-certs 2>/dev/null || true
 	rm -f $(dir $(abspath $(lastword $(MAKEFILE_LIST)))).realm.json
 	@echo "Keycloak state wiped. Run 'make up' to restart with fresh realm and passwords."

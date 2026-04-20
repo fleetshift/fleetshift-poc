@@ -19,11 +19,11 @@ fi
 
 if [ "${1:-}" = "--clean" ]; then
   echo "==> Stopping stack and removing all data"
-  docker compose -f "$COMPOSE_DIR/docker-compose.yml" $PROFILES down -v
+  podman compose -f "$COMPOSE_DIR/docker-compose.yml" $PROFILES down -v
   rm -f "$COMPOSE_DIR/.realm.json"
 else
   echo "==> Stopping stack (preserving data)"
-  docker compose -f "$COMPOSE_DIR/docker-compose.yml" $PROFILES down
+  podman compose -f "$COMPOSE_DIR/docker-compose.yml" $PROFILES down
 fi
 
 echo "==> Done."
