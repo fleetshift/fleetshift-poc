@@ -15,42 +15,22 @@
 # To disable: DEMO_MODE=false make up
 
 services:
-  # ── Init: TLS certs (demo mode only) ────────────────────────────
+
+  # ── Infrastructure (demo mode only) ─────────────────────────────
+
   keycloak-certs:
     image: alpine:3
     profiles: ["demo"]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        if [ -f /certs/keycloak.crt ]; then
-          echo "TLS certs already exist, skipping generation"
-          exit 0
-        fi
-        apk add --no-cache openssl > /dev/null
-        echo "Generating CA..."
-        openssl req -x509 -newkey rsa:2048 -nodes \
-          -keyout /certs/ca.key -out /certs/ca.crt \
-          -days 3650 -subj "/CN=FleetShift Local CA" 2>/dev/null
-        echo "Generating Keycloak server certificate..."
-        openssl req -newkey rsa:2048 -nodes \
-          -keyout /certs/keycloak.key -out /tmp/keycloak.csr \
-          -subj "/CN=keycloak" 2>/dev/null
-        openssl x509 -req -in /tmp/keycloak.csr \
-          -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial \
-          -out /certs/keycloak.crt -days 3650 \
-          -extfile <(printf "subjectAltName=DNS:keycloak,DNS:localhost") 2>/dev/null
-        rm -f /tmp/keycloak.csr /certs/ca.srl
-        chmod 644 /certs/*.crt
-        chmod 644 /certs/*.key
-        echo "TLS certs generated in /certs/"
+    command: /scripts/generate-certs.sh
     volumes:
       - keycloak-certs:/certs
+      - ./scripts/generate-certs.sh:/scripts/generate-certs.sh:ro
 
-  # ── Keycloak (demo mode only) ───────────────────────────────────
   keycloak:
     image: quay.io/keycloak/keycloak:26.2
     profiles: ["demo"]
     command: start-dev --import-realm
+    restart: unless-stopped
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
@@ -78,9 +58,11 @@ services:
       keycloak-certs:
         condition: service_completed_successfully
 
-  # ── FleetShift Server ───────────────────────────────────────────
+  # ── Core ────────────────────────────────────────────────────────
+
   fleetshift-server:
     image: ${IMAGE_REGISTRY}/fleetshift-server:${IMAGE_TAG}
+    restart: unless-stopped
     command:
       - serve
       - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
@@ -106,36 +88,20 @@ services:
       timeout: 3s
       retries: 30
 
-  # ── Init: OIDC auth registration (demo mode only) ──────────────
-  auth-setup:
-    image: ${IMAGE_REGISTRY}/fleetshift-server:${IMAGE_TAG}
-    profiles: ["demo"]
-    entrypoint: ["/bin/sh", "-c"]
-    command:
-      - |
-        fleetctl auth setup \
-          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
-          --issuer-url ${OIDC_ISSUER_URL} \
-          --client-id ${OIDC_CLIENT_ID} \
-          --audience ${OIDC_AUDIENCE} \
-        && echo "Auth method registered." \
-        || echo "Auth setup failed (may already exist) — continuing."
-    depends_on:
-      fleetshift-server:
-        condition: service_healthy
+  # ── Frontend ────────────────────────────────────────────────────
 
-  # ── Mock UI Plugins ─────────────────────────────────────────────
   fleetshift-mock-ui-plugins:
     image: ${IMAGE_REGISTRY}/fleetshift-mock-ui-plugins:${IMAGE_TAG}
+    restart: unless-stopped
     command: ["npm", "run", "serve:dist", "-w", "packages/mock-ui-plugins"]
     ports:
       - "8001:8001"
     volumes:
       - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist
 
-  # ── Mock Servers ────────────────────────────────────────────────
   fleetshift-mock-servers:
     image: ${IMAGE_REGISTRY}/fleetshift-mock-servers:${IMAGE_TAG}
+    restart: unless-stopped
     environment:
       MODE: ${MODE}
       MANAGEMENT_API_TARGET: ${MANAGEMENT_API_TARGET}
@@ -159,9 +125,9 @@ services:
       fleetshift-server:
         condition: service_healthy
 
-  # ── GUI ─────────────────────────────────────────────────────────
   fleetshift-gui:
     image: ${IMAGE_REGISTRY}/fleetshift-gui:${IMAGE_TAG}
+    restart: unless-stopped
     environment:
       API_PROXY_TARGET: ${API_PROXY_TARGET}
       KEYCLOAK_URL: ${KEYCLOAK_URL}
@@ -172,6 +138,25 @@ services:
       - keycloak-certs:/certs:ro
     depends_on:
       fleetshift-mock-servers:
+        condition: service_healthy
+
+  # ── Init (demo mode only) ───────────────────────────────────────
+
+  auth-setup:
+    image: ${IMAGE_REGISTRY}/fleetshift-server:${IMAGE_TAG}
+    profiles: ["demo"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        fleetctl auth setup \
+          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
+          --issuer-url ${OIDC_ISSUER_URL} \
+          --client-id ${OIDC_CLIENT_ID} \
+          --audience ${OIDC_AUDIENCE} \
+        && echo "Auth method registered." \
+        || echo "Auth setup failed (may already exist) — continuing."
+    depends_on:
+      fleetshift-server:
         condition: service_healthy
 
 volumes:
