@@ -21,13 +21,13 @@ Everything runs in the `keycloak-prod` namespace.
 
 ```bash
 # With Let's Encrypt TLS (recommended for demos):
-ACME_EMAIL=you@example.com ./deploy.sh
+./deploy.sh --acme-email you@example.com
 
-# Without Let's Encrypt (uses cluster wildcard cert):
+# Without Let's Encrypt (uses self-signed cert):
 ./deploy.sh
 
 # With base domain for OCP console OIDC (required for AWS cluster provisioning):
-./deploy.sh --base-domain aws-acm-cluster-virt.devcluster.openshift.com
+./deploy.sh --acme-email you@example.com --base-domain aws-acm-cluster-virt.devcluster.openshift.com
 ```
 
 The script is idempotent — safe to re-run if something fails partway through. Existing secrets are preserved on re-run.

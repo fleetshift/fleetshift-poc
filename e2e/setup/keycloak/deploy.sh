@@ -1,16 +1,33 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ------------------------------------------------------------------
+# Deploy a production-like Keycloak instance on OpenShift
+#
+# Installs cert-manager and RHBK operators, provisions TLS (Let's
+# Encrypt or self-signed), deploys PostgreSQL + Keycloak, imports the
+# FleetShift realm with generated user passwords, and configures the
+# ocp-console client secret.
+#
+# Idempotent — safe to re-run if something fails partway through.
+#
+# Usage:
+#   ./deploy.sh --acme-email you@example.com
+#   ./deploy.sh --acme-email you@example.com --base-domain example.com
+#   ./deploy.sh --fresh-cert --acme-email you@example.com
+# ------------------------------------------------------------------
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 NAMESPACE="keycloak-prod"
 KEYCLOAK_CR_NAME="keycloak"
-ACME_EMAIL="${ACME_EMAIL:-}"
+ACME_EMAIL=""
 FRESH_CERT="${FRESH_CERT:-false}"
 BASE_DOMAINS=()
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --acme-email) ACME_EMAIL="$2"; shift 2 ;;
     --base-domain) BASE_DOMAINS+=("$2"); shift 2 ;;
     --fresh-cert) FRESH_CERT=true; shift ;;
     *) break ;;
@@ -228,7 +245,7 @@ REALM_JSON=$(jq \
         elif .username == "admin" then .credentials[0].value = $adm
         else .
         end
-    )' "${SCRIPT_DIR}/../../../../deploy/keycloak/fleetshift-realm.json")
+    )' "${SCRIPT_DIR}/../../../deploy/keycloak/fleetshift-realm.json")
 
 cat <<EOF | oc apply -n "${NAMESPACE}" -f -
 {
