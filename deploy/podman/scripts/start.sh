@@ -56,7 +56,7 @@ if [ "${DEMO_MODE:-true}" = "true" ]; then
         -extfile <(printf "subjectAltName=DNS:keycloak,DNS:localhost") 2>/dev/null
       rm -f /tmp/keycloak.csr /certs/ca.srl
       chmod 644 /certs/*.crt
-      chmod 600 /certs/*.key
+      chmod 644 /certs/*.key
       echo "TLS certs generated in /certs/"
     '
 
@@ -99,7 +99,7 @@ podman run -d \
   -p "${FLEETSHIFT_SERVER_GRPC_PORT}:${FLEETSHIFT_SERVER_GRPC_PORT}" \
   -v fleetshift-data:/data \
   -v keycloak-certs:/certs:ro \
-  -v /run/user/$(id -u)/podman/podman.sock:/var/run/docker.sock \
+  -v /run/user/"$(id -u)"/podman/podman.sock:/var/run/docker.sock \
   -v /tmp:/tmp \
   -e CONTAINER_HOST=keycloak \
   -e OIDC_HTTPS_PORT="${KC_HTTPS_PORT}" \
