@@ -8,12 +8,15 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  %-20s %s\n", $$1, $$2}'
 
 up: ## Start the full FleetShift stack
+	@chmod +x $(SCRIPTS_DIR)/*.sh
 	$(SCRIPTS_DIR)/start.sh
 
 down: ## Stop all containers, preserve data
+	@chmod +x $(SCRIPTS_DIR)/*.sh
 	$(SCRIPTS_DIR)/stop.sh
 
 clean: ## Stop all containers and remove ALL data (volumes, network)
+	@chmod +x $(SCRIPTS_DIR)/*.sh
 	$(SCRIPTS_DIR)/stop.sh --clean
 
 restart-%: ## Restart a single container (e.g., make restart-fleetshift-mock-servers)
