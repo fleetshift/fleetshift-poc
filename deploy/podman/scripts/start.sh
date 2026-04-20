@@ -5,16 +5,17 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 DEPLOY_DIR="$(cd "$COMPOSE_DIR/.." && pwd)"
 
-# Load .env if present, fall back to template
-if [ -f "$DEPLOY_DIR/.env" ]; then
-  set -a; source "$DEPLOY_DIR/.env"; set +a
-elif [ -f "$DEPLOY_DIR/.env.template" ]; then
-  echo "No .env found, using .env.template defaults"
-  set -a; source "$DEPLOY_DIR/.env.template"; set +a
-else
-  echo "ERROR: No .env or .env.template found in $DEPLOY_DIR" >&2
-  exit 1
+# Ensure .env exists
+if [ ! -f "$DEPLOY_DIR/.env" ]; then
+  if [ -f "$DEPLOY_DIR/.env.template" ]; then
+    echo "No .env found, creating from .env.template"
+    cp "$DEPLOY_DIR/.env.template" "$DEPLOY_DIR/.env"
+  else
+    echo "ERROR: No .env or .env.template found in $DEPLOY_DIR" >&2
+    exit 1
+  fi
 fi
+set -a; source "$DEPLOY_DIR/.env"; set +a
 
 DEMO_MODE="${DEMO_MODE:-true}"
 REALM_TEMPLATE="${DEPLOY_DIR}/keycloak/fleetshift-realm.json"
@@ -24,8 +25,10 @@ COMPOSE_PROFILES=""
 if [ "$DEMO_MODE" = "true" ]; then
   COMPOSE_PROFILES="demo"
 
-  # Generate user passwords and template the realm JSON
-  echo "==> Generating realm user passwords"
+  # Generate all passwords
+  echo "==> Generating passwords"
+  KC_BOOTSTRAP_ADMIN_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
+  export KC_BOOTSTRAP_ADMIN_PASSWORD
   OPS_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
   DEV_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
   ADMIN_USER_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
@@ -45,12 +48,11 @@ fi
 
 # Detect podman socket path
 if [ -z "${PODMAN_SOCKET:-}" ]; then
-  PODMAN_SOCKET=$(podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null || echo "/run/user/$(id -u)/podman/podman.sock")
+  PODMAN_SOCKET=$(podman info --format '{{.Host.RemoteSocket.Path}}' 2>/dev/null | sed 's|^unix://||' || echo "/run/user/$(id -u)/podman/podman.sock")
 fi
 
 echo "==> Starting FleetShift stack (demo_mode=$DEMO_MODE)"
 COMPOSE_PROFILES="$COMPOSE_PROFILES" \
-REALM_JSON="$REALM_JSON" \
 PODMAN_SOCKET="$PODMAN_SOCKET" \
   podman compose -f "$COMPOSE_DIR/docker-compose.yml" --env-file "$DEPLOY_DIR/.env" up -d
 
@@ -63,6 +65,9 @@ echo "    Mock Plugins:    http://localhost:8001"
 if [ "$DEMO_MODE" = "true" ]; then
   echo "    Keycloak Admin:  https://keycloak:${KC_HTTPS_PORT:-8443}"
   echo "    Keycloak (HTTP): http://localhost:${KC_HTTP_PORT:-8180}"
+  echo ""
+  echo "  Keycloak Admin Console:"
+  echo "    ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin} / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"
   echo ""
   echo "  FleetShift Realm Credentials:"
   echo "    ops / ${OPS_PASSWORD}"

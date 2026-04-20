@@ -1,7 +1,8 @@
 .PHONY: help up down clean restart-% logs logs-% status reset-keycloak
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
-COMPOSE := podman compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml
+DEPLOY_DIR := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/..)
+COMPOSE := podman compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml --env-file $(DEPLOY_DIR)/.env
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_%-]+:.*?## .*$$' $(MAKEFILE_LIST) | \

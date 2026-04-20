@@ -48,7 +48,7 @@ services:
       - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
     volumes:
       - keycloak-certs:/opt/keycloak/certs:ro
-      - ${REALM_JSON}:/opt/keycloak/data/import/fleetshift-realm.json:ro
+      - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
       interval: 5s
@@ -80,7 +80,7 @@ services:
     volumes:
       - fleetshift-data:/data
       - keycloak-certs:/certs:ro
-      - ${PODMAN_SOCKET}:/var/run/docker.sock
+      - ${PODMAN_SOCKET:-/dev/null}:/var/run/docker.sock
       - /tmp:/tmp
     healthcheck:
       test: ["CMD", "curl", "-sf", "http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT}/v1/deployments"]
