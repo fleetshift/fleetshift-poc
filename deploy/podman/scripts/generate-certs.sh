@@ -18,12 +18,13 @@ openssl req -newkey rsa:2048 -nodes \
   -keyout /certs/keycloak.key -out /tmp/keycloak.csr \
   -subj "/CN=keycloak" 2>/dev/null
 
+printf "subjectAltName=DNS:keycloak,DNS:localhost" > /tmp/san.cnf
 openssl x509 -req -in /tmp/keycloak.csr \
   -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial \
   -out /certs/keycloak.crt -days 3650 \
-  -extfile <(printf "subjectAltName=DNS:keycloak,DNS:localhost") 2>/dev/null
+  -extfile /tmp/san.cnf 2>/dev/null
 
-rm -f /tmp/keycloak.csr /certs/ca.srl
+rm -f /tmp/keycloak.csr /tmp/san.cnf /certs/ca.srl
 chmod 644 /certs/*.crt
 chmod 644 /certs/*.key
 echo "TLS certs generated in /certs/"

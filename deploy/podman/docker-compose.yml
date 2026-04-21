@@ -32,17 +32,17 @@ services:
     command: start-dev --import-realm
     restart: unless-stopped
     environment:
-      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME}
-      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD}
-      KC_HTTP_ENABLED: "true"
-      KC_HTTP_PORT: "${KC_HTTP_PORT}"
-      KC_HTTPS_PORT: "${KC_HTTPS_PORT}"
-      KC_HTTPS_CERTIFICATE_FILE: /opt/keycloak/certs/keycloak.crt
-      KC_HTTPS_CERTIFICATE_KEY_FILE: /opt/keycloak/certs/keycloak.key
-      KC_HTTP_RELATIVE_PATH: /auth
-      KC_HOSTNAME: ${KC_HOSTNAME}
-      KC_HOSTNAME_PORT: "${KC_HTTP_PORT}"
-      KC_HOSTNAME_STRICT: "false"
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD
+      - KC_HTTP_ENABLED=true
+      - KC_HTTP_PORT=${KC_HTTP_PORT}
+      - KC_HTTPS_PORT=${KC_HTTPS_PORT}
+      - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/certs/keycloak.crt
+      - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/certs/keycloak.key
+      - KC_HTTP_RELATIVE_PATH=/auth
+      - KC_HOSTNAME=${KC_HOSTNAME}
+      - KC_HOSTNAME_PORT=${KC_HTTP_PORT}
+      - KC_HOSTNAME_STRICT=false
     ports:
       - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
       - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
@@ -87,6 +87,9 @@ services:
       interval: 5s
       timeout: 3s
       retries: 30
+    depends_on:
+      keycloak-certs:
+        condition: service_completed_successfully
 
   # ── Frontend ────────────────────────────────────────────────────
 
@@ -150,7 +153,7 @@ services:
       - |
         fleetctl auth setup \
           --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
-          --issuer-url ${OIDC_ISSUER_URL} \
+          --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift \
           --client-id ${OIDC_CLIENT_ID} \
           --audience ${OIDC_AUDIENCE} \
         && echo "Auth method registered." \

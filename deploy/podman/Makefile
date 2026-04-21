@@ -1,4 +1,4 @@
-.PHONY: help up down clean restart-% logs logs-% status reset-keycloak
+.PHONY: help up down clean restart-% logs logs-% status reset-keycloak cli-setup
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
 DEPLOY_DIR := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/..)
@@ -31,6 +31,10 @@ logs-%: ## Tail logs from a single container (e.g., make logs-fleetshift-server)
 
 status: ## Show running FleetShift containers
 	$(COMPOSE) ps
+
+cli-setup: ## Configure fleetctl CLI for local deployment
+	@chmod +x $(SCRIPTS_DIR)/*.sh
+	$(SCRIPTS_DIR)/cli-setup.sh
 
 reset-keycloak: ## Wipe Keycloak state and re-import realm (generates new passwords)
 	$(COMPOSE) --profile demo stop keycloak

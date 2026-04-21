@@ -217,25 +217,6 @@
       "attributes": {
         "github_username": ["dev-github"]
       }
-    },
-    {
-      "username": "admin",
-      "email": "admin@fleetshift.local",
-      "firstName": "Admin",
-      "lastName": "User",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "GENERATED_AT_DEPLOY_TIME",
-          "temporary": false
-        }
-      ],
-      "realmRoles": ["ops", "dev"],
-      "attributes": {
-        "github_username": ["admin-github"]
-      }
     }
   ]
 }
