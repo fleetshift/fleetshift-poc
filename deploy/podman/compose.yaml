@@ -31,7 +31,7 @@ services:
     command: start-dev --import-realm
     restart: unless-stopped
     networks:
-      fleetshift:
+      default:
         aliases:
           - keycloak.localtest.me
     environment:
