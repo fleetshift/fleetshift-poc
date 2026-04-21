@@ -30,10 +30,6 @@ services:
     profiles: ["demo"]
     command: start-dev --import-realm
     restart: unless-stopped
-    networks:
-      default:
-        aliases:
-          - keycloak.localtest.me
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD
