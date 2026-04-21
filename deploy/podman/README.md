@@ -1,6 +1,6 @@
 # FleetShift Podman Deployment
 
-Deploy the full FleetShift stack using podman containers with docker-compose.
+Deploy the full FleetShift stack using podman containers with compose.
 
 ## Prerequisites
 

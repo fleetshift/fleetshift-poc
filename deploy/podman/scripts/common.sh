@@ -19,7 +19,7 @@ load_env() {
 }
 
 compose() {
-  local -a cmd=(podman compose -f "$COMPOSE_DIR/docker-compose.yml" --env-file "$DEPLOY_DIR/.env")
+  local -a cmd=(podman compose -f "$COMPOSE_DIR/compose.yaml" --env-file "$DEPLOY_DIR/.env")
   if [ "${DEMO_MODE:-true}" = "true" ]; then
     cmd+=(--profile demo)
   fi
