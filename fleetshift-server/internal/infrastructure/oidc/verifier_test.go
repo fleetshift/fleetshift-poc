@@ -97,3 +97,4 @@ func TestVerifier_WrongAudience(t *testing.T) {
 		t.Fatal("Verify: expected error for wrong audience, got nil")
 	}
 }
+

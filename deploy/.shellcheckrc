@@ -1,0 +1,2 @@
+# Disable "Not following" warning for sourced files
+disable=SC1091

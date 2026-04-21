@@ -1,4 +1,4 @@
-.PHONY: help build build-server build-cli build-ocp-engine test test-server test-cli test-ocp-engine test-e2e generate
+.PHONY: help build build-server build-cli build-ocp-engine test test-server test-cli test-ocp-engine test-e2e generate image-build image-push
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -35,3 +35,12 @@ test-e2e-aws: build ## Run AWS provision/destroy E2E test
 generate: ## Generate protobuf and gRPC code
 	buf generate --path proto/fleetshift
 	buf generate --template buf.gen.ocp.yaml --path proto/ocp/v1
+
+DEV_REGISTRY ?= quay.io/$(USER)
+IMAGE_TAG ?= latest
+
+image-build: ## Build the fleetshift-server container image
+	podman build -t $(DEV_REGISTRY)/fleetshift-server:$(IMAGE_TAG) .
+
+image-push: ## Push the fleetshift-server container image
+	podman push $(DEV_REGISTRY)/fleetshift-server:$(IMAGE_TAG)

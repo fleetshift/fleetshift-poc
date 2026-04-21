@@ -25,6 +25,7 @@ jobs:
         with:
           go-version-file: fleetshift-server/go.mod
           cache: true
+          cache-dependency-path: "**/go.sum"
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v4

@@ -360,7 +360,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		probe.RBACBootstrapped(auth.Caller.Subject, username)
 	}
 
-	apiServer, caCert, err := ExtractClusterConnInfo([]byte(kc))
+	apiServer, caCert, err := ExtractClusterConnInfo([]byte(internalKC))
 	if err != nil {
 		probe.Error(err)
 		failDelivery(ctx, signaler, "extract connection info for %q: %v", spec.Name, err)

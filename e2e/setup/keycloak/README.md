@@ -21,13 +21,13 @@ Everything runs in the `keycloak-prod` namespace.
 
 ```bash
 # With Let's Encrypt TLS (recommended for demos):
-ACME_EMAIL=you@example.com ./deploy.sh
+./deploy.sh --acme-email you@example.com
 
-# Without Let's Encrypt (uses cluster wildcard cert):
+# Without Let's Encrypt (uses self-signed cert):
 ./deploy.sh
 
 # With base domain for OCP console OIDC (required for AWS cluster provisioning):
-./deploy.sh --base-domain aws-acm-cluster-virt.devcluster.openshift.com
+./deploy.sh --acme-email you@example.com --base-domain aws-acm-cluster-virt.devcluster.openshift.com
 ```
 
 The script is idempotent — safe to re-run if something fails partway through. Existing secrets are preserved on re-run.
@@ -92,15 +92,16 @@ Test user passwords are generated at deploy time and printed once in the deploy 
 To add a personal user for dev testing:
 
 ```bash
-./add-user.sh --username mshort@redhat.com --password mypass --github mshort55 --roles ops,dev
+# From the repo root:
+deploy/podman/scripts/add-user.sh --username mshort@redhat.com --password mypass --github mshort55 --roles ops,dev
 ```
 
-This creates (or updates) a user with the specified credentials, GitHub username, and realm roles. The script is idempotent — re-running it updates the existing user's password and attributes.
+This creates (or updates) a user with the specified credentials, GitHub username, and realm roles. The script is idempotent — re-running it updates the existing user's password and attributes. When run without `--admin-password`, it auto-discovers credentials from OpenShift.
 
 All flags can also be set via environment variables:
 
 ```bash
-KC_NEW_USERNAME=mshort@redhat.com KC_NEW_PASSWORD=mypass KC_NEW_GITHUB=mshort55 KC_NEW_ROLES=ops,dev ./add-user.sh
+KC_NEW_USERNAME=mshort@redhat.com KC_NEW_PASSWORD=mypass KC_NEW_GITHUB=mshort55 KC_NEW_ROLES=ops,dev deploy/podman/scripts/add-user.sh
 ```
 
 ### OIDC Endpoints
@@ -169,7 +170,7 @@ The realm ships with `localhost` redirect URIs for local development. Add your p
 prod/
 ├── deploy.sh                      # Main deploy script
 ├── teardown.sh                    # Clean removal script
-├── add-user.sh                    # Add a personal user with custom credentials
+│                                  # (add-user.sh moved to deploy/podman/scripts/)
 ├── manifests/
 │   ├── namespace.yaml             # keycloak-prod namespace
 │   ├── cert-manager-sub.yaml      # cert-manager operator (OLM)

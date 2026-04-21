@@ -71,7 +71,7 @@ services:
       - "8443:8443"
       - "8180:8180"
     volumes:
-      - ./keycloak/fleetshift-realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+      - ./deploy/keycloak/fleetshift-realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
       - keycloak-certs:/opt/keycloak/certs:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8180"]

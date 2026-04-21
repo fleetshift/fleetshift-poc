@@ -5,9 +5,9 @@
   "registrationAllowed": false,
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
-  "resetPasswordAllowed": true,
+  "resetPasswordAllowed": false,
   "editUsernameAllowed": false,
-  "bruteForceProtected": false,
+  "bruteForceProtected": true,
   "roles": {
     "realm": [
       {
@@ -26,9 +26,8 @@
       "name": "FleetShift UI",
       "enabled": true,
       "publicClient": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
         "http://localhost:4000/*"
@@ -53,7 +52,6 @@
           "name": "audience-mapper",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
-          "consentRequired": false,
           "config": {
             "included.client.audience": "fleetshift-ui",
             "id.token.claim": "false",
@@ -67,9 +65,8 @@
       "name": "FleetShift CLI",
       "enabled": true,
       "publicClient": true,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
       "redirectUris": [
         "http://localhost:8888/callback",
         "http://127.0.0.1/callback",
@@ -97,7 +94,6 @@
           "name": "audience-mapper",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
-          "consentRequired": false,
           "config": {
             "included.client.audience": "fleetshift-cli",
             "id.token.claim": "false",
@@ -113,7 +109,6 @@
       "publicClient": true,
       "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
       "redirectUris": [
         "http://127.0.0.1/callback"
       ],
@@ -133,7 +128,6 @@
           "name": "fleetshift-signing-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
-          "consentRequired": false,
           "config": {
             "included.client.audience": "fleetshift-signing",
             "id.token.claim": "true",
@@ -144,7 +138,6 @@
           "name": "github-username",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-usermodel-attribute-mapper",
-          "consentRequired": false,
           "config": {
             "user.attribute": "github_username",
             "claim.name": "github_username",
@@ -162,7 +155,6 @@
       "publicClient": false,
       "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
-      "implicitFlowEnabled": false,
       "secret": "GENERATED_AT_DEPLOY_TIME",
       "redirectUris": [],
       "webOrigins": ["+"],
@@ -173,13 +165,11 @@
         "roles",
         "email"
       ],
-      "attributes": {},
       "protocolMappers": [
         {
           "name": "ocp-console-audience",
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
-          "consentRequired": false,
           "config": {
             "included.client.audience": "ocp-console",
             "id.token.claim": "true",
@@ -226,25 +216,6 @@
       "realmRoles": ["dev"],
       "attributes": {
         "github_username": ["dev-github"]
-      }
-    },
-    {
-      "username": "admin",
-      "email": "admin@fleetshift.local",
-      "firstName": "Admin",
-      "lastName": "User",
-      "enabled": true,
-      "emailVerified": true,
-      "credentials": [
-        {
-          "type": "password",
-          "value": "GENERATED_AT_DEPLOY_TIME",
-          "temporary": false
-        }
-      ],
-      "realmRoles": ["ops", "dev"],
-      "attributes": {
-        "github_username": ["admin-github"]
       }
     }
   ]

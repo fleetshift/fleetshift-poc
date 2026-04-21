@@ -107,6 +107,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	kindOpts := []kindaddon.AgentOption{
 		kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
 	}
+	if tempDir := os.Getenv("KIND_TEMP_DIR"); tempDir != "" {
+		kindOpts = append(kindOpts, kindaddon.WithTempDir(tempDir))
+		logger.Info("kind agent: using temp dir " + tempDir)
+	}
 	if oidcCABundle != nil {
 		kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
 	}
