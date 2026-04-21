@@ -92,15 +92,16 @@ Test user passwords are generated at deploy time and printed once in the deploy 
 To add a personal user for dev testing:
 
 ```bash
-./add-user.sh --username mshort@redhat.com --password mypass --github mshort55 --roles ops,dev
+# From the repo root:
+deploy/podman/scripts/add-user.sh --username mshort@redhat.com --password mypass --github mshort55 --roles ops,dev
 ```
 
-This creates (or updates) a user with the specified credentials, GitHub username, and realm roles. The script is idempotent — re-running it updates the existing user's password and attributes.
+This creates (or updates) a user with the specified credentials, GitHub username, and realm roles. The script is idempotent — re-running it updates the existing user's password and attributes. When run without `--admin-password`, it auto-discovers credentials from OpenShift.
 
 All flags can also be set via environment variables:
 
 ```bash
-KC_NEW_USERNAME=mshort@redhat.com KC_NEW_PASSWORD=mypass KC_NEW_GITHUB=mshort55 KC_NEW_ROLES=ops,dev ./add-user.sh
+KC_NEW_USERNAME=mshort@redhat.com KC_NEW_PASSWORD=mypass KC_NEW_GITHUB=mshort55 KC_NEW_ROLES=ops,dev deploy/podman/scripts/add-user.sh
 ```
 
 ### OIDC Endpoints
@@ -169,7 +170,7 @@ The realm ships with `localhost` redirect URIs for local development. Add your p
 prod/
 ├── deploy.sh                      # Main deploy script
 ├── teardown.sh                    # Clean removal script
-├── add-user.sh                    # Add a personal user with custom credentials
+│                                  # (add-user.sh moved to deploy/podman/scripts/)
 ├── manifests/
 │   ├── namespace.yaml             # keycloak-prod namespace
 │   ├── cert-manager-sub.yaml      # cert-manager operator (OLM)

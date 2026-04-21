@@ -1,4 +1,4 @@
-.PHONY: help up down clean restart-% logs logs-% status reset-keycloak cli-setup
+.PHONY: help up down clean restart-% logs logs-% status cli-setup add-user reset-keycloak
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
 DEPLOY_DIR := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/..)
@@ -35,6 +35,10 @@ status: ## Show running FleetShift containers
 cli-setup: ## Configure fleetctl CLI for local deployment
 	@chmod +x $(SCRIPTS_DIR)/*.sh
 	$(SCRIPTS_DIR)/cli-setup.sh
+
+add-user: ## Add a user to Keycloak (ADMIN_PW=<pw> USERNAME=<email> PASSWORD=<pw> GITHUB=<gh> ROLES=ops,dev)
+	@chmod +x $(SCRIPTS_DIR)/*.sh
+	$(SCRIPTS_DIR)/add-user.sh --admin-password "$(ADMIN_PW)" --username "$(USERNAME)" --password "$(PASSWORD)" --github "$(GITHUB)" $(if $(ROLES),--roles "$(ROLES)")
 
 reset-keycloak: ## Wipe Keycloak state and re-import realm (generates new passwords)
 	$(COMPOSE) --profile demo stop keycloak
