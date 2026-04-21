@@ -29,8 +29,47 @@ fi
 echo "==> Starting FleetShift stack (demo_mode=${DEMO_MODE:-true})"
 PODMAN_SOCKET="$PODMAN_SOCKET" compose up -d
 
+# Register github_username attribute in Keycloak user profile schema.
+# Keycloak 26 requires attributes to be registered before the admin API accepts them.
+# This can't be done via realm import — requires the admin API after startup.
+if [ "${DEMO_MODE:-true}" = "true" ]; then
+  KC_URL="http://${KC_HOSTNAME:-localhost}:${KC_HTTP_PORT:-8180}/auth"
+
+  echo "==> Waiting for Keycloak API..."
+  until curl -sf "$KC_URL/realms/master" >/dev/null 2>&1; do
+    sleep 2
+  done
+
+  ADMIN_TOKEN=$(curl -sf "$KC_URL/realms/master/protocol/openid-connect/token" \
+    -d "grant_type=password&client_id=admin-cli&username=admin&password=${KC_BOOTSTRAP_ADMIN_PASSWORD}" \
+    | jq -r .access_token)
+
+  PROFILE_JSON=$(curl -sf "$KC_URL/admin/realms/fleetshift/users/profile" \
+    -H "Authorization: Bearer $ADMIN_TOKEN")
+
+  if echo "$PROFILE_JSON" | jq -e '.attributes[] | select(.name == "github_username")' >/dev/null 2>&1; then
+    echo "    github_username attribute already registered."
+  else
+    echo "==> Registering github_username in user profile schema"
+    UPDATED_PROFILE=$(echo "$PROFILE_JSON" | jq '.attributes += [{
+      "name": "github_username",
+      "displayName": "GitHub Username",
+      "validations": {},
+      "annotations": {},
+      "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
+      "multivalued": false
+    }]')
+    curl -sf -o /dev/null -X PUT \
+      "$KC_URL/admin/realms/fleetshift/users/profile" \
+      -H "Authorization: Bearer $ADMIN_TOKEN" \
+      -H "Content-Type: application/json" \
+      -d "$UPDATED_PROFILE"
+    echo "    github_username attribute registered."
+  fi
+fi
+
 echo ""
-echo "==> FleetShift stack is starting!"
+echo "==> FleetShift stack is running!"
 echo "    GUI:             http://localhost:3000"
 echo "    Mock API:        http://localhost:4000"
 echo "    FleetShift API:  http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"

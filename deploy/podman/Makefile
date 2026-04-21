@@ -2,7 +2,7 @@
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
 DEPLOY_DIR := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/..)
-COMPOSE := podman compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml --env-file $(DEPLOY_DIR)/.env
+COMPOSE := podman compose -f $(dir $(abspath $(lastword $(MAKEFILE_LIST))))docker-compose.yml --env-file $(DEPLOY_DIR)/.env --profile demo
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_%-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
