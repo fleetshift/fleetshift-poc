@@ -98,38 +98,3 @@ func TestVerifier_WrongAudience(t *testing.T) {
 	}
 }
 
-func TestVerifier_ContainerHostRewrite(t *testing.T) {
-	ctx := context.Background()
-	idp := oidctest.Start(t, oidctest.WithAudience("test-audience"))
-
-	// Build a verifier with ContainerHost that rewrites "localhost"
-	// to the actual listen address (127.0.0.1).
-	verifier, err := oidc.NewVerifier(ctx,
-		oidc.WithHTTPClient(idp.HTTPClient()),
-		oidc.WithContainerHost("127.0.0.1"),
-	)
-	if err != nil {
-		t.Fatalf("NewVerifier: %v", err)
-	}
-
-	// Register a JWKS URI using "localhost" — the rewrite should make
-	// it reachable via 127.0.0.1.
-	localhostJWKS := domain.EndpointURL("https://localhost:" + idp.Port() + "/jwks")
-	if err := verifier.RegisterKeySet(ctx, localhostJWKS); err != nil {
-		t.Fatalf("RegisterKeySet with localhost URI: %v", err)
-	}
-
-	// Verify a token using a config with the localhost JWKS URI.
-	// The verifier should look up the rewritten cache key internally.
-	rawToken := idp.IssueToken(t, oidctest.TokenClaims{Subject: "user-rewrite"})
-	config := idp.OIDCConfig()
-	config.JWKSURI = localhostJWKS
-
-	claims, err := verifier.Verify(ctx, config, rawToken)
-	if err != nil {
-		t.Fatalf("Verify with rewritten JWKS: %v", err)
-	}
-	if claims.Subject != "user-rewrite" {
-		t.Errorf("Subject = %q, want %q", claims.Subject, "user-rewrite")
-	}
-}

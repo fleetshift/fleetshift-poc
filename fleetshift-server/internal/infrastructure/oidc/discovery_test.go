@@ -4,7 +4,6 @@ import (
 	"context"
 	"testing"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 )
@@ -61,31 +60,4 @@ func TestVerifier_WithHTTPClient_SelfSignedCA(t *testing.T) {
 	}
 }
 
-func TestDiscoveryClient_ContainerHostRewrite(t *testing.T) {
-	idp := oidctest.Start(t)
-
-	// The provider is listening on 127.0.0.1:<port> over HTTPS.
-	// Build a "localhost" issuer URL that points to the same server.
-	// Set ContainerHost to "127.0.0.1" so the rewrite makes the URL
-	// reachable (localhost -> 127.0.0.1 is identity on this host,
-	// but exercises the rewrite code path).
-	localhostIssuer := domain.IssuerURL("https://localhost:" + idp.Port())
-
-	dc := oidc.NewDiscoveryClient(idp.HTTPClient())
-	dc.ContainerHost = "127.0.0.1"
-
-	meta, err := dc.FetchMetadata(context.Background(), localhostIssuer)
-	if err != nil {
-		t.Fatalf("FetchMetadata with ContainerHost rewrite: %v", err)
-	}
-
-	// The fetched metadata should reflect the provider's configured
-	// issuer URL (what the provider returns), NOT the rewritten URL.
-	if meta.Issuer != idp.IssuerURL() {
-		t.Errorf("Issuer = %q, want %q (provider's issuer, not rewritten URL)", meta.Issuer, idp.IssuerURL())
-	}
-	if meta.JWKSURI == "" {
-		t.Error("JWKSURI is empty")
-	}
-}
 

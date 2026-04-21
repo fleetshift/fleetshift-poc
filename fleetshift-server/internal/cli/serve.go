@@ -95,8 +95,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return err
 	}
 
-	containerHost := os.Getenv("CONTAINER_HOST")
-
 	var oidcCABundle []byte
 	if f.oidcCAFile != "" {
 		var err error
@@ -116,7 +114,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if oidcCABundle != nil {
 		kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
 	}
-	if containerHost != "" {
+	if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
 		kindOpts = append(kindOpts, kindaddon.WithContainerHost(containerHost))
 		logger.Info("kind agent: rewriting localhost OIDC issuer URLs to " + containerHost)
 	}
@@ -227,15 +225,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
-	discoveryClient.ContainerHost = containerHost
 
 	var verifierOpts []oidc.VerifierOption
 	if oidcHTTPClient != nil {
 		verifierOpts = append(verifierOpts, oidc.WithHTTPClient(oidcHTTPClient))
-	}
-	if containerHost != "" {
-		verifierOpts = append(verifierOpts, oidc.WithContainerHost(containerHost))
-		logger.Info("OIDC: rewriting localhost URLs to " + containerHost + " for container-internal HTTP fetches")
 	}
 	tokenVerifier, err := oidc.NewVerifier(ctx, verifierOpts...)
 	if err != nil {

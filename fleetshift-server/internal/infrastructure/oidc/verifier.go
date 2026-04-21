@@ -16,8 +16,7 @@ import (
 // Verifier implements [domain.OIDCTokenVerifier] using lestrrat-go/jwx.
 // It manages a [jwk.Cache] internally for JWKS auto-refresh.
 type Verifier struct {
-	cache         *jwk.Cache
-	containerHost string
+	cache *jwk.Cache
 
 	mu      sync.RWMutex
 	keySets map[string]jwk.Set // jwksURI -> cached set
@@ -27,8 +26,7 @@ type Verifier struct {
 type VerifierOption func(*verifierConfig)
 
 type verifierConfig struct {
-	httpClient    httprc.HTTPClient
-	containerHost string
+	httpClient httprc.HTTPClient
 }
 
 // WithHTTPClient sets the HTTP client used for JWKS fetching. This is
@@ -36,14 +34,6 @@ type verifierConfig struct {
 // or proxy configuration.
 func WithHTTPClient(c httprc.HTTPClient) VerifierOption {
 	return func(cfg *verifierConfig) { cfg.httpClient = c }
-}
-
-// WithContainerHost sets a hostname override for JWKS URIs. When set,
-// "localhost" or "127.0.0.1" in JWKS URIs is rewritten to the given host.
-// This allows the verifier to reach IdP endpoints that advertise localhost
-// URIs but are only reachable at a container-network address.
-func WithContainerHost(host string) VerifierOption {
-	return func(cfg *verifierConfig) { cfg.containerHost = host }
 }
 
 // NewVerifier creates a verifier with a background JWKS cache.
@@ -63,9 +53,8 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 		return nil, fmt.Errorf("create JWK cache: %w", err)
 	}
 	return &Verifier{
-		cache:         cache,
-		containerHost: cfg.containerHost,
-		keySets:       make(map[string]jwk.Set),
+		cache:   cache,
+		keySets: make(map[string]jwk.Set),
 	}, nil
 }
 
@@ -73,7 +62,7 @@ func NewVerifier(ctx context.Context, opts ...VerifierOption) (*Verifier, error)
 // are refreshed automatically. Call this on startup for persisted auth
 // methods and after creating new ones.
 func (v *Verifier) RegisterKeySet(ctx context.Context, jwksURI domain.EndpointURL) error {
-	uri := rewriteLocalhost(string(jwksURI), v.containerHost)
+	uri := string(jwksURI)
 	v.mu.Lock()
 	defer v.mu.Unlock()
 
@@ -166,7 +155,7 @@ func getStringSliceClaim(tok jwt.Token, key string) []string {
 }
 
 func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (jwk.Set, error) {
-	uri := rewriteLocalhost(string(jwksURI), v.containerHost)
+	uri := string(jwksURI)
 	v.mu.RLock()
 	ks, ok := v.keySets[uri]
 	v.mu.RUnlock()

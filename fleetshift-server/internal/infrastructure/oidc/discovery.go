@@ -12,8 +12,7 @@ import (
 // DiscoveryClient implements [domain.OIDCDiscoveryClient] by fetching
 // the OpenID Connect discovery document via HTTP.
 type DiscoveryClient struct {
-	HTTP          *http.Client
-	ContainerHost string
+	HTTP *http.Client
 }
 
 // NewDiscoveryClient creates a discovery client using the given HTTP client.
@@ -36,9 +35,8 @@ type discoveryDocument struct {
 // well-known endpoint.
 func (c *DiscoveryClient) FetchMetadata(ctx context.Context, issuerURL domain.IssuerURL) (domain.OIDCMetadata, error) {
 	endpoint := string(issuerURL) + "/.well-known/openid-configuration"
-	fetchURL := rewriteLocalhost(endpoint, c.ContainerHost)
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fetchURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return domain.OIDCMetadata{}, fmt.Errorf("create request: %w", err)
 	}
