@@ -25,6 +25,7 @@ Deploy the full FleetShift stack using podman containers with compose.
 - **podman** installed and running (`podman --version`)
   - macOS: `podman machine init && podman machine start`
 - **jq** installed (`jq --version`) — used for realm password generation
+- **kind** installed (`kind --version`) — used for local cluster provisioning
 - **`/etc/hosts` entry** on macOS (see above)
 - Container images built or available (see [Building Dev Images](#building-dev-images))
 
