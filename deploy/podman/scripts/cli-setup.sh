@@ -32,7 +32,8 @@ jq -n \
     client_id: $client,
     scopes: ["openid", "profile", "email"],
     authorization_endpoint: $auth,
-    token_endpoint: $token
+    token_endpoint: $token,
+    key_enrollment_client_id: "fleetshift-signing"
   }' > "$CONFIG_FILE"
 
 echo "CLI config written to ${CONFIG_FILE}"

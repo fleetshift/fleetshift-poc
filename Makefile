@@ -36,11 +36,11 @@ generate: ## Generate protobuf and gRPC code
 	buf generate --path proto/fleetshift
 	buf generate --template buf.gen.ocp.yaml --path proto/ocp/v1
 
-IMAGE_REGISTRY ?= quay.io/rheemshort
-IMAGE_TAG ?= 0.1.0
+DEV_REGISTRY ?= quay.io/$(USER)
+IMAGE_TAG ?= latest
 
 image-build: ## Build the fleetshift-server container image
-	docker build -t $(IMAGE_REGISTRY)/fleetshift-server:$(IMAGE_TAG) .
+	podman build -t $(DEV_REGISTRY)/fleetshift-server:$(IMAGE_TAG) .
 
 image-push: ## Push the fleetshift-server container image
-	docker push $(IMAGE_REGISTRY)/fleetshift-server:$(IMAGE_TAG)
+	podman push $(DEV_REGISTRY)/fleetshift-server:$(IMAGE_TAG)

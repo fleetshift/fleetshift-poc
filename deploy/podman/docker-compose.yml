@@ -61,7 +61,7 @@ services:
   # ── Core ────────────────────────────────────────────────────────
 
   fleetshift-server:
-    image: ${IMAGE_REGISTRY}/fleetshift-server:${IMAGE_TAG}
+    image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}
     restart: unless-stopped
     command:
       - serve
@@ -94,7 +94,7 @@ services:
   # ── Frontend ────────────────────────────────────────────────────
 
   fleetshift-mock-ui-plugins:
-    image: ${IMAGE_REGISTRY}/fleetshift-mock-ui-plugins:${IMAGE_TAG}
+    image: ${FLEETSHIFT_MOCK_UI_PLUGINS_IMAGE:-quay.io/stolostron/fleetshift-mock-ui-plugins:latest}
     restart: unless-stopped
     command: ["npm", "run", "serve:dist", "-w", "packages/mock-ui-plugins"]
     ports:
@@ -103,7 +103,7 @@ services:
       - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist
 
   fleetshift-mock-servers:
-    image: ${IMAGE_REGISTRY}/fleetshift-mock-servers:${IMAGE_TAG}
+    image: ${FLEETSHIFT_MOCK_SERVERS_IMAGE:-quay.io/stolostron/fleetshift-mock-servers:latest}
     restart: unless-stopped
     environment:
       MODE: ${MODE}
@@ -129,7 +129,7 @@ services:
         condition: service_healthy
 
   fleetshift-gui:
-    image: ${IMAGE_REGISTRY}/fleetshift-gui:${IMAGE_TAG}
+    image: ${FLEETSHIFT_GUI_IMAGE:-quay.io/stolostron/fleetshift-gui:latest}
     restart: unless-stopped
     environment:
       API_PROXY_TARGET: ${API_PROXY_TARGET}
@@ -146,16 +146,19 @@ services:
   # ── Init (demo mode only) ───────────────────────────────────────
 
   auth-setup:
-    image: ${IMAGE_REGISTRY}/fleetshift-server:${IMAGE_TAG}
+    image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}
     profiles: ["demo"]
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
         fleetctl auth setup \
           --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
-          --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift \
+          --issuer-url http://keycloak:${KC_HTTP_PORT}/auth/realms/fleetshift \
           --client-id ${OIDC_CLIENT_ID} \
           --audience ${OIDC_AUDIENCE} \
+          --key-enrollment-client-id fleetshift-signing \
+          --registry-id github.com \
+          --registry-subject-expression "claims.github_username" \
         && echo "Auth method registered." \
         || echo "Auth setup failed (may already exist) — continuing."
     depends_on:

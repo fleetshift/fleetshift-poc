@@ -68,6 +68,17 @@ if [ "${DEMO_MODE:-true}" = "true" ]; then
   fi
 fi
 
+# Create optional dev user if configured
+if [ -n "${DEV_USER_USERNAME:-}" ] && [ "${DEMO_MODE:-true}" = "true" ]; then
+  echo "==> Creating dev user: ${DEV_USER_USERNAME}"
+  "$SCRIPT_DIR/add-user.sh" \
+    --admin-password "$KC_BOOTSTRAP_ADMIN_PASSWORD" \
+    --username "$DEV_USER_USERNAME" \
+    --password "${DEV_USER_PASSWORD:-changeme}" \
+    --github "${DEV_USER_GITHUB:-}" \
+    ${DEV_USER_ROLES:+--roles "$DEV_USER_ROLES"}
+fi
+
 echo ""
 echo "==> FleetShift stack is running!"
 echo "    GUI:             http://localhost:3000"
