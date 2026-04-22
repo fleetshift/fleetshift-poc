@@ -8,6 +8,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+var _ domain.Store = (*Store)(nil)
+
 // Store implements [domain.Store] backed by SQLite.
 type Store struct {
 	DB *sql.DB

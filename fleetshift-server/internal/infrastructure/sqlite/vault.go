@@ -9,6 +9,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+var _ domain.Vault = (*VaultStore)(nil)
+
 // VaultStore implements [domain.Vault] backed by SQLite. It operates
 // on *sql.DB directly (not within the transactional [Store]) because
 // vault operations are independent of domain entity transactions.
