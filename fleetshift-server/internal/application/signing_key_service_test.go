@@ -205,13 +205,16 @@ func TestSignerEnrollmentService_Create_MissingEnrollmentAudience(t *testing.T) 
 	}
 }
 
-func TestSignerEnrollmentService_Create_MissingRegistrySubjectMapping(t *testing.T) {
+func TestSignerEnrollmentService_Create_NoRegistryConfigured(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	provider := oidctest.Start(t)
 
 	verifier, err := oidc.NewVerifier(context.Background(), oidc.WithHTTPClient(provider.HTTPClient()))
 	if err != nil {
 		t.Fatalf("create verifier: %v", err)
+	}
+	if err := verifier.RegisterKeySet(context.Background(), domain.EndpointURL(string(provider.IssuerURL())+"/jwks")); err != nil {
+		t.Fatalf("register key set: %v", err)
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: store.DB}
@@ -223,7 +226,7 @@ func TestSignerEnrollmentService_Create_MissingRegistrySubjectMapping(t *testing
 			Audience:              provider.Audience(),
 			JWKSURI:               domain.EndpointURL(string(provider.IssuerURL()) + "/jwks"),
 			KeyEnrollmentAudience: enrollmentAudience,
-			// RegistrySubjectMapping intentionally omitted
+			// Neither PublicKeyClaimExpression nor RegistrySubjectMapping configured
 		},
 	}); err != nil {
 		t.Fatalf("save auth method: %v", err)
@@ -242,13 +245,13 @@ func TestSignerEnrollmentService_Create_MissingRegistrySubjectMapping(t *testing
 	ctx := callerCtx("user-1", provider.IssuerURL())
 
 	_, err = svc.Create(ctx, application.CreateSignerEnrollmentInput{
-		ID:            "se-no-mapping",
+		ID:            "se-no-registry",
 		IdentityToken: idToken,
 	})
 	if err == nil {
-		t.Fatal("expected error for missing registry subject mapping, got nil")
+		t.Fatal("expected error for missing registry configuration, got nil")
 	}
-	if !containsStr(err.Error(), "registry subject mapping") {
+	if !containsStr(err.Error(), "no key registry configured") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }

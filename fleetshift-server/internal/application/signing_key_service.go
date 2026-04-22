@@ -24,18 +24,18 @@ type CreateSignerEnrollmentInput struct {
 	IdentityToken string
 }
 
-// Create validates the enrollment ID token, evaluates the configured
-// CEL claim mapping to derive the registry subject, and persists a
-// [domain.SignerEnrollment].
+// Create validates the enrollment ID token, resolves the registry
+// subject, and persists a [domain.SignerEnrollment].
 //
 // The validation steps are:
 //  1. Caller must be authenticated (Authorization header).
-//  2. Load the OIDC auth method to get the enrollment audience and
-//     registry subject mapping.
+//  2. Load the OIDC auth method to get the enrollment audience.
 //  3. Verify the ID token against IdP JWKS using the enrollment
 //     audience.
 //  4. Confirm the identity token's sub matches the caller's sub.
-//  5. Evaluate the CEL claim mapping to derive the registry subject.
+//  5. Determine registry: PublicKeyClaimExpression → OIDC registry,
+//     RegistrySubjectMapping → external registry (e.g. GitHub),
+//     neither → error (admin must configure one explicitly).
 //  6. Persist the SignerEnrollment.
 func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnrollmentInput) (domain.SignerEnrollment, error) {
 	ac := AuthFromContext(ctx)
@@ -56,12 +56,6 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		return domain.SignerEnrollment{}, err
 	}
 
-	if oidcConfig.RegistrySubjectMapping == nil {
-		return domain.SignerEnrollment{}, fmt.Errorf(
-			"%w: no registry subject mapping configured on OIDC auth method",
-			domain.ErrInvalidArgument)
-	}
-
 	idTokenClaims, err := s.verifyIdentityToken(ctx, oidcConfig, in.IdentityToken)
 	if err != nil {
 		return domain.SignerEnrollment{}, fmt.Errorf("identity token verification failed: %w", err)
@@ -73,11 +67,27 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 			domain.ErrInvalidArgument, idTokenClaims.Subject, ac.Subject.Subject)
 	}
 
-	registrySubject, err := EvalClaimMapping(oidcConfig.RegistrySubjectMapping, in.IdentityToken)
-	if err != nil {
+	var registrySubject domain.RegistrySubject
+	var registryID domain.KeyRegistryID
+
+	mapping := oidcConfig.RegistrySubjectMapping
+	switch {
+	case oidcConfig.PublicKeyClaimExpression != "":
+		registryID = "oidc"
+		registrySubject = domain.RegistrySubject(idTokenClaims.Subject)
+	case mapping != nil:
+		registrySubject, err = EvalClaimMapping(mapping, in.IdentityToken)
+		if err != nil {
+			return domain.SignerEnrollment{}, fmt.Errorf(
+				"%w: claim mapping evaluation failed: %v",
+				domain.ErrInvalidArgument, err)
+		}
+		registryID = mapping.RegistryID
+	default:
 		return domain.SignerEnrollment{}, fmt.Errorf(
-			"%w: claim mapping evaluation failed: %v",
-			domain.ErrInvalidArgument, err)
+			"%w: no key registry configured — run fleetctl auth setup with "+
+				"--public-key-claim-expression (OIDC) or --registry-id + --registry-subject-expression (GitHub)",
+			domain.ErrInvalidArgument)
 	}
 
 	now := time.Now().UTC()
@@ -86,7 +96,7 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		FederatedIdentity: ac.Subject.FederatedIdentity,
 		IdentityToken:     domain.RawToken(in.IdentityToken),
 		RegistrySubject:   registrySubject,
-		RegistryID:        oidcConfig.RegistrySubjectMapping.RegistryID,
+		RegistryID:        registryID,
 		CreatedAt:         now,
 		ExpiresAt:         now.Add(365 * 24 * time.Hour), // TODO: make configurable
 	}

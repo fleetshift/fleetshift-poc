@@ -10,15 +10,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// EvalClaimMapping evaluates a [domain.RegistrySubjectMapping]'s CEL
-// expression against the raw claims of a JWT. The expression receives
-// a single variable "claims" of type map(string, dyn) and must
-// produce a string result.
-func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (domain.RegistrySubject, error) {
-	if mapping == nil {
-		return "", fmt.Errorf("no registry subject mapping configured")
-	}
-
+// EvalCELClaim evaluates a CEL expression against the raw claims of a
+// JWT. The expression receives a single variable "claims" of type
+// map(string, dyn) and must produce a string result.
+func EvalCELClaim(expression string, rawToken string) (string, error) {
 	claims, err := extractAllClaims(rawToken)
 	if err != nil {
 		return "", fmt.Errorf("extract claims from ID token: %w", err)
@@ -31,9 +26,9 @@ func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (
 		return "", fmt.Errorf("create CEL environment: %w", err)
 	}
 
-	ast, issues := env.Compile(mapping.Expression)
+	ast, issues := env.Compile(expression)
 	if issues != nil && issues.Err() != nil {
-		return "", fmt.Errorf("compile CEL expression %q: %w", mapping.Expression, issues.Err())
+		return "", fmt.Errorf("compile CEL expression %q: %w", expression, issues.Err())
 	}
 
 	prg, err := env.Program(ast)
@@ -52,6 +47,19 @@ func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (
 	}
 	if s == "" {
 		return "", fmt.Errorf("CEL expression produced an empty string")
+	}
+	return s, nil
+}
+
+// EvalClaimMapping evaluates a [domain.RegistrySubjectMapping]'s CEL
+// expression against the raw claims of a JWT.
+func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (domain.RegistrySubject, error) {
+	if mapping == nil {
+		return "", fmt.Errorf("no registry subject mapping configured")
+	}
+	s, err := EvalCELClaim(mapping.Expression, rawToken)
+	if err != nil {
+		return "", err
 	}
 	return domain.RegistrySubject(s), nil
 }

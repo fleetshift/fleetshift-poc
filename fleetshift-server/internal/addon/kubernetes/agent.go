@@ -155,6 +155,7 @@ func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifi
 		issuers[e.IssuerURL] = attestation.TrustedIssuer{
 			JWKSURI:                e.JWKSURI,
 			Audience:               e.EnrollmentAudience,
+			PublicKeyClaimExpression: e.PublicKeyClaimExpression,
 			RegistrySubjectMapping: e.RegistrySubjectMapping,
 		}
 	}

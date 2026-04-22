@@ -15,14 +15,16 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
 // TrustedIssuer describes an OIDC issuer the delivery agent trusts.
 type TrustedIssuer struct {
-	JWKSURI                domain.EndpointURL
-	Audience               domain.Audience // enrollment audience
-	RegistrySubjectMapping *domain.RegistrySubjectMapping
+	JWKSURI                 domain.EndpointURL
+	Audience                domain.Audience // enrollment audience
+	PublicKeyClaimExpression string
+	RegistrySubjectMapping  *domain.RegistrySubjectMapping
 }
 
 // Verifier verifies attestation bundles. It owns a JWKS cache for
@@ -139,10 +141,25 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 		}
 	}
 
-	// 5. Key resolution: fetch public keys for the registry subject.
-	keys, err := v.resolveKeys(ctx, sa.RegistryID, sa.RegistrySubject)
-	if err != nil {
-		return fmt.Errorf("key resolution: %w", err)
+	// 5. Key resolution: for OIDC registries evaluate the CEL
+	//    expression to extract the public key from the verified ID
+	//    token; for external registries (e.g. GitHub) delegate to
+	//    the KeyResolver.
+	var keys []crypto.PublicKey
+	if trusted.PublicKeyClaimExpression != "" {
+		base64Key, celErr := application.EvalCELClaim(trusted.PublicKeyClaimExpression, string(sa.IdentityToken))
+		if celErr != nil {
+			return fmt.Errorf("extract public key claim from identity token: %w", celErr)
+		}
+		keys, err = keyregistry.ParsePublicKeyFromBase64(base64Key)
+		if err != nil {
+			return fmt.Errorf("parse public key from identity token: %w", err)
+		}
+	} else {
+		keys, err = v.resolveKeys(ctx, sa.RegistryID, sa.RegistrySubject)
+		if err != nil {
+			return fmt.Errorf("key resolution: %w", err)
+		}
 	}
 
 	// 6. Envelope reconstruction

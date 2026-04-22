@@ -282,6 +282,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateWF:      createWf,
 		Orchestration: orchWf,
 		KeyResolver:   keyResolver,
+		AuthMethods:   authMethodRepo,
 	}
 
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
