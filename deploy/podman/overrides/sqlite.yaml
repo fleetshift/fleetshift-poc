@@ -1,0 +1,14 @@
+services:
+  fleetshift-server:
+    command:
+      - serve
+      - --db=/data/fleetshift.db
+      - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
+      - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
+      - --log-level=${FLEETSHIFT_LOG_LEVEL}
+      - --oidc-ca-file=/certs/ca.crt
+    volumes:
+      - fleetshift-data:/data
+
+volumes:
+  fleetshift-data:
