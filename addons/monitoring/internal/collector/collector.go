@@ -81,6 +81,10 @@ func (c *Collector) Collect(ctx context.Context) (*pb.CollectResponse, error) {
 	}, nil
 }
 
+func (c *Collector) GenerateManifests(_ context.Context, _ string) ([][]byte, error) {
+	return nil, fmt.Errorf("GenerateManifests is not supported on the cluster side")
+}
+
 func (c *Collector) fetchNodeUsage(ctx context.Context) map[string]nodeMetricsUsage {
 	result := make(map[string]nodeMetricsUsage)
 

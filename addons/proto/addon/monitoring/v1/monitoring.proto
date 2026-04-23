@@ -6,9 +6,18 @@ option go_package = "github.com/fleetshift/fleetshift-poc/addons/gen/addon/monit
 
 service MonitoringAddon {
   rpc Collect(CollectRequest) returns (CollectResponse);
+  rpc GenerateManifests(GenerateManifestsRequest) returns (GenerateManifestsResponse);
 }
 
 message CollectRequest {}
+
+message GenerateManifestsRequest {
+  string target_id = 1;
+}
+
+message GenerateManifestsResponse {
+  repeated bytes manifests = 1;
+}
 
 message CollectResponse {
   repeated NodeMetrics nodes = 1;

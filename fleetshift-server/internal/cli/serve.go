@@ -30,6 +30,7 @@ import (
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	fleetletaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/fleetlet"
+	addonplugin "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/plugin"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
@@ -160,10 +161,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Timeout: 30 * time.Second,
 	}
 
+	addonPluginMgr := addonplugin.NewManager(logger)
+	defer addonPluginMgr.Kill()
+
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:            store,
 		Delivery:         router,
-		Strategies:       domain.DefaultStrategyFactory{},
+		Strategies:       domain.DefaultStrategyFactory{Addons: addonPluginMgr},
 		Registry:         reg,
 		Observer:         observability.NewDeploymentObserver(logger),
 		DeliveryObserver: observability.NewDeliveryObserver(logger),

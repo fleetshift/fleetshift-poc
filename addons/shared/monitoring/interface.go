@@ -22,6 +22,7 @@ var PluginMap = map[string]plugin.Plugin{
 
 type MonitoringAddon interface {
 	Collect(ctx context.Context) (*pb.CollectResponse, error)
+	GenerateManifests(ctx context.Context, targetID string) ([][]byte, error)
 }
 
 type MonitoringGRPCPlugin struct {

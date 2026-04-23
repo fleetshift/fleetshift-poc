@@ -15,6 +15,9 @@ message ManifestStrategy {
   // Manifests to deliver verbatim. Required when type is TYPE_INLINE.
   repeated Manifest manifests = 2 [(google.api.field_behavior) = OPTIONAL];
 
+  // Name of the addon plugin. Required when type is TYPE_ADDON.
+  string addon_name = 3 [(google.api.field_behavior) = OPTIONAL];
+
   // Type of manifest strategy.
   enum Type {
     // Default value. Not used.
@@ -22,5 +25,8 @@ message ManifestStrategy {
 
     // Deliver manifests verbatim from the spec.
     TYPE_INLINE = 1;
+
+    // Generate manifests via a go-plugin addon subprocess.
+    TYPE_ADDON = 2;
   }
 }
