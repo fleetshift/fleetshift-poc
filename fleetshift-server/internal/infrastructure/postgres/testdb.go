@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"testing"
@@ -13,28 +15,43 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+func init() {
+	if _, err := exec.LookPath("podman"); err == nil {
+		os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
+	}
+}
+
 var (
 	containerOnce sync.Once
+	containerCtr  *tcpostgres.PostgresContainer
 	containerConn string
 	containerErr  error
 )
 
-func startContainer() (string, error) {
+func detectProvider() testcontainers.ContainerCustomizer {
+	if _, err := exec.LookPath("podman"); err == nil {
+		return testcontainers.WithProvider(testcontainers.ProviderPodman)
+	}
+	return testcontainers.WithProvider(testcontainers.ProviderDefault)
+}
+
+func startContainer() (*tcpostgres.PostgresContainer, string, error) {
 	ctx := context.Background()
 	ctr, err := tcpostgres.Run(ctx, "postgres:18",
 		tcpostgres.WithDatabase("fleetshift_test"),
 		tcpostgres.WithUsername("test"),
 		tcpostgres.WithPassword("test"),
 		testcontainers.WithWaitStrategy(wait.ForListeningPort("5432/tcp")),
+		detectProvider(),
 	)
 	if err != nil {
-		return "", fmt.Errorf("start postgres container: %w", err)
+		return nil, "", fmt.Errorf("start postgres container: %w", err)
 	}
 	connStr, err := ctr.ConnectionString(ctx, "sslmode=disable")
 	if err != nil {
-		return "", fmt.Errorf("get connection string: %w", err)
+		return nil, "", fmt.Errorf("get connection string: %w", err)
 	}
-	return connStr, nil
+	return ctr, connStr, nil
 }
 
 var (
@@ -45,7 +62,7 @@ var (
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	containerOnce.Do(func() {
-		containerConn, containerErr = startContainer()
+		containerCtr, containerConn, containerErr = startContainer()
 	})
 	if containerErr != nil {
 		t.Fatalf("postgres container: %v", containerErr)
@@ -83,8 +100,13 @@ func OpenTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func TerminateTestContainer() {
+	if containerCtr != nil {
+		containerCtr.Terminate(context.Background())
+	}
+}
+
 func replaceDBName(connStr, dbName string) string {
-	// connStr format: postgres://user:pass@host:port/dbname?params
 	lastSlash := strings.LastIndex(connStr, "/")
 	if lastSlash < 0 {
 		return connStr
