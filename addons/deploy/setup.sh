@@ -37,6 +37,11 @@ docker build -f addons/Dockerfile.monitoring -t monitoring-agent:dev .
 echo "=== Loading images into Kind cluster ${CLUSTER_NAME} ==="
 kind load docker-image fleetlet:dev monitoring-agent:dev --name "${CLUSTER_NAME}"
 
+echo "=== Installing metrics-server (for real CPU/memory usage) ==="
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl -n kube-system patch deployment metrics-server --type=json \
+    -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+
 echo "=== Deploying MonitoringConfig CRD ==="
 kubectl apply -f addons/deploy/kind/monitoring-crd.yaml
 
