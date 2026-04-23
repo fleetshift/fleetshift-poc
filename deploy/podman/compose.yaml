@@ -1,0 +1,176 @@
+# FleetShift production-like deployment — pre-built images, no source mounts.
+#
+# Prerequisites:
+#   - Build images first (see deploy/podman/README.md)
+#   - jq installed (for realm password generation)
+#   - Copy deploy/.env.template to deploy/.env (or start.sh uses template defaults)
+#
+# Usage:
+#   make up       — generate realm passwords, start stack
+#   make down     — stop stack, preserve data
+#   make clean    — stop stack, delete all data
+#
+# Keycloak (demo mode) is enabled via the "demo" profile.
+# To disable: DEMO_MODE=false make up
+
+services:
+
+  # ── Infrastructure (demo mode only) ─────────────────────────────
+
+  keycloak-certs:
+    image: alpine:3
+    profiles: ["demo"]
+    command: /scripts/generate-certs.sh
+    volumes:
+      - keycloak-certs:/certs
+      - ./scripts/generate-certs.sh:/scripts/generate-certs.sh:ro
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    profiles: ["demo"]
+    command: start-dev --import-realm
+    restart: unless-stopped
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD
+      - KC_HTTP_ENABLED=true
+      - KC_HTTP_PORT=${KC_HTTP_PORT}
+      - KC_HTTPS_PORT=${KC_HTTPS_PORT}
+      - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/certs/keycloak.crt
+      - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/certs/keycloak.key
+      - KC_HTTP_RELATIVE_PATH=/auth
+      - KC_HOSTNAME=${KC_HOSTNAME}
+      - KC_HOSTNAME_PORT=${KC_HTTP_PORT}
+      - KC_HOSTNAME_STRICT=false
+    ports:
+      - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
+      - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
+    volumes:
+      - keycloak-certs:/opt/keycloak/certs:ro
+      - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      keycloak-certs:
+        condition: service_completed_successfully
+
+  # ── Core ────────────────────────────────────────────────────────
+
+  fleetshift-server:
+    image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}
+    restart: unless-stopped
+    privileged: true
+    command:
+      - serve
+      - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
+      - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
+      - --db=/data/fleetshift.db
+      - --log-level=${FLEETSHIFT_LOG_LEVEL}
+      - --oidc-ca-file=/certs/ca.crt
+    environment:
+      OIDC_HTTPS_PORT: "${KC_HTTPS_PORT}"
+      KIND_TEMP_DIR: "${KIND_TEMP_DIR:-/tmp}"
+      KIND_EXPERIMENTAL_DOCKER_NETWORK: fleetshift
+    ports:
+      - "${FLEETSHIFT_SERVER_HTTP_PORT}:${FLEETSHIFT_SERVER_HTTP_PORT}"
+      - "${FLEETSHIFT_SERVER_GRPC_PORT}:${FLEETSHIFT_SERVER_GRPC_PORT}"
+    volumes:
+      - fleetshift-data:/data
+      - keycloak-certs:/certs:ro
+      - ${PODMAN_SOCKET:-/dev/null}:/var/run/docker.sock
+      - ${KIND_TEMP_DIR:-/tmp}:${KIND_TEMP_DIR:-/tmp}
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT}/v1/deployments"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      keycloak-certs:
+        condition: service_completed_successfully
+
+  # ── Frontend ────────────────────────────────────────────────────
+
+  fleetshift-mock-ui-plugins:
+    image: ${FLEETSHIFT_MOCK_UI_PLUGINS_IMAGE:-quay.io/stolostron/fleetshift-mock-ui-plugins:latest}
+    restart: unless-stopped
+    command: ["npm", "run", "serve:dist", "-w", "packages/mock-ui-plugins"]
+    ports:
+      - "8001:8001"
+    volumes:
+      - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist
+
+  fleetshift-mock-servers:
+    image: ${FLEETSHIFT_MOCK_SERVERS_IMAGE:-quay.io/stolostron/fleetshift-mock-servers:latest}
+    restart: unless-stopped
+    environment:
+      MODE: ${MODE}
+      MANAGEMENT_API_TARGET: ${MANAGEMENT_API_TARGET}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      K8S_TLS_INSECURE: "${K8S_TLS_INSECURE}"
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    ports:
+      - "4000:4000"
+    volumes:
+      - fleetshift-mock-servers-db:/opt/app-root/src/packages/mock-servers/data
+      - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist:ro
+      - keycloak-certs:/certs:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/4000"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      fleetshift-mock-ui-plugins:
+        condition: service_started
+      fleetshift-server:
+        condition: service_healthy
+
+  fleetshift-gui:
+    image: ${FLEETSHIFT_GUI_IMAGE:-quay.io/stolostron/fleetshift-gui:latest}
+    restart: unless-stopped
+    environment:
+      API_PROXY_TARGET: ${API_PROXY_TARGET}
+      KEYCLOAK_URL: ${KEYCLOAK_URL}
+      NODE_EXTRA_CA_CERTS: /certs/ca.crt
+    ports:
+      - "3000:3000"
+    volumes:
+      - keycloak-certs:/certs:ro
+    depends_on:
+      fleetshift-mock-servers:
+        condition: service_healthy
+
+  # ── Init (demo mode only) ───────────────────────────────────────
+
+  auth-setup:
+    image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}
+    profiles: ["demo"]
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        fleetctl auth setup \
+          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
+          --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift \
+          --client-id ${OIDC_CLIENT_ID} \
+          --audience ${OIDC_AUDIENCE} \
+          --key-enrollment-client-id fleetshift-signing \
+          --registry-id github.com \
+          --registry-subject-expression "claims.github_username" \
+        && echo "Auth method registered." \
+        || echo "Auth setup failed (may already exist) — continuing."
+    depends_on:
+      fleetshift-server:
+        condition: service_healthy
+
+volumes:
+  fleetshift-data:
+  fleetshift-mock-servers-db:
+  keycloak-certs:
+  ui-plugins-dist:
+
+networks:
+  default:
+    name: fleetshift

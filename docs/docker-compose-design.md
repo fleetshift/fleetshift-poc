@@ -1,6 +1,6 @@
 # Docker Compose: Design Decisions
 
-This document explains the non-obvious choices in the unified `docker-compose.yml`
+This document explains the non-obvious choices in the unified `compose.yaml`
 and the Go server changes that support it.
 
 ## Unified stack

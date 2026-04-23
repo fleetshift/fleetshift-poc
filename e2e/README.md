@@ -24,7 +24,7 @@ Deploy Keycloak with the FleetShift realm. Scripts are in `e2e/setup/keycloak/`:
 ```bash
 cd e2e/setup/keycloak
 ./deploy.sh                    # Deploy Keycloak + realm + test users
-./add-user.sh \                # Add your personal user
+../../deploy/podman/scripts/add-user.sh \   # Add your personal user
   --username you@company.com \
   --password yourpass \
   --github your-github-username \
@@ -370,7 +370,7 @@ e2e/setup/
 ├── keycloak/                          # Keycloak deployment on OCP
 │   ├── deploy.sh                      # Deploy Keycloak + realm + test users
 │   ├── teardown.sh                    # Remove everything
-│   ├── add-user.sh                    # Add personal user with GitHub username
+│   │                                  # (add-user.sh moved to deploy/podman/scripts/)
 │   ├── README.md                      # Detailed Keycloak setup docs
 │   ├── realm/
 │   │   └── fleetshift-realm.json      # Realm config (3 clients, 3 test users, 2 roles)

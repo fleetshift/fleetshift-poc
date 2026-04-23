@@ -1,6 +1,19 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# ------------------------------------------------------------------
+# Tear down the Keycloak deployment from OpenShift
+#
+# Removes the FleetShift realm, Keycloak CR, PostgreSQL, TLS
+# resources, and the keycloak-prod namespace. Backs up the TLS
+# certificate to avoid Let's Encrypt rate limits on re-deploy.
+#
+# Optionally uninstalls the cert-manager and RHBK operators.
+#
+# Usage:
+#   ./teardown.sh
+# ------------------------------------------------------------------
+
 NAMESPACE="keycloak-prod"
 KEYCLOAK_CR_NAME="keycloak"
 

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -323,9 +324,13 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		return nil, false
 	}
 
-	// External kubeconfig (127.0.0.1:<nodePort>) — used for stored connection info
-	// accessible from the host.
-	kc, err := provider.KubeConfig(spec.Name, false)
+	// When KIND_EXPERIMENTAL_DOCKER_NETWORK is set, the agent and kind
+	// clusters share a named Docker network — use the internal kubeconfig
+	// (container hostname:6443) for bootstrap ops and stored connection
+	// info. Otherwise, use the external kubeconfig (127.0.0.1:<nodePort>)
+	// which is reachable from the host.
+	useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
+	kc, err := provider.KubeConfig(spec.Name, useInternal)
 	if err != nil {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventWarning,
@@ -334,25 +339,13 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		return nil, true
 	}
 
-	// Internal kubeconfig (container IP:6443) — used for in-container operations
-	// (RBAC bootstrap, platform SA) where 127.0.0.1 would be unreachable.
-	internalKC, err := provider.KubeConfig(spec.Name, true)
-	if err != nil {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventWarning,
-			Message: fmt.Sprintf("get internal kubeconfig for %q: %v", spec.Name, err),
-		})
-		// Fall back to external kubeconfig (works when not in Docker).
-		internalKC = kc
-	}
-
 	if auth.Caller != nil {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
 			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.Subject, spec.Name),
 		})
 		username := string(auth.Caller.Issuer) + "#" + string(auth.Caller.Subject)
-		if err := bootstrapRBAC(ctx, []byte(internalKC), auth.Caller.Issuer, auth.Caller); err != nil {
+		if err := bootstrapRBAC(ctx, []byte(kc), auth.Caller.Issuer, auth.Caller); err != nil {
 			probe.Error(err)
 			failDelivery(ctx, signaler, "bootstrap RBAC on %q: %v", spec.Name, err)
 			return nil, false
@@ -380,7 +373,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		Kind:    domain.DeliveryEventProgress,
 		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", spec.Name),
 	})
-	ref, token, saErr := bootstrapPlatformSA(ctx, []byte(internalKC), targetID)
+	ref, token, saErr := bootstrapPlatformSA(ctx, []byte(kc), targetID)
 	if saErr != nil {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventWarning,
