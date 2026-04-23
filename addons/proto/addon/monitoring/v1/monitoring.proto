@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package addon.monitoring.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/addons/gen/addon/monitoring/v1;monitoringv1";
+
+service MonitoringAddon {
+  rpc Collect(CollectRequest) returns (CollectResponse);
+}
+
+message CollectRequest {}
+
+message CollectResponse {
+  repeated NodeMetrics nodes = 1;
+  int32 total_pods = 2;
+  string cluster_id = 3;
+  int64 collected_at = 4;
+}
+
+message NodeMetrics {
+  string name = 1;
+  int64 cpu_millicores = 2;
+  int64 memory_bytes = 3;
+  int32 pod_count = 4;
+  int64 cpu_usage_millicores = 5;
+  int64 memory_usage_bytes = 6;
+}

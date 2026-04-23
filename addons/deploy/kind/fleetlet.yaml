@@ -1,0 +1,46 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: fleetlet
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: fleetlet-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    name: fleetlet
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fleetlet
+  namespace: default
+  labels:
+    app: fleetlet
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: fleetlet
+  template:
+    metadata:
+      labels:
+        app: fleetlet
+    spec:
+      serviceAccountName: fleetlet
+      containers:
+        - name: fleetlet
+          image: fleetlet:dev
+          args:
+            - --platform-addr=fleetshift:50051
+            - --target-id=fleetlet-kind-1
+            - --target-name=Kind Addon Spike
+            - --monitoring-addr=monitoring-addon:10000
+            - --metrics-interval=30s

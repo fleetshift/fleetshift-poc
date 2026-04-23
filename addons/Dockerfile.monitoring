@@ -1,0 +1,14 @@
+# Build from repo root: docker build -f addons/Dockerfile.monitoring .
+FROM golang:1.25-alpine AS builder
+WORKDIR /build
+COPY fleetshift-server/go.mod fleetshift-server/go.sum ./fleetshift-server/
+COPY fleetshift-server/gen/ ./fleetshift-server/gen/
+COPY addons/go.mod addons/go.sum ./addons/
+WORKDIR /build/addons
+RUN go mod download
+COPY addons/ /build/addons/
+RUN CGO_ENABLED=0 go build -o /monitoring-agent ./monitoring/cmd/agent/
+
+FROM alpine:3.21
+COPY --from=builder /monitoring-agent /monitoring-agent
+ENTRYPOINT ["/monitoring-agent"]

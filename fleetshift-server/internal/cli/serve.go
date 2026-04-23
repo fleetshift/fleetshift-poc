@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc/reflection"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	fleetletaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/fleetlet"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
@@ -42,6 +43,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
+	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
 )
 
 type serveFlags struct {
@@ -302,6 +304,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	kubeAgent := kubernetesaddon.NewAgent(kubeAgentOpts...)
 	router.Register(kubernetesaddon.TargetType, kubeAgent)
 
+	// --- fleetlet agent (remote delivery via gRPC) ---
+
+	fleetletServer := transportgrpc.NewFleetletServer(targetSvc, logger)
+	fleetletAgent := &fleetletaddon.Agent{Server: fleetletServer}
+	router.Register(fleetletaddon.TargetType, fleetletAgent)
+
 	// --- gRPC server ---
 
 	grpcServer := grpc.NewServer(
@@ -318,6 +326,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
+	pb.RegisterFleetletServiceServer(grpcServer, fleetletServer)
 	reflection.Register(grpcServer)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
@@ -339,9 +348,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
 
+	httpMux := http.NewServeMux()
+	httpMux.Handle("/v1/ws/conditions", transporthttp.NewConditionsWSHandler(fleetletServer.Broadcaster, logger))
+	httpMux.Handle("/", gwMux)
+
 	httpServer := &http.Server{
 		Addr:    f.httpAddr,
-		Handler: gwMux,
+		Handler: httpMux,
 	}
 
 	// --- start ---

@@ -1,0 +1,73 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: monitoring-addon
+  namespace: default
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: monitoring-addon
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "pods"]
+    verbs: ["list", "get", "watch"]
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["list", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: monitoring-addon-reader
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: monitoring-addon
+subjects:
+  - kind: ServiceAccount
+    name: monitoring-addon
+    namespace: default
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: monitoring-addon
+  namespace: default
+  labels:
+    app: monitoring-addon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: monitoring-addon
+  template:
+    metadata:
+      labels:
+        app: monitoring-addon
+    spec:
+      serviceAccountName: monitoring-addon
+      containers:
+        - name: monitoring
+          image: monitoring-agent:dev
+          ports:
+            - containerPort: 10000
+              name: plugin
+          env:
+            - name: CLUSTER_ID
+              value: "addon-spike"
+            - name: LISTEN_PORT
+              value: "10000"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: monitoring-addon
+  namespace: default
+spec:
+  selector:
+    app: monitoring-addon
+  ports:
+    - port: 10000
+      targetPort: 10000
+      name: plugin
