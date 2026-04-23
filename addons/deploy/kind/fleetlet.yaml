@@ -50,7 +50,7 @@ spec:
     spec:
       serviceAccountName: fleetlet
       volumes:
-        - name: plugin-socket
+        - name: plugin-sockets
           emptyDir:
             sizeLimit: 1Mi
       containers:
@@ -60,10 +60,10 @@ spec:
             - --platform-addr=fleetshift:50051
             - --target-id=fleetlet-kind-1
             - --target-name=Kind Addon Spike
-            - --monitoring-socket=/run/plugins/monitoring.sock
+            - --plugin-dir=/run/plugins
             - --metrics-interval=30s
           volumeMounts:
-            - name: plugin-socket
+            - name: plugin-sockets
               mountPath: /run/plugins
 
         - name: monitoring
@@ -71,8 +71,10 @@ spec:
           env:
             - name: CLUSTER_ID
               value: "addon-spike"
-            - name: PLUGIN_SOCKET
-              value: /run/plugins/monitoring.sock
+            - name: PLUGIN_UNIX_SOCKET_DIR
+              value: /run/plugins
+            - name: FLEETSHIFT_MONITORING
+              value: "v1"
           volumeMounts:
-            - name: plugin-socket
+            - name: plugin-sockets
               mountPath: /run/plugins

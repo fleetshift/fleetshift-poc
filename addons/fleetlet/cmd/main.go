@@ -7,12 +7,15 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/hashicorp/go-plugin"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
@@ -26,34 +29,29 @@ import (
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 
 	monitoringpb "github.com/fleetshift/fleetshift-poc/addons/gen/addon/monitoring/v1"
+	monitoringplugin "github.com/fleetshift/fleetshift-poc/addons/shared/monitoring"
 )
 
 func main() {
 	platformAddr := flag.String("platform-addr", "localhost:50051", "FleetShift platform gRPC address")
 	targetID := flag.String("target-id", "fleetlet-kind-1", "Target ID to register")
 	targetName := flag.String("target-name", "Kind Addon Spike", "Human-readable target name")
-	monitoringAddr := flag.String("monitoring-addr", "", "Monitoring addon address (host:port); empty to skip")
-	monitoringSocket := flag.String("monitoring-socket", "", "Monitoring addon Unix socket path; takes precedence over --monitoring-addr")
+	pluginDir := flag.String("plugin-dir", "", "Directory containing go-plugin Unix sockets (shared emptyDir)")
 	metricsInterval := flag.Duration("metrics-interval", 30*time.Second, "Metrics collection interval")
 	flag.Parse()
-
-	effectiveMonitoringAddr := *monitoringAddr
-	if *monitoringSocket != "" {
-		effectiveMonitoringAddr = "unix:" + *monitoringSocket
-	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, logger, *platformAddr, *targetID, *targetName, effectiveMonitoringAddr, *metricsInterval); err != nil {
+	if err := run(ctx, logger, *platformAddr, *targetID, *targetName, *pluginDir, *metricsInterval); err != nil {
 		logger.Error("fleetlet exited with error", "error", err)
 		os.Exit(1)
 	}
 }
 
-func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targetName, monitoringAddr string, metricsInterval time.Duration) error {
+func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targetName, pluginDir string, metricsInterval time.Duration) error {
 	logger.Info("connecting to platform", "addr", platformAddr)
 
 	conn, err := grpc.NewClient(platformAddr,
@@ -112,17 +110,17 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 		logger.Warn("not running in-cluster, SSA disabled", "error", err)
 	}
 
-	// --- Monitoring addon via go-plugin ---
+	// --- Monitoring addon via go-plugin (sidecar) ---
 
-	var monitoringAddon *monitoringGRPCClient
-	if monitoringAddr != "" {
-		addon, cleanup, err := connectMonitoringAddon(logger, monitoringAddr)
+	var monAddon monitoringplugin.MonitoringAddon
+	if pluginDir != "" {
+		addon, cleanup, err := connectMonitoringPlugin(ctx, logger, pluginDir)
 		if err != nil {
-			logger.Warn("failed to connect monitoring addon", "error", err)
+			logger.Warn("failed to connect monitoring plugin", "error", err)
 		} else {
-			monitoringAddon = addon
+			monAddon = addon
 			defer cleanup()
-			logger.Info("monitoring addon connected", "addr", monitoringAddr)
+			logger.Info("monitoring plugin connected via go-plugin")
 		}
 	}
 
@@ -136,9 +134,8 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 
 	logger.Info("deliver stream established, waiting for instructions")
 
-	// Start metrics relay if monitoring addon is connected
-	if monitoringAddon != nil {
-		go metricsLoop(ctx, logger, deliverStream, monitoringAddon, targetID, metricsInterval)
+	if monAddon != nil {
+		go metricsLoop(ctx, logger, deliverStream, monAddon, targetID, metricsInterval)
 	}
 
 	for {
@@ -213,26 +210,64 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 	}
 }
 
-func connectMonitoringAddon(logger *slog.Logger, addr string) (*monitoringGRPCClient, func(), error) {
-	conn, err := grpc.NewClient(addr,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+// connectMonitoringPlugin discovers a go-plugin Unix socket in pluginDir and
+// connects via ReattachConfig. The sidecar container creates the socket using
+// plugin.Serve() with PLUGIN_UNIX_SOCKET_DIR; the name is random so we glob.
+func connectMonitoringPlugin(ctx context.Context, logger *slog.Logger, pluginDir string) (monitoringplugin.MonitoringAddon, func(), error) {
+	socketPath, err := waitForSocket(ctx, logger, pluginDir, 30*time.Second)
 	if err != nil {
-		return nil, nil, fmt.Errorf("connect to monitoring addon: %w", err)
+		return nil, nil, err
 	}
 
-	client := monitoringpb.NewMonitoringAddonClient(conn)
-	addon := &monitoringGRPCClient{client: client}
+	logger.Info("discovered plugin socket", "path", socketPath)
 
-	return addon, func() { conn.Close() }, nil
+	c := plugin.NewClient(&plugin.ClientConfig{
+		HandshakeConfig: monitoringplugin.Handshake,
+		Plugins:         monitoringplugin.PluginMap,
+		Reattach: &plugin.ReattachConfig{
+			Protocol:        plugin.ProtocolGRPC,
+			ProtocolVersion: 1,
+			Addr:            &net.UnixAddr{Name: socketPath, Net: "unix"},
+			Test:            true,
+		},
+		AllowedProtocols: []plugin.Protocol{plugin.ProtocolGRPC},
+	})
+
+	rpcClient, err := c.Client()
+	if err != nil {
+		c.Kill()
+		return nil, nil, fmt.Errorf("get rpc client: %w", err)
+	}
+
+	raw, err := rpcClient.Dispense("monitoring")
+	if err != nil {
+		c.Kill()
+		return nil, nil, fmt.Errorf("dispense monitoring: %w", err)
+	}
+
+	addon := raw.(monitoringplugin.MonitoringAddon)
+	return addon, func() { c.Kill() }, nil
 }
 
-type monitoringGRPCClient struct {
-	client monitoringpb.MonitoringAddonClient
-}
+func waitForSocket(ctx context.Context, logger *slog.Logger, dir string, timeout time.Duration) (string, error) {
+	deadline := time.After(timeout)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-func (c *monitoringGRPCClient) Collect(ctx context.Context) (*monitoringpb.CollectResponse, error) {
-	return c.client.Collect(ctx, &monitoringpb.CollectRequest{})
+	for {
+		select {
+		case <-ctx.Done():
+			return "", ctx.Err()
+		case <-deadline:
+			return "", fmt.Errorf("timed out waiting for plugin socket in %s", dir)
+		case <-ticker.C:
+			matches, _ := filepath.Glob(filepath.Join(dir, "plugin*"))
+			if len(matches) > 0 {
+				return matches[0], nil
+			}
+			logger.Debug("waiting for plugin socket", "dir", dir)
+		}
+	}
 }
 
 func applyManifests(ctx context.Context, logger *slog.Logger, dynClient dynamic.Interface, manifests []*pb.Manifest) error {
@@ -293,7 +328,7 @@ func guessResource(kind string) string {
 	}
 }
 
-func metricsLoop(ctx context.Context, logger *slog.Logger, stream grpc.BidiStreamingClient[pb.DeliverEvent, pb.DeliverInstruction], addon *monitoringGRPCClient, targetID string, interval time.Duration) {
+func metricsLoop(ctx context.Context, logger *slog.Logger, stream grpc.BidiStreamingClient[pb.DeliverEvent, pb.DeliverInstruction], addon monitoringplugin.MonitoringAddon, targetID string, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
