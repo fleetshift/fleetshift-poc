@@ -1,6 +1,8 @@
 # Managed resources
 
-> **Naming note.** This document uses "managed resource" as the working term for addon-driven, consumer-facing resource types. Alternative names worth revisiting as the design matures: **offering** (captures the provider/consumer relationship with zero Kubernetes namespace collision), **fulfillment** (emphasizes the lifecycle from intent to realized infrastructure). "Platform resource" was the original term but was retired because "platform" already refers to the management plane itself.
+> **Naming note.** This document uses "managed resource" as the working term for addon-driven, consumer-facing resource types. Alternative names worth revisiting as the design matures: **offering** (captures the provider/consumer relationship with zero Kubernetes namespace collision). "Platform resource" was the original term but was retired because "platform" already refers to the management plane itself.
+>
+> **Fulfillment** is the core kernel primitive — the internal orchestration unit that drives the reconciliation loop. It is not directly created or edited by users. User-facing concepts (managed resources, campaigns, deployments) create and drive fulfillments. See [Architectural layering](#architectural-layering) below.
 
 ## Problem
 
@@ -246,18 +248,130 @@ sequenceDiagram
 
 The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a deployment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived deployment to the delivery attestation, without the platform ever needing to understand what a "ROSA cluster" is.
 
-### State
+### Architectural layering
 
-The schema of a managed resource is defined by the addon. The platform takes care of its storage and retrieval through well-known API patterns:
+The platform separates the core orchestration primitive from user-facing concepts:
 
-(something like this, TBD)
+**Fulfillment** (kernel primitive): the internal unit of orchestration. A fulfillment is a versioned composition of pointers (intent, placement, rollout) that drives the reconciliation loop — resolve → delta → plan → generate → deliver. Fulfillments are not directly created or edited by users. They have version history at the kernel level: each mutation creates a new fulfillment version (snapshot of all pointers), making generation meaningful for audit, debugging, and rollback.
 
-- `POST /{resource}`: Persists an intent for the resource and begins reconciliation
-- `GET  /{resource}`: Retrieves all stored intents
-- `GET  /{resource}/{name}`
-- `PUT  /{resource}/{name}`
+**User-facing concepts** (thin layers over fulfillments):
 
-Inventory is a separate concern. Addons can report inventory. Inventory is the state of things as they are. A single intent may explode into many resources. High level intent may explode into many "lower level" decisions and resulting attributes.
+- **Managed resource**: continuous reconciliation, addon-driven or config-only, typed collections (`/clusters`, `/monitoring-stacks`). Creates and drives a fulfillment.
+- **Campaign**: run-to-completion fleet operations, immutable once started. Creates fulfillments for each stage.
+- **Deployment**: the "just deploy this" convenience. A thin wrapper that creates a single fulfillment. Simple edit/status API.
+
+Each user-facing concept defines its own API surface, lifecycle rules, and editability. The fulfillment has no direct edit API — it's driven exclusively through the concept that owns it. This avoids the problem where higher-level concepts must restrict a general-purpose primitive ("you can't edit this deployment because it's owned by a managed resource"). Instead, the primitive is inert by default, and each concept grants specific capabilities.
+
+> **Note.** Earlier sections of this document use "Deployment" to refer to both the user-facing concept and what is now the fulfillment. Those sections predate this layering and should be read with this distinction in mind. The structural relationships they describe (derived deployment from managed resource, attestation chain, addon registration) remain correct — the examples illustrate how a managed resource creates and drives a fulfillment through the standard orchestration pipeline.
+
+### Versioned intent
+
+Managed resource specs are stored as immutable versions. A fulfillment holds a pointer to a specific version. Updating the pointer IS the fulfillment mutation — generation bumps naturally, eliminating lockstep coordination between a mutable resource table and the fulfillment.
+
+```sql
+CREATE TABLE resource_intents (
+  resource_type TEXT NOT NULL,
+  name          TEXT NOT NULL,
+  version       INTEGER NOT NULL,
+  spec          TEXT NOT NULL,       -- jsonb in Postgres
+  provenance    TEXT,
+  created_at    TEXT NOT NULL,
+  PRIMARY KEY (resource_type, name, version)
+);
+```
+
+Each version is immutable — INSERT only, never UPDATE. Postgres: `PARTITION BY LIST (resource_type)`, partitions at addon registration. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
+
+#### Bundled intent for multiple K8s manifests
+
+A single intent can contain multiple K8s resources, keyed by manifest name. Versioned as a unit — any change to any resource bumps the intent version. Maps 1:1 to OCM ManifestWork without requiring synthetic fulfillments or multiple intent pointers per fulfillment.
+
+```json
+{
+  "resource_type": "cert-manager",
+  "name": "cert-manager-install",
+  "version": 4,
+  "spec": {
+    "manifests": [
+      {"key": "ns",     "gvk": "v1/Namespace",        "content": {"name": "cert-manager"}},
+      {"key": "crds",   "gvk": "apiextensions/v1/CRD", "content": {}},
+      {"key": "deploy", "gvk": "apps/v1/Deployment",   "content": {}},
+      {"key": "svc",    "gvk": "v1/Service",           "content": {}},
+      {"key": "rbac",   "gvk": "rbac/v1/ClusterRole",  "content": {}}
+    ]
+  }
+}
+```
+
+### Fulfillment as composition of versioned pointers
+
+Fulfillments reference versioned things — intent, placement strategy, rollout strategy — each independently versioned and reusable:
+
+```
+fulfillment:
+  manifest:  resource_intent @version
+  placement: placement_strategy @version
+  rollout:   rollout_strategy @version
+  generation: N
+  state:     {api_url, provider_id, ...}
+```
+
+Each mutation creates a new fulfillment version (snapshot of all pointers at that generation). This plumbs complete history without a monolithic history table — component version histories are independent, and fulfillment versions capture the composition traversal (which specific versions were active together at each point in time). Reusable placement strategies across fulfillments matches OCM.
+
+The fulfillment's `state` field carries mutable, non-historical outputs — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change. If history is needed for observed properties, it flows through inventory.
+
+### Delivery model
+
+Deliveries are keyed on `(fulfillment_id, target_id)`. For bundled intents with multiple manifests, the delivery reports per-manifest apply outcomes via **manifest_results**:
+
+```json
+{
+  "ns":     {"applied": true},
+  "crds":   {"applied": true},
+  "deploy": {"applied": true},
+  "svc":    {"applied": true},
+  "rbac":   {"applied": false, "error": "forbidden: requires elevated privileges"}
+}
+```
+
+manifest_results has a narrow purpose: "what happened when I tried to apply each manifest." Written at apply time, overwritten on next apply. Not historical — delivery condition events cover the transition story. Failed applies don't produce inventory; manifest_results covers failures.
+
+**Delivery conditions** are addon-reported _operational_ status on this target — the addon's own assessment of its ability to function ("can't reach API server", "auth failed", "apply batch completed"). These are NOT a semantic health aggregate of deployed resources. The addon is the thing doing the delivery, so if there's aggregate status only it knows about, it needs a place to put it.
+
+**Fulfillment conditions** are platform-aggregated from delivery conditions via CEL. Single-target = pass-through. Built-in defaults when no CEL registered. Two stored condition levels: delivery (addon-reported) and fulfillment (platform-aggregated). No per-manifest condition layer on deliveries — per-manifest health comes from inventory.
+
+### Inventory
+
+Inventory is the system for all historical observed state — the state of things as they are. It covers all resources comprehensively: managed resources, discovered resources, sub-resources, and ordinary K8s resources (Namespaces, ConfigMaps, RBAC). Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
+
+Inventory is a projection, not a literal copy of the source resource. The addon extracts relevant fields, like ACM search collectors extract a subset of K8s fields.
+
+Each inventory item has:
+
+- **Identity**: resource type, name, source association (fulfillment + target, optional manifest_key for intent-correlated resources, null for side-effect resources)
+- **State**: opaque, addon-defined. Runtime/observed properties (replica counts, image versions, allocatable resources, etc.)
+- **Conditions**: structured, platform-queryable. Historical transitions tracked via condition events. Gives the platform a uniform health query surface across all resource types without understanding state internals.
+
+For managed resources, the managed thing itself is an inventory item. A single intent may explode into many inventory items — the managed resource plus sub-resources created by the addon (nodes under a cluster, operators, etc.). Side-effect resources associate with the delivery but have no manifest_key.
+
+**Condition types** are both platform-defined and addon-defined. The platform defines conventional types (`Lifecycle`, `Healthy`) for universal fleet dashboards. Addons define domain-specific types (`ReplicationHealthy`, `KeyValid`, `Progressing`) without platform coordination. The platform defines conventions, not constraints — ecosystem conventions emerge from usage.
+
+Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded conditions), AKS (provisioningState/powerState only), RDS (health encoded in status enum). Each maps onto the inventory shape with addon-side translation. The inconsistency across cloud APIs is the reason conditions exist as a platform abstraction.
+
+#### Managed resource API projection
+
+The managed resource consumer API projects from:
+- **Spec** → `resource_intents` (the version the fulfillment references)
+- **Phase** → fulfillment lifecycle enum
+- **Observed state** → inventory (conditions and state for the managed thing and its sub-resources)
+
+```
+GET /clusters/prod-us-east-1
+  spec:       → from resource_intents @version
+  phase:      → from fulfillment (provisioning/active/failed/deleting)
+  conditions: → from inventory item for this managed resource
+  state:      → from inventory item for this managed resource
+```
 
 > OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
 
