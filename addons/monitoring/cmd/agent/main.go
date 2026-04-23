@@ -22,10 +22,8 @@ func main() {
 		clusterID = "unknown"
 	}
 
+	socketPath := os.Getenv("PLUGIN_SOCKET")
 	port := os.Getenv("LISTEN_PORT")
-	if port == "" {
-		port = "10000"
-	}
 
 	config, err := rest.InClusterConfig()
 	if err != nil {
@@ -42,20 +40,33 @@ func main() {
 		ClusterID: clusterID,
 	}
 
-	lis, err := net.Listen("tcp", fmt.Sprintf("0.0.0.0:%s", port))
-	if err != nil {
-		panic("failed to listen: " + err.Error())
+	var lis net.Listener
+	switch {
+	case socketPath != "":
+		os.Remove(socketPath)
+		lis, err = net.Listen("unix", socketPath)
+		if err != nil {
+			panic("failed to listen on unix socket: " + err.Error())
+		}
+		fmt.Fprintf(os.Stderr, "monitoring addon listening on unix:%s\n", socketPath)
+	default:
+		if port == "" {
+			port = "10000"
+		}
+		lis, err = net.Listen("tcp", fmt.Sprintf("0.0.0.0:%s", port))
+		if err != nil {
+			panic("failed to listen on tcp: " + err.Error())
+		}
+		fmt.Fprintf(os.Stderr, "monitoring addon listening on :%s\n", port)
 	}
 
 	s := grpc.NewServer()
 	pb.RegisterMonitoringAddonServer(s, &monitoringplugin.GRPCServer{Impl: impl})
 
-	// go-plugin client uses gRPC health check for Ping()
 	healthSrv := health.NewServer()
 	healthpb.RegisterHealthServer(s, healthSrv)
 	healthSrv.SetServingStatus("plugin", healthpb.HealthCheckResponse_SERVING)
 
-	fmt.Fprintf(os.Stderr, "monitoring addon listening on :%s\n", port)
 	if err := s.Serve(lis); err != nil {
 		panic("serve failed: " + err.Error())
 	}

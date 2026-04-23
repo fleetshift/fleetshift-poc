@@ -45,64 +45,39 @@ they don't share a filesystem — Unix sockets can't cross pod boundaries. This 
 why we switched to plain gRPC (`grpc.NewServer()` / `grpc.NewClient()`) for
 cluster-side addon communication.
 
-### When go-plugin would work: sidecar pattern
+### Solution: sidecar pattern with Unix domain sockets
 
-go-plugin works if both processes share a filesystem, which is possible in K8s
-using a **sidecar** deployment with a shared `emptyDir` volume:
+We use a **sidecar** deployment where the fleetlet and addons run as containers in
+the same Pod, communicating via Unix domain sockets on a shared `emptyDir` volume.
+This gives us UDS performance with full crash isolation — one container crashing
+doesn't take down the other (K8s restarts only the failed container).
 
 ```mermaid
 graph LR
     subgraph pod["Single K8s Pod"]
-        fleetlet["Fleetlet container<br/>(go-plugin client)"]
-        addon["Monitoring Addon container<br/>(go-plugin server)"]
-        vol[("emptyDir<br/>/plugin-socket")]
+        fleetlet["Fleetlet container<br/>(gRPC client)"]
+        addon["Monitoring Addon container<br/>(gRPC server)"]
+        vol[("emptyDir<br/>/run/plugins/monitoring.sock")]
 
-        addon -->|"Unix socket"| vol
-        fleetlet -->|"ReattachConfig"| vol
+        addon -->|"listen unix://"| vol
+        fleetlet -->|"dial unix://"| vol
     end
 ```
 
-```yaml
-# Sidecar deployment sketch
-spec:
-  volumes:
-    - name: plugin-socket
-      emptyDir: {}
-  containers:
-    - name: monitoring-addon
-      image: monitoring-agent:dev
-      env:
-        - name: PLUGIN_UNIX_SOCKET_DIR   # go-plugin reads this
-          value: /plugin-socket
-      volumeMounts:
-        - name: plugin-socket
-          mountPath: /plugin-socket
+The monitoring addon listens on a well-known socket path (`/run/plugins/monitoring.sock`),
+and the fleetlet connects to it via gRPC's native `unix:` scheme. No go-plugin
+protocol is needed on the cluster side — plain gRPC over UDS provides the same low
+IPC overhead while keeping the deployment model simple.
 
-    - name: fleetlet
-      image: fleetlet:dev
-      volumeMounts:
-        - name: plugin-socket
-          mountPath: /plugin-socket
-```
+**Why not go-plugin for the sidecar?** We could use `ReattachConfig{Test: true}` +
+`PLUGIN_UNIX_SOCKET_DIR`, but go-plugin creates socket files with random suffixes
+(`/plugin-socket/plugin<RANDOM>`), requiring glob-based discovery. Plain gRPC with
+a well-known socket path is simpler and equally performant.
 
-The fleetlet connects via `ReattachConfig{Addr: <socket path>, Test: true}`.
-`Test: true` tells the client not to manage the addon process lifecycle (important
-since K8s manages both containers independently).
-
-**Discovery caveat:** go-plugin creates socket files with random suffixes
-(`/plugin-socket/plugin<RANDOM>`). The fleetlet would need to glob for
-`filepath.Glob("/plugin-socket/plugin*")` or have the addon write the path to a
-known file.
-
-### Trade-offs
-
-| Approach | Pros | Cons |
-|---|---|---|
-| **Separate Pods + plain gRPC** (current) | Independent scaling and restarts; standard K8s Service discovery; simpler debugging (separate logs/resources) | Loses go-plugin handshake, health negotiation, and version protocol |
-| **Sidecar + go-plugin** | Full go-plugin protocol (handshake, versioning, process health); no network exposure for addon | Coupled lifecycle (pod restart kills both); can't scale addon independently; socket path discovery needed |
-
-For this spike we chose separate pods to keep the architecture flexible. A sidecar
-approach is viable for production if addon independence isn't required.
+**Crash isolation:** Containers in the same Pod have separate cgroups and
+namespaces. If the monitoring addon OOM-kills or segfaults, only that container
+restarts — the fleetlet stays up. The shared `emptyDir` has a `sizeLimit: 1Mi`
+to prevent disk pressure.
 
 ## Architecture
 
@@ -125,12 +100,16 @@ graph TB
     end
 
     subgraph kind["Kind Cluster (Docker network: fleetshift)"]
-        fleetlet["Fleetlet Pod<br/>(gRPC client)"]
-        monAddon["Monitoring Addon Pod<br/>(gRPC server :10000)"]
+        subgraph fleetletPod["Fleetlet Pod"]
+            fleetlet["Fleetlet container<br/>(gRPC client)"]
+            monAddon["Monitoring sidecar<br/>(gRPC server)"]
+            socket[("UDS<br/>/run/plugins/monitoring.sock")]
+            fleetlet -->|"Collect() every 30s"| socket
+            monAddon -->|"listen"| socket
+        end
         k8sAPI["Kubernetes API"]
         metricsSrv["metrics-server"]
 
-        fleetlet -->|"Collect() every 30s"| monAddon
         monAddon -->|"list nodes, pods"| k8sAPI
         monAddon -->|"node metrics"| metricsSrv
         fleetlet -->|"SSA patch"| k8sAPI
@@ -235,8 +214,7 @@ addons/
     ├── setup.sh                    # deploy fleetlet + addon to Kind cluster
     ├── demo.sh                     # scale workloads to demo live metrics
     └── kind/
-        ├── fleetlet.yaml           # Deployment + RBAC (cluster-admin)
-        ├── monitoring.yaml         # Deployment + Service + ClusterRole
+        ├── fleetlet.yaml           # Deployment with monitoring sidecar + RBAC
         └── monitoring-crd.yaml     # MonitoringConfig CRD
 ```
 
@@ -272,7 +250,7 @@ packages/
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Addon communication | Plain gRPC (not go-plugin) | go-plugin uses Unix sockets on Linux, incompatible with cross-pod communication |
+| Addon communication | gRPC over Unix socket (sidecar) | Low IPC overhead, crash-isolated containers, no network exposure |
 | Manifest application | Server-Side Apply (SSA) | Declarative, conflict-free, field-manager ownership |
 | Metrics transport | ConditionReport with JSON message | Zero proto changes to FleetletService; structured data in string field |
 | Browser streaming | WebSocket via ConditionBroadcaster | Low-latency fan-out from gRPC server to N browser clients |
@@ -321,18 +299,18 @@ This will:
 1. Export kubeconfig for the Kind cluster
 2. Build `fleetlet:dev` and `monitoring-agent:dev` images
 3. Load images into Kind
-4. Deploy MonitoringConfig CRD, monitoring addon, and fleetlet
-5. Fleetlet registers with the platform and starts relaying metrics
+4. Deploy MonitoringConfig CRD and fleetlet pod (with monitoring sidecar)
+5. Fleetlet registers with the platform and starts relaying metrics via UDS
 
 ### Verify
 
 ```bash
 # Check fleetlet logs
 export KUBECONFIG=/tmp/kind-<cluster-name>.kubeconfig
-kubectl logs -f deploy/fleetlet
+kubectl logs -f deploy/fleetlet -c fleetlet
 
-# Check monitoring addon logs
-kubectl logs -f deploy/monitoring-addon
+# Check monitoring sidecar logs
+kubectl logs -f deploy/fleetlet -c monitoring
 
 # Platform should show target registration
 docker compose logs fleetshift --tail=20
@@ -363,7 +341,7 @@ kubectl -n kube-system patch deployment metrics-server --type=json \
 
 1. **gRPC bidirectional streaming** works for platform ↔ cluster communication
 2. **Fleetlet as a relay agent** can register targets, apply manifests, and relay addon data
-3. **Addons as separate processes** (monitoring addon) can collect cluster-specific data independently
+3. **Addons as sidecar containers** communicate via Unix sockets with crash isolation
 4. **Real-time data flow** from Kind cluster → fleetlet → platform → WebSocket → browser works end-to-end
 5. **SSA manifest delivery** enables the platform to push configuration (MonitoringConfig CRD) to clusters
 6. **Scalprum plugin architecture** supports live data dashboards loaded dynamically into the shell

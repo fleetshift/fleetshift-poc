@@ -33,15 +33,21 @@ func main() {
 	targetID := flag.String("target-id", "fleetlet-kind-1", "Target ID to register")
 	targetName := flag.String("target-name", "Kind Addon Spike", "Human-readable target name")
 	monitoringAddr := flag.String("monitoring-addr", "", "Monitoring addon address (host:port); empty to skip")
+	monitoringSocket := flag.String("monitoring-socket", "", "Monitoring addon Unix socket path; takes precedence over --monitoring-addr")
 	metricsInterval := flag.Duration("metrics-interval", 30*time.Second, "Metrics collection interval")
 	flag.Parse()
+
+	effectiveMonitoringAddr := *monitoringAddr
+	if *monitoringSocket != "" {
+		effectiveMonitoringAddr = "unix:" + *monitoringSocket
+	}
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, logger, *platformAddr, *targetID, *targetName, *monitoringAddr, *metricsInterval); err != nil {
+	if err := run(ctx, logger, *platformAddr, *targetID, *targetName, effectiveMonitoringAddr, *metricsInterval); err != nil {
 		logger.Error("fleetlet exited with error", "error", err)
 		os.Exit(1)
 	}

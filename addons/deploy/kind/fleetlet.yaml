@@ -5,13 +5,27 @@ metadata:
   namespace: default
 ---
 apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: fleetlet
+rules:
+  # cluster-admin for SSA manifest application
+  - apiGroups: ["*"]
+    resources: ["*"]
+    verbs: ["*"]
+  # metrics-server access for monitoring sidecar
+  - apiGroups: ["metrics.k8s.io"]
+    resources: ["nodes", "pods"]
+    verbs: ["list", "get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
-  name: fleetlet-admin
+  name: fleetlet
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  name: cluster-admin
+  name: fleetlet
 subjects:
   - kind: ServiceAccount
     name: fleetlet
@@ -35,6 +49,10 @@ spec:
         app: fleetlet
     spec:
       serviceAccountName: fleetlet
+      volumes:
+        - name: plugin-socket
+          emptyDir:
+            sizeLimit: 1Mi
       containers:
         - name: fleetlet
           image: fleetlet:dev
@@ -42,5 +60,19 @@ spec:
             - --platform-addr=fleetshift:50051
             - --target-id=fleetlet-kind-1
             - --target-name=Kind Addon Spike
-            - --monitoring-addr=monitoring-addon:10000
+            - --monitoring-socket=/run/plugins/monitoring.sock
             - --metrics-interval=30s
+          volumeMounts:
+            - name: plugin-socket
+              mountPath: /run/plugins
+
+        - name: monitoring
+          image: monitoring-agent:dev
+          env:
+            - name: CLUSTER_ID
+              value: "addon-spike"
+            - name: PLUGIN_SOCKET
+              value: /run/plugins/monitoring.sock
+          volumeMounts:
+            - name: plugin-socket
+              mountPath: /run/plugins

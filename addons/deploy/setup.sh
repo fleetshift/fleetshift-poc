@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 #
-# Deploy fleetlet + monitoring addon into a FleetShift-provisioned Kind cluster.
+# Deploy fleetlet + monitoring addon (sidecar) into a FleetShift-provisioned Kind cluster.
 #
 # The Kind cluster must already exist (provisioned via docker compose + FleetShift API).
 # The cluster containers share the "fleetshift" Docker network, so the fleetlet
 # reaches the platform at fleetshift:50051 (compose service name).
+#
+# The monitoring addon runs as a sidecar container in the same pod as the fleetlet,
+# communicating via a Unix domain socket on a shared emptyDir volume.
 #
 # Usage:
 #   ./setup.sh <cluster-name>
@@ -37,26 +40,21 @@ kind load docker-image fleetlet:dev monitoring-agent:dev --name "${CLUSTER_NAME}
 echo "=== Deploying MonitoringConfig CRD ==="
 kubectl apply -f addons/deploy/kind/monitoring-crd.yaml
 
-echo "=== Deploying monitoring addon ==="
-kubectl apply -f addons/deploy/kind/monitoring.yaml
-
-echo "=== Waiting for monitoring addon ==="
-kubectl rollout status deployment/monitoring-addon --timeout=60s
-
-echo "=== Deploying fleetlet (target: ${FLEETLET_TARGET_ID}) ==="
+echo "=== Deploying fleetlet + monitoring sidecar (target: ${FLEETLET_TARGET_ID}) ==="
 sed \
     -e "s/--target-id=fleetlet-kind-1/--target-id=${FLEETLET_TARGET_ID}/" \
     -e "s/--target-name=Kind Addon Spike/--target-name=${CLUSTER_NAME} fleetlet/" \
     addons/deploy/kind/fleetlet.yaml | kubectl apply -f -
 
-echo "=== Waiting for fleetlet ==="
+echo "=== Waiting for fleetlet pod ==="
 kubectl rollout status deployment/fleetlet --timeout=60s
 
 echo ""
 echo "=== Done ==="
 echo "Fleetlet registered as target '${FLEETLET_TARGET_ID}'."
+echo "Monitoring addon runs as sidecar, communicating via Unix socket."
 echo ""
 echo "export KUBECONFIG=${KUBECONFIG_FILE}"
-echo "  kubectl logs -f deploy/fleetlet"
-echo "  kubectl logs -f deploy/monitoring-addon"
+echo "  kubectl logs -f deploy/fleetlet -c fleetlet"
+echo "  kubectl logs -f deploy/fleetlet -c monitoring"
 echo "  kubectl get monitoringconfigs"
