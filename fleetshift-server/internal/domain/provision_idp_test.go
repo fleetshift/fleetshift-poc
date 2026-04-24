@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -171,4 +172,7 @@ func (r *provisionSyncRecord) Run(activity domain.Activity[any, any], in any) (a
 
 func (r *provisionSyncRecord) Await(_ string) (any, error) {
 	return nil, fmt.Errorf("provisionSyncRecord: Await not supported")
+}
+func (r *provisionSyncRecord) Sleep(_ time.Duration) error {
+	return nil
 }

@@ -20,20 +20,21 @@ type Generation int64
 
 // Deployment is the composition of manifest, placement, and rollout strategies.
 type Deployment struct {
-	ID                DeploymentID
-	UID               string
-	ManifestStrategy  ManifestStrategySpec
-	PlacementStrategy PlacementStrategySpec
-	RolloutStrategy   *RolloutStrategySpec // nil means immediate
-	ResolvedTargets   []TargetID
-	State             DeploymentState
-	Auth              DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
-	Provenance        *Provenance  // nil for token-passthrough deployments
-	Generation         Generation  // incremented on every mutation; starts at 1
-	ObservedGeneration Generation  // last generation fully reconciled by a workflow
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
-	Etag              string
+	ID                 DeploymentID
+	UID                string
+	ManifestStrategy   ManifestStrategySpec
+	PlacementStrategy  PlacementStrategySpec
+	RolloutStrategy    *RolloutStrategySpec // nil means immediate
+	ResolvedTargets    []TargetID
+	State              DeploymentState
+	Auth               DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
+	Provenance         *Provenance  // nil for token-passthrough deployments
+	Generation         Generation   // incremented on every mutation; starts at 1
+	ObservedGeneration Generation   // last generation fully reconciled by a workflow
+	ActiveWorkflowGen  *Generation  // non-nil while an orchestration workflow holds the lock
+	CreatedAt          time.Time
+	UpdatedAt          time.Time
+	Etag               string
 }
 
 // BumpGeneration increments the deployment's generation counter.
@@ -93,8 +94,25 @@ func (d *Deployment) ApplyReconciliationResult(r ReconciliationResult) {
 
 // CompleteReconciliation advances [ObservedGeneration] to reconciledGen.
 // If [Generation] has advanced past reconciledGen, needsRestart is true,
-// indicating the caller should start a new reconciliation workflow.
+// indicating the caller should loop. When converged (!needsRestart),
+// the orchestration lock ([ActiveWorkflowGen]) is cleared.
 func (d *Deployment) CompleteReconciliation(reconciledGen Generation) (needsRestart bool) {
 	d.ObservedGeneration = reconciledGen
-	return d.Generation > reconciledGen
+	needsRestart = d.Generation > reconciledGen
+	if !needsRestart {
+		d.ActiveWorkflowGen = nil
+	}
+	return needsRestart
+}
+
+// AcquireOrchestrationLock sets [ActiveWorkflowGen] to the current
+// [Generation], indicating an orchestration workflow is running.
+// Returns false if the lock is already held.
+func (d *Deployment) AcquireOrchestrationLock() bool {
+	if d.ActiveWorkflowGen != nil {
+		return false
+	}
+	gen := d.Generation
+	d.ActiveWorkflowGen = &gen
+	return true
 }

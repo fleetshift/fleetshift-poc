@@ -19,4 +19,10 @@ var (
 	// this as a no-op: the running workflow will pick up any new
 	// generation when it completes.
 	ErrAlreadyRunning = errors.New("reconciliation workflow already running")
+
+	// ErrConcurrentUpdate indicates that another mutation of the same
+	// type is already in progress for this deployment at the same
+	// observed generation. The caller should retry or let the
+	// in-progress mutation converge.
+	ErrConcurrentUpdate = errors.New("concurrent update")
 )

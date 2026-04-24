@@ -180,6 +180,16 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if err != nil {
 		return fmt.Errorf("register create-deployment: %w", err)
 	}
+
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		return fmt.Errorf("register delete-deployment: %w", err)
+	}
+
 	// --- seed default targets ---
 
 	targetSvc := &application.TargetService{Store: store}
@@ -276,12 +286,24 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
 		},
 	}
+	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:             store,
+		Orchestration:     orchWf,
+		ProvenanceBuilder: provenanceBuilder,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		return fmt.Errorf("register resume-deployment: %w", err)
+	}
 
 	deploymentSvc := &application.DeploymentService{
-		Store:         store,
-		CreateWF:      createWf,
-		Orchestration: orchWf,
-		KeyResolver:   keyResolver,
+		Store:             store,
+		CreateWF:          createWf,
+		DeleteWF:          deleteWf,
+		ResumeWF:          resumeWf,
+		ProvenanceBuilder: provenanceBuilder,
 	}
 
 	signerEnrollmentSvc := &application.SignerEnrollmentService{

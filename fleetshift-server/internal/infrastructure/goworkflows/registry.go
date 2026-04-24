@@ -68,10 +68,17 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		func() error { return registerActivity(r.Worker, invokers, spec.CompleteReconciliation()) },
 		func() error { return registerActivity(r.Worker, invokers, spec.DeleteDeploymentRecord()) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CleanupProvisionedTargets()) },
+		func() error { return registerActivity(r.Worker, invokers, spec.AcquireLock()) },
 	} {
 		if err := reg(); err != nil {
 			return nil, err
 		}
+	}
+
+	ow := &orchestrationWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
 	}
 
 	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (struct{}, error) {
@@ -96,11 +103,7 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
 	}
 
-	return &orchestrationWorkflow{
-		client:  r.Client,
-		wfName:  spec.Name(),
-		timeout: r.timeout(),
-	}, nil
+	return ow, nil
 }
 
 func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflowSpec) (domain.CreateDeploymentWorkflow, error) {
@@ -123,6 +126,58 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 	}
 
 	return &createDeploymentWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
+func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflowSpec) (domain.DeleteDeploymentWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+
+	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting()); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment()); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (domain.Deployment, error) {
+		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
+		return spec.Run(record, deploymentID)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &deleteDeploymentWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
+func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+
+	if err := registerActivity(r.Worker, invokers, spec.MutateToResumed()); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment()); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, input domain.ResumeDeploymentInput) (domain.Deployment, error) {
+		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
+		return spec.Run(record, input)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &resumeDeploymentWorkflow{
 		client:  r.Client,
 		wfName:  spec.Name(),
 		timeout: r.timeout(),
@@ -213,6 +268,10 @@ func (r *baseRecord) Await(signalName string) (any, error) {
 	return recv()
 }
 
+func (r *baseRecord) Sleep(d time.Duration) error {
+	return workflow.Sleep(r.wfCtx, d)
+}
+
 // --- OrchestrationWorkflow ---
 
 type orchestrationWorkflow struct {
@@ -285,6 +344,60 @@ func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.Provision
 	}, nil
 }
 
+// --- DeleteDeploymentWorkflow ---
+
+type deleteDeploymentWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: instanceID,
+	}, w.wfName, deploymentID)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrConcurrentUpdate
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[domain.Deployment]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
+// --- ResumeDeploymentWorkflow ---
+
+type resumeDeploymentWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: instanceID,
+	}, w.wfName, input)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrConcurrentUpdate
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[domain.Deployment]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
 // --- Execution ---
 
 type execution[O any] struct {
@@ -303,8 +416,10 @@ func (e *execution[O]) AwaitResult(ctx context.Context) (O, error) {
 
 // Compile-time interface checks.
 var (
-	_ domain.Registry                 = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow    = (*orchestrationWorkflow)(nil)
-	_ domain.CreateDeploymentWorkflow = (*createDeploymentWorkflow)(nil)
-	_ domain.ProvisionIdPWorkflow     = (*provisionIdPWorkflow)(nil)
+	_ domain.Registry                  = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow     = (*orchestrationWorkflow)(nil)
+	_ domain.CreateDeploymentWorkflow  = (*createDeploymentWorkflow)(nil)
+	_ domain.DeleteDeploymentWorkflow  = (*deleteDeploymentWorkflow)(nil)
+	_ domain.ResumeDeploymentWorkflow  = (*resumeDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow      = (*provisionIdPWorkflow)(nil)
 )

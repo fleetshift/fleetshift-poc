@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
-	"errors"
 	"fmt"
 	"time"
 
@@ -14,10 +13,11 @@ import (
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
-	Store         domain.Store
-	CreateWF      domain.CreateDeploymentWorkflow
-	Orchestration domain.OrchestrationWorkflow
-	KeyResolver   *KeyResolver
+	Store             domain.Store
+	CreateWF          domain.CreateDeploymentWorkflow
+	DeleteWF          domain.DeleteDeploymentWorkflow
+	ResumeWF          domain.ResumeDeploymentWorkflow
+	ProvenanceBuilder domain.ProvenanceBuilder // nil when signing is not configured
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -42,12 +42,16 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 				"%w: signing a deployment requires an authenticated caller",
 				domain.ErrInvalidArgument)
 		}
+		if s.ProvenanceBuilder == nil {
+			return domain.Deployment{}, fmt.Errorf(
+				"%w: signing not configured", domain.ErrInvalidArgument)
+		}
 		tx, err := s.Store.BeginReadOnly(ctx)
 		if err != nil {
 			return domain.Deployment{}, fmt.Errorf("begin read tx: %w", err)
 		}
 		defer tx.Rollback()
-		prov, err := s.buildProvenance(
+		prov, err := s.ProvenanceBuilder.BuildProvenance(
 			ctx, tx.SignerEnrollments(), ac.Subject,
 			in.ID, in.ManifestStrategy, in.PlacementStrategy,
 			in.ExpectedGeneration, in.UserSignature, in.ValidUntil,
@@ -115,12 +119,10 @@ type ResumeInput struct {
 	ValidUntil    time.Time
 }
 
-// Resume resumes a deployment that is paused for authentication. It
-// updates the deployment's auth with the caller's fresh token, bumps
-// the generation, and triggers a new reconciliation.
-//
-// If the deployment has provenance, the caller must provide a fresh
-// signature (re-signing). Token-passthrough deployments resume as before.
+// Resume resumes a deployment that is paused for authentication by
+// starting a durable resume-deployment workflow. The workflow updates
+// auth/provenance, bumps the generation, and guarantees orchestration
+// converges the new state.
 func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.Deployment, error) {
 	ac := AuthFromContext(ctx)
 	if ac == nil || ac.Subject == nil {
@@ -128,9 +130,9 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 			domain.ErrInvalidArgument)
 	}
 
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
+		return domain.Deployment{}, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -138,60 +140,40 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 	if err != nil {
 		return domain.Deployment{}, err
 	}
-
-	if dep.State != domain.DeploymentStatePausedAuth {
-		return domain.Deployment{}, fmt.Errorf("%w: deployment %q is in state %q, not paused_auth",
-			domain.ErrInvalidArgument, in.ID, dep.State)
-	}
-
-	hadProvenance := dep.Provenance != nil
-
-	dep.Auth = domain.DeliveryAuth{
-		Caller:   ac.Subject,
-		Audience: ac.Audience,
-		Token:    ac.Token,
-	}
-
-	if hadProvenance || len(in.UserSignature) > 0 {
-		if hadProvenance && len(in.UserSignature) == 0 {
-			return domain.Deployment{}, fmt.Errorf(
-				"%w: deployment %q has provenance; re-signing is required to resume",
-				domain.ErrInvalidArgument, in.ID)
-		}
-		nextGen := dep.Generation + 1
-		prov, err := s.buildProvenance(
-			ctx, tx.SignerEnrollments(), ac.Subject,
-			dep.ID, dep.ManifestStrategy, dep.PlacementStrategy,
-			nextGen, in.UserSignature, in.ValidUntil,
-		)
-		if err != nil {
-			return domain.Deployment{}, fmt.Errorf("build provenance: %w", err)
-		}
-		dep.Provenance = prov
-	}
-
-	dep.BumpGeneration()
-	if err := tx.Deployments().Update(ctx, dep); err != nil {
-		return domain.Deployment{}, fmt.Errorf("update deployment: %w", err)
-	}
+	currentGen := dep.Generation
 	if err := tx.Commit(); err != nil {
-		return domain.Deployment{}, fmt.Errorf("commit: %w", err)
+		return domain.Deployment{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
-	if err := s.Reconcile(ctx, in.ID); err != nil {
-		return domain.Deployment{}, fmt.Errorf("reconcile: %w", err)
+	exec, err := s.ResumeWF.Start(ctx, domain.ResumeDeploymentInput{
+		ID: in.ID,
+		Auth: domain.DeliveryAuth{
+			Caller:   ac.Subject,
+			Audience: ac.Audience,
+			Token:    ac.Token,
+		},
+		UserSignature: in.UserSignature,
+		ValidUntil:    in.ValidUntil,
+	}, currentGen)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("start resume-deployment workflow: %w", err)
 	}
 
-	return dep, nil
+	result, err := exec.AwaitResult(ctx)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("resume-deployment workflow: %w", err)
+	}
+
+	return result, nil
 }
 
-// Delete transitions a deployment to the deleting state, bumps its
-// generation, and triggers a reconciliation that will execute the
-// delete pipeline.
+// Delete starts a durable delete-deployment workflow that transitions
+// the deployment to [domain.DeploymentStateDeleting], bumps its
+// generation, and guarantees orchestration converges the delete.
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
-		return domain.Deployment{}, fmt.Errorf("begin tx: %w", err)
+		return domain.Deployment{}, fmt.Errorf("begin read tx: %w", err)
 	}
 	defer tx.Rollback()
 
@@ -199,39 +181,48 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	if err != nil {
 		return domain.Deployment{}, err
 	}
-	dep.State = domain.DeploymentStateDeleting
-	dep.BumpGeneration()
-	if err := tx.Deployments().Update(ctx, dep); err != nil {
-		return domain.Deployment{}, fmt.Errorf("update deployment: %w", err)
-	}
+	currentGen := dep.Generation
 	if err := tx.Commit(); err != nil {
-		return domain.Deployment{}, fmt.Errorf("commit: %w", err)
+		return domain.Deployment{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
-	if err := s.Reconcile(ctx, id); err != nil {
-		return domain.Deployment{}, err
+	exec, err := s.DeleteWF.Start(ctx, id, currentGen)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("start delete-deployment workflow: %w", err)
 	}
 
-	return dep, nil
+	result, err := exec.AwaitResult(ctx)
+	if err != nil {
+		return domain.Deployment{}, fmt.Errorf("delete-deployment workflow: %w", err)
+	}
+
+	return result, nil
 }
 
-// Reconcile starts a reconciliation workflow for the given deployment.
-// The workflow engine enforces at-most-one-active-instance per
-// deployment ID; if a workflow is already running, [domain.ErrAlreadyRunning]
-// is swallowed and the method returns nil — the running workflow will
-// observe the new generation when it finishes.
-func (s *DeploymentService) Reconcile(ctx context.Context, id domain.DeploymentID) error {
-	_, err := s.Orchestration.Start(ctx, id)
-	if errors.Is(err, domain.ErrAlreadyRunning) {
-		return nil
+// verifySignatureAgainstKeySet tries each public key in the set until
+// one successfully verifies the ECDSA signature. Returns an error if
+// none succeed.
+func verifySignatureAgainstKeySet(doc, sig []byte, keys []crypto.PublicKey) error {
+	for _, k := range keys {
+		ecKey, ok := k.(*ecdsa.PublicKey)
+		if !ok {
+			continue
+		}
+		if err := fscrypto.VerifyECDSASignature(ecKey, doc, sig); err == nil {
+			return nil
+		}
 	}
-	return err
+	return fmt.Errorf("no key in the set verified the signature")
 }
 
-// buildProvenance constructs [domain.Provenance] by looking up the
-// caller's signer enrollment, resolving public keys from the external
-// registry via [KeyResolver], and verifying the signature.
-func (s *DeploymentService) buildProvenance(
+// KeyResolverProvenanceBuilder adapts [KeyResolver] to the
+// [domain.ProvenanceBuilder] interface used by mutation workflows
+// that require provenance construction.
+type KeyResolverProvenanceBuilder struct {
+	KeyResolver *KeyResolver
+}
+
+func (b *KeyResolverProvenanceBuilder) BuildProvenance(
 	ctx context.Context,
 	enrollments domain.SignerEnrollmentRepository,
 	caller *domain.SubjectClaims,
@@ -242,6 +233,9 @@ func (s *DeploymentService) buildProvenance(
 	userSig []byte,
 	validUntil time.Time,
 ) (*domain.Provenance, error) {
+	if caller == nil {
+		return nil, fmt.Errorf("%w: caller identity required for provenance", domain.ErrInvalidArgument)
+	}
 	found, err := enrollments.ListBySubject(ctx, caller.FederatedIdentity)
 	if err != nil {
 		return nil, fmt.Errorf("list signer enrollments: %w", err)
@@ -263,7 +257,7 @@ func (s *DeploymentService) buildProvenance(
 	}
 	envelopeHash := domain.HashIntent(envelopeBytes)
 
-	keys, err := s.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+	keys, err := b.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
 	if err != nil {
 		return nil, fmt.Errorf("resolve signing keys: %w", err)
 	}
@@ -284,43 +278,3 @@ func (s *DeploymentService) buildProvenance(
 	}, nil
 }
 
-// verifySignatureAgainstKeySet tries each public key in the set until
-// one successfully verifies the ECDSA signature. Returns an error if
-// none succeed.
-func verifySignatureAgainstKeySet(doc, sig []byte, keys []crypto.PublicKey) error {
-	for _, k := range keys {
-		ecKey, ok := k.(*ecdsa.PublicKey)
-		if !ok {
-			continue
-		}
-		if err := fscrypto.VerifyECDSASignature(ecKey, doc, sig); err == nil {
-			return nil
-		}
-	}
-	return fmt.Errorf("no key in the set verified the signature")
-}
-
-// Invalidate bumps the deployment's generation and triggers a
-// reconciliation. Use this when an external change (placement,
-// manifests, spec) requires re-evaluation.
-func (s *DeploymentService) Invalidate(ctx context.Context, id domain.DeploymentID) error {
-	tx, err := s.Store.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	dep, err := tx.Deployments().Get(ctx, id)
-	if err != nil {
-		return fmt.Errorf("get deployment: %w", err)
-	}
-	dep.BumpGeneration()
-	if err := tx.Deployments().Update(ctx, dep); err != nil {
-		return fmt.Errorf("update deployment: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit: %w", err)
-	}
-
-	return s.Reconcile(ctx, id)
-}

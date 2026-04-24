@@ -251,6 +251,9 @@ func (r *recordingRecord) Run(activity domain.Activity[any, any], in any) (any, 
 func (r *recordingRecord) Await(signalName string) (any, error) {
 	return r.delegate.Await(signalName)
 }
+func (r *recordingRecord) Sleep(d time.Duration) error {
+	return r.delegate.Sleep(d)
+}
 
 func (r *recordingRecord) activityNames() []string {
 	names := make([]string, len(r.records))
@@ -276,6 +279,9 @@ func (r *simpleRecord) Await(_ string) (any, error) {
 	e := <-r.events
 	return e, nil
 }
+func (r *simpleRecord) Sleep(_ time.Duration) error {
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // Signal routing
@@ -295,6 +301,14 @@ func (r *stubRegistry) RegisterOrchestration(_ *domain.OrchestrationWorkflowSpec
 }
 
 func (r *stubRegistry) RegisterCreateDeployment(_ *domain.CreateDeploymentWorkflowSpec) (domain.CreateDeploymentWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterDeleteDeployment(_ *domain.DeleteDeploymentWorkflowSpec) (domain.DeleteDeploymentWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterResumeDeployment(_ *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
 	return nil, nil
 }
 
@@ -999,6 +1013,7 @@ type afterLoadBumpGenRecord struct {
 func (r *afterLoadBumpGenRecord) ID() string              { return r.delegate.ID() }
 func (r *afterLoadBumpGenRecord) Context() context.Context { return r.delegate.Context() }
 func (r *afterLoadBumpGenRecord) Await(sig string) (any, error) { return r.delegate.Await(sig) }
+func (r *afterLoadBumpGenRecord) Sleep(d time.Duration) error { return r.delegate.Sleep(d) }
 
 func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	out, err := r.delegate.Run(activity, in)
@@ -1093,6 +1108,9 @@ func (r *attestationCapturingRecord) ID() string              { return r.delegat
 func (r *attestationCapturingRecord) Context() context.Context { return r.delegate.Context() }
 func (r *attestationCapturingRecord) Await(sig string) (any, error) {
 	return r.delegate.Await(sig)
+}
+func (r *attestationCapturingRecord) Sleep(d time.Duration) error {
+	return r.delegate.Sleep(d)
 }
 
 func (r *attestationCapturingRecord) Run(activity domain.Activity[any, any], in any) (any, error) {

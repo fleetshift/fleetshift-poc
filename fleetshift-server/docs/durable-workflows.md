@@ -6,10 +6,9 @@ Design an application-facing abstraction where:
   - workflow bodies (orchestration)
   - activity bodies (business logic + side effects)
   - activity boundaries (fine grained)
-- The application does not import go-workflows or DBOS.
-- Infrastructure can provide any of the three implementations:
+- The application does not import go-workflows.
+- Infrastructure can provide either implementation:
   - go-workflows workflows + activities
-  - DBOS workflows + RunAsStep steps
   - memworkflow (in-memory, for fast tests)
 
 ⸻
@@ -26,7 +25,7 @@ Instead use:
 
 This matches how go-workflows (and Temporal-like systems) record work: "activity function + serialized args."
 
-DBOS executes the activity by calling RunAsStep and invoking activity.Run(ctx, input) inside it.
+go-workflows executes the activity by calling workflow.ExecuteActivity and invoking activity.Run(ctx, input) inside it.
 
 ⸻
 
@@ -86,6 +85,7 @@ type Record interface {
   Context() context.Context
   Run(activity Activity[any, any], in any) (any, error)
   Await(signalName string) (any, error)
+  Sleep(d time.Duration) error
 }
 ```
 
@@ -116,6 +116,9 @@ The Registry registers workflow specs and returns per-workflow interfaces that c
 type Registry interface {
   RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
   RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
+  RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
+  RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
+  RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
   SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
 }
 
@@ -148,7 +151,7 @@ Application service responsibilities
 Where logic lives
 	•	Activity bodies: in activity methods on the workflow spec (domain logic, repo calls, external effects).
 	•	Orchestration: in the spec's Run method (the ordering/branching of activities via RunActivity and AwaitSignal).
-	•	No go-workflows/DBOS imports anywhere in domain packages.
+	•	No go-workflows imports anywhere in domain packages.
 
 ⸻
 
@@ -172,21 +175,6 @@ go-workflows implementation (internal/infrastructure/goworkflows)
 	•	calls client.GetWorkflowResult[O](ctx, client, instance, timeout)
 	•	SignalDeploymentEvent:
 	•	calls client.SignalWorkflow(ctx, instanceID, signalName, event)
-
-DBOS implementation (internal/infrastructure/dbosworkflows)
-	•	RegisterOrchestration(spec):
-	•	For each activity method, create a typed invoker that calls dbos.RunAsStep(ctx, func(stepCtx) (O, error) { return activity.Run(stepCtx, in.(I)) }, dbos.WithStepName(activity.Name()))
-	•	Register a wrapper workflow function with dbos.RegisterWorkflow(dbosCtx, fn, dbos.WithWorkflowName(spec.Name())). The wrapper:
-	•	builds a baseRecord with the DBOS context, invokers map, and signal receivers
-	•	signal receivers use dbos.Recv[T](ctx, signalName, timeout) in a loop, skipping zero-value events
-	•	calls spec.Run(record, input)
-	•	Return a handle whose Start method calls dbos.RunWorkflow.
-	•	Execution.AwaitResult:
-	•	calls handle.GetResult()
-	•	SignalDeploymentEvent:
-	•	calls dbos.Send(dbosCtx, workflowID, event, signalName)
-	•	dbos.Launch:
-	•	called once via sync.Once on first RegisterCreateDeployment call
 
 memworkflow implementation (internal/infrastructure/memworkflow)
 	•	No activity registration needed.
@@ -221,11 +209,10 @@ An abstraction is "portable" if:
 	•	Workflow orchestration is framework-free and only uses RunActivity and AwaitSignal.
 	•	You can implement Record.Run using:
 	•	go-workflows: workflow.ExecuteActivity[O](wfCtx, options, name, in).Get(wfCtx)
-	•	DBOS: dbos.RunAsStep(ctx, func(stepCtx) (O, error) { return activity.Run(stepCtx, in) }, dbos.WithStepName(name))
 	•	memworkflow: JSON round-trip + goroutine dispatch
 
 It's "clean" if:
-	•	domain packages compile with zero go-workflows/DBOS imports
+	•	domain packages compile with zero go-workflows imports
 	•	infrastructure is the only place that imports those libraries
 
 ⸻
@@ -241,12 +228,13 @@ When asked to implement a workflow:
 
 When asked to implement a new backend:
 	•	implement Registry, the per-workflow interfaces, and Execution[T]
-	•	implement Record with Run and Await
+	•	implement Record with Run, Await, and Sleep
 	•	map Record.Run to the engine's durable primitive:
 	•	go-workflows: ExecuteActivity
-	•	DBOS: RunAsStep
 	•	memworkflow: goroutine + JSON round-trip
 	•	map Record.Await to the engine's signal primitive:
 	•	go-workflows: workflow.NewSignalChannel + Receive
-	•	DBOS: dbos.Recv (loop, skip zero-value)
 	•	memworkflow: buffered channel + JSON deserialize
+	•	map Record.Sleep to the engine's durable timer:
+	•	go-workflows: workflow.Sleep
+	•	memworkflow: cancellable timer

@@ -52,11 +52,30 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteDeployment: %v", err)
+	}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeDeployment: %v", err)
+	}
+
 	targetSvc := &application.TargetService{Store: store}
 	deploySvc := &application.DeploymentService{
-		Store:         store,
-		CreateWF:      createWf,
-		Orchestration: orchWf,
+		Store:    store,
+		CreateWF: createWf,
+		DeleteWF: deleteWf,
+		ResumeWF: resumeWf,
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

@@ -91,10 +91,29 @@ func Start(t *testing.T) string {
 		t.Fatalf("RegisterProvisionIdP: %v", err)
 	}
 
-	deploymentSvc := &application.DeploymentService{
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         store,
-		CreateWF:      createWf,
 		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteDeployment: %v", err)
+	}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeDeployment: %v", err)
+	}
+
+	deploymentSvc := &application.DeploymentService{
+		Store:    store,
+		CreateWF: createWf,
+		DeleteWF: deleteWf,
+		ResumeWF: resumeWf,
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
