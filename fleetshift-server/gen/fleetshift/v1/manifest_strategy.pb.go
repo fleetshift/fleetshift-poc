@@ -30,6 +30,8 @@ const (
 	ManifestStrategy_TYPE_UNSPECIFIED ManifestStrategy_Type = 0
 	// Deliver manifests verbatim from the spec.
 	ManifestStrategy_TYPE_INLINE ManifestStrategy_Type = 1
+	// Generate manifests via a go-plugin addon subprocess.
+	ManifestStrategy_TYPE_ADDON ManifestStrategy_Type = 2
 )
 
 // Enum value maps for ManifestStrategy_Type.
@@ -37,10 +39,12 @@ var (
 	ManifestStrategy_Type_name = map[int32]string{
 		0: "TYPE_UNSPECIFIED",
 		1: "TYPE_INLINE",
+		2: "TYPE_ADDON",
 	}
 	ManifestStrategy_Type_value = map[string]int32{
 		"TYPE_UNSPECIFIED": 0,
 		"TYPE_INLINE":      1,
+		"TYPE_ADDON":       2,
 	}
 )
 
@@ -77,7 +81,9 @@ type ManifestStrategy struct {
 	// Type of manifest strategy.
 	Type ManifestStrategy_Type `protobuf:"varint,1,opt,name=type,proto3,enum=fleetshift.v1.ManifestStrategy_Type" json:"type,omitempty"`
 	// Manifests to deliver verbatim. Required when type is TYPE_INLINE.
-	Manifests     []*Manifest `protobuf:"bytes,2,rep,name=manifests,proto3" json:"manifests,omitempty"`
+	Manifests []*Manifest `protobuf:"bytes,2,rep,name=manifests,proto3" json:"manifests,omitempty"`
+	// Name of the addon plugin. Required when type is TYPE_ADDON.
+	AddonName     string `protobuf:"bytes,3,opt,name=addon_name,json=addonName,proto3" json:"addon_name,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -126,17 +132,28 @@ func (x *ManifestStrategy) GetManifests() []*Manifest {
 	return nil
 }
 
+func (x *ManifestStrategy) GetAddonName() string {
+	if x != nil {
+		return x.AddonName
+	}
+	return ""
+}
+
 var File_fleetshift_v1_manifest_strategy_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_manifest_strategy_proto_rawDesc = "" +
 	"\n" +
-	"%fleetshift/v1/manifest_strategy.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1cfleetshift/v1/manifest.proto\"\xbc\x01\n" +
+	"%fleetshift/v1/manifest_strategy.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1cfleetshift/v1/manifest.proto\"\xf0\x01\n" +
 	"\x10ManifestStrategy\x12=\n" +
 	"\x04type\x18\x01 \x01(\x0e2$.fleetshift.v1.ManifestStrategy.TypeB\x03\xe0A\x02R\x04type\x12:\n" +
-	"\tmanifests\x18\x02 \x03(\v2\x17.fleetshift.v1.ManifestB\x03\xe0A\x01R\tmanifests\"-\n" +
+	"\tmanifests\x18\x02 \x03(\v2\x17.fleetshift.v1.ManifestB\x03\xe0A\x01R\tmanifests\x12\"\n" +
+	"\n" +
+	"addon_name\x18\x03 \x01(\tB\x03\xe0A\x01R\taddonName\"=\n" +
 	"\x04Type\x12\x14\n" +
 	"\x10TYPE_UNSPECIFIED\x10\x00\x12\x0f\n" +
-	"\vTYPE_INLINE\x10\x01BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\vTYPE_INLINE\x10\x01\x12\x0e\n" +
+	"\n" +
+	"TYPE_ADDON\x10\x02BWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_manifest_strategy_proto_rawDescOnce sync.Once

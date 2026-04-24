@@ -1,0 +1,5 @@
+# The monitoring addon now runs as a sidecar container inside the fleetlet pod.
+# See fleetlet.yaml for the combined deployment.
+#
+# This file is kept for reference only. The monitoring addon's RBAC, container
+# spec, and socket configuration are all defined in fleetlet.yaml.

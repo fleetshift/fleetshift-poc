@@ -475,6 +475,9 @@ definitions:
           type: object
           $ref: '#/definitions/v1Manifest'
         description: Manifests to deliver verbatim. Required when type is TYPE_INLINE.
+      addonName:
+        type: string
+        description: Name of the addon plugin. Required when type is TYPE_ADDON.
     description: ManifestStrategy specifies how manifests are generated.
     required:
       - type
@@ -483,12 +486,14 @@ definitions:
     enum:
       - TYPE_UNSPECIFIED
       - TYPE_INLINE
+      - TYPE_ADDON
     default: TYPE_UNSPECIFIED
     description: |-
       Type of manifest strategy.
 
        - TYPE_UNSPECIFIED: Default value. Not used.
        - TYPE_INLINE: Deliver manifests verbatim from the spec.
+       - TYPE_ADDON: Generate manifests via a go-plugin addon subprocess.
   v1OIDCConfig:
     type: object
     properties:
