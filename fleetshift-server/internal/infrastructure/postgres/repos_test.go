@@ -32,36 +32,42 @@ func newTxRepo[T any](t *testing.T, accessor func(domain.Tx) T) T {
 }
 
 func TestTargetRepo(t *testing.T) {
+	t.Parallel()
 	targetrepotest.Run(t, func(t *testing.T) domain.TargetRepository {
 		return newTxRepo(t, domain.Tx.Targets)
 	})
 }
 
 func TestDeploymentRepo(t *testing.T) {
+	t.Parallel()
 	deploymentrepotest.Run(t, func(t *testing.T) domain.DeploymentRepository {
 		return newTxRepo(t, domain.Tx.Deployments)
 	})
 }
 
 func TestDeliveryRepo(t *testing.T) {
+	t.Parallel()
 	deliveryrepotest.Run(t, func(t *testing.T) domain.DeliveryRepository {
 		return newTxRepo(t, domain.Tx.Deliveries)
 	})
 }
 
 func TestInventoryRepo(t *testing.T) {
+	t.Parallel()
 	inventoryrepotest.Run(t, func(t *testing.T) domain.InventoryRepository {
 		return newTxRepo(t, domain.Tx.Inventory)
 	})
 }
 
 func TestStore(t *testing.T) {
+	t.Parallel()
 	storetest.Run(t, func(t *testing.T) domain.Store {
 		return newStore(t)
 	})
 }
 
 func TestAuthMethodRepo(t *testing.T) {
+	t.Parallel()
 	authmethodrepotest.Run(t, func(t *testing.T) domain.AuthMethodRepository {
 		db := postgres.OpenTestDB(t)
 		return &postgres.AuthMethodRepo{DB: db}

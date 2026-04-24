@@ -9,6 +9,7 @@ import (
 )
 
 func TestSignerEnrollmentRepo(t *testing.T) {
+	t.Parallel()
 	signerenrollmentrepotest.Run(t, func(t *testing.T) domain.Store {
 		return &postgres.Store{DB: postgres.OpenTestDB(t)}
 	})

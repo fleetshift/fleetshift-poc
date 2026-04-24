@@ -81,6 +81,8 @@ func scanAuthMethod(s scanner) (domain.AuthMethod, error) {
 			return domain.AuthMethod{}, fmt.Errorf("unmarshal OIDC config: %w", err)
 		}
 		m.OIDC = &cfg
+	default:
+		return domain.AuthMethod{}, fmt.Errorf("unknown auth method type: %s", m.Type)
 	}
 
 	return m, nil

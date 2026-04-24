@@ -9,6 +9,7 @@ import (
 )
 
 func TestVault(t *testing.T) {
+	t.Parallel()
 	vaulttest.Run(t, func(t *testing.T) domain.Vault {
 		return &postgres.VaultStore{DB: postgres.OpenTestDB(t)}
 	})

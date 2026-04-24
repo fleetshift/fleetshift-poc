@@ -299,4 +299,49 @@ func Run(t *testing.T, factory Factory) {
 			t.Errorf("ObservedGeneration = %d, want 3", got.ObservedGeneration)
 		}
 	})
+
+	t.Run("Update_WithRolloutAndProvenance", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		_ = repo.Create(ctx, d)
+
+		d.RolloutStrategy = &domain.RolloutStrategySpec{
+			Type:                  domain.RolloutStrategyImmediate,
+			VersionConflictPolicy: domain.VersionConflictCompleteAll,
+		}
+		d.Provenance = &domain.Provenance{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Subject: "user-1",
+					Issuer:  "https://issuer.example.com",
+				},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
+			ValidUntil:         fixedTime.Add(24 * time.Hour),
+			ExpectedGeneration: 1,
+		}
+		d.UpdatedAt = fixedTime.Add(time.Minute)
+		if err := repo.Update(ctx, d); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.RolloutStrategy == nil {
+			t.Fatal("RolloutStrategy is nil after Update round-trip")
+		}
+		if got.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
+			t.Errorf("RolloutStrategy.Type = %q, want %q", got.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
+		}
+		if got.Provenance == nil {
+			t.Fatal("Provenance is nil after Update round-trip")
+		}
+		if string(got.Provenance.Sig.ContentHash) != "hash" {
+			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "hash")
+		}
+	})
 }
