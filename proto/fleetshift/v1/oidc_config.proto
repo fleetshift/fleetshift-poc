@@ -30,6 +30,11 @@ message OIDCConfig {
   // access tokens and managed cluster tokens.
   string key_enrollment_audience = 6;
 
+  // CEL expression evaluated over ID token claims to extract the
+  // signer's base64-encoded SPKI/PKIX public key (for OIDC key
+  // registries). Example: "claims.signing_public_key".
+  string public_key_claim_expression = 8;
+
   // Maps ID token claims to a key registry subject. When set, the
   // delivery agent derives the registry subject from the signer's
   // identity token using this mapping.

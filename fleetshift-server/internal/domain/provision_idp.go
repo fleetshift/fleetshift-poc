@@ -86,6 +86,7 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 			IssuerURL:              method.OIDC.IssuerURL,
 			JWKSURI:                method.OIDC.JWKSURI,
 			EnrollmentAudience:     method.OIDC.KeyEnrollmentAudience,
+			PublicKeyClaimExpression: method.OIDC.PublicKeyClaimExpression,
 			RegistrySubjectMapping: method.OIDC.RegistrySubjectMapping,
 		}
 

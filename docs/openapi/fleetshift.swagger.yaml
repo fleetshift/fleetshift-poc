@@ -517,6 +517,12 @@ definitions:
           the server verifies that key binding bundles carry an ID token
           with this audience, isolating enrollment tokens from platform
           access tokens and managed cluster tokens.
+      publicKeyClaimExpression:
+        type: string
+        description: |-
+          CEL expression evaluated over ID token claims to extract the
+          signer's base64-encoded SPKI/PKIX public key (for OIDC key
+          registries). Example: "claims.signing_public_key".
       registrySubjectMapping:
         $ref: '#/definitions/v1RegistrySubjectMapping'
         description: |-

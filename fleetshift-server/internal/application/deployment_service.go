@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
@@ -18,6 +19,7 @@ type DeploymentService struct {
 	CreateWF      domain.CreateDeploymentWorkflow
 	Orchestration domain.OrchestrationWorkflow
 	KeyResolver   *KeyResolver
+	AuthMethods   domain.AuthMethodRepository
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -263,7 +265,7 @@ func (s *DeploymentService) buildProvenance(
 	}
 	envelopeHash := domain.HashIntent(envelopeBytes)
 
-	keys, err := s.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+	keys, err := s.resolveSigningKeys(ctx, enrollment)
 	if err != nil {
 		return nil, fmt.Errorf("resolve signing keys: %w", err)
 	}
@@ -282,6 +284,41 @@ func (s *DeploymentService) buildProvenance(
 		ExpectedGeneration: generation,
 		OutputConstraints:  nil,
 	}, nil
+}
+
+// resolveSigningKeys returns the public keys for a signer enrollment.
+// For OIDC enrollments (no external registry) the key is extracted
+// from the enrollment's identity token via the configured CEL
+// expression. For external registries (GitHub) it delegates to KeyResolver.
+func (s *DeploymentService) resolveSigningKeys(ctx context.Context, enrollment domain.SignerEnrollment) ([]crypto.PublicKey, error) {
+	if enrollment.RegistryID == "oidc" {
+		oidcConfig, err := s.loadOIDCConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if oidcConfig.PublicKeyClaimExpression == "" {
+			return nil, fmt.Errorf("OIDC auth method has no public_key_claim_expression configured")
+		}
+		base64Key, err := EvalCELClaim(oidcConfig.PublicKeyClaimExpression, string(enrollment.IdentityToken))
+		if err != nil {
+			return nil, fmt.Errorf("evaluate public key claim: %w", err)
+		}
+		return keyregistry.ParsePublicKeyFromBase64(base64Key)
+	}
+	return s.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+}
+
+func (s *DeploymentService) loadOIDCConfig(ctx context.Context) (domain.OIDCConfig, error) {
+	methods, err := s.AuthMethods.List(ctx)
+	if err != nil {
+		return domain.OIDCConfig{}, fmt.Errorf("list auth methods: %w", err)
+	}
+	for _, m := range methods {
+		if m.Type == domain.AuthMethodTypeOIDC && m.OIDC != nil {
+			return *m.OIDC, nil
+		}
+	}
+	return domain.OIDCConfig{}, fmt.Errorf("no OIDC auth method configured")
 }
 
 // verifySignatureAgainstKeySet tries each public key in the set until

@@ -33,6 +33,25 @@ The browser accesses Keycloak via HTTP on port 8180. HTTPS (port 8443) is used
 internally by kube-apiserver in kind clusters — the CA cert is auto-generated
 and mounted automatically.
 
+## Signing key enrollment
+
+The UI includes a signing key management page. After logging in:
+
+1. Navigate to the signing key page (Management plugin)
+2. Click **Generate** to create an ECDSA P-256 key pair in the browser (IndexedDB)
+3. Select a registry:
+   - **Keycloak** — stores the public key as a Keycloak user attribute automatically
+   - **GitHub** — copies the SSH public key to clipboard; paste it at github.com/settings/ssh/new as a **Signing Key**
+   - **Manual** — copy the key yourself
+4. Click **Enroll** to register the enrollment with the server
+
+Once enrolled, creating deployments will sign them with your key. The server
+verifies the signature using the public key from the selected registry.
+
+For the GitHub registry, the user must have a `github_username` attribute set
+in Keycloak (Admin Console → Users → Attributes) **before** logging in. See
+[Key Registries](keycloak-key-registry.md) for details.
+
 ## Create a kind cluster
 
 ```bash
