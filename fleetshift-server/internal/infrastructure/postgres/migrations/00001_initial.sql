@@ -22,6 +22,7 @@ CREATE TABLE deployments (
     provenance          JSONB,
     generation          INTEGER NOT NULL DEFAULT 1,
     observed_generation INTEGER NOT NULL DEFAULT 0,
+    active_workflow_gen INTEGER,
     created_at          TEXT NOT NULL DEFAULT NOW(),
     updated_at          TEXT NOT NULL DEFAULT NOW(),
     etag                TEXT NOT NULL DEFAULT ''
