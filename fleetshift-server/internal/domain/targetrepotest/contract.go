@@ -69,6 +69,38 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("CreateAndGet_WithAcceptedResourceTypes", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		target := domain.TargetInfo{
+			ID:                    "t1",
+			Type:                  "kubernetes",
+			Name:                  "cluster-a",
+			Labels:                map[string]string{"env": "prod"},
+			Properties:            map[string]string{"region": "us-east"},
+			AcceptedResourceTypes: []domain.ResourceType{"kubernetes.manifest", "helm.chart"},
+		}
+
+		if err := repo.Create(ctx, target); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "t1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if len(got.AcceptedResourceTypes) != 2 {
+			t.Fatalf("AcceptedResourceTypes len = %d, want 2", len(got.AcceptedResourceTypes))
+		}
+		types := map[domain.ResourceType]bool{}
+		for _, rt := range got.AcceptedResourceTypes {
+			types[rt] = true
+		}
+		if !types["kubernetes.manifest"] || !types["helm.chart"] {
+			t.Errorf("AcceptedResourceTypes = %v, want [kubernetes.manifest helm.chart]", got.AcceptedResourceTypes)
+		}
+	})
+
 	t.Run("CreateDuplicate", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

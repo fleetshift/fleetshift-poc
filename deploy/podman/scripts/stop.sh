@@ -4,6 +4,15 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 load_env
 
+# Always include all override files so compose can find every possible service,
+# regardless of which profile was used to start the stack.
+COMPOSE_FILES=(
+  "-f" "$COMPOSE_DIR/compose.yaml"
+  "-f" "$COMPOSE_DIR/overrides/sqlite.yaml"
+  "-f" "$COMPOSE_DIR/overrides/postgres.yaml"
+  "-f" "$COMPOSE_DIR/overrides/local-keycloak.yaml"
+)
+
 if [ "${1:-}" = "--clean" ]; then
   echo "==> Stopping stack and removing all data"
   if command -v kind >/dev/null 2>&1 && kind get clusters 2>/dev/null | grep -q "^my-oidc-cluster$"; then

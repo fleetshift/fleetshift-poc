@@ -4,18 +4,22 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
 	wfbackend "github.com/cschleiden/go-workflows/backend"
+	wfpostgres "github.com/cschleiden/go-workflows/backend/postgres"
 	wfsqlite "github.com/cschleiden/go-workflows/backend/sqlite"
 	"github.com/cschleiden/go-workflows/client"
 	"github.com/cschleiden/go-workflows/worker"
@@ -39,6 +43,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc"
+	pgstore "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
@@ -48,6 +53,7 @@ type serveFlags struct {
 	grpcAddr         string
 	httpAddr         string
 	dbPath           string
+	databaseURL      string
 	logLevel         string
 	logFormat        string
 	logLevelOverride string
@@ -66,6 +72,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.grpcAddr, "grpc-addr", ":50051", "gRPC listen address")
 	cmd.Flags().StringVar(&f.httpAddr, "http-addr", ":8080", "HTTP/JSON gateway listen address")
 	cmd.Flags().StringVar(&f.dbPath, "db", "fleetshift.db", "SQLite database path")
+	cmd.Flags().StringVar(&f.databaseURL, "database-url", os.Getenv("DATABASE_URL"), "PostgreSQL connection URL (mutually exclusive with --db)")
 	cmd.Flags().StringVar(&f.logLevel, "log-level", "info", "log level (debug, info, warn, error)")
 	cmd.Flags().StringVar(&f.logFormat, "log-format", "text", "log format (text, json)")
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
@@ -78,15 +85,37 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	defer stop()
 
 	// --- infrastructure ---
+	if f.databaseURL != "" && f.dbPath != "fleetshift.db" {
+		return fmt.Errorf("--database-url and --db are mutually exclusive")
+	}
 
-	db, err := sqlite.Open(f.dbPath)
-	if err != nil {
-		return fmt.Errorf("open database: %w", err)
+	var (
+		db             *sql.DB
+		store          domain.Store
+		vault          domain.Vault
+		authMethodRepo domain.AuthMethodRepository
+	)
+
+	if f.databaseURL != "" {
+		var err error
+		db, err = pgstore.Open(f.databaseURL)
+		if err != nil {
+			return fmt.Errorf("open database: %w", err)
+		}
+		store = &pgstore.Store{DB: db}
+		vault = &pgstore.VaultStore{DB: db}
+		authMethodRepo = &pgstore.AuthMethodRepo{DB: db}
+	} else {
+		var err error
+		db, err = sqlite.Open(f.dbPath)
+		if err != nil {
+			return fmt.Errorf("open database: %w", err)
+		}
+		store = &sqlite.Store{DB: db}
+		vault = &sqlite.VaultStore{DB: db}
+		authMethodRepo = &sqlite.AuthMethodRepo{DB: db}
 	}
 	defer db.Close()
-
-	store := &sqlite.Store{DB: db}
-	vault := &sqlite.VaultStore{DB: db}
 
 	router := delivery.NewRoutingDeliveryService()
 
@@ -146,9 +175,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// Kubernetes agent is registered after the attestation verifier is
 	// built (see below). The router is only consulted at delivery time.
 
-	wfBackend := wfsqlite.NewSqliteBackend(f.dbPath,
-		wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
-	)
+	var wfBackend wfbackend.Backend
+	if f.databaseURL != "" {
+		pgHost, pgPort, pgUser, pgPass, pgDB, err := parseDatabaseURL(f.databaseURL)
+		if err != nil {
+			return fmt.Errorf("parse database URL for workflows backend: %w", err)
+		}
+		wfBackend = wfpostgres.NewPostgresBackend(pgHost, pgPort, pgUser, pgPass, pgDB,
+			wfpostgres.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
+		)
+	} else {
+		wfBackend = wfsqlite.NewSqliteBackend(f.dbPath,
+			wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
+		)
+	}
 	wfWorker := worker.New(wfBackend, nil)
 	wfClient := client.New(wfBackend)
 
@@ -233,7 +273,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
 
 	var verifierOpts []oidc.VerifierOption
@@ -483,4 +522,30 @@ func parseLevelOverrides(spec string) (map[slogutil.ComponentName]slog.Level, er
 		overrides[slogutil.ComponentName(k)] = lvl
 	}
 	return overrides, nil
+}
+
+// parseDatabaseURL extracts host, port, user, password, and dbname from a
+// PostgreSQL connection URL (e.g. "postgres://user:pass@host:5432/dbname").
+func parseDatabaseURL(rawURL string) (host string, port int, user, password, dbname string, err error) {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return "", 0, "", "", "", fmt.Errorf("parse database URL: %w", err)
+	}
+
+	host = u.Hostname()
+	portStr := u.Port()
+	if portStr == "" {
+		port = 5432
+	} else {
+		port, err = strconv.Atoi(portStr)
+		if err != nil {
+			return "", 0, "", "", "", fmt.Errorf("parse database port %q: %w", portStr, err)
+		}
+	}
+
+	user = u.User.Username()
+	password, _ = u.User.Password()
+	dbname = strings.TrimPrefix(u.Path, "/")
+
+	return host, port, user, password, dbname, nil
 }

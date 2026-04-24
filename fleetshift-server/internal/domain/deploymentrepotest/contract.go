@@ -74,6 +74,88 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("CreateAndGet_WithRolloutStrategy", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		d.RolloutStrategy = &domain.RolloutStrategySpec{
+			Type:                  domain.RolloutStrategyImmediate,
+			VersionConflictPolicy: domain.VersionConflictCompleteAll,
+		}
+
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.RolloutStrategy == nil {
+			t.Fatal("RolloutStrategy is nil after round-trip")
+		}
+		if got.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
+			t.Errorf("RolloutStrategy.Type = %q, want %q", got.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
+		}
+		if got.RolloutStrategy.VersionConflictPolicy != domain.VersionConflictCompleteAll {
+			t.Errorf("RolloutStrategy.VersionConflictPolicy = %q, want %q", got.RolloutStrategy.VersionConflictPolicy, domain.VersionConflictCompleteAll)
+		}
+	})
+
+	t.Run("CreateAndGet_WithProvenance", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		d.Provenance = &domain.Provenance{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Subject: "user-1",
+					Issuer:  "https://issuer.example.com",
+				},
+				ContentHash:    []byte("sha256-hash-bytes"),
+				SignatureBytes: []byte("ecdsa-sig-bytes"),
+			},
+			ValidUntil:         fixedTime.Add(24 * time.Hour),
+			ExpectedGeneration: 1,
+			OutputConstraints: []domain.OutputConstraint{
+				{Name: "cluster-version", Expression: ">= 4.14"},
+			},
+		}
+
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Provenance == nil {
+			t.Fatal("Provenance is nil after round-trip")
+		}
+		if string(got.Provenance.Sig.ContentHash) != "sha256-hash-bytes" {
+			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "sha256-hash-bytes")
+		}
+		if string(got.Provenance.Sig.SignatureBytes) != "ecdsa-sig-bytes" {
+			t.Errorf("Provenance.Sig.SignatureBytes = %q, want %q", got.Provenance.Sig.SignatureBytes, "ecdsa-sig-bytes")
+		}
+		if got.Provenance.Sig.Signer.Subject != "user-1" {
+			t.Errorf("Provenance.Sig.Signer.Subject = %q, want %q", got.Provenance.Sig.Signer.Subject, "user-1")
+		}
+		if !got.Provenance.ValidUntil.Equal(fixedTime.Add(24 * time.Hour)) {
+			t.Errorf("Provenance.ValidUntil = %v, want %v", got.Provenance.ValidUntil, fixedTime.Add(24*time.Hour))
+		}
+		if got.Provenance.ExpectedGeneration != 1 {
+			t.Errorf("Provenance.ExpectedGeneration = %d, want 1", got.Provenance.ExpectedGeneration)
+		}
+		if len(got.Provenance.OutputConstraints) != 1 {
+			t.Fatalf("Provenance.OutputConstraints len = %d, want 1", len(got.Provenance.OutputConstraints))
+		}
+		if got.Provenance.OutputConstraints[0].Name != "cluster-version" {
+			t.Errorf("OutputConstraints[0].Name = %q, want %q", got.Provenance.OutputConstraints[0].Name, "cluster-version")
+		}
+	})
+
 	t.Run("CreateDuplicate", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
@@ -215,6 +297,51 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if got.ObservedGeneration != 3 {
 			t.Errorf("ObservedGeneration = %d, want 3", got.ObservedGeneration)
+		}
+	})
+
+	t.Run("Update_WithRolloutAndProvenance", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		_ = repo.Create(ctx, d)
+
+		d.RolloutStrategy = &domain.RolloutStrategySpec{
+			Type:                  domain.RolloutStrategyImmediate,
+			VersionConflictPolicy: domain.VersionConflictCompleteAll,
+		}
+		d.Provenance = &domain.Provenance{
+			Sig: domain.Signature{
+				Signer: domain.FederatedIdentity{
+					Subject: "user-1",
+					Issuer:  "https://issuer.example.com",
+				},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
+			ValidUntil:         fixedTime.Add(24 * time.Hour),
+			ExpectedGeneration: 1,
+		}
+		d.UpdatedAt = fixedTime.Add(time.Minute)
+		if err := repo.Update(ctx, d); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.RolloutStrategy == nil {
+			t.Fatal("RolloutStrategy is nil after Update round-trip")
+		}
+		if got.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
+			t.Errorf("RolloutStrategy.Type = %q, want %q", got.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
+		}
+		if got.Provenance == nil {
+			t.Fatal("Provenance is nil after Update round-trip")
+		}
+		if string(got.Provenance.Sig.ContentHash) != "hash" {
+			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "hash")
 		}
 	})
 }

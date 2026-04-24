@@ -4,6 +4,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 load_env
 detect_podman_socket
+resolve_profile
 
 : "${KIND_TEMP_DIR:=${HOME}/.fleetshift/tmp}"
 mkdir -p "$KIND_TEMP_DIR"
@@ -12,7 +13,7 @@ export KIND_TEMP_DIR
 REALM_TEMPLATE="${DEPLOY_DIR}/keycloak/fleetshift-realm.json"
 REALM_JSON="${COMPOSE_DIR}/.realm.json"
 
-if [ "${DEMO_MODE:-true}" = "true" ]; then
+if [ "$AUTH_MODE" = "local" ]; then
   echo "==> Generating passwords"
   KC_BOOTSTRAP_ADMIN_PASSWORD=$(generate_password)
   export KC_BOOTSTRAP_ADMIN_PASSWORD
@@ -30,13 +31,10 @@ if [ "${DEMO_MODE:-true}" = "true" ]; then
     )' "$REALM_TEMPLATE" > "$REALM_JSON"
 fi
 
-echo "==> Starting FleetShift stack (demo_mode=${DEMO_MODE:-true})"
+echo "==> Starting FleetShift stack (db=$DB_BACKEND, auth=$AUTH_MODE)"
 PODMAN_SOCKET="$PODMAN_SOCKET" compose up -d
 
-# Register github_username attribute in Keycloak user profile schema.
-# Keycloak 26 requires attributes to be registered before the admin API accepts them.
-# This can't be done via realm import — requires the admin API after startup.
-if [ "${DEMO_MODE:-true}" = "true" ]; then
+if [ "$AUTH_MODE" = "local" ]; then
   KC_URL="http://${KC_HOSTNAME:-localhost}:${KC_HTTP_PORT:-8180}/auth"
 
   echo "==> Waiting for Keycloak API..."
@@ -72,8 +70,7 @@ if [ "${DEMO_MODE:-true}" = "true" ]; then
   fi
 fi
 
-# Create optional dev user if configured
-if [ -n "${DEV_USER_USERNAME:-}" ] && [ "${DEMO_MODE:-true}" = "true" ]; then
+if [ -n "${DEV_USER_USERNAME:-}" ] && [ "$AUTH_MODE" = "local" ]; then
   echo "==> Creating dev user: ${DEV_USER_USERNAME}"
   "$SCRIPT_DIR/add-user.sh" \
     --admin-password "$KC_BOOTSTRAP_ADMIN_PASSWORD" \
@@ -89,7 +86,7 @@ echo "    GUI:             http://localhost:3000"
 echo "    Mock API:        http://localhost:4000"
 echo "    FleetShift API:  http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 echo "    Mock Plugins:    http://localhost:8001"
-if [ "${DEMO_MODE:-true}" = "true" ]; then
+if [ "$AUTH_MODE" = "local" ]; then
   echo "    Keycloak Admin:  https://localhost:${KC_HTTPS_PORT:-8443}"
   echo "    Keycloak (HTTP): http://localhost:${KC_HTTP_PORT:-8180}"
   echo ""

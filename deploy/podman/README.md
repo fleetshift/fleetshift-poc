@@ -34,7 +34,7 @@ Deploy the full FleetShift stack using podman containers with compose.
 ```bash
 cd deploy/podman
 
-# Start the stack (auto-creates .env from template on first run)
+# Start in demo mode (sqlite + local keycloak, the default)
 make up
 
 # Credentials are printed at the end of startup output.
@@ -42,19 +42,62 @@ make up
 # Keycloak: http://keycloak:8180 (requires /etc/hosts on macOS)
 ```
 
+## Profiles & Overrides
+
+FleetShift uses named profiles with per-axis overrides for flexible deployment configuration.
+
+### Named Profiles
+
+| Profile | DB Backend | Auth Provider | Use Case |
+|---|---|---|---|
+| `demo` (default) | SQLite | Local Keycloak | Quick demos, local dev without external dependencies |
+| `prod` | PostgreSQL | External OIDC | Production-like deployments |
+
+```bash
+make up                    # demo (default)
+make up PROFILE=prod       # prod
+```
+
+### Per-Axis Overrides
+
+Override the DB backend or auth provider independently:
+
+| Variable | Options | Description |
+|---|---|---|
+| `DB` | `sqlite`, `postgres` | Database backend |
+| `AUTH` | `local`, `external` | Auth provider (`local` = bundled Keycloak) |
+
+```bash
+make up DB=postgres AUTH=local       # postgres + local keycloak
+make up PROFILE=prod AUTH=local      # same as above (prod defaults to postgres)
+make up DB=sqlite AUTH=external      # sqlite + external oidc
+```
+
+### Sticky Configuration
+
+Set `PROFILE` in `deploy/.env` to avoid passing it every time:
+
+```bash
+# deploy/.env
+PROFILE=prod
+```
+
+Command-line always takes precedence over `.env`.
+
 ## Available Commands
 
-```
-make up                 Start the full FleetShift stack
-make down               Stop all containers, preserve data
-make clean              Stop all containers and remove ALL data
-make status             Show running containers
-make logs               Tail logs from all containers
-make logs-<service>     Tail logs from one container (e.g., make logs-fleetshift-server)
-make restart-<service>  Restart one container (e.g., make restart-fleetshift-mock-servers)
-make cli-setup          Configure fleetctl CLI for local deployment
-make reset-keycloak     Wipe Keycloak state and re-import realm with new passwords
-```
+| Command | Description |
+|---|---|
+| `make up` | Start the FleetShift stack. Accepts `PROFILE=`, `DB=`, `AUTH=` overrides. |
+| `make down` | Stop all containers, preserve data volumes. |
+| `make clean` | Stop all containers and remove ALL data (volumes, network, kind clusters). |
+| `make status` | Show running containers and health status. |
+| `make logs` | Tail logs from all containers. |
+| `make logs-<service>` | Tail logs from one container (e.g., `make logs-fleetshift-server`). |
+| `make restart-<service>` | Restart one container (e.g., `make restart-fleetshift-mock-servers`). |
+| `make cli-setup` | Configure `fleetctl` CLI for local OIDC auth (requires running stack). |
+| `make reset-keycloak` | Wipe Keycloak state, re-import realm with new passwords. |
+| `make help` | Show all available targets. |
 
 ## Configuration
 
@@ -64,14 +107,15 @@ Key settings:
 
 | Variable | Default | Description |
 |---|---|---|
-| `DEMO_MODE` | `true` | Include local Keycloak instance |
+| `PROFILE` | `demo` | Named profile: `demo` or `prod` |
 | `KC_HOSTNAME` | `keycloak` | Hostname Keycloak uses in all URLs (issuer, endpoints) |
 | `KC_HTTP_PORT` | `8180` | Keycloak HTTP port |
+| `POSTGRES_PASSWORD` | `changeme` | PostgreSQL password (used when `DB=postgres`) |
 | `FLEETSHIFT_LOG_LEVEL` | `debug` | Server log level |
 
 ### Dev User (optional)
 
-Uncomment these in `.env` to auto-create a personal Keycloak user during startup:
+Uncomment these in `.env` to auto-create a personal Keycloak user during startup (only applies when `AUTH=local`):
 
 ```bash
 DEV_USER_USERNAME=mshort@redhat.com

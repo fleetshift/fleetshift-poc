@@ -1,0 +1,65 @@
+services:
+  keycloak-certs:
+    image: alpine:3
+    command: /scripts/generate-certs.sh
+    volumes:
+      - keycloak-certs:/certs
+      - ./scripts/generate-certs.sh:/scripts/generate-certs.sh:ro
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: start-dev --import-realm
+    restart: unless-stopped
+    environment:
+      - KC_BOOTSTRAP_ADMIN_USERNAME=admin
+      - KC_BOOTSTRAP_ADMIN_PASSWORD
+      - KC_HTTP_ENABLED=true
+      - KC_HTTP_PORT=${KC_HTTP_PORT}
+      - KC_HTTPS_PORT=${KC_HTTPS_PORT}
+      - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/certs/keycloak.crt
+      - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/certs/keycloak.key
+      - KC_HTTP_RELATIVE_PATH=/auth
+      - KC_HOSTNAME=${KC_HOSTNAME}
+      - KC_HOSTNAME_PORT=${KC_HTTP_PORT}
+      - KC_HOSTNAME_STRICT=false
+    ports:
+      - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
+      - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
+    volumes:
+      - keycloak-certs:/opt/keycloak/certs:ro
+      - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+    depends_on:
+      keycloak-certs:
+        condition: service_completed_successfully
+
+  fleetshift-server:
+    depends_on:
+      keycloak-certs:
+        condition: service_completed_successfully
+
+  auth-setup:
+    image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        fleetctl auth setup \
+          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
+          --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift \
+          --client-id ${OIDC_CLIENT_ID} \
+          --audience ${OIDC_AUDIENCE} \
+          --key-enrollment-client-id fleetshift-signing \
+          --registry-id github.com \
+          --registry-subject-expression "claims.github_username" \
+        && echo "Auth method registered." \
+        || echo "Auth setup failed (may already exist) — continuing."
+    depends_on:
+      fleetshift-server:
+        condition: service_healthy
+
+volumes:
+  keycloak-certs:
