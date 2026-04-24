@@ -48,17 +48,7 @@ func (r *AuthMethodRepo) List(ctx context.Context) ([]domain.AuthMethod, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list auth methods: %w", err)
 	}
-	defer rows.Close()
-
-	var methods []domain.AuthMethod
-	for rows.Next() {
-		m, err := scanAuthMethod(rows)
-		if err != nil {
-			return nil, err
-		}
-		methods = append(methods, m)
-	}
-	return methods, rows.Err()
+	return collectRows(rows, scanAuthMethod)
 }
 
 func marshalAuthMethodConfig(m domain.AuthMethod) ([]byte, error) {
@@ -74,7 +64,7 @@ func scanAuthMethod(s scanner) (domain.AuthMethod, error) {
 	var id, methodType, configJSON string
 	if err := s.Scan(&id, &methodType, &configJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.AuthMethod{}, fmt.Errorf("%w", domain.ErrNotFound)
+			return domain.AuthMethod{}, domain.ErrNotFound
 		}
 		return domain.AuthMethod{}, fmt.Errorf("scan auth method: %w", err)
 	}

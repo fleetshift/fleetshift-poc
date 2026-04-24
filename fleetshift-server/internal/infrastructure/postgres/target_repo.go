@@ -60,17 +60,7 @@ func (r *TargetRepo) List(ctx context.Context) ([]domain.TargetInfo, error) {
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
-	defer rows.Close()
-
-	var targets []domain.TargetInfo
-	for rows.Next() {
-		t, err := scanTarget(rows)
-		if err != nil {
-			return nil, err
-		}
-		targets = append(targets, t)
-	}
-	return targets, rows.Err()
+	return collectRows(rows, scanTarget)
 }
 
 func (r *TargetRepo) Delete(ctx context.Context, id domain.TargetID) error {
@@ -85,16 +75,12 @@ func (r *TargetRepo) Delete(ctx context.Context, id domain.TargetID) error {
 	return nil
 }
 
-type scanner interface {
-	Scan(dest ...any) error
-}
-
 func scanTarget(s scanner) (domain.TargetInfo, error) {
 	var t domain.TargetInfo
 	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID, artJSON string
 	if err := s.Scan(&id, &targetType, &t.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID, &artJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return t, fmt.Errorf("%w", domain.ErrNotFound)
+			return t, domain.ErrNotFound
 		}
 		return t, fmt.Errorf("scan target: %w", err)
 	}

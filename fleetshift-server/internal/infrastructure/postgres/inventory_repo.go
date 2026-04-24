@@ -17,9 +17,9 @@ type InventoryRepo struct {
 }
 
 func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) error {
-	props, err := marshalOrDefault(item.Properties)
-	if err != nil {
-		return fmt.Errorf("marshal properties: %w", err)
+	props := item.Properties
+	if props == nil {
+		props = json.RawMessage("{}")
 	}
 	labels, err := json.Marshal(item.Labels)
 	if err != nil {
@@ -72,9 +72,9 @@ func (r *InventoryRepo) ListByType(ctx context.Context, t domain.InventoryType) 
 }
 
 func (r *InventoryRepo) Update(ctx context.Context, item domain.InventoryItem) error {
-	props, err := marshalOrDefault(item.Properties)
-	if err != nil {
-		return fmt.Errorf("marshal properties: %w", err)
+	props := item.Properties
+	if props == nil {
+		props = json.RawMessage("{}")
 	}
 	labels, err := json.Marshal(item.Labels)
 	if err != nil {
@@ -121,17 +121,7 @@ func (r *InventoryRepo) queryItems(ctx context.Context, query string, args ...an
 	if err != nil {
 		return nil, fmt.Errorf("query inventory items: %w", err)
 	}
-	defer rows.Close()
-
-	var items []domain.InventoryItem
-	for rows.Next() {
-		item, err := scanInventoryItem(rows)
-		if err != nil {
-			return nil, err
-		}
-		items = append(items, item)
-	}
-	return items, rows.Err()
+	return collectRows(rows, scanInventoryItem)
 }
 
 func scanInventoryItem(s scanner) (domain.InventoryItem, error) {
@@ -141,7 +131,7 @@ func scanInventoryItem(s scanner) (domain.InventoryItem, error) {
 
 	if err := s.Scan(&id, &itemType, &name, &propsJSON, &labelsJSON, &srcDeliveryID, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return item, fmt.Errorf("%w", domain.ErrNotFound)
+			return item, domain.ErrNotFound
 		}
 		return item, fmt.Errorf("scan inventory item: %w", err)
 	}
@@ -167,11 +157,4 @@ func scanInventoryItem(s scanner) (domain.InventoryItem, error) {
 	}
 	item.UpdatedAt = t
 	return item, nil
-}
-
-func marshalOrDefault(raw json.RawMessage) (json.RawMessage, error) {
-	if raw == nil {
-		return json.RawMessage("{}"), nil
-	}
-	return raw, nil
 }

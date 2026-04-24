@@ -16,42 +16,66 @@ type DeploymentRepo struct {
 	DB *sql.Tx
 }
 
-func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
+type marshaledDeployment struct {
+	manifest   string
+	placement  string
+	rollout    sql.NullString
+	targets    string
+	auth       string
+	provenance sql.NullString
+}
+
+func marshalDeploymentFields(d domain.Deployment) (marshaledDeployment, error) {
 	ms, err := json.Marshal(d.ManifestStrategy)
 	if err != nil {
-		return fmt.Errorf("marshal manifest strategy: %w", err)
+		return marshaledDeployment{}, fmt.Errorf("marshal manifest strategy: %w", err)
 	}
 	ps, err := json.Marshal(d.PlacementStrategy)
 	if err != nil {
-		return fmt.Errorf("marshal placement strategy: %w", err)
+		return marshaledDeployment{}, fmt.Errorf("marshal placement strategy: %w", err)
 	}
 	var rs []byte
 	if d.RolloutStrategy != nil {
 		rs, err = json.Marshal(d.RolloutStrategy)
 		if err != nil {
-			return fmt.Errorf("marshal rollout strategy: %w", err)
+			return marshaledDeployment{}, fmt.Errorf("marshal rollout strategy: %w", err)
 		}
 	}
 	rt, err := json.Marshal(d.ResolvedTargets)
 	if err != nil {
-		return fmt.Errorf("marshal resolved targets: %w", err)
+		return marshaledDeployment{}, fmt.Errorf("marshal resolved targets: %w", err)
 	}
 	auth, err := json.Marshal(d.Auth)
 	if err != nil {
-		return fmt.Errorf("marshal auth: %w", err)
+		return marshaledDeployment{}, fmt.Errorf("marshal auth: %w", err)
 	}
 	var provJSON []byte
 	if d.Provenance != nil {
 		provJSON, err = json.Marshal(d.Provenance)
 		if err != nil {
-			return fmt.Errorf("marshal provenance: %w", err)
+			return marshaledDeployment{}, fmt.Errorf("marshal provenance: %w", err)
 		}
+	}
+	return marshaledDeployment{
+		manifest:   string(ms),
+		placement:  string(ps),
+		rollout:    nullString(rs),
+		targets:    string(rt),
+		auth:       string(auth),
+		provenance: nullString(provJSON),
+	}, nil
+}
+
+func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
+	m, err := marshalDeploymentFields(d)
+	if err != nil {
+		return err
 	}
 
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, created_at, updated_at, etag)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
-		d.ID, d.UID, string(ms), string(ps), nullString(rs), string(rt), d.State, string(auth), nullString(provJSON),
+		d.ID, d.UID, m.manifest, m.placement, m.rollout, m.targets, d.State, m.auth, m.provenance,
 		int64(d.Generation), int64(d.ObservedGeneration),
 		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
 	)
@@ -81,49 +105,13 @@ func (r *DeploymentRepo) List(ctx context.Context) ([]domain.Deployment, error) 
 	if err != nil {
 		return nil, fmt.Errorf("list deployments: %w", err)
 	}
-	defer rows.Close()
-
-	var deployments []domain.Deployment
-	for rows.Next() {
-		d, err := scanDeployment(rows)
-		if err != nil {
-			return nil, err
-		}
-		deployments = append(deployments, d)
-	}
-	return deployments, rows.Err()
+	return collectRows(rows, scanDeployment)
 }
 
 func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error {
-	ms, err := json.Marshal(d.ManifestStrategy)
+	m, err := marshalDeploymentFields(d)
 	if err != nil {
-		return fmt.Errorf("marshal manifest strategy: %w", err)
-	}
-	ps, err := json.Marshal(d.PlacementStrategy)
-	if err != nil {
-		return fmt.Errorf("marshal placement strategy: %w", err)
-	}
-	var rs []byte
-	if d.RolloutStrategy != nil {
-		rs, err = json.Marshal(d.RolloutStrategy)
-		if err != nil {
-			return fmt.Errorf("marshal rollout strategy: %w", err)
-		}
-	}
-	rt, err := json.Marshal(d.ResolvedTargets)
-	if err != nil {
-		return fmt.Errorf("marshal resolved targets: %w", err)
-	}
-	auth, err := json.Marshal(d.Auth)
-	if err != nil {
-		return fmt.Errorf("marshal auth: %w", err)
-	}
-	var provJSON []byte
-	if d.Provenance != nil {
-		provJSON, err = json.Marshal(d.Provenance)
-		if err != nil {
-			return fmt.Errorf("marshal provenance: %w", err)
-		}
+		return err
 	}
 
 	res, err := r.DB.ExecContext(ctx,
@@ -133,7 +121,7 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 		     generation = $8, observed_generation = $9,
 		     updated_at = $10, etag = $11
 		 WHERE id = $12`,
-		string(ms), string(ps), nullString(rs), string(rt), d.State, string(auth), nullString(provJSON),
+		m.manifest, m.placement, m.rollout, m.targets, d.State, m.auth, m.provenance,
 		int64(d.Generation), int64(d.ObservedGeneration),
 		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, d.ID,
 	)
@@ -168,7 +156,7 @@ func scanDeployment(s scanner) (domain.Deployment, error) {
 		&generation, &observedGeneration,
 		&createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return d, fmt.Errorf("%w", domain.ErrNotFound)
+			return d, domain.ErrNotFound
 		}
 		return d, fmt.Errorf("scan deployment: %w", err)
 	}

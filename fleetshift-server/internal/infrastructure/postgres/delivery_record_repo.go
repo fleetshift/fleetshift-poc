@@ -68,17 +68,7 @@ func (r *DeliveryRepo) ListByDeployment(ctx context.Context, depID domain.Deploy
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
 	}
-	defer rows.Close()
-
-	var deliveries []domain.Delivery
-	for rows.Next() {
-		d, err := scanDelivery(rows)
-		if err != nil {
-			return nil, err
-		}
-		deliveries = append(deliveries, d)
-	}
-	return deliveries, rows.Err()
+	return collectRows(rows, scanDelivery)
 }
 
 func (r *DeliveryRepo) DeleteByDeployment(ctx context.Context, depID domain.DeploymentID) error {
@@ -97,7 +87,7 @@ func scanDelivery(s scanner) (domain.Delivery, error) {
 	var id, depID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
 	if err := s.Scan(&id, &depID, &tgtID, &manifestsJSON, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return d, fmt.Errorf("%w", domain.ErrNotFound)
+			return d, domain.ErrNotFound
 		}
 		return d, fmt.Errorf("scan delivery: %w", err)
 	}

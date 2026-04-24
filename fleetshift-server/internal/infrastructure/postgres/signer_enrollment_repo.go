@@ -59,17 +59,7 @@ func (r *SignerEnrollmentRepo) ListBySubject(ctx context.Context, identity domai
 	if err != nil {
 		return nil, fmt.Errorf("query signer enrollments: %w", err)
 	}
-	defer rows.Close()
-
-	var enrollments []domain.SignerEnrollment
-	for rows.Next() {
-		e, err := scanSignerEnrollment(rows)
-		if err != nil {
-			return nil, err
-		}
-		enrollments = append(enrollments, e)
-	}
-	return enrollments, rows.Err()
+	return collectRows(rows, scanSignerEnrollment)
 }
 
 func scanSignerEnrollment(s scanner) (domain.SignerEnrollment, error) {

@@ -15,8 +15,13 @@ import (
 	"github.com/testcontainers/testcontainers-go/wait"
 )
 
+func isPodmanAvailable() bool {
+	_, err := exec.LookPath("podman")
+	return err == nil
+}
+
 func init() {
-	if _, err := exec.LookPath("podman"); err == nil {
+	if isPodmanAvailable() {
 		os.Setenv("TESTCONTAINERS_RYUK_DISABLED", "true")
 	}
 }
@@ -29,7 +34,7 @@ var (
 )
 
 func detectProvider() testcontainers.ContainerCustomizer {
-	if _, err := exec.LookPath("podman"); err == nil {
+	if isPodmanAvailable() {
 		return testcontainers.WithProvider(testcontainers.ProviderPodman)
 	}
 	return testcontainers.WithProvider(testcontainers.ProviderDefault)
