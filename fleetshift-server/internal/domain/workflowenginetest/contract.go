@@ -10,10 +10,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -38,7 +38,7 @@ type Infra struct {
 type InfraFactory func(t *testing.T) Infra
 
 // RegistryFactory returns the [domain.Registry] under test. The registry
-// may perform implementation-specific setup (e.g. launch DBOS, start worker)
+// may perform implementation-specific setup (e.g. start worker)
 // and register t.Cleanup for teardown. The registry is not given workflow
 // specs; the contract builds them from infra and passes them to Register.
 type RegistryFactory func(t *testing.T) domain.Registry
@@ -47,6 +47,8 @@ type RegistryFactory func(t *testing.T) domain.Registry
 type workflows struct {
 	Orchestration    domain.OrchestrationWorkflow
 	CreateDeployment domain.CreateDeploymentWorkflow
+	DeleteDeployment domain.DeleteDeploymentWorkflow
+	ResumeDeployment domain.ResumeDeploymentWorkflow
 	ProvisionIdP     domain.ProvisionIdPWorkflow
 }
 
@@ -204,14 +206,12 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
 
-		// Delete via the application service, which transitions
-		// to Deleting, bumps generation, and triggers reconciliation.
-		depSvc := &application.DeploymentService{
-			Store:         infra.Store,
-			Orchestration: wfs.Orchestration,
+		exec, err := wfs.DeleteDeployment.Start(ctx, "d1", 1)
+		if err != nil {
+			t.Fatalf("Start delete workflow: %v", err)
 		}
-		if _, err := depSvc.Delete(ctx, "d1"); err != nil {
-			t.Fatalf("Delete: %v", err)
+		if _, err := exec.AwaitResult(ctx); err != nil {
+			t.Fatalf("Delete workflow: %v", err)
 		}
 
 		// Poll until the deployment record is gone.
@@ -417,6 +417,135 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 	})
 
+	t.Run("Invalidate_RestartsOrchestration", func(t *testing.T) {
+		infra := infraFactory(t)
+		wfs := registerWorkflows(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		registerTargets(ctx, t, infra, "t1")
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"t1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+
+		// Bump generation directly in the DB (simulating an external
+		// change source) and manually start orchestration. This test
+		// exercises the engine's ability to re-reconcile after a
+		// generation bump, without going through DeploymentService.
+		//
+		// TODO: replace with a proper update/mutation workflow test
+		// when one exists, to keep the tests' contract exposure clean.
+		func() {
+			tx, err := infra.Store.Begin(ctx)
+			if err != nil {
+				t.Fatalf("Begin: %v", err)
+			}
+			defer tx.Rollback()
+			dep, err := tx.Deployments().Get(ctx, "d1")
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			dep.BumpGeneration()
+			if err := tx.Deployments().Update(ctx, dep); err != nil {
+				t.Fatalf("Update: %v", err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatalf("Commit: %v", err)
+			}
+		}()
+
+		for {
+			_, err := wfs.Orchestration.Start(ctx, "d1")
+			if err == nil {
+				break
+			}
+			if !errors.Is(err, domain.ErrAlreadyRunning) {
+				t.Fatalf("Start orchestration: %v", err)
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting to start orchestration")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+
+		awaitObservedGeneration(ctx, t, infra, "d1", 2)
+
+		dep, err := queryDeployment(ctx, t, infra, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if dep.State != domain.DeploymentStateActive {
+			t.Fatalf("State = %q after invalidation, want %q", dep.State, domain.DeploymentStateActive)
+		}
+	})
+
+	t.Run("Resume_RestartsOrchestration", func(t *testing.T) {
+		infra := infraFactory(t)
+		wfs := registerWorkflows(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "af1", Type: AuthFailTargetType, Name: "auth-fail-1"},
+		)
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d1",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"af1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStatePausedAuth)
+		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+
+		exec, err := wfs.ResumeDeployment.Start(ctx, domain.ResumeDeploymentInput{
+			ID: "d1",
+			Auth: domain.DeliveryAuth{
+				Caller: &domain.SubjectClaims{
+					FederatedIdentity: domain.FederatedIdentity{
+						Subject: "user-1",
+						Issuer:  "https://issuer.example.com",
+					},
+				},
+				Token: "fresh-token",
+			},
+		}, 1)
+		if err != nil {
+			t.Fatalf("Start resume workflow: %v", err)
+		}
+		if _, err := exec.AwaitResult(ctx); err != nil {
+			t.Fatalf("Resume workflow: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateActive)
+		awaitObservedGeneration(ctx, t, infra, "d1", 2)
+	})
+
 	t.Run("StartOrchestration_AlreadyRunning", func(t *testing.T) {
 		infra := infraFactory(t)
 		wfs := registerWorkflows(t, infra, registryFactory)
@@ -448,10 +577,10 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 
 		// Second Start while the first is still running: expect
-		// ErrAlreadyRunning (go-workflows, memworkflow) or nil (DBOS).
+		// ErrAlreadyRunning.
 		_, err = wfs.Orchestration.Start(ctx, "dup")
-		if err != nil && !errors.Is(err, domain.ErrAlreadyRunning) {
-			t.Fatalf("second Start: got %v, want ErrAlreadyRunning or nil", err)
+		if !errors.Is(err, domain.ErrAlreadyRunning) {
+			t.Fatalf("second Start: got %v, want ErrAlreadyRunning", err)
 		}
 
 		// Let the first workflow complete.
@@ -469,6 +598,7 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 	t.Helper()
 	if infra.AgentRegistrar != nil {
 		infra.AgentRegistrar.Register(OutputTargetType, &outputAgent{})
+		infra.AgentRegistrar.Register(AuthFailTargetType, &authFailThenSucceedAgent{})
 	}
 	reg := registryFactory(t)
 
@@ -493,6 +623,24 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
+		Store:         infra.Store,
+		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteDeployment: %v", err)
+	}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:         infra.Store,
+		Orchestration: orchWf,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeDeployment: %v", err)
+	}
+
 	provSpec := &domain.ProvisionIdPWorkflowSpec{
 		AuthMethods:      stubAuthMethodRepo{},
 		Discovery:        stubDiscovery{},
@@ -510,6 +658,8 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 	return workflows{
 		Orchestration:    orchWf,
 		CreateDeployment: createWf,
+		DeleteDeployment: deleteWf,
+		ResumeDeployment: resumeWf,
 		ProvisionIdP:     provWf,
 	}
 }
@@ -531,6 +681,11 @@ const TestTargetType domain.TargetType = "test"
 // Used by the delivery-outputs contract test.
 const OutputTargetType domain.TargetType = "output-test"
 
+// AuthFailTargetType is a target type whose delivery agent fails the
+// first delivery with [domain.DeliveryStateAuthFailed], then succeeds
+// on all subsequent attempts. Used by the Resume contract test.
+const AuthFailTargetType domain.TargetType = "auth-fail-test"
+
 func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...string) {
 	t.Helper()
 	tx, err := infra.Store.Begin(ctx)
@@ -546,6 +701,29 @@ func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...stri
 		}))
 	}
 	must(t, tx.Commit())
+}
+
+func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.Generation) {
+	t.Helper()
+	for {
+		tx, err := infra.Store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		dep, err := tx.Deployments().Get(ctx, id)
+		tx.Rollback()
+		if err != nil {
+			t.Fatalf("Get(%s): %v", id, err)
+		}
+		if dep.ObservedGeneration >= want {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for ObservedGeneration >= %d (last: %d)", want, dep.ObservedGeneration)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
@@ -692,6 +870,35 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.D
 }
 
 func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// authFailThenSucceedAgent fails the first delivery with
+// [domain.DeliveryStateAuthFailed], then succeeds on all subsequent
+// attempts. The first call returns AuthFailed synchronously; subsequent
+// calls return Accepted and complete asynchronously via the signaler.
+type authFailThenSucceedAgent struct {
+	mu      sync.Mutex
+	attempt int
+}
+
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	a.mu.Lock()
+	a.attempt++
+	n := a.attempt
+	a.mu.Unlock()
+
+	if n == 1 {
+		return domain.DeliveryResult{
+			State:   domain.DeliveryStateAuthFailed,
+			Message: "401 Unauthorized",
+		}, nil
+	}
+	go signaler.Done(context.Background(), domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
 }
 

@@ -411,6 +411,36 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 	})
 }
 
+// AcquireLock sets [Deployment.ActiveWorkflowGen] to the deployment's
+// current generation, claiming the orchestration lock. Returns the
+// acquired generation. If the lock is already held, this is a
+// programming error (the engine's at-most-one instance guarantee
+// should prevent it).
+//
+// NOTE: recovery from a stale lock (orchestration failed after
+// acquiring) is deferred follow-up work.
+func (s *OrchestrationWorkflowSpec) AcquireLock() Activity[DeploymentID, Generation] {
+	return NewActivity("acquire-orchestration-lock", func(ctx context.Context, id DeploymentID) (Generation, error) {
+		tx, err := s.Store.Begin(ctx)
+		if err != nil {
+			return 0, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		dep, err := tx.Deployments().Get(ctx, id)
+		if err != nil {
+			return 0, err
+		}
+		if !dep.AcquireOrchestrationLock() {
+			return 0, fmt.Errorf("deployment %q: orchestration lock already held (gen %d)", id, *dep.ActiveWorkflowGen)
+		}
+		if err := tx.Deployments().Update(ctx, dep); err != nil {
+			return 0, err
+		}
+		return dep.Generation, tx.Commit()
+	})
+}
+
 // CheckGeneration reads the deployment's current generation from the
 // store. Used mid-rollout to detect whether a new mutation has arrived.
 func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[DeploymentID, Generation] {
@@ -469,6 +499,11 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 	ctx, probe := s.observer().RunStarted(record.Context(), deploymentID)
 	defer probe.End()
 	_ = ctx
+
+	if _, err := RunActivity(record, s.AcquireLock(), deploymentID); err != nil {
+		probe.Error(err)
+		return struct{}{}, fmt.Errorf("acquire orchestration lock: %w", err)
+	}
 
 	for {
 		loaded, err := RunActivity(record, s.LoadDeploymentAndPool(), deploymentID)

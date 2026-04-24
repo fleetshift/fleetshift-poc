@@ -21,6 +21,9 @@ func (r *stubRecord) Run(activity domain.Activity[any, any], in any) (any, error
 func (r *stubRecord) Await(_ string) (any, error) {
 	return nil, nil
 }
+func (r *stubRecord) Sleep(_ time.Duration) error {
+	return nil
+}
 
 // fakeOrchestrationWorkflow records the deployment ID it was started with.
 type fakeOrchestrationWorkflow struct {

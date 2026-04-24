@@ -300,6 +300,73 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("ActiveWorkflowGen_RoundTrip", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		gen := domain.Generation(5)
+		d.ActiveWorkflowGen = &gen
+
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.ActiveWorkflowGen == nil {
+			t.Fatal("ActiveWorkflowGen is nil after round-trip, want non-nil")
+		}
+		if *got.ActiveWorkflowGen != 5 {
+			t.Errorf("ActiveWorkflowGen = %d, want 5", *got.ActiveWorkflowGen)
+		}
+	})
+
+	t.Run("ActiveWorkflowGen_NilByDefault", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repo.Get(ctx, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.ActiveWorkflowGen != nil {
+			t.Errorf("ActiveWorkflowGen = %d, want nil", *got.ActiveWorkflowGen)
+		}
+	})
+
+	t.Run("Update_ActiveWorkflowGen_SetAndClear", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		d := sampleDeployment()
+		_ = repo.Create(ctx, d)
+
+		gen := domain.Generation(2)
+		d.ActiveWorkflowGen = &gen
+		d.UpdatedAt = fixedTime.Add(time.Minute)
+		if err := repo.Update(ctx, d); err != nil {
+			t.Fatalf("Update (set): %v", err)
+		}
+		got, _ := repo.Get(ctx, "d1")
+		if got.ActiveWorkflowGen == nil || *got.ActiveWorkflowGen != 2 {
+			t.Fatalf("after set: ActiveWorkflowGen = %v, want 2", got.ActiveWorkflowGen)
+		}
+
+		d.ActiveWorkflowGen = nil
+		d.UpdatedAt = fixedTime.Add(2 * time.Minute)
+		if err := repo.Update(ctx, d); err != nil {
+			t.Fatalf("Update (clear): %v", err)
+		}
+		got, _ = repo.Get(ctx, "d1")
+		if got.ActiveWorkflowGen != nil {
+			t.Errorf("after clear: ActiveWorkflowGen = %d, want nil", *got.ActiveWorkflowGen)
+		}
+	})
+
 	t.Run("Update_WithRolloutAndProvenance", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

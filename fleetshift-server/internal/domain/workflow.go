@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // Workflow types are organized as follows:
 //
@@ -37,11 +40,15 @@ type Record interface {
 	Run(activity Activity[any, any], in any) (any, error)
 
 	// Await blocks until the named signal arrives. It uses the engine's
-	// internal execution context (workflow.Context, dbos.DBOSContext, etc.)
+	// internal execution context (e.g. workflow.Context in go-workflows)
 	// rather than a context.Context parameter. This avoids accidentally
 	// carrying request-scoped cancellation into a durable await — the
 	// engine controls the lifecycle, not the caller.
 	Await(signalName string) (any, error)
+
+	// Sleep durably pauses the workflow for at least the given duration.
+	// After replay the engine fast-forwards past completed sleeps.
+	Sleep(d time.Duration) error
 }
 
 // Signal is a named, typed channel for cross-workflow communication.
@@ -90,6 +97,8 @@ type Execution[T any] interface {
 type Registry interface {
 	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
 	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
+	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
+	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
 	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
 	SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
 }
@@ -114,6 +123,22 @@ type CreateDeploymentWorkflow interface {
 // start new instances. Returned by [Registry.RegisterProvisionIdP].
 type ProvisionIdPWorkflow interface {
 	Start(ctx context.Context, input ProvisionIdPInput) (Execution[AuthMethod], error)
+}
+
+// DeleteDeploymentWorkflow is a registered delete-deployment workflow.
+// Returned by [Registry.RegisterDeleteDeployment]. The observedGen
+// parameter is used by the adapter to derive a generation-qualified
+// instance ID for same-type dedup.
+type DeleteDeploymentWorkflow interface {
+	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[Deployment], error)
+}
+
+// ResumeDeploymentWorkflow is a registered resume-deployment workflow.
+// Returned by [Registry.RegisterResumeDeployment]. The observedGen
+// parameter is used by the adapter to derive a generation-qualified
+// instance ID for same-type dedup.
+type ResumeDeploymentWorkflow interface {
+	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[Deployment], error)
 }
 
 // NewActivity creates an [Activity] from a stable name and a function.

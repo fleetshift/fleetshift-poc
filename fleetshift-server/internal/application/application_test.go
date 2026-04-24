@@ -66,13 +66,35 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 		},
 	}
 
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteDeployment: %v", err)
+	}
+
+	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:             store,
+		Orchestration:     orchWf,
+		ProvenanceBuilder: provenanceBuilder,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeDeployment: %v", err)
+	}
+
 	return testHarness{
 		targets: &application.TargetService{Store: store},
 		deployments: &application.DeploymentService{
-			Store:         store,
-			CreateWF:      createWf,
-			Orchestration: orchWf,
-			KeyResolver:   keyResolver,
+			Store:             store,
+			CreateWF:          createWf,
+			DeleteWF:          deleteWf,
+			ResumeWF:          resumeWf,
+			ProvenanceBuilder: provenanceBuilder,
 		},
 		store:   store,
 		fakeReg: fakeReg,

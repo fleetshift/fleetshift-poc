@@ -20,6 +20,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -85,6 +86,14 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 
 func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflowSpec) (domain.CreateDeploymentWorkflow, error) {
 	return &createDeploymentWorkflow{spec: spec}, nil
+}
+
+func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflowSpec) (domain.DeleteDeploymentWorkflow, error) {
+	return &deleteDeploymentWorkflow{registry: r, spec: spec}, nil
+}
+
+func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
+	return &resumeDeploymentWorkflow{registry: r, spec: spec}, nil
 }
 
 func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
@@ -181,6 +190,98 @@ func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.Provision
 	return &provisionExecution{id: "provision-idp-" + string(input.AuthMethodID), done: done}, nil
 }
 
+// --- DeleteDeploymentWorkflow ---
+
+type deleteDeploymentWorkflow struct {
+	registry *Registry
+	spec     *domain.DeleteDeploymentWorkflowSpec
+	mu       sync.Mutex
+	running  map[string]struct{}
+}
+
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
+
+	w.mu.Lock()
+	if w.running == nil {
+		w.running = make(map[string]struct{})
+	}
+	if _, active := w.running[instanceID]; active {
+		w.mu.Unlock()
+		return nil, domain.ErrConcurrentUpdate
+	}
+	w.running[instanceID] = struct{}{}
+	w.mu.Unlock()
+
+	done := make(chan deploymentResult, 1)
+
+	go func() {
+		defer func() {
+			w.mu.Lock()
+			delete(w.running, instanceID)
+			w.mu.Unlock()
+			if r := recover(); r != nil {
+				done <- deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)}
+			}
+		}()
+
+		record := &baseRecord{
+			id:  instanceID,
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, deploymentID)
+		done <- deploymentResult{val: val, err: err}
+	}()
+
+	return &deploymentExecution{id: instanceID, done: done}, nil
+}
+
+// --- ResumeDeploymentWorkflow ---
+
+type resumeDeploymentWorkflow struct {
+	registry *Registry
+	spec     *domain.ResumeDeploymentWorkflowSpec
+	mu       sync.Mutex
+	running  map[string]struct{}
+}
+
+func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
+
+	w.mu.Lock()
+	if w.running == nil {
+		w.running = make(map[string]struct{})
+	}
+	if _, active := w.running[instanceID]; active {
+		w.mu.Unlock()
+		return nil, domain.ErrConcurrentUpdate
+	}
+	w.running[instanceID] = struct{}{}
+	w.mu.Unlock()
+
+	done := make(chan deploymentResult, 1)
+
+	go func() {
+		defer func() {
+			w.mu.Lock()
+			delete(w.running, instanceID)
+			w.mu.Unlock()
+			if r := recover(); r != nil {
+				done <- deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)}
+			}
+		}()
+
+		record := &baseRecord{
+			id:  instanceID,
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, input)
+		done <- deploymentResult{val: val, err: err}
+	}()
+
+	return &deploymentExecution{id: instanceID, done: done}, nil
+}
+
 // --- shared base Record ---
 
 type baseRecord struct {
@@ -244,6 +345,19 @@ func (r *baseRecord) runOnce(activity domain.Activity[any, any], in any) (any, e
 		return res.out, res.err
 	case <-r.ctx.Done():
 		return nil, r.ctx.Err()
+	}
+}
+
+// Sleep pauses the workflow for at least the given duration using a
+// cancellable timer rather than bare [time.Sleep].
+func (r *baseRecord) Sleep(d time.Duration) error {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-r.ctx.Done():
+		return r.ctx.Err()
 	}
 }
 
@@ -323,6 +437,26 @@ func (e *createExecution) AwaitResult(ctx context.Context) (domain.Deployment, e
 	}
 }
 
+type deploymentResult struct {
+	val domain.Deployment
+	err error
+}
+
+type deploymentExecution struct {
+	id   string
+	done <-chan deploymentResult
+}
+
+func (e *deploymentExecution) WorkflowID() string { return e.id }
+func (e *deploymentExecution) AwaitResult(ctx context.Context) (domain.Deployment, error) {
+	select {
+	case r := <-e.done:
+		return r.val, r.err
+	case <-ctx.Done():
+		return domain.Deployment{}, ctx.Err()
+	}
+}
+
 type provisionResult struct {
 	val domain.AuthMethod
 	err error
@@ -345,8 +479,10 @@ func (e *provisionExecution) AwaitResult(ctx context.Context) (domain.AuthMethod
 
 // Compile-time interface checks.
 var (
-	_ domain.Registry                 = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow    = (*orchestrationWorkflow)(nil)
-	_ domain.CreateDeploymentWorkflow = (*createDeploymentWorkflow)(nil)
-	_ domain.ProvisionIdPWorkflow     = (*provisionIdPWorkflow)(nil)
+	_ domain.Registry                  = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow     = (*orchestrationWorkflow)(nil)
+	_ domain.CreateDeploymentWorkflow  = (*createDeploymentWorkflow)(nil)
+	_ domain.DeleteDeploymentWorkflow  = (*deleteDeploymentWorkflow)(nil)
+	_ domain.ResumeDeploymentWorkflow  = (*resumeDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow      = (*provisionIdPWorkflow)(nil)
 )
