@@ -24,7 +24,7 @@ RUN cd fleetshift-cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates curl docker.io \
+    ca-certificates curl podman \
     && rm -rf /var/lib/apt/lists/*
 
 # Install kind
