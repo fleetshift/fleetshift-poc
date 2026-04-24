@@ -54,8 +54,8 @@ type OIDCConfig struct {
 	JWKSURI               EndpointURL // resolved from discovery
 	AuthorizationEndpoint EndpointURL // resolved from discovery
 	TokenEndpoint         EndpointURL // resolved from discovery
-	KeyEnrollmentAudience Audience    // audience for signer enrollment ID tokens
-	// TODO: this could/should probably be multiple not one
+	KeyEnrollmentAudience  Audience    // audience for signer enrollment ID tokens
+	PublicKeyClaimExpression string    // CEL expression extracting the base64 SPKI public key from ID token claims
 	RegistrySubjectMapping *RegistrySubjectMapping
 }
 
@@ -77,8 +77,9 @@ type KeyRegistry struct {
 	Endpoint string // e.g. "https://api.github.com"
 }
 
-// BuiltInKeyRegistries returns the set of known public registries.
-// For the prototype only github.com is supported.
+// BuiltInKeyRegistries returns the set of known external key registries.
+// OIDC key resolution is not an external registry — it extracts the
+// public key directly from the enrollment ID token via a CEL expression.
 func BuiltInKeyRegistries() map[KeyRegistryID]KeyRegistry {
 	return map[KeyRegistryID]KeyRegistry{
 		"github.com": {
@@ -107,6 +108,7 @@ type TrustBundleEntry struct {
 	IssuerURL              IssuerURL              `json:"issuer_url"`
 	JWKSURI                EndpointURL            `json:"jwks_uri"`
 	EnrollmentAudience     Audience               `json:"enrollment_audience"`
+	PublicKeyClaimExpression string                `json:"public_key_claim_expression,omitempty"`
 	RegistrySubjectMapping *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
 }
 

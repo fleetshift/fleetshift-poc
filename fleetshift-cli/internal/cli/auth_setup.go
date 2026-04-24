@@ -17,6 +17,7 @@ type authSetupFlags struct {
 	methodID                 string
 	audience                 string
 	keyEnrollmentClientID    string
+	publicKeyClaimExpr       string
 	oidcCAFile               string
 	registryID               string
 	registrySubjectExpr      string
@@ -38,6 +39,7 @@ func newAuthSetupCmd(ctx *cmdContext) *cobra.Command {
 	cmd.Flags().StringVar(&f.audience, "audience", "", "Expected audience claim")
 	cmd.Flags().StringVar(&f.keyEnrollmentClientID, "key-enrollment-client-id", "", "OAuth2 client ID for signing key enrollment (dedicated OIDC client)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuer (saved to local config)")
+	cmd.Flags().StringVar(&f.publicKeyClaimExpr, "public-key-claim-expression", "", "CEL expression extracting the signer's SPKI public key from ID token claims (e.g. claims.signing_public_key)")
 	cmd.Flags().StringVar(&f.registryID, "registry-id", "", "External key registry ID (e.g. github.com)")
 	cmd.Flags().StringVar(&f.registrySubjectExpr, "registry-subject-expression", "", "CEL expression mapping ID token claims to a registry subject (e.g. claims.preferred_username)")
 	_ = cmd.MarkFlagRequired("issuer-url")
@@ -52,6 +54,7 @@ func runAuthSetup(cmd *cobra.Command, ctx *cmdContext, f *authSetupFlags) error 
 		IssuerUrl:             f.issuerURL,
 		Audience:              f.audience,
 		KeyEnrollmentAudience: f.keyEnrollmentClientID,
+		PublicKeyClaimExpression: f.publicKeyClaimExpr,
 	}
 	if f.registryID != "" && f.registrySubjectExpr != "" {
 		oidcConfig.RegistrySubjectMapping = &pb.RegistrySubjectMapping{

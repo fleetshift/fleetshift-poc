@@ -286,7 +286,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
 		},
 	}
-	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
+	provenanceBuilder := &application.KeyResolverProvenanceBuilder{
+		KeyResolver: keyResolver,
+		AuthMethods: authMethodRepo,
+	}
 
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
 		Store:             store,

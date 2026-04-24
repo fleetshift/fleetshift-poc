@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
@@ -217,9 +218,12 @@ func verifySignatureAgainstKeySet(doc, sig []byte, keys []crypto.PublicKey) erro
 
 // KeyResolverProvenanceBuilder adapts [KeyResolver] to the
 // [domain.ProvenanceBuilder] interface used by mutation workflows
-// that require provenance construction.
+// that require provenance construction. AuthMethods is required for
+// OIDC-based enrollments where the signing key is extracted from the
+// identity token rather than an external registry.
 type KeyResolverProvenanceBuilder struct {
 	KeyResolver *KeyResolver
+	AuthMethods domain.AuthMethodRepository
 }
 
 func (b *KeyResolverProvenanceBuilder) BuildProvenance(
@@ -257,7 +261,7 @@ func (b *KeyResolverProvenanceBuilder) BuildProvenance(
 	}
 	envelopeHash := domain.HashIntent(envelopeBytes)
 
-	keys, err := b.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+	keys, err := b.resolveSigningKeys(ctx, enrollment)
 	if err != nil {
 		return nil, fmt.Errorf("resolve signing keys: %w", err)
 	}
@@ -278,3 +282,37 @@ func (b *KeyResolverProvenanceBuilder) BuildProvenance(
 	}, nil
 }
 
+// resolveSigningKeys returns the public keys for a signer enrollment.
+// For OIDC enrollments (no external registry) the key is extracted
+// from the enrollment's identity token via the configured CEL
+// expression. For external registries (GitHub) it delegates to KeyResolver.
+func (b *KeyResolverProvenanceBuilder) resolveSigningKeys(ctx context.Context, enrollment domain.SignerEnrollment) ([]crypto.PublicKey, error) {
+	if enrollment.RegistryID == "oidc" {
+		oidcConfig, err := b.loadOIDCConfig(ctx)
+		if err != nil {
+			return nil, err
+		}
+		if oidcConfig.PublicKeyClaimExpression == "" {
+			return nil, fmt.Errorf("OIDC auth method has no public_key_claim_expression configured")
+		}
+		base64Key, err := EvalCELClaim(oidcConfig.PublicKeyClaimExpression, string(enrollment.IdentityToken))
+		if err != nil {
+			return nil, fmt.Errorf("evaluate public key claim: %w", err)
+		}
+		return keyregistry.ParsePublicKeyFromBase64(base64Key)
+	}
+	return b.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+}
+
+func (b *KeyResolverProvenanceBuilder) loadOIDCConfig(ctx context.Context) (domain.OIDCConfig, error) {
+	methods, err := b.AuthMethods.List(ctx)
+	if err != nil {
+		return domain.OIDCConfig{}, fmt.Errorf("list auth methods: %w", err)
+	}
+	for _, m := range methods {
+		if m.Type == domain.AuthMethodTypeOIDC && m.OIDC != nil {
+			return *m.OIDC, nil
+		}
+	}
+	return domain.OIDCConfig{}, fmt.Errorf("no OIDC auth method configured")
+}

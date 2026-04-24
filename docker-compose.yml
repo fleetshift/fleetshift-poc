@@ -47,7 +47,7 @@ services:
           -extfile <(printf "subjectAltName=DNS:keycloak,DNS:localhost") 2>/dev/null
         rm -f /tmp/keycloak.csr /certs/ca.srl
         chmod 644 /certs/*.crt
-        chmod 600 /certs/*.key
+        chmod 644 /certs/*.key
         echo "TLS certs generated in /certs/"
     volumes:
       - keycloak-certs:/certs
@@ -129,7 +129,9 @@ services:
           --issuer-url http://keycloak:8180/auth/realms/fleetshift \
           --client-id fleetshift-ui \
           --audience fleetshift-ui \
-        && echo "Auth method registered." \
+          --key-enrollment-client-id fleetshift-ui \
+          --public-key-claim-expression claims.signing_public_key \
+        && echo "Auth method registered with OIDC registry." \
         || echo "Auth setup failed (may already exist) — continuing."
     depends_on:
       fleetshift:
@@ -213,6 +215,7 @@ services:
     environment:
       KEYCLOAK_URL: http://keycloak:8180/auth
       API_PROXY_TARGET: http://mock-servers:4000
+      OME_API_TARGET: http://fleetshift:8085
       NODE_EXTRA_CA_CERTS: /certs/ca.crt
     depends_on:
       mock-servers:

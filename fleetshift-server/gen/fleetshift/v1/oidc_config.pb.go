@@ -40,6 +40,10 @@ type OIDCConfig struct {
 	// with this audience, isolating enrollment tokens from platform
 	// access tokens and managed cluster tokens.
 	KeyEnrollmentAudience string `protobuf:"bytes,6,opt,name=key_enrollment_audience,json=keyEnrollmentAudience,proto3" json:"key_enrollment_audience,omitempty"`
+	// CEL expression evaluated over ID token claims to extract the
+	// signer's base64-encoded SPKI/PKIX public key (for OIDC key
+	// registries). Example: "claims.signing_public_key".
+	PublicKeyClaimExpression string `protobuf:"bytes,8,opt,name=public_key_claim_expression,json=publicKeyClaimExpression,proto3" json:"public_key_claim_expression,omitempty"`
 	// Maps ID token claims to a key registry subject. When set, the
 	// delivery agent derives the registry subject from the signer's
 	// identity token using this mapping.
@@ -120,6 +124,13 @@ func (x *OIDCConfig) GetKeyEnrollmentAudience() string {
 	return ""
 }
 
+func (x *OIDCConfig) GetPublicKeyClaimExpression() string {
+	if x != nil {
+		return x.PublicKeyClaimExpression
+	}
+	return ""
+}
+
 func (x *OIDCConfig) GetRegistrySubjectMapping() *RegistrySubjectMapping {
 	if x != nil {
 		return x.RegistrySubjectMapping
@@ -131,7 +142,7 @@ var File_fleetshift_v1_oidc_config_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_oidc_config_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffleetshift/v1/oidc_config.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a,fleetshift/v1/registry_subject_mapping.proto\"\xe8\x02\n" +
+	"\x1ffleetshift/v1/oidc_config.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a,fleetshift/v1/registry_subject_mapping.proto\"\xa7\x03\n" +
 	"\n" +
 	"OIDCConfig\x12\x1d\n" +
 	"\n" +
@@ -140,7 +151,8 @@ const file_fleetshift_v1_oidc_config_proto_rawDesc = "" +
 	"\x16authorization_endpoint\x18\x03 \x01(\tB\x03\xe0A\x03R\x15authorizationEndpoint\x12*\n" +
 	"\x0etoken_endpoint\x18\x04 \x01(\tB\x03\xe0A\x03R\rtokenEndpoint\x12\x1e\n" +
 	"\bjwks_uri\x18\x05 \x01(\tB\x03\xe0A\x03R\ajwksUri\x126\n" +
-	"\x17key_enrollment_audience\x18\x06 \x01(\tR\x15keyEnrollmentAudience\x12_\n" +
+	"\x17key_enrollment_audience\x18\x06 \x01(\tR\x15keyEnrollmentAudience\x12=\n" +
+	"\x1bpublic_key_claim_expression\x18\b \x01(\tR\x18publicKeyClaimExpression\x12_\n" +
 	"\x18registry_subject_mapping\x18\a \x01(\v2%.fleetshift.v1.RegistrySubjectMappingR\x16registrySubjectMappingBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
