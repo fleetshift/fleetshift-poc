@@ -65,19 +65,16 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 	opts := r.activityOptions()
 
 	for _, reg := range []func() error{
-		func() error { return registerActivity(r.Worker, invokers, spec.LoadDeploymentAndPool(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.AcquireLockAndLoad(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ResolvePlacement(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.PlanRollout(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.GenerateManifests(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.DeliverToTarget(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.RemoveFromTarget(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.PersistReconciliationResult(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.PersistAndCompleteReconciliation(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CompleteReconciliation(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.DeleteDeploymentRecord(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CleanupProvisionedTargets(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.AcquireLock(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CleanupAndDeleteDeployment(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ReleaseLock(), opts) },
 	} {
 		if err := reg(); err != nil {
