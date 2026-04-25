@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -583,7 +582,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	}
 }
 
-func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
+func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	store, _ := setupStore(t)
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
@@ -599,16 +598,22 @@ func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
 
 	rec := &simpleRecord{ctx: context.Background(), events: events}
 	_, err := wf.Run(rec, "d1")
-	if err == nil {
-		t.Fatal("expected error for empty pool")
-	}
-	if !strings.Contains(err.Error(), "zero targets") {
-		t.Errorf("error = %q, want 'zero targets'", err.Error())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	dep := getDeployment(t, store, "d1")
-	if dep.State != domain.DeploymentStateFailed {
-		t.Errorf("State = %q, want failed", dep.State)
+	if dep.State != domain.DeploymentStateActive {
+		t.Errorf("State = %q, want active", dep.State)
+	}
+	if len(dep.ResolvedTargets) != 0 {
+		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets)
+	}
+	if dep.ActiveWorkflowGen != nil {
+		t.Errorf("ActiveWorkflowGen should be nil, got %v", dep.ActiveWorkflowGen)
+	}
+	if dep.ObservedGeneration != 1 {
+		t.Errorf("ObservedGeneration = %d, want 1", dep.ObservedGeneration)
 	}
 }
 
@@ -1020,7 +1025,7 @@ func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any)
 	if err != nil {
 		return out, err
 	}
-	if !r.loaded && activity.Name() == "load-deployment-and-pool" {
+	if !r.loaded && activity.Name() == "acquire-lock-and-load" {
 		r.loaded = true
 		tx, txErr := r.store.Begin(context.Background())
 		if txErr != nil {
@@ -1525,6 +1530,150 @@ func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
 	}
 	if removes[0].Attestation != nil {
 		t.Error("Attestation should be nil for deployments without provenance")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Fault-injection store wrapper
+// ---------------------------------------------------------------------------
+
+// commitFaultStore wraps a [domain.Store] and injects a single transient
+// commit failure on the first write-transaction commit after [Arm] is
+// called. Once the fault fires it is permanently disarmed.
+type commitFaultStore struct {
+	domain.Store
+	mu      sync.Mutex
+	armed   bool
+	tripped bool
+	err     error
+}
+
+// Arm enables the fault. The very next write-tx Commit will fail.
+func (s *commitFaultStore) Arm() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.tripped {
+		s.armed = true
+	}
+}
+
+func (s *commitFaultStore) Begin(ctx context.Context) (domain.Tx, error) {
+	tx, err := s.Store.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &commitFaultTx{Tx: tx, store: s}, nil
+}
+
+type commitFaultTx struct {
+	domain.Tx
+	store *commitFaultStore
+}
+
+func (tx *commitFaultTx) Commit() error {
+	tx.store.mu.Lock()
+	shouldFault := tx.store.armed && !tx.store.tripped
+	if shouldFault {
+		tx.store.armed = false
+		tx.store.tripped = true
+	}
+	tx.store.mu.Unlock()
+
+	if shouldFault {
+		tx.Tx.Rollback()
+		return tx.store.err
+	}
+	return tx.Tx.Commit()
+}
+
+// faultArmingObserver arms a [commitFaultStore] when delivery outputs
+// are processed. This creates a precise fault point: outputs have been
+// committed, and the very next write (reconciliation completion) will
+// fail.
+type faultArmingObserver struct {
+	domain.NoOpDeploymentObserver
+	store *commitFaultStore
+}
+
+func (o *faultArmingObserver) RunStarted(ctx context.Context, _ domain.DeploymentID) (context.Context, domain.DeploymentRunProbe) {
+	return ctx, &faultArmingProbe{store: o.store}
+}
+
+type faultArmingProbe struct {
+	domain.NoOpDeploymentRunProbe
+	store *commitFaultStore
+}
+
+func (p *faultArmingProbe) DeliveryOutputsProcessed(_ []domain.ProvisionedTarget, _ int) {
+	p.store.Arm()
+}
+
+// ---------------------------------------------------------------------------
+// Replay-safety regression
+// ---------------------------------------------------------------------------
+
+func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExists(t *testing.T) {
+	realStore, vault := setupStore(t)
+	seedDeployment(t, realStore, domain.Deployment{
+		ID:                "d1",
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
+		State:             domain.DeploymentStateCreating,
+	})
+	seedTargets(t, realStore, domain.TargetInfo{ID: "provisioner", Name: "provisioner", Type: "test"})
+
+	deliveryAgent := &outputProducingDelivery{
+		targets: []domain.ProvisionedTarget{{
+			ID: "k8s-new-cluster", Type: "kubernetes", Name: "new-cluster",
+			Properties: map[string]string{"kubeconfig_ref": "targets/k8s-new-cluster/kubeconfig"},
+		}},
+		secrets: []domain.ProducedSecret{{
+			Ref: "targets/k8s-new-cluster/kubeconfig", Value: []byte("fake-kubeconfig-data"),
+		}},
+	}
+
+	// The faultArmingObserver arms the store right after delivery
+	// outputs are committed. The next write-tx commit (reconciliation
+	// completion) hits a transient failure, causing ContinueAsNew. The
+	// fault fires once; retries see a healthy store.
+	store := &commitFaultStore{
+		Store: realStore,
+		err:   fmt.Errorf("transient DB error"),
+	}
+	obs := &faultArmingObserver{store: store}
+
+	// Simulate the engine's ContinueAsNew loop: re-run the workflow on
+	// each restart, up to a bounded number of attempts. A healthy
+	// pipeline should converge within two attempts (one fault + one
+	// successful retry).
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		events := make(chan domain.DeploymentEvent, 16)
+		wf := newTestWorkflow(store, deliveryAgent, events, func(wf *domain.OrchestrationWorkflowSpec) {
+			wf.Vault = vault
+			wf.Observer = obs
+		})
+		rec := &simpleRecord{ctx: context.Background(), events: events}
+		_, lastErr = wf.Run(rec, "d1")
+		if lastErr == nil {
+			break
+		}
+		var canErr *domain.ContinueAsNewError
+		if !errors.As(lastErr, &canErr) {
+			t.Fatalf("attempt %d: unexpected non-ContinueAsNew error: %v", attempt+1, lastErr)
+		}
+	}
+	if lastErr != nil {
+		t.Fatalf("workflow did not converge after %d attempts "+
+			"(stuck in ContinueAsNew loop from replayed output registration): %v",
+			maxAttempts, lastErr)
+	}
+
+	dep := getDeployment(t, realStore, "d1")
+	if dep.State != domain.DeploymentStateActive {
+		t.Errorf("State = %q, want active after replay recovery", dep.State)
 	}
 }
 

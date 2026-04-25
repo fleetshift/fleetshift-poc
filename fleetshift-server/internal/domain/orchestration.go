@@ -100,17 +100,12 @@ type DeploymentAndPool struct {
 	Pool       []TargetInfo
 }
 
-// CompleteReconciliationInput carries the deployment ID and the generation
-// that was reconciled so the activity can atomically decide whether a new
-// reconciliation is needed.
-type CompleteReconciliationInput struct {
-	DeploymentID  DeploymentID
+// PersistAndCompleteInput carries the reconciliation result and the
+// generation that was reconciled. Used by the combined
+// [PersistAndCompleteReconciliation] activity.
+type PersistAndCompleteInput struct {
+	Result        ReconciliationResult
 	ReconciledGen Generation
-}
-
-// CleanupProvisionedTargetsInput is the input to the cleanup-provisioned-targets activity.
-type CleanupProvisionedTargetsInput struct {
-	DeploymentID DeploymentID
 }
 
 // OrchestrationWorkflowSpec is the deployment pipeline expressed as a
@@ -145,12 +140,15 @@ func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-deployme
 // dependencies. Infrastructure adapters call these to register activities;
 // the workflow body calls them via [RunActivity].
 
-// LoadDeploymentAndPool reads the deployment and target pool in a single
-// activity to avoid separate durable steps. Used at workflow start and when
-// reloading after a spec change.
-func (s *OrchestrationWorkflowSpec) LoadDeploymentAndPool() Activity[DeploymentID, DeploymentAndPool] {
-	return NewActivity("load-deployment-and-pool", func(ctx context.Context, id DeploymentID) (DeploymentAndPool, error) {
-		tx, err := s.Store.BeginReadOnly(ctx)
+// AcquireLockAndLoad acquires the orchestration lock (if not already
+// held) and loads the deployment and target pool in a single activity.
+// On the first call the lock is claimed; on subsequent calls (within
+// the same workflow execution) it is already held so only the load
+// happens. This combines the former AcquireLock and LoadDeploymentAndPool
+// activities to eliminate a redundant deployment read.
+func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[DeploymentID, DeploymentAndPool] {
+	return NewActivity("acquire-lock-and-load", func(ctx context.Context, id DeploymentID) (DeploymentAndPool, error) {
+		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return DeploymentAndPool{}, fmt.Errorf("begin tx: %w", err)
 		}
@@ -160,6 +158,12 @@ func (s *OrchestrationWorkflowSpec) LoadDeploymentAndPool() Activity[DeploymentI
 		if err != nil {
 			return DeploymentAndPool{}, err
 		}
+		if dep.AcquireOrchestrationLock() {
+			if err := tx.Deployments().Update(ctx, dep); err != nil {
+				return DeploymentAndPool{}, err
+			}
+		}
+
 		pool, err := tx.Targets().List(ctx)
 		if err != nil {
 			return DeploymentAndPool{}, err
@@ -282,40 +286,22 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, str
 	})
 }
 
-// DeleteDeploymentRecord hard-deletes delivery records and the deployment record.
-func (s *OrchestrationWorkflowSpec) DeleteDeploymentRecord() Activity[DeploymentID, struct{}] {
-	return NewActivity("delete-deployment-record", func(ctx context.Context, id DeploymentID) (struct{}, error) {
+// CleanupAndDeleteDeployment atomically cleans up provisioned targets
+// (e.g. kind clusters), hard-deletes delivery records, and hard-deletes
+// the deployment record in a single transaction. This combines the
+// former CleanupProvisionedTargets and DeleteDeploymentRecord activities.
+func (s *OrchestrationWorkflowSpec) CleanupAndDeleteDeployment() Activity[DeploymentID, struct{}] {
+	return NewActivity("cleanup-and-delete-deployment", func(ctx context.Context, id DeploymentID) (struct{}, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
-		if err := tx.Deliveries().DeleteByDeployment(ctx, id); err != nil {
-			return struct{}{}, fmt.Errorf("delete delivery records: %w", err)
-		}
-		if err := tx.Deployments().Delete(ctx, id); err != nil {
-			return struct{}{}, fmt.Errorf("delete deployment: %w", err)
-		}
-		return struct{}{}, tx.Commit()
-	})
-}
-
-// CleanupProvisionedTargets removes targets that were provisioned by
-// deliveries of this deployment (e.g. kind clusters).
-func (s *OrchestrationWorkflowSpec) CleanupProvisionedTargets() Activity[CleanupProvisionedTargetsInput, struct{}] {
-	return NewActivity("cleanup-provisioned-targets", func(ctx context.Context, in CleanupProvisionedTargetsInput) (struct{}, error) {
-		tx, err := s.Store.Begin(ctx)
-		if err != nil {
-			return struct{}{}, fmt.Errorf("begin tx: %w", err)
-		}
-		defer tx.Rollback()
-
-		deliveries, err := tx.Deliveries().ListByDeployment(ctx, in.DeploymentID)
+		deliveries, err := tx.Deliveries().ListByDeployment(ctx, id)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("list deliveries: %w", err)
 		}
-
 		for _, d := range deliveries {
 			target, err := tx.Targets().Get(ctx, d.TargetID)
 			if err != nil {
@@ -335,35 +321,50 @@ func (s *OrchestrationWorkflowSpec) CleanupProvisionedTargets() Activity[Cleanup
 				}
 			}
 		}
+
+		if err := tx.Deliveries().DeleteByDeployment(ctx, id); err != nil {
+			return struct{}{}, fmt.Errorf("delete delivery records: %w", err)
+		}
+		if err := tx.Deployments().Delete(ctx, id); err != nil {
+			return struct{}{}, fmt.Errorf("delete deployment: %w", err)
+		}
 		return struct{}{}, tx.Commit()
 	})
 }
 
-// PersistReconciliationResult persists a [ReconciliationResult] using
-// a fresh read-modify-write cycle. The activity reads the latest
-// aggregate so that concurrent generation bumps by the service layer
-// are preserved.
-func (s *OrchestrationWorkflowSpec) PersistReconciliationResult() Activity[ReconciliationResult, struct{}] {
-	return NewActivity("persist-reconciliation-result", func(ctx context.Context, r ReconciliationResult) (struct{}, error) {
+// PersistAndCompleteReconciliation atomically applies a
+// [ReconciliationResult] and completes reconciliation in a single
+// read-modify-write cycle. It reads the latest deployment aggregate
+// (preserving concurrent generation bumps), applies the result, and
+// advances [Deployment.ObservedGeneration]. Returns needsRestart when
+// the generation has advanced during the pipeline.
+//
+// Combining persist and complete eliminates the window where the
+// deployment's state is updated but the lock has not yet been released,
+// and prevents the error-swallowing that existed when the two were
+// separate activities.
+func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[PersistAndCompleteInput, bool] {
+	return NewActivity("persist-and-complete-reconciliation", func(ctx context.Context, in PersistAndCompleteInput) (bool, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return struct{}{}, fmt.Errorf("begin tx: %w", err)
+			return false, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
-		fresh, err := tx.Deployments().Get(ctx, r.DeploymentID)
+		fresh, err := tx.Deployments().Get(ctx, in.Result.DeploymentID)
 		if err != nil {
-			return struct{}{}, fmt.Errorf("get deployment: %w", err)
+			return false, fmt.Errorf("get deployment: %w", err)
 		}
 
-		fresh.ApplyReconciliationResult(r)
+		fresh.ApplyReconciliationResult(in.Result)
+		needsRestart := fresh.CompleteReconciliation(in.ReconciledGen)
 		fresh.UpdatedAt = s.now()
 		fresh.Etag = uuid.New().String()
 
 		if err := tx.Deployments().Update(ctx, fresh); err != nil {
-			return struct{}{}, err
+			return false, err
 		}
-		return struct{}{}, tx.Commit()
+		return needsRestart, tx.Commit()
 	})
 }
 
@@ -371,6 +372,10 @@ func (s *OrchestrationWorkflowSpec) PersistReconciliationResult() Activity[Recon
 // registers provisioned targets. Secrets are stored first so that
 // target properties referencing vault refs are valid at registration
 // time. Results with no outputs are skipped.
+//
+// All writes use upsert semantics so the activity is replay-safe:
+// delivery agents may be re-invoked after a transient failure and
+// produce the same outputs on each attempt.
 func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryResult, struct{}] {
 	return NewActivity("process-delivery-outputs", func(ctx context.Context, result DeliveryResult) (struct{}, error) {
 		if len(result.ProducedSecrets) == 0 && len(result.ProvisionedTargets) == 0 {
@@ -391,53 +396,60 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 		}
 		defer tx.Rollback()
 
-		reg := &TargetRegistrar{
-			Targets:   tx.Targets(),
-			Inventory: tx.Inventory(),
-		}
+		// TODO: revisit the "TargetRegistrar" thing – should we make that upsert instead? remove that?
+		now := s.now()
 		for _, pt := range result.ProvisionedTargets {
-			if err := reg.Register(ctx, TargetInfo{
+			invID := InventoryItemID("target:" + string(pt.ID))
+
+			props, _ := json.Marshal(pt.Properties)
+			if err := tx.Inventory().CreateOrUpdate(ctx, InventoryItem{
+				ID:         invID,
+				Type:       InventoryType(pt.Type),
+				Name:       pt.Name,
+				Properties: props,
+				Labels:     pt.Labels,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}); err != nil {
+				return struct{}{}, fmt.Errorf("upsert inventory item for target %q: %w", pt.ID, err)
+			}
+
+			if err := tx.Targets().CreateOrUpdate(ctx, TargetInfo{
 				ID:                    pt.ID,
 				Type:                  pt.Type,
 				Name:                  pt.Name,
 				Labels:                pt.Labels,
 				Properties:            pt.Properties,
 				AcceptedResourceTypes: pt.AcceptedResourceTypes,
+				InventoryItemID:       invID,
 			}); err != nil {
-				return struct{}{}, fmt.Errorf("register target %q: %w", pt.ID, err)
+				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
 			}
 		}
 		return struct{}{}, tx.Commit()
 	})
 }
 
-// AcquireLock sets [Deployment.ActiveWorkflowGen] to the deployment's
-// current generation, claiming the orchestration lock. Returns the
-// acquired generation. If the lock is already held, this is a
-// programming error (the engine's at-most-one instance guarantee
-// should prevent it).
-//
-// NOTE: recovery from a stale lock (orchestration failed after
-// acquiring) is deferred follow-up work.
-func (s *OrchestrationWorkflowSpec) AcquireLock() Activity[DeploymentID, Generation] {
-	return NewActivity("acquire-orchestration-lock", func(ctx context.Context, id DeploymentID) (Generation, error) {
+// ReleaseLock clears [Deployment.ActiveWorkflowGen] without advancing
+// [Deployment.ObservedGeneration]. Used before ContinueAsNew so the
+// next execution can re-acquire the lock for a fresh retry attempt.
+func (s *OrchestrationWorkflowSpec) ReleaseLock() Activity[DeploymentID, struct{}] {
+	return NewActivity("release-orchestration-lock", func(ctx context.Context, id DeploymentID) (struct{}, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return 0, fmt.Errorf("begin tx: %w", err)
+			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		dep, err := tx.Deployments().Get(ctx, id)
 		if err != nil {
-			return 0, err
+			return struct{}{}, err
 		}
-		if !dep.AcquireOrchestrationLock() {
-			return 0, fmt.Errorf("deployment %q: orchestration lock already held (gen %d)", id, *dep.ActiveWorkflowGen)
-		}
+		dep.ReleaseOrchestrationLock()
 		if err := tx.Deployments().Update(ctx, dep); err != nil {
-			return 0, err
+			return struct{}{}, err
 		}
-		return dep.Generation, tx.Commit()
+		return struct{}{}, tx.Commit()
 	})
 }
 
@@ -459,30 +471,6 @@ func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[DeploymentID, Gen
 	})
 }
 
-// CompleteReconciliation advances [Deployment.ObservedGeneration] to
-// reconciledGen. If the deployment's generation has advanced past
-// reconciledGen during the workflow run, needsRestart is returned as
-// true, indicating the caller should loop.
-func (s *OrchestrationWorkflowSpec) CompleteReconciliation() Activity[CompleteReconciliationInput, bool] {
-	return NewActivity("complete-reconciliation", func(ctx context.Context, in CompleteReconciliationInput) (bool, error) {
-		tx, err := s.Store.Begin(ctx)
-		if err != nil {
-			return false, fmt.Errorf("begin tx: %w", err)
-		}
-		defer tx.Rollback()
-
-		dep, err := tx.Deployments().Get(ctx, in.DeploymentID)
-		if err != nil {
-			return false, err
-		}
-		needsRestart := dep.CompleteReconciliation(in.ReconciledGen)
-		if err := tx.Deployments().Update(ctx, dep); err != nil {
-			return false, err
-		}
-		return needsRestart, tx.Commit()
-	})
-}
-
 func (s *OrchestrationWorkflowSpec) observer() DeploymentObserver {
 	if s.Observer != nil {
 		return s.Observer
@@ -490,81 +478,86 @@ func (s *OrchestrationWorkflowSpec) observer() DeploymentObserver {
 	return NoOpDeploymentObserver{}
 }
 
-// Run is the deterministic workflow body. It loads the deployment
-// state, runs the appropriate pipeline (reconcile or delete), and
-// atomically completes. If the generation advanced during execution
-// the workflow loops and re-runs the pipeline rather than spawning a
-// new workflow instance.
+// Run is the deterministic workflow body. Each execution does a single
+// pass through the pipeline. On retryable failure the workflow releases
+// its lock and returns [ContinueAsNew] to restart with a fresh history.
+// On terminal failure the workflow persists [DeploymentStateFailed] and
+// completes reconciliation atomically. Run never returns a non-nil
+// error — it always terminates in a controlled state or restarts via
+// ContinueAsNew.
 func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID) (struct{}, error) {
 	ctx, probe := s.observer().RunStarted(record.Context(), deploymentID)
 	defer probe.End()
 	_ = ctx
 
-	if _, err := RunActivity(record, s.AcquireLock(), deploymentID); err != nil {
-		probe.Error(err)
-		return struct{}{}, fmt.Errorf("acquire orchestration lock: %w", err)
-	}
-
 	for {
-		loaded, err := RunActivity(record, s.LoadDeploymentAndPool(), deploymentID)
+		loaded, err := RunActivity(record, s.AcquireLockAndLoad(), deploymentID)
 		if err != nil {
 			probe.Error(err)
-			return struct{}{}, fmt.Errorf("load deployment and pool: %w", err)
+			if IsTerminal(err) {
+				return struct{}{}, nil
+			}
+			return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 		}
 		dep, pool := loaded.Deployment, loaded.Pool
 		startGen := dep.Generation
+
+		var result ReconciliationResult
 
 		switch dep.State {
 		case DeploymentStateDeleting:
 			if err := s.executeDelete(record, dep, pool, deploymentID); err != nil {
 				probe.Error(err)
-				return struct{}{}, err
+				if !IsTerminal(err) {
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
+				}
+				result = NewFailedResult(deploymentID, dep.Auth, err.Error())
+			} else {
+				return struct{}{}, nil
 			}
-			// Record is hard-deleted. No PersistReconciliationResult
-			// or CompleteReconciliation — just return.
-			return struct{}{}, nil
 
 		default:
 			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, deploymentID, startGen, probe)
-			var result ReconciliationResult
 			if errors.Is(err, errAuthPaused) {
+				probe.Error(err)
 				result = NewPausedAuthResult(deploymentID, dep.Auth)
-				probe.StateChanged(result.State)
-				probe.Error(err)
-				if _, err := RunActivity(record, s.PersistReconciliationResult(), result); err != nil {
-					probe.Error(err)
-					return struct{}{}, fmt.Errorf("persist reconciliation result (paused_auth): %w", err)
-				}
 			} else if err != nil {
-				result = NewFailedResult(deploymentID, dep.Auth)
-				probe.StateChanged(result.State)
-				if _, updateErr := RunActivity(record, s.PersistReconciliationResult(), result); updateErr != nil {
-					probe.Error(updateErr)
-				}
 				probe.Error(err)
-				return struct{}{}, err
+				if !IsTerminal(err) {
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
+				}
+				result = NewFailedResult(deploymentID, dep.Auth, err.Error())
 			} else {
 				result = NewActiveResult(deploymentID, resolvedIDs, dep.Auth)
-				probe.StateChanged(result.State)
-				if _, err := RunActivity(record, s.PersistReconciliationResult(), result); err != nil {
-					probe.Error(err)
-					return struct{}{}, fmt.Errorf("persist reconciliation result: %w", err)
-				}
 			}
 		}
 
-		needsRestart, err := RunActivity(record, s.CompleteReconciliation(), CompleteReconciliationInput{
-			DeploymentID:  deploymentID,
+		probe.StateChanged(result.State)
+		needsRestart, err := RunActivity(record, s.PersistAndCompleteReconciliation(), PersistAndCompleteInput{
+			Result:        result,
 			ReconciledGen: startGen,
 		})
 		if err != nil {
 			probe.Error(err)
-			return struct{}{}, fmt.Errorf("complete reconciliation: %w", err)
+			return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 		}
 		if !needsRestart {
 			return struct{}{}, nil
 		}
 	}
+}
+
+// releaseLockAndContinue releases the orchestration lock and returns a
+// [ContinueAsNew] error to restart with a fresh history.
+func (s *OrchestrationWorkflowSpec) releaseLockAndContinue(
+	record Record,
+	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
+) error {
+	if _, err := RunActivity(record, s.ReleaseLock(), deploymentID); err != nil {
+		probe.Error(err)
+	}
+	return ContinueAsNew(deploymentID)
 }
 
 // executePlacementPipeline runs the full resolve → delta → plan → execute
@@ -585,9 +578,8 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("resolve placement: %w", err)
 	}
 
-	// TODO: is this actually an error case?
 	if len(resolved) == 0 {
-		return nil, fmt.Errorf("placement resolved to zero targets")
+		return nil, nil
 	}
 
 	resolvedTargets := ResolvedTargetInfos(resolved, pool)
@@ -646,16 +638,9 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 		}
 	}
 
-	// Phase 2: Target cleanup (provisioned kind targets).
-	if _, err := RunActivity(record, s.CleanupProvisionedTargets(), CleanupProvisionedTargetsInput{
-		DeploymentID: deploymentID,
-	}); err != nil {
-		return fmt.Errorf("cleanup provisioned targets: %w", err)
-	}
-
-	// Phase 3: Record deletion.
-	if _, err := RunActivity(record, s.DeleteDeploymentRecord(), deploymentID); err != nil {
-		return fmt.Errorf("delete deployment record: %w", err)
+	// Phase 2: Cleanup provisioned targets and delete records atomically.
+	if _, err := RunActivity(record, s.CleanupAndDeleteDeployment(), deploymentID); err != nil {
+		return fmt.Errorf("cleanup and delete: %w", err)
 	}
 
 	return nil

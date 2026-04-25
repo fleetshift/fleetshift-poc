@@ -49,9 +49,9 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth), nullString(provJSON),
+		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State), d.StatusReason, string(auth), nullString(provJSON),
 		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
 		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
 	)
@@ -64,7 +64,7 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag`
+const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag`
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
@@ -111,11 +111,11 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE deployments
 		 SET manifest_strategy = ?, placement_strategy = ?, rollout_strategy = ?,
-		     resolved_targets = ?, state = ?, auth = ?, provenance = ?,
+		     resolved_targets = ?, state = ?, status_reason = ?, auth = ?, provenance = ?,
 		     generation = ?, observed_generation = ?, active_workflow_gen = ?,
 		     updated_at = ?, etag = ?
 		 WHERE id = ?`,
-		string(ms), string(ps), nullString(rs), string(rt), string(d.State), string(auth), nullString(provJSON),
+		string(ms), string(ps), nullString(rs), string(rt), string(d.State), d.StatusReason, string(auth), nullString(provJSON),
 		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
 		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, string(d.ID),
 	)
@@ -143,11 +143,11 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 
 func scanDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
-	var id, uid, msJSON, psJSON, rtJSON, stateStr, authJSON, createdAtStr, updatedAtStr, etag string
+	var id, uid, msJSON, psJSON, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr, etag string
 	var rsJSON, provJSON sql.NullString
 	var generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
-	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &authJSON, &provJSON,
+	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -158,6 +158,7 @@ func scanDeployment(s scanner) (domain.Deployment, error) {
 	d.ID = domain.DeploymentID(id)
 	d.UID = uid
 	d.State = domain.DeploymentState(stateStr)
+	d.StatusReason = statusReason
 	d.Generation = domain.Generation(generation)
 	d.ObservedGeneration = domain.Generation(observedGeneration)
 	if activeWorkflowGen.Valid {

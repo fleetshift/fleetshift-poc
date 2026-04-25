@@ -295,9 +295,20 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		dep := awaitDeploymentState(ctx, t, infra, "d1", domain.DeploymentStateFailed)
+		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+
+		dep, err := queryDeployment(ctx, t, infra, "d1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if dep.State != domain.DeploymentStateActive {
+			t.Fatalf("State = %q, want %q", dep.State, domain.DeploymentStateActive)
+		}
 		if len(dep.ResolvedTargets) != 0 {
 			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", dep.ResolvedTargets)
+		}
+		if dep.ActiveWorkflowGen != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", dep.ActiveWorkflowGen)
 		}
 
 		records := queryDeliveries(ctx, t, infra, "d1")
@@ -586,6 +597,152 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		// Let the first workflow complete.
 		if exec != nil {
 			exec.AwaitResult(ctx)
+		}
+	})
+
+	t.Run("TransientFailure_ContinueAsNew_ThenSucceeds", func(t *testing.T) {
+		infra := infraFactory(t)
+		if infra.AgentRegistrar != nil {
+			infra.AgentRegistrar.Register(TransientFailTargetType, &transientFailAgent{
+				failsRemaining: transientFailCount,
+			})
+		}
+		wfs := registerWorkflowsWithAgents(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "tf1", Type: TransientFailTargetType, Name: "transient-fail-1"},
+		)
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d-transient",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"tf1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitObservedGeneration(ctx, t, infra, "d-transient", 1)
+
+		dep, err := queryDeployment(ctx, t, infra, "d-transient")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if dep.State != domain.DeploymentStateActive {
+			t.Fatalf("State = %q, want %q", dep.State, domain.DeploymentStateActive)
+		}
+		if dep.ActiveWorkflowGen != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", dep.ActiveWorkflowGen)
+		}
+		assertResolvedTargets(t, dep, "tf1")
+	})
+
+	t.Run("TerminalFailure_TransitionsToFailed", func(t *testing.T) {
+		infra := infraFactory(t)
+		agent := &terminalFailAgent{}
+		if infra.AgentRegistrar != nil {
+			infra.AgentRegistrar.Register(TerminalFailTargetType, agent)
+		}
+		wfs := registerWorkflowsWithAgents(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "term1", Type: TerminalFailTargetType, Name: "terminal-fail-1"},
+		)
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d-terminal",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"term1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitObservedGeneration(ctx, t, infra, "d-terminal", 1)
+
+		dep, err := queryDeployment(ctx, t, infra, "d-terminal")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if dep.State != domain.DeploymentStateFailed {
+			t.Fatalf("State = %q, want %q", dep.State, domain.DeploymentStateFailed)
+		}
+		if dep.ActiveWorkflowGen != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", dep.ActiveWorkflowGen)
+		}
+		if dep.StatusReason == "" {
+			t.Fatal("StatusReason should be populated for a terminal failure")
+		}
+		if n := agent.Calls(); n != 1 {
+			t.Errorf("terminal agent called %d times, want 1 (engine should not retry permanent errors)", n)
+		}
+	})
+
+	t.Run("DeleteRetry_ContinueAsNew_ThenSucceeds", func(t *testing.T) {
+		infra := infraFactory(t)
+		agent := &transientRemoveAgent{failsRemaining: transientFailCount}
+		if infra.AgentRegistrar != nil {
+			infra.AgentRegistrar.Register(TransientRemoveTargetType, agent)
+		}
+		wfs := registerWorkflowsWithAgents(t, infra, registryFactory)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "tr1", Type: TransientRemoveTargetType, Name: "transient-remove-1"},
+		)
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d-delretry",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"tr1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitDeploymentState(ctx, t, infra, "d-delretry", domain.DeploymentStateActive)
+
+		exec, err := wfs.DeleteDeployment.Start(ctx, "d-delretry", 1)
+		if err != nil {
+			t.Fatalf("Start delete workflow: %v", err)
+		}
+		if _, err := exec.AwaitResult(ctx); err != nil {
+			t.Fatalf("Delete workflow: %v", err)
+		}
+
+		for {
+			_, err := queryDeployment(ctx, t, infra, "d-delretry")
+			if errors.Is(err, domain.ErrNotFound) {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				t.Fatalf("timed out waiting for deployment to be deleted")
+			case <-time.After(50 * time.Millisecond):
+			}
 		}
 	})
 
@@ -900,6 +1057,162 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 
 func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
 	return nil
+}
+
+// TransientFailTargetType is a target type whose delivery agent
+// fails transiently (enough times to exhaust engine-level activity
+// retries), then succeeds. Used to verify ContinueAsNew retry.
+const TransientFailTargetType domain.TargetType = "transient-fail-test"
+
+// transientFailCount is calibrated to exceed memworkflow's
+// activityMaxAttempts (10), ensuring the first execution exhausts
+// retries and the second execution succeeds.
+const transientFailCount = 11
+
+// TerminalFailTargetType is a target type whose delivery agent always
+// returns a terminal error. Used to verify terminal failure handling.
+const TerminalFailTargetType domain.TargetType = "terminal-fail-test"
+
+// TransientRemoveTargetType is a target type whose Remove method fails
+// transiently, used to verify delete retry via ContinueAsNew.
+const TransientRemoveTargetType domain.TargetType = "transient-remove-test"
+
+// transientFailAgent fails the first N Deliver calls with a plain
+// (retryable) error, then succeeds. N is set by failsRemaining.
+type transientFailAgent struct {
+	mu             sync.Mutex
+	failsRemaining int
+}
+
+func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	a.mu.Lock()
+	if a.failsRemaining > 0 {
+		a.failsRemaining--
+		a.mu.Unlock()
+		return domain.DeliveryResult{}, errors.New("transient failure")
+	}
+	a.mu.Unlock()
+	go signaler.Done(context.Background(), domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// terminalFailAgent always returns a terminal error from Deliver.
+// It counts invocations so tests can verify the engine did not retry.
+type terminalFailAgent struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (a *terminalFailAgent) Calls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
+
+func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	a.mu.Lock()
+	a.calls++
+	a.mu.Unlock()
+	return domain.DeliveryResult{}, domain.TerminalError(errors.New("permanently broken"))
+}
+
+func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+	return nil
+}
+
+// transientRemoveAgent delivers successfully but fails Remove
+// transiently, then succeeds. Used by the delete retry test.
+type transientRemoveAgent struct {
+	mu             sync.Mutex
+	failsRemaining int
+}
+
+func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	go signaler.Done(context.Background(), domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+}
+
+func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.failsRemaining > 0 {
+		a.failsRemaining--
+		return errors.New("transient remove failure")
+	}
+	return nil
+}
+
+// registerWorkflowsWithAgents is like registerWorkflows but skips the
+// default agent registration, allowing the caller to register custom
+// agents before calling this.
+func registerWorkflowsWithAgents(t *testing.T, infra Infra, registryFactory RegistryFactory) workflows {
+	t.Helper()
+	reg := registryFactory(t)
+
+	orchSpec := &domain.OrchestrationWorkflowSpec{
+		Store:      infra.Store,
+		Delivery:   infra.Delivery,
+		Strategies: domain.DefaultStrategyFactory{},
+		Registry:   reg,
+		Vault:      infra.Vault,
+	}
+	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+
+	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
+		Store:         infra.Store,
+		Orchestration: orchWf,
+	}
+	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
+	if err != nil {
+		t.Fatalf("RegisterCreateDeployment: %v", err)
+	}
+
+	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
+		Store:         infra.Store,
+		Orchestration: orchWf,
+	}
+	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteDeployment: %v", err)
+	}
+
+	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
+		Store:         infra.Store,
+		Orchestration: orchWf,
+	}
+	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeDeployment: %v", err)
+	}
+
+	provSpec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods:      stubAuthMethodRepo{},
+		Discovery:        stubDiscovery{},
+		CreateDeployment: createWf,
+		TrustBundlePlacement: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"kind-local"},
+		},
+	}
+	provWf, err := reg.RegisterProvisionIdP(provSpec)
+	if err != nil {
+		t.Fatalf("RegisterProvisionIdP: %v", err)
+	}
+
+	return workflows{
+		Orchestration:    orchWf,
+		CreateDeployment: createWf,
+		DeleteDeployment: deleteWf,
+		ResumeDeployment: resumeWf,
+		ProvisionIdP:     provWf,
+	}
 }
 
 // stubAuthMethodRepo is a no-op repository for contract test registration.
