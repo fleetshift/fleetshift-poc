@@ -141,6 +141,22 @@ type ResumeDeploymentWorkflow interface {
 	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[Deployment], error)
 }
 
+// ContinueAsNewError is returned by a workflow body to request that
+// the engine restart the workflow with a fresh history and the given
+// input. This keeps history bounded for long-running or retrying
+// workflows while preserving the same logical workflow instance.
+type ContinueAsNewError struct {
+	Input any
+}
+
+func (e *ContinueAsNewError) Error() string { return "continue as new" }
+
+// ContinueAsNew returns a [ContinueAsNewError] that workflow adapters
+// intercept to restart the workflow with the given input.
+func ContinueAsNew(input any) error {
+	return &ContinueAsNewError{Input: input}
+}
+
 // NewActivity creates an [Activity] from a stable name and a function.
 // Workflow spec types use this to define their activities as methods.
 func NewActivity[I, O any](name string, fn func(context.Context, I) (O, error)) Activity[I, O] {

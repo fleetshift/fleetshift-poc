@@ -73,9 +73,9 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		d.ID, d.UID, m.manifest, m.placement, m.rollout, m.targets, d.State, m.auth, m.provenance,
+		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
+		d.ID, d.UID, m.manifest, m.placement, m.rollout, m.targets, d.State, d.StatusReason, m.auth, m.provenance,
 		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
 		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
 	)
@@ -88,7 +88,7 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag`
+const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag`
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
@@ -117,11 +117,11 @@ func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE deployments
 		 SET manifest_strategy = $1, placement_strategy = $2, rollout_strategy = $3,
-		     resolved_targets = $4, state = $5, auth = $6, provenance = $7,
-		     generation = $8, observed_generation = $9, active_workflow_gen = $10,
-		     updated_at = $11, etag = $12
-		 WHERE id = $13`,
-		m.manifest, m.placement, m.rollout, m.targets, d.State, m.auth, m.provenance,
+		     resolved_targets = $4, state = $5, status_reason = $6, auth = $7, provenance = $8,
+		     generation = $9, observed_generation = $10, active_workflow_gen = $11,
+		     updated_at = $12, etag = $13
+		 WHERE id = $14`,
+		m.manifest, m.placement, m.rollout, m.targets, d.State, d.StatusReason, m.auth, m.provenance,
 		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
 		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, d.ID,
 	)
@@ -149,11 +149,11 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 
 func scanDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
-	var id, uid, msJSON, psJSON, rtJSON, stateStr, authJSON, createdAtStr, updatedAtStr, etag string
+	var id, uid, msJSON, psJSON, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr, etag string
 	var rsJSON, provJSON sql.NullString
 	var generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
-	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &authJSON, &provJSON,
+	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -164,6 +164,7 @@ func scanDeployment(s scanner) (domain.Deployment, error) {
 	d.ID = domain.DeploymentID(id)
 	d.UID = uid
 	d.State = domain.DeploymentState(stateStr)
+	d.StatusReason = statusReason
 	d.Generation = domain.Generation(generation)
 	d.ObservedGeneration = domain.Generation(observedGeneration)
 	if activeWorkflowGen.Valid {

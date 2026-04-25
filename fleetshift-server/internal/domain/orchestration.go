@@ -441,6 +441,29 @@ func (s *OrchestrationWorkflowSpec) AcquireLock() Activity[DeploymentID, Generat
 	})
 }
 
+// ReleaseLock clears [Deployment.ActiveWorkflowGen] without advancing
+// [Deployment.ObservedGeneration]. Used before ContinueAsNew so the
+// next execution can re-acquire the lock for a fresh retry attempt.
+func (s *OrchestrationWorkflowSpec) ReleaseLock() Activity[DeploymentID, struct{}] {
+	return NewActivity("release-orchestration-lock", func(ctx context.Context, id DeploymentID) (struct{}, error) {
+		tx, err := s.Store.Begin(ctx)
+		if err != nil {
+			return struct{}{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		dep, err := tx.Deployments().Get(ctx, id)
+		if err != nil {
+			return struct{}{}, err
+		}
+		dep.ReleaseOrchestrationLock()
+		if err := tx.Deployments().Update(ctx, dep); err != nil {
+			return struct{}{}, err
+		}
+		return struct{}{}, tx.Commit()
+	})
+}
+
 // CheckGeneration reads the deployment's current generation from the
 // store. Used mid-rollout to detect whether a new mutation has arrived.
 func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[DeploymentID, Generation] {
@@ -490,11 +513,12 @@ func (s *OrchestrationWorkflowSpec) observer() DeploymentObserver {
 	return NoOpDeploymentObserver{}
 }
 
-// Run is the deterministic workflow body. It loads the deployment
-// state, runs the appropriate pipeline (reconcile or delete), and
-// atomically completes. If the generation advanced during execution
-// the workflow loops and re-runs the pipeline rather than spawning a
-// new workflow instance.
+// Run is the deterministic workflow body. Each execution does a single
+// pass through the pipeline. On retryable failure the workflow releases
+// its lock and returns [ContinueAsNew] to restart with a fresh history.
+// On terminal failure the workflow persists [DeploymentStateFailed] and
+// completes reconciliation. Run never returns a non-nil error — it
+// always terminates in a controlled state or restarts via ContinueAsNew.
 func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID) (struct{}, error) {
 	ctx, probe := s.observer().RunStarted(record.Context(), deploymentID)
 	defer probe.End()
@@ -502,14 +526,20 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 
 	if _, err := RunActivity(record, s.AcquireLock(), deploymentID); err != nil {
 		probe.Error(err)
-		return struct{}{}, fmt.Errorf("acquire orchestration lock: %w", err)
+		if IsTerminal(err) {
+			return struct{}{}, nil
+		}
+		return struct{}{}, s.continueAsNew(record, deploymentID, probe)
 	}
 
 	for {
 		loaded, err := RunActivity(record, s.LoadDeploymentAndPool(), deploymentID)
 		if err != nil {
 			probe.Error(err)
-			return struct{}{}, fmt.Errorf("load deployment and pool: %w", err)
+			if IsTerminal(err) {
+				return struct{}{}, nil
+			}
+			return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 		}
 		dep, pool := loaded.Deployment, loaded.Pool
 		startGen := dep.Generation
@@ -518,37 +548,36 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 		case DeploymentStateDeleting:
 			if err := s.executeDelete(record, dep, pool, deploymentID); err != nil {
 				probe.Error(err)
-				return struct{}{}, err
+				if !IsTerminal(err) {
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
+				}
+				s.persistFailedResult(record, deploymentID, dep.Auth, err, probe)
+			} else {
+				return struct{}{}, nil
 			}
-			// Record is hard-deleted. No PersistReconciliationResult
-			// or CompleteReconciliation — just return.
-			return struct{}{}, nil
 
 		default:
 			resolvedIDs, err := s.executePlacementPipeline(record, dep, pool, deploymentID, startGen, probe)
-			var result ReconciliationResult
 			if errors.Is(err, errAuthPaused) {
-				result = NewPausedAuthResult(deploymentID, dep.Auth)
+				result := NewPausedAuthResult(deploymentID, dep.Auth)
 				probe.StateChanged(result.State)
 				probe.Error(err)
-				if _, err := RunActivity(record, s.PersistReconciliationResult(), result); err != nil {
-					probe.Error(err)
-					return struct{}{}, fmt.Errorf("persist reconciliation result (paused_auth): %w", err)
+				if _, persistErr := RunActivity(record, s.PersistReconciliationResult(), result); persistErr != nil {
+					probe.Error(persistErr)
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 				}
 			} else if err != nil {
-				result = NewFailedResult(deploymentID, dep.Auth)
-				probe.StateChanged(result.State)
-				if _, updateErr := RunActivity(record, s.PersistReconciliationResult(), result); updateErr != nil {
-					probe.Error(updateErr)
-				}
 				probe.Error(err)
-				return struct{}{}, err
+				if !IsTerminal(err) {
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
+				}
+				s.persistFailedResult(record, deploymentID, dep.Auth, err, probe)
 			} else {
-				result = NewActiveResult(deploymentID, resolvedIDs, dep.Auth)
+				result := NewActiveResult(deploymentID, resolvedIDs, dep.Auth)
 				probe.StateChanged(result.State)
-				if _, err := RunActivity(record, s.PersistReconciliationResult(), result); err != nil {
-					probe.Error(err)
-					return struct{}{}, fmt.Errorf("persist reconciliation result: %w", err)
+				if _, persistErr := RunActivity(record, s.PersistReconciliationResult(), result); persistErr != nil {
+					probe.Error(persistErr)
+					return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 				}
 			}
 		}
@@ -559,12 +588,53 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID
 		})
 		if err != nil {
 			probe.Error(err)
-			return struct{}{}, fmt.Errorf("complete reconciliation: %w", err)
+			return struct{}{}, s.releaseLockAndContinue(record, deploymentID, probe)
 		}
 		if !needsRestart {
 			return struct{}{}, nil
 		}
 	}
+}
+
+// persistFailedResult persists a [DeploymentStateFailed] result with
+// the cause's message as the status reason. If the persist itself
+// fails, the error is reported via probe but the workflow continues
+// to [CompleteReconciliation] regardless.
+func (s *OrchestrationWorkflowSpec) persistFailedResult(
+	record Record,
+	deploymentID DeploymentID,
+	auth DeliveryAuth,
+	cause error,
+	probe DeploymentRunProbe,
+) {
+	result := NewFailedResult(deploymentID, auth, cause.Error())
+	probe.StateChanged(result.State)
+	if _, err := RunActivity(record, s.PersistReconciliationResult(), result); err != nil {
+		probe.Error(err)
+	}
+}
+
+// releaseLockAndContinue releases the orchestration lock and returns a
+// [ContinueAsNew] error to restart with a fresh history.
+func (s *OrchestrationWorkflowSpec) releaseLockAndContinue(
+	record Record,
+	deploymentID DeploymentID,
+	probe DeploymentRunProbe,
+) error {
+	if _, err := RunActivity(record, s.ReleaseLock(), deploymentID); err != nil {
+		probe.Error(err)
+	}
+	return ContinueAsNew(deploymentID)
+}
+
+// continueAsNew returns a [ContinueAsNew] error without attempting to
+// release the lock (used when the lock was never acquired).
+func (s *OrchestrationWorkflowSpec) continueAsNew(
+	_ Record,
+	deploymentID DeploymentID,
+	_ DeploymentRunProbe,
+) error {
+	return ContinueAsNew(deploymentID)
 }
 
 // executePlacementPipeline runs the full resolve → delta → plan → execute
@@ -585,9 +655,8 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("resolve placement: %w", err)
 	}
 
-	// TODO: is this actually an error case?
 	if len(resolved) == 0 {
-		return nil, fmt.Errorf("placement resolved to zero targets")
+		return nil, nil
 	}
 
 	resolvedTargets := ResolvedTargetInfos(resolved, pool)

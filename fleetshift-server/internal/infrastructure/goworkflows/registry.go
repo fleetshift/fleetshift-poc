@@ -17,10 +17,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// activityOptions overrides go-workflows' DefaultActivityOptions with
-// aggressive retries so that transient failures (network blips,
-// database contention) do not permanently fail a reconciliation.
-var activityOptions = workflow.ActivityOptions{
+// defaultActivityOptions provides aggressive retries so that transient
+// failures (network blips, database contention) do not permanently fail
+// a reconciliation.
+var defaultActivityOptions = workflow.ActivityOptions{
 	RetryOptions: workflow.RetryOptions{
 		MaxAttempts:        20,
 		FirstRetryInterval: 500 * time.Millisecond,
@@ -36,9 +36,17 @@ type activityInvoker func(wfCtx workflow.Context, in any) (any, error)
 
 // Registry implements [domain.Registry] backed by go-workflows.
 type Registry struct {
-	Worker  *worker.Worker
-	Client  *client.Client
-	Timeout time.Duration
+	Worker          *worker.Worker
+	Client          *client.Client
+	Timeout         time.Duration
+	ActivityOptions *workflow.ActivityOptions // nil uses defaultActivityOptions
+}
+
+func (r *Registry) activityOptions() workflow.ActivityOptions {
+	if r.ActivityOptions != nil {
+		return *r.ActivityOptions
+	}
+	return defaultActivityOptions
 }
 
 func (r *Registry) timeout() time.Duration {
@@ -54,21 +62,23 @@ func (r *Registry) SignalDeploymentEvent(ctx context.Context, deploymentID domai
 
 func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec) (domain.OrchestrationWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
 
 	for _, reg := range []func() error{
-		func() error { return registerActivity(r.Worker, invokers, spec.LoadDeploymentAndPool()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.ResolvePlacement()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.PlanRollout()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.GenerateManifests()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.DeliverToTarget()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.RemoveFromTarget()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.PersistReconciliationResult()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CompleteReconciliation()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.DeleteDeploymentRecord()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CleanupProvisionedTargets()) },
-		func() error { return registerActivity(r.Worker, invokers, spec.AcquireLock()) },
+		func() error { return registerActivity(r.Worker, invokers, spec.LoadDeploymentAndPool(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.ResolvePlacement(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.PlanRollout(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.GenerateManifests(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.DeliverToTarget(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.RemoveFromTarget(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.PersistReconciliationResult(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CompleteReconciliation(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.DeleteDeploymentRecord(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CleanupProvisionedTargets(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.AcquireLock(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.ReleaseLock(), opts) },
 	} {
 		if err := reg(); err != nil {
 			return nil, err
@@ -96,7 +106,12 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 				},
 			},
 		}
-		return spec.Run(record, deploymentID)
+		val, err := spec.Run(record, deploymentID)
+		var can *domain.ContinueAsNewError
+		if errors.As(err, &can) {
+			return val, workflow.ContinueAsNew(ctx, can.Input.(domain.DeploymentID))
+		}
+		return val, err
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -108,11 +123,12 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 
 func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflowSpec) (domain.CreateDeploymentWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.PersistDeployment()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.PersistDeployment(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.StartOrchestration()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.StartOrchestration(), opts); err != nil {
 		return nil, err
 	}
 
@@ -134,11 +150,12 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 
 func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflowSpec) (domain.DeleteDeploymentWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment(), opts); err != nil {
 		return nil, err
 	}
 
@@ -160,11 +177,12 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 
 func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.MutateToResumed()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.MutateToResumed(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment(), opts); err != nil {
 		return nil, err
 	}
 
@@ -186,11 +204,12 @@ func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflo
 
 func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.ResolveAndPersist()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.ResolveAndPersist(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.DeployTrustBundle()); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.DeployTrustBundle(), opts); err != nil {
 		return nil, err
 	}
 
@@ -216,6 +235,7 @@ func registerActivity[I, O any](
 	w *worker.Worker,
 	invokers map[string]activityInvoker,
 	activity domain.Activity[I, O],
+	opts workflow.ActivityOptions,
 ) error {
 	name := activity.Name()
 
@@ -228,7 +248,7 @@ func registerActivity[I, O any](
 
 	invokers[name] = func(wfCtx workflow.Context, in any) (any, error) {
 		result, err := workflow.ExecuteActivity[O](
-			wfCtx, activityOptions, name, in,
+			wfCtx, opts, name, in,
 		).Get(wfCtx)
 		return result, err
 	}

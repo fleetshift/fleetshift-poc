@@ -9,6 +9,7 @@ import (
 	wfsqlite "github.com/cschleiden/go-workflows/backend/sqlite"
 	"github.com/cschleiden/go-workflows/client"
 	"github.com/cschleiden/go-workflows/worker"
+	"github.com/cschleiden/go-workflows/workflow"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/workflowenginetest"
@@ -64,10 +65,26 @@ func goInfra(t *testing.T) workflowenginetest.Infra {
 // the go-workflows registry. The registry only provides [domain.Registry];
 // worker and client setup are implementation-specific.
 func TestWorkflowEngine_GoWorkflows(t *testing.T) {
+	// Use fast retry options for tests so that transient-failure and
+	// terminal-failure tests don't spend minutes in exponential backoff.
+	testActivityOpts := &workflow.ActivityOptions{
+		RetryOptions: workflow.RetryOptions{
+			MaxAttempts:        3,
+			FirstRetryInterval: 1 * time.Millisecond,
+			MaxRetryInterval:   5 * time.Millisecond,
+			BackoffCoefficient: 2,
+		},
+	}
+
 	workflowenginetest.Run(t, goInfra, func(t *testing.T) domain.Registry {
 		b := wfsqlite.NewInMemoryBackend()
 		w := startWorker(t, b)
 		c := client.New(b)
-		return &goworkflows.Registry{Worker: w, Client: c, Timeout: 10 * time.Second}
+		return &goworkflows.Registry{
+			Worker:          w,
+			Client:          c,
+			Timeout:         10 * time.Second,
+			ActivityOptions: testActivityOpts,
+		}
 	})
 }
