@@ -88,6 +88,63 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("CreateOrUpdate_Insert", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		item := domain.InventoryItem{
+			ID:         "inv-1",
+			Type:       "docker.daemon",
+			Name:       "local-docker",
+			Properties: json.RawMessage(`{"version":"24"}`),
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if err := repo.CreateOrUpdate(ctx, item); err != nil {
+			t.Fatalf("CreateOrUpdate (insert): %v", err)
+		}
+
+		got, err := repo.Get(ctx, "inv-1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != "local-docker" {
+			t.Errorf("Name = %q, want %q", got.Name, "local-docker")
+		}
+	})
+
+	t.Run("CreateOrUpdate_Update", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		item := domain.InventoryItem{
+			ID: "inv-1", Type: "docker.daemon", Name: "old",
+			Properties: json.RawMessage(`{"version":"23"}`),
+			CreatedAt:  now, UpdatedAt: now,
+		}
+		if err := repo.Create(ctx, item); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		item.Name = "new"
+		item.Properties = json.RawMessage(`{"version":"24"}`)
+		item.UpdatedAt = now.Add(time.Minute)
+		if err := repo.CreateOrUpdate(ctx, item); err != nil {
+			t.Fatalf("CreateOrUpdate (update): %v", err)
+		}
+
+		got, err := repo.Get(ctx, "inv-1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != "new" {
+			t.Errorf("Name = %q, want new", got.Name)
+		}
+		if !got.CreatedAt.Equal(now) {
+			t.Errorf("CreatedAt changed: got %v, want %v", got.CreatedAt, now)
+		}
+	})
+
 	t.Run("CreateDuplicate", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

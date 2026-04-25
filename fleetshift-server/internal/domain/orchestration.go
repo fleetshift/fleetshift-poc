@@ -372,6 +372,10 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 // registers provisioned targets. Secrets are stored first so that
 // target properties referencing vault refs are valid at registration
 // time. Results with no outputs are skipped.
+//
+// All writes use upsert semantics so the activity is replay-safe:
+// delivery agents may be re-invoked after a transient failure and
+// produce the same outputs on each attempt.
 func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryResult, struct{}] {
 	return NewActivity("process-delivery-outputs", func(ctx context.Context, result DeliveryResult) (struct{}, error) {
 		if len(result.ProducedSecrets) == 0 && len(result.ProvisionedTargets) == 0 {
@@ -392,20 +396,34 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 		}
 		defer tx.Rollback()
 
-		reg := &TargetRegistrar{
-			Targets:   tx.Targets(),
-			Inventory: tx.Inventory(),
-		}
+		// TODO: revisit the "TargetRegistrar" thing – should we make that upsert instead? remove that?
+		now := s.now()
 		for _, pt := range result.ProvisionedTargets {
-			if err := reg.Register(ctx, TargetInfo{
+			invID := InventoryItemID("target:" + string(pt.ID))
+
+			props, _ := json.Marshal(pt.Properties)
+			if err := tx.Inventory().CreateOrUpdate(ctx, InventoryItem{
+				ID:         invID,
+				Type:       InventoryType(pt.Type),
+				Name:       pt.Name,
+				Properties: props,
+				Labels:     pt.Labels,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}); err != nil {
+				return struct{}{}, fmt.Errorf("upsert inventory item for target %q: %w", pt.ID, err)
+			}
+
+			if err := tx.Targets().CreateOrUpdate(ctx, TargetInfo{
 				ID:                    pt.ID,
 				Type:                  pt.Type,
 				Name:                  pt.Name,
 				Labels:                pt.Labels,
 				Properties:            pt.Properties,
 				AcceptedResourceTypes: pt.AcceptedResourceTypes,
+				InventoryItemID:       invID,
 			}); err != nil {
-				return struct{}{}, fmt.Errorf("register target %q: %w", pt.ID, err)
+				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
 			}
 		}
 		return struct{}{}, tx.Commit()

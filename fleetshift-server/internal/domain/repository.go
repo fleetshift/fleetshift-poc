@@ -5,6 +5,7 @@ import "context"
 // TargetRepository persists and retrieves target metadata.
 type TargetRepository interface {
 	Create(ctx context.Context, target TargetInfo) error
+	CreateOrUpdate(ctx context.Context, target TargetInfo) error
 	Get(ctx context.Context, id TargetID) (TargetInfo, error)
 	List(ctx context.Context) ([]TargetInfo, error)
 	Delete(ctx context.Context, id TargetID) error
@@ -22,6 +23,7 @@ type DeploymentRepository interface {
 // InventoryRepository persists and retrieves inventory items.
 type InventoryRepository interface {
 	Create(ctx context.Context, item InventoryItem) error
+	CreateOrUpdate(ctx context.Context, item InventoryItem) error
 	Get(ctx context.Context, id InventoryItemID) (InventoryItem, error)
 	List(ctx context.Context) ([]InventoryItem, error)
 	ListByType(ctx context.Context, t InventoryType) ([]InventoryItem, error)

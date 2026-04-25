@@ -47,6 +47,44 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 	return nil
 }
 
+func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) error {
+	labels, err := json.Marshal(t.Labels)
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+	props, err := json.Marshal(t.Properties)
+	if err != nil {
+		return fmt.Errorf("marshal properties: %w", err)
+	}
+	art, err := marshalResourceTypes(t.AcceptedResourceTypes)
+	if err != nil {
+		return fmt.Errorf("marshal accepted_resource_types: %w", err)
+	}
+
+	state := t.State
+	if state == "" {
+		state = domain.TargetStateReady
+	}
+
+	_, err = r.DB.ExecContext(ctx,
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		 ON CONFLICT(id) DO UPDATE SET
+		   type = EXCLUDED.type,
+		   name = EXCLUDED.name,
+		   state = EXCLUDED.state,
+		   labels = EXCLUDED.labels,
+		   properties = EXCLUDED.properties,
+		   inventory_item_id = EXCLUDED.inventory_item_id,
+		   accepted_resource_types = EXCLUDED.accepted_resource_types`,
+		t.ID, t.Type, t.Name, state, string(labels), string(props), t.InventoryItemID, art,
+	)
+	if err != nil {
+		return fmt.Errorf("upsert target: %w", err)
+	}
+	return nil
+}
+
 func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types FROM targets WHERE id = $1`,
