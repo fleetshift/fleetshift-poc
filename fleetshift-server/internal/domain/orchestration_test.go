@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -583,7 +582,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	}
 }
 
-func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
+func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	store, _ := setupStore(t)
 	seedDeployment(t, store, domain.Deployment{
 		ID:                "d1",
@@ -599,16 +598,22 @@ func TestOrchestration_EmptyPool_FailsDeployment(t *testing.T) {
 
 	rec := &simpleRecord{ctx: context.Background(), events: events}
 	_, err := wf.Run(rec, "d1")
-	if err == nil {
-		t.Fatal("expected error for empty pool")
-	}
-	if !strings.Contains(err.Error(), "zero targets") {
-		t.Errorf("error = %q, want 'zero targets'", err.Error())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 
 	dep := getDeployment(t, store, "d1")
-	if dep.State != domain.DeploymentStateFailed {
-		t.Errorf("State = %q, want failed", dep.State)
+	if dep.State != domain.DeploymentStateActive {
+		t.Errorf("State = %q, want active", dep.State)
+	}
+	if len(dep.ResolvedTargets) != 0 {
+		t.Errorf("ResolvedTargets = %v, want empty", dep.ResolvedTargets)
+	}
+	if dep.ActiveWorkflowGen != nil {
+		t.Errorf("ActiveWorkflowGen should be nil, got %v", dep.ActiveWorkflowGen)
+	}
+	if dep.ObservedGeneration != 1 {
+		t.Errorf("ObservedGeneration = %d, want 1", dep.ObservedGeneration)
 	}
 }
 

@@ -16,6 +16,7 @@ package memworkflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"runtime"
@@ -136,13 +137,22 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.D
 			}
 		}()
 
-		record := &baseRecord{
-			id:     string(deploymentID),
-			ctx:    ctx,
-			events: inst.events,
+		id := deploymentID
+		for {
+			record := &baseRecord{
+				id:     string(id),
+				ctx:    ctx,
+				events: inst.events,
+			}
+			val, err := w.spec.Run(record, id)
+			var can *domain.ContinueAsNewError
+			if errors.As(err, &can) {
+				id = can.Input.(domain.DeploymentID)
+				continue
+			}
+			done <- orchResult{val: val, err: err}
+			return
 		}
-		val, err := w.spec.Run(record, deploymentID)
-		done <- orchResult{val: val, err: err}
 	}()
 
 	return &orchExecution{id: string(deploymentID), done: done}, nil

@@ -27,6 +27,8 @@ type Deployment struct {
 	RolloutStrategy    *RolloutStrategySpec // nil means immediate
 	ResolvedTargets    []TargetID
 	State              DeploymentState
+	// TODO: consider replacing status reason with conditions
+	StatusReason       string       // human-readable explanation for the current state; cleared on success
 	Auth               DeliveryAuth // passthrough credentials; may change over time (e.g. token refresh)
 	Provenance         *Provenance  // nil for token-passthrough deployments
 	Generation         Generation   // incremented on every mutation; starts at 1
@@ -49,6 +51,7 @@ func (d *Deployment) BumpGeneration() {
 type ReconciliationResult struct {
 	DeploymentID    DeploymentID
 	State           DeploymentState
+	StatusReason    string // human-readable; populated on failure, cleared on success
 	ResolvedTargets []TargetID
 	Auth            DeliveryAuth
 }
@@ -64,10 +67,11 @@ func NewActiveResult(id DeploymentID, resolvedTargets []TargetID, auth DeliveryA
 }
 
 // NewFailedResult builds a result for a failed reconciliation pipeline.
-func NewFailedResult(id DeploymentID, auth DeliveryAuth) ReconciliationResult {
+func NewFailedResult(id DeploymentID, auth DeliveryAuth, reason string) ReconciliationResult {
 	return ReconciliationResult{
 		DeploymentID: id,
 		State:        DeploymentStateFailed,
+		StatusReason: reason,
 		Auth:         auth,
 	}
 }
@@ -88,6 +92,7 @@ func NewPausedAuthResult(id DeploymentID, auth DeliveryAuth) ReconciliationResul
 // concurrent service-layer mutations are preserved.
 func (d *Deployment) ApplyReconciliationResult(r ReconciliationResult) {
 	d.State = r.State
+	d.StatusReason = r.StatusReason
 	d.ResolvedTargets = r.ResolvedTargets
 	d.Auth = r.Auth
 }
@@ -115,4 +120,11 @@ func (d *Deployment) AcquireOrchestrationLock() bool {
 	gen := d.Generation
 	d.ActiveWorkflowGen = &gen
 	return true
+}
+
+// ReleaseOrchestrationLock clears [ActiveWorkflowGen] without
+// advancing [ObservedGeneration]. Used before ContinueAsNew so the
+// next execution can re-acquire the lock for a fresh attempt.
+func (d *Deployment) ReleaseOrchestrationLock() {
+	d.ActiveWorkflowGen = nil
 }
