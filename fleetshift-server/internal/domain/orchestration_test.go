@@ -1025,7 +1025,7 @@ func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any)
 	if err != nil {
 		return out, err
 	}
-	if !r.loaded && activity.Name() == "load-deployment-and-pool" {
+	if !r.loaded && activity.Name() == "acquire-lock-and-load" {
 		r.loaded = true
 		tx, txErr := r.store.Begin(context.Background())
 		if txErr != nil {
