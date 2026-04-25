@@ -101,6 +101,60 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("CreateOrUpdate_Insert", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		target := domain.TargetInfo{
+			ID:         "t1",
+			Type:       "kubernetes",
+			Name:       "cluster-a",
+			Labels:     map[string]string{"env": "prod"},
+			Properties: map[string]string{"region": "us-east"},
+		}
+
+		if err := repo.CreateOrUpdate(ctx, target); err != nil {
+			t.Fatalf("CreateOrUpdate (insert): %v", err)
+		}
+
+		got, err := repo.Get(ctx, "t1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != "cluster-a" {
+			t.Errorf("Name = %q, want %q", got.Name, "cluster-a")
+		}
+	})
+
+	t.Run("CreateOrUpdate_Update", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		target := domain.TargetInfo{
+			ID:   "t1",
+			Type: "kubernetes",
+			Name: "cluster-a",
+		}
+		if err := repo.Create(ctx, target); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		target.Name = "cluster-a-updated"
+		target.Properties = map[string]string{"region": "eu-west"}
+		if err := repo.CreateOrUpdate(ctx, target); err != nil {
+			t.Fatalf("CreateOrUpdate (update): %v", err)
+		}
+
+		got, err := repo.Get(ctx, "t1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Name != "cluster-a-updated" {
+			t.Errorf("Name = %q, want %q", got.Name, "cluster-a-updated")
+		}
+		if got.Properties["region"] != "eu-west" {
+			t.Errorf("Properties[region] = %q, want %q", got.Properties["region"], "eu-west")
+		}
+	})
+
 	t.Run("CreateDuplicate", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

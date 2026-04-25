@@ -49,6 +49,43 @@ func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) e
 	return nil
 }
 
+func (r *InventoryRepo) CreateOrUpdate(ctx context.Context, item domain.InventoryItem) error {
+	props, err := marshalOrDefault(item.Properties)
+	if err != nil {
+		return fmt.Errorf("marshal properties: %w", err)
+	}
+	labels, err := json.Marshal(item.Labels)
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+
+	var srcDeliveryID *string
+	if item.SourceDeliveryID != nil {
+		s := string(*item.SourceDeliveryID)
+		srcDeliveryID = &s
+	}
+
+	_, err = r.DB.ExecContext(ctx,
+		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
+		   type = excluded.type,
+		   name = excluded.name,
+		   properties = excluded.properties,
+		   labels = excluded.labels,
+		   source_delivery_id = excluded.source_delivery_id,
+		   updated_at = excluded.updated_at`,
+		string(item.ID), string(item.Type), item.Name,
+		string(props), string(labels), srcDeliveryID,
+		item.CreatedAt.UTC().Format(time.RFC3339),
+		item.UpdatedAt.UTC().Format(time.RFC3339),
+	)
+	if err != nil {
+		return fmt.Errorf("upsert inventory item: %w", err)
+	}
+	return nil
+}
+
 func (r *InventoryRepo) Get(ctx context.Context, id domain.InventoryItemID) (domain.InventoryItem, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at
