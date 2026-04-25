@@ -647,8 +647,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 	t.Run("TerminalFailure_TransitionsToFailed", func(t *testing.T) {
 		infra := infraFactory(t)
+		agent := &terminalFailAgent{}
 		if infra.AgentRegistrar != nil {
-			infra.AgentRegistrar.Register(TerminalFailTargetType, &terminalFailAgent{})
+			infra.AgentRegistrar.Register(TerminalFailTargetType, agent)
 		}
 		wfs := registerWorkflowsWithAgents(t, infra, registryFactory)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -687,6 +688,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 		if dep.StatusReason == "" {
 			t.Fatal("StatusReason should be populated for a terminal failure")
+		}
+		if n := agent.Calls(); n != 1 {
+			t.Errorf("terminal agent called %d times, want 1 (engine should not retry permanent errors)", n)
 		}
 	})
 
@@ -1097,9 +1101,22 @@ func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ do
 }
 
 // terminalFailAgent always returns a terminal error from Deliver.
-type terminalFailAgent struct{}
+// It counts invocations so tests can verify the engine did not retry.
+type terminalFailAgent struct {
+	mu    sync.Mutex
+	calls int
+}
+
+func (a *terminalFailAgent) Calls() int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.calls
+}
 
 func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+	a.mu.Lock()
+	a.calls++
+	a.mu.Unlock()
 	return domain.DeliveryResult{}, domain.TerminalError(errors.New("permanently broken"))
 }
 

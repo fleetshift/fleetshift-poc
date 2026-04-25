@@ -237,7 +237,11 @@ func registerActivity[I, O any](
 	name := activity.Name()
 
 	activityFn := func(ctx context.Context, in I) (O, error) {
-		return activity.Run(ctx, in)
+		out, err := activity.Run(ctx, in)
+		if err != nil && domain.IsTerminal(err) {
+			return out, workflow.NewPermanentError(err)
+		}
+		return out, err
 	}
 	if err := w.RegisterActivity(activityFn, goregistry.WithName(name)); err != nil {
 		return fmt.Errorf("register activity %q: %w", name, err)
@@ -274,7 +278,11 @@ func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error
 	if !ok {
 		return nil, fmt.Errorf("activity %q not registered", activity.Name())
 	}
-	return invoke(r.wfCtx, in)
+	out, err := invoke(r.wfCtx, in)
+	if err != nil && !workflow.CanRetry(err) {
+		return out, domain.TerminalError(err)
+	}
+	return out, err
 }
 
 func (r *baseRecord) Await(signalName string) (any, error) {
