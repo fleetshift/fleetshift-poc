@@ -1,0 +1,390 @@
+# Addon Architecture: Bundle Model & Engine-Centric Assets
+
+## Summary
+
+An addon is a **bundle** that can contain any combination of backend, UI, and
+CLI components -- but must include at least one. Addon bundles are registered
+with the management engine, which is the single authority on what addons exist.
+Remote clusters install addons (running their backend component), but they
+never introduce new ones.
+
+A UI or CLI component only activates when the addon's backend is installed on
+at least one managed cluster. If a UI surface does not need a backend addon for
+its data, it belongs in a core plugin, not an addon.
+
+## Addon Bundle Model
+
+An addon bundle is the unit of packaging, registration, and installation. It
+declares which components it ships:
+
+```mermaid
+graph TB
+    subgraph Bundle["Addon Bundle (e.g. monitoring)"]
+        direction LR
+        BE["Backend<br/><i>go-plugin sidecar</i><br/>Runs on cluster"]
+        UI["UI Plugin<br/><i>JS bundle + manifest</i><br/>Served by engine"]
+        CLI["CLI Extension<br/><i>cobra commands</i><br/>Runs on workstation"]
+    end
+
+    BE -.-|"required for"| UI
+    BE -.-|"required for"| CLI
+
+    style BE fill:#4a9,stroke:#2a7,color:#fff
+    style UI fill:#49a,stroke:#27a,color:#fff
+    style CLI fill:#94a,stroke:#72a,color:#fff
+```
+
+At least one component is required. UI and CLI are optional but depend on
+the backend being installed on at least one cluster.
+
+| Component | What it is | Where it runs | When it activates |
+|-----------|-----------|---------------|-------------------|
+| **Backend** | go-plugin sidecar or operator | Managed cluster (via fleetlet) | When installed on a cluster |
+| **UI** | Scalprum plugin (JS bundle + manifest) | Browser (served by engine) | When backend is installed on >= 1 cluster |
+| **CLI** | CLI extension commands | Developer workstation | When backend is installed on >= 1 cluster |
+
+**Key constraint**: UI and CLI components require a backend installation. An
+addon that only provides UI without needing cluster-side data is not an addon
+-- it is core functionality that should live in a core plugin. The backend
+component is what justifies the addon's existence as a separately installable
+unit.
+
+## The Core Insight
+
+The engine already knows the full universe of available addons before any
+cluster installs anything. A cluster cannot install an addon the engine does
+not offer. This means:
+
+1. **The engine has every addon's bundle at registration time.** When an
+   addon is registered (via CLI, API, or bundled at build time), all its
+   components -- backend definition, UI assets, CLI extensions -- are stored
+   in the engine's addon catalog.
+2. **Clusters only toggle state.** Installing an addon on a cluster is a
+   state change ("cluster X has addon Y enabled"), not a data transfer.
+3. **No asset upload from fleetlets is necessary.** The push-to-platform
+   model (fleetlets uploading JS bundles over gRPC) adds complexity without
+   value. The engine already has the assets.
+
+## Architecture
+
+```mermaid
+graph TD
+    subgraph Engine["Management Engine"]
+        CAT["Addon Catalog<br/>(all available addons)"]
+        ASSETS["Asset Store<br/>(JS bundles, manifests)"]
+        HTTP["HTTP Asset Server<br/>/v1/addon-plugins/"]
+        STATE["Cluster State<br/>(which addons enabled where)"]
+
+        CAT --> ASSETS
+        CAT --> STATE
+        ASSETS --> HTTP
+    end
+
+    subgraph Clusters["Remote Clusters"]
+        C1["Cluster A<br/>addons: [monitoring, logging]"]
+        C2["Cluster B<br/>addons: [monitoring]"]
+        C3["Cluster C<br/>addons: []"]
+    end
+
+    subgraph Browser["Web Console"]
+        SHELL["Shell App"]
+        SCALPRUM["Scalprum Runtime"]
+    end
+
+    STATE -->|"enabled addons"| SHELL
+    HTTP -->|"JS bundles"| SCALPRUM
+    C1 -.->|"install/uninstall"| STATE
+    C2 -.->|"install/uninstall"| STATE
+```
+
+## Lifecycle
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant Engine
+    participant Catalog as Addon Catalog
+    participant Cluster
+    participant Shell as Web Console
+
+    Note over Admin,Shell: Phase 1: Addon Registration (one-time)
+    Admin->>Engine: Register addon (backend + UI assets)
+    Engine->>Catalog: Store addon definition + JS bundles
+    Engine-->>Admin: Addon available in catalog
+
+    Note over Admin,Shell: Phase 2: Addon Installation (per-cluster)
+    Admin->>Engine: Install addon on Cluster A
+    Engine->>Cluster: Deploy addon backend (via fleetlet)
+    Engine->>Engine: Mark "Cluster A has addon X"
+
+    Note over Admin,Shell: Phase 3: UI Discovery (automatic)
+    Shell->>Engine: GET /v1/addon-plugins
+    Engine-->>Shell: List of registered addons + manifests
+    Shell->>Engine: GET /v1/addon-plugins/{name}/assets/*.js
+    Engine-->>Shell: JS bundle
+    Shell->>Shell: Merge into Scalprum config, render UI
+```
+
+## What the Engine Stores
+
+Each addon in the catalog has:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique addon identifier (e.g. `addon-monitoring-plugin`) |
+| `version` | Semver for cache-busting and upgrades |
+| `manifest` | Scalprum-compatible JSON (extensions, loadScripts) |
+| `assets` | JS bundle files (one or more) |
+| `extends_core` | Which core plugin surface this addon extends |
+
+The asset store is append-only with version deduplication: same name + same
+version = no-op; same name + newer version = replace.
+
+## What the Cluster Controls
+
+A cluster's relationship to addons is purely declarative state:
+
+```
+Cluster A:
+  installed_addons:
+    - monitoring (v1.2.0)
+    - logging (v1.0.0)
+```
+
+The cluster does not hold or transmit UI assets. It runs the addon backend
+(go-plugin sidecar or standalone operator) and reports health/metrics via the
+fleetlet. The UI surfaces are entirely server-side in the engine.
+
+## Why Not Push-from-Fleetlet?
+
+An alternative model has each fleetlet discover addon UI assets from a shared
+volume and upload them to the engine over gRPC. This was considered and
+rejected:
+
+| Concern | Push Model | Engine-Centric Model |
+|---------|-----------|---------------------|
+| Asset availability | Only after a cluster connects | Always available |
+| Duplicate uploads | N clusters with same addon = N uploads | Zero uploads |
+| Offline clusters | No UI until cluster reconnects | UI always works |
+| Version consistency | Race between fleetlets uploading different versions | Single source of truth |
+| Bandwidth | Large JS bundles over gRPC on every reconnect | Zero network cost |
+| Complexity | Fleetlet needs asset discovery + upload logic | Engine already has the assets |
+
+The push model solves a problem that does not exist: addons cannot appear on
+clusters that the engine does not know about.
+
+## Shell Integration
+
+The shell (web console) discovers addon plugins the same way it discovers
+built-in plugins:
+
+```mermaid
+graph LR
+    SHELL["Shell App"] -->|"GET /v1/addon-plugins"| ENGINE["Engine API"]
+    ENGINE -->|"JSON: name, version, manifest"| SHELL
+    SHELL -->|"Merge into Scalprum config"| SCALPRUM["Scalprum Runtime"]
+    SCALPRUM -->|"GET /{name}/assets/*.js"| ENGINE
+    ENGINE -->|"JS bundle"| SCALPRUM
+```
+
+The Scalprum config for an addon plugin looks identical to a built-in plugin:
+
+```json
+{
+  "addon-monitoring-plugin": {
+    "name": "addon-monitoring-plugin",
+    "manifestLocation": "http://engine:8080/v1/addon-plugins/addon-monitoring-plugin/manifest.json",
+    "assetsHost": "http://engine:8080/v1/addon-plugins/addon-monitoring-plugin/assets"
+  }
+}
+```
+
+The shell does not know or care whether a plugin is built-in or an addon. It
+loads them all the same way through Scalprum.
+
+## Addon Visibility Rules
+
+An addon's UI plugin appears in the console when:
+
+1. The addon bundle is registered in the engine's addon catalog
+2. The addon's **backend** is installed on at least one managed cluster
+3. The user has the addon's nav items enabled in their preferences
+
+Rule 2 is the critical gate. A UI plugin without a running backend has no
+data source -- it would render empty surfaces. This is also why standalone
+UI-only addons do not exist: if the UI does not need addon-specific backend
+data, it belongs in a core plugin.
+
+The same rule applies to CLI extensions: an addon's CLI commands are only
+relevant when the backend is running somewhere.
+
+Rule 3 gives users per-persona control via the existing marketplace toggle
+mechanism.
+
+## Extension Model
+
+A single addon UI plugin can expose **multiple components** -- both standalone
+pages and extensions to core extension points. This means one addon bundle
+can contribute several surfaces to the console at once.
+
+```mermaid
+graph TD
+    subgraph Addon["addon-monitoring-plugin"]
+        direction TB
+        P1["MetricsDashboard<br/><i>standalone page</i>"]
+        P2["AlertRules<br/><i>standalone page</i>"]
+        W1["ClusterHealthWidget<br/><i>dashboard widget</i>"]
+        T1["MetricsTab<br/><i>cluster detail tab</i>"]
+    end
+
+    subgraph Core["Core Extension Points"]
+        DASH["Dashboard<br/>widget slots"]
+        DETAIL["Cluster Detail<br/>tab slots"]
+    end
+
+    subgraph Nav["Navigation"]
+        NAV["Top-level nav items"]
+    end
+
+    P1 --> NAV
+    P2 --> NAV
+    W1 --> DASH
+    T1 --> DETAIL
+```
+
+Extension types:
+
+- **`fleetshift.module`** -- standalone page with its own nav item
+- **`fleetshift.dashboard-widget`** -- widget rendered on the dashboard
+- **Core extension points** -- tabs, panels, or other slots defined by core
+  plugins (e.g. a tab on the cluster detail page)
+
+Addon plugins **cannot** reference other addon plugins' scopes in their
+`$codeRef`. They can only extend core plugin surfaces. This constraint is
+enforced at load time: if a `$codeRef` references a non-core scope, it is
+rejected.
+
+## Cross-Plugin Navigation
+
+Plugins -- including addons -- need to link to each other without hardcoding
+paths. A monitoring addon might link to a cluster detail page owned by the
+core plugin, or a core widget might link to an addon's metrics page. Hardcoded
+paths create tight coupling and break when routes change or plugins are not
+installed.
+
+The solution is **reference-based navigation**: plugins navigate by target
+scope and module name, not by path. The shell resolves these references to
+actual routes at runtime based on the page registry. If the target plugin is
+not installed, the link gracefully degrades.
+
+```mermaid
+graph LR
+    A["Addon Plugin<br/><i>wants to link to cluster detail</i>"] -->|"scope: core-plugin<br/>module: ClusterDetailPage"| SHELL["Shell Router<br/><i>resolves to /clusters/:id</i>"]
+    B["Core Plugin<br/><i>wants to link to metrics</i>"] -->|"scope: addon-monitoring-plugin<br/>module: MetricsDashboard"| SHELL
+    SHELL --> PAGE["Resolved Page"]
+```
+
+The engine holds the routing structure -- it knows which plugins are
+registered, what modules they expose, and which routes they occupy. This
+means the backend can provide the page registry that the shell uses for
+resolution, keeping routing knowledge centralized rather than scattered across
+plugins.
+
+See [007-cross-plugin-navigation](https://github.com/fleetshift/fleetshift-user-interface/blob/main/spikes/007-cross-plugin-navigation.md)
+for the implementation spike.
+
+## Future: Addon SDK
+
+The long-term vision is an addon SDK that bundles backend + frontend + cli:
+
+```
+fleetshift addon create monitoring
+fleetshift addon build          # produces backend binary + UI bundle
+fleetshift addon publish        # registers in engine catalog
+```
+
+The `publish` step pushes the UI assets to the engine's addon catalog via the
+CLI/API. The engine stores them and serves them to browsers. No fleetlet
+involvement in asset delivery.
+
+## Consistency with Prior Design Decisions
+
+The engine-centric asset model is not a new direction -- it follows directly
+from decisions already made across the platform's architecture. This section
+traces how existing designs lead to this conclusion.
+
+### Addon registration is platform-side (architecture.md, Section 8)
+
+The capability and addon contract establishes that addons register their
+capabilities (ManifestGenerator, PlacementStrategy, etc.) with the platform.
+The platform is the registry; addons declare what they can do, the platform
+routes to them. UI plugin registration is the same pattern applied to
+frontend assets.
+
+### The platform owns the plugin registry (architecture.md, Section 12c)
+
+The UI extensibility model explicitly follows the Grafana/OpenShift dynamic
+console plugin pattern:
+
+> The platform provides the shell and plugin registry; addons provide
+> domain-specific content.
+
+The plugin registry lives on the platform. Addons contribute content to it.
+Storing UI assets in this registry is the natural implementation of this
+design.
+
+### Managed resources register schemas with the platform (managed_resources.md)
+
+When an addon connects, it registers its managed resource types -- including
+schemas, delivery targets, and status projections -- as part of capability
+registration. The platform stores this registration and exposes consumer-facing
+APIs based on it. UI plugin metadata is analogous: the addon declares its
+extensions and the platform exposes them to the shell.
+
+### Addon discovery flows from the platform (OME-12)
+
+The foundational addon story (OME-12: Addon registration and discovery)
+specifies:
+
+> Addons can be registered with the platform and declare their capabilities.
+> The platform can discover available addons and route to them based on type.
+
+Registration is with the platform. Discovery flows from the platform. This
+applies equally to backend capabilities and frontend plugins.
+
+### UI plugin discovery is based on backend registration (OME-13)
+
+OME-13 (Web UI addon integration) specifies:
+
+> UI plugins are discoverable based on backend addon registration. The addon
+> model provides the metadata the frontend needs to load the correct plugin.
+
+The frontend asks the platform what plugins exist. The platform answers based
+on what addons have registered. The assets need to be where the platform can
+serve them -- which means the platform's own store.
+
+### The kernel owns the UI shell (OME-30 layered model)
+
+The cluster provisioning design (OME-30) defines a four-layer architecture.
+The UI shell and plugin system sit at Layer 1 (kernel) -- platform
+infrastructure that addons at higher layers contribute to. The kernel
+manages the plugin catalog; addons populate it.
+
+### All addon stories follow the same pattern (OME-18 through OME-21)
+
+MCOA, ACS, manifest strategies, and API extensions all register with the
+management plane. The management plane stores their definitions and routes
+to them. No addon story has the cluster as the source of truth for addon
+capabilities or assets.
+
+## Relationship to Existing Implementation
+
+The current codebase has proto definitions (`UIPluginSpec`, `RegisterPlugin`)
+and platform-side storage (`addon_plugins` table, HTTP serving) that align
+with this model. The fleetlet-side asset discovery code exists but is
+unnecessary under the engine-centric model and should not be used in
+production.
+
+The HTTP serving endpoints (`/v1/addon-plugins/*`) and the Scalprum config
+merge logic in the shell are correct and reusable regardless of how assets
+arrive in the engine.
