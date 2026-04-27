@@ -157,7 +157,7 @@ Placement strategies are **declarative**: they express the desired target set at
 
 ### Design invariant: single-pod viability
 
-The platform must function correctly as a single pod with an embedded database. This is a design invariant, not a degraded mode. Every feature, every dependency, and every subsystem must satisfy the question: *does this still work for a single-pod instance with an embedded SQLite database?*
+The platform kernel must function correctly as a single pod with an embedded database. This is a design invariant for the kernel, not a degraded mode. Core kernel subsystems must satisfy the question: *does this still work for a single-pod instance with an embedded SQLite database?* Addons and the capabilities they provide are not bound by this constraint -- they have their own deployment and scaling requirements.
 
 The platform is designed to be recursively instantiable (see section 12). A parent platform deploys child platform instances as standard workloads. For this to be economically viable at per-tenant or per-region granularity, the minimum deployment footprint must be one pod: one container, one process, one persistent volume. No external database server, no mandatory sidecar, no multi-replica correctness dependency.
 
@@ -168,7 +168,7 @@ Concretely:
 - **All subsystems function with a single writer.** The orchestration pipeline, resource index, delivery tracking, and access cache all work correctly with one concurrent writer. Multi-writer support (for multi-replica Postgres deployments) is an optimization, not a correctness requirement.
 - **No external service dependencies for core function.** The platform starts, serves traffic, and runs the full orchestration pipeline with nothing more than a filesystem path for its database. External services (managed Postgres, object storage, external IdP) are integrations, not requirements.
 
-Multi-replica deployment with external Postgres remains the production model for large or high-availability instances. The invariant is that single-pod mode is always correct, always functional, and always the baseline against which new features are evaluated. If a proposed feature requires an external service, a sidecar, or multiple replicas to function, that requirement must be justified explicitly and must not be on the critical path for a minimal instance.
+Multi-replica deployment with external Postgres remains the production model for large or high-availability instances. The invariant is that single-pod mode is always correct, always functional, and always the baseline against which new kernel features are evaluated. If a proposed kernel feature requires an external service, a sidecar, or multiple replicas to function, that requirement must be justified explicitly and must not be on the critical path for a minimal instance.
 
 ### The delivery contract
 
@@ -179,6 +179,8 @@ A **target** is any endpoint that maintains the delivery contract. The platform 
 3. **Continuously report health.** The delivery agent watches the applied resources and streams status back to the platform. Health is not a one-time check; it is a continuous signal that the platform uses for rollout progression, placement decisions, and user-visible status.
 
 How a target implements these three requirements is its own business. A Kubernetes target uses Server-Side Apply and watches resource conditions. A platform target creates child deployments through the FleetShift API. An addon-registered target implements whatever domain-specific logic its backend requires. The delivery contract is the only constraint that the platform imposes on its targets.
+
+When a delivery agent supports provenance verification, it independently verifies that a real user authorized the operation before applying -- see section 1b. Provenance verification is a target capability, not a platform requirement; targets without verification support still satisfy the delivery contract.
 
 ---
 
@@ -202,13 +204,30 @@ For example, a Thanos addon could register a `thanos` target type. Deploying Tha
 
 Addon-registered targets participate in the standard pipeline: placement resolves them, rollout batches them, manifest strategies generate payloads for them, and the platform tracks their delivery status. The only difference from built-in types is that the delivery agent logic lives in the addon process, not in the fleetlet.
 
+### Delivery agent authentication
+
+Every delivery agent must support at least one mode of the authentication model (see section 1b and authentication.md). It verifies that an authorized user approved the operation before applying -- whether by validating a bearer token, verifying a provenance attestation, or other modes defined in the future. The agent combines verification, apply, and status reporting in one component; there is no separate broadly-privileged reconciler that blindly trusts the platform. Target-side credentials (e.g., a Kubernetes SA, a cloud provider role) never leave the target environment.
+
+---
+
+## 1b. Authentication and provenance
+
+The platform is designed to limit the trust placed in the platform itself -- a compromise of the management platform should not compromise an entire multi-tenant provider estate. The authentication model addresses two orthogonal concerns:
+
+- **Provenance** -- cryptographic proof of who authorized an operation. Every delivery can carry a user signature; the delivery agent can verify it before applying. This composes with all credential presentation modes.
+- **Credential presentation** -- whose credential applies resources at the target. The user's own token (OIDC passthrough), a delegation service account, or the delivery agent's own SA are all valid modes. The choice is per-target, not per-platform.
+
+When credentials or attestation are missing, expired, or insufficient, the deployment transitions to `PausedAuth` -- a recoverable waiting state where any authorized user can resume with fresh approval. `PausedAuth` is the universal fallback: it prevents silent failure and ensures that no delivery proceeds without adequate authorization.
+
+See authentication.md for the full design and poc/attestation/hybrid/ for the verification prototype.
+
 ---
 
 ## 2. Orchestration pipeline
 
 The platform's orchestration pipeline is always the same regardless of which strategies are plugged in:
 
-1. Resolve the placement strategy against the workspace's target pool → target set
+1. Resolve the placement strategy against the deployment's pool → target set
 2. Compute the delta against the previous target set → added, removed, unchanged
 3. Plan the rollout: pass the delta to the rollout strategy → ordered steps with tasks
 4. For each batch, for each target, call the manifest strategy's `Generate(gctx)` → manifests
@@ -216,23 +235,25 @@ The platform's orchestration pipeline is always the same regardless of which str
 6. Diff against previous state; add, update, or remove as needed
 7. Evaluate step tasks by calling back to the rollout strategy before proceeding
 
-### Workspace target pool
+### Pool
 
-The **workspace's target pool** is the set of targets that are valid candidates for a deployment. For a deployment in workspace W, the pool is all targets that belong to W or to any descendant workspace (see resource hierarchy, section 7). The platform loads the pool once per orchestration run; the placement strategy receives it as input and returns a subset (the resolved target set). Placement never fetches targets itself.
+A **pool** produces a target set from nothing: `Pool() → Target[]`. A **placement** produces a target set from a target set: `Resolve(Target[]) → Target[]`. These are orthogonal. The pool determines which targets exist as candidates; the placement strategy selects among them. Every deployment has a pool; the platform evaluates it once per orchestration run and passes the result to placement. Placement never fetches targets itself.
+
+A pool can be defined in several ways. The simplest is a **static list** of target IDs. Or a **label query** selects targets matching a selector expression. More advanced pool definitions may include provisioning correlation (targets created by a specific provisioning flow), scaling policies, and health aggregation -- an active Pool resource with these capabilities is being explored as a first-class kernel resource.
 
 **Placement view vs full target state.** The platform separates the state it *shares with placement* from the full target state it stores and passes to delivery. Placement receives only a **placement view** of each target (e.g. ID, name, labels). Other target metadata (e.g. properties, capacity, last-seen) are not passed to placement. As a result, placement cannot depend on them, and the platform need not consider changes to that metadata when deciding whether to re-resolve placement. Only changes to the placement view (e.g. labels, target join/leave) trigger placement invalidation.
 
 **Why pool as input:**
 
-- **Persistent authority.** A deployment has ongoing behavior (re-resolution on invalidation, fleet changes). At re-run time there is no "current user" to check—so the deployment's authority must be attached to the deployment. Creating the deployment in a workspace fixes that: the deployment can only ever see targets in that workspace's tree. The pool is that scope. (An alternative would be a deployment-scoped service principal with configured policy; the workspace model is equivalent to an implicit principal granted access to the workspace's targets.)
+- **Persistent authority.** A deployment has ongoing behavior (re-resolution on invalidation, fleet changes). At re-run time there is no "current user" to check -- so the deployment's authority must be attached to the deployment. The pool fixes that scope: the deployment can only ever see targets in its pool, regardless of how the pool is defined. (An alternative would be a deployment-scoped service principal with configured policy; the pool model is equivalent to an implicit principal granted access to a defined set of targets.)
 - **Composition.** Placement has a uniform shape: `Resolve(ctx, pool) → targets`. The output of one placement can be the input to another (e.g. scope → selector → scored). That composition only works if placement consistently expects a pool.
-- **Re-evaluation.** When the fleet or labels change, the platform reloads the pool and re-calls Resolve. Placement stays a pure, scope-agnostic function; static placement validates "ID in pool," selector and "all" filter or take the pool.
+- **Re-evaluation.** When pool membership or target labels change, the platform reloads the pool and re-calls Resolve. Placement stays a pure, scope-agnostic function; static placement validates "ID in pool," selector and "all" filter or take the pool.
 
 **Consolidated orchestration pseudo-code:**
 
 ```
 for each deployment in workspace:
-    targets = deployment.PlacementStrategy.Resolve(workspace_target_pool)
+    targets = deployment.PlacementStrategy.Resolve(deployment.pool)
     delta = diff(targets, previous_targets)
 
     plan = deployment.RolloutStrategy.Plan(delta)   // full delta: added, removed, unchanged
@@ -409,7 +430,7 @@ The fleetlet has five built-in channels that are always available, fleetlet-owne
   - **Local caching** -- the fleetlet caches resolved identities and permission results locally, reducing platform round-trips for repeated credentials. Cache entries have a short TTL aligned with the platform's session semantics.
   - **Resilience during disconnection** -- during brief platform disconnections, the fleetlet serves cached access results rather than failing every proxy request immediately. This trades freshness for availability -- a valid trade-off for the seconds-to-minutes duration of a reconnection cycle.
   - **Priority** -- if the transport is congested, access messages are prioritized over addon-defined channels. A large manifest delivery or bulk telemetry stream never starves access lookups.
-3. **Delivery channel** -- manifest delivery from platform to target (request/response). The platform sends a delivery request containing generated manifests; the delivery agent applies them and responds with an acknowledgment (success or error). For a `kubernetes` target, this means Server-Side Apply against the local API server. For addon-registered targets, the addon's delivery agent handles application. The delivery channel is per-target: a fleetlet serving multiple targets multiplexes delivery requests to the correct delivery agent based on the target ID in the delivery envelope.
+3. **Delivery channel** -- manifest delivery from platform to target (request/response). The platform sends a delivery request containing generated manifests; the delivery agent applies them and responds with an acknowledgment (success or error). The delivery envelope can include an attestation (signed input and output constraints) that the delivery agent verifies before applying (see section 1b). For a `kubernetes` target, this means Server-Side Apply against the local API server. For addon-registered targets, the addon's delivery agent handles application. The delivery channel is per-target: a fleetlet serving multiple targets multiplexes delivery requests to the correct delivery agent based on the target ID in the delivery envelope.
 4. **Status channel** -- delivery status and health from target to platform (streaming). Applied/Available/Degraded conditions flow back continuously. The platform aggregates this into `DeliveryStatusService`. Like the delivery channel, status is per-target.
 5. **Index channel** -- resource index deltas from target to platform (streaming). An indexer agent watches the target's state and streams resource deltas (add, update, delete) to the platform for fleet-wide search indexing (see section 11).
 
@@ -447,6 +468,8 @@ The fleetlet's platform-facing side is a pluggable transport. The default is gRP
 - **Kube API** -- each channel = watch + write on CRDs/Secrets. For backward compatibility with OCM-style systems where no additional infrastructure is available.
 
 The local side (gRPC over UDS or TCP) doesn't change regardless of which platform transport the fleetlet uses. A local process never knows or cares whether its messages reach the platform via gRPC, NATS, or Kafka.
+
+Transport mode also functions as a security dimension. Standard gRPC gives low latency with a live connection; buffered transport (S3, Kafka, NATS) provides an airgap where no persistent connection exists between the platform and the delivery agent. The attestation contract (envelope in, validate, apply) is identical regardless of transport -- only the delivery path changes. For buffered transport, a platform signature on the envelope adds value since there is no connection-level auth. See authentication.md and provider_consumer_model.md for how transport choice interacts with the authentication and provider models.
 
 ### Routing capabilities
 
@@ -585,19 +608,28 @@ This is the model used by Rancher (`remotedialer` peer mesh). It is simple, prov
 
 ## 7. Organizational model
 
-The platform is **single-tenant**. Each platform instance serves one organization. Multi-organization isolation is achieved through recursive instantiation (section 12) -- each organization gets its own platform instance, not a partition within a shared one. This eliminates an entire class of complexity (tenant boundary enforcement, cross-tenant data leakage, dual admin roles) and aligns with how customers actually deploy: one control plane per organizational boundary.
+The platform is natively **multi-tenant**. A **platform provider** operates the management plane and controls which addons are installed, how they are topologized, which trust domains exist, and how tenants are provisioned and onboarded. **Tenants** exist within that system, each with authorization isolation as a hard requirement. The exact set of additional isolation primitives between tenants -- process isolation, data partitioning, separate identity providers, independent upgrade schedules -- is still under design.
 
-### Two actors
+The exact relationship between the platform provider and its tenants is also TBD. The provider may be a distinct control-plane construct, another kind of tenant with elevated privileges, or something in between. This document intentionally does not resolve that question; see provider_consumer_model.md for the current exploration.
+
+Recursive instantiation (section 12) remains available as a stronger isolation boundary: each child instance has its own process, storage, and identity configuration. Native multi-tenancy and recursive instantiation coexist -- they serve different points on the isolation/cost spectrum rather than being mutually exclusive.
+
+### Actors
 
 ```mermaid
 graph TB
-    subgraph admin [Administrator]
+    subgraph provider [Platform Provider]
+        manageAddons[Manage Addon Registrations and Topology]
+        manageTrust[Manage Trust Domains]
+        provisionTenants[Provision and Onboard Tenants]
+        viewUsage[View Usage / Metering]
+    end
+
+    subgraph tenant [Tenant]
         manageWorkspaces[Manage Workspace Hierarchy]
-        manageAddons[Manage Addon Registrations]
         assignTargets[Assign Targets to Workspaces]
         createDeployments[Create Deployments in Workspaces]
         grantAccess[Grant User/Group Access at Workspace Level]
-        viewUsage[View Usage / Metering]
     end
 
     subgraph addon [Addon]
@@ -612,9 +644,9 @@ graph TB
     end
 ```
 
+**Platform provider** operates this platform instance. Manages addon installation, addon topology, trust domains, and tenant lifecycle. Views cross-tenant usage and metering data. In a recursive deployment, a parent platform manages the lifecycle of child platform instances; each child has its own provider context.
 
-
-**Administrator** operates this platform instance. Manages the workspace hierarchy, registers addons (capabilities), assigns targets to workspaces, creates deployments, and grants user/group access at workspace levels. Views usage and metering data. In a recursive deployment, a parent platform manages the lifecycle of child platform instances; the child's administrator manages their own fleet independently.
+**Tenant** operates within the platform instance under authorization isolation. Manages a workspace hierarchy, assigns targets to workspaces, creates deployments, and grants user/group access at workspace levels. Each tenant authenticates with its own trust anchor (tenant IdP, signing keys); see authentication.md for the trust model.
 
 **Addon** (like MCOA) is a platform-level integration. It registers capabilities, and the platform calls the addon's manifest generator when targets need manifests. The addon's ManifestGenerator receives a `TargetInfo` and generates manifests. The addon's query-time filtering (`PermissionTranslator`) is permission-aware through a generic platform contract -- it translates `[]ResourcePermission` into domain-specific filters without directly referencing workspace hierarchy or organizational structure. The platform resolves the organizational graph; the addon operates on a flat list of permitted resource IDs.
 
@@ -622,14 +654,18 @@ graph TB
 
 ```
 Platform Instance
-  ├── Workspace "Engineering"
-  │     ├── Workspace "Frontend"
-  │     │     └── targets: [prod-us-east, staging-us-east]
-  │     │     └── deployments: [metrics-collection → prod-us-east]
-  │     └── Workspace "Backend"
-  │           └── targets: [prod-us-west]
-  └── Workspace "Data Science"
-        └── targets: [ml-gpu-1]
+  ├── Tenant "Acme Corp"
+  │     ├── Workspace "Engineering"
+  │     │     ├── Workspace "Frontend"
+  │     │     │     └── targets: [prod-us-east, staging-us-east]
+  │     │     │     └── deployments: [metrics-collection → prod-us-east]
+  │     │     └── Workspace "Backend"
+  │     │           └── targets: [prod-us-west]
+  │     └── Workspace "Data Science"
+  │           └── targets: [ml-gpu-1]
+  └── Tenant "Globex Inc"
+        └── Workspace "Production"
+              └── targets: [prod-eu-west]
 ```
 
 **Key rules:**
@@ -637,18 +673,23 @@ Platform Instance
 - Workspaces inherit from parent workspaces. A deployment in "Engineering" can target targets in "Frontend" and "Backend" (its children). A deployment in "Frontend" can only target "Frontend" targets.
 - Users are not members of workspaces. They are *granted access to* workspaces (grant model TBD, potentially SpiceDB/Zanzibar-style). Access flows down the subtree.
 - A target belongs to exactly one workspace. Moving a target between workspaces is a remove + assign.
-- An addon is called by the platform when targets need manifests. The platform resolves workspace hierarchy and deployment selectors transparently. The addon never references workspace IDs.
+- Tenants have authorization isolation: a user authenticated under one tenant's trust anchor cannot access another tenant's workspaces, targets, or deployments. Additional isolation primitives are TBD.
+- An addon is called by the platform when targets need manifests. The platform resolves workspace hierarchy and deployment selectors transparently. The addon never references workspace IDs or tenant IDs.
 - Authorization queries return generic permission tuples with addon-defined attributes. The platform evaluates WHO has access; the addon defines WHAT access means in its domain.
 
-### Why single-tenant
+### Why native multi-tenancy
 
-Every competing multi-cluster platform that claims multi-tenancy (OCM's ManagedClusterSetBinding, Rancher's Project) actually provides intra-organization scoping, not inter-organization isolation. For hard organizational boundaries, all of them -- including OCM and Rancher -- recommend deploying separate instances. The workspace tree provides the same intra-org scoping that these platforms offer. Inter-org isolation is handled by recursive instantiation (section 12), which provides process-level isolation, independent identity providers, and independent upgrade schedules -- none of which an in-process tenant boundary can deliver.
+<!-- TODO: The isolation model between tenants (beyond authorization) is still under design. -->
 
-Dropping multi-tenancy eliminates: tenant ID threading through every code path, dual capability scopes (platform vs tenant), dual admin roles, cross-tenant sharing mechanisms, and an entire class of data-leakage vulnerabilities. The API surface shrinks (no `/tenants/{tenant}` prefix on every endpoint). The codebase is simpler, the mental model is simpler, and every feature ships faster.
+The platform provides native tenant boundaries with authorization isolation as the foundation. This enables a single platform instance to serve multiple organizations without requiring a separate process per tenant. The workspace tree provides intra-tenant scoping (team boundaries, environment separation), while tenant boundaries provide inter-organization isolation.
+
+For deployments requiring stronger isolation -- separate processes, independent storage, distinct identity providers, independent upgrade schedules -- recursive instantiation (section 12) is available. A parent platform can deploy child instances as standard workloads, giving each child full process-level isolation. Native multi-tenancy and recursive instantiation serve different points on the isolation/cost spectrum; both are valid and can coexist within the same deployment.
 
 ---
 
 ## 8. Capability and addon contract
+
+Addons are separate processes, not just for modularity but for **trust**. Targets can trust addons in ways they do not trust the platform -- an addon that generates manifests or makes placement decisions signs its own outputs, and the delivery agent can verify those signatures independently. This is a key reason addons run as separate processes with their own identities rather than as in-process plugins of the platform kernel. See authentication.md for the signing and verification model.
 
 ### Addon surface
 
@@ -688,6 +729,16 @@ The `ManifestGenerator` interface has specific semantics that addon implementers
 - **At-least-once invocation**: The platform may invoke `Generate` speculatively for dry-run or preview purposes. Generate need not be a pure function, but repeated invocations must be safe.
 - **Dry-run safety**: Generate may be called speculatively; implementations must not assume every call results in delivery.
 - **OnRemoved semantics**: Called when a target leaves this capability's target set. The platform retries OnRemoved with at-least-once semantics until it succeeds. Implementations must be idempotent -- calling OnRemoved twice for the same target must not double-delete or return an error.
+
+---
+
+## 8a. Managed resources
+
+**Managed resources** are addon-driven, consumer-facing resource types -- the "nouns" of the platform (e.g., clusters, VMs, ArgoCD instances). An addon registers a managed resource type with a schema, and the platform exposes a consumer-facing API for it.
+
+Structurally, a managed resource derives a Deployment where the addon itself is the delivery target. The derivation is mechanical: the platform stores the user's signed resource spec, creates a derived Deployment with `delivery_target: self`, and delivers the resource document to the addon through the standard orchestration pipeline. The addon interprets the resource spec and fulfills it -- calling cloud provider APIs, creating infrastructure, managing lifecycle. Provenance chains from the user's signature through the managed resource to the derived deployment.
+
+See managed_resources.md for the full design. This concept is being developed; the structural relationship (managed resource → derived Deployment → addon delivery) is the stable part, while the consumer-facing API shape and schema registration mechanics are still maturing.
 
 ---
 
@@ -898,6 +949,10 @@ Each instance has its own identity provider configuration — inherited from the
 
 The parent manages the child's infrastructure (pod, storage, network) without needing to authenticate against the child's platform API. Infrastructure health is observed via the delivery status channel and the fleetlet's health reporting.
 
+### Provider/consumer/factory topology
+
+Related design work explores a provider/consumer/factory topology for managed infrastructure services at scale -- where a consumer requests managed resources through a front door, a provider fulfills them by scheduling onto factory infrastructure, and a boundary separates the two surfaces. This topology composes with managed resources (section 8a), pools (section 2), the authentication model (section 1b), and the native provider/tenant model (section 7). See provider_consumer_model.md for the full proposal; the exact relationships between `provider`, `tenant`, and `consumer` in this topology remain TBD.
+
 ### Cross-instance queries
 
 When multiple platform instances exist in a hierarchy, users need aggregated views: "show me all degraded deployments across all regions," "list vulnerability findings from all StackRox instances."
@@ -1045,6 +1100,8 @@ These are genuinely undecided design points. Established design decisions have b
 
 **Options:** (a) Platform-managed mTLS as part of the fleetlet channel, (b) addon bundles certs in generated manifests, (c) a dedicated `CertService` interface.
 
+**Partial progress:** authentication.md addresses user and addon key distribution (key binding bundles, external key sources like GitHub/GitLab, SPIFFE/SPIRE and cert-manager for addons). The mTLS certificate provisioning question for fleetlet-platform communication remains open as a separate concern.
+
 ### Deployment defaults for registered capabilities
 
 **Question:** When an addon registers a capability but no user has created a deployment for it yet, should the platform auto-create a "deploy everywhere" deployment?
@@ -1190,13 +1247,10 @@ Sub-questions if this direction has merit:
 
 **Context:** A proxy fleetlet (section 5a) uses a kubeconfig to reach a remote cluster. Sub-questions: (a) Who rotates the kubeconfig when credentials expire? (b) How does the platform handle the handoff from proxy fleetlet (on Kind) to co-located fleetlet (on the target) — does the platform explicitly deregister the proxy target, or does the co-located fleetlet's registration supersede it? (c) Could the 1:N fleetlet model support proxy delivery with a single fleetlet process (delivery envelope routing), or is a separate fleetlet process per target the right default?
 
-### Fleetlet channel count
-
-**Note:** The fleetlet now has five built-in channels (Control, Access, Delivery, Status, Index), up from two in the initial design. Update any references to "two built-in channels" or "four built-in channels" throughout documentation and code.
-
 ### Deferred to separate designs
 
-- **Authorization model:** The unified model for grants, inheritance, and workspace-level access will be designed separately, potentially using SpiceDB/Zanzibar-style relationship tuples. The management plane API provides a generic `LookupPermissions` endpoint; the authorization model determines how permissions are computed.
+- **Authorization model:** The unified model for grants, inheritance, and workspace-level access will be designed separately, potentially using SpiceDB/Zanzibar-style relationship tuples. The management plane API provides a generic `LookupPermissions` endpoint; the authorization model determines how permissions are computed. authentication.md provides direction on trust anchors (tenant IdP, user signing keys), trust anchor constraints, and `PausedAuth` as the universal credential-gap fallback.
+- **Tenancy model and isolation primitives:** The exact relationship between the platform provider and tenants (section 7) is TBD, as are non-authorization isolation primitives between tenants. The document establishes authorization isolation as a hard requirement; the full isolation model is a separate design exercise.
 - **Permission schema language:** How the addon registers its permission schema with the platform (SpiceDB ZED, CEL, custom DSL) is out of scope for this plan.
 - **Concrete DeploymentGroup controller implementation:** This document captures the concept and API shape; the controller's internal state machine and workflow design is a separate design exercise.
 - **UI plugin SDK and implementation:** The architecture establishes extension points and the plugin model; the concrete plugin SDK, loading mechanism, and isolation model are separate designs referencing prior art (OpenShift dynamic console plugins, Grafana plugins).
