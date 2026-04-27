@@ -94,6 +94,12 @@ func (b *ConditionBroadcaster) Subscribe() (id uint64, ch <-chan []byte, snapsho
 	return id, c, snap
 }
 
+func (b *ConditionBroadcaster) Remove(targetID domain.TargetID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.latest, targetID)
+}
+
 func (b *ConditionBroadcaster) Unsubscribe(id uint64) {
 	b.mu.Lock()
 	defer b.mu.Unlock()

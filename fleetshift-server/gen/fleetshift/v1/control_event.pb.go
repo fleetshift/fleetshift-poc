@@ -28,6 +28,7 @@ type ControlEvent struct {
 	// Types that are valid to be assigned to Event:
 	//
 	//	*ControlEvent_RegisterTarget
+	//	*ControlEvent_Goodbye
 	Event         isControlEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -79,6 +80,15 @@ func (x *ControlEvent) GetRegisterTarget() *RegisterTarget {
 	return nil
 }
 
+func (x *ControlEvent) GetGoodbye() *Goodbye {
+	if x != nil {
+		if x, ok := x.Event.(*ControlEvent_Goodbye); ok {
+			return x.Goodbye
+		}
+	}
+	return nil
+}
+
 type isControlEvent_Event interface {
 	isControlEvent_Event()
 }
@@ -87,15 +97,22 @@ type ControlEvent_RegisterTarget struct {
 	RegisterTarget *RegisterTarget `protobuf:"bytes,1,opt,name=register_target,json=registerTarget,proto3,oneof"`
 }
 
+type ControlEvent_Goodbye struct {
+	Goodbye *Goodbye `protobuf:"bytes,2,opt,name=goodbye,proto3,oneof"`
+}
+
 func (*ControlEvent_RegisterTarget) isControlEvent_Event() {}
+
+func (*ControlEvent_Goodbye) isControlEvent_Event() {}
 
 var File_fleetshift_v1_control_event_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_control_event_proto_rawDesc = "" +
 	"\n" +
-	"!fleetshift/v1/control_event.proto\x12\rfleetshift.v1\x1a#fleetshift/v1/register_target.proto\"a\n" +
+	"!fleetshift/v1/control_event.proto\x12\rfleetshift.v1\x1a#fleetshift/v1/register_target.proto\x1a\x1bfleetshift/v1/goodbye.proto\"\x95\x01\n" +
 	"\fControlEvent\x12H\n" +
-	"\x0fregister_target\x18\x01 \x01(\v2\x1d.fleetshift.v1.RegisterTargetH\x00R\x0eregisterTargetB\a\n" +
+	"\x0fregister_target\x18\x01 \x01(\v2\x1d.fleetshift.v1.RegisterTargetH\x00R\x0eregisterTarget\x122\n" +
+	"\agoodbye\x18\x02 \x01(\v2\x16.fleetshift.v1.GoodbyeH\x00R\agoodbyeB\a\n" +
 	"\x05eventBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
@@ -114,14 +131,16 @@ var file_fleetshift_v1_control_event_proto_msgTypes = make([]protoimpl.MessageIn
 var file_fleetshift_v1_control_event_proto_goTypes = []any{
 	(*ControlEvent)(nil),   // 0: fleetshift.v1.ControlEvent
 	(*RegisterTarget)(nil), // 1: fleetshift.v1.RegisterTarget
+	(*Goodbye)(nil),        // 2: fleetshift.v1.Goodbye
 }
 var file_fleetshift_v1_control_event_proto_depIdxs = []int32{
 	1, // 0: fleetshift.v1.ControlEvent.register_target:type_name -> fleetshift.v1.RegisterTarget
-	1, // [1:1] is the sub-list for method output_type
-	1, // [1:1] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	2, // 1: fleetshift.v1.ControlEvent.goodbye:type_name -> fleetshift.v1.Goodbye
+	2, // [2:2] is the sub-list for method output_type
+	2, // [2:2] is the sub-list for method input_type
+	2, // [2:2] is the sub-list for extension type_name
+	2, // [2:2] is the sub-list for extension extendee
+	0, // [0:2] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_control_event_proto_init() }
@@ -130,8 +149,10 @@ func file_fleetshift_v1_control_event_proto_init() {
 		return
 	}
 	file_fleetshift_v1_register_target_proto_init()
+	file_fleetshift_v1_goodbye_proto_init()
 	file_fleetshift_v1_control_event_proto_msgTypes[0].OneofWrappers = []any{
 		(*ControlEvent_RegisterTarget)(nil),
+		(*ControlEvent_Goodbye)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{

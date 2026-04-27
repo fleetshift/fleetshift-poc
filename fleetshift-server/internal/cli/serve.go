@@ -311,6 +311,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- fleetlet agent (remote delivery via gRPC) ---
 
 	fleetletServer := transportgrpc.NewFleetletServer(targetSvc, logger)
+	fleetletServer.StartHealthChecker(ctx, 90*time.Second, 15*time.Second)
 	fleetletAgent := &fleetletaddon.Agent{Server: fleetletServer}
 	router.Register(fleetletaddon.TargetType, fleetletAgent)
 

@@ -12,6 +12,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -37,7 +38,7 @@ func main() {
 	targetID := flag.String("target-id", "fleetlet-kind-1", "Target ID to register")
 	targetName := flag.String("target-name", "Kind Addon Spike", "Human-readable target name")
 	pluginDir := flag.String("plugin-dir", "", "Directory containing go-plugin Unix sockets (shared emptyDir)")
-	metricsInterval := flag.Duration("metrics-interval", 30*time.Second, "Metrics collection interval")
+	metricsInterval := flag.Duration("metrics-interval", 30*time.Second, "Metrics collection and heartbeat interval")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
@@ -45,13 +46,35 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if err := run(ctx, logger, *platformAddr, *targetID, *targetName, *pluginDir, *metricsInterval); err != nil {
-		logger.Error("fleetlet exited with error", "error", err)
-		os.Exit(1)
+	backoff := 1 * time.Second
+	const maxBackoff = 60 * time.Second
+
+	for {
+		err := run(ctx, logger, *platformAddr, *targetID, *targetName, *pluginDir, *metricsInterval)
+		if ctx.Err() != nil {
+			logger.Info("fleetlet shut down gracefully")
+			return
+		}
+
+		logger.Warn("fleetlet disconnected, will reconnect",
+			"error", err, "backoff", backoff)
+
+		select {
+		case <-time.After(backoff):
+		case <-ctx.Done():
+			logger.Info("fleetlet shut down during backoff")
+			return
+		}
+
+		backoff = min(backoff*2, maxBackoff)
 	}
 }
 
 func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targetName, pluginDir string, metricsInterval time.Duration) error {
+	// runCtx keeps streams alive until we explicitly cancel after sending Goodbye.
+	runCtx, runCancel := context.WithCancel(context.Background())
+	defer runCancel()
+
 	logger.Info("connecting to platform", "addr", platformAddr)
 
 	conn, err := grpc.NewClient(platformAddr,
@@ -66,7 +89,7 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 
 	// --- Control: register target ---
 
-	controlStream, err := client.Control(ctx)
+	controlStream, err := client.Control(runCtx)
 	if err != nil {
 		return fmt.Errorf("open control stream: %w", err)
 	}
@@ -113,20 +136,23 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 	// --- Monitoring addon via go-plugin (sidecar) ---
 
 	var monAddon monitoringplugin.MonitoringAddon
+	var addons []*addonStatus
 	if pluginDir != "" {
-		addon, cleanup, err := connectMonitoringPlugin(ctx, logger, pluginDir)
+		addon, cleanup, err := connectMonitoringPlugin(runCtx, logger, pluginDir)
 		if err != nil {
 			logger.Warn("failed to connect monitoring plugin", "error", err)
+			addons = append(addons, &addonStatus{name: "monitoring", connected: false, lastError: err.Error()})
 		} else {
 			monAddon = addon
 			defer cleanup()
 			logger.Info("monitoring plugin connected via go-plugin")
+			addons = append(addons, &addonStatus{name: "monitoring", connected: true})
 		}
 	}
 
 	// --- Deliver: handle delivery requests ---
 
-	deliverCtx := metadata.AppendToOutgoingContext(ctx, "target-id", targetID)
+	deliverCtx := metadata.AppendToOutgoingContext(runCtx, "target-id", targetID)
 	deliverStream, err := client.Deliver(deliverCtx)
 	if err != nil {
 		return fmt.Errorf("open deliver stream: %w", err)
@@ -134,9 +160,29 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 
 	logger.Info("deliver stream established, waiting for instructions")
 
+	// Start heartbeat loop (always, even without addons)
+	go heartbeatLoop(runCtx, logger, deliverStream, targetID, metricsInterval, addons)
+
 	if monAddon != nil {
-		go metricsLoop(ctx, logger, deliverStream, monAddon, targetID, metricsInterval)
+		go metricsLoop(runCtx, logger, deliverStream, monAddon, targetID, metricsInterval, addons[0])
 	}
+
+	// Graceful shutdown: send Goodbye before tearing down streams.
+	go func() {
+		<-ctx.Done()
+		logger.Info("shutdown signal received, sending goodbye")
+		_ = controlStream.Send(&pb.ControlEvent{
+			Event: &pb.ControlEvent_Goodbye{
+				Goodbye: &pb.Goodbye{
+					TargetId:  targetID,
+					Reason:    "SIGTERM",
+					Timestamp: timestamppb.Now(),
+				},
+			},
+		})
+		time.Sleep(500 * time.Millisecond)
+		runCancel()
+	}()
 
 	for {
 		instruction, err := deliverStream.Recv()
@@ -166,7 +212,7 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 				return fmt.Errorf("send delivery accepted: %w", err)
 			}
 
-			applyErr := applyManifests(ctx, logger, dynClient, req.Manifests)
+			applyErr := applyManifests(runCtx, logger, dynClient, req.Manifests)
 
 			state := pb.DeliveryCompleted_STATE_DELIVERED
 			msg := "applied by fleetlet"
@@ -206,6 +252,82 @@ func run(ctx context.Context, logger *slog.Logger, platformAddr, targetID, targe
 			}); err != nil {
 				return fmt.Errorf("send remove completed: %w", err)
 			}
+		}
+	}
+}
+
+// addonStatus tracks the health of a single go-plugin addon.
+type addonStatus struct {
+	mu               sync.Mutex
+	name             string
+	connected        bool
+	lastCollectionAt time.Time
+	lastError        string
+}
+
+func (s *addonStatus) setSuccess(t time.Time) {
+	s.mu.Lock()
+	s.connected = true
+	s.lastCollectionAt = t
+	s.lastError = ""
+	s.mu.Unlock()
+}
+
+func (s *addonStatus) setError(err error) {
+	s.mu.Lock()
+	s.lastError = err.Error()
+	s.mu.Unlock()
+}
+
+func (s *addonStatus) toProto() *pb.AddonHealth {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ah := &pb.AddonHealth{
+		Name:      s.name,
+		Connected: s.connected,
+		Message:   s.lastError,
+	}
+	if !s.lastCollectionAt.IsZero() {
+		ah.LastCollectionTime = timestamppb.New(s.lastCollectionAt)
+	}
+	return ah
+}
+
+// heartbeatLoop sends periodic Heartbeat messages on the deliver stream.
+func heartbeatLoop(
+	ctx context.Context,
+	logger *slog.Logger,
+	stream grpc.BidiStreamingClient[pb.DeliverEvent, pb.DeliverInstruction],
+	targetID string,
+	interval time.Duration,
+	addons []*addonStatus,
+) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			var health []*pb.AddonHealth
+			for _, a := range addons {
+				health = append(health, a.toProto())
+			}
+
+			if err := stream.Send(&pb.DeliverEvent{
+				Event: &pb.DeliverEvent_Heartbeat{
+					Heartbeat: &pb.Heartbeat{
+						TargetId:    targetID,
+						Timestamp:   timestamppb.Now(),
+						AddonHealth: health,
+					},
+				},
+			}); err != nil {
+				logger.Warn("failed to send heartbeat", "error", err)
+				return
+			}
+			logger.Debug("heartbeat sent", "addons", len(health))
 		}
 	}
 }
@@ -328,7 +450,7 @@ func guessResource(kind string) string {
 	}
 }
 
-func metricsLoop(ctx context.Context, logger *slog.Logger, stream grpc.BidiStreamingClient[pb.DeliverEvent, pb.DeliverInstruction], addon monitoringplugin.MonitoringAddon, targetID string, interval time.Duration) {
+func metricsLoop(ctx context.Context, logger *slog.Logger, stream grpc.BidiStreamingClient[pb.DeliverEvent, pb.DeliverInstruction], addon monitoringplugin.MonitoringAddon, targetID string, interval time.Duration, status *addonStatus) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
@@ -340,9 +462,11 @@ func metricsLoop(ctx context.Context, logger *slog.Logger, stream grpc.BidiStrea
 			resp, err := addon.Collect(ctx)
 			if err != nil {
 				logger.Warn("metrics collection failed", "error", err)
+				status.setError(err)
 				continue
 			}
 
+			status.setSuccess(time.Now())
 			conditions := metricsToConditions(resp)
 
 			if err := stream.Send(&pb.DeliverEvent{

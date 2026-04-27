@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/protobuf/timestamp.proto";
+
+// Goodbye is sent by the fleetlet on the Control stream during graceful
+// shutdown (SIGTERM). It tells the hub that the disconnection is
+// intentional, not a crash or network failure.
+message Goodbye {
+  string target_id = 1;
+  string reason = 2;
+  google.protobuf.Timestamp timestamp = 3;
+}

@@ -1,17 +1,20 @@
 package grpc
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"sync"
+	"time"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
+	"google.golang.org/protobuf/types/known/timestamppb"
 )
 
 // FleetletSession holds the state for a single connected fleetlet.
@@ -22,6 +25,12 @@ type FleetletSession struct {
 	deliver  grpc.BidiStreamingServer[pb.DeliverEvent, pb.DeliverInstruction]
 	pending  map[string]chan *pb.DeliverEvent // delivery_id → response
 	closedCh chan struct{}
+
+	// Health tracking
+	lastHeartbeat time.Time
+	addonHealth   []*pb.AddonHealth
+	healthy       bool
+	graceful      bool
 }
 
 func (s *FleetletSession) setDeliverStream(stream grpc.BidiStreamingServer[pb.DeliverEvent, pb.DeliverInstruction]) {
@@ -118,6 +127,100 @@ func (s *FleetletServer) Session(id domain.TargetID) *FleetletSession {
 	return s.sessions[id]
 }
 
+// StartHealthChecker spawns a goroutine that periodically checks all
+// sessions for expired heartbeats and publishes health state changes.
+func (s *FleetletServer) StartHealthChecker(ctx context.Context, timeout, interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				s.checkHealth(timeout)
+			}
+		}
+	}()
+}
+
+func (s *FleetletServer) checkHealth(timeout time.Duration) {
+	s.mu.RLock()
+	sessions := make([]*FleetletSession, 0, len(s.sessions))
+	for _, sess := range s.sessions {
+		sessions = append(sessions, sess)
+	}
+	s.mu.RUnlock()
+
+	now := time.Now()
+	for _, sess := range sessions {
+		sess.mu.Lock()
+		if sess.healthy && !sess.lastHeartbeat.IsZero() && now.Sub(sess.lastHeartbeat) > timeout {
+			sess.healthy = false
+			sess.mu.Unlock()
+			s.Logger.Warn("heartbeat expired",
+				"target_id", sess.TargetID,
+				"last_heartbeat", sess.lastHeartbeat)
+			s.publishHealthEvent(sess.TargetID, sess)
+		} else {
+			sess.mu.Unlock()
+		}
+	}
+}
+
+func (s *FleetletServer) publishHealthEvent(targetID domain.TargetID, session *FleetletSession) {
+	var conditions []*pb.Condition
+
+	if session == nil {
+		conditions = append(conditions, &pb.Condition{
+			Type:    "FleetletHealth",
+			Status:  "False",
+			Reason:  "Disconnected",
+			Message: `{"healthy":false,"graceful":false}`,
+		})
+	} else {
+		session.mu.Lock()
+		status, reason := "True", "Healthy"
+		if session.graceful {
+			status, reason = "False", "GracefulShutdown"
+		} else if !session.healthy {
+			status, reason = "False", "HeartbeatExpired"
+		}
+		msg := fmt.Sprintf(`{"healthy":%t,"graceful":%t,"lastHeartbeat":"%s"}`,
+			session.healthy, session.graceful,
+			session.lastHeartbeat.Format(time.RFC3339))
+
+		conditions = append(conditions, &pb.Condition{
+			Type:    "FleetletHealth",
+			Status:  status,
+			Reason:  reason,
+			Message: msg,
+		})
+
+		for _, ah := range session.addonHealth {
+			addonStatus := "True"
+			if !ah.Connected {
+				addonStatus = "False"
+			}
+			conditions = append(conditions, &pb.Condition{
+				Type:    "AddonHealth",
+				Status:  addonStatus,
+				Reason:  ah.Name,
+				Message: ah.Message,
+			})
+		}
+		session.mu.Unlock()
+	}
+
+	report := &pb.DeliveryConditionReport{
+		DeliveryId: "health-" + string(targetID),
+		TargetId:   string(targetID),
+		Conditions: conditions,
+		ObservedAt: timestamppb.Now(),
+	}
+	s.Broadcaster.Publish(targetID, report)
+}
+
 // Control handles target registration on a bidirectional stream.
 func (s *FleetletServer) Control(stream grpc.BidiStreamingServer[pb.ControlEvent, pb.ControlInstruction]) error {
 	for {
@@ -127,6 +230,20 @@ func (s *FleetletServer) Control(stream grpc.BidiStreamingServer[pb.ControlEvent
 		}
 		if err != nil {
 			return err
+		}
+
+		if goodbye := evt.GetGoodbye(); goodbye != nil {
+			tid := domain.TargetID(goodbye.TargetId)
+			s.Logger.Info("fleetlet sent goodbye",
+				"target_id", tid, "reason", goodbye.Reason)
+
+			session := s.Session(tid)
+			if session != nil {
+				session.mu.Lock()
+				session.graceful = true
+				session.mu.Unlock()
+			}
+			continue
 		}
 
 		reg := evt.GetRegisterTarget()
@@ -221,13 +338,24 @@ func (s *FleetletServer) Deliver(stream grpc.BidiStreamingServer[pb.DeliverEvent
 
 	session.setDeliverStream(stream)
 	s.Logger.Info("deliver stream established", "target_id", targetID)
+	s.publishHealthEvent(targetID, session)
 
 	defer func() {
+		session.mu.Lock()
+		graceful := session.graceful
+		session.mu.Unlock()
+
 		s.mu.Lock()
 		delete(s.sessions, targetID)
 		s.mu.Unlock()
 		close(session.closedCh)
-		s.Logger.Info("fleetlet disconnected", "target_id", targetID)
+
+		if graceful {
+			s.Logger.Info("fleetlet disconnected gracefully", "target_id", targetID)
+		} else {
+			s.Logger.Warn("fleetlet disconnected unexpectedly", "target_id", targetID)
+		}
+		s.Broadcaster.Remove(targetID)
 	}()
 
 	for {
@@ -256,6 +384,19 @@ func (s *FleetletServer) Deliver(stream grpc.BidiStreamingServer[pb.DeliverEvent
 				"delivery_id", e.ConditionReport.DeliveryId,
 				"conditions", len(e.ConditionReport.Conditions))
 			s.Broadcaster.Publish(targetID, e.ConditionReport)
+		case *pb.DeliverEvent_Heartbeat:
+			hb := e.Heartbeat
+			session.mu.Lock()
+			session.lastHeartbeat = time.Now()
+			session.addonHealth = hb.AddonHealth
+			session.healthy = true
+			session.mu.Unlock()
+
+			s.Logger.Debug("heartbeat received",
+				"target_id", targetID,
+				"addons", len(hb.AddonHealth))
+
+			s.publishHealthEvent(targetID, session)
 		}
 	}
 }

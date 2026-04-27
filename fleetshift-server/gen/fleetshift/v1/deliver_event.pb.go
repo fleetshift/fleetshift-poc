@@ -32,6 +32,7 @@ type DeliverEvent struct {
 	//	*DeliverEvent_DeliveryCompleted
 	//	*DeliverEvent_RemoveCompleted
 	//	*DeliverEvent_ConditionReport
+	//	*DeliverEvent_Heartbeat
 	Event         isDeliverEvent_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -119,6 +120,15 @@ func (x *DeliverEvent) GetConditionReport() *DeliveryConditionReport {
 	return nil
 }
 
+func (x *DeliverEvent) GetHeartbeat() *Heartbeat {
+	if x != nil {
+		if x, ok := x.Event.(*DeliverEvent_Heartbeat); ok {
+			return x.Heartbeat
+		}
+	}
+	return nil
+}
+
 type isDeliverEvent_Event interface {
 	isDeliverEvent_Event()
 }
@@ -143,6 +153,10 @@ type DeliverEvent_ConditionReport struct {
 	ConditionReport *DeliveryConditionReport `protobuf:"bytes,5,opt,name=condition_report,json=conditionReport,proto3,oneof"`
 }
 
+type DeliverEvent_Heartbeat struct {
+	Heartbeat *Heartbeat `protobuf:"bytes,6,opt,name=heartbeat,proto3,oneof"`
+}
+
 func (*DeliverEvent_DeliveryAccepted) isDeliverEvent_Event() {}
 
 func (*DeliverEvent_DeliveryProgress) isDeliverEvent_Event() {}
@@ -153,17 +167,20 @@ func (*DeliverEvent_RemoveCompleted) isDeliverEvent_Event() {}
 
 func (*DeliverEvent_ConditionReport) isDeliverEvent_Event() {}
 
+func (*DeliverEvent_Heartbeat) isDeliverEvent_Event() {}
+
 var File_fleetshift_v1_deliver_event_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_deliver_event_proto_rawDesc = "" +
 	"\n" +
-	"!fleetshift/v1/deliver_event.proto\x12\rfleetshift.v1\x1a%fleetshift/v1/delivery_accepted.proto\x1a%fleetshift/v1/delivery_progress.proto\x1a&fleetshift/v1/delivery_completed.proto\x1a$fleetshift/v1/remove_completed.proto\x1a-fleetshift/v1/delivery_condition_report.proto\"\xac\x03\n" +
+	"!fleetshift/v1/deliver_event.proto\x12\rfleetshift.v1\x1a%fleetshift/v1/delivery_accepted.proto\x1a%fleetshift/v1/delivery_progress.proto\x1a&fleetshift/v1/delivery_completed.proto\x1a$fleetshift/v1/remove_completed.proto\x1a-fleetshift/v1/delivery_condition_report.proto\x1a\x1dfleetshift/v1/heartbeat.proto\"\xe6\x03\n" +
 	"\fDeliverEvent\x12N\n" +
 	"\x11delivery_accepted\x18\x01 \x01(\v2\x1f.fleetshift.v1.DeliveryAcceptedH\x00R\x10deliveryAccepted\x12N\n" +
 	"\x11delivery_progress\x18\x02 \x01(\v2\x1f.fleetshift.v1.DeliveryProgressH\x00R\x10deliveryProgress\x12Q\n" +
 	"\x12delivery_completed\x18\x03 \x01(\v2 .fleetshift.v1.DeliveryCompletedH\x00R\x11deliveryCompleted\x12K\n" +
 	"\x10remove_completed\x18\x04 \x01(\v2\x1e.fleetshift.v1.RemoveCompletedH\x00R\x0fremoveCompleted\x12S\n" +
-	"\x10condition_report\x18\x05 \x01(\v2&.fleetshift.v1.DeliveryConditionReportH\x00R\x0fconditionReportB\a\n" +
+	"\x10condition_report\x18\x05 \x01(\v2&.fleetshift.v1.DeliveryConditionReportH\x00R\x0fconditionReport\x128\n" +
+	"\theartbeat\x18\x06 \x01(\v2\x18.fleetshift.v1.HeartbeatH\x00R\theartbeatB\a\n" +
 	"\x05eventBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
@@ -186,6 +203,7 @@ var file_fleetshift_v1_deliver_event_proto_goTypes = []any{
 	(*DeliveryCompleted)(nil),       // 3: fleetshift.v1.DeliveryCompleted
 	(*RemoveCompleted)(nil),         // 4: fleetshift.v1.RemoveCompleted
 	(*DeliveryConditionReport)(nil), // 5: fleetshift.v1.DeliveryConditionReport
+	(*Heartbeat)(nil),               // 6: fleetshift.v1.Heartbeat
 }
 var file_fleetshift_v1_deliver_event_proto_depIdxs = []int32{
 	1, // 0: fleetshift.v1.DeliverEvent.delivery_accepted:type_name -> fleetshift.v1.DeliveryAccepted
@@ -193,11 +211,12 @@ var file_fleetshift_v1_deliver_event_proto_depIdxs = []int32{
 	3, // 2: fleetshift.v1.DeliverEvent.delivery_completed:type_name -> fleetshift.v1.DeliveryCompleted
 	4, // 3: fleetshift.v1.DeliverEvent.remove_completed:type_name -> fleetshift.v1.RemoveCompleted
 	5, // 4: fleetshift.v1.DeliverEvent.condition_report:type_name -> fleetshift.v1.DeliveryConditionReport
-	5, // [5:5] is the sub-list for method output_type
-	5, // [5:5] is the sub-list for method input_type
-	5, // [5:5] is the sub-list for extension type_name
-	5, // [5:5] is the sub-list for extension extendee
-	0, // [0:5] is the sub-list for field type_name
+	6, // 5: fleetshift.v1.DeliverEvent.heartbeat:type_name -> fleetshift.v1.Heartbeat
+	6, // [6:6] is the sub-list for method output_type
+	6, // [6:6] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_fleetshift_v1_deliver_event_proto_init() }
@@ -210,12 +229,14 @@ func file_fleetshift_v1_deliver_event_proto_init() {
 	file_fleetshift_v1_delivery_completed_proto_init()
 	file_fleetshift_v1_remove_completed_proto_init()
 	file_fleetshift_v1_delivery_condition_report_proto_init()
+	file_fleetshift_v1_heartbeat_proto_init()
 	file_fleetshift_v1_deliver_event_proto_msgTypes[0].OneofWrappers = []any{
 		(*DeliverEvent_DeliveryAccepted)(nil),
 		(*DeliverEvent_DeliveryProgress)(nil),
 		(*DeliverEvent_DeliveryCompleted)(nil),
 		(*DeliverEvent_RemoveCompleted)(nil),
 		(*DeliverEvent_ConditionReport)(nil),
+		(*DeliverEvent_Heartbeat)(nil),
 	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
