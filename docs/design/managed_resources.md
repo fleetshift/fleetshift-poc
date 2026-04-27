@@ -455,7 +455,7 @@ Non-reconciling fleet-wide operations (e.g. upgrade campaigns, rolling patches) 
 
 **WIP / DRAFT**
 
-These could possibly be inventory or addon-directed queries (hand waving a bit over what that is–maybe an extension of the federated query mechanism discussed in [architecture.md](./architecture.md)) that are pre-configured templates? We'd like to define a read projection up front and not have to hit the addon to process this.
+These could possibly be inventory or addon-directed queries (hand waving a bit over what that is -- maybe an extension of the federated query mechanism discussed in [architecture/platform_hierarchy.md](./architecture/platform_hierarchy.md)) that are pre-configured templates. We'd like to define a read projection up front and not have to hit the addon to process this.
 
 ### Integration (observability, security, ...)
 

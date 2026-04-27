@@ -65,7 +65,7 @@ A consumer can also run their own FleetShift instance. This adds fleet-wide work
 
 When the provider provisions a cluster on behalf of such a consumer, the provider configures the new cluster's fleetlet to connect to the consumer's FleetShift instance. The managed resource type's lifecycle includes this cross-instance target registration -- the provider knows the consumer instance's endpoint and injects it into the provisioned cluster's bootstrap configuration.
 
-The provider's managed resource types are also advertised to the consumer instance. The consumer instance can use a generic "managed resource" addon that adapts to whatever types the provider exposes, allowing the consumer to request managed resources through their own deployment pipeline rather than calling the provider API directly. This is the recursive instantiation path described in architecture.md section 12, but it is opt-in -- not the only way consumers interact with providers.
+The provider's managed resource types are also advertised to the consumer instance. The consumer instance can use a generic "managed resource" addon that adapts to whatever types the provider exposes, allowing the consumer to request managed resources through their own deployment pipeline rather than calling the provider API directly. This is the recursive instantiation path described in [architecture/platform_hierarchy.md](architecture/platform_hierarchy.md), but it is opt-in -- not the only way consumers interact with providers.
 
 ## 3. Signed intent verification in delivery
 
