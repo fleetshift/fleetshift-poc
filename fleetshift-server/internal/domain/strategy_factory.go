@@ -10,16 +10,33 @@ type StrategyFactory interface {
 	RolloutStrategy(spec *RolloutStrategySpec) RolloutStrategy
 }
 
+// AddonManifestStrategyFactory creates manifest strategies that delegate
+// to go-plugin addon subprocesses. When set on DefaultStrategyFactory,
+// the "addon" manifest strategy type becomes available.
+type AddonManifestStrategyFactory interface {
+	CreateStrategy(addonName string) ManifestStrategy
+}
+
 // DefaultStrategyFactory creates built-in strategy implementations.
 // Built-in strategies are currently pure with no I/O; the orchestration
 // pipeline invokes all strategies from activities so that custom or
 // future strategies may perform I/O or stateful behavior safely.
-type DefaultStrategyFactory struct{}
+type DefaultStrategyFactory struct {
+	Addons AddonManifestStrategyFactory // optional: enables "addon" manifest strategy
+}
 
 func (f DefaultStrategyFactory) ManifestStrategy(spec ManifestStrategySpec) (ManifestStrategy, error) {
 	switch spec.Type {
 	case ManifestStrategyInline:
 		return &InlineManifestStrategy{Manifests: spec.Manifests}, nil
+	case ManifestStrategyAddon:
+		if f.Addons == nil {
+			return nil, fmt.Errorf("%w: addon manifest strategy not configured", ErrInvalidArgument)
+		}
+		if spec.AddonName == "" {
+			return nil, fmt.Errorf("%w: addon manifest strategy requires AddonName", ErrInvalidArgument)
+		}
+		return f.Addons.CreateStrategy(spec.AddonName), nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported manifest strategy type %q", ErrInvalidArgument, spec.Type)
 	}

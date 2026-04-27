@@ -5,12 +5,14 @@ type ManifestStrategyType string
 
 const (
 	ManifestStrategyInline ManifestStrategyType = "inline"
+	ManifestStrategyAddon  ManifestStrategyType = "addon"
 )
 
 // ManifestStrategySpec is the user-provided specification for manifest generation.
 type ManifestStrategySpec struct {
 	Type      ManifestStrategyType
 	Manifests []Manifest // required for "inline"
+	AddonName string     // required for "addon"
 }
 
 // PlacementStrategyType identifies the kind of placement strategy.

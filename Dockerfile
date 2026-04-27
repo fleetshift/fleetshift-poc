@@ -2,23 +2,26 @@ FROM golang:1.25 AS builder
 
 WORKDIR /src
 
-# Copy go.mod/go.sum for both modules to cache deps
-# CLI has a replace directive pointing to ../fleetshift-server
+# Copy go.mod/go.sum for all modules to cache deps
 COPY fleetshift-server/go.mod fleetshift-server/go.sum ./fleetshift-server/
 COPY fleetshift-cli/go.mod fleetshift-cli/go.sum ./fleetshift-cli/
+COPY addons/go.mod addons/go.sum ./addons/
 COPY gen/go.mod gen/go.sum ./gen/
 RUN cd fleetshift-server && go mod download && \
-    cd ../fleetshift-cli && go mod download
+    cd ../fleetshift-cli && go mod download && \
+    cd ../addons && go mod download
 
-# Copy all source (server, cli, gen, proto)
+# Copy all source
 COPY fleetshift-server/ ./fleetshift-server/
 COPY fleetshift-cli/ ./fleetshift-cli/
+COPY addons/ ./addons/
 COPY gen/ ./gen/
 COPY proto/ ./proto/
 
-# Build both binaries
+# Build binaries
 RUN cd fleetshift-server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift
 RUN cd fleetshift-cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
+RUN cd addons && CGO_ENABLED=0 go build -o /bin/monitoring-platform ./monitoring/cmd/platform/
 
 # --- Runtime ---
 FROM debian:bookworm-slim
@@ -39,6 +42,7 @@ RUN ARCH=$(dpkg --print-architecture) && \
 
 COPY --from=builder /bin/fleetshift /usr/local/bin/fleetshift
 COPY --from=builder /bin/fleetctl /usr/local/bin/fleetctl
+COPY --from=builder /bin/monitoring-platform /usr/local/bin/monitoring-platform
 
 EXPOSE 50051 8085
 

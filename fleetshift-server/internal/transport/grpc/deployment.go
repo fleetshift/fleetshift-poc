@@ -173,6 +173,14 @@ func manifestStrategyFromProto(p *pb.ManifestStrategy) (domain.ManifestStrategyS
 			Type:      domain.ManifestStrategyInline,
 			Manifests: manifests,
 		}, nil
+	case pb.ManifestStrategy_TYPE_ADDON:
+		if p.GetAddonName() == "" {
+			return domain.ManifestStrategySpec{}, fmt.Errorf("addon_name is required for TYPE_ADDON")
+		}
+		return domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyAddon,
+			AddonName: p.GetAddonName(),
+		}, nil
 	default:
 		return domain.ManifestStrategySpec{}, fmt.Errorf("unsupported manifest_strategy type: %v", p.GetType())
 	}
@@ -308,6 +316,9 @@ func manifestStrategyToProto(s domain.ManifestStrategySpec) *pb.ManifestStrategy
 	switch s.Type {
 	case domain.ManifestStrategyInline:
 		ms.Type = pb.ManifestStrategy_TYPE_INLINE
+	case domain.ManifestStrategyAddon:
+		ms.Type = pb.ManifestStrategy_TYPE_ADDON
+		ms.AddonName = s.AddonName
 	}
 	if len(s.Manifests) > 0 {
 		ms.Manifests = make([]*pb.Manifest, len(s.Manifests))
