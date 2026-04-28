@@ -252,7 +252,7 @@ The key property: the platform is a courier throughout. It stores the user's sig
 
 The platform separates the core orchestration primitive from user-facing concepts:
 
-**Fulfillment** (kernel primitive): the internal unit of orchestration. A Fulfillment is a versioned composition of pointers (intent, placement, rollout) that drives the reconciliation loop — resolve → delta → plan → generate → deliver. Fulfillments are not directly created or edited by users. They have version history at the kernel level: each mutation creates a new Fulfillment version (snapshot of all pointers), making generation meaningful for audit, debugging, and rollback.
+**Fulfillment** (kernel primitive): the internal unit of orchestration. Each Fulfillment maintains independently versioned strategy streams (manifest, placement, rollout) that drive the reconciliation loop — resolve → delta → plan → generate → deliver. Fulfillments are not directly created or edited by users. Any strategy version advance bumps the Fulfillment's generation, providing configuration history at the kernel level for audit, debugging, and rollback.
 
 **User-facing concepts** (thin layers over Fulfillments):
 
@@ -264,7 +264,7 @@ Each user-facing concept defines its own API surface, lifecycle rules, and edita
 
 ### Versioned intent
 
-Managed resource specs are stored as immutable versions. A Fulfillment holds a pointer to a specific version. Updating the pointer IS the Fulfillment mutation — generation bumps naturally, eliminating lockstep coordination between a mutable resource table and the Fulfillment.
+Managed resource specs are stored as immutable versions — the user-facing version history. Each update to a managed resource creates a new version; the managed resource HEAD table tracks which version is current.
 
 ```sql
 CREATE TABLE resource_intents (
@@ -280,20 +280,34 @@ CREATE TABLE resource_intents (
 
 Each version is immutable — INSERT only, never UPDATE. Postgres: `PARTITION BY LIST (resource_type)`, partitions at addon registration. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
 
-### Fulfillment as composition of versioned pointers
+Resource intent versioning is a managed resource layer concern, distinct from Fulfillment strategy versioning (see [below](#fulfillment-strategy-versioning)). When a new resource intent version is created, the platform creates a corresponding manifest strategy version on the Fulfillment (referencing the new intent version), which bumps the Fulfillment's generation and triggers reconciliation. But the two version histories are independent: the resource intent tracks what the user asked for; the Fulfillment's manifest strategy tracks what the system was configured to deliver.
 
-Fulfillments reference versioned things — intent, placement strategy, rollout strategy — each independently versioned and reusable:
+### Fulfillment strategy versioning
+
+Each strategy type on a Fulfillment has its own append-only version stream scoped to that Fulfillment. The Fulfillment tracks the current version of each strategy. Any strategy version advance bumps the Fulfillment's generation, which is the orchestration loop's signal to reconcile.
 
 ```
 fulfillment:
-  manifest:  resource_intent @version
-  placement: placement_strategy @version
-  rollout:   rollout_strategy @version
+  id: F1
+  manifest_strategy_version:  3
+  placement_strategy_version: 2
+  rollout_strategy_version:   1
   generation: N
   state:     {api_url, provider_id, ...}
+
+manifest_strategies:   (fulfillment_id, version, type, content, created_at)
+placement_strategies:  (fulfillment_id, version, type, content, created_at)
+rollout_strategies:    (fulfillment_id, version, type, content, created_at)
 ```
 
-Each mutation creates a new Fulfillment version (snapshot of all pointers at that generation). This plumbs complete history without a monolithic history table — component version histories are independent, and Fulfillment versions capture the composition traversal (which specific versions were active together at each point in time). Reusable placement strategies across Fulfillments matches OCM.
+Strategy versions are scoped to a Fulfillment — each Fulfillment maintains independent version counters per strategy type. This cleanly separates two distinct version histories:
+
+- **Resource version history** (what the user asked for over time) — stored in `resource_intents`, tracked by the managed resource HEAD table
+- **Fulfillment configuration history** (what the system was configured to do at each point) — stored in per-Fulfillment strategy versions
+
+A managed resource spec change creates a new `resource_intent` version AND a new manifest strategy version on the Fulfillment (referencing the new intent version). But the Fulfillment's manifest strategy can also change for reasons unrelated to the resource intent (e.g. addon invalidation). And placement or rollout strategies change independently of either.
+
+**Shared definitions.** Strategies can reference shared, reusable definitions through an additional layer of indirection — the same pattern as managed resources referencing `resource_intents`. A placement strategy version might reference a shared placement definition used across many Fulfillments. When the shared definition changes, each affected Fulfillment gets a new strategy version, which bumps generation and triggers reconciliation. The reusability lives in the referenced definition, not in the strategy version stream itself.
 
 The Fulfillment's `state` field carries mutable, non-historical outputs — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change. If history is needed for observed properties, it flows through inventory.
 
@@ -362,13 +376,13 @@ Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded con
 
 The managed resource consumer API projects from:
 
-- **Spec** → `resource_intents` (the version the Fulfillment references)
+- **Spec** → `resource_intents` (the version the managed resource tracks)
 - **Phase** → Fulfillment lifecycle enum
 - **Observed state** → inventory (conditions and state for the managed thing and its sub-resources)
 
 ```
 GET /clusters/prod-us-east-1
-  spec:       → from resource_intents @version
+  spec:       → from resource_intents @current_version (managed resource HEAD)
   phase:      → from Fulfillment (provisioning/active/failed/deleting)
   conditions: → from inventory item for this managed resource
   state:      → from inventory item for this managed resource
@@ -397,20 +411,20 @@ CREATE TABLE managed_resources (
 The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (`GET /clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for phase:
 
 ```sql
-SELECT mr.*, ri.spec, ri.provenance, d.state AS phase
+SELECT mr.*, ri.spec, ri.provenance, f.state AS phase
 FROM managed_resources mr
 JOIN resource_intents ri
   ON ri.resource_type = mr.resource_type
   AND ri.name = mr.name
   AND ri.version = mr.current_version
-JOIN deployments d ON d.id = mr.fulfillment_id
+JOIN fulfillments f ON f.id = mr.fulfillment_id
 WHERE mr.resource_type = 'clusters'
   AND mr.deleted_at IS NULL;
 ```
 
 Phase is not denormalized — the Fulfillment join is already required for Fulfillment-level state. Observed state (conditions, runtime properties) comes from a separate inventory query.
 
-Writes: `INSERT` on create, `UPDATE current_version` on spec change (bumps the Fulfillment's intent pointer), `UPDATE deleted_at` on delete.
+Writes: `INSERT` on create, `UPDATE current_version` on spec change, `UPDATE deleted_at` on delete. Updating `current_version` is a managed resource layer operation; it triggers a corresponding manifest strategy version on the Fulfillment (see [Fulfillment strategy versioning](#fulfillment-strategy-versioning)), but the two version counters are independent.
 
 ### Placement and groupings
 
@@ -492,9 +506,10 @@ When an addon [re]connects...
 - **`state` field on Fulfillments as the sole observed-state mechanism** — stable outputs only; historical observed state through inventory
 - **Per-manifest condition layer on deliveries** — inventory is the per-resource condition system
 - **Three-level condition hierarchy** — two levels sufficient (delivery + Fulfillment)
-- **Multiple intent pointers per Fulfillment** — bundled intent preferred
+- **Multiple intent pointers per Fulfillment** — bundled intent preferred; strategy versioning is per strategy type, not per intent
 - **Delivery conditions as semantic health aggregate** — delivery conditions are addon operational status; resource health through inventory
 - **Direct user access to the kernel primitive** — user-facing concepts (managed resource, campaign, deployment) are the API; Fulfillment is internal
+- **Fulfillment as composite version snapshot** — replaced by per-strategy version streams; the Fulfillment tracks current versions per strategy type, and generation derives from strategy version advances
 
 ### Open questions
 
@@ -522,8 +537,8 @@ The existing codebase uses "Deployment" for what is now the Fulfillment. Rename 
 
 ### Phasing
 
-1. **Phase 1:** Versioned intent table (`resource_intents`) + Fulfillment (derived from managed resource, with version pointer) + basic lifecycle (phase). No rich status. Proves the managed resource → Fulfillment flow end-to-end.
+1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle (phase). No rich status. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
 
-2. **Phase 2:** Inventory as observation system. Inventory items with state + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Fulfillment versioning.
+2. **Phase 2:** Inventory as observation system. Inventory items with state + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
 
 3. **Phase 3:** CEL-based aggregation for multi-target. Fleet-wide condition and inventory queries. Campaign and deployment as user-facing concepts over Fulfillments.

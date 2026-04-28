@@ -16,7 +16,8 @@ import (
 type DeliveryAuth struct {
 	Caller   *SubjectClaims // identity of the user who initiated the delivery
 	Audience []Audience     // token audience; used to derive target OIDC client ID
-	Token    RawToken       // verified JWT; agents use for passthrough to target APIs
+	// TODO: Never store this; should eventually refer to in memory or pause if unavailable
+	Token RawToken // verified JWT; agents use for passthrough to target APIs
 }
 
 // DeliveryState indicates where a delivery is in its lifecycle.
@@ -89,4 +90,3 @@ type DeliveryEvent struct {
 	Message   string
 	Detail    json.RawMessage
 }
-
