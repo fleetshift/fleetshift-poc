@@ -6,7 +6,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
-from .model import Attestation, Input, TrustAnchor, VerifiedOutput
+from .model import Attestation, FulfillmentRelation, Input, TrustAnchor, VerifiedOutput
 
 
 class VerificationError(Exception):
@@ -41,19 +41,34 @@ class VerificationBundle:
     All referenced inputs and attestations are here; only trust
     anchors come from the out-of-band [TrustStore].
 
-    Two typed maps enforce the structural distinction:
+    Three typed maps enforce the structural distinctions:
       - inputs: prior state references (SignedInput | DerivedInput)
       - attestations: full attestations whose output is consumed
+      - fulfillment_relations: addon-signed evidence describing how
+        managed resources map to fulfillments
     """
 
     inputs: dict[str, Input] = field(default_factory=dict)
     attestations: dict[str, Attestation] = field(default_factory=dict)
+    fulfillment_relations: dict[str, FulfillmentRelation] = field(default_factory=dict)
 
     def get_input(self, input_id: str) -> Input | None:
         return self.inputs.get(input_id)
 
     def get_attestation(self, attestation_id: str) -> Attestation | None:
         return self.attestations.get(attestation_id)
+
+    def find_fulfillment_relation(
+        self, addon_id: str, resource_type: str,
+    ) -> FulfillmentRelation | None:
+        """Find a fulfillment relation matching the given addon and resource type."""
+        from .model import RegisteredSelfTarget
+        for relation in self.fulfillment_relations.values():
+            if isinstance(relation, RegisteredSelfTarget):
+                if (relation.signature.signature.signer_id == addon_id
+                        and relation.resource_type == resource_type):
+                    return relation
+        return None
 
 
 @dataclass
@@ -78,11 +93,14 @@ class VerificationResult:
 
 
 @dataclass(frozen=True)
-class DeploymentState:
-    """Target-side state for a specific deployment, used for replay protection."""
+class FulfillmentState:
+    """Target-side state for a specific fulfillment, used for replay protection."""
 
-    deployment_id: str
+    content_id: str
     generation: int
+
+
+DeploymentState = FulfillmentState
 
 
 @dataclass(frozen=True)
@@ -90,7 +108,7 @@ class VerificationContext:
     bundle: VerificationBundle
     trust_store: TrustStore
     target_identity: dict[str, Any] = field(default_factory=dict)
-    current_deployment_state: DeploymentState | None = None
+    current_fulfillment_state: FulfillmentState | None = None
 
     def input_ref(self, input_id: str) -> VerificationRef:
         return ("input", input_id)
@@ -141,13 +159,15 @@ def verify_attestation(
     trust_store: TrustStore,
     *,
     target_identity: dict[str, Any] | None = None,
-    current_deployment_state: DeploymentState | None = None,
+    current_deployment_state: FulfillmentState | None = None,
+    current_fulfillment_state: FulfillmentState | None = None,
 ) -> VerifiedOutput:
+    resolved_state = current_fulfillment_state or current_deployment_state
     context = VerificationContext(
         bundle=bundle,
         trust_store=trust_store,
         target_identity=target_identity or {},
-        current_deployment_state=current_deployment_state,
+        current_fulfillment_state=resolved_state,
     )
     result, _, verified_output = attestation.verify(context, frozenset())
     if not result.valid or verified_output is None:

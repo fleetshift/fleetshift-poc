@@ -339,21 +339,19 @@ class DeliveryVerificationTests(unittest.TestCase):
             )
         self.assertIn("manifests must be signed by observability", str(ctx.exception))
 
-    def test_addon_manifest_wrong_trust_anchor(self) -> None:
-        other_anchor = TrustAnchor(
-            anchor_id="other-addons",
-            known_keys={"observability": self.obs_addon.keys.public_key_bytes},
-        )
+    def test_addon_manifest_unknown_trust_anchor_rejected(self) -> None:
+        """Output signed via a trust anchor not in the trust store is rejected
+        by the structural check in _verify_output_sig, even though the
+        user-signed content does not constrain the trust anchor."""
         ts = TrustStore()
         ts.add(TrustAnchor(
             anchor_id="tenant-idp",
             known_keys={"alice": self.alice.keys.public_key_bytes},
         ))
-        ts.add(other_anchor)
 
-        si = self._addon_predicate_input(trust_anchor_id="fleet-addons")
+        si = self._addon_predicate_input()
         output = sign_put_manifests(
-            self.obs_addon.keys, "observability", "other-addons",
+            self.obs_addon.keys, "observability", "unknown-anchor",
             SAMPLE_MANIFESTS,
         )
         att = Attestation(attestation_id="att-1", input=si, output=output)
@@ -362,7 +360,7 @@ class DeliveryVerificationTests(unittest.TestCase):
                 att, self.empty_bundle, ts,
                 target_identity=self.prod_target,
             )
-        self.assertIn("manifests must be signed by observability via fleet-addons", str(ctx.exception))
+        self.assertIn("trust anchor not found", str(ctx.exception))
 
     # ==================================================================
     # Predicate placement (self-assessment)
@@ -1034,7 +1032,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1077,7 +1076,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1121,7 +1121,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1160,7 +1161,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1226,7 +1228,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1287,7 +1290,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1326,7 +1330,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1380,7 +1385,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1473,7 +1479,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v3",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v2",
                 update_attestation_id="upgrade-2",
             ),
@@ -1487,7 +1494,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
             inputs={
                 "cluster-01-v1": v1_input,
                 "cluster-01-v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="cluster-01-v1",
                     update_attestation_id="upgrade-1",
                 ),
@@ -1565,7 +1573,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1642,7 +1651,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1691,7 +1701,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-02-v2",
             input=DerivedInput(
-                deployment_id="cluster-02",
+                prior_content_id="cluster-02",
+                prior_content_type="deployment",
                 prior_input_id="cluster-02-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1773,7 +1784,8 @@ class FleetWideUpgradeTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -1964,7 +1976,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.29.5"),
             ),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=0)
+        state = DeploymentState(content_id="cluster-01", generation=0)
         result = verify_attestation(
             att, VerificationBundle(), self.trust_store,
             target_identity=self.prod_target,
@@ -1983,7 +1995,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.29.5"),
             ),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=1)
+        state = DeploymentState(content_id="cluster-01", generation=1)
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(
                 att, VerificationBundle(), self.trust_store,
@@ -2003,7 +2015,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.29.5"),
             ),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=1)
+        state = DeploymentState(content_id="cluster-01", generation=1)
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(
                 att, VerificationBundle(), self.trust_store,
@@ -2036,7 +2048,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             input=v1_input,
             output=make_remove_by_deployment_id("cluster-01"),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=2)
+        state = DeploymentState(content_id="cluster-01", generation=2)
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(
                 att, VerificationBundle(), self.trust_store,
@@ -2056,14 +2068,14 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.29.5"),
             ),
         )
-        wrong_state = DeploymentState(deployment_id="cluster-99", generation=0)
+        wrong_state = DeploymentState(content_id="cluster-99", generation=0)
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(
                 att, VerificationBundle(), self.trust_store,
                 target_identity=self.prod_target,
                 current_deployment_state=wrong_state,
             )
-        self.assertIn("deployment state mismatch", str(ctx.exception))
+        self.assertIn("content state mismatch", str(ctx.exception))
 
     # ==================================================================
     # Mixed: expected_generation present, no target state (stateless target)
@@ -2098,7 +2110,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -2111,7 +2124,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={"cluster-01-v1": v1_input},
             attestations={"upgrade-1": upgrade_att},
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=1)
+        state = DeploymentState(content_id="cluster-01", generation=1)
         result = verify_attestation(
             final_att, bundle, self.trust_store,
             target_identity=self.prod_target,
@@ -2154,7 +2167,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="u1",
                 ),
@@ -2167,7 +2181,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="v3",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2",
                 update_attestation_id="u2",
             ),
@@ -2176,7 +2191,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.31.0"),
             ),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=2)
+        state = DeploymentState(content_id="cluster-01", generation=2)
         result = verify_attestation(
             final_att, bundle, self.trust_store,
             target_identity=self.prod_target,
@@ -2209,7 +2224,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="u1",
                 ),
@@ -2222,7 +2238,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="v3",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2",
                 update_attestation_id="u2",
             ),
@@ -2231,7 +2248,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
                 self._target_manifests("1.31.0"),
             ),
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=3)
+        state = DeploymentState(content_id="cluster-01", generation=3)
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(
                 final_att, bundle, self.trust_store,
@@ -2248,7 +2265,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -2275,7 +2293,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="cluster-01-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -2288,7 +2307,7 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={"cluster-01-v1": v1_input},
             attestations={"upgrade-1": upgrade_att},
         )
-        state = DeploymentState(deployment_id="cluster-01", generation=1)
+        state = DeploymentState(content_id="cluster-01", generation=1)
         result = verify_attestation(
             final_att, bundle, self.trust_store,
             target_identity=self.prod_target,
@@ -2312,7 +2331,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -2343,7 +2363,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         final_att = Attestation(
             attestation_id="cluster-01-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -2409,7 +2430,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="u1",
                 ),
@@ -2419,7 +2441,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         att_ok = Attestation(
             attestation_id="v3-ok",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2",
                 update_attestation_id="u2",
             ),
@@ -2439,7 +2462,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2-bad": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="u2",
                 ),
@@ -2449,7 +2473,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         att_bad = Attestation(
             attestation_id="v3-bad",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2-bad",
                 update_attestation_id="u1",
             ),
@@ -2505,7 +2530,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="ua",
                 ),
@@ -2515,7 +2541,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         att_ab = Attestation(
             attestation_id="v3-ab",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2",
                 update_attestation_id="ub",
             ),
@@ -2534,7 +2561,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
             inputs={
                 "v1": v1_input,
                 "v2": DerivedInput(
-                    deployment_id="cluster-01",
+                    prior_content_id="cluster-01",
+                    prior_content_type="deployment",
                     prior_input_id="v1",
                     update_attestation_id="ub",
                 ),
@@ -2544,7 +2572,8 @@ class GenerationAndPreconditionTests(unittest.TestCase):
         att_ba = Attestation(
             attestation_id="v3-ba",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="v2",
                 update_attestation_id="ua",
             ),

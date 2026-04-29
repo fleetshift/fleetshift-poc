@@ -8,7 +8,13 @@ from typing import TYPE_CHECKING, Any
 from .model import OutputConstraint
 
 if TYPE_CHECKING:
-    from .model import DeploymentContent
+    from .model import (
+        DeploymentContent,
+        InputContent,
+        ManagedResourceContent,
+        RegisteredSelfTarget,
+    )
+    from .verify import VerificationContext
 
 
 def constraint_to_document(constraint: OutputConstraint) -> dict[str, Any]:
@@ -88,16 +94,14 @@ def derive_manifest_strategy_constraints(
 
     if stype == "addon":
         addon_id = strategy.get("addon_id")
-        trust_anchor_id = strategy.get("trust_anchor_id", "fleet-addons")
         if not addon_id:
             return ()
         return (
             OutputConstraint(
-                name=f"manifests must be signed by {addon_id} via {trust_anchor_id}",
+                name=f"manifests must be signed by {addon_id}",
                 expression=(
                     f'action != "put" || '
                     f'(output.has_signature && '
-                    f'output.signature.trust_anchor_id == "{trust_anchor_id}" && '
                     f'output.signer_id == "{addon_id}")'
                 ),
             ),
@@ -138,15 +142,13 @@ def derive_placement_strategy_constraints(
 
     if stype == "addon":
         addon_id = strategy.get("addon_id")
-        trust_anchor_id = strategy.get("trust_anchor_id", "fleet-addons")
         if not addon_id:
             return ()
         return (
             OutputConstraint(
-                name=f"placement must be signed by {addon_id} via {trust_anchor_id}",
+                name=f"placement must be signed by {addon_id}",
                 expression=(
                     f'placement.has_signature && '
-                    f'placement.signature.trust_anchor_id == "{trust_anchor_id}" && '
                     f'placement.signer_id == "{addon_id}"'
                 ),
             ),
@@ -167,12 +169,183 @@ def derive_placement_strategy_constraints(
     )
 
 
-def derive_strategy_constraints(content: DeploymentContent) -> tuple[OutputConstraint, ...]:
-    """Derive all strategy-implied constraints from signed input content."""
-    d = content.to_dict()
+def derive_strategy_constraints(
+    content: InputContent,
+    context: VerificationContext,
+) -> tuple[OutputConstraint, ...]:
+    """Derive all content-implied constraints from signed input content.
+
+    Dispatches on content type.  [DeploymentContent] uses the existing
+    strategy-implied constraint derivation.  [ManagedResourceContent]
+    looks up its fulfillment relation from the verification bundle and
+    derives constraints from it.
+    """
+    from .model import DeploymentContent as _DC
+    from .model import ManagedResourceContent as _MRC
+
+    if isinstance(content, _DC):
+        d = content.to_dict()
+        return (
+            derive_manifest_strategy_constraints(d)
+            + derive_placement_strategy_constraints(d)
+        )
+
+    if isinstance(content, _MRC):
+        return derive_managed_resource_constraints(content, context)
+
     return (
-        derive_manifest_strategy_constraints(d)
-        + derive_placement_strategy_constraints(d)
+        OutputConstraint(
+            name=f"unknown content type: {content.content_type()}",
+            expression="false",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Managed resource constraint derivation
+# ---------------------------------------------------------------------------
+
+
+def derive_managed_resource_constraints(
+    content: ManagedResourceContent,
+    context: VerificationContext,
+) -> tuple[OutputConstraint, ...]:
+    """Derive constraints from a managed resource's fulfillment relation.
+
+    The relation is external evidence in the verification bundle, not
+    part of the user-signed content.  The verifier looks it up by
+    (addon_id, resource_type), verifies its signature against the trust
+    store, and dispatches on the relation type.
+    """
+    from .model import RegisteredSelfTarget as _RST
+
+    relation = context.bundle.find_fulfillment_relation(
+        content.addon_id, content.resource_type,
+    )
+    if relation is None:
+        return (
+            OutputConstraint(
+                name=(
+                    f"no fulfillment relation found for "
+                    f"addon {content.addon_id!r}, "
+                    f"resource type {content.resource_type!r}"
+                ),
+                expression="false",
+            ),
+        )
+
+    if isinstance(relation, _RST):
+        return _derive_registered_self_target_constraints(content, relation, context)
+
+    return (
+        OutputConstraint(
+            name=f"unknown fulfillment relation type: {type(relation).__name__}",
+            expression="false",
+        ),
+    )
+
+
+def _derive_registered_self_target_constraints(
+    content: ManagedResourceContent,
+    relation: RegisteredSelfTarget,
+    context: VerificationContext,
+) -> tuple[OutputConstraint, ...]:
+    """Derive constraints for a RegisteredSelfTarget relation.
+
+    Verifies the relation signature cryptographically and against the
+    trust store, then derives:
+      - Placement is static to the addon (target.id == addon_id).
+      - Manifests must match the user's signed spec (deterministic,
+        like inline for deployments -- no addon signature required).
+    """
+    from .crypto import content_hash as _content_hash
+    from .crypto import verify as _verify
+    from .model import TrustAnchorSubject
+
+    addon_id = content.addon_id
+
+    relation_doc = {
+        "relation_type": "registered_self_target",
+        "resource_type": relation.resource_type,
+    }
+    relation_hash = _content_hash(relation_doc)
+    sig = relation.signature.signature
+
+    if sig.content_hash != relation_hash:
+        return (
+            OutputConstraint(
+                name="fulfillment relation hash mismatch",
+                expression="false",
+            ),
+        )
+    if not _verify(sig.public_key, relation_hash, sig.signature_bytes):
+        return (
+            OutputConstraint(
+                name="fulfillment relation signature invalid",
+                expression="false",
+            ),
+        )
+
+    if sig.signer_id != addon_id:
+        return (
+            OutputConstraint(
+                name=(
+                    f"relation signer mismatch: "
+                    f"signed by {sig.signer_id!r}, "
+                    f"expected addon {addon_id!r}"
+                ),
+                expression="false",
+            ),
+        )
+
+    if relation.resource_type != content.resource_type:
+        return (
+            OutputConstraint(
+                name=(
+                    f"relation resource_type mismatch: "
+                    f"relation has {relation.resource_type!r}, "
+                    f"content has {content.resource_type!r}"
+                ),
+                expression="false",
+            ),
+        )
+
+    anchor = context.trust_store.get(relation.signature.trust_anchor_id)
+    if anchor is None:
+        return (
+            OutputConstraint(
+                name=(
+                    f"trust anchor not found for relation: "
+                    f"{relation.signature.trust_anchor_id!r}"
+                ),
+                expression="false",
+            ),
+        )
+    known_key = anchor.known_keys.get(sig.signer_id)
+    if known_key is None or known_key != sig.public_key:
+        return (
+            OutputConstraint(
+                name=(
+                    f"relation signer {sig.signer_id!r} not recognised "
+                    f"by anchor {relation.signature.trust_anchor_id!r}"
+                ),
+                expression="false",
+            ),
+        )
+
+    return (
+        OutputConstraint(
+            name=f"placement targets addon {addon_id}",
+            expression=f'target.id == "{addon_id}"',
+        ),
+        OutputConstraint(
+            name="manifests must match resource spec",
+            expression=(
+                'action != "put" || '
+                'output.manifests == [{"resource_type": "managed_resource_spec", '
+                '"content": input.spec}]'
+            ),
+        ),
     )
 
 

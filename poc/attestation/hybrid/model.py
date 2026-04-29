@@ -37,8 +37,33 @@ class StrategySpec:
         )
 
 
+class InputContent(ABC):
+    """Common protocol for all typed input content variants.
+
+    Each variant carries its own structure, identity, and evidence for
+    how a fulfillment derives from it.  The verification pipeline works
+    through this interface; constraint derivation and update mutation
+    dispatch on the concrete type.
+    """
+
+    @abstractmethod
+    def to_dict(self) -> dict[str, Any]:
+        """Canonical dict representation for signing and CEL evaluation."""
+        ...
+
+    @abstractmethod
+    def content_id(self) -> str:
+        """The identity of this content (e.g. deployment ID, resource name)."""
+        ...
+
+    @abstractmethod
+    def content_type(self) -> str:
+        """Type discriminator included in the signed envelope."""
+        ...
+
+
 @dataclass(frozen=True)
-class DeploymentContent:
+class DeploymentContent(InputContent):
     """Typed input content for a deployment.
 
     Mirrors the Go domain's Deployment struct: deployment identity plus
@@ -53,10 +78,17 @@ class DeploymentContent:
 
     def to_dict(self) -> dict[str, Any]:
         return {
+            "content_type": "deployment",
             "deployment_id": self.deployment_id,
             "manifest_strategy": self.manifest_strategy.to_dict(),
             "placement_strategy": self.placement_strategy.to_dict(),
         }
+
+    def content_id(self) -> str:
+        return self.deployment_id
+
+    def content_type(self) -> str:
+        return "deployment"
 
     @staticmethod
     def from_dict(d: dict[str, Any]) -> DeploymentContent:
@@ -64,6 +96,70 @@ class DeploymentContent:
             deployment_id=d["deployment_id"],
             manifest_strategy=StrategySpec.from_dict(d["manifest_strategy"]),
             placement_strategy=StrategySpec.from_dict(d["placement_strategy"]),
+        )
+
+
+# ---------------------------------------------------------------------------
+# Fulfillment relations -- platform-defined, typed evidence describing how
+# a managed resource maps to a fulfillment.  Verifiers have built-in logic
+# for each variant.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class RegisteredSelfTarget:
+    """1:1 manifest delivery to the addon itself.
+
+    The addon signs this to claim: "I own resources of this type,
+    and fulfillments derived from them target me directly."
+    Implies: placement = static to addon, manifests must match
+    the user's signed spec (deterministic, like inline).
+    """
+
+    resource_type: str
+    signature: OutputSignature
+
+
+FulfillmentRelation = RegisteredSelfTarget
+
+
+@dataclass(frozen=True)
+class ManagedResourceContent(InputContent):
+    """Typed input content for a managed resource.
+
+    The user signs the "what" (resource_type, resource_name, spec) and
+    the "who" (addon_id).  The "how" -- the fulfillment relation -- is
+    external evidence carried in the [VerificationBundle], not part of
+    what the user signs.
+    """
+
+    resource_type: str
+    resource_name: str
+    spec: dict[str, Any]
+    addon_id: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "content_type": "managed_resource",
+            "resource_type": self.resource_type,
+            "resource_name": self.resource_name,
+            "spec": self.spec,
+            "addon_id": self.addon_id,
+        }
+
+    def content_id(self) -> str:
+        return self.resource_name
+
+    def content_type(self) -> str:
+        return "managed_resource"
+
+    @staticmethod
+    def from_dict(d: dict[str, Any]) -> ManagedResourceContent:
+        return ManagedResourceContent(
+            resource_type=d["resource_type"],
+            resource_name=d["resource_name"],
+            spec=d["spec"],
+            addon_id=d["addon_id"],
         )
 
 
@@ -161,9 +257,9 @@ class TrustAnchorSubject:
     def to_context(self) -> dict[str, Any]:
         content = (
             self.content.to_dict()
-            if isinstance(self.content, DeploymentContent) else self.content
+            if isinstance(self.content, InputContent) else self.content
         )
-        ctx = {
+        ctx: dict[str, Any] = {
             "content": content,
             "kind": self.kind,
             "signer_id": self.signer_id,
@@ -241,7 +337,7 @@ class OutputConstraint:
 
 @dataclass(frozen=True)
 class VerifiedInput:
-    content: DeploymentContent
+    content: InputContent
     content_hash: bytes
     output_constraints: tuple[OutputConstraint, ...]
     signer_id: str | None = None
@@ -381,7 +477,7 @@ class PutManifests:
             if not pe_result.valid:
                 return context.fail(label, "placement evidence invalid", children), None
 
-        implied = derive_strategy_constraints(verified_input.content)
+        implied = derive_strategy_constraints(verified_input.content, context)
         all_constraints = implied + verified_input.output_constraints
 
         cel_ctx = _delivery_cel_context(
@@ -436,12 +532,13 @@ class RemoveByDeploymentId:
         label = f"{attestation_id} output"
         children: list[VerificationResult] = []
 
-        if self.deployment_id != verified_input.content.deployment_id:
+        input_content_id = verified_input.content.content_id()
+        if self.deployment_id != input_content_id:
             return (
                 context.fail(
                     label,
                     f"remove deployment_id mismatch: output targets {self.deployment_id!r}, "
-                    f"input has {verified_input.content.deployment_id!r}",
+                    f"input has {input_content_id!r}",
                 ),
                 None,
             )
@@ -455,7 +552,7 @@ class RemoveByDeploymentId:
             if not pe_result.valid:
                 return context.fail(label, "placement evidence invalid", children), None
 
-        implied = derive_strategy_constraints(verified_input.content)
+        implied = derive_strategy_constraints(verified_input.content, context)
         all_constraints = implied + verified_input.output_constraints
 
         cel_ctx = _delivery_cel_context(
@@ -565,12 +662,13 @@ def _verify_placement_evidence(
     if not sig_result.valid:
         return context.fail(label, "signature invalid", children), None
 
-    if evidence.deployment_id != verified_input.content.deployment_id:
+    input_content_id = verified_input.content.content_id()
+    if evidence.deployment_id != input_content_id:
         return (
             context.fail(
                 label,
                 f"deployment_id mismatch: evidence has {evidence.deployment_id!r}, "
-                f"input has {verified_input.content.deployment_id!r}",
+                f"input has {input_content_id!r}",
                 children,
             ),
             None,
@@ -678,7 +776,7 @@ class Input(ABC):
 class SignedInput(Input):
     """A signer's direct authorization of input content and CEL constraints."""
 
-    content: DeploymentContent
+    content: InputContent
     signature: Signature
     key_binding: KeyBinding
     valid_until: float
@@ -773,9 +871,10 @@ class SignedInput(Input):
 class DerivedInput(Input):
     """Input derived from a prior input and a verified update attestation.
 
-    deployment_id is a first-class structural property: a derived input
-    *is* a new version of a specific deployment.  It is grounded in the
-    signed chain via the prior's deployment_id.
+    prior_content_id and prior_content_type together identify the prior
+    content -- an ID only has meaning with regard to a type.  The derived
+    input *is* a new version of that specific content.  Both are checked
+    against the resolved prior.
 
     prior_input_id references an Input (SignedInput | DerivedInput) in the
     verification bundle -- only the input side of the prior state is needed,
@@ -784,11 +883,12 @@ class DerivedInput(Input):
     update_attestation_id references a full Attestation in the bundle --
     the update is a deployment whose verified output carries the CEL
     expression and constraints for derivation.  The update attestation
-    is verified with the deployment as the target, so the update's
-    placement strategy naturally gates which deployments it applies to.
+    is verified with the content as the target, so the update's
+    placement strategy naturally gates which content it applies to.
     """
 
-    deployment_id: str
+    prior_content_id: str
+    prior_content_type: str
     prior_input_id: str
     update_attestation_id: str
 
@@ -832,16 +932,24 @@ class DerivedInput(Input):
         if not prior_result.valid or verified_prior is None:
             return context.fail(label, "prior input verification failed", children), None
 
-        if self.deployment_id != verified_prior.content.deployment_id:
+        actual_type = verified_prior.content.content_type()
+        if self.prior_content_type != actual_type:
             return context.fail(
                 label,
-                f"deployment_id mismatch: input declares {self.deployment_id!r}, "
-                f"prior has {verified_prior.content.deployment_id!r}",
+                f"content type mismatch: input declares {self.prior_content_type!r}, "
+                f"prior has {actual_type!r}",
             ), None
 
-        # -- verify update with the deployment as the target --
-        deployment_target = {"id": self.deployment_id}
-        update_context = context.with_target_identity(deployment_target)
+        actual_id = verified_prior.content.content_id()
+        if self.prior_content_id != actual_id:
+            return context.fail(
+                label,
+                f"content_id mismatch: input declares {self.prior_content_id!r}, "
+                f"prior has {actual_id!r}",
+            ), None
+
+        update_target = {"id": self.prior_content_id}
+        update_context = context.with_target_identity(update_target)
 
         update_result, _, verified_update_output = update_attestation.verify(
             update_context,
@@ -858,16 +966,16 @@ class DerivedInput(Input):
         try:
             update_content = _extract_update_content(verified_update_output.content)
             check_preconditions(verified_prior.content, update_content)
-            derived_content = DeploymentContent.from_dict(apply_update(
-                verified_prior.content,
-                update_content,
-            ))
-            if derived_content.deployment_id != self.deployment_id:
-                    raise ValueError(
-                        f"update must not rewrite deployment identity: "
-                        f"expected {self.deployment_id!r}, "
-                        f"got {derived_content.deployment_id!r}"
-                    )
+            derived_dict = apply_update(verified_prior.content, update_content)
+            derived_content = _reconstitute_content(
+                verified_prior.content, derived_dict,
+            )
+            if derived_content.content_id() != self.prior_content_id:
+                raise ValueError(
+                    f"update must not rewrite content identity: "
+                    f"expected {self.prior_content_id!r}, "
+                    f"got {derived_content.content_id()!r}"
+                )
             output_constraints = derive_constraints(
                 verified_prior.output_constraints,
                 update_content,
@@ -898,9 +1006,20 @@ class DerivedInput(Input):
         )
 
 
+def _reconstitute_content(
+    prior: InputContent, derived_dict: dict[str, Any],
+) -> InputContent:
+    """Reconstitute typed content from a derived dict, dispatching on the prior's type."""
+    if isinstance(prior, DeploymentContent):
+        return DeploymentContent.from_dict(derived_dict)
+    if isinstance(prior, ManagedResourceContent):
+        return ManagedResourceContent.from_dict(derived_dict)
+    raise ValueError(f"cannot reconstitute content type: {type(prior).__name__}")
+
+
 @dataclass(frozen=True)
 class Attestation:
-    """A single attested deployment: input plus output."""
+    """A single attested input-output pair: input content plus delivery action."""
 
     attestation_id: str
     input: Input
@@ -983,7 +1102,7 @@ def _check_generation(
 ) -> VerificationResult:
     """Check expected_generation against optional target-side state."""
     label = f"{attestation_id} generation"
-    state = context.current_deployment_state
+    state = context.current_fulfillment_state
 
     if verified_input.expected_generation is None:
         return context.ok(label, "no expected_generation signed")
@@ -995,13 +1114,13 @@ def _check_generation(
             f"no target state (stateless)",
         )
 
-    dep_id = verified_input.content.deployment_id
+    cid = verified_input.content.content_id()
 
-    if state.deployment_id != dep_id:
+    if state.content_id != cid:
         return context.fail(
             label,
-            f"deployment state mismatch: state is for {state.deployment_id!r}, "
-            f"attestation resolves to {dep_id!r}",
+            f"content state mismatch: state is for {state.content_id!r}, "
+            f"attestation resolves to {cid!r}",
         )
 
     expected_current = state.generation + 1

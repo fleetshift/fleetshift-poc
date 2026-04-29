@@ -4,11 +4,11 @@ This directory is a Python proof of concept for the provenance and verification 
 
 It is trying to answer one narrow question:
 
-> If the management plane is only a courier, what evidence does a target need in order to accept a deployment, an update, or a removal?
+> If the management plane is only a courier, what evidence does a target need in order to accept a delivery, an update, or a removal?
 
 The answer explored here is a prototype that combines:
 
-- a user signs the deployment input
+- a user signs the input content (a deployment spec, a managed resource spec, or future content types)
 - addons may sign opaque outputs such as rendered manifests, placement decisions, or update plans
 - the target verifies the whole chain locally from a self-contained bundle plus external trust anchors
 
@@ -19,14 +19,23 @@ The end design document is broader than this prototype. It also covers credentia
 At the code structure level, this directory combines a few ideas in one model:
 
 - a single `Attestation(input, output)` shape
+- content-type polymorphism: `SignedInput.content` is a typed union (`DeploymentContent | ManagedResourceContent | ...`) via the `InputContent` protocol
 - explicit, signed CEL output constraints on inputs
-- strategy-implied constraints derived from the signed deployment content
+- content-implied constraints derived from the signed input content (strategy-based for deployments, relation-based for managed resources)
 - self-contained verification bundles instead of verifier-side history lookup
 - data-driven input derivation from signed update outputs
 - delivery-aware output types for put and remove operations
 - explainable verification results instead of a bare pass/fail
 
-The built-in strategy types are a good example of that composition:
+### Content types
+
+The `InputContent` protocol defines a common interface (`to_dict`, `content_id`, `content_type`) that all content variants implement. The verification pipeline works generically through this protocol; constraint derivation, identity extraction, and update mutation dispatch on the concrete type.
+
+**`DeploymentContent`** carries deployment identity plus manifest and placement strategy specs. Built-in to the platform.
+
+**`ManagedResourceContent`** carries a resource spec and addon reference (`addon_id`). The user signs the "what" and the "who" -- not the "how" or the trust path. The fulfillment relation -- addon-signed evidence describing how the resource maps to a fulfillment -- is external evidence in the `VerificationBundle`, not part of what the user signs. Relation types are platform-defined (verifiers have built-in logic for each), so they use strong typing. The first relation type is `RegisteredSelfTarget` (1:1 delivery to the addon itself).
+
+### Deployment strategies
 
 | Strategy | What it means |
 | --- | --- |
@@ -35,13 +44,19 @@ The built-in strategy types are a good example of that composition:
 | placement `predicate` | The target self-assesses placement by evaluating a CEL predicate against its own identity. |
 | placement `addon` | A placement addon signs the allowed target list. |
 
+### Managed resource fulfillment relations
+
+| Relation | What it means |
+| --- | --- |
+| `RegisteredSelfTarget` | 1:1 manifest delivery to the addon itself. Implies placement = static to addon, manifests must match the user's signed spec. |
+
 ## Core ideas
 
-### 1. A deployment is verified as `input -> output`
+### 1. A delivery is verified as `input -> output`
 
 The main object is `Attestation`, which pairs:
 
-- an `Input`
+- an `Input` (whose content is a typed union via `InputContent`)
 - a concrete delivery action (`PutManifests` or `RemoveByDeploymentId`)
 
 The target does not trust the output on its own. It verifies that the output is justified by the input.
@@ -50,12 +65,12 @@ The target does not trust the output on its own. It verifies that the output is 
 
 `SignedInput` signs an envelope containing:
 
-- the `DeploymentContent`
+- the typed `InputContent` (e.g. `DeploymentContent` or `ManagedResourceContent`)
 - `valid_until`
 - explicit output constraints
 - optional `expected_generation`
 
-This is important: the signer is not only authorizing "this deployment exists". They are also authorizing the rules the eventual output must satisfy.
+This is important: the signer is not only authorizing "this content exists". They are also authorizing the rules the eventual output must satisfy. The content type serves as its own discriminator -- no separate `kind` field is needed.
 
 Those explicit rules are CEL expressions (`OutputConstraint`) evaluated at verification time over a context containing:
 
@@ -65,22 +80,28 @@ Those explicit rules are CEL expressions (`OutputConstraint`) evaluated at verif
 - `action`
 - `placement`
 
-### 3. Strategies imply more policy
+### 3. Content implies policy
 
-In addition to explicitly signed CEL constraints, the verifier derives built-in constraints from the signed strategies in `policy.py`.
+In addition to explicitly signed CEL constraints, the verifier derives built-in constraints from the signed content in `policy.py`. Constraint derivation dispatches on the content type:
 
-Examples:
+**Deployments** (`DeploymentContent`):
 
 - inline manifests imply `output.manifests == input.manifest_strategy.manifests`
-- addon manifests imply "the output must be signed by addon X via trust anchor Y"
+- addon manifests imply "the output must be signed by addon X"
 - predicate placement implies puts are allowed only when the target matches, and removals only when it no longer matches
 - addon placement implies the placement evidence must be signed, and the current target must be consistent with the signed target list
+
+**Managed resources** (`ManagedResourceContent`):
+
+- the verifier looks up the fulfillment relation from the `VerificationBundle` by `(addon_id, resource_type)`
+- it verifies the relation cryptographically and against the `TrustStore` (signer key recognised by the claimed anchor)
+- `RegisteredSelfTarget` implies placement is static to the addon and manifests must match the user's signed spec (like inline for deployments -- the content is deterministic)
 
 This is one of the most important ideas in the prototype: the signed input is not just data, it is a compact declaration of how verification must work.
 
 ### 4. Updates are first-class attestations
 
-`DerivedInput` models a new deployment version reconstructed from:
+`DerivedInput` models a new content version reconstructed from:
 
 - a prior input
 - an update attestation whose output contains a signed `spec_update`
@@ -91,9 +112,9 @@ The `spec_update` carries:
 - optional preconditions
 - optional additional output constraints
 
-This lets the verifier rebuild deployment history from signed material instead of trusting the platform's stored state.
+This lets the verifier rebuild content history from signed material instead of trusting the platform's stored state. `DerivedInput` carries `prior_content_id` and `prior_content_type` to unambiguously identify the prior content being updated. Reconstitution dispatches on the prior content's concrete type.
 
-An important detail: update attestations are themselves deployments. That means update planning can have its own manifest strategy, placement strategy, and addon signatures. In the upgrade scenarios, the update planner signs the patch, and a placement addon signs which deployment IDs the patch is allowed to apply to.
+An important detail: update attestations are themselves deployments. That means update planning can have its own manifest strategy, placement strategy, and addon signatures. In the upgrade scenarios, the update planner signs the patch, and a placement addon signs which content IDs the patch is allowed to apply to.
 
 ### 5. Trust is split between users and addons
 
@@ -142,7 +163,7 @@ In other words, the target can validate:
 The tests cover a fairly wide slice of the design space:
 
 - inline outputs cannot be tampered with or swapped between attestations
-- addon outputs must be signed by the expected addon and trust anchor
+- addon outputs must be signed by the expected addon (trust anchor is verified structurally, not by user constraint)
 - placement can be self-assessed (`predicate`) or externally decided (`addon`)
 - removals are verified too; they are not trusted just because they are deletions
 - derived inputs inherit prior constraints and can add new ones
@@ -150,6 +171,10 @@ The tests cover a fairly wide slice of the design space:
 - unknown strategy types fail closed
 - forged keys, forged bindings, replayed outputs, and cross-deployment evidence are rejected
 - optional `expected_generation` gives a simple target-side stale-write check
+- managed resources are verified through the same pipeline as deployments with content-type dispatch
+- fulfillment relation evidence is external (in the bundle), looked up by `(addon_id, resource_type)`, and verified against the trust store
+- missing relation evidence fails closed
+- managed resource and deployment attestations coexist in the same bundle
 
 ## Mapping to `docs/design/authentication.md`
 
@@ -187,6 +212,7 @@ This prototype is closest to the provenance half of the design.
 - `cel_runtime.py`: CEL compilation and evaluation helpers
 - `test_hybrid.py`: focused security and model tests
 - `test_delivery.py`: delivery, placement, upgrade, and generation scenarios
+- `test_managed_resource.py`: managed resource attestation with fulfillment relations
 
 ## Running it
 

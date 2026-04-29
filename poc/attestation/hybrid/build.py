@@ -8,11 +8,13 @@ from typing import TYPE_CHECKING, Any, Iterable
 from .crypto import KeyPair, content_hash, sign
 from .model import (
     KeyBinding,
+    ManagedResourceContent,
     ManifestEnvelope,
     OutputConstraint,
     OutputSignature,
     PlacementEvidence,
     PutManifests,
+    RegisteredSelfTarget,
     RemoveByDeploymentId,
     Signature,
     SignedInput,
@@ -21,7 +23,7 @@ from .model import (
 from .policy import signed_input_envelope
 
 if TYPE_CHECKING:
-    from .model import DeploymentContent
+    from .model import InputContent
 
 
 def make_key_binding(
@@ -46,7 +48,7 @@ def make_key_binding(
 def make_signed_input(
     keys: KeyPair,
     key_binding: KeyBinding,
-    content: DeploymentContent,
+    content: InputContent,
     *,
     output_constraints: Iterable[OutputConstraint] = (),
     valid_duration_sec: float = 86400,
@@ -141,4 +143,62 @@ def make_placement_evidence(
             ),
             trust_anchor_id=trust_anchor_id,
         ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Managed resource helpers
+# ---------------------------------------------------------------------------
+
+
+def make_registered_self_target(
+    keys: KeyPair,
+    signer_id: str,
+    trust_anchor_id: str,
+    resource_type: str,
+) -> RegisteredSelfTarget:
+    """Construct an addon-signed RegisteredSelfTarget relation."""
+    relation_doc = {
+        "relation_type": "registered_self_target",
+        "resource_type": resource_type,
+    }
+    doc_hash = content_hash(relation_doc)
+    return RegisteredSelfTarget(
+        resource_type=resource_type,
+        signature=OutputSignature(
+            signature=Signature(
+                signer_id=signer_id,
+                public_key=keys.public_key_bytes,
+                content_hash=doc_hash,
+                signature_bytes=sign(keys.private_key, doc_hash),
+            ),
+            trust_anchor_id=trust_anchor_id,
+        ),
+    )
+
+
+def make_managed_resource_input(
+    keys: KeyPair,
+    key_binding: KeyBinding,
+    *,
+    resource_type: str,
+    resource_name: str,
+    spec: dict[str, Any],
+    addon_id: str,
+    output_constraints: Iterable[OutputConstraint] = (),
+    valid_duration_sec: float = 86400,
+    expected_generation: int | None = None,
+) -> SignedInput:
+    """Convenience helper for signing a managed resource input."""
+    content = ManagedResourceContent(
+        resource_type=resource_type,
+        resource_name=resource_name,
+        spec=spec,
+        addon_id=addon_id,
+    )
+    return make_signed_input(
+        keys, key_binding, content,
+        output_constraints=output_constraints,
+        valid_duration_sec=valid_duration_sec,
+        expected_generation=expected_generation,
     )

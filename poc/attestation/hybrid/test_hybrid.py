@@ -335,7 +335,8 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="d1-v2",
             input=DerivedInput(
-                deployment_id="cluster-01",
+                prior_content_id="cluster-01",
+                prior_content_type="deployment",
                 prior_input_id="d1-v1",
                 update_attestation_id="upgrade-1",
             ),
@@ -400,7 +401,8 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -450,7 +452,8 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final-bad-expression",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior-bad-update",
                 update_attestation_id="update-bad-expression",
             ),
@@ -501,7 +504,8 @@ class HybridAttestationTests(unittest.TestCase):
         final_attestation = Attestation(
             attestation_id="final-wrong",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior-wrong",
                 update_attestation_id="update-wrong",
             ),
@@ -688,7 +692,7 @@ class HybridAttestationTests(unittest.TestCase):
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(att, self.empty_bundle, self.trust_store)
         self.assertIn(
-            "manifests must be signed by capi-provisioner via fleet-addons",
+            "manifests must be signed by capi-provisioner",
             str(ctx.exception),
         )
 
@@ -1134,7 +1138,8 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
-                    deployment_id="deploy-1",
+                    prior_content_id="deploy-1",
+                    prior_content_type="deployment",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),
@@ -1148,7 +1153,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1195,7 +1201,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="final-overlap",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="shared",
                 update_attestation_id="shared",
             ),
@@ -1229,7 +1236,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="missing-prior",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="nonexistent",
                 update_attestation_id="update",
             ),
@@ -1245,7 +1253,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="missing-update",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="nonexistent",
             ),
@@ -1290,7 +1299,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="deployment-id-mismatch",
             input=DerivedInput(
-                deployment_id="deploy-2",
+                prior_content_id="deploy-2",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1304,7 +1314,7 @@ class HybridAttestationTests(unittest.TestCase):
         )
         with self.assertRaises(VerificationError) as ctx:
             verify_attestation(att, bundle, self.trust_store)
-        self.assertIn("deployment_id mismatch", str(ctx.exception))
+        self.assertIn("content_id mismatch", str(ctx.exception))
         self.assertIn("input declares 'deploy-2'", str(ctx.exception))
 
     def test_expired_prior_input_in_derivation(self) -> None:
@@ -1342,7 +1352,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="expired-prior",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1391,7 +1402,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="expired-update",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1443,7 +1455,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="bad-update",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1496,7 +1509,8 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
-                    deployment_id="deploy-1",
+                    prior_content_id="deploy-1",
+                    prior_content_type="deployment",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),
@@ -1510,7 +1524,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1552,7 +1567,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="untrusted-update",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1643,7 +1659,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="wrong-output",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1706,7 +1723,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="mixed",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="prior",
                 update_attestation_id="update",
             ),
@@ -1765,7 +1783,8 @@ class HybridAttestationTests(unittest.TestCase):
         att = Attestation(
             attestation_id="d1-v3",
             input=DerivedInput(
-                deployment_id="deploy-1",
+                prior_content_id="deploy-1",
+                prior_content_type="deployment",
                 prior_input_id="d1-v2",
                 update_attestation_id="update-2",
             ),
@@ -1777,7 +1796,8 @@ class HybridAttestationTests(unittest.TestCase):
             inputs={
                 "d1-v1": v1_input,
                 "d1-v2": DerivedInput(
-                    deployment_id="deploy-1",
+                    prior_content_id="deploy-1",
+                    prior_content_type="deployment",
                     prior_input_id="d1-v1",
                     update_attestation_id="update-1",
                 ),

@@ -9,10 +9,10 @@ from .model import OutputConstraint
 from .policy import constraints_from_documents
 
 if TYPE_CHECKING:
-    from .model import DeploymentContent
+    from .model import InputContent
 
 
-def check_preconditions(prior_content: DeploymentContent, update_content: dict[str, Any]) -> None:
+def check_preconditions(prior_content: InputContent, update_content: dict[str, Any]) -> None:
     """Evaluate signed preconditions against prior content.
 
     If any precondition evaluates false, raises ValueError to halt
@@ -35,7 +35,7 @@ def check_preconditions(prior_content: DeploymentContent, update_content: dict[s
             raise ValueError(f"precondition failed: {expr}")
 
 
-def apply_update(prior_content: DeploymentContent, update_content: dict[str, Any]) -> dict[str, Any]:
+def apply_update(prior_content: InputContent, update_content: dict[str, Any]) -> dict[str, Any]:
     """Apply a spec-update directive to prior input content.
 
     The caller is responsible for ensuring update_content comes from a
