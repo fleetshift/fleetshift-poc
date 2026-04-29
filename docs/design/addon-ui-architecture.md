@@ -43,11 +43,27 @@ the backend being installed on at least one cluster.
 | **UI** | Scalprum plugin (JS bundle + manifest) | Browser (served by engine) | When backend is installed on >= 1 cluster |
 | **CLI** | CLI extension commands | Developer workstation | When backend is installed on >= 1 cluster |
 
-**Key constraint**: UI and CLI components require a backend installation. An
-addon that only provides UI without needing cluster-side data is not an addon
--- it is core functionality that should live in a core plugin. The backend
-component is what justifies the addon's existence as a separately installable
-unit.
+**Key constraint**: An addon must declare its backend dependencies. It does
+not have to ship its own backend, but it must specify which backends it
+depends on — whether core APIs, other addons, or both. This is declared in
+the addon manifest as a dependency list:
+
+```yaml
+name: my-custom-dashboard
+dependencies:
+  - core                    # depends on core platform APIs
+  - addon-monitoring        # depends on the monitoring addon's backend
+```
+
+The platform validates these dependencies at install time:
+
+- If all dependencies are available → addon installs normally
+- If a dependency is missing → installation is blocked with a clear error
+  (e.g. "Requires addon-monitoring which is not installed")
+
+This enables UI-only addons (a custom dashboard that consumes existing APIs)
+while ensuring every addon has a functioning data source. An addon with zero
+dependencies is valid only for fully static content.
 
 ## Addon Catalog
 
@@ -271,16 +287,18 @@ loads them all the same way through Scalprum.
 An addon's UI plugin appears in the console when:
 
 1. The addon bundle is registered in the engine's addon catalog
-2. The addon's **backend** is installed on at least one managed cluster
+2. The addon's **declared dependencies** are satisfied (all required backends
+   — core APIs or other addons — are available)
 3. The user has the addon's nav items enabled in their preferences
 
-Rule 2 is the critical gate. A UI plugin without a running backend has no
-data source -- it would render empty surfaces. This is also why standalone
-UI-only addons do not exist: if the UI does not need addon-specific backend
-data, it belongs in a core plugin.
+Rule 2 is the critical gate. If an addon ships its own backend, that backend
+must be installed on at least one managed cluster. If an addon depends on
+other addons' backends, those addons must be installed. If an addon only
+depends on core APIs, it activates as soon as it is registered (core is
+always available).
 
 The same rule applies to CLI extensions: an addon's CLI commands are only
-relevant when the backend is running somewhere.
+relevant when its dependencies are satisfied.
 
 Rule 3 gives users per-persona control via the existing marketplace toggle
 mechanism.
