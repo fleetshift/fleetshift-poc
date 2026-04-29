@@ -357,6 +357,97 @@ plugins.
 See [007-cross-plugin-navigation](https://github.com/fleetshift/fleetshift-user-interface/blob/main/spikes/007-cross-plugin-navigation.md)
 for the implementation spike.
 
+## Explored Alternative: Allowing Core Plugin Overrides
+
+A question was raised about whether addons should be able to replace core
+plugin surfaces entirely — for example, shipping a "better Deployments page"
+that replaces the core one. This is technically possible but introduces
+cascading UX consistency problems. This section explores why.
+
+### The problem: core plugins are extension targets
+
+Core plugins are not standalone pages — they are **extension targets** that
+other plugins depend on. Consider the core Deployments plugin in an OCP-like
+model:
+
+```mermaid
+graph TD
+    subgraph Core["Core Deployments Plugin"]
+        DP["Deployments Page<br/><i>route: /deployments</i>"]
+        TAB1["Overview Tab<br/><i>/deployments/:id</i>"]
+        TAB2["YAML Tab<br/><i>/deployments/:id/yaml</i>"]
+        TAB3["Events Tab<br/><i>/deployments/:id/events</i>"]
+    end
+
+    subgraph Addons["Other Plugins Extending Deployments"]
+        MTAB["Metrics Tab<br/><i>extends deployment detail</i>"]
+        LINK1["Pods Plugin<br/><i>links to /deployments/:id</i>"]
+        LINK2["GitOps Plugin<br/><i>links to /deployments/:id</i>"]
+    end
+
+    MTAB -->|"extension point"| TAB1
+    LINK1 -->|"navigates to"| DP
+    LINK2 -->|"navigates to"| DP
+```
+
+The Deployments page has:
+
+1. **Nested routes** — tabs like Overview, YAML, Events, each with their own
+   route segment
+2. **Extension points** — slots where other plugins inject tabs (e.g. a
+   monitoring addon adds a Metrics tab)
+3. **Inbound links** — other plugins (Pods detail, GitOps) navigate to
+   specific deployment routes
+
+### What breaks when you override
+
+If an addon replaces the core Deployments plugin:
+
+| Dependency | What breaks |
+|-----------|-------------|
+| **Nested routes** | Unless the addon re-implements every nested route identically, deep links from other plugins return 404. A link to `/deployments/:id/yaml` fails if the replacement plugin doesn't have that route. |
+| **Extension points** | The monitoring addon injects a Metrics tab into the Deployments detail page. If the replacement plugin doesn't implement the same extension point slots, the tab disappears silently. |
+| **Cross-plugin navigation** | Pods detail links to "View Deployment" via scope reference to the core Deployments plugin. Core plugins are always present, and scopes must be unique — the addon *must* use a different scope. This means every cross-plugin link that references the core scope still resolves to the core plugin. The addon can never intercept those links without re-registering every other plugin's references. |
+| **Route uniqueness** | Routes must be unique. The replacement plugin either takes the same route (breaking the original) or uses a different route (breaking all inbound links). There is no safe middle ground. |
+
+### The alternative: addons on separate routes
+
+An addon *can* create a custom Deployments-like page on its own route (e.g.
+`/my-deployments`). Users can enable/disable nav items via the marketplace.
+But this does not replace the core plugin — it coexists alongside it:
+
+- Other plugins still link to the core Deployments page
+- Extension points still target the core plugin's slots
+- The addon's page is isolated — it doesn't receive extensions from other
+  plugins unless it explicitly implements the same extension point contract
+
+To make cross-plugin links point to the addon's page instead of the core
+one, every other plugin that references the Deployments scope would need to
+be updated. This is a platform-wide change, not a local addon decision.
+
+### Conclusion
+
+Overriding core plugins is technically possible but **we cannot guarantee
+consistent UX** when it happens. The web of dependencies between plugins —
+routes, extension points, cross-plugin navigation — assumes the core plugin
+is the canonical owner of its routes and extension slots. Replacing it breaks
+that assumption for every other plugin that depends on it.
+
+What addons *can* do:
+
+- **Extend** core plugin surfaces (add tabs, widgets, panels via extension
+  points)
+- **Create new pages** on their own routes with their own nav items
+- **Consume core APIs** without shipping their own backend
+
+What addons *cannot* safely do:
+
+- **Replace** a core plugin's routes (breaks inbound links)
+- **Override** a core plugin's extension points (breaks other addons'
+  extensions)
+- **Shadow** a core plugin (two plugins on the same route is undefined
+  behavior)
+
 ## Future: Addon SDK
 
 The long-term vision is an addon SDK that bundles backend + frontend + cli:
