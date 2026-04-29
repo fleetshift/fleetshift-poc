@@ -152,8 +152,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
 	}
 	kindAgent := kindaddon.NewAgent(
+		// Guard nil: Remove() calls providerFactory(nil) because there is
+		// no DeliverySignaler during deletion. Passing nil to
+		// ProviderWithLogger causes a panic inside kind's provider.
 		func(logger kindlog.Logger) kindaddon.ClusterProvider {
-			return cluster.NewProvider(cluster.ProviderWithLogger(logger))
+			var opts []cluster.ProviderOption
+			if logger != nil {
+				opts = append(opts, cluster.ProviderWithLogger(logger))
+			}
+			return cluster.NewProvider(opts...)
 		},
 		kindOpts...,
 	)

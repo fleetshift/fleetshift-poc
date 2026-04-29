@@ -32,7 +32,11 @@ if [ "$AUTH_MODE" = "local" ]; then
 fi
 
 echo "==> Starting FleetShift stack (db=$DB_BACKEND, auth=$AUTH_MODE)"
-PODMAN_SOCKET="$PODMAN_SOCKET" compose up -d
+UP_ARGS=(-d)
+if [ "${DEV:-}" = "true" ] || [ "${BUILD:-}" = "true" ]; then
+  UP_ARGS+=(--build)
+fi
+PODMAN_SOCKET="$PODMAN_SOCKET" compose up "${UP_ARGS[@]}"
 
 if [ "$AUTH_MODE" = "local" ]; then
   KC_URL="http://${KC_HOSTNAME:-localhost}:${KC_HTTP_PORT:-8180}/auth"

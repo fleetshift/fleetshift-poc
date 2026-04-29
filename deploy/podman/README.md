@@ -84,11 +84,63 @@ PROFILE=prod
 
 Command-line always takes precedence over `.env`.
 
+## Dev Mode
+
+`make dev` builds all container images from source and mounts source directories for hot-reload. This is the recommended way to develop the UI and backend together.
+
+```bash
+# From deploy/podman/ or the repo root:
+make dev
+
+# Equivalent to:
+DEV=true make up
+```
+
+What it does:
+
+- **Builds images from source** instead of pulling pre-built ones (`--build` is always passed)
+- **fleetshift-server** — built from repo root Dockerfile, mounts Docker socket and `/tmp` for Kind cluster provisioning
+- **fleetshift-gui** — built from the UI repo, hot-reloads on changes to `packages/gui/src/` and `packages/common/src/`
+- **fleetshift-mock-servers** — built from the UI repo, runs `npm run dev` (nodemon) for live reload on `packages/mock-servers/src/` changes
+- **fleetshift-mock-ui-plugins** — built from the UI repo (no source mounts; plugins are pre-built)
+
+Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo (relative to `deploy/podman/`).
+
+After changing Go code in the server, run `make rebuild` to rebuild the image and restart.
+
+### Deployment Signing in Dev Mode
+
+The dev stack uses OIDC-based signing by default: the user's signing public key is stored as a Keycloak user attribute and read from the ID token at deployment time. This avoids external dependencies (no GitHub key registry needed) and makes it easy to test the full sign → deploy → verify flow from the UI.
+
+For signing from the UI to work, the OIDC client and audience must match the UI's Keycloak client:
+
+```bash
+# deploy/.env
+OIDC_CLIENT_ID=fleetshift-ui
+OIDC_AUDIENCE=fleetshift-ui
+```
+
+The `.env.template` defaults to `fleetshift-cli` which only works for CLI-based auth. Change both to `fleetshift-ui` when developing with the UI.
+
+The key registry mode is controlled by these `.env` variables:
+
+| Variable | Option A (OIDC claim) | Option B (GitHub) |
+|---|---|---|
+| `KEY_ENROLLMENT_CLIENT_ID` | `fleetshift-ui` | `fleetshift-signing` |
+| `PUBLIC_KEY_CLAIM_EXPR` | `claims.signing_public_key` | _(unset)_ |
+| `KEY_REGISTRY_ID` | _(unset)_ | `github.com` |
+| `KEY_REGISTRY_SUBJECT_EXPR` | _(unset)_ | `claims.github_username` |
+
+Option A (OIDC claim) is recommended for local dev. The `.env.template` defaults to Option B (GitHub) for shared environments.
+
 ## Available Commands
 
 | Command | Description |
 |---|---|
 | `make up` | Start the FleetShift stack. Accepts `PROFILE=`, `DB=`, `AUTH=` overrides. |
+| `make dev` | Start with local source builds + hot-reload (see [Dev Mode](#dev-mode)). |
+| `make build` | Rebuild container images without restarting. |
+| `make rebuild` | Stop, rebuild images, and restart in one shot. |
 | `make down` | Stop all containers, preserve data volumes. |
 | `make clean` | Stop all containers and remove ALL data (volumes, network, kind clusters). |
 | `make status` | Show running containers and health status. |
@@ -112,6 +164,12 @@ Key settings:
 | `KC_HTTP_PORT` | `8180` | Keycloak HTTP port |
 | `POSTGRES_PASSWORD` | `changeme` | PostgreSQL password (used when `DB=postgres`) |
 | `FLEETSHIFT_LOG_LEVEL` | `debug` | Server log level |
+| `UI_DIR` | `../../../fleetshift-user-interface` | Path to UI repo (relative to `deploy/podman/`, used by `make dev`) |
+| `OIDC_CLIENT_ID` | `fleetshift-cli` | OIDC client ID for the auth method |
+| `KEY_ENROLLMENT_CLIENT_ID` | `fleetshift-signing` | Client ID used during signer key enrollment |
+| `PUBLIC_KEY_CLAIM_EXPR` | _(unset)_ | Token claim expression for OIDC-based key registry |
+| `KEY_REGISTRY_ID` | `github.com` | External key registry ID (e.g., `github.com`) |
+| `KEY_REGISTRY_SUBJECT_EXPR` | _(unset)_ | Token claim expression mapping to external registry subject |
 
 ### Dev User (optional)
 

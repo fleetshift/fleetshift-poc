@@ -4,4 +4,11 @@ This repository represents both a **prototype** for a next generation k8s/OpenSh
 
 ## Full-stack local development
 
-See [docs/fullstack-setup.md](docs/fullstack-setup.md) for the unified Docker Compose setup that runs the entire stack (Keycloak, FleetShift server, mock servers, plugins, GUI) with one command.
+```bash
+make dev    # builds from source, hot-reload for GUI and mock servers
+make down   # stop (preserve data)
+make logs   # tail all container logs
+make status # show running containers
+```
+
+See [deploy/podman/README.md](deploy/podman/README.md) for full documentation (profiles, overrides, signing config, troubleshooting).

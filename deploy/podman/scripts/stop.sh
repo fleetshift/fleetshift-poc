@@ -11,6 +11,7 @@ COMPOSE_FILES=(
   "-f" "$COMPOSE_DIR/overrides/sqlite.yaml"
   "-f" "$COMPOSE_DIR/overrides/postgres.yaml"
   "-f" "$COMPOSE_DIR/overrides/local-keycloak.yaml"
+  "-f" "$COMPOSE_DIR/overrides/dev.yaml"
 )
 
 if [ "${1:-}" = "--clean" ]; then

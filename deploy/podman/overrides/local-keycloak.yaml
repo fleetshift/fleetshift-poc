@@ -47,16 +47,17 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        fleetctl auth setup \
-          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
-          --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift \
-          --client-id ${OIDC_CLIENT_ID} \
-          --audience ${OIDC_AUDIENCE} \
-          --key-enrollment-client-id fleetshift-signing \
-          --registry-id github.com \
-          --registry-subject-expression "claims.github_username" \
-        && echo "Auth method registered." \
-        || echo "Auth setup failed (may already exist) — continuing."
+        ARGS="--server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT}"
+        ARGS="$$ARGS --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift"
+        ARGS="$$ARGS --client-id ${OIDC_CLIENT_ID}"
+        ARGS="$$ARGS --audience ${OIDC_AUDIENCE}"
+        [ -n "${KEY_ENROLLMENT_CLIENT_ID:-}" ] && ARGS="$$ARGS --key-enrollment-client-id ${KEY_ENROLLMENT_CLIENT_ID}"
+        [ -n "${KEY_REGISTRY_ID:-}" ] && ARGS="$$ARGS --registry-id ${KEY_REGISTRY_ID}"
+        [ -n "${KEY_REGISTRY_SUBJECT_EXPR:-}" ] && ARGS="$$ARGS --registry-subject-expression ${KEY_REGISTRY_SUBJECT_EXPR}"
+        [ -n "${PUBLIC_KEY_CLAIM_EXPR:-}" ] && ARGS="$$ARGS --public-key-claim-expression ${PUBLIC_KEY_CLAIM_EXPR}"
+        fleetctl auth setup $$ARGS \
+          && echo "Auth method registered." \
+          || echo "Auth setup failed (may already exist) — continuing."
     depends_on:
       fleetshift-server:
         condition: service_healthy

@@ -1,4 +1,4 @@
-.PHONY: help up down clean restart-% logs logs-% status cli-setup reset-keycloak
+.PHONY: help up dev build rebuild down clean restart-% logs logs-% status cli-setup reset-keycloak
 
 SCRIPTS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))scripts
 DEPLOY_DIR := $(abspath $(dir $(abspath $(lastword $(MAKEFILE_LIST))))/..)
@@ -9,6 +9,16 @@ help: ## Show this help
 
 up: ## Start the FleetShift stack (PROFILE=demo|prod DB=sqlite|postgres AUTH=local|external)
 	$(SCRIPTS_DIR)/start.sh
+
+dev: ## Start with local source builds + hot-reload (builds images from source)
+	DEV=true $(SCRIPTS_DIR)/start.sh
+
+build: ## Rebuild images without restarting (use with up/dev: make build up)
+	@bash -c 'source $(SCRIPTS_DIR)/common.sh && load_env && resolve_profile && compose build'
+
+rebuild: ## Stop, rebuild images, and restart (clean restart with fresh builds)
+	$(SCRIPTS_DIR)/stop.sh
+	BUILD=true $(SCRIPTS_DIR)/start.sh
 
 down: ## Stop all containers, preserve data
 	$(SCRIPTS_DIR)/stop.sh

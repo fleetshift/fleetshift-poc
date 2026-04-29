@@ -1,0 +1,48 @@
+# Dev override — build from source with hot-reload.
+#
+# Layered on top of the base compose + db + auth overrides.
+# Activated by DEV=true (e.g. `make dev` or `DEV=true make up`).
+#
+# Requires UI_DIR in .env (default: ../../../fleetshift-user-interface,
+# relative to deploy/podman/).
+
+services:
+
+  # ── Backend ────────────────────────────────────────────────────
+
+  fleetshift-server:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /tmp:/tmp
+
+  # ── Frontend ───────────────────────────────────────────────────
+
+  fleetshift-gui:
+    build:
+      context: ${UI_DIR}
+      dockerfile: Dockerfile.gui
+    environment:
+      OME_API_TARGET: http://fleetshift-server:${FLEETSHIFT_SERVER_HTTP_PORT}
+    volumes:
+      - ${UI_DIR}/packages/gui/src:/opt/app-root/src/packages/gui/src:ro
+      - ${UI_DIR}/packages/gui/webpack.config.ts:/opt/app-root/src/packages/gui/webpack.config.ts:ro
+      - ${UI_DIR}/packages/common/src:/opt/app-root/src/packages/common/src:ro
+
+  fleetshift-mock-servers:
+    build:
+      context: ${UI_DIR}
+      dockerfile: Dockerfile.mock-servers
+    command: ["npm", "run", "dev", "-w", "packages/mock-servers"]
+    volumes:
+      - ${UI_DIR}/packages/mock-servers/src:/opt/app-root/src/packages/mock-servers/src:ro
+      - ${UI_DIR}/packages/common/src:/opt/app-root/src/packages/common/src:ro
+      - ${UI_DIR}/packages/mock-servers/.env:/opt/app-root/src/packages/mock-servers/.env:ro
+      - ${UI_DIR}/packages/mock-cli-plugins/dist/cli-plugin-registry.json:/opt/app-root/src/packages/mock-cli-plugins/dist/cli-plugin-registry.json:ro
+
+  fleetshift-mock-ui-plugins:
+    build:
+      context: ${UI_DIR}
+      dockerfile: Dockerfile.mock-ui-plugins

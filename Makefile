@@ -1,4 +1,4 @@
-.PHONY: help build build-server build-cli build-ocp-engine test test-server test-cli test-ocp-engine test-e2e generate image-build image-push
+.PHONY: help build build-server build-cli build-ocp-engine test test-server test-cli test-ocp-engine test-e2e generate image-build image-push dev down logs status
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -44,3 +44,15 @@ image-build: ## Build the fleetshift-server container image
 
 image-push: ## Push the fleetshift-server container image
 	podman push $(DEV_REGISTRY)/fleetshift-server:$(IMAGE_TAG)
+
+dev: ## Start local dev stack (builds from source, hot-reload)
+	$(MAKE) -C deploy/podman dev
+
+down: ## Stop the dev stack (preserve data)
+	$(MAKE) -C deploy/podman down
+
+logs: ## Tail logs from all containers
+	$(MAKE) -C deploy/podman logs
+
+status: ## Show running containers
+	$(MAKE) -C deploy/podman status

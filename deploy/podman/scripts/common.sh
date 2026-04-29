@@ -58,7 +58,11 @@ resolve_profile() {
       ;;
   esac
 
-  echo "==> Profile: $profile (db=$DB_BACKEND, auth=$AUTH_MODE)"
+  if [ "${DEV:-}" = "true" ]; then
+    COMPOSE_FILES+=("-f" "$COMPOSE_DIR/overrides/dev.yaml")
+  fi
+
+  echo "==> Profile: $profile (db=$DB_BACKEND, auth=$AUTH_MODE${DEV:+, dev=true})"
 }
 
 compose() {
