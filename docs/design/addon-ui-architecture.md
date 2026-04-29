@@ -49,6 +49,71 @@ addon that only provides UI without needing cluster-side data is not an addon
 component is what justifies the addon's existence as a separately installable
 unit.
 
+## Addon Catalog
+
+The addon catalog is a **runtime data structure** — not something compiled
+into the binary. It is the engine's authoritative registry of what addons
+are available, what each addon ships, and how to install it. The engine reads
+the catalog at runtime; adding a new addon means registering it in the catalog
+via API, not rebuilding the server.
+
+### What the catalog contains
+
+Each entry in the catalog describes one addon bundle:
+
+| Field | Description |
+|-------|-------------|
+| `name` | Unique addon identifier (e.g. `monitoring`) |
+| `version` | Semver — used for upgrades and cache-busting |
+| `components` | Which surfaces this addon ships (backend, UI, CLI — at least one) |
+| `install_spec` | How to install the addon (OCI artifact reference, container image, JS bundle URL — depends on distribution mechanism) |
+| `manifest` | Scalprum-compatible JSON for the UI component (if present) |
+| `assets` | JS bundle files for the UI component (if present) |
+| `extends_core` | Which core plugin surface this addon extends (if any) |
+
+The `install_spec` is the key piece — it tells the engine *how* to pull and
+run the addon's backend, not just *that* it exists. If addons are distributed
+as OCI artifacts, the spec points to a registry and tag. If they are container
+images, it points to an image reference. The distribution mechanism is
+pluggable; the catalog just stores the pointer.
+
+### Per-instance catalogs
+
+Each OME deployment has its own addon catalog. A self-hosted OME might have
+a private catalog populated with internal addons. A hosted/SaaS OME could
+optionally point to a public catalog as well. This is analogous to Helm's
+configurable chart repositories or VS Code's extension marketplace — the
+catalog source is a deployment decision, not a build decision.
+
+### Catalog vs. installed
+
+The catalog and installation are separate concerns:
+
+- **Catalog** = "these addons are available" (like a Helm repo — you can
+  browse charts but haven't installed them yet)
+- **Installed** = "this addon is active on this OME instance" (its backend
+  is running on one or more clusters, its UI is loaded in the shell, its CLI
+  extensions are available)
+
+The catalog tells the engine *how* to install; the install action actually
+pulls the artifact, starts the backend, registers the UI plugin, etc.
+Uninstalling removes the runtime state but does not remove the addon from
+the catalog — it remains available for reinstallation.
+
+### Runtime registration — not baked into the binary
+
+The engine does **not** need to know about addons at build time. Bundling
+the universe of addons into the binary would require bespoke builds for
+different product configurations and would prevent users from shipping their
+own addons without a custom build.
+
+Instead, addons are registered at runtime via API (or CLI, which calls the
+API). The catalog is just data in the engine's database. This means:
+
+1. **Adding an addon** = an API call that creates a catalog entry
+2. **Different deployments** can have completely different catalogs
+3. **Third-party addons** work without any changes to the engine binary
+
 ## The Core Insight
 
 The engine already knows the full universe of available addons before any
@@ -56,9 +121,8 @@ cluster installs anything. A cluster cannot install an addon the engine does
 not offer. This means:
 
 1. **The engine has every addon's bundle at registration time.** When an
-   addon is registered (via CLI, API, or bundled at build time), all its
-   components -- backend definition, UI assets, CLI extensions -- are stored
-   in the engine's addon catalog.
+   addon is registered via the API, all its components -- backend definition,
+   UI assets, CLI extensions -- are stored in the engine's addon catalog.
 2. **Clusters only toggle state.** Installing an addon on a cluster is a
    state change ("cluster X has addon Y enabled"), not a data transfer.
 3. **No asset upload from fleetlets is necessary.** The push-to-platform
