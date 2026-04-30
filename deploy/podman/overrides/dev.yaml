@@ -8,6 +8,18 @@
 
 services:
 
+  # ── Frontend builder (init container) ─────────────────────────
+  # Builds all frontend assets inside a container and copies them
+  # to a shared volume. No host node/npm required.
+
+  web-builder:
+    build:
+      context: ${UI_DIR:-../../../fleetshift-user-interface}
+      dockerfile: Dockerfile.web
+    privileged: true
+    volumes:
+      - web-assets:/output
+
   # ── Backend ────────────────────────────────────────────────────
 
   fleetshift-server:
@@ -17,32 +29,10 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - /tmp:/tmp
+      - web-assets:/srv/web:ro
+    depends_on:
+      web-builder:
+        condition: service_completed_successfully
 
-  # ── Frontend ───────────────────────────────────────────────────
-
-  fleetshift-gui:
-    build:
-      context: ${UI_DIR}
-      dockerfile: Dockerfile.gui
-    environment:
-      OME_API_TARGET: http://fleetshift-server:${FLEETSHIFT_SERVER_HTTP_PORT}
-    volumes:
-      - ${UI_DIR}/packages/gui/src:/opt/app-root/src/packages/gui/src:ro
-      - ${UI_DIR}/packages/gui/webpack.config.ts:/opt/app-root/src/packages/gui/webpack.config.ts:ro
-      - ${UI_DIR}/packages/common/src:/opt/app-root/src/packages/common/src:ro
-
-  fleetshift-mock-servers:
-    build:
-      context: ${UI_DIR}
-      dockerfile: Dockerfile.mock-servers
-    command: ["npm", "run", "dev", "-w", "packages/mock-servers"]
-    volumes:
-      - ${UI_DIR}/packages/mock-servers/src:/opt/app-root/src/packages/mock-servers/src:ro
-      - ${UI_DIR}/packages/common/src:/opt/app-root/src/packages/common/src:ro
-      - ${UI_DIR}/packages/mock-servers/.env:/opt/app-root/src/packages/mock-servers/.env:ro
-      - ${UI_DIR}/packages/mock-cli-plugins/dist/cli-plugin-registry.json:/opt/app-root/src/packages/mock-cli-plugins/dist/cli-plugin-registry.json:ro
-
-  fleetshift-mock-ui-plugins:
-    build:
-      context: ${UI_DIR}
-      dockerfile: Dockerfile.mock-ui-plugins
+volumes:
+  web-assets:

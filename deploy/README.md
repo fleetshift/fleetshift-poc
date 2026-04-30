@@ -56,9 +56,9 @@ task deploy:reset-keycloak        # wipe keycloak state, re-import realm
 
 ### Dev Mode
 
-`task deploy:dev` builds images from source and mounts source directories for hot-reload. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
+`task deploy:dev` builds frontend assets in a container (using `Dockerfile.web` from the UI repo) and starts the Go backend serving everything on `:8085`. No host Node.js or npm required. Requires `UI_DIR` in `.env` pointing to the `fleetshift-user-interface` repo.
 
-After changing Go code, run `task deploy:rebuild` to rebuild and restart.
+After changing Go code, run `task deploy:rebuild` to rebuild and restart. After changing frontend code, run `task deploy:clean` then `task deploy:dev` to rebuild the web assets.
 
 ### Configuration
 
@@ -80,8 +80,7 @@ To auto-create a personal Keycloak user on startup (`AUTH=local` only), set `DEV
 
 | Service | URL | Description |
 |---|---|---|
-| GUI | http://localhost:3000 | FleetShift web interface |
-| FleetShift API | http://localhost:8085 | HTTP gateway |
+| FleetShift (UI + API) | http://localhost:8085 | Web interface + HTTP gateway (single port) |
 | FleetShift gRPC | localhost:50051 | gRPC (used by fleetctl) |
 | Keycloak | http://keycloak:8180 | OIDC provider (requires `/etc/hosts` on macOS) |
 

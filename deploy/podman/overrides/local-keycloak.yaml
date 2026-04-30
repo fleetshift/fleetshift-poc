@@ -44,7 +44,10 @@ services:
       - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
       - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
       - --log-level=${FLEETSHIFT_LOG_LEVEL}
+      - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-ca-file=/certs/ca.crt
+      - --oidc-ui-authority=http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift
+      - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
     environment:
       OIDC_HTTPS_PORT: "${KC_HTTPS_PORT}"
     volumes:
@@ -52,18 +55,6 @@ services:
     depends_on:
       keycloak-certs:
         condition: service_completed_successfully
-
-  fleetshift-mock-servers:
-    environment:
-      NODE_EXTRA_CA_CERTS: /certs/ca.crt
-    volumes:
-      - keycloak-certs:/certs:ro
-
-  fleetshift-gui:
-    environment:
-      NODE_EXTRA_CA_CERTS: /certs/ca.crt
-    volumes:
-      - keycloak-certs:/certs:ro
 
   auth-setup:
     image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server:latest}

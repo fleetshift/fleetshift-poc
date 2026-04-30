@@ -47,6 +47,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
+	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
 )
 
 type serveFlags struct {
@@ -58,6 +59,9 @@ type serveFlags struct {
 	logFormat        string
 	logLevelOverride string
 	oidcCAFile       string
+	webDir           string
+	oidcUIAuthority  string
+	oidcUIClientID   string
 }
 
 func newServeCmd() *cobra.Command {
@@ -77,6 +81,9 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.logFormat, "log-format", "text", "log format (text, json)")
 	cmd.Flags().StringVar(&f.logLevelOverride, "log-level-override", "", "per-component log level overrides (e.g. deployment=debug,authn=debug)")
 	cmd.Flags().StringVar(&f.oidcCAFile, "oidc-ca-file", "", "PEM CA certificate for OIDC issuers (for kind clusters trusting self-signed or local CAs)")
+	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
+	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
+	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
 	return cmd
 }
 
@@ -410,9 +417,24 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
 
+	topMux := http.NewServeMux()
+	topMux.Handle("/v1/", gwMux)
+
+	if f.webDir != "" {
+		uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
+			WebDir:         f.webDir,
+			OIDCAuthority:  f.oidcUIAuthority,
+			OIDCUIClientID: f.oidcUIClientID,
+			Logger:         logger,
+		})
+		topMux.Handle("/api/ui/", uiMux)
+		topMux.Handle("/", transporthttp.NewStaticHandler(f.webDir))
+		logger.Info("serving frontend assets", "web-dir", f.webDir)
+	}
+
 	httpServer := &http.Server{
 		Addr:    f.httpAddr,
-		Handler: gwMux,
+		Handler: topMux,
 	}
 
 	// --- start ---
@@ -529,6 +551,13 @@ func parseLevelOverrides(spec string) (map[slogutil.ComponentName]slog.Level, er
 		overrides[slogutil.ComponentName(k)] = lvl
 	}
 	return overrides, nil
+}
+
+func envOrDefault(key, fallback string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return fallback
 }
 
 // parseDatabaseURL extracts host, port, user, password, and dbname from a

@@ -54,7 +54,7 @@ tasks:
       - printf 'AUTH={{.RESOLVED_AUTH}}\nDB={{.RESOLVED_DB}}\nDEV={{.DEV}}\n' > .active-deploy
 
   dev:
-    desc: Start in dev mode — source mounts + hot-reload
+    desc: Start in dev mode — builds frontend + backend from source in containers
     cmds:
       - task: up
         vars:
@@ -120,6 +120,13 @@ tasks:
       CONTAINER: '{{index .MATCH 0}}'
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env restart {{.CONTAINER}}
+
+  rebuild-web:
+    desc: Rebuild frontend assets without restarting the server
+    env: *deploy_env
+    cmds:
+      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f -s web-builder
+      - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env up --build web-builder
 
   cli-setup:
     desc: Configure fleetctl CLI for the current deployment

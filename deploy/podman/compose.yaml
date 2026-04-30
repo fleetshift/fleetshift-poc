@@ -45,57 +45,9 @@ services:
       - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
       - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
       - --log-level=${FLEETSHIFT_LOG_LEVEL}
-
-  # ── Frontend ────────────────────────────────────────────────────
-
-  fleetshift-mock-ui-plugins:
-    image: ${FLEETSHIFT_MOCK_UI_PLUGINS_IMAGE:-quay.io/stolostron/fleetshift-mock-ui-plugins:latest}
-    restart: unless-stopped
-    command: ["npm", "run", "serve:dist", "-w", "packages/mock-ui-plugins"]
-    ports:
-      - "8001:8001"
-    volumes:
-      - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist
-
-  fleetshift-mock-servers:
-    image: ${FLEETSHIFT_MOCK_SERVERS_IMAGE:-quay.io/stolostron/fleetshift-mock-servers:latest}
-    restart: unless-stopped
-    environment:
-      MODE: ${MODE}
-      MANAGEMENT_API_TARGET: ${MANAGEMENT_API_TARGET}
-      KEYCLOAK_URL: ${KEYCLOAK_URL}
-      K8S_TLS_INSECURE: "${K8S_TLS_INSECURE}"
-    ports:
-      - "4000:4000"
-    volumes:
-      - fleetshift-mock-servers-db:/opt/app-root/src/packages/mock-servers/data
-      - ui-plugins-dist:/opt/app-root/src/packages/mock-ui-plugins/dist:ro
-    healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/4000"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-    depends_on:
-      fleetshift-mock-ui-plugins:
-        condition: service_started
-      fleetshift-server:
-        condition: service_healthy
-
-  fleetshift-gui:
-    image: ${FLEETSHIFT_GUI_IMAGE:-quay.io/stolostron/fleetshift-gui:latest}
-    restart: unless-stopped
-    environment:
-      API_PROXY_TARGET: ${API_PROXY_TARGET}
-      KEYCLOAK_URL: ${KEYCLOAK_URL}
-    ports:
-      - "3000:3000"
-    depends_on:
-      fleetshift-mock-servers:
-        condition: service_healthy
-
-volumes:
-  ui-plugins-dist:
-  fleetshift-mock-servers-db:
+      - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
+      - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-${OIDC_ISSUER_URL}}
+      - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
 
 networks:
   default:

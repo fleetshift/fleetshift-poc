@@ -56,6 +56,7 @@ echo "==> Starting FleetShift stack (db=$DB_BACKEND, auth=$AUTH_MODE)"
 UP_ARGS=(-d)
 if [ "${DEV:-}" = "true" ] || [ "${BUILD:-}" = "true" ]; then
   UP_ARGS+=(--build)
+  podman volume rm -f web-assets podman_web-assets 2>/dev/null || true
 fi
 PODMAN_SOCKET="$PODMAN_SOCKET" compose up "${UP_ARGS[@]}"
 
@@ -107,10 +108,7 @@ fi
 
 echo ""
 echo "==> FleetShift stack is running!"
-echo "    GUI:             http://localhost:3000"
-echo "    Mock API:        http://localhost:4000"
-echo "    FleetShift API:  http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
-echo "    Mock Plugins:    http://localhost:8001"
+echo "    FleetShift:      http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 if [ "$AUTH_MODE" = "local" ]; then
   echo "    Keycloak Admin:  https://localhost:${KC_HTTPS_PORT:-8443}"
   echo "    Keycloak (HTTP): http://localhost:${KC_HTTP_PORT:-8180}"
