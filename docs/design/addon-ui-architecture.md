@@ -466,6 +466,160 @@ What addons *cannot* safely do:
 - **Shadow** a core plugin (two plugins on the same route is undefined
   behavior)
 
+## Pre-Installed Plugins
+
+Not every UI surface requires an addon backend. Products that ship with
+OpenShift or are installed independently (ACS/StackRox, Service Mesh,
+Serverless, etc.) install CRDs and expose data through the standard
+Kubernetes API. Their UI plugins can communicate with the cluster
+directly — the same way the classic OpenShift console plugin model works.
+
+These **pre-installed plugins** sit between core plugins and full addons:
+
+| Type | Backend dependency | Data path | Example |
+|------|-------------------|-----------|---------|
+| **Core plugin** | None (core K8s APIs) | fleetlet → K8s API | Pods, Namespaces, Nodes |
+| **Pre-installed plugin** | None (pre-existing CRDs) | fleetlet → K8s API (custom resources) | ACS, Service Mesh, Serverless |
+| **Addon plugin** | Addon backend (deployed by OME) | fleetlet → addon sidecar → OME | Custom monitoring, custom dashboards |
+
+### From the UI, all plugins are the same
+
+The distinction between these three types exists only on the **backend
+lifecycle** side — who deploys and manages the data source. From the UI
+and CLI perspective, installation is identical for all plugin types:
+
+1. The plugin manifest (entry point, exposed modules, extensions) is
+   registered in the catalog
+2. The federated module is enabled
+3. Scalprum loads and renders it
+
+The federated module itself knows how to obtain its data. It makes HTTP
+calls to whatever API it needs — core K8s, OpenShift CRDs, or an addon
+aggregation endpoint. The shell does not know or care where the data comes
+from. This means there is no separate "install" vs "import" flow for the UI
+layer. Whether the backend was deployed by OME, pre-installed by an
+operator, or is a built-in K8s API, the UI plugin activation is the same
+operation: register metadata, enable the module.
+
+```mermaid
+graph TD
+    subgraph Shell["Shell (Scalprum)"]
+        FM["Federated Module<br/><i>loaded from catalog manifest</i>"]
+    end
+
+    subgraph Data["Data Sources (all HTTP)"]
+        K8S["Core K8s API<br/><i>pods, namespaces</i>"]
+        CRD["OpenShift CRDs<br/><i>ACS, Service Mesh</i>"]
+        ADDON["Addon Backend<br/><i>fleet aggregation</i>"]
+    end
+
+    FM -->|"HTTP"| K8S
+    FM -->|"HTTP"| CRD
+    FM -->|"HTTP"| ADDON
+
+    style Shell fill:#49a,stroke:#27a,color:#fff
+```
+
+The module may need configuration (e.g. which cluster to query, which
+aggregation endpoint to use), but this is runtime context passed via the
+shell's API object — not a difference in the plugin loading mechanism.
+
+### Discovery and activation
+
+A core plugin is always available (every cluster has pods and namespaces).
+A pre-installed plugin only makes sense when the relevant CRDs are present
+on the cluster. Unlike addon plugins — where OME deploys the backend and
+knows exactly what exists — pre-installed plugins are set up by operators
+or product installers. OME needs to **discover** them.
+
+The catalog drives this. Each pre-installed plugin entry declares what to
+look for:
+
+```yaml
+name: acs-plugin
+type: pre-installed
+discovery:
+  crds:
+    - stackrox.io/v1alpha1/CentralInstance
+    - platform.stackrox.io/v1alpha1/SecuredCluster
+```
+
+The `type: pre-installed` flag tells the system this is not an addon to deploy
+but a pre-existing capability to discover. The fleetlet checks whether
+the declared CRDs exist on each managed cluster and reports back to OME:
+
+```mermaid
+sequenceDiagram
+    participant Catalog as Addon Catalog
+    participant OME as OME Engine
+    participant Fleetlet as Fleetlet (Cluster A)
+
+    OME->>Fleetlet: "Check for these CRDs"
+    Fleetlet->>Fleetlet: kubectl get crd stackrox.io/...
+    Fleetlet-->>OME: "CRDs present: [CentralInstance, SecuredCluster]"
+    OME->>OME: Mark "Cluster A has acs-plugin"
+    OME-->>Catalog: Plugin visible for Cluster A
+```
+
+This is the same end state as addon installation — OME knows which
+clusters have which plugins — but the path is discovery rather than
+deployment. The UI plugin activates when at least one cluster reports the
+relevant CRDs, and is hidden when none do.
+
+### The fleet aggregation boundary
+
+The single-cluster view works without any addon backend — the UI can query
+one cluster's K8s API for its ACS violations, Service Mesh configs, etc.,
+just like the classic OCP console does.
+
+However, once OME manages multiple clusters with the same pre-installed plugin,
+a new need emerges: **fleet-wide aggregation**. Viewing all ACS violations
+across 50 clusters, comparing Service Mesh configurations across
+environments, or rolling out a policy change fleet-wide — these operations
+cannot be served by querying one cluster at a time.
+
+This is the point where a pre-installed plugin may evolve into a full addon:
+
+```mermaid
+graph LR
+    subgraph Single["Single-Cluster View"]
+        direction TB
+        UI1["UI Plugin"]
+        K8S["K8s API<br/><i>per cluster</i>"]
+        NOTE1["No addon backend<br/>needed"]
+
+        UI1 -->|"query CRDs"| K8S
+    end
+
+    subgraph Fleet["Fleet-Wide View"]
+        direction TB
+        UI2["UI Plugin"]
+        BE["Addon Backend<br/><i>aggregates data<br/>across clusters</i>"]
+        K8S2["K8s APIs<br/><i>all clusters</i>"]
+
+        UI2 -->|"query"| BE
+        BE -->|"aggregate"| K8S2
+    end
+
+    Single -->|"evolves into"| Fleet
+
+    style NOTE1 fill:none,stroke:none,color:#888
+```
+
+The transition is incremental: the per-cluster UI remains useful on its own,
+and the addon backend adds the fleet-wide layer on top. This means a product
+like ACS can integrate with OME in two phases:
+
+1. **Day 1**: Register as a pre-installed plugin — per-cluster views work
+   immediately for any cluster that has ACS installed, no addon deployment
+   required
+2. **Day 2**: Ship an addon backend that aggregates ACS data across the
+   fleet — fleet-wide dashboards, cross-cluster policy views, etc.
+
+This avoids an all-or-nothing integration model: products get useful
+single-cluster UI integration immediately, and invest in fleet-wide
+aggregation when the use case demands it.
+
 ## Future: Addon SDK
 
 The long-term vision is an addon SDK that bundles backend + frontend + cli:
