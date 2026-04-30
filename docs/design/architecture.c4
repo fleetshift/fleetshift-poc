@@ -1,0 +1,479 @@
+// FleetShift Architecture — LikeC4 Model
+// Source of truth: docs/design/architecture.md and sub-documents.
+//
+// This diagram captures the key abstraction contours, not every internal detail.
+// For specifics, follow the reading guide in docs/design/architecture.md.
+
+// ─────────────────────────────────────────────
+//  Specification
+// ─────────────────────────────────────────────
+
+specification {
+
+  element actor {
+    style {
+      shape person
+      color green
+    }
+  }
+
+  element system {
+    style {
+      shape rectangle
+      color primary
+    }
+  }
+
+  element component {
+    style {
+      shape rectangle
+      color secondary
+    }
+  }
+
+  element store {
+    style {
+      shape storage
+      color amber
+    }
+  }
+
+  element channel {
+    style {
+      shape queue
+      color muted
+    }
+  }
+
+  element external {
+    style {
+      shape rectangle
+      color gray
+    }
+  }
+
+  relationship async {
+    color amber
+    line dotted
+  }
+
+  tag unproven
+}
+
+// ─────────────────────────────────────────────
+//  Model
+// ─────────────────────────────────────────────
+
+model {
+
+  // ── Actors ──────────────────────────────────
+
+  provider = actor 'Platform Provider' {
+    description 'Operates the management plane. Controls addon installation, trust domains, and tenant onboarding.'
+  }
+
+  tenant = actor 'Tenant' {
+    description '''
+      Operates within the platform under authorization isolation.
+      Manages workspace trees, assigns targets, creates deployments,
+      and grants user access at workspace scope.
+    '''
+  }
+
+  // ── External Trust ──────────────────────────
+
+  tenantIdp = external 'Tenant IdP' {
+    description '''
+      External OIDC identity provider. The platform is never a trust root —
+      trust anchors are always external. Provides user identity, authorization
+      claims, and JWKS for key verification. Users sign operations with their
+      own keys; delivery agents verify signatures against IdP-anchored bindings.
+    '''
+  }
+
+  // ── FleetShift Management Plane ─────────────
+
+  fleetshift = system 'FleetShift' {
+    description '''
+      A URL-addressable management plane providing the orchestration pipeline,
+      the fleetlet transport layer, and platform APIs. Zero infrastructure coupling:
+      no addon or fleetlet inherently depends on Kubernetes or any specific
+      infrastructure. Single-pod viability is a design invariant — the kernel
+      works as one pod with embedded SQLite.
+    '''
+
+    platformApi = component 'Platform API' {
+      description '''
+        gRPC/REST surface for deployments, targets, managed resources, search,
+        and addon registration. The API is also the addon-facing surface for
+        identity resolution (ResolveIdentity), permission lookup (LookupPermissions),
+        and resource state reporting (inventory/conditions).
+      '''
+      technology 'gRPC / REST'
+    }
+
+    orchestration = component 'Orchestration' {
+      description '''
+        The uniform pipeline for all deployments:
+        Resolve → Delta → Plan → Generate → Deliver → Diff → Evaluate.
+        Uses durable execution with idempotent strategy callbacks.
+        The pipeline is the same regardless of which concrete strategies
+        are plugged in — the platform owns the execution shell,
+        addons own the strategy logic.
+      '''
+    }
+
+    deliveryAuth = component 'Delivery Authorization' {
+      description '''
+        Cross-cutting: CredentialPresentation × Provenance.
+        Credential presentation: whose credential applies at the target
+        (run-as-me, run-as-workload, run-as-platform).
+        Provenance: user signature verified by the delivery agent before apply.
+        PausedAuth: universal fallback when credentials or attestation are
+        missing, expired, or insufficient — recoverable by any authorized user.
+      '''
+    }
+
+    resourceStore = store 'Storage' {
+      description '''
+        Pluggable: embedded SQLite for small instances, external Postgres
+        for larger ones. Stores fulfillments (with per-strategy version streams),
+        resource intents, targets, deliveries, inventory, and condition events.
+      '''
+      technology 'SQLite / Postgres'
+    }
+  }
+
+  // ── Fleetlet ────────────────────────────────
+
+  fleetlet = system 'Fleetlet' {
+    #unproven
+    description '''
+      Transport multiplexer at each target. All addon-platform communication
+      goes through the fleetlet. Runs no business logic — centralizes connection
+      lifecycle, reconnection, backpressure, and channel routing. Local processes
+      connect via UDS or TCP; the fleetlet connects outward to the platform URL.
+      Transport-agnostic: gRPC/TLS, NATS, Kafka, HTTP/WebSocket, or Kube API.
+    '''
+
+    controlChannel = channel 'Control' {
+      description 'Heartbeat, target registration, capability declarations, target metadata.'
+    }
+
+    deliveryChannel = channel 'Delivery' {
+      description 'Request/response manifest delivery. Envelope includes attestation data for delivery agent verification.'
+    }
+
+    statusChannel = channel 'Status' {
+      description 'Continuous health and delivery status from target back to platform.'
+    }
+
+    indexChannel = channel 'Index' {
+      description 'Observed-state deltas from target to platform for fleet-wide inventory and search.'
+    }
+
+    accessChannel = channel 'Access' {
+      description 'ResolveIdentity and LookupPermissions for addon use. Latency-sensitive with local caching.'
+    }
+
+    addonChannels = channel 'Addon Channels' {
+      description '''
+        Addon-defined channels: API proxy (e.g. K8s API for kubectl, watches, exec),
+        generation traffic, invalidation signals, addon API proxying, data streams,
+        and strategy-specific traffic.
+      '''
+    }
+  }
+
+  // ── Addon ───────────────────────────────────
+
+  addon = system 'Addon' {
+    description '''
+      Primary extension surface. Separate processes — not just for modularity,
+      but for trust and signature boundaries. Addons can sign outputs with their
+      own identities; delivery agents verify addon material independently of the platform.
+    '''
+
+    strategies = component 'Strategy Implementations' {
+      description '''
+        Addons extend all three deployment axes:
+        ManifestStrategy — generate what to deploy (ManifestGenerator, InvalidateManifests).
+        PlacementStrategy — decide where it goes (Resolve, signed placement evidence).
+        RolloutStrategy — control how fast (Plan, task evaluation, gating).
+        Built-in strategies cover simple cases; addons handle the non-trivial logic.
+      '''
+    }
+
+    managedResources = component 'Managed Resource Types' {
+      description '''
+        Addon-registered, consumer-facing resource types: clusters, VMs, Argo instances.
+        The addon defines the schema, delivery target (self), and status projection.
+        The platform mechanically derives a Fulfillment and delivers through the
+        standard orchestration pipeline — same as any other deployment.
+      '''
+    }
+
+    addonUi = component 'UI / API Extensions' {
+      description '''
+        Domain-specific UI plugins ("what are you deploying?", "what does this target look like?")
+        and API extensions. The platform provides the shell and plugin registry; addons provide
+        domain-specific content. Addons also implement PermissionTranslators to convert generic
+        platform permission results into backend-specific filters.
+      '''
+    }
+  }
+
+  // ── Target ──────────────────────────────────
+
+  target = system 'Target' {
+    description '''
+      Any endpoint satisfying the delivery contract:
+      1. Accept a declarative payload
+      2. Apply it
+      3. Continuously report health
+
+      Target types include Kubernetes (Server-Side Apply), other FleetShift instances,
+      and addon-registered types. Addons can register their own target types while
+      participating in the same deployment pipeline.
+    '''
+
+    deliveryAgent = component 'Delivery Agent' {
+      description '''
+        Combines verification, apply, and status reporting in one component.
+        Verifies attestation before apply: input signature, output constraints,
+        strategy-implied constraints, generation check. No separate broadly privileged
+        reconciler — credentials never leave the target environment.
+        For Kubernetes: Server-Side Apply, resource watches for health, pruning.
+      '''
+    }
+
+    indexerAgent = component 'Indexer Agent' {
+      description '''
+        Reports observed state to the platform for fleet-wide inventory and search.
+        For Kubernetes: watches local API server, extracts fields per schema, streams
+        deltas via the fleetlet index channel. Deployed through the normal delivery
+        pipeline — not built into the fleetlet.
+      '''
+    }
+  }
+
+  // ─────────────────────────────────────────────
+  //  Relationships
+  // ─────────────────────────────────────────────
+
+  // Actor → Platform
+  provider -> fleetshift.platformApi 'manages platform, addons, trust, tenants'
+  tenant -> fleetshift.platformApi 'deployments, targets, workspaces, managed resources'
+
+  // External Trust
+  fleetshift.deliveryAuth -> tenantIdp 'verifies identity (JWKS)'
+  target.deliveryAgent -> tenantIdp 'verifies user signatures independently'
+
+  // Platform internals
+  fleetshift.platformApi -> fleetshift.orchestration 'triggers fulfillments'
+  fleetshift.platformApi -> fleetshift.deliveryAuth 'sign, verify, PausedAuth'
+  fleetshift.orchestration -> fleetshift.resourceStore 'durable execution state'
+  fleetshift.orchestration -> fleetshift.deliveryAuth 'attaches attestation to deliveries'
+
+  // Platform → Fleetlet
+  fleetshift.orchestration -> fleetlet.deliveryChannel 'manifests + attestation envelope'
+  fleetlet.statusChannel -[async]-> fleetshift.orchestration 'health and delivery status'
+  fleetlet.indexChannel -[async]-> fleetshift.platformApi 'observed-state deltas for inventory'
+  fleetlet.controlChannel -> fleetshift.platformApi 'registration, heartbeat'
+  fleetlet.accessChannel -> fleetshift.platformApi 'identity and permission lookups'
+
+  // Fleetlet → Target
+  fleetlet.deliveryChannel -> target.deliveryAgent 'manifests + attestation'
+  target.deliveryAgent -[async]-> fleetlet.statusChannel 'apply result, health, drift'
+  target.indexerAgent -[async]-> fleetlet.indexChannel 'resource state deltas'
+
+  // Addon ↔ Platform (all through fleetlet)
+  addon -> fleetlet 'all addon ↔ platform communication'
+  addon.strategies -> fleetshift.orchestration 'Generate, Resolve, Plan, InvalidateManifests'
+  addon.managedResources -> fleetshift.platformApi 'registers resource types and schemas'
+  addon.addonUi -> fleetshift.platformApi 'UI plugins, API extensions, permission translation'
+}
+
+// ─────────────────────────────────────────────
+//  Views
+// ─────────────────────────────────────────────
+
+views {
+
+  // ── Landscape ───────────────────────────────
+
+  view landscape {
+    title '[DRAFT] FleetShift — Landscape'
+    description '''
+      The major abstraction boundaries: users interact with the platform,
+      the platform orchestrates deployments through the fleetlet to targets,
+      addons extend the strategy model and register managed resource types,
+      and trust anchors are external to the platform.
+    '''
+
+    include
+      provider,
+      tenant,
+      fleetshift,
+      fleetlet,
+      addon,
+      target,
+      tenantIdp
+
+    style fleetshift {
+      color primary
+    }
+    style fleetlet {
+      color indigo
+    }
+    style addon {
+      color secondary
+    }
+    style target {
+      color green
+    }
+  }
+
+  // ── Platform & Addon Model ──────────────────
+
+  view platformView of fleetshift {
+    title '[DRAFT] Platform & Addon Model'
+    description '''
+      The platform provides the orchestration shell and platform APIs.
+      Addons plug strategy logic into all three deployment axes
+      (manifest, placement, rollout), register managed resource types,
+      and provide UI/API extensions. Delivery authorization is cross-cutting —
+      every delivery carries a user signature verified at the target.
+    '''
+
+    include
+      *,
+      tenant,
+      provider,
+      addon,
+      fleetlet,
+      tenantIdp
+
+    style orchestration {
+      color primary
+    }
+    style deliveryAuth {
+      color red
+    }
+  }
+
+  // ── Fleetlet & Channels ─────────────────────
+
+  view transportView of fleetlet {
+    title '[DRAFT] Fleetlet & Transport'
+    description '''
+      The fleetlet multiplexes named bidirectional channels between
+      local processes and the platform. Built-in channels cover control,
+      delivery, status, indexing, and access. Addons define additional
+      channels for API proxying, data streams, and strategy-specific traffic.
+      Transport is pluggable — the local protocol and platform-facing transport
+      are independent choices.
+    '''
+
+    include
+      *,
+      fleetshift.orchestration,
+      fleetshift.platformApi,
+      target.deliveryAgent,
+      target.indexerAgent,
+      addon
+
+    style deliveryChannel {
+      color red
+    }
+    style statusChannel {
+      color amber
+    }
+    style indexChannel {
+      color indigo
+    }
+    style accessChannel {
+      color green
+    }
+  }
+
+  // ── Delivery Authorization ──────────────────
+
+  view authView of fleetshift.deliveryAuth {
+    title '[DRAFT] Delivery Authorization'
+    description '''
+      CredentialPresentation × Provenance. The platform is never a trust root.
+      Every delivery carries a user signature; the delivery agent verifies
+      independently against IdP-anchored key bindings. Strategy-implied constraints
+      govern what the platform can derive from a signed intent. PausedAuth is the
+      universal fallback — recoverable by any authorized user.
+    '''
+
+    include
+      *,
+      tenant,
+      fleetshift.platformApi,
+      fleetshift.orchestration,
+      tenantIdp,
+      target.deliveryAgent,
+      fleetlet.deliveryChannel,
+      addon.strategies
+  }
+
+  // ── Target & Delivery Contract ──────────────
+
+  view targetView of target {
+    title '[DRAFT] Target & Delivery Contract'
+    description '''
+      A target is any endpoint that can accept a declarative payload, apply it,
+      and continuously report health. The delivery agent combines verification
+      and apply in one step — no intermediate CRD, no separate controller.
+      Indexer agents report observed state for fleet-wide inventory.
+      Kubernetes is the primary built-in target type; addons can register their own.
+    '''
+
+    include
+      *,
+      fleetlet.deliveryChannel,
+      fleetlet.statusChannel,
+      fleetlet.indexChannel,
+      fleetlet.addonChannels,
+      fleetshift.orchestration,
+      tenantIdp
+
+    style deliveryAgent {
+      color red
+    }
+    style indexerAgent {
+      color indigo
+    }
+  }
+
+  // ── Addon Extension Surface ─────────────────
+
+  view addonView of addon {
+    title '[DRAFT] Addon Extension Surface'
+    description '''
+      Addons are separate processes — for trust, not just modularity.
+      They extend all three strategy axes, register managed resource types
+      (consumer-facing nouns like clusters, VMs), and provide UI/API extensions.
+      All addon-platform communication goes through the fleetlet.
+    '''
+
+    include
+      *,
+      fleetshift.orchestration,
+      fleetshift.platformApi,
+      fleetlet
+
+    style strategies {
+      color primary
+    }
+    style managedResources {
+      color red
+    }
+    style addonUi {
+      color amber
+    }
+  }
+}
