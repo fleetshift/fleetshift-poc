@@ -123,6 +123,16 @@ model {
       '''
     }
 
+    extensionPoints = component 'Extension Points' {
+      description '''
+        The platform-side surface where addons plug in. Strategy callbacks
+        (ManifestGenerator, PlacementStrategy, RolloutStrategy), the managed
+        resource pipeline (schema registration, fulfillment derivation),
+        and addon API/UI proxy. The platform provides the contracts;
+        addons provide the implementations.
+      '''
+    }
+
     deliveryAuth = component 'Delivery Authorization' {
       description '''
         Cross-cutting: CredentialPresentation × Provenance.
@@ -131,6 +141,33 @@ model {
         Provenance: user signature verified by the delivery agent before apply.
         PausedAuth: universal fallback when credentials or attestation are
         missing, expired, or insufficient — recoverable by any authorized user.
+      '''
+    }
+
+    inventory = component 'Inventory' {
+      description '''
+        Fleet-wide observed-state indexing and search. Targets report resource
+        state and conditions via the fleetlet; the platform projects them into
+        a queryable inventory. Enables cross-target discovery, drift detection,
+        and deployment-aware search.
+      '''
+    }
+
+    accessControl = component 'Access Control' {
+      description '''
+        Identity resolution (ResolveIdentity) and generic permission lookup
+        (LookupPermissions). The platform evaluates permissions against identity
+        and workspace grants; addons define what those permissions mean in their
+        own domain and translate results into backend-specific filters.
+      '''
+    }
+
+    tenancy = component 'Tenant Configuration' {
+      description '''
+        Natively multi-tenant. Workspace hierarchy with authorization isolation
+        between tenants. Users are granted access to workspaces; targets belong
+        to exactly one workspace. Addons consume generic permission lookups
+        rather than reasoning about tenant or workspace IDs directly.
       '''
     }
 
@@ -272,26 +309,28 @@ model {
   // Platform internals
   fleetshift.platformApi -> fleetshift.orchestration 'triggers fulfillments'
   fleetshift.platformApi -> fleetshift.deliveryAuth 'sign, verify, PausedAuth'
+  fleetshift.platformApi -> fleetshift.accessControl 'authN/authZ on every request'
   fleetshift.orchestration -> fleetshift.resourceStore 'durable execution state'
   fleetshift.orchestration -> fleetshift.deliveryAuth 'attaches attestation to deliveries'
+  fleetshift.orchestration -> fleetshift.extensionPoints 'invokes addon strategy callbacks'
+  fleetshift.extensionPoints -> fleetshift.orchestration 'InvalidateManifests'
 
   // Platform → Fleetlet
   fleetshift.orchestration -> fleetlet.deliveryChannel 'manifests + attestation envelope'
   fleetlet.statusChannel -[async]-> fleetshift.orchestration 'health and delivery status'
-  fleetlet.indexChannel -[async]-> fleetshift.platformApi 'observed-state deltas for inventory'
+  fleetlet.indexChannel -[async]-> fleetshift.inventory 'observed-state deltas for inventory'
   fleetlet.controlChannel -> fleetshift.platformApi 'registration, heartbeat'
-  fleetlet.accessChannel -> fleetshift.platformApi 'identity and permission lookups'
+  fleetlet.accessChannel -> fleetshift.accessControl 'identity and permission lookups'
 
   // Fleetlet → Target
   fleetlet.deliveryChannel -> target.deliveryAgent 'manifests + attestation'
   target.deliveryAgent -[async]-> fleetlet.statusChannel 'apply result, health, drift'
   target.indexerAgent -[async]-> fleetlet.indexChannel 'resource state deltas'
 
-  // Addon ↔ Platform (all through fleetlet)
-  addon -> fleetlet 'all addon ↔ platform communication'
-  addon.strategies -> fleetshift.orchestration 'Generate, Resolve, Plan, InvalidateManifests'
-  addon.managedResources -> fleetshift.platformApi 'registers resource types and schemas'
-  addon.addonUi -> fleetshift.platformApi 'UI plugins, API extensions, permission translation'
+  // Addon ↔ Platform
+  addon.strategies -> fleetshift.extensionPoints 'Generate, Resolve, Plan, InvalidateManifests'
+  addon.managedResources -> fleetshift.extensionPoints 'registers resource types and schemas'
+  addon.addonUi -> fleetshift.extensionPoints 'UI plugins, API extensions, permission translation'
 }
 
 // ─────────────────────────────────────────────
@@ -299,6 +338,67 @@ model {
 // ─────────────────────────────────────────────
 
 views {
+
+  // ── Capability Layers ───────────────────────
+
+  view index {
+    title '[DRAFT] FleetShift — Capability Layers'
+    description '''
+      The system in layers of responsibility. Domain addons capture
+      fit-for-purpose knowledge and expose it through the platform.
+      The platform provides the core fleet management engine.
+      The fleetlet provides transport. Targets satisfy the delivery contract.
+    '''
+
+    group 'Domain Addons — e.g. Cluster Mgmt, Observability, Virtualization' {
+      include
+        addon,
+        addon.*
+    }
+
+    group 'FleetShift — Core Fleet Management Engine' {
+      include
+        fleetshift.orchestration,
+        fleetshift.extensionPoints,
+        fleetshift.deliveryAuth,
+        fleetshift.inventory,
+        fleetshift.accessControl,
+        fleetshift.tenancy,
+        fleetshift.resourceStore
+    }
+
+    group 'Fleetlet — Channel-Based Transport' {
+      include fleetlet
+    }
+
+    group 'Targets — Accept, Apply, Report Health' {
+      include target
+    }
+
+    autoLayout TopBottom
+
+    style addon {
+      color green
+    }
+    style fleetshift.orchestration {
+      color primary
+    }
+    style fleetshift.extensionPoints {
+      color secondary
+    }
+    style fleetshift.deliveryAuth {
+      color red
+    }
+    style fleetshift.inventory {
+      color indigo
+    }
+    style fleetshift.accessControl {
+      color amber
+    }
+    style fleetshift.tenancy {
+      color amber
+    }
+  }
 
   // ── Landscape ───────────────────────────────
 
@@ -357,8 +457,20 @@ views {
     style orchestration {
       color primary
     }
+    style extensionPoints {
+      color secondary
+    }
     style deliveryAuth {
       color red
+    }
+    style inventory {
+      color indigo
+    }
+    style accessControl {
+      color amber
+    }
+    style tenancy {
+      color amber
     }
   }
 
