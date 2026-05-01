@@ -11,12 +11,25 @@ type TargetRepository interface {
 	Delete(ctx context.Context, id TargetID) error
 }
 
-// DeploymentRepository persists and retrieves deployments.
+// FulfillmentRepository persists and retrieves fulfillments.
+// Create and Update drain pending strategy records (via
+// [Fulfillment.DrainPendingStrategyRecords]) and insert them.
+// Get materializes current strategy specs by joining the version tables.
+type FulfillmentRepository interface {
+	Create(ctx context.Context, f Fulfillment) error
+	Get(ctx context.Context, id FulfillmentID) (Fulfillment, error)
+	Update(ctx context.Context, f Fulfillment) error
+	Delete(ctx context.Context, id FulfillmentID) error
+}
+
+// DeploymentRepository persists and retrieves the thin deployment
+// aggregate. Mutations that affect orchestration state go through
+// [FulfillmentRepository].
 type DeploymentRepository interface {
 	Create(ctx context.Context, d Deployment) error
 	Get(ctx context.Context, id DeploymentID) (Deployment, error)
-	List(ctx context.Context) ([]Deployment, error)
-	Update(ctx context.Context, d Deployment) error
+	GetView(ctx context.Context, id DeploymentID) (DeploymentView, error)
+	ListView(ctx context.Context) ([]DeploymentView, error)
 	Delete(ctx context.Context, id DeploymentID) error
 }
 
@@ -31,11 +44,11 @@ type InventoryRepository interface {
 	Delete(ctx context.Context, id InventoryItemID) error
 }
 
-// DeliveryRepository persists deliveries for each deployment-target pair.
+// DeliveryRepository persists deliveries for each fulfillment-target pair.
 type DeliveryRepository interface {
 	Put(ctx context.Context, d Delivery) error
 	Get(ctx context.Context, id DeliveryID) (Delivery, error)
-	GetByDeploymentTarget(ctx context.Context, deploymentID DeploymentID, targetID TargetID) (Delivery, error)
-	ListByDeployment(ctx context.Context, deploymentID DeploymentID) ([]Delivery, error)
-	DeleteByDeployment(ctx context.Context, deploymentID DeploymentID) error
+	GetByFulfillmentTarget(ctx context.Context, fID FulfillmentID, tID TargetID) (Delivery, error)
+	ListByFulfillment(ctx context.Context, fID FulfillmentID) ([]Delivery, error)
+	DeleteByFulfillment(ctx context.Context, fID FulfillmentID) error
 }

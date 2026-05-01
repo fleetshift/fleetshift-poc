@@ -14,8 +14,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // TestKindAddon_RealDocker exercises the full addon lifecycle against
@@ -133,9 +133,9 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	dep := awaitState(ctx, t, store, "kind-docker-deploy", domain.DeploymentStateActive)
-	if len(dep.ResolvedTargets) != 1 || dep.ResolvedTargets[0] != "kind-docker" {
-		t.Fatalf("unexpected ResolvedTargets: %v", dep.ResolvedTargets)
+	view := awaitState(ctx, t, store, "kind-docker-deploy", domain.FulfillmentStateActive)
+	if len(view.Fulfillment.ResolvedTargets) != 1 || view.Fulfillment.ResolvedTargets[0] != "kind-docker" {
+		t.Fatalf("unexpected ResolvedTargets: %v", view.Fulfillment.ResolvedTargets)
 	}
 
 	// Delivery is async; poll until the cluster appears or context expires.

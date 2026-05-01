@@ -37,18 +37,18 @@ const activityMaxAttempts = 10
 // to the correct goroutine.
 type Registry struct {
 	mu        sync.Mutex
-	instances map[domain.DeploymentID]*instance
+	instances map[domain.FulfillmentID]*instance
 }
 
 type instance struct {
-	events chan []byte // JSON-serialized DeploymentEvent
+	events chan []byte // JSON-serialized FulfillmentEvent
 }
 
-func (r *Registry) getInstance(id domain.DeploymentID) *instance {
+func (r *Registry) getInstance(id domain.FulfillmentID) *instance {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.instances == nil {
-		r.instances = make(map[domain.DeploymentID]*instance)
+		r.instances = make(map[domain.FulfillmentID]*instance)
 	}
 	inst, ok := r.instances[id]
 	if !ok {
@@ -58,16 +58,16 @@ func (r *Registry) getInstance(id domain.DeploymentID) *instance {
 	return inst
 }
 
-func (r *Registry) removeInstance(id domain.DeploymentID) {
+func (r *Registry) removeInstance(id domain.FulfillmentID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	delete(r.instances, id)
 }
 
-// SignalDeploymentEvent JSON-serializes the event and delivers it to
+// SignalFulfillmentEvent JSON-serializes the event and delivers it to
 // the workflow instance's signal channel, mirroring how durable engines
 // persist signals before delivering them.
-func (r *Registry) SignalDeploymentEvent(ctx context.Context, id domain.DeploymentID, event domain.DeploymentEvent) error {
+func (r *Registry) SignalFulfillmentEvent(ctx context.Context, id domain.FulfillmentID, event domain.FulfillmentEvent) error {
 	data, err := json.Marshal(event)
 	if err != nil {
 		return fmt.Errorf("memworkflow: marshal signal: %w", err)
@@ -107,37 +107,37 @@ type orchestrationWorkflow struct {
 	registry *Registry
 	spec     *domain.OrchestrationWorkflowSpec
 	mu       sync.Mutex
-	running  map[domain.DeploymentID]struct{}
+	running  map[domain.FulfillmentID]struct{}
 }
 
-func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID) (domain.Execution[struct{}], error) {
+func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.FulfillmentID) (domain.Execution[struct{}], error) {
 	w.mu.Lock()
 	if w.running == nil {
-		w.running = make(map[domain.DeploymentID]struct{})
+		w.running = make(map[domain.FulfillmentID]struct{})
 	}
-	if _, active := w.running[deploymentID]; active {
+	if _, active := w.running[fulfillmentID]; active {
 		w.mu.Unlock()
 		return nil, domain.ErrAlreadyRunning
 	}
-	w.running[deploymentID] = struct{}{}
+	w.running[fulfillmentID] = struct{}{}
 	w.mu.Unlock()
 
-	inst := w.registry.getInstance(deploymentID)
+	inst := w.registry.getInstance(fulfillmentID)
 
 	done := make(chan orchResult, 1)
 
 	go func() {
 		defer func() {
-			w.registry.removeInstance(deploymentID)
+			w.registry.removeInstance(fulfillmentID)
 			w.mu.Lock()
-			delete(w.running, deploymentID)
+			delete(w.running, fulfillmentID)
 			w.mu.Unlock()
 			if r := recover(); r != nil {
 				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
 			}
 		}()
 
-		id := deploymentID
+		id := fulfillmentID
 		for {
 			record := &baseRecord{
 				id:     string(id),
@@ -147,7 +147,7 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.D
 			val, err := w.spec.Run(record, id)
 			var can *domain.ContinueAsNewError
 			if errors.As(err, &can) {
-				id = can.Input.(domain.DeploymentID)
+				id = can.Input.(domain.FulfillmentID)
 				continue
 			}
 			done <- orchResult{val: val, err: err}
@@ -155,7 +155,7 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.D
 		}
 	}()
 
-	return &orchExecution{id: string(deploymentID), done: done}, nil
+	return &orchExecution{id: string(fulfillmentID), done: done}, nil
 }
 
 // --- CreateDeploymentWorkflow ---
@@ -164,7 +164,7 @@ type createDeploymentWorkflow struct {
 	spec *domain.CreateDeploymentWorkflowSpec
 }
 
-func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.Deployment], error) {
+func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 	done := make(chan createResult, 1)
 
 	go func() {
@@ -209,7 +209,7 @@ type deleteDeploymentWorkflow struct {
 	running  map[string]struct{}
 }
 
-func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
 
 	w.mu.Lock()
@@ -255,7 +255,7 @@ type resumeDeploymentWorkflow struct {
 	running  map[string]struct{}
 }
 
-func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
 
 	w.mu.Lock()
@@ -375,11 +375,11 @@ func (r *baseRecord) Sleep(d time.Duration) error {
 }
 
 // Await blocks until a signal arrives on the channel, then
-// JSON-deserializes it into [domain.DeploymentEvent].
+// JSON-deserializes it into [domain.FulfillmentEvent].
 func (r *baseRecord) Await(signalName string) (any, error) {
 	select {
 	case data := <-r.events:
-		var event domain.DeploymentEvent
+		var event domain.FulfillmentEvent
 		if err := json.Unmarshal(data, &event); err != nil {
 			return nil, fmt.Errorf("memworkflow: unmarshal signal %q: %w", signalName, err)
 		}
@@ -431,7 +431,7 @@ func (e *orchExecution) AwaitResult(ctx context.Context) (struct{}, error) {
 }
 
 type createResult struct {
-	val domain.Deployment
+	val domain.DeploymentView
 	err error
 }
 
@@ -441,17 +441,17 @@ type createExecution struct {
 }
 
 func (e *createExecution) WorkflowID() string { return e.id }
-func (e *createExecution) AwaitResult(ctx context.Context) (domain.Deployment, error) {
+func (e *createExecution) AwaitResult(ctx context.Context) (domain.DeploymentView, error) {
 	select {
 	case r := <-e.done:
 		return r.val, r.err
 	case <-ctx.Done():
-		return domain.Deployment{}, ctx.Err()
+		return domain.DeploymentView{}, ctx.Err()
 	}
 }
 
 type deploymentResult struct {
-	val domain.Deployment
+	val domain.DeploymentView
 	err error
 }
 
@@ -461,12 +461,12 @@ type deploymentExecution struct {
 }
 
 func (e *deploymentExecution) WorkflowID() string { return e.id }
-func (e *deploymentExecution) AwaitResult(ctx context.Context) (domain.Deployment, error) {
+func (e *deploymentExecution) AwaitResult(ctx context.Context) (domain.DeploymentView, error) {
 	select {
 	case r := <-e.done:
 		return r.val, r.err
 	case <-ctx.Done():
-		return domain.Deployment{}, ctx.Err()
+		return domain.DeploymentView{}, ctx.Err()
 	}
 }
 

@@ -6,10 +6,10 @@ type DeliveryCompletionEvent struct {
 	Result     DeliveryResult
 }
 
-// DeploymentEvent is the signal delivered to a running reconciliation
+// FulfillmentEvent is the signal delivered to a running reconciliation
 // workflow. In the discrete-workflow model only delivery completion
-// events are signaled; all other mutations bump the deployment's
+// events are signaled; all other mutations bump the fulfillment's
 // [Generation] and start a new reconciliation workflow.
-type DeploymentEvent struct {
+type FulfillmentEvent struct {
 	DeliveryCompleted *DeliveryCompletionEvent
 }

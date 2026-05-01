@@ -163,10 +163,14 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 	}
 
 	// 6. Envelope reconstruction
+	dc, err := asDeploymentContent(input.Content)
+	if err != nil {
+		return fmt.Errorf("signed input content: %w", err)
+	}
 	envelope, err := domain.BuildSignedInputEnvelope(
-		input.Content.DeploymentID,
-		input.Content.ManifestStrategy,
-		input.Content.PlacementStrategy,
+		dc.DeploymentID,
+		dc.ManifestStrategy,
+		dc.PlacementStrategy,
 		input.ValidUntil,
 		input.OutputConstraints,
 		input.ExpectedGeneration,
@@ -226,8 +230,23 @@ func verifyOutput(input *domain.SignedInput, output domain.DeliveryOutput) error
 	}
 }
 
+func asDeploymentContent(c domain.InputContent) (domain.DeploymentContent, error) {
+	switch v := c.(type) {
+	case domain.DeploymentContent:
+		return v, nil
+	case *domain.DeploymentContent:
+		return *v, nil
+	default:
+		return domain.DeploymentContent{}, fmt.Errorf("expected deployment signed input content, got %T", c)
+	}
+}
+
 func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) error {
-	expected := input.Content.ManifestStrategy.Manifests
+	dc, err := asDeploymentContent(input.Content)
+	if err != nil {
+		return err
+	}
+	expected := dc.ManifestStrategy.Manifests
 	actual := put.Manifests
 	if len(expected) != len(actual) {
 		return fmt.Errorf("manifest count mismatch: expected %d, got %d", len(expected), len(actual))
@@ -245,9 +264,13 @@ func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) err
 }
 
 func verifyRemoveByDeploymentId(input *domain.SignedInput, remove *domain.RemoveByDeploymentId) error {
-	if remove.DeploymentID != input.Content.DeploymentID {
+	dc, err := asDeploymentContent(input.Content)
+	if err != nil {
+		return err
+	}
+	if remove.DeploymentID != dc.DeploymentID {
 		return fmt.Errorf("remove deployment_id mismatch: output %q, input %q",
-			remove.DeploymentID, input.Content.DeploymentID)
+			remove.DeploymentID, dc.DeploymentID)
 	}
 	return nil
 }

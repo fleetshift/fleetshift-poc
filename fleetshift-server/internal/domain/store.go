@@ -31,6 +31,7 @@ type Store interface {
 //	return tx.Commit()
 type Tx interface {
 	Targets() TargetRepository
+	Fulfillments() FulfillmentRepository
 	Deployments() DeploymentRepository
 	Deliveries() DeliveryRepository
 	Inventory() InventoryRepository

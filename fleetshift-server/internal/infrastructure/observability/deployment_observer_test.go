@@ -9,13 +9,13 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
 )
 
-func TestDeploymentObserver_RunStarted_LogsAndReturnsProbe(t *testing.T) {
+func TestFulfillmentObserver_RunStarted_LogsAndReturnsProbe(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	ctx, probe := obs.RunStarted(context.Background(), "dep-1")
+	obs := observability.NewFulfillmentObserver(logger)
+	ctx, probe := obs.RunStarted(context.Background(), "ful-1")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -31,18 +31,18 @@ func TestDeploymentObserver_RunStarted_LogsAndReturnsProbe(t *testing.T) {
 	probe.End()
 }
 
-func TestDeploymentRunProbe_FullLifecycle(t *testing.T) {
+func TestFulfillmentRunProbe_FullLifecycle(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "dep-2")
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-2")
 
-	probe.EventReceived(domain.DeploymentEvent{
+	probe.EventReceived(domain.FulfillmentEvent{
 		DeliveryCompleted: &domain.DeliveryCompletionEvent{DeliveryID: "d1:t1"},
 	})
-	probe.StateChanged(domain.DeploymentStateActive)
+	probe.StateChanged(domain.FulfillmentStateActive)
 	probe.End()
 
 	records := handler.Records()
@@ -67,13 +67,13 @@ func TestDeploymentRunProbe_FullLifecycle(t *testing.T) {
 	}
 }
 
-func TestDeploymentRunProbe_ManifestsFiltered_AllDroppedLogsWarning(t *testing.T) {
+func TestFulfillmentRunProbe_ManifestsFiltered_AllDroppedLogsWarning(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "dep-filter")
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-filter")
 
 	probe.ManifestsFiltered(domain.TargetInfo{ID: "k8s-1", Type: "kubernetes"}, 2, 0)
 	probe.End()
@@ -94,13 +94,13 @@ func TestDeploymentRunProbe_ManifestsFiltered_AllDroppedLogsWarning(t *testing.T
 	}
 }
 
-func TestDeploymentRunProbe_ManifestsFiltered_PartialLogsDebug(t *testing.T) {
+func TestFulfillmentRunProbe_ManifestsFiltered_PartialLogsDebug(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "dep-partial")
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-partial")
 
 	probe.ManifestsFiltered(domain.TargetInfo{ID: "kind-1", Type: "kind"}, 3, 2)
 	probe.End()
@@ -121,13 +121,13 @@ func TestDeploymentRunProbe_ManifestsFiltered_PartialLogsDebug(t *testing.T) {
 	}
 }
 
-func TestDeploymentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
+func TestFulfillmentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "dep-3")
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-3")
 
 	probe.Error(domain.ErrNotFound)
 	probe.End()
@@ -148,13 +148,13 @@ func TestDeploymentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	}
 }
 
-func TestDeploymentRunProbe_DeliveryOutputsProcessed_LogsTargets(t *testing.T) {
+func TestFulfillmentRunProbe_DeliveryOutputsProcessed_LogsTargets(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
-	obs := observability.NewDeploymentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "dep-outputs")
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-outputs")
 
 	probe.DeliveryOutputsProcessed([]domain.ProvisionedTarget{
 		{ID: "k8s-cluster1", Type: "kubernetes", Name: "cluster1"},

@@ -538,7 +538,7 @@ Whether resource types can be defined through configuration alone (no addon proc
 
 #### Fulfillment rename in codebase
 
-The existing codebase uses "Deployment" for what is now the Fulfillment. Rename scope and approach TBD.
+Completed in OME-43. The codebase now has `Fulfillment` as its own aggregate with `FulfillmentRepository`, and `Deployment` is a thin aggregate holding a `FulfillmentID` reference. Orchestration operates on `Fulfillment` directly. A `DeploymentView` read model joins the two for the user-facing API. The user-facing proto/gRPC layer still uses "Deployment" terminology.
 
 ### Phasing
 

@@ -22,17 +22,14 @@ type OutputConstraint struct {
 	Expression string
 }
 
-// Provenance carries the cryptographic proof that a user authorized
-// a deployment. Stored on the deployment. Does NOT carry deployment
-// content (that's on the Deployment itself — no duplication).
-//
-// The full key binding is NOT stored here; the issuer needed for
-// delivery-time key binding lookup is carried inside Sig.Signer.
-type Provenance struct {
-	Sig                Signature
-	ValidUntil         time.Time
-	ExpectedGeneration Generation
-	OutputConstraints  []OutputConstraint
+// InputContent is a typed union for the content that a signer
+// authorizes. Matches the hybrid attestation PoC's InputContent
+// protocol. Valid implementations are [DeploymentContent] and (in
+// OME-44) ManagedResourceContent.
+type InputContent interface {
+	ContentID() string
+	ContentType() string
+	inputContent() // sealed
 }
 
 // DeploymentContent groups the identity and strategy fields that the
@@ -41,6 +38,80 @@ type DeploymentContent struct {
 	DeploymentID      DeploymentID
 	ManifestStrategy  ManifestStrategySpec
 	PlacementStrategy PlacementStrategySpec
+}
+
+func (c DeploymentContent) ContentID() string   { return string(c.DeploymentID) }
+func (c DeploymentContent) ContentType() string  { return "deployment" }
+func (DeploymentContent) inputContent()          {}
+
+// Provenance carries the cryptographic proof that a user authorized
+// a fulfillment. Stored on the [Fulfillment]. Content carries the
+// typed [InputContent] that was signed -- matches the hybrid PoC
+// where SignedInput.content IS the typed content.
+type Provenance struct {
+	Content            InputContent // what the user signed (typed)
+	Sig                Signature
+	ValidUntil         time.Time
+	ExpectedGeneration Generation
+	OutputConstraints  []OutputConstraint
+}
+
+// provenanceJSON is the wire representation for [Provenance]. The
+// Content field uses a discriminated union (ContentType + typed field)
+// for polymorphic InputContent serialization.
+type provenanceJSON struct {
+	ContentType        string             `json:"ContentType"`
+	DeploymentContent  *DeploymentContent `json:"DeploymentContent,omitempty"`
+	Sig                Signature          `json:"Sig"`
+	ValidUntil         time.Time          `json:"ValidUntil"`
+	ExpectedGeneration Generation         `json:"ExpectedGeneration"`
+	OutputConstraints  []OutputConstraint `json:"OutputConstraints,omitempty"`
+}
+
+// MarshalJSON implements [json.Marshaler] for Provenance.
+func (p Provenance) MarshalJSON() ([]byte, error) {
+	j := provenanceJSON{
+		Sig:                p.Sig,
+		ValidUntil:         p.ValidUntil,
+		ExpectedGeneration: p.ExpectedGeneration,
+		OutputConstraints:  p.OutputConstraints,
+	}
+	switch c := p.Content.(type) {
+	case DeploymentContent:
+		j.ContentType = "deployment"
+		j.DeploymentContent = &c
+	case *DeploymentContent:
+		j.ContentType = "deployment"
+		j.DeploymentContent = c
+	case nil:
+		// no content
+	default:
+		return nil, fmt.Errorf("provenance: unknown InputContent type %T", p.Content)
+	}
+	return json.Marshal(j)
+}
+
+// UnmarshalJSON implements [json.Unmarshaler] for Provenance.
+func (p *Provenance) UnmarshalJSON(data []byte) error {
+	var j provenanceJSON
+	if err := json.Unmarshal(data, &j); err != nil {
+		return err
+	}
+	p.Sig = j.Sig
+	p.ValidUntil = j.ValidUntil
+	p.ExpectedGeneration = j.ExpectedGeneration
+	p.OutputConstraints = j.OutputConstraints
+	switch j.ContentType {
+	case "deployment":
+		if j.DeploymentContent != nil {
+			p.Content = *j.DeploymentContent
+		}
+	case "":
+		p.Content = nil
+	default:
+		return fmt.Errorf("provenance: unknown ContentType %q", j.ContentType)
+	}
+	return nil
 }
 
 // SignerAssertion carries the minimal data a delivery agent needs
@@ -56,12 +127,71 @@ type SignerAssertion struct {
 // assembled at delivery time from stored Provenance plus the signer
 // assertion derived from the enrollment record.
 type SignedInput struct {
-	Content            DeploymentContent
+	Content            InputContent
 	Sig                Signature
 	Signer             SignerAssertion // replaces the former full key binding bundle
 	ValidUntil         time.Time
 	OutputConstraints  []OutputConstraint
 	ExpectedGeneration Generation
+}
+
+// signedInputJSON is the wire representation for [SignedInput].
+type signedInputJSON struct {
+	ContentType        string             `json:"ContentType"`
+	DeploymentContent  *DeploymentContent `json:"DeploymentContent,omitempty"`
+	Sig                Signature          `json:"Sig"`
+	Signer             SignerAssertion    `json:"Signer"`
+	ValidUntil         time.Time          `json:"ValidUntil"`
+	OutputConstraints  []OutputConstraint `json:"OutputConstraints,omitempty"`
+	ExpectedGeneration Generation         `json:"ExpectedGeneration"`
+}
+
+// MarshalJSON implements [json.Marshaler] for SignedInput.
+func (si SignedInput) MarshalJSON() ([]byte, error) {
+	j := signedInputJSON{
+		Sig:                si.Sig,
+		Signer:             si.Signer,
+		ValidUntil:         si.ValidUntil,
+		OutputConstraints:  si.OutputConstraints,
+		ExpectedGeneration: si.ExpectedGeneration,
+	}
+	switch c := si.Content.(type) {
+	case DeploymentContent:
+		j.ContentType = "deployment"
+		j.DeploymentContent = &c
+	case *DeploymentContent:
+		j.ContentType = "deployment"
+		j.DeploymentContent = c
+	case nil:
+		// no content
+	default:
+		return nil, fmt.Errorf("signed input: unknown InputContent type %T", si.Content)
+	}
+	return json.Marshal(j)
+}
+
+// UnmarshalJSON implements [json.Unmarshaler] for SignedInput.
+func (si *SignedInput) UnmarshalJSON(data []byte) error {
+	var j signedInputJSON
+	if err := json.Unmarshal(data, &j); err != nil {
+		return err
+	}
+	si.Sig = j.Sig
+	si.Signer = j.Signer
+	si.ValidUntil = j.ValidUntil
+	si.OutputConstraints = j.OutputConstraints
+	si.ExpectedGeneration = j.ExpectedGeneration
+	switch j.ContentType {
+	case "deployment":
+		if j.DeploymentContent != nil {
+			si.Content = *j.DeploymentContent
+		}
+	case "":
+		si.Content = nil
+	default:
+		return fmt.Errorf("signed input: unknown ContentType %q", j.ContentType)
+	}
+	return nil
 }
 
 // Attestation is the self-contained verification bundle assembled at

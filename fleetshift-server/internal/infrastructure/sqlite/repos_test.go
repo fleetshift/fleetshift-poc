@@ -8,6 +8,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/authmethodrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/storetest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
@@ -33,14 +34,26 @@ func TestTargetRepo(t *testing.T) {
 }
 
 func TestDeploymentRepo(t *testing.T) {
-	deploymentrepotest.Run(t, func(t *testing.T) domain.DeploymentRepository {
+	deploymentrepotest.Run(t, func(t *testing.T) domain.Tx {
 		store := beginTestTx(t)
 		tx, err := store.Begin(context.Background())
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
 		t.Cleanup(func() { tx.Rollback() })
-		return tx.Deployments()
+		return tx
+	})
+}
+
+func TestFulfillmentRepo(t *testing.T) {
+	fulfillmentrepotest.Run(t, func(t *testing.T) domain.FulfillmentRepository {
+		store := beginTestTx(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { tx.Rollback() })
+		return tx.Fulfillments()
 	})
 }
 

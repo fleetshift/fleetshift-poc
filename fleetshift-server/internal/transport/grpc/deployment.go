@@ -36,12 +36,12 @@ func (s *DeploymentServer) CreateDeployment(ctx context.Context, req *pb.CreateD
 		return nil, status.Errorf(codes.InvalidArgument, "invalid deployment: %v", err)
 	}
 
-	dep, err := s.Deployments.Create(ctx, input)
+	view, err := s.Deployments.Create(ctx, input)
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	return deploymentToProto(dep), nil
+	return deploymentToProto(view), nil
 }
 
 func (s *DeploymentServer) GetDeployment(ctx context.Context, req *pb.GetDeploymentRequest) (*pb.Deployment, error) {
@@ -50,12 +50,12 @@ func (s *DeploymentServer) GetDeployment(ctx context.Context, req *pb.GetDeploym
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	dep, err := s.Deployments.Get(ctx, id)
+	view, err := s.Deployments.Get(ctx, id)
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	return deploymentToProto(dep), nil
+	return deploymentToProto(view), nil
 }
 
 func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeDeploymentRequest) (*pb.Deployment, error) {
@@ -72,24 +72,24 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 		in.ValidUntil = req.GetValidUntil().AsTime()
 	}
 
-	dep, err := s.Deployments.Resume(ctx, in)
+	view, err := s.Deployments.Resume(ctx, in)
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	return deploymentToProto(dep), nil
+	return deploymentToProto(view), nil
 }
 
 func (s *DeploymentServer) ListDeployments(ctx context.Context, _ *pb.ListDeploymentsRequest) (*pb.ListDeploymentsResponse, error) {
 	// TODO: implement pagination
-	deps, err := s.Deployments.List(ctx)
+	views, err := s.Deployments.List(ctx)
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	out := make([]*pb.Deployment, len(deps))
-	for i, d := range deps {
-		out[i] = deploymentToProto(d)
+	out := make([]*pb.Deployment, len(views))
+	for i, v := range views {
+		out[i] = deploymentToProto(v)
 	}
 	return &pb.ListDeploymentsResponse{Deployments: out}, nil
 }
@@ -100,12 +100,12 @@ func (s *DeploymentServer) DeleteDeployment(ctx context.Context, req *pb.DeleteD
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	dep, err := s.Deployments.Delete(ctx, id)
+	view, err := s.Deployments.Delete(ctx, id)
 	if err != nil {
 		return nil, domainError(err)
 	}
 
-	return deploymentToProto(dep), nil
+	return deploymentToProto(view), nil
 }
 
 // --- resource name helpers ---
@@ -217,27 +217,29 @@ func rolloutStrategyFromProto(p *pb.RolloutStrategy) (domain.RolloutStrategySpec
 	}
 }
 
-func deploymentToProto(d domain.Deployment) *pb.Deployment {
+func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
+	d := v.Deployment
+	f := v.Fulfillment
 	dep := &pb.Deployment{
 		Name:  deploymentName(d.ID),
-		State: deploymentStateToProto(d.State),
+		State: fulfillmentStateToProto(f.State),
 	}
 
 	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
 		dep.State == pb.Deployment_STATE_DELETING ||
 		dep.State == pb.Deployment_STATE_PAUSED_AUTH
 
-	dep.ManifestStrategy = manifestStrategyToProto(d.ManifestStrategy)
-	dep.PlacementStrategy = placementStrategyToProto(d.PlacementStrategy)
-	if d.RolloutStrategy != nil {
+	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy)
+	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy)
+	if f.RolloutStrategy != nil {
 		dep.RolloutStrategy = &pb.RolloutStrategy{
-			Type: rolloutStrategyTypeToProto(d.RolloutStrategy.Type),
+			Type: rolloutStrategyTypeToProto(f.RolloutStrategy.Type),
 		}
 	}
 
-	if len(d.ResolvedTargets) > 0 {
-		ids := make([]string, len(d.ResolvedTargets))
-		for i, t := range d.ResolvedTargets {
+	if len(f.ResolvedTargets) > 0 {
+		ids := make([]string, len(f.ResolvedTargets))
+		for i, t := range f.ResolvedTargets {
 			ids[i] = string(t)
 		}
 		dep.ResolvedTargetIds = ids
@@ -252,8 +254,8 @@ func deploymentToProto(d domain.Deployment) *pb.Deployment {
 	dep.Uid = d.UID
 	dep.Etag = d.Etag
 
-	if d.Provenance != nil {
-		dep.Provenance = provenanceToProto(d.Provenance)
+	if f.Provenance != nil {
+		dep.Provenance = provenanceToProto(f.Provenance)
 	}
 
 	return dep
@@ -286,17 +288,17 @@ func provenanceToProto(p *domain.Provenance) *pb.Provenance {
 	return prov
 }
 
-func deploymentStateToProto(s domain.DeploymentState) pb.Deployment_State {
+func fulfillmentStateToProto(s domain.FulfillmentState) pb.Deployment_State {
 	switch s {
-	case domain.DeploymentStateCreating:
+	case domain.FulfillmentStateCreating:
 		return pb.Deployment_STATE_CREATING
-	case domain.DeploymentStateActive:
+	case domain.FulfillmentStateActive:
 		return pb.Deployment_STATE_ACTIVE
-	case domain.DeploymentStateDeleting:
+	case domain.FulfillmentStateDeleting:
 		return pb.Deployment_STATE_DELETING
-	case domain.DeploymentStateFailed:
+	case domain.FulfillmentStateFailed:
 		return pb.Deployment_STATE_FAILED
-	case domain.DeploymentStatePausedAuth:
+	case domain.FulfillmentStatePausedAuth:
 		return pb.Deployment_STATE_PAUSED_AUTH
 	default:
 		return pb.Deployment_STATE_UNSPECIFIED

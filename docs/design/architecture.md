@@ -32,6 +32,8 @@ Deployment = ManifestStrategy × PlacementStrategy × RolloutStrategy
 
 These are the orchestration axes. They describe how the platform computes and executes delivery. They are intentionally separate from delivery authorization.
 
+Internally, the orchestration axes live on the **Fulfillment** kernel primitive — a separate aggregate from the user-facing Deployment. A Deployment holds a `FulfillmentID` reference; orchestration operates on Fulfillment directly. This separation enables multiple user-facing concepts (deployments, managed resources, campaigns) to drive the same orchestration pipeline. See [managed_resources.md](managed_resources.md#architectural-layering) for the layering model.
+
 Delivery authorization is a first-class, cross-cutting concern:
 
 ```text

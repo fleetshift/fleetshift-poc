@@ -31,6 +31,8 @@ Read this when you need the platform's core mental model before diving into exec
 
 ## Deployment as three strategy axes
 
+> **Implementation note.** In the codebase, the three strategy axes and orchestration state live on the **Fulfillment** kernel primitive — a separate aggregate from the user-facing `Deployment`. A `Deployment` is a thin aggregate that holds a `FulfillmentID` reference; the `DeploymentView` read model joins the two for the API. Orchestration operates on `Fulfillment` directly. This separation enables other user-facing concepts (managed resources, campaigns) to drive the same orchestration pipeline. See [managed_resources.md](../managed_resources.md#architectural-layering) for the full layering model.
+
 The management plane decomposes every deployment into three orthogonal, pluggable strategies:
 
 ```text

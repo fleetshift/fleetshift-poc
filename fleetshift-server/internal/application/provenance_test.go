@@ -125,17 +125,17 @@ func TestCreateDeployment_WithSignature_AttachesProvenance(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if dep.Provenance == nil {
-		t.Fatal("expected Provenance to be set on signed deployment")
+	if dep.Fulfillment.Provenance == nil {
+		t.Fatal("expected Provenance to be set on signed fulfillment")
 	}
-	if dep.Provenance.Sig.Signer.Subject != subjectID {
-		t.Errorf("Signer.Subject = %q, want %q", dep.Provenance.Sig.Signer.Subject, subjectID)
+	if dep.Fulfillment.Provenance.Sig.Signer.Subject != subjectID {
+		t.Errorf("Signer.Subject = %q, want %q", dep.Fulfillment.Provenance.Sig.Signer.Subject, subjectID)
 	}
-	if len(dep.Provenance.Sig.SignatureBytes) == 0 {
+	if len(dep.Fulfillment.Provenance.Sig.SignatureBytes) == 0 {
 		t.Error("expected non-empty SignatureBytes")
 	}
-	if dep.Provenance.ExpectedGeneration != 1 {
-		t.Errorf("ExpectedGeneration = %d, want 1", dep.Provenance.ExpectedGeneration)
+	if dep.Fulfillment.Provenance.ExpectedGeneration != 1 {
+		t.Errorf("ExpectedGeneration = %d, want 1", dep.Fulfillment.Provenance.ExpectedGeneration)
 	}
 }
 
@@ -158,8 +158,8 @@ func TestCreateDeployment_WithoutSignature_NoProvenance(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if dep.Provenance != nil {
-		t.Error("expected no Provenance on unsigned deployment")
+	if dep.Fulfillment.Provenance != nil {
+		t.Error("expected no Provenance on unsigned fulfillment")
 	}
 }
 
@@ -231,18 +231,20 @@ func TestResumeDeployment_WithProvenance_RequiresReSign(t *testing.T) {
 	subjectID := domain.SubjectID("user-1")
 	issuer := domain.IssuerURL("https://issuer.example.com")
 
-	seedDeployment(t, h.store, domain.Deployment{
-		ID:    "prov-dep",
-		State: domain.DeploymentStatePausedAuth,
-		Provenance: &domain.Provenance{
+	seedDeployment(t, h.store, "prov-dep", func(f *domain.Fulfillment) {
+		f.State = domain.FulfillmentStatePausedAuth
+		f.Provenance = &domain.Provenance{
+			Content: domain.DeploymentContent{
+				DeploymentID:      "prov-dep",
+				ManifestStrategy:  defaultManifestStrategy(),
+				PlacementStrategy: defaultPlacementStrategy(),
+			},
 			Sig: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: subjectID, Issuer: issuer},
 				SignatureBytes: []byte("old-sig"),
 			},
 			ExpectedGeneration: 1,
-		},
-		ManifestStrategy:  defaultManifestStrategy(),
-		PlacementStrategy: defaultPlacementStrategy(),
+		}
 	})
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
@@ -269,19 +271,23 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 	ms := defaultManifestStrategy()
 	ps := defaultPlacementStrategy()
 
-	seedDeployment(t, h.store, domain.Deployment{
-		ID:    "resign-dep",
-		State: domain.DeploymentStatePausedAuth,
-		Provenance: &domain.Provenance{
+	seedDeployment(t, h.store, "resign-dep", func(f *domain.Fulfillment) {
+		f.State = domain.FulfillmentStatePausedAuth
+		f.ManifestStrategy = ms
+		f.PlacementStrategy = ps
+		f.Provenance = &domain.Provenance{
+			Content: domain.DeploymentContent{
+				DeploymentID:      "resign-dep",
+				ManifestStrategy:  ms,
+				PlacementStrategy: ps,
+			},
 			Sig: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: subjectID, Issuer: issuer},
 				SignatureBytes: []byte("old-sig"),
 			},
 			ExpectedGeneration: 1,
-		},
-		ManifestStrategy:  ms,
-		PlacementStrategy: ps,
-		Generation:        1,
+		}
+		f.Generation = 1
 	})
 
 	validUntil := time.Now().Add(24 * time.Hour)
@@ -301,22 +307,19 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 		t.Fatalf("Resume: %v", err)
 	}
 
-	if dep.Provenance == nil {
+	if dep.Fulfillment.Provenance == nil {
 		t.Fatal("expected fresh Provenance after re-sign")
 	}
-	if dep.Provenance.ExpectedGeneration != 2 {
-		t.Errorf("ExpectedGeneration = %d, want 2", dep.Provenance.ExpectedGeneration)
+	if dep.Fulfillment.Provenance.ExpectedGeneration != 2 {
+		t.Errorf("ExpectedGeneration = %d, want 2", dep.Fulfillment.Provenance.ExpectedGeneration)
 	}
 }
 
 func TestResumeDeployment_TokenPassthrough_NoProvenance(t *testing.T) {
 	h := setup(t)
 
-	seedDeployment(t, h.store, domain.Deployment{
-		ID:                "token-dep",
-		State:             domain.DeploymentStatePausedAuth,
-		ManifestStrategy:  defaultManifestStrategy(),
-		PlacementStrategy: defaultPlacementStrategy(),
+	seedDeployment(t, h.store, "token-dep", func(f *domain.Fulfillment) {
+		f.State = domain.FulfillmentStatePausedAuth
 	})
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
@@ -328,64 +331,81 @@ func TestResumeDeployment_TokenPassthrough_NoProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
 	}
-	if dep.Provenance != nil {
+	if dep.Fulfillment.Provenance != nil {
 		t.Error("expected no Provenance on token-passthrough resume")
 	}
 }
 
-func TestRepoRoundTrip_ProvenanceOnDeployment(t *testing.T) {
+func TestRepoRoundTrip_ProvenanceOnFulfillment(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 
 	now := time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)
-	dep := domain.Deployment{
-		ID:  "prov-rt",
-		UID: "uid-prov-rt",
-		ManifestStrategy: domain.ManifestStrategySpec{
-			Type: domain.ManifestStrategyInline,
-			Manifests: []domain.Manifest{{
-				ResourceType: "api.kind.cluster",
-				Raw:          []byte(`{"name":"test"}`),
-			}},
-		},
-		PlacementStrategy: domain.PlacementStrategySpec{
-			Type:    domain.PlacementStrategyStatic,
-			Targets: []domain.TargetID{"target-a"},
-		},
-		Auth: domain.DeliveryAuth{
-			Caller: &domain.SubjectClaims{
-				FederatedIdentity: domain.FederatedIdentity{
-					Subject: "user-1",
-					Issuer:  "https://issuer.example.com",
-				},
-			},
-			Token: "test-token",
-		},
-		Provenance: &domain.Provenance{
-			Sig: domain.Signature{
-				Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
-				ContentHash:    []byte("hash-bytes"),
-				SignatureBytes: []byte("sig-bytes"),
-			},
-			ValidUntil:         now.Add(24 * time.Hour),
-			ExpectedGeneration: 1,
-			OutputConstraints: []domain.OutputConstraint{
-				{Name: "test-constraint", Expression: "output.valid == true"},
-			},
-		},
-		State:      domain.DeploymentStateCreating,
-		Generation: 1,
-		CreatedAt:  now,
-		UpdatedAt:  now,
-		Etag:       "test-etag",
+	fID := domain.FulfillmentID("ful-prov-rt")
+
+	f := domain.Fulfillment{
+		ID:        fID,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
+	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+		Type: domain.ManifestStrategyInline,
+		Manifests: []domain.Manifest{{
+			ResourceType: "api.kind.cluster",
+			Raw:          []byte(`{"name":"test"}`),
+		}},
+	}, now)
+	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+		Type:    domain.PlacementStrategyStatic,
+		Targets: []domain.TargetID{"target-a"},
+	}, now)
+	f.AdvanceRolloutStrategy(nil, now)
+
+	f.Auth = domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "user-1",
+				Issuer:  "https://issuer.example.com",
+			},
+		},
+		Token: "test-token",
+	}
+	f.Provenance = &domain.Provenance{
+		Content: domain.DeploymentContent{
+			DeploymentID:      "prov-rt",
+			ManifestStrategy:  f.ManifestStrategy,
+			PlacementStrategy: f.PlacementStrategy,
+		},
+		Sig: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
+			ContentHash:    []byte("hash-bytes"),
+			SignatureBytes: []byte("sig-bytes"),
+		},
+		ValidUntil:         now.Add(24 * time.Hour),
+		ExpectedGeneration: 1,
+		OutputConstraints: []domain.OutputConstraint{
+			{Name: "test-constraint", Expression: "output.valid == true"},
+		},
+	}
+	f.State = domain.FulfillmentStateCreating
+	f.Generation = 1
 
 	ctx := context.Background()
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := tx.Deployments().Create(ctx, dep); err != nil {
-		t.Fatalf("create: %v", err)
+	if err := tx.Fulfillments().Create(ctx, f); err != nil {
+		t.Fatalf("create fulfillment: %v", err)
+	}
+	if err := tx.Deployments().Create(ctx, domain.Deployment{
+		ID:            "prov-rt",
+		UID:           "uid-prov-rt",
+		FulfillmentID: fID,
+		CreatedAt:     now,
+		UpdatedAt:     now,
+		Etag:          "test-etag",
+	}); err != nil {
+		t.Fatalf("create deployment: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -397,16 +417,16 @@ func TestRepoRoundTrip_ProvenanceOnDeployment(t *testing.T) {
 	}
 	defer tx2.Rollback()
 
-	got, err := tx2.Deployments().Get(ctx, "prov-rt")
+	got, err := tx2.Deployments().GetView(ctx, "prov-rt")
 	if err != nil {
-		t.Fatalf("get: %v", err)
+		t.Fatalf("get view: %v", err)
 	}
 
-	if got.Provenance == nil {
+	if got.Fulfillment.Provenance == nil {
 		t.Fatal("expected Provenance to survive round-trip")
 	}
 
-	p := got.Provenance
+	p := got.Fulfillment.Provenance
 	if p.Sig.Signer.Subject != "user-1" {
 		t.Errorf("Sig.Signer.Subject = %q, want %q", p.Sig.Signer.Subject, "user-1")
 	}

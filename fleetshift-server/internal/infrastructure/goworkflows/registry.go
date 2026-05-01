@@ -56,8 +56,8 @@ func (r *Registry) timeout() time.Duration {
 	return 30 * time.Second
 }
 
-func (r *Registry) SignalDeploymentEvent(ctx context.Context, deploymentID domain.DeploymentID, event domain.DeploymentEvent) error {
-	return r.Client.SignalWorkflow(ctx, string(deploymentID), domain.DeploymentEventSignal.Name, event)
+func (r *Registry) SignalFulfillmentEvent(ctx context.Context, fulfillmentID domain.FulfillmentID, event domain.FulfillmentEvent) error {
+	return r.Client.SignalWorkflow(ctx, string(fulfillmentID), domain.FulfillmentEventSignal.Name, event)
 }
 
 func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec) (domain.OrchestrationWorkflow, error) {
@@ -74,7 +74,7 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		func() error { return registerActivity(r.Worker, invokers, spec.PersistAndCompleteReconciliation(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CleanupAndDeleteDeployment(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CleanupAndDeleteFulfillment(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ReleaseLock(), opts) },
 	} {
 		if err := reg(); err != nil {
@@ -88,25 +88,25 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		timeout: r.timeout(),
 	}
 
-	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (struct{}, error) {
-		ch := workflow.NewSignalChannel[domain.DeploymentEvent](ctx, domain.DeploymentEventSignal.Name)
+	wfFunc := func(ctx workflow.Context, fulfillmentID domain.FulfillmentID) (struct{}, error) {
+		ch := workflow.NewSignalChannel[domain.FulfillmentEvent](ctx, domain.FulfillmentEventSignal.Name)
 		record := &baseRecord{
 			wfCtx:    ctx,
 			invokers: invokers,
 			signals: map[string]func() (any, error){
-				domain.DeploymentEventSignal.Name: func() (any, error) {
+				domain.FulfillmentEventSignal.Name: func() (any, error) {
 					val, ok := ch.Receive(ctx)
 					if !ok {
-						return nil, fmt.Errorf("signal channel %q closed", domain.DeploymentEventSignal.Name)
+						return nil, fmt.Errorf("signal channel %q closed", domain.FulfillmentEventSignal.Name)
 					}
 					return val, nil
 				},
 			},
 		}
-		val, err := spec.Run(record, deploymentID)
+		val, err := spec.Run(record, fulfillmentID)
 		var can *domain.ContinueAsNewError
 		if errors.As(err, &can) {
-			return val, workflow.ContinueAsNew(ctx, can.Input.(domain.DeploymentID))
+			return val, workflow.ContinueAsNew(ctx, can.Input.(domain.FulfillmentID))
 		}
 		return val, err
 	}
@@ -129,7 +129,7 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.CreateDeploymentInput) (domain.Deployment, error) {
+	wfFunc := func(ctx workflow.Context, input domain.CreateDeploymentInput) (domain.DeploymentView, error) {
 		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
 		return spec.Run(record, input)
 	}
@@ -152,11 +152,14 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.LoadFulfillment(), opts); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.DeleteDeploymentRow(), opts); err != nil {
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (domain.Deployment, error) {
+	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (domain.DeploymentView, error) {
 		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
 		return spec.Run(record, deploymentID)
 	}
@@ -179,11 +182,11 @@ func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflo
 	if err := registerActivity(r.Worker, invokers, spec.MutateToResumed(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.LoadDeployment(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.LoadFulfillment(), opts); err != nil {
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.ResumeDeploymentInput) (domain.Deployment, error) {
+	wfFunc := func(ctx workflow.Context, input domain.ResumeDeploymentInput) (domain.DeploymentView, error) {
 		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
 		return spec.Run(record, input)
 	}
@@ -305,10 +308,10 @@ type orchestrationWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *orchestrationWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID) (domain.Execution[struct{}], error) {
+func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.FulfillmentID) (domain.Execution[struct{}], error) {
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
-		InstanceID: string(deploymentID),
-	}, w.wfName, deploymentID)
+		InstanceID: string(fulfillmentID),
+	}, w.wfName, fulfillmentID)
 	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
 		return nil, domain.ErrAlreadyRunning
 	}
@@ -331,7 +334,7 @@ type createDeploymentWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.Deployment], error) {
+func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: "create-" + string(input.ID),
 	}, w.wfName, input)
@@ -339,7 +342,7 @@ func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.Creat
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.Deployment]{
+	return &execution[domain.DeploymentView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,
@@ -377,7 +380,7 @@ type deleteDeploymentWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
@@ -389,7 +392,7 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.Deployment]{
+	return &execution[domain.DeploymentView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,
@@ -404,7 +407,7 @@ type resumeDeploymentWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.Deployment], error) {
+func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
@@ -416,7 +419,7 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.Deployment]{
+	return &execution[domain.DeploymentView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,

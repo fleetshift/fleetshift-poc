@@ -17,43 +17,13 @@ type DeploymentRepo struct {
 }
 
 func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
-	ms, err := json.Marshal(d.ManifestStrategy)
-	if err != nil {
-		return fmt.Errorf("marshal manifest strategy: %w", err)
-	}
-	ps, err := json.Marshal(d.PlacementStrategy)
-	if err != nil {
-		return fmt.Errorf("marshal placement strategy: %w", err)
-	}
-	var rs []byte
-	if d.RolloutStrategy != nil {
-		rs, err = json.Marshal(d.RolloutStrategy)
-		if err != nil {
-			return fmt.Errorf("marshal rollout strategy: %w", err)
-		}
-	}
-	rt, err := json.Marshal(d.ResolvedTargets)
-	if err != nil {
-		return fmt.Errorf("marshal resolved targets: %w", err)
-	}
-	auth, err := json.Marshal(d.Auth)
-	if err != nil {
-		return fmt.Errorf("marshal auth: %w", err)
-	}
-	var provJSON []byte
-	if d.Provenance != nil {
-		provJSON, err = json.Marshal(d.Provenance)
-		if err != nil {
-			return fmt.Errorf("marshal provenance: %w", err)
-		}
-	}
-
-	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(d.ID), d.UID, string(ms), string(ps), nullString(rs), string(rt), string(d.State), d.StatusReason, string(auth), nullString(provJSON),
-		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
-		d.CreatedAt.UTC().Format(time.RFC3339), d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag,
+	_, err := r.DB.ExecContext(ctx,
+		`INSERT INTO deployments (id, uid, fulfillment_id, created_at, updated_at, etag)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		string(d.ID), d.UID, string(d.FulfillmentID),
+		d.CreatedAt.UTC().Format(time.RFC3339),
+		d.UpdatedAt.UTC().Format(time.RFC3339),
+		d.Etag,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -64,69 +34,49 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-const deploymentColumns = `id, uid, manifest_strategy, placement_strategy, rollout_strategy, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at, etag`
+const thinDeploymentColumns = `id, uid, fulfillment_id, created_at, updated_at, etag`
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT `+deploymentColumns+` FROM deployments WHERE id = ?`,
+		`SELECT `+thinDeploymentColumns+` FROM deployments WHERE id = ?`,
 		string(id),
 	)
-	return scanDeployment(row)
+	return scanThinDeployment(row)
 }
 
-func (r *DeploymentRepo) List(ctx context.Context) ([]domain.Deployment, error) {
+func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
+	row := r.DB.QueryRowContext(ctx,
+		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
+		        `+prefixedFulfillmentColumns("f")+`
+		 FROM deployments d
+		 JOIN fulfillments f ON f.id = d.fulfillment_id
+		 WHERE d.id = ?`,
+		string(id),
+	)
+	return scanDeploymentView(row)
+}
+
+func (r *DeploymentRepo) ListView(ctx context.Context) ([]domain.DeploymentView, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT `+deploymentColumns+` FROM deployments`,
+		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
+		        `+prefixedFulfillmentColumns("f")+`
+		 FROM deployments d
+		 JOIN fulfillments f ON f.id = d.fulfillment_id`,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("list deployments: %w", err)
+		return nil, fmt.Errorf("list deployment views: %w", err)
 	}
 	defer rows.Close()
 
-	var deployments []domain.Deployment
+	var views []domain.DeploymentView
 	for rows.Next() {
-		d, err := scanDeployment(rows)
+		v, err := scanDeploymentView(rows)
 		if err != nil {
 			return nil, err
 		}
-		deployments = append(deployments, d)
+		views = append(views, v)
 	}
-	return deployments, rows.Err()
-}
-
-func (r *DeploymentRepo) Update(ctx context.Context, d domain.Deployment) error {
-	ms, _ := json.Marshal(d.ManifestStrategy)
-	ps, _ := json.Marshal(d.PlacementStrategy)
-	var rs []byte
-	if d.RolloutStrategy != nil {
-		rs, _ = json.Marshal(d.RolloutStrategy)
-	}
-	rt, _ := json.Marshal(d.ResolvedTargets)
-	auth, _ := json.Marshal(d.Auth)
-	var provJSON []byte
-	if d.Provenance != nil {
-		provJSON, _ = json.Marshal(d.Provenance)
-	}
-
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE deployments
-		 SET manifest_strategy = ?, placement_strategy = ?, rollout_strategy = ?,
-		     resolved_targets = ?, state = ?, status_reason = ?, auth = ?, provenance = ?,
-		     generation = ?, observed_generation = ?, active_workflow_gen = ?,
-		     updated_at = ?, etag = ?
-		 WHERE id = ?`,
-		string(ms), string(ps), nullString(rs), string(rt), string(d.State), d.StatusReason, string(auth), nullString(provJSON),
-		int64(d.Generation), int64(d.ObservedGeneration), nullGeneration(d.ActiveWorkflowGen),
-		d.UpdatedAt.UTC().Format(time.RFC3339), d.Etag, string(d.ID),
-	)
-	if err != nil {
-		return fmt.Errorf("update deployment: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("deployment %q: %w", d.ID, domain.ErrNotFound)
-	}
-	return nil
+	return views, rows.Err()
 }
 
 func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) error {
@@ -141,15 +91,21 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 	return nil
 }
 
-func scanDeployment(s scanner) (domain.Deployment, error) {
+func prefixedFulfillmentColumns(alias string) string {
+	return alias + ".id, " +
+		alias + ".manifest_strategy, " + alias + ".manifest_strategy_version, " +
+		alias + ".placement_strategy, " + alias + ".placement_strategy_version, " +
+		alias + ".rollout_strategy, " + alias + ".rollout_strategy_version, " +
+		alias + ".resolved_targets, " + alias + ".state, " + alias + ".status_reason, " +
+		alias + ".auth, " + alias + ".provenance, " +
+		alias + ".generation, " + alias + ".observed_generation, " + alias + ".active_workflow_gen, " +
+		alias + ".created_at, " + alias + ".updated_at"
+}
+
+func scanThinDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
-	var id, uid, msJSON, psJSON, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr, etag string
-	var rsJSON, provJSON sql.NullString
-	var generation, observedGeneration int64
-	var activeWorkflowGen sql.NullInt64
-	if err := s.Scan(&id, &uid, &msJSON, &psJSON, &rsJSON, &rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
-		&generation, &observedGeneration, &activeWorkflowGen,
-		&createdAtStr, &updatedAtStr, &etag); err != nil {
+	var id, uid, fID, createdAtStr, updatedAtStr, etag string
+	if err := s.Scan(&id, &uid, &fID, &createdAtStr, &updatedAtStr, &etag); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return d, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -157,62 +113,101 @@ func scanDeployment(s scanner) (domain.Deployment, error) {
 	}
 	d.ID = domain.DeploymentID(id)
 	d.UID = uid
-	d.State = domain.DeploymentState(stateStr)
-	d.StatusReason = statusReason
-	d.Generation = domain.Generation(generation)
-	d.ObservedGeneration = domain.Generation(observedGeneration)
-	if activeWorkflowGen.Valid {
-		g := domain.Generation(activeWorkflowGen.Int64)
-		d.ActiveWorkflowGen = &g
-	}
+	d.FulfillmentID = domain.FulfillmentID(fID)
 	d.Etag = etag
-
 	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
 		d.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
 		d.UpdatedAt = t
 	}
-
-	if err := json.Unmarshal([]byte(msJSON), &d.ManifestStrategy); err != nil {
-		return d, fmt.Errorf("unmarshal manifest strategy: %w", err)
-	}
-	if err := json.Unmarshal([]byte(psJSON), &d.PlacementStrategy); err != nil {
-		return d, fmt.Errorf("unmarshal placement strategy: %w", err)
-	}
-	if rsJSON.Valid {
-		d.RolloutStrategy = &domain.RolloutStrategySpec{}
-		if err := json.Unmarshal([]byte(rsJSON.String), d.RolloutStrategy); err != nil {
-			return d, fmt.Errorf("unmarshal rollout strategy: %w", err)
-		}
-	}
-	if err := json.Unmarshal([]byte(rtJSON), &d.ResolvedTargets); err != nil {
-		return d, fmt.Errorf("unmarshal resolved targets: %w", err)
-	}
-	if authJSON != "" {
-		if err := json.Unmarshal([]byte(authJSON), &d.Auth); err != nil {
-			return d, fmt.Errorf("unmarshal auth: %w", err)
-		}
-	}
-	if provJSON.Valid {
-		d.Provenance = &domain.Provenance{}
-		if err := json.Unmarshal([]byte(provJSON.String), d.Provenance); err != nil {
-			return d, fmt.Errorf("unmarshal provenance: %w", err)
-		}
-	}
 	return d, nil
 }
 
-func nullString(b []byte) sql.NullString {
-	if b == nil {
-		return sql.NullString{}
+func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
+	var v domain.DeploymentView
+	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr, etag string
+	var fID, fMsJSON, fPsJSON, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
+	var fRsJSON, fProvJSON sql.NullString
+	var fMsVer, fPsVer, fRsVer, fGen, fObsGen int64
+	var fActiveWfGen sql.NullInt64
+
+	if err := s.Scan(
+		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr, &etag,
+		&fID, &fMsJSON, &fMsVer, &fPsJSON, &fPsVer, &fRsJSON, &fRsVer,
+		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON,
+		&fGen, &fObsGen, &fActiveWfGen,
+		&fCreatedAtStr, &fUpdatedAtStr,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return v, fmt.Errorf("%w", domain.ErrNotFound)
+		}
+		return v, fmt.Errorf("scan deployment view: %w", err)
 	}
-	return sql.NullString{String: string(b), Valid: true}
+
+	v.Deployment.ID = domain.DeploymentID(dID)
+	v.Deployment.UID = uid
+	v.Deployment.FulfillmentID = domain.FulfillmentID(fRefID)
+	v.Deployment.Etag = etag
+	if t, err := time.Parse(time.RFC3339, dCreatedAtStr); err == nil {
+		v.Deployment.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, dUpdatedAtStr); err == nil {
+		v.Deployment.UpdatedAt = t
+	}
+
+	v.Fulfillment.ID = domain.FulfillmentID(fID)
+	v.Fulfillment.ManifestStrategyVersion = domain.StrategyVersion(fMsVer)
+	v.Fulfillment.PlacementStrategyVersion = domain.StrategyVersion(fPsVer)
+	v.Fulfillment.RolloutStrategyVersion = domain.StrategyVersion(fRsVer)
+	v.Fulfillment.State = domain.FulfillmentState(fStateStr)
+	v.Fulfillment.StatusReason = fStatusReason
+	v.Fulfillment.Generation = domain.Generation(fGen)
+	v.Fulfillment.ObservedGeneration = domain.Generation(fObsGen)
+	if fActiveWfGen.Valid {
+		g := domain.Generation(fActiveWfGen.Int64)
+		v.Fulfillment.ActiveWorkflowGen = &g
+	}
+	if t, err := time.Parse(time.RFC3339, fCreatedAtStr); err == nil {
+		v.Fulfillment.CreatedAt = t
+	}
+	if t, err := time.Parse(time.RFC3339, fUpdatedAtStr); err == nil {
+		v.Fulfillment.UpdatedAt = t
+	}
+
+	if err := unmarshalJSON(fMsJSON, &v.Fulfillment.ManifestStrategy, "manifest strategy"); err != nil {
+		return v, err
+	}
+	if err := unmarshalJSON(fPsJSON, &v.Fulfillment.PlacementStrategy, "placement strategy"); err != nil {
+		return v, err
+	}
+	if fRsJSON.Valid {
+		v.Fulfillment.RolloutStrategy = &domain.RolloutStrategySpec{}
+		if err := unmarshalJSON(fRsJSON.String, v.Fulfillment.RolloutStrategy, "rollout strategy"); err != nil {
+			return v, err
+		}
+	}
+	if err := unmarshalJSON(fRtJSON, &v.Fulfillment.ResolvedTargets, "resolved targets"); err != nil {
+		return v, err
+	}
+	if fAuthJSON != "" {
+		if err := unmarshalJSON(fAuthJSON, &v.Fulfillment.Auth, "auth"); err != nil {
+			return v, err
+		}
+	}
+	if fProvJSON.Valid {
+		v.Fulfillment.Provenance = &domain.Provenance{}
+		if err := unmarshalJSON(fProvJSON.String, v.Fulfillment.Provenance, "provenance"); err != nil {
+			return v, err
+		}
+	}
+
+	return v, nil
 }
 
-func nullGeneration(g *domain.Generation) sql.NullInt64 {
-	if g == nil {
-		return sql.NullInt64{}
+func unmarshalJSON[T any](data string, dst *T, label string) error {
+	if err := json.Unmarshal([]byte(data), dst); err != nil {
+		return fmt.Errorf("unmarshal %s: %w", label, err)
 	}
-	return sql.NullInt64{Int64: int64(*g), Valid: true}
+	return nil
 }

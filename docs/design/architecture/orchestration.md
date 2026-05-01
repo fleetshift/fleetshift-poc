@@ -29,6 +29,8 @@ Read this when you need to understand how the platform computes target sets, pla
 
 ## Orchestration pipeline
 
+> **Implementation note.** The orchestration pipeline operates on the **Fulfillment** kernel primitive, not the user-facing Deployment directly. A Fulfillment owns the strategies, state, and generation that drive orchestration. User-facing concepts (deployments, managed resources) each hold a `FulfillmentID` reference. See [managed_resources.md](../managed_resources.md#architectural-layering) for the layering model.
+
 The orchestration pipeline is always the same regardless of which concrete strategies are plugged in:
 
 1. Resolve the placement strategy against the deployment's pool

@@ -363,7 +363,7 @@ Attestation:
     output: PutManifests | RemoveByDeploymentId
 
 SignedInput:
-    content: DeploymentContent        // deployment_id, manifest_strategy, placement_strategy
+    content: InputContent             // polymorphic: DeploymentContent, ManagedResourceContent, etc.
     signature: Signature              // signer_id, public_key, content_hash, signature_bytes
     key_binding: KeyBinding           // signer_id, public_key, trust_anchor_id, binding_proof
     valid_until: timestamp

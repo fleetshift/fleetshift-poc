@@ -11,50 +11,50 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// DeploymentObserver is a [domain.DeploymentObserver] that logs
-// deployment orchestration lifecycle events via [slog].
-type DeploymentObserver struct {
-	domain.NoOpDeploymentObserver
+// FulfillmentObserver is a [domain.FulfillmentObserver] that logs
+// fulfillment orchestration lifecycle events via [slog].
+type FulfillmentObserver struct {
+	domain.NoOpFulfillmentObserver
 	logger *slog.Logger
 }
 
-// NewDeploymentObserver returns a DeploymentObserver that logs to logger.
-func NewDeploymentObserver(logger *slog.Logger) *DeploymentObserver {
-	return &DeploymentObserver{logger: logger.With("component", "deployment")}
+// NewFulfillmentObserver returns a FulfillmentObserver that logs to logger.
+func NewFulfillmentObserver(logger *slog.Logger) *FulfillmentObserver {
+	return &FulfillmentObserver{logger: logger.With("component", "deployment")}
 }
 
-func (o *DeploymentObserver) RunStarted(ctx context.Context, deploymentID domain.DeploymentID) (context.Context, domain.DeploymentRunProbe) {
-	logger := o.logger.With(slog.String("deployment_id", string(deploymentID)))
+func (o *FulfillmentObserver) RunStarted(ctx context.Context, fulfillmentID domain.FulfillmentID) (context.Context, domain.FulfillmentRunProbe) {
+	logger := o.logger.With(slog.String("fulfillment_id", string(fulfillmentID)))
 	if logger.Enabled(ctx, slog.LevelInfo) {
 		logger.LogAttrs(ctx, slog.LevelInfo, "deployment run started")
 	}
-	return ctx, &deploymentRunProbe{
-		logger:       logger,
-		ctx:          ctx,
-		startTime:    time.Now(),
-		deploymentID: deploymentID,
+	return ctx, &fulfillmentRunProbe{
+		logger:         logger,
+		ctx:            ctx,
+		startTime:      time.Now(),
+		fulfillmentID: fulfillmentID,
 	}
 }
 
-type deploymentRunProbe struct {
-	domain.NoOpDeploymentRunProbe
-	logger       *slog.Logger
-	ctx          context.Context
-	startTime    time.Time
-	deploymentID domain.DeploymentID
-	err          error
+type fulfillmentRunProbe struct {
+	domain.NoOpFulfillmentRunProbe
+	logger        *slog.Logger
+	ctx           context.Context
+	startTime     time.Time
+	fulfillmentID domain.FulfillmentID
+	err           error
 }
 
-func (p *deploymentRunProbe) EventReceived(event domain.DeploymentEvent) {
+func (p *fulfillmentRunProbe) EventReceived(event domain.FulfillmentEvent) {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
 	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "deployment event received",
-		slog.String("event_kind", classifyDeploymentEvent(event)),
+		slog.String("event_kind", classifyFulfillmentEvent(event)),
 	)
 }
 
-func (p *deploymentRunProbe) StateChanged(state domain.DeploymentState) {
+func (p *fulfillmentRunProbe) StateChanged(state domain.FulfillmentState) {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
@@ -63,7 +63,7 @@ func (p *deploymentRunProbe) StateChanged(state domain.DeploymentState) {
 	)
 }
 
-func (p *deploymentRunProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
+func (p *fulfillmentRunProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
 	if accepted == 0 {
 		p.logger.LogAttrs(p.ctx, slog.LevelWarn, "all manifests filtered for target",
 			slog.String("target_id", string(target.ID)),
@@ -83,7 +83,7 @@ func (p *deploymentRunProbe) ManifestsFiltered(target domain.TargetInfo, total, 
 	)
 }
 
-func (p *deploymentRunProbe) DeliveryOutputsProcessed(targets []domain.ProvisionedTarget, secrets int) {
+func (p *fulfillmentRunProbe) DeliveryOutputsProcessed(targets []domain.ProvisionedTarget, secrets int) {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
@@ -98,11 +98,11 @@ func (p *deploymentRunProbe) DeliveryOutputsProcessed(targets []domain.Provision
 	)
 }
 
-func (p *deploymentRunProbe) Error(err error) {
+func (p *fulfillmentRunProbe) Error(err error) {
 	p.err = err
 }
 
-func (p *deploymentRunProbe) End() {
+func (p *fulfillmentRunProbe) End() {
 	duration := time.Since(p.startTime)
 	if p.err != nil {
 		p.logger.LogAttrs(p.ctx, slog.LevelError, "deployment run failed",
@@ -119,7 +119,7 @@ func (p *deploymentRunProbe) End() {
 	)
 }
 
-func classifyDeploymentEvent(event domain.DeploymentEvent) string {
+func classifyFulfillmentEvent(event domain.FulfillmentEvent) string {
 	switch {
 	case event.DeliveryCompleted != nil:
 		return "delivery_completed"

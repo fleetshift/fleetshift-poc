@@ -25,13 +25,13 @@ type RecordingDeliveryService struct {
 func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	now := s.now()
 	d := domain.Delivery{
-		ID:           deliveryID,
-		DeploymentID: deploymentIDFromDeliveryID(deliveryID),
-		TargetID:     target.ID,
-		Manifests:    manifests,
-		State:        domain.DeliveryStateDelivered,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            deliveryID,
+		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
+		TargetID:      target.ID,
+		Manifests:     manifests,
+		State:         domain.DeliveryStateDelivered,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	}
 
 	tx, err := s.Store.Begin(ctx)
@@ -59,17 +59,17 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 	}
 	defer tx.Rollback()
 
-	_, err = tx.Deliveries().GetByDeploymentTarget(ctx, deploymentIDFromDeliveryID(deliveryID), target.ID)
+	_, err = tx.Deliveries().GetByFulfillmentTarget(ctx, fulfillmentIDFromDeliveryID(deliveryID), target.ID)
 	if err != nil {
 		return nil
 	}
 	if err := tx.Deliveries().Put(ctx, domain.Delivery{
-		ID:           deliveryID,
-		DeploymentID: deploymentIDFromDeliveryID(deliveryID),
-		TargetID:     target.ID,
-		State:        domain.DeliveryStatePending,
-		CreatedAt:    s.now(),
-		UpdatedAt:    s.now(),
+		ID:            deliveryID,
+		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
+		TargetID:      target.ID,
+		State:         domain.DeliveryStatePending,
+		CreatedAt:     s.now(),
+		UpdatedAt:     s.now(),
 	}); err != nil {
 		return err
 	}
@@ -83,13 +83,13 @@ func (s *RecordingDeliveryService) now() time.Time {
 	return time.Now()
 }
 
-// deploymentIDFromDeliveryID extracts the deployment ID from a
-// composite delivery ID of the form "deploymentID:targetID".
-func deploymentIDFromDeliveryID(id domain.DeliveryID) domain.DeploymentID {
+// fulfillmentIDFromDeliveryID extracts the fulfillment ID from a
+// composite delivery ID of the form "fulfillmentID:targetID".
+func fulfillmentIDFromDeliveryID(id domain.DeliveryID) domain.FulfillmentID {
 	for i := 0; i < len(id); i++ {
 		if id[i] == ':' {
-			return domain.DeploymentID(id[:i])
+			return domain.FulfillmentID(id[:i])
 		}
 	}
-	return domain.DeploymentID(id)
+	return domain.FulfillmentID(id)
 }

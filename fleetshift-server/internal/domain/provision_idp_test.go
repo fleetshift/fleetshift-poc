@@ -20,9 +20,11 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 			return nil
 		}},
 		Discovery: fakeDiscovery{},
-		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.Deployment], error) {
+		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 			startedInput = in
-			return &immediateExecution[domain.Deployment]{val: domain.Deployment{ID: in.ID}}, nil
+			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
+				Deployment: domain.Deployment{ID: in.ID},
+			}}, nil
 		}},
 		TrustBundlePlacement: domain.PlacementStrategySpec{
 			Type:    domain.PlacementStrategyStatic,
@@ -147,14 +149,16 @@ func (fakeDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 }
 
 type fakeCreateDeploymentWF struct {
-	startFn func(context.Context, domain.CreateDeploymentInput) (domain.Execution[domain.Deployment], error)
+	startFn func(context.Context, domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error)
 }
 
-func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.Deployment], error) {
+func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 	if f.startFn != nil {
 		return f.startFn(ctx, in)
 	}
-	return &immediateExecution[domain.Deployment]{val: domain.Deployment{ID: in.ID}}, nil
+	return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
+		Deployment: domain.Deployment{ID: in.ID},
+	}}, nil
 }
 
 // provisionSyncRecord is a synchronous [domain.Record] that runs

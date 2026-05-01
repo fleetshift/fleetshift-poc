@@ -4,7 +4,7 @@ import "context"
 
 // DeliverySignaler manages the domain responsibilities of a single
 // delivery: updating delivery state in the repository and signaling
-// the deployment workflow on completion. It calls
+// the fulfillment workflow on completion. It calls
 // [DeliveryObserver] methods at the appropriate points for
 // observability, creating a short-lived probe per operation so that
 // each receives the caller's context.
@@ -17,32 +17,32 @@ import "context"
 // A zero-value &DeliverySignaler{} is safe to use: nil fields mean no
 // state updates, no signaling, and no observer callbacks.
 type DeliverySignaler struct {
-	DeploymentID DeploymentID
-	DeliveryID   DeliveryID
-	Target       TargetInfo
-	Store        Store
-	Signal       func(context.Context, DeploymentID, DeploymentEvent) error
-	observer     DeliveryObserver
-	progressed   bool
+	FulfillmentID FulfillmentID
+	DeliveryID    DeliveryID
+	Target        TargetInfo
+	Store         Store
+	Signal        func(context.Context, FulfillmentID, FulfillmentEvent) error
+	observer      DeliveryObserver
+	progressed    bool
 }
 
 // NewDeliverySignaler creates a DeliverySignaler. If observer is nil,
 // observer calls are skipped.
 func NewDeliverySignaler(
-	deploymentID DeploymentID,
+	fulfillmentID FulfillmentID,
 	deliveryID DeliveryID,
 	target TargetInfo,
 	store Store,
-	signal func(context.Context, DeploymentID, DeploymentEvent) error,
+	signal func(context.Context, FulfillmentID, FulfillmentEvent) error,
 	observer DeliveryObserver,
 ) *DeliverySignaler {
 	return &DeliverySignaler{
-		DeploymentID: deploymentID,
-		DeliveryID:   deliveryID,
-		Target:       target,
-		Store:        store,
-		Signal:       signal,
-		observer:     observer,
+		FulfillmentID: fulfillmentID,
+		DeliveryID:    deliveryID,
+		Target:        target,
+		Store:         store,
+		Signal:        signal,
+		observer:      observer,
 	}
 }
 
@@ -78,7 +78,7 @@ func (s *DeliverySignaler) Done(ctx context.Context, result DeliveryResult) {
 		}
 	}
 	if s.Signal != nil {
-		if err := s.Signal(ctx, s.DeploymentID, DeploymentEvent{
+		if err := s.Signal(ctx, s.FulfillmentID, FulfillmentEvent{
 			DeliveryCompleted: &DeliveryCompletionEvent{
 				DeliveryID: s.DeliveryID,
 				Result:     result,

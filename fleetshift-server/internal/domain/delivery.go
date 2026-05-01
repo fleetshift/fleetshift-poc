@@ -34,15 +34,15 @@ const (
 )
 
 // Delivery is a first-class entity capturing a single
-// deployment-to-target delivery and its lifecycle.
+// fulfillment-to-target delivery and its lifecycle.
 type Delivery struct {
-	ID           DeliveryID
-	DeploymentID DeploymentID
-	TargetID     TargetID
-	Manifests    []Manifest
-	State        DeliveryState
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ID            DeliveryID
+	FulfillmentID FulfillmentID
+	TargetID      TargetID
+	Manifests     []Manifest
+	State         DeliveryState
+	CreatedAt     time.Time
+	UpdatedAt     time.Time
 }
 
 // DeliveryResult is the outcome of a single delivery attempt.

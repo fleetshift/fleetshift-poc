@@ -53,14 +53,14 @@ type Record interface {
 
 // Signal is a named, typed channel for cross-workflow communication.
 // Created once as a package-level variable and shared between send
-// ([Registry.SignalDeploymentEvent]) and receive ([AwaitSignal]) sides.
+// ([Registry.SignalFulfillmentEvent]) and receive ([AwaitSignal]) sides.
 type Signal[T any] struct {
 	Name string
 }
 
-// DeploymentEventSignal is the signal used for delivery-completion
+// FulfillmentEventSignal is the signal used for delivery-completion
 // and lifecycle events sent to orchestration workflows.
-var DeploymentEventSignal = Signal[DeploymentEvent]{Name: "deployment-event"}
+var FulfillmentEventSignal = Signal[FulfillmentEvent]{Name: "fulfillment-event"}
 
 // RunActivity provides type-safe durable activity execution from within
 // a workflow body. It is a thin wrapper around [Record.Run].
@@ -100,23 +100,23 @@ type Registry interface {
 	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
 	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
 	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
-	SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
+	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
 }
 
 // OrchestrationWorkflow is a registered orchestration workflow that
 // can start new instances. Returned by [Registry.RegisterOrchestration].
 //
-// If a workflow for the given deployment is already active
-// the engine may return an [Execution] handle for the running workflow,
-// or an [ErrAlreadyRunning] error.
+// If a workflow for the given fulfillment is already active the engine
+// may return an [Execution] handle for the running workflow, or an
+// [ErrAlreadyRunning] error.
 type OrchestrationWorkflow interface {
-	Start(ctx context.Context, deploymentID DeploymentID) (Execution[struct{}], error)
+	Start(ctx context.Context, fulfillmentID FulfillmentID) (Execution[struct{}], error)
 }
 
 // CreateDeploymentWorkflow is a registered create-deployment workflow
 // that can start new instances. Returned by [Registry.RegisterCreateDeployment].
 type CreateDeploymentWorkflow interface {
-	Start(ctx context.Context, input CreateDeploymentInput) (Execution[Deployment], error)
+	Start(ctx context.Context, input CreateDeploymentInput) (Execution[DeploymentView], error)
 }
 
 // ProvisionIdPWorkflow is a registered provision-idp workflow that can
@@ -130,7 +130,7 @@ type ProvisionIdPWorkflow interface {
 // parameter is used by the adapter to derive a generation-qualified
 // instance ID for same-type dedup.
 type DeleteDeploymentWorkflow interface {
-	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[Deployment], error)
+	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[DeploymentView], error)
 }
 
 // ResumeDeploymentWorkflow is a registered resume-deployment workflow.
@@ -138,7 +138,7 @@ type DeleteDeploymentWorkflow interface {
 // parameter is used by the adapter to derive a generation-qualified
 // instance ID for same-type dedup.
 type ResumeDeploymentWorkflow interface {
-	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[Deployment], error)
+	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[DeploymentView], error)
 }
 
 // ContinueAsNewError is returned by a workflow body to request that

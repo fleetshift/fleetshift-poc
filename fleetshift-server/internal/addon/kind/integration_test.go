@@ -10,8 +10,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // TestKindAddon_EndToEnd exercises the full addon lifecycle:
@@ -117,12 +117,12 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	dep := awaitState(ctx, t, store, "kind-deployment", domain.DeploymentStateActive)
-	if len(dep.ResolvedTargets) != 1 {
-		t.Fatalf("ResolvedTargets: got %d, want 1", len(dep.ResolvedTargets))
+	view := awaitState(ctx, t, store, "kind-deployment", domain.FulfillmentStateActive)
+	if len(view.Fulfillment.ResolvedTargets) != 1 {
+		t.Fatalf("ResolvedTargets: got %d, want 1", len(view.Fulfillment.ResolvedTargets))
 	}
-	if dep.ResolvedTargets[0] != "my-kind" {
-		t.Errorf("ResolvedTargets[0] = %q, want %q", dep.ResolvedTargets[0], "my-kind")
+	if view.Fulfillment.ResolvedTargets[0] != "my-kind" {
+		t.Errorf("ResolvedTargets[0] = %q, want %q", view.Fulfillment.ResolvedTargets[0], "my-kind")
 	}
 
 	<-provider.created
@@ -131,17 +131,17 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 }
 
-func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.DeploymentState) domain.Deployment {
+func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.FulfillmentState) domain.DeploymentView {
 	t.Helper()
 	for {
 		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		dep, err := tx.Deployments().Get(ctx, id)
+		view, err := tx.Deployments().GetView(ctx, id)
 		tx.Rollback()
-		if err == nil && dep.State == want {
-			return dep
+		if err == nil && view.Fulfillment.State == want {
+			return view
 		}
 		select {
 		case <-ctx.Done():

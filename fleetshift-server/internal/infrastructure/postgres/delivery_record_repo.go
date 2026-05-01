@@ -23,14 +23,14 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO delivery_records (id, deployment_id, target_id, manifests, state, created_at, updated_at)
+		`INSERT INTO delivery_records (id, fulfillment_id, target_id, manifests, state, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)
-		 ON CONFLICT (deployment_id, target_id) DO UPDATE SET
+		 ON CONFLICT (fulfillment_id, target_id) DO UPDATE SET
 		   id = excluded.id,
 		   manifests = excluded.manifests,
 		   state = excluded.state,
 		   updated_at = excluded.updated_at`,
-		d.ID, d.DeploymentID, d.TargetID,
+		string(d.ID), string(d.FulfillmentID), string(d.TargetID),
 		string(manifests), d.State,
 		d.CreatedAt.UTC().Format(time.RFC3339),
 		d.UpdatedAt.UTC().Format(time.RFC3339),
@@ -43,27 +43,27 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 
 func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
 		 FROM delivery_records WHERE id = $1`,
-		id,
+		string(id),
 	)
 	return scanDelivery(row)
 }
 
-func (r *DeliveryRepo) GetByDeploymentTarget(ctx context.Context, depID domain.DeploymentID, tgtID domain.TargetID) (domain.Delivery, error) {
+func (r *DeliveryRepo) GetByFulfillmentTarget(ctx context.Context, fID domain.FulfillmentID, tgtID domain.TargetID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
-		 FROM delivery_records WHERE deployment_id = $1 AND target_id = $2`,
-		depID, tgtID,
+		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+		 FROM delivery_records WHERE fulfillment_id = $1 AND target_id = $2`,
+		string(fID), string(tgtID),
 	)
 	return scanDelivery(row)
 }
 
-func (r *DeliveryRepo) ListByDeployment(ctx context.Context, depID domain.DeploymentID) ([]domain.Delivery, error) {
+func (r *DeliveryRepo) ListByFulfillment(ctx context.Context, fID domain.FulfillmentID) ([]domain.Delivery, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT id, deployment_id, target_id, manifests, state, created_at, updated_at
-		 FROM delivery_records WHERE deployment_id = $1`,
-		depID,
+		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+		 FROM delivery_records WHERE fulfillment_id = $1`,
+		string(fID),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list deliveries: %w", err)
@@ -71,10 +71,10 @@ func (r *DeliveryRepo) ListByDeployment(ctx context.Context, depID domain.Deploy
 	return collectRows(rows, scanDelivery)
 }
 
-func (r *DeliveryRepo) DeleteByDeployment(ctx context.Context, depID domain.DeploymentID) error {
+func (r *DeliveryRepo) DeleteByFulfillment(ctx context.Context, fID domain.FulfillmentID) error {
 	_, err := r.DB.ExecContext(ctx,
-		`DELETE FROM delivery_records WHERE deployment_id = $1`,
-		depID,
+		`DELETE FROM delivery_records WHERE fulfillment_id = $1`,
+		string(fID),
 	)
 	if err != nil {
 		return fmt.Errorf("delete deliveries: %w", err)
@@ -84,15 +84,15 @@ func (r *DeliveryRepo) DeleteByDeployment(ctx context.Context, depID domain.Depl
 
 func scanDelivery(s scanner) (domain.Delivery, error) {
 	var d domain.Delivery
-	var id, depID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
-	if err := s.Scan(&id, &depID, &tgtID, &manifestsJSON, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
+	var id, fID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
+	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return d, domain.ErrNotFound
 		}
 		return d, fmt.Errorf("scan delivery: %w", err)
 	}
 	d.ID = domain.DeliveryID(id)
-	d.DeploymentID = domain.DeploymentID(depID)
+	d.FulfillmentID = domain.FulfillmentID(fID)
 	d.TargetID = domain.TargetID(tgtID)
 	d.State = domain.DeliveryState(stateStr)
 	if err := json.Unmarshal([]byte(manifestsJSON), &d.Manifests); err != nil {

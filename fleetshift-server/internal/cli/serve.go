@@ -229,7 +229,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Delivery:         router,
 		Strategies:       domain.DefaultStrategyFactory{},
 		Registry:         reg,
-		Observer:         observability.NewDeploymentObserver(logger),
+		Observer:         observability.NewFulfillmentObserver(logger),
 		DeliveryObserver: observability.NewDeliveryObserver(logger),
 		Vault:            vault,
 	}

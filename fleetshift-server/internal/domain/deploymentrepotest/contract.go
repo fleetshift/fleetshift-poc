@@ -12,53 +12,69 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// Factory creates a fresh [domain.DeploymentRepository] for each test.
-type Factory func(t *testing.T) domain.DeploymentRepository
+// Factory creates a fresh [domain.Tx] for each test so callers can use
+// [domain.Tx.Fulfillments] before creating deployments (foreign key)
+// and [domain.Tx.Deployments] for the repository under test.
+type Factory func(t *testing.T) domain.Tx
 
 // Run exercises the [domain.DeploymentRepository] contract.
 func Run(t *testing.T, factory Factory) {
 	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
+	ctx := context.Background()
 
-	sampleDeployment := func() domain.Deployment {
-		return domain.Deployment{
-			ID:  "d1",
-			UID: "uid-abc-123",
+	sampleFulfillment := func(id domain.FulfillmentID) domain.Fulfillment {
+		return domain.Fulfillment{
+			ID: id,
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
 			},
+			ManifestStrategyVersion: 1,
 			PlacementStrategy: domain.PlacementStrategySpec{
 				Type:    domain.PlacementStrategyStatic,
 				Targets: []domain.TargetID{"t1", "t2"},
 			},
-			State:     domain.DeploymentStateCreating,
-			CreatedAt: fixedTime,
-			UpdatedAt: fixedTime,
-			Etag:      "etag-v1",
+			PlacementStrategyVersion: 1,
+			State:                    domain.FulfillmentStateCreating,
+			CreatedAt:                fixedTime,
+			UpdatedAt:                fixedTime,
+			Generation:               1,
+			ObservedGeneration:       0,
+		}
+	}
+
+	sampleThinDeployment := func(depID domain.DeploymentID, fid domain.FulfillmentID) domain.Deployment {
+		return domain.Deployment{
+			ID:            depID,
+			UID:           "uid-abc-123",
+			FulfillmentID: fid,
+			CreatedAt:     fixedTime,
+			UpdatedAt:     fixedTime,
+			Etag:          "etag-v1",
 		}
 	}
 
 	t.Run("CreateAndGet", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
+		tx := factory(t)
+		defer tx.Rollback()
+
+		fid := domain.FulfillmentID("f-create-get")
+		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
+			t.Fatalf("Create fulfillment: %v", err)
+		}
+		d := sampleThinDeployment("d-create-get", fid)
+		repo := tx.Deployments()
 
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "d1")
+		got, err := repo.Get(ctx, "d-create-get")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.ManifestStrategy.Type != domain.ManifestStrategyInline {
-			t.Errorf("ManifestStrategy.Type = %q, want %q", got.ManifestStrategy.Type, domain.ManifestStrategyInline)
-		}
-		if len(got.PlacementStrategy.Targets) != 2 {
-			t.Errorf("PlacementStrategy.Targets = %d, want 2", len(got.PlacementStrategy.Targets))
-		}
-		if got.State != domain.DeploymentStateCreating {
-			t.Errorf("State = %q, want %q", got.State, domain.DeploymentStateCreating)
+		if got.FulfillmentID != fid {
+			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID, fid)
 		}
 		if got.UID != "uid-abc-123" {
 			t.Errorf("UID = %q, want %q", got.UID, "uid-abc-123")
@@ -74,93 +90,19 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("CreateAndGet_WithRolloutStrategy", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		d.RolloutStrategy = &domain.RolloutStrategySpec{
-			Type:                  domain.RolloutStrategyImmediate,
-			VersionConflictPolicy: domain.VersionConflictCompleteAll,
-		}
-
-		if err := repo.Create(ctx, d); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.RolloutStrategy == nil {
-			t.Fatal("RolloutStrategy is nil after round-trip")
-		}
-		if got.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
-			t.Errorf("RolloutStrategy.Type = %q, want %q", got.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
-		}
-		if got.RolloutStrategy.VersionConflictPolicy != domain.VersionConflictCompleteAll {
-			t.Errorf("RolloutStrategy.VersionConflictPolicy = %q, want %q", got.RolloutStrategy.VersionConflictPolicy, domain.VersionConflictCompleteAll)
-		}
-	})
-
-	t.Run("CreateAndGet_WithProvenance", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		d.Provenance = &domain.Provenance{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Subject: "user-1",
-					Issuer:  "https://issuer.example.com",
-				},
-				ContentHash:    []byte("sha256-hash-bytes"),
-				SignatureBytes: []byte("ecdsa-sig-bytes"),
-			},
-			ValidUntil:         fixedTime.Add(24 * time.Hour),
-			ExpectedGeneration: 1,
-			OutputConstraints: []domain.OutputConstraint{
-				{Name: "cluster-version", Expression: ">= 4.14"},
-			},
-		}
-
-		if err := repo.Create(ctx, d); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.Provenance == nil {
-			t.Fatal("Provenance is nil after round-trip")
-		}
-		if string(got.Provenance.Sig.ContentHash) != "sha256-hash-bytes" {
-			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "sha256-hash-bytes")
-		}
-		if string(got.Provenance.Sig.SignatureBytes) != "ecdsa-sig-bytes" {
-			t.Errorf("Provenance.Sig.SignatureBytes = %q, want %q", got.Provenance.Sig.SignatureBytes, "ecdsa-sig-bytes")
-		}
-		if got.Provenance.Sig.Signer.Subject != "user-1" {
-			t.Errorf("Provenance.Sig.Signer.Subject = %q, want %q", got.Provenance.Sig.Signer.Subject, "user-1")
-		}
-		if !got.Provenance.ValidUntil.Equal(fixedTime.Add(24 * time.Hour)) {
-			t.Errorf("Provenance.ValidUntil = %v, want %v", got.Provenance.ValidUntil, fixedTime.Add(24*time.Hour))
-		}
-		if got.Provenance.ExpectedGeneration != 1 {
-			t.Errorf("Provenance.ExpectedGeneration = %d, want 1", got.Provenance.ExpectedGeneration)
-		}
-		if len(got.Provenance.OutputConstraints) != 1 {
-			t.Fatalf("Provenance.OutputConstraints len = %d, want 1", len(got.Provenance.OutputConstraints))
-		}
-		if got.Provenance.OutputConstraints[0].Name != "cluster-version" {
-			t.Errorf("OutputConstraints[0].Name = %q, want %q", got.Provenance.OutputConstraints[0].Name, "cluster-version")
-		}
-	})
-
 	t.Run("CreateDuplicate", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		_ = repo.Create(ctx, d)
+		tx := factory(t)
+		defer tx.Rollback()
+
+		fid := domain.FulfillmentID("f-dup")
+		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
+			t.Fatalf("Create fulfillment: %v", err)
+		}
+		d := sampleThinDeployment("d-dup", fid)
+		repo := tx.Deployments()
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
 		err := repo.Create(ctx, d)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second Create: got %v, want ErrAlreadyExists", err)
@@ -168,247 +110,137 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("GetNotFound", func(t *testing.T) {
-		repo := factory(t)
-		_, err := repo.Get(context.Background(), "nonexistent")
+		tx := factory(t)
+		defer tx.Rollback()
+
+		_, err := tx.Deployments().Get(ctx, "nonexistent-deployment")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get: got %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("Update", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		_ = repo.Create(ctx, d)
+	t.Run("GetView", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
 
-		laterTime := fixedTime.Add(5 * time.Minute)
-		d.State = domain.DeploymentStateActive
-		d.ResolvedTargets = []domain.TargetID{"t1", "t2"}
-		d.UpdatedAt = laterTime
-		d.Etag = "etag-v2"
-		if err := repo.Update(ctx, d); err != nil {
-			t.Fatalf("Update: %v", err)
+		f := sampleFulfillment("f-view")
+		f.RolloutStrategy = &domain.RolloutStrategySpec{
+			Type:                  domain.RolloutStrategyImmediate,
+			VersionConflictPolicy: domain.VersionConflictCompleteAll,
+		}
+		f.RolloutStrategyVersion = 1
+
+		if err := tx.Fulfillments().Create(ctx, f); err != nil {
+			t.Fatalf("Create fulfillment: %v", err)
 		}
 
-		got, _ := repo.Get(ctx, "d1")
-		if got.State != domain.DeploymentStateActive {
-			t.Errorf("State after Update = %q, want %q", got.State, domain.DeploymentStateActive)
+		d := sampleThinDeployment("d-view", f.ID)
+		repo := tx.Deployments()
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create deployment: %v", err)
 		}
-		if len(got.ResolvedTargets) != 2 {
-			t.Errorf("ResolvedTargets = %d, want 2", len(got.ResolvedTargets))
-		}
-		if !got.CreatedAt.Equal(fixedTime) {
-			t.Errorf("CreatedAt changed after Update: got %v, want %v", got.CreatedAt, fixedTime)
-		}
-		if !got.UpdatedAt.Equal(laterTime) {
-			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt, laterTime)
-		}
-		if got.Etag != "etag-v2" {
-			t.Errorf("Etag = %q, want %q", got.Etag, "etag-v2")
-		}
-	})
 
-	t.Run("UpdateNotFound", func(t *testing.T) {
-		repo := factory(t)
-		err := repo.Update(context.Background(), domain.Deployment{ID: "nonexistent"})
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("Update: got %v, want ErrNotFound", err)
-		}
-	})
-
-	t.Run("List", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d1 := sampleDeployment()
-		d2 := sampleDeployment()
-		d2.ID = "d2"
-		_ = repo.Create(ctx, d1)
-		_ = repo.Create(ctx, d2)
-
-		got, err := repo.List(ctx)
+		v, err := repo.GetView(ctx, "d-view")
 		if err != nil {
-			t.Fatalf("List: %v", err)
+			t.Fatalf("GetView: %v", err)
 		}
-		if len(got) != 2 {
-			t.Fatalf("List: got %d, want 2", len(got))
+		if v.Deployment.ID != "d-view" {
+			t.Errorf("Deployment.ID = %q, want %q", v.Deployment.ID, "d-view")
+		}
+		if v.Deployment.FulfillmentID != f.ID {
+			t.Errorf("Deployment.FulfillmentID = %q, want %q", v.Deployment.FulfillmentID, f.ID)
+		}
+		if v.Fulfillment.ID != f.ID {
+			t.Errorf("Fulfillment.ID = %q, want %q", v.Fulfillment.ID, f.ID)
+		}
+		if v.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyInline {
+			t.Errorf("Fulfillment.ManifestStrategy.Type = %q, want %q", v.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyInline)
+		}
+		if len(v.Fulfillment.PlacementStrategy.Targets) != 2 {
+			t.Errorf("Fulfillment.PlacementStrategy.Targets len = %d, want 2", len(v.Fulfillment.PlacementStrategy.Targets))
+		}
+		if v.Fulfillment.State != domain.FulfillmentStateCreating {
+			t.Errorf("Fulfillment.State = %q, want %q", v.Fulfillment.State, domain.FulfillmentStateCreating)
+		}
+		if v.Fulfillment.RolloutStrategy == nil {
+			t.Fatal("Fulfillment.RolloutStrategy is nil after GetView")
+		}
+		if v.Fulfillment.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
+			t.Errorf("RolloutStrategy.Type = %q, want %q", v.Fulfillment.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
+		}
+	})
+
+	t.Run("ListView", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+
+		for _, pair := range []struct {
+			depID string
+			fid   domain.FulfillmentID
+		}{
+			{"d-list-a", "f-list-a"},
+			{"d-list-b", "f-list-b"},
+		} {
+			f := sampleFulfillment(pair.fid)
+			if err := tx.Fulfillments().Create(ctx, f); err != nil {
+				t.Fatalf("Create fulfillment %q: %v", pair.fid, err)
+			}
+			d := sampleThinDeployment(domain.DeploymentID(pair.depID), pair.fid)
+			if err := tx.Deployments().Create(ctx, d); err != nil {
+				t.Fatalf("Create deployment %q: %v", pair.depID, err)
+			}
+		}
+
+		views, err := tx.Deployments().ListView(ctx)
+		if err != nil {
+			t.Fatalf("ListView: %v", err)
+		}
+		if len(views) != 2 {
+			t.Fatalf("ListView len = %d, want 2", len(views))
+		}
+		seen := map[domain.DeploymentID]bool{}
+		for _, v := range views {
+			seen[v.Deployment.ID] = true
+			if v.Deployment.FulfillmentID != v.Fulfillment.ID {
+				t.Errorf("deployment %s: FulfillmentID %q != Fulfillment.ID %q", v.Deployment.ID, v.Deployment.FulfillmentID, v.Fulfillment.ID)
+			}
+		}
+		for _, id := range []domain.DeploymentID{"d-list-a", "d-list-b"} {
+			if !seen[id] {
+				t.Errorf("ListView missing deployment %q", id)
+			}
 		}
 	})
 
 	t.Run("Delete", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		_ = repo.Create(ctx, sampleDeployment())
-		if err := repo.Delete(ctx, "d1"); err != nil {
+		tx := factory(t)
+		defer tx.Rollback()
+
+		fid := domain.FulfillmentID("f-del")
+		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
+			t.Fatalf("Create fulfillment: %v", err)
+		}
+		d := sampleThinDeployment("d-del", fid)
+		repo := tx.Deployments()
+		if err := repo.Create(ctx, d); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		if err := repo.Delete(ctx, "d-del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		_, err := repo.Get(ctx, "d1")
+		_, err := repo.Get(ctx, "d-del")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get after Delete: got %v, want ErrNotFound", err)
 		}
 	})
 
 	t.Run("DeleteNotFound", func(t *testing.T) {
-		repo := factory(t)
-		err := repo.Delete(context.Background(), "nonexistent")
+		tx := factory(t)
+		defer tx.Rollback()
+
+		err := tx.Deployments().Delete(ctx, "nonexistent-deployment")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Delete: got %v, want ErrNotFound", err)
-		}
-	})
-
-	t.Run("GenerationFields_RoundTrip", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		d.Generation = 3
-		d.ObservedGeneration = 2
-
-		if err := repo.Create(ctx, d); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.Generation != 3 {
-			t.Errorf("Generation = %d, want 3", got.Generation)
-		}
-		if got.ObservedGeneration != 2 {
-			t.Errorf("ObservedGeneration = %d, want 2", got.ObservedGeneration)
-		}
-	})
-
-	t.Run("Update_PersistsReconciliationFields", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		d.Generation = 1
-		d.ObservedGeneration = 0
-		_ = repo.Create(ctx, d)
-
-		d.Generation = 5
-		d.ObservedGeneration = 3
-		if err := repo.Update(ctx, d); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-
-		got, _ := repo.Get(ctx, "d1")
-		if got.Generation != 5 {
-			t.Errorf("Generation = %d, want 5", got.Generation)
-		}
-		if got.ObservedGeneration != 3 {
-			t.Errorf("ObservedGeneration = %d, want 3", got.ObservedGeneration)
-		}
-	})
-
-	t.Run("ActiveWorkflowGen_RoundTrip", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		gen := domain.Generation(5)
-		d.ActiveWorkflowGen = &gen
-
-		if err := repo.Create(ctx, d); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.ActiveWorkflowGen == nil {
-			t.Fatal("ActiveWorkflowGen is nil after round-trip, want non-nil")
-		}
-		if *got.ActiveWorkflowGen != 5 {
-			t.Errorf("ActiveWorkflowGen = %d, want 5", *got.ActiveWorkflowGen)
-		}
-	})
-
-	t.Run("ActiveWorkflowGen_NilByDefault", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-
-		if err := repo.Create(ctx, d); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.ActiveWorkflowGen != nil {
-			t.Errorf("ActiveWorkflowGen = %d, want nil", *got.ActiveWorkflowGen)
-		}
-	})
-
-	t.Run("Update_ActiveWorkflowGen_SetAndClear", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		_ = repo.Create(ctx, d)
-
-		gen := domain.Generation(2)
-		d.ActiveWorkflowGen = &gen
-		d.UpdatedAt = fixedTime.Add(time.Minute)
-		if err := repo.Update(ctx, d); err != nil {
-			t.Fatalf("Update (set): %v", err)
-		}
-		got, _ := repo.Get(ctx, "d1")
-		if got.ActiveWorkflowGen == nil || *got.ActiveWorkflowGen != 2 {
-			t.Fatalf("after set: ActiveWorkflowGen = %v, want 2", got.ActiveWorkflowGen)
-		}
-
-		d.ActiveWorkflowGen = nil
-		d.UpdatedAt = fixedTime.Add(2 * time.Minute)
-		if err := repo.Update(ctx, d); err != nil {
-			t.Fatalf("Update (clear): %v", err)
-		}
-		got, _ = repo.Get(ctx, "d1")
-		if got.ActiveWorkflowGen != nil {
-			t.Errorf("after clear: ActiveWorkflowGen = %d, want nil", *got.ActiveWorkflowGen)
-		}
-	})
-
-	t.Run("Update_WithRolloutAndProvenance", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-		d := sampleDeployment()
-		_ = repo.Create(ctx, d)
-
-		d.RolloutStrategy = &domain.RolloutStrategySpec{
-			Type:                  domain.RolloutStrategyImmediate,
-			VersionConflictPolicy: domain.VersionConflictCompleteAll,
-		}
-		d.Provenance = &domain.Provenance{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Subject: "user-1",
-					Issuer:  "https://issuer.example.com",
-				},
-				ContentHash:    []byte("hash"),
-				SignatureBytes: []byte("sig"),
-			},
-			ValidUntil:         fixedTime.Add(24 * time.Hour),
-			ExpectedGeneration: 1,
-		}
-		d.UpdatedAt = fixedTime.Add(time.Minute)
-		if err := repo.Update(ctx, d); err != nil {
-			t.Fatalf("Update: %v", err)
-		}
-
-		got, err := repo.Get(ctx, "d1")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-		if got.RolloutStrategy == nil {
-			t.Fatal("RolloutStrategy is nil after Update round-trip")
-		}
-		if got.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
-			t.Errorf("RolloutStrategy.Type = %q, want %q", got.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
-		}
-		if got.Provenance == nil {
-			t.Fatal("Provenance is nil after Update round-trip")
-		}
-		if string(got.Provenance.Sig.ContentHash) != "hash" {
-			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "hash")
 		}
 	})
 }

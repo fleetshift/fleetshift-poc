@@ -67,10 +67,10 @@ type OrchestrationWorkflowSpec struct {
 }
 
 func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-deployment" }
-func (s *OrchestrationWorkflowSpec) Run(record Record, deploymentID DeploymentID) (struct{}, error)
+func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID FulfillmentID) (struct{}, error)
 
 // Activity methods — each returns a typed Activity
-func (s *OrchestrationWorkflowSpec) LoadDeploymentAndPool() Activity[DeploymentID, DeploymentAndPool]
+func (s *OrchestrationWorkflowSpec) LoadFulfillmentAndPool() Activity[FulfillmentID, FulfillmentAndPool]
 func (s *OrchestrationWorkflowSpec) ResolvePlacement() Activity[ResolvePlacementInput, []PlacementTarget]
 // ...
 ```
@@ -98,14 +98,14 @@ func AwaitSignal[T any](record Record, sig Signal[T]) (T, error)
 
 1. Signals
 
-Named, typed channels for cross-workflow communication. A Signal value is shared between the send side (Registry.SignalDeploymentEvent) and the receive side (AwaitSignal).
+Named, typed channels for cross-workflow communication. A Signal value is shared between the send side (Registry.SignalFulfillmentEvent) and the receive side (AwaitSignal).
 
 ```go
 type Signal[T any] struct {
   Name string
 }
 
-var DeploymentEventSignal = Signal[DeploymentEvent]{Name: "deployment-event"}
+var FulfillmentEventSignal = Signal[FulfillmentEvent]{Name: "fulfillment-event"}
 ```
 
 1. Registration + invocation handles
@@ -119,15 +119,15 @@ type Registry interface {
   RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
   RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
   RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
-  SignalDeploymentEvent(ctx context.Context, deploymentID DeploymentID, event DeploymentEvent) error
+  SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
 }
 
 type OrchestrationWorkflow interface {
-  Start(ctx context.Context, deploymentID DeploymentID) (Execution[struct{}], error)
+  Start(ctx context.Context, fulfillmentID FulfillmentID) (Execution[struct{}], error)
 }
 
 type CreateDeploymentWorkflow interface {
-  Start(ctx context.Context, input CreateDeploymentInput) (Execution[Deployment], error)
+  Start(ctx context.Context, input CreateDeploymentInput) (Execution[DeploymentView], error)
 }
 
 type Execution[T any] interface {
@@ -173,7 +173,7 @@ go-workflows implementation (internal/infrastructure/goworkflows)
 	•	calls the pre-registered signal receiver, which calls ch.Receive(ctx)
 	•	Execution.AwaitResult:
 	•	calls client.GetWorkflowResult[O](ctx, client, instance, timeout)
-	•	SignalDeploymentEvent:
+	•	SignalFulfillmentEvent:
 	•	calls client.SignalWorkflow(ctx, instanceID, signalName, event)
 
 memworkflow implementation (internal/infrastructure/memworkflow)
@@ -184,7 +184,7 @@ memworkflow implementation (internal/infrastructure/memworkflow)
 	•	JSON round-trips input, dispatches activity.Run(context.Background(), in) in a goroutine, JSON round-trips the output. This catches serialization issues that would be silent without a durable engine.
 	•	Record.Await(signalName):
 	•	blocks on a buffered channel of JSON-serialized events, deserializes on receive
-	•	SignalDeploymentEvent:
+	•	SignalFulfillmentEvent:
 	•	JSON-serializes the event and sends it on the instance's channel, mirroring how durable engines persist signals before delivering them
 	•	No durable state or replay. Recommended workflow backend for fast, high-fidelity tests.
 

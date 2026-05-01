@@ -17,22 +17,22 @@ type spyAgent struct {
 
 func (s *spyAgent) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	s.delivered = append(s.delivered, domain.DeliverInput{
-		Target:       target,
-		DeliveryID:   deliveryID,
-		DeploymentID: domain.DeploymentID(deliveryID),
-		Manifests:    manifests,
+		Target:        target,
+		DeliveryID:    deliveryID,
+		FulfillmentID: domain.FulfillmentID(deliveryID),
+		Manifests:     manifests,
 	})
 	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
 func (s *spyAgent) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, _ *domain.DeliverySignaler) error {
 	s.removed = append(s.removed, domain.RemoveInput{
-		Target:       target,
-		DeliveryID:   deliveryID,
-		DeploymentID: domain.DeploymentID(deliveryID),
-		Manifests:    manifests,
-		Auth:         auth,
-		Attestation:  att,
+		Target:        target,
+		DeliveryID:    deliveryID,
+		FulfillmentID: domain.FulfillmentID(deliveryID),
+		Manifests:     manifests,
+		Auth:          auth,
+		Attestation:   att,
 	})
 	return nil
 }
