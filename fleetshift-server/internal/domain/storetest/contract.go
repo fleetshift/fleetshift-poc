@@ -15,6 +15,23 @@ import (
 // Factory creates a fresh [domain.Store] for each test invocation.
 type Factory func(t *testing.T) domain.Store
 
+func sampleFulfillment(id domain.FulfillmentID, now time.Time) domain.Fulfillment {
+	f := domain.Fulfillment{
+		ID:        id,
+		State:     domain.FulfillmentStateCreating,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+		Type:      domain.ManifestStrategyInline,
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+	}, now)
+	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+		Type: domain.PlacementStrategyAll,
+	}, now)
+	return f
+}
+
 // Run exercises the [domain.Store] contract.
 func Run(t *testing.T, factory Factory) {
 	t.Run("CommitPersists", func(t *testing.T) {
@@ -122,21 +139,7 @@ func Run(t *testing.T, factory Factory) {
 		if err := tx.Targets().Create(ctx, domain.TargetInfo{ID: "t1", Name: "cluster-a"}); err != nil {
 			t.Fatalf("Create target: %v", err)
 		}
-		if err := tx.Fulfillments().Create(ctx, domain.Fulfillment{
-			ID: "f-cross",
-			ManifestStrategy: domain.ManifestStrategySpec{
-				Type:      domain.ManifestStrategyInline,
-				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
-			},
-			ManifestStrategyVersion:  1,
-			PlacementStrategy:        domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
-			PlacementStrategyVersion: 1,
-			State:                    domain.FulfillmentStateCreating,
-			CreatedAt:                fixed,
-			UpdatedAt:                fixed,
-			Generation:               1,
-			ObservedGeneration:       0,
-		}); err != nil {
+		if err := tx.Fulfillments().Create(ctx, sampleFulfillment("f-cross", fixed)); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
 		if err := tx.Deployments().Create(ctx, domain.Deployment{
@@ -184,21 +187,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Begin: %v", err)
 		}
 		defer tx.Rollback()
-		if err := tx.Fulfillments().Create(ctx, domain.Fulfillment{
-			ID: "f-acc",
-			ManifestStrategy: domain.ManifestStrategySpec{
-				Type:      domain.ManifestStrategyInline,
-				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
-			},
-			ManifestStrategyVersion:  1,
-			PlacementStrategy:        domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
-			PlacementStrategyVersion: 1,
-			State:                    domain.FulfillmentStateCreating,
-			CreatedAt:                fixed,
-			UpdatedAt:                fixed,
-			Generation:               1,
-			ObservedGeneration:       0,
-		}); err != nil {
+		if err := tx.Fulfillments().Create(ctx, sampleFulfillment("f-acc", fixed)); err != nil {
 			t.Fatalf("Fulfillments().Create: %v", err)
 		}
 		if err := tx.Commit(); err != nil {

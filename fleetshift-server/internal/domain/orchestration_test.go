@@ -33,15 +33,28 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 		f.UpdatedAt = f.CreatedAt
 	}
 	f.ID = domain.FulfillmentID(depID)
-	if f.ManifestStrategyVersion == 0 {
-		f.ManifestStrategyVersion = 1
+
+	// Use Advance* to populate pending strategy records so the version
+	// tables get rows on Create. Preserve the caller's desired generation.
+	wantGen := f.Generation
+	ms, ps, rs := f.ManifestStrategy, f.PlacementStrategy, f.RolloutStrategy
+	f.ManifestStrategy = domain.ManifestStrategySpec{}
+	f.PlacementStrategy = domain.PlacementStrategySpec{}
+	f.RolloutStrategy = nil
+	f.ManifestStrategyVersion = 0
+	f.PlacementStrategyVersion = 0
+	f.RolloutStrategyVersion = 0
+	f.Generation = 0
+
+	f.AdvanceManifestStrategy(ms, f.CreatedAt)
+	f.AdvancePlacementStrategy(ps, f.CreatedAt)
+	if rs != nil {
+		f.AdvanceRolloutStrategy(rs, f.CreatedAt)
 	}
-	if f.PlacementStrategyVersion == 0 {
-		f.PlacementStrategyVersion = 1
+	if wantGen > 0 {
+		f.Generation = wantGen
 	}
-	if f.RolloutStrategyVersion == 0 {
-		f.RolloutStrategyVersion = 1
-	}
+
 	dep := domain.Deployment{
 		ID:            depID,
 		UID:           "test-uid",

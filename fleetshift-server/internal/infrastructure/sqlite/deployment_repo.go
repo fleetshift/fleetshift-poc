@@ -47,9 +47,10 @@ func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domai
 func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
-		        `+prefixedFulfillmentColumns("f")+`
+		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
 		 JOIN fulfillments f ON f.id = d.fulfillment_id
+		 `+strategyJoins("f")+`
 		 WHERE d.id = ?`,
 		string(id),
 	)
@@ -59,9 +60,10 @@ func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (d
 func (r *DeploymentRepo) ListView(ctx context.Context) ([]domain.DeploymentView, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
-		        `+prefixedFulfillmentColumns("f")+`
+		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
-		 JOIN fulfillments f ON f.id = d.fulfillment_id`,
+		 JOIN fulfillments f ON f.id = d.fulfillment_id
+		 `+strategyJoins("f"),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list deployment views: %w", err)
@@ -91,17 +93,6 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 	return nil
 }
 
-func prefixedFulfillmentColumns(alias string) string {
-	return alias + ".id, " +
-		alias + ".manifest_strategy, " + alias + ".manifest_strategy_version, " +
-		alias + ".placement_strategy, " + alias + ".placement_strategy_version, " +
-		alias + ".rollout_strategy, " + alias + ".rollout_strategy_version, " +
-		alias + ".resolved_targets, " + alias + ".state, " + alias + ".status_reason, " +
-		alias + ".auth, " + alias + ".provenance, " +
-		alias + ".generation, " + alias + ".observed_generation, " + alias + ".active_workflow_gen, " +
-		alias + ".created_at, " + alias + ".updated_at"
-}
-
 func scanThinDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
 	var id, uid, fID, createdAtStr, updatedAtStr, etag string
@@ -127,14 +118,14 @@ func scanThinDeployment(s scanner) (domain.Deployment, error) {
 func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	var v domain.DeploymentView
 	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr, etag string
-	var fID, fMsJSON, fPsJSON, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
-	var fRsJSON, fProvJSON sql.NullString
+	var fID, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
+	var fMsSpec, fPsSpec, fRsSpec, fProvJSON sql.NullString
 	var fMsVer, fPsVer, fRsVer, fGen, fObsGen int64
 	var fActiveWfGen sql.NullInt64
 
 	if err := s.Scan(
 		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr, &etag,
-		&fID, &fMsJSON, &fMsVer, &fPsJSON, &fPsVer, &fRsJSON, &fRsVer,
+		&fID, &fMsVer, &fMsSpec, &fPsVer, &fPsSpec, &fRsVer, &fRsSpec,
 		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON,
 		&fGen, &fObsGen, &fActiveWfGen,
 		&fCreatedAtStr, &fUpdatedAtStr,
@@ -175,15 +166,19 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 		v.Fulfillment.UpdatedAt = t
 	}
 
-	if err := unmarshalJSON(fMsJSON, &v.Fulfillment.ManifestStrategy, "manifest strategy"); err != nil {
-		return v, err
+	if fMsSpec.Valid {
+		if err := unmarshalJSON(fMsSpec.String, &v.Fulfillment.ManifestStrategy, "manifest strategy"); err != nil {
+			return v, err
+		}
 	}
-	if err := unmarshalJSON(fPsJSON, &v.Fulfillment.PlacementStrategy, "placement strategy"); err != nil {
-		return v, err
+	if fPsSpec.Valid {
+		if err := unmarshalJSON(fPsSpec.String, &v.Fulfillment.PlacementStrategy, "placement strategy"); err != nil {
+			return v, err
+		}
 	}
-	if fRsJSON.Valid {
+	if fRsSpec.Valid {
 		v.Fulfillment.RolloutStrategy = &domain.RolloutStrategySpec{}
-		if err := unmarshalJSON(fRsJSON.String, v.Fulfillment.RolloutStrategy, "rollout strategy"); err != nil {
+		if err := unmarshalJSON(fRsSpec.String, v.Fulfillment.RolloutStrategy, "rollout strategy"); err != nil {
 			return v, err
 		}
 	}

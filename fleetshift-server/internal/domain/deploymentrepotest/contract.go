@@ -23,24 +23,21 @@ func Run(t *testing.T, factory Factory) {
 	ctx := context.Background()
 
 	sampleFulfillment := func(id domain.FulfillmentID) domain.Fulfillment {
-		return domain.Fulfillment{
-			ID: id,
-			ManifestStrategy: domain.ManifestStrategySpec{
-				Type:      domain.ManifestStrategyInline,
-				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
-			},
-			ManifestStrategyVersion: 1,
-			PlacementStrategy: domain.PlacementStrategySpec{
-				Type:    domain.PlacementStrategyStatic,
-				Targets: []domain.TargetID{"t1", "t2"},
-			},
-			PlacementStrategyVersion: 1,
-			State:                    domain.FulfillmentStateCreating,
-			CreatedAt:                fixedTime,
-			UpdatedAt:                fixedTime,
-			Generation:               1,
-			ObservedGeneration:       0,
+		f := domain.Fulfillment{
+			ID:        id,
+			State:     domain.FulfillmentStateCreating,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
 		}
+		f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		}, fixedTime)
+		f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1", "t2"},
+		}, fixedTime)
+		return f
 	}
 
 	sampleThinDeployment := func(depID domain.DeploymentID, fid domain.FulfillmentID) domain.Deployment {
@@ -124,11 +121,10 @@ func Run(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 
 		f := sampleFulfillment("f-view")
-		f.RolloutStrategy = &domain.RolloutStrategySpec{
+		f.AdvanceRolloutStrategy(&domain.RolloutStrategySpec{
 			Type:                  domain.RolloutStrategyImmediate,
 			VersionConflictPolicy: domain.VersionConflictCompleteAll,
-		}
-		f.RolloutStrategyVersion = 1
+		}, fixedTime)
 
 		if err := tx.Fulfillments().Create(ctx, f); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)

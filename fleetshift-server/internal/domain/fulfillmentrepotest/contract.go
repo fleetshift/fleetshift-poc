@@ -20,24 +20,21 @@ func Run(t *testing.T, factory Factory) {
 	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 
 	sampleFulfillment := func() domain.Fulfillment {
-		return domain.Fulfillment{
-			ID: domain.FulfillmentID("f1"),
-			ManifestStrategy: domain.ManifestStrategySpec{
-				Type:      domain.ManifestStrategyInline,
-				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
-			},
-			ManifestStrategyVersion: 1,
-			PlacementStrategy: domain.PlacementStrategySpec{
-				Type:    domain.PlacementStrategyStatic,
-				Targets: []domain.TargetID{"t1", "t2"},
-			},
-			PlacementStrategyVersion: 1,
-			State:                    domain.FulfillmentStateCreating,
-			CreatedAt:                fixedTime,
-			UpdatedAt:                fixedTime,
-			Generation:               1,
-			ObservedGeneration:       0,
+		f := domain.Fulfillment{
+			ID:        domain.FulfillmentID("f1"),
+			State:     domain.FulfillmentStateCreating,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
 		}
+		f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		}, fixedTime)
+		f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1", "t2"},
+		}, fixedTime)
+		return f
 	}
 
 	t.Run("CreateAndGet", func(t *testing.T) {
@@ -83,11 +80,10 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		f.RolloutStrategy = &domain.RolloutStrategySpec{
+		f.AdvanceRolloutStrategy(&domain.RolloutStrategySpec{
 			Type:                  domain.RolloutStrategyImmediate,
 			VersionConflictPolicy: domain.VersionConflictCompleteAll,
-		}
-		f.RolloutStrategyVersion = 1
+		}, fixedTime)
 
 		if err := repo.Create(ctx, f); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -189,12 +185,13 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 		_ = repo.Create(ctx, f)
+		f.DrainPendingStrategyRecords()
 
 		laterTime := fixedTime.Add(5 * time.Minute)
 		f.State = domain.FulfillmentStateActive
 		f.ResolvedTargets = []domain.TargetID{"t1", "t2"}
 		f.UpdatedAt = laterTime
-		f.Generation = 2
+		f.Generation = 3
 		if err := repo.Update(ctx, f); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
@@ -269,9 +266,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		f.Generation = 1
-		f.ObservedGeneration = 0
 		_ = repo.Create(ctx, f)
+		f.DrainPendingStrategyRecords()
 
 		f.Generation = 5
 		f.ObservedGeneration = 3
@@ -332,6 +328,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 		_ = repo.Create(ctx, f)
+		f.DrainPendingStrategyRecords()
 
 		gen := domain.Generation(2)
 		f.ActiveWorkflowGen = &gen
@@ -360,6 +357,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 		_ = repo.Create(ctx, f)
+		f.DrainPendingStrategyRecords()
 
 		advTime := fixedTime.Add(time.Hour)
 		f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
@@ -386,12 +384,12 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 		_ = repo.Create(ctx, f)
+		f.DrainPendingStrategyRecords()
 
-		f.RolloutStrategy = &domain.RolloutStrategySpec{
+		f.AdvanceRolloutStrategy(&domain.RolloutStrategySpec{
 			Type:                  domain.RolloutStrategyImmediate,
 			VersionConflictPolicy: domain.VersionConflictCompleteAll,
-		}
-		f.RolloutStrategyVersion = 1
+		}, fixedTime)
 		f.Provenance = &domain.Provenance{
 			Sig: domain.Signature{
 				Signer: domain.FederatedIdentity{

@@ -17,21 +17,6 @@ type FulfillmentRepo struct {
 }
 
 func (r *FulfillmentRepo) Create(ctx context.Context, f domain.Fulfillment) error {
-	ms, err := json.Marshal(f.ManifestStrategy)
-	if err != nil {
-		return fmt.Errorf("marshal manifest strategy: %w", err)
-	}
-	ps, err := json.Marshal(f.PlacementStrategy)
-	if err != nil {
-		return fmt.Errorf("marshal placement strategy: %w", err)
-	}
-	var rs []byte
-	if f.RolloutStrategy != nil {
-		rs, err = json.Marshal(f.RolloutStrategy)
-		if err != nil {
-			return fmt.Errorf("marshal rollout strategy: %w", err)
-		}
-	}
 	rt, err := json.Marshal(f.ResolvedTargets)
 	if err != nil {
 		return fmt.Errorf("marshal resolved targets: %w", err)
@@ -50,17 +35,17 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f domain.Fulfillment) erro
 
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO fulfillments (
-			id, manifest_strategy, manifest_strategy_version,
-			placement_strategy, placement_strategy_version,
-			rollout_strategy, rollout_strategy_version,
+			id, manifest_strategy_version,
+			placement_strategy_version,
+			rollout_strategy_version,
 			resolved_targets, state, status_reason, auth, provenance,
 			generation, observed_generation, active_workflow_gen,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
 		string(f.ID),
-		string(ms), int64(f.ManifestStrategyVersion),
-		string(ps), int64(f.PlacementStrategyVersion),
-		nullStringFromBytes(rs), int64(f.RolloutStrategyVersion),
+		int64(f.ManifestStrategyVersion),
+		int64(f.PlacementStrategyVersion),
+		int64(f.RolloutStrategyVersion),
 		string(rt), string(f.State), f.StatusReason,
 		string(auth), nullStringFromBytes(provJSON),
 		int64(f.Generation), int64(f.ObservedGeneration),
@@ -80,19 +65,16 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f domain.Fulfillment) erro
 
 func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (domain.Fulfillment, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT `+fulfillmentColumns+` FROM fulfillments WHERE id = $1`,
+		`SELECT `+fulfillmentColumnsJoined("f")+`
+		 FROM fulfillments f
+		 `+strategyJoins("f")+`
+		 WHERE f.id = $1`,
 		string(id),
 	)
 	return scanFulfillment(row)
 }
 
 func (r *FulfillmentRepo) Update(ctx context.Context, f domain.Fulfillment) error {
-	ms, _ := json.Marshal(f.ManifestStrategy)
-	ps, _ := json.Marshal(f.PlacementStrategy)
-	var rs []byte
-	if f.RolloutStrategy != nil {
-		rs, _ = json.Marshal(f.RolloutStrategy)
-	}
 	rt, _ := json.Marshal(f.ResolvedTargets)
 	auth, _ := json.Marshal(f.Auth)
 	var provJSON []byte
@@ -102,17 +84,17 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f domain.Fulfillment) erro
 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE fulfillments SET
-			manifest_strategy = $1, manifest_strategy_version = $2,
-			placement_strategy = $3, placement_strategy_version = $4,
-			rollout_strategy = $5, rollout_strategy_version = $6,
-			resolved_targets = $7, state = $8, status_reason = $9,
-			auth = $10, provenance = $11,
-			generation = $12, observed_generation = $13, active_workflow_gen = $14,
-			updated_at = $15
-		WHERE id = $16`,
-		string(ms), int64(f.ManifestStrategyVersion),
-		string(ps), int64(f.PlacementStrategyVersion),
-		nullStringFromBytes(rs), int64(f.RolloutStrategyVersion),
+			manifest_strategy_version = $1,
+			placement_strategy_version = $2,
+			rollout_strategy_version = $3,
+			resolved_targets = $4, state = $5, status_reason = $6,
+			auth = $7, provenance = $8,
+			generation = $9, observed_generation = $10, active_workflow_gen = $11,
+			updated_at = $12
+		WHERE id = $13`,
+		int64(f.ManifestStrategyVersion),
+		int64(f.PlacementStrategyVersion),
+		int64(f.RolloutStrategyVersion),
 		string(rt), string(f.State), f.StatusReason,
 		string(auth), nullStringFromBytes(provJSON),
 		int64(f.Generation), int64(f.ObservedGeneration),
@@ -181,16 +163,36 @@ func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, f *do
 	return nil
 }
 
-const fulfillmentColumns = `id, manifest_strategy, manifest_strategy_version, placement_strategy, placement_strategy_version, rollout_strategy, rollout_strategy_version, resolved_targets, state, status_reason, auth, provenance, generation, observed_generation, active_workflow_gen, created_at, updated_at`
+// fulfillmentColumnsJoined returns the SELECT column list for a
+// fulfillment row joined with its strategy version tables. The caller
+// must alias fulfillments as f and include [strategyJoins].
+func fulfillmentColumnsJoined(f string) string {
+	return f + ".id, " +
+		f + ".manifest_strategy_version, ms.spec, " +
+		f + ".placement_strategy_version, ps.spec, " +
+		f + ".rollout_strategy_version, rs.spec, " +
+		f + ".resolved_targets, " + f + ".state, " + f + ".status_reason, " +
+		f + ".auth, " + f + ".provenance, " +
+		f + ".generation, " + f + ".observed_generation, " + f + ".active_workflow_gen, " +
+		f + ".created_at, " + f + ".updated_at"
+}
+
+// strategyJoins returns LEFT JOIN clauses that materialize strategy
+// specs from the version tables. The join aliases are ms, ps, rs.
+func strategyJoins(f string) string {
+	return `LEFT JOIN manifest_strategies ms ON ms.fulfillment_id = ` + f + `.id AND ms.version = ` + f + `.manifest_strategy_version
+		 LEFT JOIN placement_strategies ps ON ps.fulfillment_id = ` + f + `.id AND ps.version = ` + f + `.placement_strategy_version
+		 LEFT JOIN rollout_strategies rs ON rs.fulfillment_id = ` + f + `.id AND rs.version = ` + f + `.rollout_strategy_version`
+}
 
 func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 	var f domain.Fulfillment
-	var id, msJSON, psJSON, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
-	var rsJSON, provJSON sql.NullString
+	var id, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
+	var msSpec, psSpec, rsSpec, provJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
 	if err := s.Scan(
-		&id, &msJSON, &msVer, &psJSON, &psVer, &rsJSON, &rsVer,
+		&id, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
 		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&createdAtStr, &updatedAtStr,
@@ -220,15 +222,19 @@ func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 		f.UpdatedAt = t
 	}
 
-	if err := json.Unmarshal([]byte(msJSON), &f.ManifestStrategy); err != nil {
-		return f, fmt.Errorf("unmarshal manifest strategy: %w", err)
+	if msSpec.Valid {
+		if err := json.Unmarshal([]byte(msSpec.String), &f.ManifestStrategy); err != nil {
+			return f, fmt.Errorf("unmarshal manifest strategy: %w", err)
+		}
 	}
-	if err := json.Unmarshal([]byte(psJSON), &f.PlacementStrategy); err != nil {
-		return f, fmt.Errorf("unmarshal placement strategy: %w", err)
+	if psSpec.Valid {
+		if err := json.Unmarshal([]byte(psSpec.String), &f.PlacementStrategy); err != nil {
+			return f, fmt.Errorf("unmarshal placement strategy: %w", err)
+		}
 	}
-	if rsJSON.Valid {
+	if rsSpec.Valid {
 		f.RolloutStrategy = &domain.RolloutStrategySpec{}
-		if err := json.Unmarshal([]byte(rsJSON.String), f.RolloutStrategy); err != nil {
+		if err := json.Unmarshal([]byte(rsSpec.String), f.RolloutStrategy); err != nil {
 			return f, fmt.Errorf("unmarshal rollout strategy: %w", err)
 		}
 	}
