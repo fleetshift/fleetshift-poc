@@ -7,16 +7,18 @@ import (
 )
 
 // DeleteDeploymentWorkflowSpec transitions a fulfillment to
-// [FulfillmentStateDeleting], bumps its generation, and runs a
-// convergence loop to guarantee orchestration picks up the new state.
-// After orchestration completes (deleting the fulfillment), the
-// deployment row is cleaned up.
+// [FulfillmentStateDeleting], bumps its generation, starts a
+// background [DeleteCleanupWorkflow], and runs a convergence loop to
+// guarantee orchestration picks up the new state. The actual
+// hard-delete of the deployment and fulfillment rows is handled by
+// the cleanup workflow after orchestration signals completion.
 //
 // Pass this spec to [Registry.RegisterDeleteDeployment] to obtain a
 // [DeleteDeploymentWorkflow] that can start instances.
 type DeleteDeploymentWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
+	Cleanup       DeleteCleanupWorkflow
 }
 
 func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment" }
@@ -80,37 +82,41 @@ func (s *DeleteDeploymentWorkflowSpec) LoadFulfillment() Activity[FulfillmentID,
 	})
 }
 
-// DeleteDeploymentRow removes the thin deployment row after
-// orchestration has cleaned up the fulfillment.
-func (s *DeleteDeploymentWorkflowSpec) DeleteDeploymentRow() Activity[DeploymentID, struct{}] {
-	return NewActivity("delete-deployment-row", func(ctx context.Context, id DeploymentID) (struct{}, error) {
-		tx, err := s.Store.Begin(ctx)
-		if err != nil {
-			return struct{}{}, fmt.Errorf("begin tx: %w", err)
+// StartCleanup starts the background [DeleteCleanupWorkflow] via the
+// [Cleanup] handle. The cleanup workflow awaits the
+// [DeleteCleanupCompleteSignal] from orchestration before
+// hard-deleting both rows. Idempotent: treats [ErrAlreadyRunning] as
+// success so activity replays are safe.
+func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteCleanupInput, struct{}] {
+	return NewActivity("start-delete-cleanup", func(ctx context.Context, input DeleteCleanupInput) (struct{}, error) {
+		_, err := s.Cleanup.Start(ctx, input)
+		if err != nil && errors.Is(err, ErrAlreadyRunning) {
+			return struct{}{}, nil
 		}
-		defer tx.Rollback()
-		if err := tx.Deployments().Delete(ctx, id); err != nil && !errors.Is(err, ErrNotFound) {
-			return struct{}{}, fmt.Errorf("delete deployment row: %w", err)
-		}
-		return struct{}{}, tx.Commit()
+		return struct{}{}, err
 	})
 }
 
-// Run is the workflow body: mutate, run the convergence-start loop,
-// then clean up the deployment row. [ErrNotFound] during convergence
-// is terminal success (the delete completed while waiting).
+// Run is the workflow body: mutate to deleting, start the background
+// cleanup workflow, then run the convergence loop to ensure
+// orchestration picks up the new state. Returns the DELETING snapshot
+// immediately; the actual row deletion happens asynchronously in the
+// cleanup workflow.
 func (s *DeleteDeploymentWorkflowSpec) Run(record Record, deploymentID DeploymentID) (DeploymentView, error) {
 	mr, err := RunActivity(record, s.MutateToDeleting(), deploymentID)
 	if err != nil {
 		return DeploymentView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
 
-	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
-		return DeploymentView{}, err
+	if _, err := RunActivity(record, s.StartCleanup(), DeleteCleanupInput{
+		DeploymentID:  deploymentID,
+		FulfillmentID: mr.FulfillmentID,
+	}); err != nil {
+		return DeploymentView{}, fmt.Errorf("start cleanup: %w", err)
 	}
 
-	if _, err := RunActivity(record, s.DeleteDeploymentRow(), deploymentID); err != nil {
-		return DeploymentView{}, fmt.Errorf("delete deployment row: %w", err)
+	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
+		return DeploymentView{}, err
 	}
 
 	return mr.View, nil

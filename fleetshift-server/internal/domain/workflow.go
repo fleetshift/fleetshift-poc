@@ -62,6 +62,26 @@ type Signal[T any] struct {
 // and lifecycle events sent to orchestration workflows.
 var FulfillmentEventSignal = Signal[FulfillmentEvent]{Name: "fulfillment-event"}
 
+// DeleteCleanupCompleteSignal is sent by orchestration to a
+// [DeleteCleanupWorkflow] after delivery data has been cleaned up,
+// indicating the cleanup workflow may hard-delete the deployment and
+// fulfillment rows.
+var DeleteCleanupCompleteSignal = Signal[DeleteCleanupCompleteEvent]{Name: "delete-cleanup-complete"}
+
+// DeleteCleanupCompleteEvent carries the fulfillment ID whose delivery
+// data has been cleaned up by orchestration.
+type DeleteCleanupCompleteEvent struct {
+	FulfillmentID FulfillmentID
+}
+
+// DeleteCleanupInput identifies the deployment and fulfillment rows
+// that the [DeleteCleanupWorkflow] will hard-delete after receiving a
+// [DeleteCleanupCompleteSignal].
+type DeleteCleanupInput struct {
+	DeploymentID  DeploymentID
+	FulfillmentID FulfillmentID
+}
+
 // RunActivity provides type-safe durable activity execution from within
 // a workflow body. It is a thin wrapper around [Record.Run].
 func RunActivity[I any, O any](record Record, activity Activity[I, O], in I) (O, error) {
@@ -98,9 +118,11 @@ type Registry interface {
 	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
 	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
 	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
+	RegisterDeleteCleanup(spec *DeleteCleanupWorkflowSpec) (DeleteCleanupWorkflow, error)
 	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
 	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
 	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
+	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
 }
 
 // OrchestrationWorkflow is a registered orchestration workflow that
@@ -131,6 +153,15 @@ type ProvisionIdPWorkflow interface {
 // instance ID for same-type dedup.
 type DeleteDeploymentWorkflow interface {
 	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[DeploymentView], error)
+}
+
+// DeleteCleanupWorkflow is a registered delete-cleanup workflow.
+// Returned by [Registry.RegisterDeleteCleanup]. It runs in the
+// background, awaiting a [DeleteCleanupCompleteSignal] from
+// orchestration before hard-deleting the deployment and fulfillment
+// rows. The instance ID is deterministic: cleanup-{fulfillmentID}.
+type DeleteCleanupWorkflow interface {
+	Start(ctx context.Context, input DeleteCleanupInput) (Execution[struct{}], error)
 }
 
 // ResumeDeploymentWorkflow is a registered resume-deployment workflow.

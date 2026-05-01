@@ -59,9 +59,18 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+		Store: store,
+	}
+	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteCleanup: %v", err)
+	}
+
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {

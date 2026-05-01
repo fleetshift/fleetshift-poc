@@ -114,6 +114,14 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f domain.Fulfillment) erro
 }
 
 func (r *FulfillmentRepo) Delete(ctx context.Context, id domain.FulfillmentID) error {
+	for _, table := range []string{"manifest_strategies", "placement_strategies", "rollout_strategies"} {
+		if _, err := r.DB.ExecContext(ctx,
+			`DELETE FROM `+table+` WHERE fulfillment_id = $1`, string(id),
+		); err != nil {
+			return fmt.Errorf("delete %s for fulfillment %q: %w", table, id, err)
+		}
+	}
+
 	res, err := r.DB.ExecContext(ctx, `DELETE FROM fulfillments WHERE id = $1`, string(id))
 	if err != nil {
 		return fmt.Errorf("delete fulfillment: %w", err)

@@ -174,7 +174,9 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 
 // Delete starts a durable delete-deployment workflow that transitions
 // the fulfillment to [domain.FulfillmentStateDeleting], bumps its
-// generation, and guarantees orchestration converges the delete.
+// generation, and guarantees orchestration converges the delete. If
+// the fulfillment is already deleting, the current view is returned
+// without starting a new workflow (idempotent).
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
 	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
@@ -190,12 +192,15 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
-	currentGen := fulfillment.Generation
 	if err := tx.Commit(); err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
-	exec, err := s.DeleteWF.Start(ctx, id, currentGen)
+	if fulfillment.State == domain.FulfillmentStateDeleting {
+		return domain.DeploymentView{Deployment: dep, Fulfillment: fulfillment}, nil
+	}
+
+	exec, err := s.DeleteWF.Start(ctx, id, fulfillment.Generation)
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("start delete-deployment workflow: %w", err)
 	}

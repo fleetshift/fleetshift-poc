@@ -66,9 +66,18 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 		},
 	}
 
+	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+		Store: store,
+	}
+	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteCleanup: %v", err)
+	}
+
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {
@@ -317,18 +326,9 @@ func TestDeleteDeployment_TransitionsToDeleting(t *testing.T) {
 		t.Errorf("returned Fulfillment.State = %q, want deleting", dep.Fulfillment.State)
 	}
 
-	// The durable delete workflow removes the thin deployment row once
-	// orchestration has finished cleaning up the fulfillment, so the
-	// resource is no longer observable via GetView after Delete returns.
-	tx, err := h.store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	defer tx.Rollback()
-	_, err = tx.Deployments().GetView(ctx, "d1")
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("after delete workflow, GetView: got %v, want ErrNotFound", err)
-	}
+	// The deployment should eventually be fully removed once the
+	// background cleanup workflow completes.
+	awaitDeploymentGone(ctx, t, h.store, "d1")
 }
 
 func TestDeleteDeployment_ReturnsSnapshot(t *testing.T) {
@@ -390,11 +390,91 @@ func TestDeleteDeployment_SecondDeleteAfterCompleteIsNotFound(t *testing.T) {
 		t.Fatalf("first Delete: %v", err)
 	}
 
-	// Delete is fully durable: the deployment row is dropped after the
-	// fulfillment is removed, so a second delete sees nothing.
+	awaitDeploymentGone(ctx, t, h.store, "d1")
+
 	_, err = h.deployments.Delete(ctx, "d1")
 	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("second Delete: got %v, want ErrNotFound", err)
+		t.Fatalf("second Delete after cleanup: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestDeleteDeployment_IdempotentWhileDeleting(t *testing.T) {
+	h := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	registerTargets(t, h, "t1")
+
+	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "d1",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.FulfillmentStateActive)
+
+	dep1, err := h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+	if dep1.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("first Delete state = %q, want deleting", dep1.Fulfillment.State)
+	}
+
+	// Second delete while still deleting should be idempotent.
+	dep2, err := h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("second Delete (idempotent): %v", err)
+	}
+	if dep2.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("second Delete state = %q, want deleting", dep2.Fulfillment.State)
+	}
+}
+
+func TestDeleteDeployment_DeploymentVisibleDuringCleanup(t *testing.T) {
+	h := setup(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	registerTargets(t, h, "t1")
+
+	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "d1",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.FulfillmentStateActive)
+
+	dep, err := h.deployments.Delete(ctx, "d1")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if dep.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("Delete state = %q, want deleting", dep.Fulfillment.State)
+	}
+
+	// Deployment should be visible via GetView in DELETING state after
+	// Delete returns (the cleanup workflow hasn't finished yet or we can
+	// verify it's at least DELETING before it completes).
+	view, err := queryDeployment(ctx, t, h.store, "d1")
+	if err != nil && !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetView after Delete: %v", err)
+	}
+	if err == nil && view.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("GetView state = %q, want deleting", view.Fulfillment.State)
 	}
 }
 
@@ -406,6 +486,26 @@ func queryDeployment(ctx context.Context, t *testing.T, store domain.Store, id d
 	}
 	defer tx.Rollback()
 	return tx.Deployments().GetView(ctx, id)
+}
+
+func awaitDeploymentGone(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		_, err = tx.Deployments().GetView(ctx, id)
+		tx.Rollback()
+		if errors.Is(err, domain.ErrNotFound) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for deployment %s to be deleted", id)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
 }
 
 func awaitCondition(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, cond func(domain.DeploymentView) bool) domain.DeploymentView {

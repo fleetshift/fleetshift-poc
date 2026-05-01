@@ -286,11 +286,14 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, str
 	})
 }
 
-// CleanupAndDeleteFulfillment atomically cleans up provisioned targets
-// (e.g. kind clusters), hard-deletes delivery records, and hard-deletes
-// the fulfillment record in a single transaction.
-func (s *OrchestrationWorkflowSpec) CleanupAndDeleteFulfillment() Activity[FulfillmentID, struct{}] {
-	return NewActivity("cleanup-and-delete-fulfillment", func(ctx context.Context, id FulfillmentID) (struct{}, error) {
+// CleanupDeliveryData cleans up provisioned targets (e.g. kind
+// clusters) and hard-deletes delivery records for a fulfillment. The
+// fulfillment row itself is NOT deleted here; that responsibility
+// belongs to [DeleteCleanupWorkflow], which deletes both the
+// deployment and fulfillment rows in FK-safe order after receiving
+// a [DeleteCleanupCompleteSignal].
+func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID, struct{}] {
+	return NewActivity("cleanup-delivery-data", func(ctx context.Context, id FulfillmentID) (struct{}, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
@@ -324,10 +327,18 @@ func (s *OrchestrationWorkflowSpec) CleanupAndDeleteFulfillment() Activity[Fulfi
 		if err := tx.Deliveries().DeleteByFulfillment(ctx, id); err != nil {
 			return struct{}{}, fmt.Errorf("delete delivery records: %w", err)
 		}
-		if err := tx.Fulfillments().Delete(ctx, id); err != nil {
-			return struct{}{}, fmt.Errorf("delete fulfillment: %w", err)
-		}
 		return struct{}{}, tx.Commit()
+	})
+}
+
+// SignalDeleteReady signals the [DeleteCleanupWorkflow] that delivery
+// data has been cleaned up and the deployment + fulfillment rows may
+// be hard-deleted.
+func (s *OrchestrationWorkflowSpec) SignalDeleteReady() Activity[FulfillmentID, struct{}] {
+	return NewActivity("signal-delete-ready", func(ctx context.Context, id FulfillmentID) (struct{}, error) {
+		return struct{}{}, s.Registry.SignalDeleteCleanupComplete(ctx, id, DeleteCleanupCompleteEvent{
+			FulfillmentID: id,
+		})
 	})
 }
 
@@ -511,7 +522,15 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 				}
 				result = NewFailedResult(fulfillmentID, f.Auth, err.Error())
 			} else {
-				return struct{}{}, nil
+				if _, err := RunActivity(record, s.CleanupDeliveryData(), fulfillmentID); err != nil {
+					probe.Error(err)
+					return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
+				}
+				result = ReconciliationResult{
+					FulfillmentID: fulfillmentID,
+					State:         FulfillmentStateDeleting,
+					Auth:          f.Auth,
+				}
 			}
 
 		default:
@@ -539,6 +558,14 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 			probe.Error(err)
 			return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
 		}
+
+		if result.State == FulfillmentStateDeleting {
+			if _, err := RunActivity(record, s.SignalDeleteReady(), fulfillmentID); err != nil {
+				probe.Error(err)
+				return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
+			}
+		}
+
 		if !needsRestart {
 			return struct{}{}, nil
 		}
@@ -603,7 +630,10 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 }
 
 // executeDelete removes the fulfillment from all currently resolved
-// targets, cleans up provisioned targets, and hard-deletes records.
+// targets. Delivery-data cleanup and the actual row hard-deletes are
+// handled separately: [CleanupDeliveryData] and
+// [SignalDeleteReady] in the DELETING branch of [Run], and the
+// [DeleteCleanupWorkflow] respectively.
 func (s *OrchestrationWorkflowSpec) executeDelete(
 	record Record,
 	f Fulfillment,
@@ -633,10 +663,6 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 		if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 			return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
 		}
-	}
-
-	if _, err := RunActivity(record, s.CleanupAndDeleteFulfillment(), fulfillmentID); err != nil {
-		return fmt.Errorf("cleanup and delete: %w", err)
 	}
 
 	return nil

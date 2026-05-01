@@ -217,24 +217,26 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Delete workflow: %v", err)
 		}
 
-		// Mutation workflows return once orchestration has been started; the
-		// engine may still be running CleanupAndDeleteFulfillment. Deployments
-		// are keyed by FulfillmentID, so we poll until deliveries are gone.
+		// The delete workflow returns once orchestration has been kicked
+		// off. The background cleanup workflow deletes the deployment and
+		// fulfillment rows after orchestration signals completion. Poll
+		// until the deployment is gone.
 		for {
-			records := queryDeliveriesByFulfillment(ctx, t, infra, fID)
-			if len(records) == 0 {
+			_, depErr := queryDeploymentView(ctx, t, infra, "d1")
+			if errors.Is(depErr, domain.ErrNotFound) {
 				break
 			}
 			select {
 			case <-ctx.Done():
-				t.Fatalf("timed out waiting for delivery records cleared (still %d)", len(records))
+				t.Fatalf("timed out waiting for deployment d1 to be deleted")
 			case <-time.After(50 * time.Millisecond):
 			}
 		}
 
-		_, depErr := queryDeploymentView(ctx, t, infra, "d1")
-		if !errors.Is(depErr, domain.ErrNotFound) {
-			t.Fatalf("expected deployment d1 removed after delete, got err=%v", depErr)
+		// Verify delivery records are also cleaned up.
+		records := queryDeliveriesByFulfillment(ctx, t, infra, fID)
+		if len(records) != 0 {
+			t.Fatalf("expected delivery records cleared, still have %d", len(records))
 		}
 	})
 
@@ -785,9 +787,18 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+		Store: infra.Store,
+	}
+	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteCleanup: %v", err)
+	}
+
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         infra.Store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {
@@ -1220,9 +1231,18 @@ func registerWorkflowsWithAgents(t *testing.T, infra Infra, registryFactory Regi
 		t.Fatalf("RegisterCreateDeployment: %v", err)
 	}
 
+	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+		Store: infra.Store,
+	}
+	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteCleanup: %v", err)
+	}
+
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         infra.Store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {

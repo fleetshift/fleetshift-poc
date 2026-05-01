@@ -240,6 +240,68 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("Delete_CascadesStrategyRecords", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		f := sampleFulfillment()
+		f.AdvanceRolloutStrategy(&domain.RolloutStrategySpec{
+			Type:                  domain.RolloutStrategyImmediate,
+			VersionConflictPolicy: domain.VersionConflictCompleteAll,
+		}, fixedTime)
+
+		if err := repo.Create(ctx, f); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "f1")
+		if err != nil {
+			t.Fatalf("Get before delete: %v", err)
+		}
+		if got.ManifestStrategyVersion == 0 || got.PlacementStrategyVersion == 0 {
+			t.Fatal("strategy versions should be populated before delete")
+		}
+
+		if err := repo.Delete(ctx, "f1"); err != nil {
+			t.Fatalf("Delete: %v", err)
+		}
+
+		// Re-create the fulfillment to verify strategy records were cleaned
+		// up (if orphaned rows remained, the re-create + new version 1 rows
+		// would collide or the old version specs would be returned).
+		f2 := domain.Fulfillment{
+			ID:        domain.FulfillmentID("f1"),
+			State:     domain.FulfillmentStateCreating,
+			CreatedAt: fixedTime,
+			UpdatedAt: fixedTime,
+		}
+		f2.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"Deployment"}`)}},
+		}, fixedTime)
+		f2.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t3"},
+		}, fixedTime)
+
+		if err := repo.Create(ctx, f2); err != nil {
+			t.Fatalf("re-Create after delete: %v", err)
+		}
+
+		got2, err := repo.Get(ctx, "f1")
+		if err != nil {
+			t.Fatalf("Get after re-create: %v", err)
+		}
+		if got2.ManifestStrategyVersion != 1 {
+			t.Errorf("ManifestStrategyVersion = %d, want 1", got2.ManifestStrategyVersion)
+		}
+		if len(got2.ManifestStrategy.Manifests) != 1 || string(got2.ManifestStrategy.Manifests[0].Raw) != `{"kind":"Deployment"}` {
+			t.Errorf("ManifestStrategy not from re-create: %+v", got2.ManifestStrategy)
+		}
+		if len(got2.PlacementStrategy.Targets) != 1 || got2.PlacementStrategy.Targets[0] != "t3" {
+			t.Errorf("PlacementStrategy not from re-create: %+v", got2.PlacementStrategy)
+		}
+	})
+
 	t.Run("GenerationFields_RoundTrip", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

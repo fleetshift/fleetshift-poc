@@ -36,12 +36,13 @@ const activityMaxAttempts = 10
 // Workflow instances are tracked so that event signals can be delivered
 // to the correct goroutine.
 type Registry struct {
-	mu        sync.Mutex
-	instances map[domain.FulfillmentID]*instance
+	mu               sync.Mutex
+	instances        map[domain.FulfillmentID]*instance
+	cleanupInstances map[domain.FulfillmentID]*instance
 }
 
 type instance struct {
-	events chan []byte // JSON-serialized FulfillmentEvent
+	events chan []byte // JSON-serialized signal events
 }
 
 func (r *Registry) getInstance(id domain.FulfillmentID) *instance {
@@ -64,6 +65,26 @@ func (r *Registry) removeInstance(id domain.FulfillmentID) {
 	delete(r.instances, id)
 }
 
+func (r *Registry) getCleanupInstance(id domain.FulfillmentID) *instance {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.cleanupInstances == nil {
+		r.cleanupInstances = make(map[domain.FulfillmentID]*instance)
+	}
+	inst, ok := r.cleanupInstances[id]
+	if !ok {
+		inst = &instance{events: make(chan []byte, 16)}
+		r.cleanupInstances[id] = inst
+	}
+	return inst
+}
+
+func (r *Registry) removeCleanupInstance(id domain.FulfillmentID) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.cleanupInstances, id)
+}
+
 // SignalFulfillmentEvent JSON-serializes the event and delivers it to
 // the workflow instance's signal channel, mirroring how durable engines
 // persist signals before delivering them.
@@ -73,6 +94,22 @@ func (r *Registry) SignalFulfillmentEvent(ctx context.Context, id domain.Fulfill
 		return fmt.Errorf("memworkflow: marshal signal: %w", err)
 	}
 	inst := r.getInstance(id)
+	select {
+	case inst.events <- data:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+// SignalDeleteCleanupComplete JSON-serializes the event and delivers it
+// to the cleanup workflow instance's signal channel.
+func (r *Registry) SignalDeleteCleanupComplete(ctx context.Context, id domain.FulfillmentID, event domain.DeleteCleanupCompleteEvent) error {
+	data, err := json.Marshal(event)
+	if err != nil {
+		return fmt.Errorf("memworkflow: marshal cleanup signal: %w", err)
+	}
+	inst := r.getCleanupInstance(id)
 	select {
 	case inst.events <- data:
 		return nil
@@ -91,6 +128,10 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 
 func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflowSpec) (domain.DeleteDeploymentWorkflow, error) {
 	return &deleteDeploymentWorkflow{registry: r, spec: spec}, nil
+}
+
+func (r *Registry) RegisterDeleteCleanup(spec *domain.DeleteCleanupWorkflowSpec) (domain.DeleteCleanupWorkflow, error) {
+	return &deleteCleanupWorkflow{registry: r, spec: spec}, nil
 }
 
 func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
@@ -139,10 +180,24 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 
 		id := fulfillmentID
 		for {
+			eventsCh := inst.events
 			record := &baseRecord{
-				id:     string(id),
-				ctx:    ctx,
-				events: inst.events,
+				id:  string(id),
+				ctx: ctx,
+				signals: map[string]func() (any, error){
+					domain.FulfillmentEventSignal.Name: func() (any, error) {
+						select {
+						case data := <-eventsCh:
+							var event domain.FulfillmentEvent
+							if err := json.Unmarshal(data, &event); err != nil {
+								return nil, fmt.Errorf("memworkflow: unmarshal signal: %w", err)
+							}
+							return event, nil
+						case <-ctx.Done():
+							return nil, ctx.Err()
+						}
+					},
+				},
 			}
 			val, err := w.spec.Run(record, id)
 			var can *domain.ContinueAsNewError
@@ -292,12 +347,75 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 	return &deploymentExecution{id: instanceID, done: done}, nil
 }
 
+// --- DeleteCleanupWorkflow ---
+
+type deleteCleanupWorkflow struct {
+	registry *Registry
+	spec     *domain.DeleteCleanupWorkflowSpec
+	mu       sync.Mutex
+	running  map[string]struct{}
+}
+
+func (w *deleteCleanupWorkflow) Start(ctx context.Context, input domain.DeleteCleanupInput) (domain.Execution[struct{}], error) {
+	instanceID := "cleanup-" + string(input.FulfillmentID)
+
+	w.mu.Lock()
+	if w.running == nil {
+		w.running = make(map[string]struct{})
+	}
+	if _, active := w.running[instanceID]; active {
+		w.mu.Unlock()
+		return nil, domain.ErrAlreadyRunning
+	}
+	w.running[instanceID] = struct{}{}
+	w.mu.Unlock()
+
+	inst := w.registry.getCleanupInstance(input.FulfillmentID)
+	done := make(chan orchResult, 1)
+
+	go func() {
+		defer func() {
+			w.mu.Lock()
+			delete(w.running, instanceID)
+			w.mu.Unlock()
+			w.registry.removeCleanupInstance(input.FulfillmentID)
+			if r := recover(); r != nil {
+				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
+			}
+		}()
+
+		eventsCh := inst.events
+		record := &baseRecord{
+			id:  instanceID,
+			ctx: ctx,
+			signals: map[string]func() (any, error){
+				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
+					select {
+					case data := <-eventsCh:
+						var event domain.DeleteCleanupCompleteEvent
+						if err := json.Unmarshal(data, &event); err != nil {
+							return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
+						}
+						return event, nil
+					case <-ctx.Done():
+						return nil, ctx.Err()
+					}
+				},
+			},
+		}
+		val, err := w.spec.Run(record, input)
+		done <- orchResult{val: val, err: err}
+	}()
+
+	return &orchExecution{id: instanceID, done: done}, nil
+}
+
 // --- shared base Record ---
 
 type baseRecord struct {
-	id     string
-	ctx    context.Context
-	events <-chan []byte // JSON-serialized signals
+	id      string
+	ctx     context.Context
+	signals map[string]func() (any, error) // per-signal-name receivers
 }
 
 func (r *baseRecord) ID() string               { return r.id }
@@ -374,19 +492,14 @@ func (r *baseRecord) Sleep(d time.Duration) error {
 	}
 }
 
-// Await blocks until a signal arrives on the channel, then
-// JSON-deserializes it into [domain.FulfillmentEvent].
+// Await blocks until the named signal arrives by calling the
+// registered receiver for that signal name.
 func (r *baseRecord) Await(signalName string) (any, error) {
-	select {
-	case data := <-r.events:
-		var event domain.FulfillmentEvent
-		if err := json.Unmarshal(data, &event); err != nil {
-			return nil, fmt.Errorf("memworkflow: unmarshal signal %q: %w", signalName, err)
-		}
-		return event, nil
-	case <-r.ctx.Done():
-		return nil, r.ctx.Err()
+	recv, ok := r.signals[signalName]
+	if !ok {
+		return nil, fmt.Errorf("memworkflow: no signal receiver registered for %q", signalName)
 	}
+	return recv()
 }
 
 // jsonRoundTrip marshals v to JSON and unmarshals into a new value of
@@ -496,6 +609,7 @@ var (
 	_ domain.OrchestrationWorkflow     = (*orchestrationWorkflow)(nil)
 	_ domain.CreateDeploymentWorkflow  = (*createDeploymentWorkflow)(nil)
 	_ domain.DeleteDeploymentWorkflow  = (*deleteDeploymentWorkflow)(nil)
+	_ domain.DeleteCleanupWorkflow     = (*deleteCleanupWorkflow)(nil)
 	_ domain.ResumeDeploymentWorkflow  = (*resumeDeploymentWorkflow)(nil)
 	_ domain.ProvisionIdPWorkflow      = (*provisionIdPWorkflow)(nil)
 )

@@ -350,12 +350,20 @@ func (r *stubRegistry) RegisterDeleteDeployment(_ *domain.DeleteDeploymentWorkfl
 	return nil, nil
 }
 
+func (r *stubRegistry) RegisterDeleteCleanup(_ *domain.DeleteCleanupWorkflowSpec) (domain.DeleteCleanupWorkflow, error) {
+	return nil, nil
+}
+
 func (r *stubRegistry) RegisterResumeDeployment(_ *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
 	return nil, nil
 }
 
 func (r *stubRegistry) RegisterProvisionIdP(_ *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
 	return nil, nil
+}
+
+func (r *stubRegistry) SignalDeleteCleanupComplete(_ context.Context, _ domain.FulfillmentID, _ domain.DeleteCleanupCompleteEvent) error {
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -837,9 +845,12 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected fulfillment ErrNotFound after cleanup, got: %v", err)
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("expected fulfillment to still exist, got: %v", err)
+	}
+	if f.State != domain.FulfillmentStateDeleting {
+		t.Errorf("fulfillment state = %q, want deleting", f.State)
 	}
 }
 
@@ -881,9 +892,12 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected fulfillment ErrNotFound after cleanup, got: %v", err)
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("expected fulfillment to still exist, got: %v", err)
+	}
+	if f.State != domain.FulfillmentStateDeleting {
+		t.Errorf("fulfillment state = %q, want deleting", f.State)
 	}
 	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("d1"))
 	if err != nil {
@@ -918,9 +932,12 @@ func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected fulfillment ErrNotFound after cleanup, got: %v", err)
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("expected fulfillment to still exist, got: %v", err)
+	}
+	if f.State != domain.FulfillmentStateDeleting {
+		t.Errorf("fulfillment state = %q, want deleting", f.State)
 	}
 }
 
@@ -957,9 +974,12 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected fulfillment ErrNotFound, got: %v", err)
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("expected fulfillment to still exist, got: %v", err)
+	}
+	if f.State != domain.FulfillmentStateDeleting {
+		t.Errorf("fulfillment state = %q, want deleting", f.State)
 	}
 }
 
@@ -1523,16 +1543,27 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 		}
 	}
 
-	// Orchestration deletes the fulfillment and delivery rows; the thin deployment
-	// row is deleted by the delete-deployment workflow, not reconcile cleanup.
+	// Orchestration cleans up delivery data but leaves the fulfillment
+	// row; the DeleteCleanupWorkflow deletes both rows after receiving
+	// the signal.
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	_, err = tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("del-attested"))
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("expected fulfillment ErrNotFound after cleanup, got: %v", err)
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("del-attested"))
+	if err != nil {
+		t.Fatalf("expected fulfillment to still exist after orchestration cleanup, got: %v", err)
+	}
+	if f.State != domain.FulfillmentStateDeleting {
+		t.Errorf("fulfillment state = %q, want deleting", f.State)
+	}
+	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("del-attested"))
+	if err != nil {
+		t.Fatalf("list deliveries: %v", err)
+	}
+	if len(deliveries) != 0 {
+		t.Errorf("expected delivery records cleaned up, still have %d", len(deliveries))
 	}
 }
 

@@ -247,9 +247,18 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register create-deployment: %w", err)
 	}
 
+	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+		Store: store,
+	}
+	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	if err != nil {
+		return fmt.Errorf("register delete-cleanup: %w", err)
+	}
+
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {

@@ -60,6 +60,10 @@ func (r *Registry) SignalFulfillmentEvent(ctx context.Context, fulfillmentID dom
 	return r.Client.SignalWorkflow(ctx, string(fulfillmentID), domain.FulfillmentEventSignal.Name, event)
 }
 
+func (r *Registry) SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID domain.FulfillmentID, event domain.DeleteCleanupCompleteEvent) error {
+	return r.Client.SignalWorkflow(ctx, "cleanup-"+string(fulfillmentID), domain.DeleteCleanupCompleteSignal.Name, event)
+}
+
 func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec) (domain.OrchestrationWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
 	opts := r.activityOptions()
@@ -74,7 +78,8 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		func() error { return registerActivity(r.Worker, invokers, spec.PersistAndCompleteReconciliation(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.CleanupAndDeleteFulfillment(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.CleanupDeliveryData(), opts) },
+		func() error { return registerActivity(r.Worker, invokers, spec.SignalDeleteReady(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.ReleaseLock(), opts) },
 	} {
 		if err := reg(); err != nil {
@@ -155,7 +160,7 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 	if err := registerActivity(r.Worker, invokers, spec.LoadFulfillment(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.DeleteDeploymentRow(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.StartCleanup(), opts); err != nil {
 		return nil, err
 	}
 
@@ -169,6 +174,43 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 	}
 
 	return &deleteDeploymentWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
+func (r *Registry) RegisterDeleteCleanup(spec *domain.DeleteCleanupWorkflowSpec) (domain.DeleteCleanupWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
+
+	if err := registerActivity(r.Worker, invokers, spec.DeleteDeploymentAndFulfillment(), opts); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, input domain.DeleteCleanupInput) (struct{}, error) {
+		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
+		record := &baseRecord{
+			wfCtx:    ctx,
+			invokers: invokers,
+			signals: map[string]func() (any, error){
+				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
+					val, ok := ch.Receive(ctx)
+					if !ok {
+						return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
+					}
+					return val, nil
+				},
+			},
+		}
+		return spec.Run(record, input)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &deleteCleanupWorkflow{
 		client:  r.Client,
 		wfName:  spec.Name(),
 		timeout: r.timeout(),
@@ -399,6 +441,33 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 	}, nil
 }
 
+// --- DeleteCleanupWorkflow ---
+
+type deleteCleanupWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *deleteCleanupWorkflow) Start(ctx context.Context, input domain.DeleteCleanupInput) (domain.Execution[struct{}], error) {
+	instanceID := "cleanup-" + string(input.FulfillmentID)
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: instanceID,
+	}, w.wfName, input)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrAlreadyRunning
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[struct{}]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
 // --- ResumeDeploymentWorkflow ---
 
 type resumeDeploymentWorkflow struct {
@@ -448,6 +517,7 @@ var (
 	_ domain.OrchestrationWorkflow     = (*orchestrationWorkflow)(nil)
 	_ domain.CreateDeploymentWorkflow  = (*createDeploymentWorkflow)(nil)
 	_ domain.DeleteDeploymentWorkflow  = (*deleteDeploymentWorkflow)(nil)
+	_ domain.DeleteCleanupWorkflow     = (*deleteCleanupWorkflow)(nil)
 	_ domain.ResumeDeploymentWorkflow  = (*resumeDeploymentWorkflow)(nil)
 	_ domain.ProvisionIdPWorkflow      = (*provisionIdPWorkflow)(nil)
 )
