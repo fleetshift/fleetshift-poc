@@ -60,7 +60,7 @@ func Start(t *testing.T) string {
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
 		Delivery:   router,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: store},
 		Registry:   reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)

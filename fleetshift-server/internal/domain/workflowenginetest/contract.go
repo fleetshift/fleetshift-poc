@@ -769,7 +769,7 @@ func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactor
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      infra.Store,
 		Delivery:   infra.Delivery,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: infra.Store},
 		Registry:   reg,
 		Vault:      infra.Vault,
 	}
@@ -1213,7 +1213,7 @@ func registerWorkflowsWithAgents(t *testing.T, infra Infra, registryFactory Regi
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      infra.Store,
 		Delivery:   infra.Delivery,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: infra.Store},
 		Registry:   reg,
 		Vault:      infra.Vault,
 	}

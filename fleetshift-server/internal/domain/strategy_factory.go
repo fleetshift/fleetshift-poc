@@ -2,30 +2,28 @@ package domain
 
 import "fmt"
 
-// StrategyFactory instantiates the appropriate strategy implementation
-// from a user-provided spec.
-type StrategyFactory interface {
-	ManifestStrategy(spec ManifestStrategySpec) (ManifestStrategy, error)
-	PlacementStrategy(spec PlacementStrategySpec) (PlacementStrategy, error)
-	RolloutStrategy(spec *RolloutStrategySpec) RolloutStrategy
+// StrategyFactory creates strategy implementations from user-provided
+// specs. Holds dependencies that individual strategies may need (e.g.
+// a [Store] for resolving managed-resource intents).
+type StrategyFactory struct {
+	Store Store
 }
 
-// DefaultStrategyFactory creates built-in strategy implementations.
-// Built-in strategies are currently pure with no I/O; the orchestration
-// pipeline invokes all strategies from activities so that custom or
-// future strategies may perform I/O or stateful behavior safely.
-type DefaultStrategyFactory struct{}
-
-func (f DefaultStrategyFactory) ManifestStrategy(spec ManifestStrategySpec) (ManifestStrategy, error) {
+func (f StrategyFactory) ManifestStrategy(spec ManifestStrategySpec) (ManifestStrategy, error) {
 	switch spec.Type {
 	case ManifestStrategyInline:
 		return &InlineManifestStrategy{Manifests: spec.Manifests}, nil
+	case ManifestStrategyManagedResource:
+		return &ManagedResourceManifestStrategy{
+			Ref:   spec.IntentRef,
+			Store: f.Store,
+		}, nil
 	default:
 		return nil, fmt.Errorf("%w: unsupported manifest strategy type %q", ErrInvalidArgument, spec.Type)
 	}
 }
 
-func (f DefaultStrategyFactory) PlacementStrategy(spec PlacementStrategySpec) (PlacementStrategy, error) {
+func (f StrategyFactory) PlacementStrategy(spec PlacementStrategySpec) (PlacementStrategy, error) {
 	switch spec.Type {
 	case PlacementStrategyStatic:
 		return &StaticPlacement{Targets: spec.Targets}, nil
@@ -41,7 +39,7 @@ func (f DefaultStrategyFactory) PlacementStrategy(spec PlacementStrategySpec) (P
 	}
 }
 
-func (f DefaultStrategyFactory) RolloutStrategy(spec *RolloutStrategySpec) RolloutStrategy {
+func (f StrategyFactory) RolloutStrategy(spec *RolloutStrategySpec) RolloutStrategy {
 	if spec == nil {
 		return &ImmediateRollout{}
 	}

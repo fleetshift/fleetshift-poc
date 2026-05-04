@@ -227,7 +227,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:            store,
 		Delivery:         router,
-		Strategies:       domain.DefaultStrategyFactory{},
+		Strategies:       domain.StrategyFactory{Store: store},
 		Registry:         reg,
 		Observer:         observability.NewFulfillmentObserver(logger),
 		DeliveryObserver: observability.NewDeliveryObserver(logger),

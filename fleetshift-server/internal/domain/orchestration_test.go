@@ -505,7 +505,7 @@ func newTestWorkflow(store domain.Store, delivery domain.DeliveryService, events
 	wf := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
 		Delivery:   delivery,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: store},
 		Registry:   reg,
 	}
 	for _, opt := range opts {

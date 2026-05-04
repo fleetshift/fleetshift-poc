@@ -20,17 +20,17 @@ func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 
 	ms, ps, rs := rel.DeriveStrategies(intent)
 
-	if ms.Type != domain.ManifestStrategyInline {
-		t.Errorf("ManifestStrategy.Type = %q, want %q", ms.Type, domain.ManifestStrategyInline)
+	if ms.Type != domain.ManifestStrategyManagedResource {
+		t.Errorf("ManifestStrategy.Type = %q, want %q", ms.Type, domain.ManifestStrategyManagedResource)
 	}
-	if len(ms.Manifests) != 1 {
-		t.Fatalf("ManifestStrategy.Manifests len = %d, want 1", len(ms.Manifests))
+	if ms.IntentRef.ResourceType != "clusters" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", ms.IntentRef.ResourceType, "clusters")
 	}
-	if ms.Manifests[0].ResourceType != "managed_resource_spec" {
-		t.Errorf("Manifest.ResourceType = %q, want %q", ms.Manifests[0].ResourceType, "managed_resource_spec")
+	if ms.IntentRef.Name != "prod-us-east-1" {
+		t.Errorf("IntentRef.Name = %q, want %q", ms.IntentRef.Name, "prod-us-east-1")
 	}
-	if string(ms.Manifests[0].Raw) != `{"provider":"rosa","version":"4.16.2"}` {
-		t.Errorf("Manifest.Raw = %s, want spec content", ms.Manifests[0].Raw)
+	if ms.IntentRef.Version != 1 {
+		t.Errorf("IntentRef.Version = %d, want 1", ms.IntentRef.Version)
 	}
 
 	if ps.Type != domain.PlacementStrategyStatic {

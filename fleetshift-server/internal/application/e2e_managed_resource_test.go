@@ -44,7 +44,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
 		Delivery:   router,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: store},
 		Registry:   reg,
 		Now:        func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
 	}
@@ -158,8 +158,14 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if view.ManagedResource.CurrentVersion != 1 {
 		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion)
 	}
-	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyInline {
-		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyInline)
+	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyManagedResource {
+		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyManagedResource)
+	}
+	if view.Fulfillment.ManifestStrategy.IntentRef.ResourceType != "clusters" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy.IntentRef.ResourceType, "clusters")
+	}
+	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
+		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
 	}
 
 	// --- Step 5: Wait for delivery (orchestration runs async) ---

@@ -33,7 +33,7 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
 		Delivery:   agent,
-		Strategies: domain.DefaultStrategyFactory{},
+		Strategies: domain.StrategyFactory{Store: store},
 		Registry:   reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
@@ -129,8 +129,14 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if view.Fulfillment.State != domain.FulfillmentStateCreating {
 		t.Errorf("Fulfillment.State = %q, want %q", view.Fulfillment.State, domain.FulfillmentStateCreating)
 	}
-	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyInline {
-		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyInline)
+	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyManagedResource {
+		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyManagedResource)
+	}
+	if view.Fulfillment.ManifestStrategy.IntentRef.ResourceType != "clusters" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy.IntentRef.ResourceType, "clusters")
+	}
+	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
+		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
 	}
 	if view.Fulfillment.PlacementStrategy.Targets[0] != "addon-cluster-mgmt" {
 		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy.Targets[0], "addon-cluster-mgmt")

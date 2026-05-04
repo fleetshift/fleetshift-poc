@@ -4,13 +4,24 @@ package domain
 type ManifestStrategyType string
 
 const (
-	ManifestStrategyInline ManifestStrategyType = "inline"
+	ManifestStrategyInline          ManifestStrategyType = "inline"
+	ManifestStrategyManagedResource ManifestStrategyType = "managed_resource"
 )
+
+// IntentRef identifies a specific versioned resource intent. Used by the
+// managed_resource manifest strategy to resolve the spec at generation
+// time rather than copying it inline.
+type IntentRef struct {
+	ResourceType ResourceType
+	Name         ResourceName
+	Version      IntentVersion
+}
 
 // ManifestStrategySpec is the user-provided specification for manifest generation.
 type ManifestStrategySpec struct {
 	Type      ManifestStrategyType
-	Manifests []Manifest // required for "inline"
+	Manifests []Manifest // populated when Type == "inline"
+	IntentRef IntentRef  // populated when Type == "managed_resource"
 }
 
 // PlacementStrategyType identifies the kind of placement strategy.

@@ -60,9 +60,6 @@ A concrete struct per workflow, holding dependencies and providing:
 ```go
 type OrchestrationWorkflowSpec struct {
   Store      Store
-  Delivery   DeliveryService
-  Strategies StrategyFactory
-  Registry   Registry
   // ... other dependencies
 }
 
