@@ -6,11 +6,23 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+// jsonEqual reports whether two JSON byte slices are semantically
+// equivalent, tolerating whitespace and key-ordering differences
+// (e.g. JSONB normalization).
+func jsonEqual(a, b []byte) bool {
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(va, vb)
+}
 
 // Factory creates a fresh [domain.FulfillmentRepository] for each test.
 type Factory func(t *testing.T) domain.FulfillmentRepository
@@ -294,7 +306,7 @@ func Run(t *testing.T, factory Factory) {
 		if got2.ManifestStrategyVersion != 1 {
 			t.Errorf("ManifestStrategyVersion = %d, want 1", got2.ManifestStrategyVersion)
 		}
-		if len(got2.ManifestStrategy.Manifests) != 1 || string(got2.ManifestStrategy.Manifests[0].Raw) != `{"kind":"Deployment"}` {
+		if len(got2.ManifestStrategy.Manifests) != 1 || !jsonEqual(got2.ManifestStrategy.Manifests[0].Raw, []byte(`{"kind":"Deployment"}`)) {
 			t.Errorf("ManifestStrategy not from re-create: %+v", got2.ManifestStrategy)
 		}
 		if len(got2.PlacementStrategy.Targets) != 1 || got2.PlacementStrategy.Targets[0] != "t3" {
@@ -436,7 +448,7 @@ func Run(t *testing.T, factory Factory) {
 		if got.ManifestStrategyVersion != 2 {
 			t.Errorf("ManifestStrategyVersion = %d, want 2", got.ManifestStrategyVersion)
 		}
-		if len(got.ManifestStrategy.Manifests) != 1 || string(got.ManifestStrategy.Manifests[0].Raw) != `{"kind":"Secret"}` {
+		if len(got.ManifestStrategy.Manifests) != 1 || !jsonEqual(got.ManifestStrategy.Manifests[0].Raw, []byte(`{"kind":"Secret"}`)) {
 			t.Fatalf("manifest spec not updated: %+v", got.ManifestStrategy.Manifests)
 		}
 	})

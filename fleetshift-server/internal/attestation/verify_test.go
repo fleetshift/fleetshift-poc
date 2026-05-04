@@ -241,6 +241,27 @@ func TestVerifyAttestation_RegistrySubjectMismatch(t *testing.T) {
 	}
 }
 
+func TestVerifyAttestation_ManifestJSONNormalized(t *testing.T) {
+	h := setupHarness(t)
+	att := h.buildValidAttestation(t)
+
+	// Simulate JSONB normalization: keys reordered alphabetically,
+	// space after colons. The provenance side (signed input) keeps the
+	// original compact form; the output side mirrors what a JSONB
+	// round-trip through manifest_strategies.spec would produce.
+	att.Output = &domain.PutManifests{
+		Manifests: []domain.Manifest{{
+			ResourceType: "kubernetes",
+			Raw:          json.RawMessage(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test", "namespace": "default"}}`),
+		}},
+	}
+
+	err := h.verifier.Verify(context.Background(), att)
+	if err != nil {
+		t.Fatalf("semantically identical manifest (JSONB-normalized) should pass verification, got: %v", err)
+	}
+}
+
 func TestVerifyAttestation_ManifestContentMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)

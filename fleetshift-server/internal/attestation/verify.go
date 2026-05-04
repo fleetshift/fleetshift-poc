@@ -9,8 +9,10 @@ import (
 	"context"
 	"crypto"
 	"crypto/ecdsa"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
@@ -257,11 +259,22 @@ func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) err
 			return fmt.Errorf("manifest[%d] resource type mismatch: expected %q, got %q",
 				i, expected[i].ResourceType, actual[i].ResourceType)
 		}
-		if !bytes.Equal(expected[i].Raw, actual[i].Raw) {
+		if !jsonEqual(expected[i].Raw, actual[i].Raw) {
 			return fmt.Errorf("manifest[%d] content mismatch", i)
 		}
 	}
 	return nil
+}
+
+// jsonEqual reports whether two JSON byte slices are semantically
+// equivalent, tolerating whitespace and key-ordering differences
+// (e.g. JSONB normalization).
+func jsonEqual(a, b json.RawMessage) bool {
+	var va, vb any
+	if json.Unmarshal(a, &va) != nil || json.Unmarshal(b, &vb) != nil {
+		return false
+	}
+	return reflect.DeepEqual(va, vb)
 }
 
 func verifyRemoveByDeploymentId(input *domain.SignedInput, remove *domain.RemoveByDeploymentId) error {
