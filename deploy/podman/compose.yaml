@@ -55,7 +55,7 @@ services:
       - --log-level=${FLEETSHIFT_LOG_LEVEL}
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-${OIDC_ISSUER_URL}}
-      - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
+      - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-cli}
     depends_on:
       web-builder:
         condition: service_completed_successfully

@@ -78,8 +78,7 @@ oc get secret keycloak-initial-admin -n keycloak-prod \
 
 | Client ID | Type | Purpose |
 |---|---|---|
-| `fleetshift-ui` | Public | UI authentication |
-| `fleetshift-cli` | Public | CLI authentication + device auth |
+| `fleetshift-cli` | Public | UI + CLI authentication (browser, device flow) |
 | `fleetshift-signing` | Public | Key enrollment / attestation |
 | `ocp-console` | Confidential | OCP console OIDC login |
 

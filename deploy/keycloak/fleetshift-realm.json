@@ -34,17 +34,23 @@
   },
   "clients": [
     {
-      "clientId": "fleetshift-ui",
-      "name": "FleetShift UI",
+      "clientId": "fleetshift-cli",
+      "name": "FleetShift Client",
       "enabled": true,
       "publicClient": true,
       "directAccessGrantsEnabled": false,
       "standardFlowEnabled": true,
       "redirectUris": [
-        "http://localhost:8085/*"
+        "http://localhost:8085/*",
+        "http://localhost:8888/callback",
+        "http://127.0.0.1/callback",
+        "http://localhost:8080/*"
       ],
       "webOrigins": [
-        "http://localhost:8085"
+        "http://localhost:8085",
+        "http://localhost:8888",
+        "http://127.0.0.1",
+        "http://localhost:8080"
       ],
       "protocol": "openid-connect",
       "defaultClientScopes": [
@@ -55,6 +61,8 @@
         "email"
       ],
       "attributes": {
+        "oauth2.device.authorization.grant.enabled": "true",
+        "oidc.ciba.grant.enabled": "false",
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
@@ -63,7 +71,7 @@
           "protocol": "openid-connect",
           "protocolMapper": "oidc-audience-mapper",
           "config": {
-            "included.client.audience": "fleetshift-ui",
+            "included.client.audience": "fleetshift-cli",
             "id.token.claim": "false",
             "access.token.claim": "true"
           }
@@ -92,48 +100,6 @@
             "id.token.claim": "true",
             "access.token.claim": "false",
             "userinfo.token.claim": "false"
-          }
-        }
-      ]
-    },
-    {
-      "clientId": "fleetshift-cli",
-      "name": "FleetShift CLI",
-      "enabled": true,
-      "publicClient": true,
-      "directAccessGrantsEnabled": false,
-      "standardFlowEnabled": true,
-      "redirectUris": [
-        "http://localhost:8888/callback",
-        "http://127.0.0.1/callback",
-        "http://localhost:8080/*"
-      ],
-      "webOrigins": [
-        "http://localhost:8888",
-        "http://127.0.0.1",
-        "http://localhost:8080"
-      ],
-      "protocol": "openid-connect",
-      "defaultClientScopes": [
-        "basic",
-        "profile",
-        "roles",
-        "email"
-      ],
-      "attributes": {
-        "oauth2.device.authorization.grant.enabled": "true",
-        "oidc.ciba.grant.enabled": "false",
-        "pkce.code.challenge.method": "S256"
-      },
-      "protocolMappers": [
-        {
-          "name": "audience-mapper",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.client.audience": "fleetshift-cli",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
           }
         }
       ]

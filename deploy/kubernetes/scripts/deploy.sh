@@ -46,7 +46,7 @@ set +a
 
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
-OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
+OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-cli}
 OIDC_CLIENT_ID=${OIDC_CLIENT_ID}
 OIDC_AUDIENCE=${OIDC_AUDIENCE}
 KEY_ENROLLMENT_CLIENT_ID=${KEY_ENROLLMENT_CLIENT_ID}
@@ -114,7 +114,7 @@ GRPC_ROUTE=$(oc get route grpc -n "${NAMESPACE}" -o jsonpath='{.spec.host}' 2>/d
 echo "  Frontend + API: https://${HTTP_ROUTE}"
 echo "  gRPC:           ${GRPC_ROUTE}:443"
 echo ""
-echo "  OIDC redirect URI (must be registered in your IdP's 'fleetshift-ui' client):"
+echo "  OIDC redirect URI (must be registered in your IdP's 'fleetshift-cli' client):"
 echo "    https://${HTTP_ROUTE}/*"
 echo "    This only needs to be set once"
 echo "    Use task k8s:register-redirect if this is the first deploy in this cluster"

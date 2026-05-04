@@ -18,18 +18,18 @@ The admin configures the registry via `fleetctl auth setup`. For the OIDC regist
 fleetctl auth setup \
   --server fleetshift:50051 \
   --issuer-url http://keycloak:8180/auth/realms/fleetshift \
-  --client-id fleetshift-ui \
-  --audience fleetshift-ui \
-  --key-enrollment-client-id fleetshift-ui \
+  --client-id fleetshift-cli \
+  --audience fleetshift-cli \
+  --key-enrollment-client-id fleetshift-cli \
   --public-key-claim-expression 'claims.signing_public_key'
 
 # GitHub registry — public key fetched from GitHub API
 fleetctl auth setup \
   --server fleetshift:50051 \
   --issuer-url http://keycloak:8180/auth/realms/fleetshift \
-  --client-id fleetshift-ui \
-  --audience fleetshift-ui \
-  --key-enrollment-client-id fleetshift-ui \
+  --client-id fleetshift-cli \
+  --audience fleetshift-cli \
+  --key-enrollment-client-id fleetshift-cli \
   --registry-id github.com \
   --registry-subject-expression 'claims.github_username'
 ```
