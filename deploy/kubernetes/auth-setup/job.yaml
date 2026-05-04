@@ -32,7 +32,7 @@ spec:
               fleetctl auth setup \
                 --server fleetshift-server:50051 \
                 --issuer-url ${OIDC_ISSUER_URL} \
-                --client-id ${OIDC_CLIENT_ID} \
+                --client-id ${OIDC_CLI_CLIENT_ID} \
                 --audience ${OIDC_AUDIENCE} \
                 --key-enrollment-client-id ${KEY_ENROLLMENT_CLIENT_ID} \
                 --registry-id ${KEY_REGISTRY_ID} \

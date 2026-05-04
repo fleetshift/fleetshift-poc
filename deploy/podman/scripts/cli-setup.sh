@@ -5,10 +5,10 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 # Configure fleetctl CLI for the current deployment. Called by 'task podman:cli-setup'.
 #
 # Fetches OIDC discovery and writes auth config to ~/.config/fleetshift/auth.json.
-# Env vars (OIDC_URL, OIDC_CLIENT_ID, etc.) are set by Taskfile.
+# Env vars (OIDC_URL, OIDC_CLI_CLIENT_ID, etc.) are set by Taskfile.
 
 ISSUER_URL="$OIDC_URL"
-CLI_CLIENT_ID="${OIDC_CLIENT_ID:-fleetshift-cli}"
+CLI_CLIENT_ID="${OIDC_CLI_CLIENT_ID:-fleetshift-cli}"
 KEY_ENROLLMENT_CLIENT="${KEY_ENROLLMENT_CLIENT_ID:-fleetshift-signing}"
 
 DISCOVERY_URL="${ISSUER_URL}/.well-known/openid-configuration"

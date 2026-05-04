@@ -7,7 +7,7 @@ services:
         fleetctl auth setup \
           --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
           --issuer-url ${OIDC_ISSUER_URL} \
-          --client-id ${OIDC_CLIENT_ID} \
+          --client-id ${OIDC_CLI_CLIENT_ID} \
           --audience ${OIDC_AUDIENCE} \
           --key-enrollment-client-id fleetshift-signing \
           --registry-id github.com \

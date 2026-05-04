@@ -5,7 +5,7 @@ set -euo pipefail
 # Register FleetShift UI redirect URI in Keycloak
 #
 # Detects the web route URL from the cluster and registers it as a
-# valid redirect URI in the Keycloak 'fleetshift-cli' client.
+# valid redirect URI in the Keycloak 'fleetshift-ui' client.
 #
 # Run while logged into the FleetShift cluster (not the Keycloak cluster) —
 # the route URL and Keycloak URL are auto-detected from the cluster.
@@ -16,7 +16,7 @@ set -euo pipefail
 
 NAMESPACE="fleetshift"
 REALM="fleetshift"
-CLIENT_ID="fleetshift-cli"
+CLIENT_ID="fleetshift-ui"
 
 log()  { echo "==> $*"; }
 die()  { echo "ERROR: $*" >&2; exit 1; }

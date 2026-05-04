@@ -146,7 +146,7 @@ task protogen       # requires buf CLI
 The realm config (`keycloak/fleetshift-realm.json`) bootstraps:
 
 - **Realm**: `fleetshift`
-- **Clients**: `fleetshift-cli` (public, browser + CLI + device flow)
+- **Clients**: `fleetshift-ui` (public, browser), `fleetshift-cli` (public, CLI + device flow)
 - **Users**: `ops` / `dev` / `admin` (password: `test`)
 - **Roles**: `ops`, `dev`
 

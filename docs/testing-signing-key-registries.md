@@ -26,8 +26,8 @@ docker compose exec fleetshift fleetctl auth setup \
   --server fleetshift:50051 \
   --issuer-url http://keycloak:8180/auth/realms/fleetshift \
   --client-id fleetshift-cli \
-  --audience fleetshift-cli \
-  --key-enrollment-client-id fleetshift-cli \
+  --audience fleetshift \
+  --key-enrollment-client-id fleetshift-signing \
   --registry-id github.com \
   --registry-subject-expression 'claims.github_username'
 ```
@@ -48,8 +48,8 @@ docker compose exec fleetshift fleetctl auth setup \
   --server fleetshift:50051 \
   --issuer-url http://keycloak:8180/auth/realms/fleetshift \
   --client-id fleetshift-cli \
-  --audience fleetshift-cli \
-  --key-enrollment-client-id fleetshift-cli \
+  --audience fleetshift \
+  --key-enrollment-client-id fleetshift-signing \
   --public-key-claim-expression 'claims.signing_public_key'
 ```
 
@@ -76,8 +76,8 @@ fleetctl auth setup \
   --server fleetshift:50051 \
   --issuer-url http://keycloak:8180/auth/realms/fleetshift \
   --client-id fleetshift-cli \
-  --audience fleetshift-cli \
-  --key-enrollment-client-id fleetshift-cli \
+  --audience fleetshift \
+  --key-enrollment-client-id fleetshift-signing \
   --public-key-claim-expression 'claims.signing_public_key'
 ```
 
