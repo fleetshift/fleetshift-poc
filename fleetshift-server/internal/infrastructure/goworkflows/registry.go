@@ -61,7 +61,7 @@ func (r *Registry) SignalFulfillmentEvent(ctx context.Context, fulfillmentID dom
 }
 
 func (r *Registry) SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID domain.FulfillmentID, event domain.DeleteCleanupCompleteEvent) error {
-	return r.Client.SignalWorkflow(ctx, "cleanup-"+string(fulfillmentID), domain.DeleteCleanupCompleteSignal.Name, event)
+	return r.Client.SignalWorkflow(ctx, domain.DeleteCleanupWorkflowID(fulfillmentID), domain.DeleteCleanupCompleteSignal.Name, event)
 }
 
 func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec) (domain.OrchestrationWorkflow, error) {
@@ -75,7 +75,9 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 		func() error { return registerActivity(r.Worker, invokers, spec.GenerateManifests(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.DeliverToTarget(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.RemoveFromTarget(), opts) },
-		func() error { return registerActivity(r.Worker, invokers, spec.PersistAndCompleteReconciliation(), opts) },
+		func() error {
+			return registerActivity(r.Worker, invokers, spec.PersistAndCompleteReconciliation(), opts)
+		},
 		func() error { return registerActivity(r.Worker, invokers, spec.ProcessDeliveryOutputs(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CheckGeneration(), opts) },
 		func() error { return registerActivity(r.Worker, invokers, spec.CleanupDeliveryData(), opts) },
@@ -179,7 +181,7 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 	}, nil
 }
 
-func (r *Registry) RegisterDeleteCleanup(spec *domain.DeleteCleanupWorkflowSpec) (domain.DeleteCleanupWorkflow, error) {
+func (r *Registry) RegisterDeleteDeploymentCleanup(spec *domain.DeleteDeploymentCleanupWorkflowSpec) (domain.DeleteDeploymentCleanupWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
 	opts := r.activityOptions()
 
@@ -187,7 +189,7 @@ func (r *Registry) RegisterDeleteCleanup(spec *domain.DeleteCleanupWorkflowSpec)
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.DeleteCleanupInput) (struct{}, error) {
+	wfFunc := func(ctx workflow.Context, input domain.DeleteDeploymentCleanupInput) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
 		record := &baseRecord{
 			wfCtx:    ctx,
@@ -209,7 +211,44 @@ func (r *Registry) RegisterDeleteCleanup(spec *domain.DeleteCleanupWorkflowSpec)
 		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
 	}
 
-	return &deleteCleanupWorkflow{
+	return &deleteDeploymentCleanupWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
+func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManagedResourceCleanupWorkflowSpec) (domain.DeleteManagedResourceCleanupWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
+
+	if err := registerActivity(r.Worker, invokers, spec.DeleteFulfillment(), opts); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceCleanupInput) (struct{}, error) {
+		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
+		record := &baseRecord{
+			wfCtx:    ctx,
+			invokers: invokers,
+			signals: map[string]func() (any, error){
+				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
+					val, ok := ch.Receive(ctx)
+					if !ok {
+						return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
+					}
+					return val, nil
+				},
+			},
+		}
+		return spec.Run(record, input)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &deleteManagedResourceCleanupWorkflow{
 		client:  r.Client,
 		wfName:  spec.Name(),
 		timeout: r.timeout(),
@@ -494,16 +533,43 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 	}, nil
 }
 
-// --- DeleteCleanupWorkflow ---
+// --- DeleteDeploymentCleanupWorkflow ---
 
-type deleteCleanupWorkflow struct {
+type deleteDeploymentCleanupWorkflow struct {
 	client  *client.Client
 	wfName  string
 	timeout time.Duration
 }
 
-func (w *deleteCleanupWorkflow) Start(ctx context.Context, input domain.DeleteCleanupInput) (domain.Execution[struct{}], error) {
-	instanceID := "cleanup-" + string(input.FulfillmentID)
+func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentCleanupInput) (domain.Execution[struct{}], error) {
+	instanceID := domain.DeleteCleanupWorkflowID(input.FulfillmentID)
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: instanceID,
+	}, w.wfName, input)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrAlreadyRunning
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[struct{}]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
+// --- DeleteManagedResourceCleanupWorkflow ---
+
+type deleteManagedResourceCleanupWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceCleanupInput) (domain.Execution[struct{}], error) {
+	instanceID := domain.DeleteCleanupWorkflowID(input.FulfillmentID)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)
@@ -573,7 +639,7 @@ type createManagedResourceWorkflow struct {
 }
 
 func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
-	instanceID := "create-mr-" + string(input.Name)
+	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)
@@ -597,7 +663,7 @@ type deleteManagedResourceWorkflow struct {
 }
 
 func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
-	instanceID := fmt.Sprintf("delete-mr-%s-%s", input.ResourceType, input.Name)
+	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)
@@ -614,13 +680,14 @@ func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.
 
 // Compile-time interface checks.
 var (
-	_ domain.Registry                      = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow         = (*orchestrationWorkflow)(nil)
-	_ domain.CreateDeploymentWorkflow      = (*createDeploymentWorkflow)(nil)
-	_ domain.DeleteDeploymentWorkflow      = (*deleteDeploymentWorkflow)(nil)
-	_ domain.DeleteCleanupWorkflow         = (*deleteCleanupWorkflow)(nil)
-	_ domain.ResumeDeploymentWorkflow      = (*resumeDeploymentWorkflow)(nil)
-	_ domain.ProvisionIdPWorkflow          = (*provisionIdPWorkflow)(nil)
-	_ domain.CreateManagedResourceWorkflow = (*createManagedResourceWorkflow)(nil)
-	_ domain.DeleteManagedResourceWorkflow = (*deleteManagedResourceWorkflow)(nil)
+	_ domain.Registry                             = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow                = (*orchestrationWorkflow)(nil)
+	_ domain.CreateDeploymentWorkflow             = (*createDeploymentWorkflow)(nil)
+	_ domain.DeleteDeploymentWorkflow             = (*deleteDeploymentWorkflow)(nil)
+	_ domain.DeleteDeploymentCleanupWorkflow      = (*deleteDeploymentCleanupWorkflow)(nil)
+	_ domain.DeleteManagedResourceCleanupWorkflow = (*deleteManagedResourceCleanupWorkflow)(nil)
+	_ domain.ResumeDeploymentWorkflow             = (*resumeDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow                 = (*provisionIdPWorkflow)(nil)
+	_ domain.CreateManagedResourceWorkflow        = (*createManagedResourceWorkflow)(nil)
+	_ domain.DeleteManagedResourceWorkflow        = (*deleteManagedResourceWorkflow)(nil)
 )

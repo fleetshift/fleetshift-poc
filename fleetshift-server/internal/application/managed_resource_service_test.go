@@ -50,9 +50,18 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 		t.Fatalf("RegisterCreateManagedResource: %v", err)
 	}
 
+	cleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{
+		Store: store,
+	}
+	cleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+	}
+
 	deleteWfSpec := &domain.DeleteManagedResourceWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteManagedResource(deleteWfSpec)
 	if err != nil {
@@ -74,9 +83,9 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 	}
 }
 
-
 func TestManagedResourceService_CreateReadDelete(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	h := setupManagedResources(t)
 
 	// First register a target so placement can resolve.
@@ -142,6 +151,8 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy.Targets[0], "addon-cluster-mgmt")
 	}
 
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+
 	// Get the resource.
 	got, err := h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
@@ -161,7 +172,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	}
 
 	// Delete.
-	_, err = h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -171,6 +182,8 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 	}
+
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
 }
 
 func TestManagedResourceService_CreateInvalidSpec(t *testing.T) {
@@ -215,5 +228,25 @@ func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Create with unknown type: got %v, want ErrNotFound", err)
+	}
+}
+
+func awaitFulfillmentGone(ctx context.Context, t *testing.T, store domain.Store, id domain.FulfillmentID) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		_, err = tx.Fulfillments().Get(ctx, id)
+		tx.Rollback()
+		if errors.Is(err, domain.ErrNotFound) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for fulfillment %s to be deleted", id)
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }

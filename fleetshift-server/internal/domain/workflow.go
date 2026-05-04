@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"fmt"
 	"time"
 )
 
@@ -63,9 +64,9 @@ type Signal[T any] struct {
 var FulfillmentEventSignal = Signal[FulfillmentEvent]{Name: "fulfillment-event"}
 
 // DeleteCleanupCompleteSignal is sent by orchestration to a
-// [DeleteCleanupWorkflow] after delivery data has been cleaned up,
-// indicating the cleanup workflow may hard-delete the deployment and
-// fulfillment rows.
+// fulfillment-scoped cleanup workflow after delivery data has been
+// cleaned up, indicating the cleanup workflow may hard-delete its
+// abstraction-specific rows.
 var DeleteCleanupCompleteSignal = Signal[DeleteCleanupCompleteEvent]{Name: "delete-cleanup-complete"}
 
 // DeleteCleanupCompleteEvent carries the fulfillment ID whose delivery
@@ -74,12 +75,40 @@ type DeleteCleanupCompleteEvent struct {
 	FulfillmentID FulfillmentID
 }
 
-// DeleteCleanupInput identifies the deployment and fulfillment rows
-// that the [DeleteCleanupWorkflow] will hard-delete after receiving a
-// [DeleteCleanupCompleteSignal].
-type DeleteCleanupInput struct {
+// DeleteDeploymentCleanupInput identifies the deployment and
+// fulfillment rows that the [DeleteDeploymentCleanupWorkflow] will
+// hard-delete after receiving a [DeleteCleanupCompleteSignal].
+type DeleteDeploymentCleanupInput struct {
 	DeploymentID  DeploymentID
 	FulfillmentID FulfillmentID
+}
+
+// DeleteCleanupWorkflowID returns the deterministic workflow instance
+// ID shared by abstraction-specific cleanup workflows for a single
+// fulfillment. Only one cleanup workflow should exist for a given
+// fulfillment at a time.
+func DeleteCleanupWorkflowID(fulfillmentID FulfillmentID) string {
+	return "cleanup-" + string(fulfillmentID)
+}
+
+// DeleteManagedResourceCleanupInput identifies the fulfillment row
+// that the [DeleteManagedResourceCleanupWorkflow] will hard-delete
+// after the managed resource HEAD record has already been removed.
+type DeleteManagedResourceCleanupInput struct {
+	FulfillmentID FulfillmentID
+}
+
+// CreateManagedResourceWorkflowID returns the deterministic workflow
+// instance ID for creating a managed resource. It includes the
+// resource type so different types may reuse the same leaf name.
+func CreateManagedResourceWorkflowID(resourceType ResourceType, name ResourceName) string {
+	return fmt.Sprintf("create-mr-%s-%s", resourceType, name)
+}
+
+// DeleteManagedResourceWorkflowID returns the deterministic workflow
+// instance ID for deleting a managed resource.
+func DeleteManagedResourceWorkflowID(resourceType ResourceType, name ResourceName) string {
+	return fmt.Sprintf("delete-mr-%s-%s", resourceType, name)
 }
 
 // RunActivity provides type-safe durable activity execution from within
@@ -118,11 +147,12 @@ type Registry interface {
 	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
 	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
 	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
-	RegisterDeleteCleanup(spec *DeleteCleanupWorkflowSpec) (DeleteCleanupWorkflow, error)
+	RegisterDeleteDeploymentCleanup(spec *DeleteDeploymentCleanupWorkflowSpec) (DeleteDeploymentCleanupWorkflow, error)
 	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
 	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
 	RegisterCreateManagedResource(spec *CreateManagedResourceWorkflowSpec) (CreateManagedResourceWorkflow, error)
 	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
+	RegisterDeleteManagedResourceCleanup(spec *DeleteManagedResourceCleanupWorkflowSpec) (DeleteManagedResourceCleanupWorkflow, error)
 	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
 	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
 }
@@ -157,13 +187,14 @@ type DeleteDeploymentWorkflow interface {
 	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[DeploymentView], error)
 }
 
-// DeleteCleanupWorkflow is a registered delete-cleanup workflow.
-// Returned by [Registry.RegisterDeleteCleanup]. It runs in the
-// background, awaiting a [DeleteCleanupCompleteSignal] from
-// orchestration before hard-deleting the deployment and fulfillment
-// rows. The instance ID is deterministic: cleanup-{fulfillmentID}.
-type DeleteCleanupWorkflow interface {
-	Start(ctx context.Context, input DeleteCleanupInput) (Execution[struct{}], error)
+// DeleteDeploymentCleanupWorkflow is a registered deployment cleanup
+// workflow. Returned by [Registry.RegisterDeleteDeploymentCleanup].
+// It runs in the background, awaiting a
+// [DeleteCleanupCompleteSignal] from orchestration before
+// hard-deleting the deployment row and the fulfillment row. The
+// instance ID is deterministic: cleanup-{fulfillmentID}.
+type DeleteDeploymentCleanupWorkflow interface {
+	Start(ctx context.Context, input DeleteDeploymentCleanupInput) (Execution[struct{}], error)
 }
 
 // ResumeDeploymentWorkflow is a registered resume-deployment workflow.
@@ -184,6 +215,17 @@ type CreateManagedResourceWorkflow interface {
 // workflow. Returned by [Registry.RegisterDeleteManagedResource].
 type DeleteManagedResourceWorkflow interface {
 	Start(ctx context.Context, input DeleteManagedResourceInput) (Execution[ManagedResourceView], error)
+}
+
+// DeleteManagedResourceCleanupWorkflow is a registered managed resource
+// cleanup workflow. Returned by
+// [Registry.RegisterDeleteManagedResourceCleanup]. It runs in the
+// background, awaiting a [DeleteCleanupCompleteSignal] from
+// orchestration before hard-deleting the fulfillment row for a
+// managed resource whose HEAD record has already been removed. The
+// instance ID is deterministic: cleanup-{fulfillmentID}.
+type DeleteManagedResourceCleanupWorkflow interface {
+	Start(ctx context.Context, input DeleteManagedResourceCleanupInput) (Execution[struct{}], error)
 }
 
 // ContinueAsNewError is returned by a workflow body to request that

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -11,19 +12,40 @@ import (
 // ManagedResourceService manages the lifecycle of managed resource
 // instances: create, read, list, and delete.
 type ManagedResourceService struct {
-	Store          domain.Store
-	SchemaCompiler domain.SchemaCompiler
-	CreateWF       domain.CreateManagedResourceWorkflow
-	DeleteWF       domain.DeleteManagedResourceWorkflow
+	Store             domain.Store
+	SchemaCompiler    domain.SchemaCompiler
+	CreateWF          domain.CreateManagedResourceWorkflow
+	DeleteWF          domain.DeleteManagedResourceWorkflow
+	ProvenanceBuilder ManagedResourceProvenanceBuilder // nil when signing is not configured
+}
+
+// ManagedResourceProvenanceBuilder constructs [domain.Provenance] for a
+// managed resource create request when the caller provides a detached
+// user signature.
+type ManagedResourceProvenanceBuilder interface {
+	BuildManagedResourceProvenance(
+		ctx context.Context,
+		enrollments domain.SignerEnrollmentRepository,
+		caller *domain.SubjectClaims,
+		resourceType domain.ResourceType,
+		resourceName domain.ResourceName,
+		spec json.RawMessage,
+		generation domain.Generation,
+		userSig []byte,
+		validUntil time.Time,
+	) (*domain.Provenance, error)
 }
 
 // CreateManagedResourceInput carries the fields needed to create a
 // managed resource instance.
 type CreateManagedResourceInput struct {
-	ResourceType  domain.ResourceType
-	Name          domain.ResourceName
-	Spec          json.RawMessage
-	Provenance    *domain.Provenance
+	ResourceType       domain.ResourceType
+	Name               domain.ResourceName
+	Spec               json.RawMessage
+	Provenance         *domain.Provenance
+	UserSignature      []byte
+	ValidUntil         time.Time
+	ExpectedGeneration domain.Generation
 }
 
 // Create validates the spec against the registered schema, applies the
@@ -50,7 +72,41 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("lookup type %q: %w", in.ResourceType, err)
 	}
-	_ = tx.Commit()
+
+	var prov *domain.Provenance
+	if len(in.UserSignature) > 0 {
+		ac := AuthFromContext(ctx)
+		if ac == nil || ac.Subject == nil {
+			return domain.ManagedResourceView{}, fmt.Errorf(
+				"%w: signing a managed resource requires an authenticated caller",
+				domain.ErrInvalidArgument,
+			)
+		}
+		if s.ProvenanceBuilder == nil {
+			return domain.ManagedResourceView{}, fmt.Errorf(
+				"%w: signing not configured", domain.ErrInvalidArgument)
+		}
+		prov, err = s.ProvenanceBuilder.BuildManagedResourceProvenance(
+			ctx,
+			tx.SignerEnrollments(),
+			ac.Subject,
+			in.ResourceType,
+			in.Name,
+			in.Spec,
+			in.ExpectedGeneration,
+			in.UserSignature,
+			in.ValidUntil,
+		)
+		if err != nil {
+			return domain.ManagedResourceView{}, fmt.Errorf("build provenance: %w", err)
+		}
+	} else if in.Provenance != nil {
+		prov = in.Provenance
+	}
+
+	if err := tx.Commit(); err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
+	}
 
 	// Validate spec against the registered schema.
 	if typeDef.SpecSchema != nil && s.SchemaCompiler != nil {
@@ -61,15 +117,6 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 		if err := schema.Validate(in.Spec); err != nil {
 			return domain.ManagedResourceView{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
 		}
-	}
-
-	// Use caller-provided provenance if set. When nil, the fulfillment
-	// is created without provenance — attestation assembly at delivery
-	// time will be skipped. Full provenance (with user signature) will
-	// be implemented once the signing flow is wired for managed resources.
-	var prov *domain.Provenance
-	if in.Provenance != nil {
-		prov = in.Provenance
 	}
 
 	exec, err := s.CreateWF.Start(ctx, domain.CreateManagedResourceInput{

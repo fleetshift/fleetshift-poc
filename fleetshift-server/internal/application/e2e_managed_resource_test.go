@@ -2,6 +2,8 @@ package application_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -12,6 +14,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/jsonschema"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
@@ -40,6 +43,14 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	router.Register("addon", agent)
 
 	reg := &memworkflow.Registry{}
+	fakeReg := keyregistry.NewFake()
+	keyResolver := &application.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: fakeReg,
+		},
+	}
+	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:      store,
@@ -63,9 +74,18 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Fatalf("RegisterCreateManagedResource: %v", err)
 	}
 
+	cleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{
+		Store: store,
+	}
+	cleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(cleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+	}
+
 	deleteWfSpec := &domain.DeleteManagedResourceWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
+		Cleanup:       cleanupWf,
 	}
 	deleteWf, err := reg.RegisterDeleteManagedResource(deleteWfSpec)
 	if err != nil {
@@ -77,10 +97,11 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		SchemaCompiler: jsonschema.Compiler{},
 	}
 	resourceSvc := &application.ManagedResourceService{
-		Store:          store,
-		SchemaCompiler: jsonschema.Compiler{},
-		CreateWF:       createWf,
-		DeleteWF:       deleteWf,
+		Store:             store,
+		SchemaCompiler:    jsonschema.Compiler{},
+		CreateWF:          createWf,
+		DeleteWF:          deleteWf,
+		ProvenanceBuilder: provenanceBuilder,
 	}
 
 	// --- Step 1: Register target (the addon) ---
@@ -141,12 +162,26 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Fatalf("Create with missing field: got %v, want ErrInvalidArgument", err)
 	}
 
-	// --- Step 4: Create valid resource ---
+	// --- Step 4: Create valid signed resource ---
+	subjectID := domain.SubjectID("user-1")
+	issuer := domain.IssuerURL("https://issuer.example.com")
+	privateKey := enrollSigner(t, store, fakeReg, subjectID, issuer)
 	validSpec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
-	view, err := resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "prod-us-east-1",
-		Spec:         validSpec,
+	validUntil := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
+	sig := signManagedResourceEnvelope(t, privateKey, "clusters", "prod-us-east-1", validSpec, validUntil, 1)
+
+	signedCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
+		Token:   "access-token",
+	})
+
+	view, err := resourceSvc.Create(signedCtx, application.CreateManagedResourceInput{
+		ResourceType:       "clusters",
+		Name:               "prod-us-east-1",
+		Spec:               validSpec,
+		UserSignature:      sig,
+		ValidUntil:         validUntil,
+		ExpectedGeneration: 1,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -167,11 +202,51 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
 		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
 	}
+	if view.Fulfillment.Provenance == nil {
+		t.Fatal("expected fulfillment provenance on signed managed resource")
+	}
 
 	// --- Step 5: Wait for delivery (orchestration runs async) ---
 	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
 
-	// --- Step 6: Verify delivered manifests contain the resource spec ---
+	// --- Step 6: Verify attestation and delivered manifests ---
+	att := agent.capturedAttestation()
+	if att == nil {
+		t.Fatal("expected delivery attestation for signed managed resource")
+	}
+	if att.Input.Signer.RegistryID != "github.com" {
+		t.Errorf("Attestation.Input.Signer.RegistryID = %q, want github.com", att.Input.Signer.RegistryID)
+	}
+	if att.Input.Signer.RegistrySubject != "gh-user-1" {
+		t.Errorf("Attestation.Input.Signer.RegistrySubject = %q, want gh-user-1", att.Input.Signer.RegistrySubject)
+	}
+	content, ok := att.Input.Provenance.Content.(domain.ManagedResourceContent)
+	if !ok {
+		t.Fatalf("Attestation.Input.Provenance.Content = %T, want ManagedResourceContent", att.Input.Provenance.Content)
+	}
+	if content.ResourceType != "clusters" {
+		t.Errorf("ManagedResourceContent.ResourceType = %q, want clusters", content.ResourceType)
+	}
+	if content.ResourceName != "prod-us-east-1" {
+		t.Errorf("ManagedResourceContent.ResourceName = %q, want prod-us-east-1", content.ResourceName)
+	}
+	if string(content.Spec) != string(validSpec) {
+		t.Errorf("ManagedResourceContent.Spec = %s, want %s", content.Spec, validSpec)
+	}
+	if att.SignedRelation == nil {
+		t.Fatal("expected SignedRelation in managed resource attestation")
+	}
+	rel, ok := att.SignedRelation.Relation.(domain.RegisteredSelfTarget)
+	if !ok {
+		t.Fatalf("SignedRelation.Relation = %T, want RegisteredSelfTarget", att.SignedRelation.Relation)
+	}
+	if rel.AddonTarget != "addon-cluster-mgmt" {
+		t.Errorf("SignedRelation.AddonTarget = %q, want addon-cluster-mgmt", rel.AddonTarget)
+	}
+	if att.SignedRelation.Signature.Signer.Subject != "addon-cluster-svc" {
+		t.Errorf("SignedRelation.Signature.Signer.Subject = %q, want addon-cluster-svc", att.SignedRelation.Signature.Signer.Subject)
+	}
+
 	manifests := agent.capturedManifests()
 	if len(manifests) == 0 {
 		t.Fatal("no manifests delivered")
@@ -247,4 +322,33 @@ func (a *mrCapturingDeliveryAgent) capturedManifests() []domain.Manifest {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.manifests
+}
+
+func signManagedResourceEnvelope(
+	t *testing.T,
+	privKey *ecdsa.PrivateKey,
+	resourceType domain.ResourceType,
+	resourceName domain.ResourceName,
+	spec json.RawMessage,
+	validUntil time.Time,
+	expectedGen domain.Generation,
+) []byte {
+	t.Helper()
+	envelopeBytes, err := domain.BuildManagedResourceEnvelope(
+		resourceType,
+		resourceName,
+		spec,
+		validUntil,
+		nil,
+		expectedGen,
+	)
+	if err != nil {
+		t.Fatalf("build managed resource envelope: %v", err)
+	}
+	hash := domain.HashIntent(envelopeBytes)
+	sig, err := ecdsa.SignASN1(rand.Reader, privKey, hash)
+	if err != nil {
+		t.Fatalf("sign: %v", err)
+	}
+	return sig
 }

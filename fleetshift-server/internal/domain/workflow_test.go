@@ -7,6 +7,15 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+func TestCreateManagedResourceWorkflowID_IncludesResourceType(t *testing.T) {
+	a := domain.CreateManagedResourceWorkflowID("clusters", "prod")
+	b := domain.CreateManagedResourceWorkflowID("databases", "prod")
+
+	if a == b {
+		t.Fatalf("workflow IDs must differ for same-name managed resources of different types: %q", a)
+	}
+}
+
 func TestContinueAsNewError(t *testing.T) {
 	t.Run("is detectable via errors.As", func(t *testing.T) {
 		err := domain.ContinueAsNew("some-input")

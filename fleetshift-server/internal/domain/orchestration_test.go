@@ -350,7 +350,11 @@ func (r *stubRegistry) RegisterDeleteDeployment(_ *domain.DeleteDeploymentWorkfl
 	return nil, nil
 }
 
-func (r *stubRegistry) RegisterDeleteCleanup(_ *domain.DeleteCleanupWorkflowSpec) (domain.DeleteCleanupWorkflow, error) {
+func (r *stubRegistry) RegisterDeleteDeploymentCleanup(_ *domain.DeleteDeploymentCleanupWorkflowSpec) (domain.DeleteDeploymentCleanupWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterDeleteManagedResourceCleanup(_ *domain.DeleteManagedResourceCleanupWorkflowSpec) (domain.DeleteManagedResourceCleanupWorkflow, error) {
 	return nil, nil
 }
 
@@ -1552,8 +1556,8 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 	}
 
 	// Orchestration cleans up delivery data but leaves the fulfillment
-	// row; the DeleteCleanupWorkflow deletes both rows after receiving
-	// the signal.
+	// row; the DeleteDeploymentCleanupWorkflow deletes both rows after
+	// receiving the signal.
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatal(err)

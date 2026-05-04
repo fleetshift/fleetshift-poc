@@ -66,12 +66,12 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 		},
 	}
 
-	cleanupSpec := &domain.DeleteCleanupWorkflowSpec{
+	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{
 		Store: store,
 	}
-	cleanupWf, err := reg.RegisterDeleteCleanup(cleanupSpec)
+	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
 	if err != nil {
-		t.Fatalf("RegisterDeleteCleanup: %v", err)
+		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
 	}
 
 	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{

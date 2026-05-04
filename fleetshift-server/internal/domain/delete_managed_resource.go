@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 )
 
@@ -13,11 +14,13 @@ type DeleteManagedResourceInput struct {
 
 // DeleteManagedResourceWorkflowSpec transitions the derived fulfillment
 // to [FulfillmentStateDeleting], deletes the managed resource instance
-// record, and starts orchestration to process the deletion on the
-// delivery side.
+// record, starts a background [DeleteManagedResourceCleanupWorkflow],
+// and starts orchestration to process the deletion on the delivery
+// side.
 type DeleteManagedResourceWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
+	Cleanup       DeleteManagedResourceCleanupWorkflow
 }
 
 func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-managed-resource" }
@@ -81,12 +84,32 @@ func (s *DeleteManagedResourceWorkflowSpec) StartOrchestration() Activity[Fulfil
 	})
 }
 
-// Run is the workflow body: mutate to deleting, then start
-// orchestration to process the removal.
+// StartCleanup starts the background
+// [DeleteManagedResourceCleanupWorkflow]. Managed resources have no
+// peer deployment row, so the cleanup workflow only deletes the
+// fulfillment row after orchestration signals completion.
+func (s *DeleteManagedResourceWorkflowSpec) StartCleanup() Activity[DeleteManagedResourceCleanupInput, struct{}] {
+	return NewActivity("mr-start-delete-cleanup", func(ctx context.Context, input DeleteManagedResourceCleanupInput) (struct{}, error) {
+		_, err := s.Cleanup.Start(ctx, input)
+		if errors.Is(err, ErrAlreadyRunning) {
+			return struct{}{}, nil
+		}
+		return struct{}{}, err
+	})
+}
+
+// Run is the workflow body: mutate to deleting, start the background
+// cleanup workflow, then start orchestration to process the removal.
 func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManagedResourceInput) (ManagedResourceView, error) {
 	view, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
 		return ManagedResourceView{}, fmt.Errorf("mutate to deleting: %w", err)
+	}
+
+	if _, err := RunActivity(record, s.StartCleanup(), DeleteManagedResourceCleanupInput{
+		FulfillmentID: view.Fulfillment.ID,
+	}); err != nil {
+		return ManagedResourceView{}, fmt.Errorf("start cleanup: %w", err)
 	}
 
 	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID); err != nil {

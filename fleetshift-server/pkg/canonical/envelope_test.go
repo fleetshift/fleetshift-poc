@@ -161,6 +161,50 @@ func TestBuildSignedInputEnvelope_StructureMatchesPOC(t *testing.T) {
 	}
 }
 
+func TestBuildManagedResourceEnvelope_Deterministic(t *testing.T) {
+	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
+
+	a, err := canonical.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	b, err := canonical.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	if string(a) != string(b) {
+		t.Errorf("envelopes differ:\n  a: %s\n  b: %s", a, b)
+	}
+}
+
+func TestBuildManagedResourceEnvelope_Structure(t *testing.T) {
+	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
+
+	env, err := canonical.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
+	if err != nil {
+		t.Fatalf("BuildManagedResourceEnvelope: %v", err)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(env, &parsed); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	for _, key := range []string{"content", "output_constraints", "valid_until", "expected_generation"} {
+		if _, ok := parsed[key]; !ok {
+			t.Errorf("missing top-level key %q", key)
+		}
+	}
+
+	content := parsed["content"].(map[string]any)
+	for _, key := range []string{"resource_type", "resource_name", "spec"} {
+		if _, ok := content[key]; !ok {
+			t.Errorf("missing content key %q", key)
+		}
+	}
+}
+
 func TestHashIntent_Deterministic(t *testing.T) {
 	data := []byte(`{"content":{"deployment_id":"test"}}`)
 	a := canonical.HashIntent(data)

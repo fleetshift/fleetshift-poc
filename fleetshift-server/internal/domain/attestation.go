@@ -40,7 +40,7 @@ type DeploymentContent struct {
 	PlacementStrategy PlacementStrategySpec
 }
 
-func (c DeploymentContent) ContentID() string  { return string(c.DeploymentID) }
+func (c DeploymentContent) ContentID() string   { return string(c.DeploymentID) }
 func (c DeploymentContent) ContentType() string { return "deployment" }
 func (DeploymentContent) inputContent()         {}
 
@@ -57,7 +57,7 @@ type ManagedResourceContent struct {
 	Spec         json.RawMessage `json:"spec"`
 }
 
-func (c ManagedResourceContent) ContentID() string  { return string(c.ResourceName) }
+func (c ManagedResourceContent) ContentID() string   { return string(c.ResourceName) }
 func (c ManagedResourceContent) ContentType() string { return "managed_resource" }
 func (ManagedResourceContent) inputContent()         {}
 
@@ -160,10 +160,13 @@ type SignedInput struct {
 }
 
 // Attestation is the self-contained verification bundle assembled at
-// delivery time. Matches the hybrid PoC's Attestation = Input + Output.
+// delivery time. For managed resources, SignedRelation carries the
+// addon-owned routing evidence that complements the user-signed input.
 type Attestation struct {
-	Input  SignedInput
-	Output DeliveryOutput // one of [*PutManifests] or [*RemoveByDeploymentId]
+	Input SignedInput
+	// TODO: the python POC shoes a "verification bundle" – we should probably implement that pattern here
+	SignedRelation *SignedRelation
+	Output         DeliveryOutput // one of [*PutManifests] or [*RemoveByDeploymentId]
 }
 
 // DeliveryOutput is a sealed sum type for delivery actions.
@@ -193,13 +196,14 @@ func (*RemoveByDeploymentId) deliveryOutput() {}
 // concrete DeliveryOutput variant to instantiate.
 type attestationJSON struct {
 	Input                SignedInput           `json:"Input"`
+	SignedRelation       *SignedRelation       `json:"SignedRelation,omitempty"`
 	OutputType           string                `json:"OutputType"`
 	PutManifests         *PutManifests         `json:"PutManifests,omitempty"`
 	RemoveByDeploymentId *RemoveByDeploymentId `json:"RemoveByDeploymentId,omitempty"`
 }
 
 func (a Attestation) MarshalJSON() ([]byte, error) {
-	j := attestationJSON{Input: a.Input}
+	j := attestationJSON{Input: a.Input, SignedRelation: a.SignedRelation}
 	switch o := a.Output.(type) {
 	case *PutManifests:
 		j.OutputType = "PutManifests"
@@ -221,6 +225,7 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	a.Input = j.Input
+	a.SignedRelation = j.SignedRelation
 	switch j.OutputType {
 	case "PutManifests":
 		a.Output = j.PutManifests
@@ -254,6 +259,26 @@ func BuildSignedInputEnvelope(
 		string(id),
 		toCanonicalManifestStrategy(ms),
 		toCanonicalPlacementStrategy(ps),
+		validUntil,
+		toCanonicalConstraints(constraints),
+		int64(expectedGeneration),
+	)
+}
+
+// BuildManagedResourceEnvelope constructs the canonical JSON envelope
+// for a signed managed resource intent.
+func BuildManagedResourceEnvelope(
+	resourceType ResourceType,
+	resourceName ResourceName,
+	spec json.RawMessage,
+	validUntil time.Time,
+	constraints []OutputConstraint,
+	expectedGeneration Generation,
+) ([]byte, error) {
+	return canonical.BuildManagedResourceEnvelope(
+		string(resourceType),
+		string(resourceName),
+		spec,
 		validUntil,
 		toCanonicalConstraints(constraints),
 		int64(expectedGeneration),

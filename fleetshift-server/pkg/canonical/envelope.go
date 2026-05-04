@@ -26,9 +26,9 @@ type Manifest struct {
 
 // PlacementStrategy is the canonical representation of a placement strategy.
 type PlacementStrategy struct {
-	Type           string
-	Targets        []string
-	MatchLabels    map[string]string
+	Type        string
+	Targets     []string
+	MatchLabels map[string]string
 }
 
 // OutputConstraint is a CEL predicate signed with the input.
@@ -76,6 +76,37 @@ func BuildSignedInputEnvelope(
 	return json.Marshal(env)
 }
 
+// BuildManagedResourceEnvelope constructs the canonical JSON envelope
+// for a signed managed resource intent. The structure mirrors
+// [BuildSignedInputEnvelope] but the content section carries the
+// managed resource type, name, and raw spec instead of deployment
+// strategies.
+func BuildManagedResourceEnvelope(
+	resourceType string,
+	resourceName string,
+	spec json.RawMessage,
+	validUntil time.Time,
+	constraints []OutputConstraint,
+	expectedGeneration int64,
+) ([]byte, error) {
+	content := managedResourceEnvelopeContent{
+		ResourceType: resourceType,
+		ResourceName: resourceName,
+		Spec:         spec,
+	}
+
+	env := managedResourceSignedInputEnvelope{
+		Content:           content,
+		OutputConstraints: marshalOutputConstraints(constraints),
+		ValidUntil:        float64(validUntil.Unix()),
+	}
+	if expectedGeneration != 0 {
+		env.ExpectedGeneration = &expectedGeneration
+	}
+
+	return json.Marshal(env)
+}
+
 // HashIntent computes the SHA-256 digest of canonical envelope bytes.
 func HashIntent(envelope []byte) []byte {
 	h := sha256.Sum256(envelope)
@@ -89,10 +120,23 @@ type signedInputEnvelope struct {
 	ExpectedGeneration *int64               `json:"expected_generation,omitempty"`
 }
 
+type managedResourceSignedInputEnvelope struct {
+	Content            managedResourceEnvelopeContent `json:"content"`
+	OutputConstraints  []envelopeConstraint           `json:"output_constraints"`
+	ValidUntil         float64                        `json:"valid_until"`
+	ExpectedGeneration *int64                         `json:"expected_generation,omitempty"`
+}
+
 type envelopeContent struct {
 	DeploymentID      string                    `json:"deployment_id"`
 	ManifestStrategy  envelopeManifestStrategy  `json:"manifest_strategy"`
 	PlacementStrategy envelopePlacementStrategy `json:"placement_strategy"`
+}
+
+type managedResourceEnvelopeContent struct {
+	ResourceType string          `json:"resource_type"`
+	ResourceName string          `json:"resource_name"`
+	Spec         json.RawMessage `json:"spec"`
 }
 
 type envelopeManifestStrategy struct {

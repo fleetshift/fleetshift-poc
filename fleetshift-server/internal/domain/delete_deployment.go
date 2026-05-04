@@ -8,17 +8,18 @@ import (
 
 // DeleteDeploymentWorkflowSpec transitions a fulfillment to
 // [FulfillmentStateDeleting], bumps its generation, starts a
-// background [DeleteCleanupWorkflow], and runs a convergence loop to
-// guarantee orchestration picks up the new state. The actual
-// hard-delete of the deployment and fulfillment rows is handled by
-// the cleanup workflow after orchestration signals completion.
+// background [DeleteDeploymentCleanupWorkflow], and runs a
+// convergence loop to guarantee orchestration picks up the new state.
+// The actual hard-delete of the deployment and fulfillment rows is
+// handled by the cleanup workflow after orchestration signals
+// completion.
 //
 // Pass this spec to [Registry.RegisterDeleteDeployment] to obtain a
 // [DeleteDeploymentWorkflow] that can start instances.
 type DeleteDeploymentWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
-	Cleanup       DeleteCleanupWorkflow
+	Cleanup       DeleteDeploymentCleanupWorkflow
 }
 
 func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment" }
@@ -82,13 +83,14 @@ func (s *DeleteDeploymentWorkflowSpec) LoadFulfillment() Activity[FulfillmentID,
 	})
 }
 
-// StartCleanup starts the background [DeleteCleanupWorkflow] via the
-// [Cleanup] handle. The cleanup workflow awaits the
+// StartCleanup starts the background
+// [DeleteDeploymentCleanupWorkflow] via the [Cleanup] handle. The
+// cleanup workflow awaits the
 // [DeleteCleanupCompleteSignal] from orchestration before
 // hard-deleting both rows. Idempotent: treats [ErrAlreadyRunning] as
 // success so activity replays are safe.
-func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteCleanupInput, struct{}] {
-	return NewActivity("start-delete-cleanup", func(ctx context.Context, input DeleteCleanupInput) (struct{}, error) {
+func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteDeploymentCleanupInput, struct{}] {
+	return NewActivity("start-delete-cleanup", func(ctx context.Context, input DeleteDeploymentCleanupInput) (struct{}, error) {
 		_, err := s.Cleanup.Start(ctx, input)
 		if err != nil && errors.Is(err, ErrAlreadyRunning) {
 			return struct{}{}, nil
@@ -108,7 +110,7 @@ func (s *DeleteDeploymentWorkflowSpec) Run(record Record, deploymentID Deploymen
 		return DeploymentView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
 
-	if _, err := RunActivity(record, s.StartCleanup(), DeleteCleanupInput{
+	if _, err := RunActivity(record, s.StartCleanup(), DeleteDeploymentCleanupInput{
 		DeploymentID:  deploymentID,
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {

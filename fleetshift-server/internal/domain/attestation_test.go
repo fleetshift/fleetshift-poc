@@ -64,6 +64,23 @@ func TestBuildSignedInputEnvelope_OmitsZeroGeneration(t *testing.T) {
 	}
 }
 
+func TestBuildManagedResourceEnvelope_Deterministic(t *testing.T) {
+	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
+
+	a, err := domain.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
+	if err != nil {
+		t.Fatalf("first call: %v", err)
+	}
+	b, err := domain.BuildManagedResourceEnvelope("clusters", "prod-us-east-1", spec, testValidUntil, nil, 1)
+	if err != nil {
+		t.Fatalf("second call: %v", err)
+	}
+
+	if string(a) != string(b) {
+		t.Errorf("envelopes differ:\n  a: %s\n  b: %s", a, b)
+	}
+}
+
 func TestSignedInput_ComposesProvenanceAndSigner(t *testing.T) {
 	prov := domain.Provenance{
 		Content: domain.DeploymentContent{
@@ -185,6 +202,10 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 				RegistrySubject: "carol-gh",
 			},
 		},
+		SignedRelation: &domain.SignedRelation{
+			Relation:  domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+			Signature: domain.Signature{Signer: domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://addon.example.com"}},
+		},
 		Output: &domain.PutManifests{
 			Manifests: []domain.Manifest{{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
 		},
@@ -205,6 +226,12 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 	}
 	if got.Input.Signer.RegistrySubject != "carol-gh" {
 		t.Errorf("Input.Signer = %q, want carol-gh", got.Input.Signer.RegistrySubject)
+	}
+	if got.SignedRelation == nil {
+		t.Fatal("SignedRelation = nil, want populated relation")
+	}
+	if rel, ok := got.SignedRelation.Relation.(domain.RegisteredSelfTarget); !ok || rel.AddonTarget != "addon-cluster-mgmt" {
+		t.Fatalf("SignedRelation.Relation = %#v, want RegisteredSelfTarget(addon-cluster-mgmt)", got.SignedRelation.Relation)
 	}
 	pm, ok := got.Output.(*domain.PutManifests)
 	if !ok {
