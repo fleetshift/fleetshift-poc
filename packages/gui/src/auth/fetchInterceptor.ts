@@ -41,6 +41,7 @@ export function installFetchInterceptor() {
 
     return _originalFetch(input, { ...init, headers }).then((response) => {
       if (response.status === 401 && _onUnauthorized) {
+        console.warn("[auth] 401 from", url, "— triggering re-auth");
         _onUnauthorized();
       }
       return response;

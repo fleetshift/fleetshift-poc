@@ -35,6 +35,7 @@ interface AuthContextValue {
   loading: boolean;
   token: string | undefined;
   email: string | undefined;
+  authError: boolean;
   login: () => void;
   logout: () => void;
 }
@@ -54,6 +55,7 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
 
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState(false);
   const fetchedForToken = useRef<string | undefined>(undefined);
 
   const accessToken = oidc.user?.access_token;
@@ -93,11 +95,8 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
     setLoading(false);
   }, [oidc.isLoading, oidc.isAuthenticated, accessToken]);
 
-  // On 401 from any API call, redirect to Keycloak login
   useEffect(() => {
-    setOnUnauthorized(() => {
-      oidcRef.current.signinRedirect();
-    });
+    setOnUnauthorized(() => setAuthError(true));
   }, []);
 
   const login = useCallback(() => {
@@ -115,6 +114,7 @@ function KeycloakAuthInner({ children }: { children: ReactNode }) {
         loading,
         token: accessToken,
         email,
+        authError,
         login,
         logout,
       }}

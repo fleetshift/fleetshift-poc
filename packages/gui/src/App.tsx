@@ -12,6 +12,7 @@ import { AppConfigProvider, useAppConfig } from "./contexts/AppConfigContext";
 import { PluginPage } from "./pages/PluginPage";
 import { DebugPage } from "./pages/DebugPage";
 import { AnimationsProvider } from "@patternfly/react-core";
+import { AuthErrorState } from "./components/AuthErrorState";
 
 const scopeRef = { current: "all" as string };
 const scopeListenersRef = { current: new Set<() => void>() };
@@ -105,15 +106,19 @@ const ScopeBridge = () => {
 };
 
 const AuthGate = ({ children }: PropsWithChildren) => {
-  const { loading, user, login } = useAuth();
+  const { loading, user, authError, login } = useAuth();
   const loginTriggered = useRef(false);
 
   useEffect(() => {
-    if (!loading && !user && !loginTriggered.current) {
+    if (!loading && !user && !authError && !loginTriggered.current) {
       loginTriggered.current = true;
       login();
     }
-  }, [loading, user, login]);
+  }, [loading, user, authError, login]);
+
+  if (authError) {
+    return <AuthErrorState onSignIn={login} />;
+  }
 
   if (loading || !user) return null;
   return <>{children}</>;
