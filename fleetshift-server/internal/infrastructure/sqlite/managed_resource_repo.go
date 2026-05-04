@@ -273,7 +273,7 @@ func (r *ManagedResourceRepo) scanView(s interface{ Scan(...any) error }) (domai
 
 	// Fulfillment scan vars (matching scanFulfillment order)
 	var fID, rtJSON, stateStr, statusReason, authJSON, fCreatedAt, fUpdatedAt string
-	var msSpec, psSpec, rsSpec, provJSON sql.NullString
+	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
 
@@ -286,7 +286,7 @@ func (r *ManagedResourceRepo) scanView(s interface{ Scan(...any) error }) (domai
 		&riSpec, &riCreatedAt,
 		// fulfillment columns (from fulfillmentColumnsJoined)
 		&fID, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
-		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
+		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON, &attestRefJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&fCreatedAt, &fUpdatedAt,
 	); err != nil {
@@ -357,6 +357,10 @@ func (r *ManagedResourceRepo) scanView(s interface{ Scan(...any) error }) (domai
 	if provJSON.Valid {
 		v.Fulfillment.Provenance = &domain.Provenance{}
 		_ = json.Unmarshal([]byte(provJSON.String), v.Fulfillment.Provenance)
+	}
+	if attestRefJSON.Valid {
+		v.Fulfillment.AttestationRef = &domain.AttestationRef{}
+		_ = json.Unmarshal([]byte(attestRefJSON.String), v.Fulfillment.AttestationRef)
 	}
 
 	return v, nil

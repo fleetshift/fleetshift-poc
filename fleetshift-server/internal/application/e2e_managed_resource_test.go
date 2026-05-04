@@ -205,6 +205,12 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if view.Fulfillment.Provenance == nil {
 		t.Fatal("expected fulfillment provenance on signed managed resource")
 	}
+	if view.Fulfillment.AttestationRef == nil {
+		t.Fatal("expected AttestationRef on signed managed resource fulfillment")
+	}
+	if view.Fulfillment.AttestationRef.RelationRef == nil || *view.Fulfillment.AttestationRef.RelationRef != "clusters" {
+		t.Errorf("AttestationRef.RelationRef = %v, want clusters", view.Fulfillment.AttestationRef.RelationRef)
+	}
 
 	// --- Step 5: Wait for delivery (orchestration runs async) ---
 	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)

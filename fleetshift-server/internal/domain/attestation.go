@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -142,6 +143,27 @@ func (p *Provenance) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// AttestationRef describes what evidence is needed to assemble a
+// delivery attestation. Stored on the [Fulfillment]; resolved lazily
+// by [AttestationAssembler] at delivery time. The signer identity is
+// already available via [Provenance].Sig.Signer, so the ref only
+// carries evidence-resolution coordinates that can't be derived from
+// provenance alone.
+type AttestationRef struct {
+	// RelationRef, when set, tells the assembler to resolve the
+	// addon-owned SignedRelation for this resource type.
+	RelationRef *ResourceType `json:",omitempty"`
+}
+
+// ResolvedEvidence is the opaque bag of attestation evidence resolved
+// by [AttestationAssembler] from an [AttestationRef]. Threaded through
+// the orchestration pipeline so that pure attestation-assembly functions
+// can compose the final [Attestation] without I/O.
+type ResolvedEvidence struct {
+	SignerAssertion *SignerAssertion
+	SignedRelation  *SignedRelation
+}
+
 // SignerAssertion carries the minimal data a delivery agent needs
 // to independently resolve a signer's public keys from an external
 // registry.
@@ -237,6 +259,53 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 		return fmt.Errorf("attestation: unknown OutputType %q", j.OutputType)
 	}
 	return nil
+}
+
+// AttestationAssembler resolves attestation evidence from the [Store]
+// using coordinates stored on a [Fulfillment]'s [AttestationRef]. It
+// centralizes the I/O that was previously scattered through the
+// orchestration pipeline, keeping the pipeline itself type-agnostic.
+type AttestationAssembler struct{}
+
+// Resolve loads the evidence described by the fulfillment's
+// [AttestationRef] within the given transaction. Returns nil when the
+// fulfillment has no provenance (unsigned).
+func (AttestationAssembler) Resolve(ctx context.Context, tx Tx, f *Fulfillment) (*ResolvedEvidence, error) {
+	if f.Provenance == nil {
+		return nil, nil
+	}
+
+	found, err := tx.SignerEnrollments().ListBySubject(ctx, f.Provenance.Sig.Signer)
+	if err != nil {
+		return nil, fmt.Errorf("list signer enrollments: %w", err)
+	}
+	if len(found) == 0 {
+		return nil, fmt.Errorf("no signer enrollment found for %s / %s",
+			f.Provenance.Sig.Signer.Subject, f.Provenance.Sig.Signer.Issuer)
+	}
+	enrollment := found[0]
+
+	ev := &ResolvedEvidence{
+		SignerAssertion: &SignerAssertion{
+			IdentityToken:   enrollment.IdentityToken,
+			RegistryID:      enrollment.RegistryID,
+			RegistrySubject: enrollment.RegistrySubject,
+		},
+	}
+
+	if f.AttestationRef != nil && f.AttestationRef.RelationRef != nil {
+		typeDef, err := tx.ManagedResources().GetType(ctx, *f.AttestationRef.RelationRef)
+		if err != nil {
+			return nil, fmt.Errorf("get managed resource type %q: %w", *f.AttestationRef.RelationRef, err)
+		}
+		ev.SignedRelation = &SignedRelation{
+			ResourceType: *f.AttestationRef.RelationRef,
+			Relation:     typeDef.Relation,
+			Signature:    typeDef.Signature,
+		}
+	}
+
+	return ev, nil
 }
 
 // HashIntent computes the SHA-256 digest of canonical envelope bytes.

@@ -119,14 +119,14 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	var v domain.DeploymentView
 	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr, etag string
 	var fID, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
-	var fMsSpec, fPsSpec, fRsSpec, fProvJSON sql.NullString
+	var fMsSpec, fPsSpec, fRsSpec, fProvJSON, fAttestRefJSON sql.NullString
 	var fMsVer, fPsVer, fRsVer, fGen, fObsGen int64
 	var fActiveWfGen sql.NullInt64
 
 	if err := s.Scan(
 		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr, &etag,
 		&fID, &fMsVer, &fMsSpec, &fPsVer, &fPsSpec, &fRsVer, &fRsSpec,
-		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON,
+		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON, &fAttestRefJSON,
 		&fGen, &fObsGen, &fActiveWfGen,
 		&fCreatedAtStr, &fUpdatedAtStr,
 	); err != nil {
@@ -193,6 +193,12 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	if fProvJSON.Valid {
 		v.Fulfillment.Provenance = &domain.Provenance{}
 		if err := unmarshalJSON(fProvJSON.String, v.Fulfillment.Provenance, "provenance"); err != nil {
+			return v, err
+		}
+	}
+	if fAttestRefJSON.Valid {
+		v.Fulfillment.AttestationRef = &domain.AttestationRef{}
+		if err := unmarshalJSON(fAttestRefJSON.String, v.Fulfillment.AttestationRef, "attestation ref"); err != nil {
 			return v, err
 		}
 	}

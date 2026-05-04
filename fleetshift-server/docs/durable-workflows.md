@@ -67,7 +67,7 @@ func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-deployme
 func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID FulfillmentID) (struct{}, error)
 
 // Activity methods — each returns a typed Activity
-func (s *OrchestrationWorkflowSpec) LoadFulfillmentAndPool() Activity[FulfillmentID, FulfillmentAndPool]
+func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID, ReconciliationSnapshot]
 func (s *OrchestrationWorkflowSpec) ResolvePlacement() Activity[ResolvePlacementInput, []PlacementTarget]
 // ...
 ```

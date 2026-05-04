@@ -32,6 +32,13 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) err
 			return fmt.Errorf("marshal provenance: %w", err)
 		}
 	}
+	var attestRefJSON []byte
+	if f.AttestationRef != nil {
+		attestRefJSON, err = json.Marshal(f.AttestationRef)
+		if err != nil {
+			return fmt.Errorf("marshal attestation ref: %w", err)
+		}
+	}
 
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO fulfillments (
@@ -39,15 +46,17 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) err
 			placement_strategy_version,
 			rollout_strategy_version,
 			resolved_targets, state, status_reason, auth, provenance,
+			attestation_ref,
 			generation, observed_generation, active_workflow_gen,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(f.ID),
 		int64(f.ManifestStrategyVersion),
 		int64(f.PlacementStrategyVersion),
 		int64(f.RolloutStrategyVersion),
 		string(rt), string(f.State), f.StatusReason,
 		string(auth), nullString(provJSON),
+		nullString(attestRefJSON),
 		int64(f.Generation), int64(f.ObservedGeneration),
 		nullGeneration(f.ActiveWorkflowGen),
 		f.CreatedAt.UTC().Format(time.RFC3339),
@@ -85,6 +94,10 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 	if f.Provenance != nil {
 		provJSON, _ = json.Marshal(f.Provenance)
 	}
+	var attestRefJSON []byte
+	if f.AttestationRef != nil {
+		attestRefJSON, _ = json.Marshal(f.AttestationRef)
+	}
 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE fulfillments SET
@@ -92,7 +105,7 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 			placement_strategy_version = ?,
 			rollout_strategy_version = ?,
 			resolved_targets = ?, state = ?, status_reason = ?,
-			auth = ?, provenance = ?,
+			auth = ?, provenance = ?, attestation_ref = ?,
 			generation = ?, observed_generation = ?, active_workflow_gen = ?,
 			updated_at = ?
 		WHERE id = ?`,
@@ -100,7 +113,7 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 		int64(f.PlacementStrategyVersion),
 		int64(f.RolloutStrategyVersion),
 		string(rt), string(f.State), f.StatusReason,
-		string(auth), nullString(provJSON),
+		string(auth), nullString(provJSON), nullString(attestRefJSON),
 		int64(f.Generation), int64(f.ObservedGeneration),
 		nullGeneration(f.ActiveWorkflowGen),
 		f.UpdatedAt.UTC().Format(time.RFC3339),
@@ -184,7 +197,7 @@ func fulfillmentColumnsJoined(f string) string {
 		f + ".placement_strategy_version, ps.spec, " +
 		f + ".rollout_strategy_version, rs.spec, " +
 		f + ".resolved_targets, " + f + ".state, " + f + ".status_reason, " +
-		f + ".auth, " + f + ".provenance, " +
+		f + ".auth, " + f + ".provenance, " + f + ".attestation_ref, " +
 		f + ".generation, " + f + ".observed_generation, " + f + ".active_workflow_gen, " +
 		f + ".created_at, " + f + ".updated_at"
 }
@@ -200,12 +213,12 @@ func strategyJoins(f string) string {
 func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 	var f domain.Fulfillment
 	var id, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
-	var msSpec, psSpec, rsSpec, provJSON sql.NullString
+	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
 	if err := s.Scan(
 		&id, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
-		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON,
+		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON, &attestRefJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&createdAtStr, &updatedAtStr,
 	); err != nil {
@@ -262,6 +275,12 @@ func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 		f.Provenance = &domain.Provenance{}
 		if err := json.Unmarshal([]byte(provJSON.String), f.Provenance); err != nil {
 			return f, fmt.Errorf("unmarshal provenance: %w", err)
+		}
+	}
+	if attestRefJSON.Valid {
+		f.AttestationRef = &domain.AttestationRef{}
+		if err := json.Unmarshal([]byte(attestRefJSON.String), f.AttestationRef); err != nil {
+			return f, fmt.Errorf("unmarshal attestation ref: %w", err)
 		}
 	}
 	return f, nil

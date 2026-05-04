@@ -93,16 +93,15 @@ type PlanRolloutInput struct {
 	Delta TargetDelta
 }
 
-// FulfillmentAndPool is the result of loading a fulfillment and the target pool
-// in a single step. Used to avoid separate durable steps for fulfillment and pool.
-// When the fulfillment carries [Provenance], the signer enrollment is also
-// resolved eagerly so attestation assembly is deterministic on replay. For
-// managed resources, the addon-owned [SignedRelation] is also loaded.
-type FulfillmentAndPool struct {
-	Fulfillment     Fulfillment
-	Pool            []TargetInfo
-	SignerAssertion *SignerAssertion
-	SignedRelation  *SignedRelation
+// ReconciliationSnapshot is the point-in-time state loaded by
+// [OrchestrationWorkflowSpec.AcquireLockAndLoad] for a single
+// reconciliation pass. It bundles the fulfillment, target pool, and
+// any pre-resolved attestation evidence so the pipeline can execute
+// without additional I/O for evidence resolution.
+type ReconciliationSnapshot struct {
+	Fulfillment Fulfillment
+	Pool        []TargetInfo
+	Evidence    *ResolvedEvidence
 }
 
 // PersistAndCompleteInput carries the reconciliation result and the
@@ -125,6 +124,7 @@ type OrchestrationWorkflowSpec struct {
 	Store            Store
 	Delivery         DeliveryService
 	Strategies       StrategyFactory
+	Attestation      AttestationAssembler
 	Registry         Registry
 	Observer         FulfillmentObserver
 	DeliveryObserver DeliveryObserver
@@ -149,68 +149,43 @@ func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-fulfillm
 // held) and loads the fulfillment and target pool in a single activity.
 // On the first call the lock is claimed; on subsequent calls (within
 // the same workflow execution) it is already held so only the load
-// happens. This combines the former AcquireLock and LoadFulfillmentAndPool
+// happens. This combines the former AcquireLock and LoadFulfillment
 // activities to eliminate a redundant fulfillment read.
-func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID, FulfillmentAndPool] {
-	return NewActivity("acquire-lock-and-load", func(ctx context.Context, id FulfillmentID) (FulfillmentAndPool, error) {
+func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID, ReconciliationSnapshot] {
+	return NewActivity("acquire-lock-and-load", func(ctx context.Context, id FulfillmentID) (ReconciliationSnapshot, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return FulfillmentAndPool{}, fmt.Errorf("begin tx: %w", err)
+			return ReconciliationSnapshot{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		f, err := tx.Fulfillments().Get(ctx, id)
 		if err != nil {
-			return FulfillmentAndPool{}, err
+			return ReconciliationSnapshot{}, err
 		}
 		if f.AcquireOrchestrationLock() {
 			if err := tx.Fulfillments().Update(ctx, f); err != nil {
-				return FulfillmentAndPool{}, err
+				return ReconciliationSnapshot{}, err
 			}
 		}
 
 		pool, err := tx.Targets().List(ctx)
 		if err != nil {
-			return FulfillmentAndPool{}, err
+			return ReconciliationSnapshot{}, err
 		}
 
-		var sa *SignerAssertion
-		var signedRelation *SignedRelation
-		if f.Provenance != nil {
-			found, err := tx.SignerEnrollments().ListBySubject(ctx, f.Provenance.Sig.Signer)
-			if err != nil {
-				return FulfillmentAndPool{}, fmt.Errorf("list signer enrollments: %w", err)
-			}
-			if len(found) == 0 {
-				return FulfillmentAndPool{}, fmt.Errorf("no signer enrollment found for %s / %s",
-					f.Provenance.Sig.Signer.Subject, f.Provenance.Sig.Signer.Issuer)
-			}
-			enrollment := found[0]
-			sa = &SignerAssertion{
-				IdentityToken:   enrollment.IdentityToken,
-				RegistryID:      enrollment.RegistryID,
-				RegistrySubject: enrollment.RegistrySubject,
-			}
-			if content, ok := asManagedResourceContent(f.Provenance.Content); ok {
-				typeDef, err := tx.ManagedResources().GetType(ctx, content.ResourceType)
-				if err != nil {
-					return FulfillmentAndPool{}, fmt.Errorf("get managed resource type %q: %w", content.ResourceType, err)
-				}
-				signedRelation = &SignedRelation{
-					Relation:  typeDef.Relation,
-					Signature: typeDef.Signature,
-				}
-			}
+		evidence, err := s.Attestation.Resolve(ctx, tx, f)
+		if err != nil {
+			return ReconciliationSnapshot{}, err
 		}
 
 		if err := tx.Commit(); err != nil {
-			return FulfillmentAndPool{}, fmt.Errorf("commit: %w", err)
+			return ReconciliationSnapshot{}, fmt.Errorf("commit: %w", err)
 		}
-		return FulfillmentAndPool{
-			Fulfillment:     *f,
-			Pool:            pool,
-			SignerAssertion: sa,
-			SignedRelation:  signedRelation,
+		return ReconciliationSnapshot{
+			Fulfillment: *f,
+			Pool:        pool,
+			Evidence:    evidence,
 		}, nil
 	})
 }
@@ -564,7 +539,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 
 		switch f.State {
 		case FulfillmentStateDeleting:
-			if err := s.executeDelete(record, f, pool, fulfillmentID, loaded.SignerAssertion, loaded.SignedRelation); err != nil {
+			if err := s.executeDelete(record, f, pool, fulfillmentID, loaded.Evidence); err != nil {
 				probe.Error(err)
 				if !IsTerminal(err) {
 					return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
@@ -583,7 +558,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 			}
 
 		default:
-			resolvedIDs, err := s.executePlacementPipeline(record, f, pool, fulfillmentID, startGen, probe, loaded.SignerAssertion, loaded.SignedRelation)
+			resolvedIDs, err := s.executePlacementPipeline(record, f, pool, fulfillmentID, startGen, probe, loaded.Evidence)
 			if errors.Is(err, errAuthPaused) {
 				probe.Error(err)
 				result = NewPausedAuthResult(fulfillmentID, f.Auth)
@@ -636,8 +611,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	fulfillmentID FulfillmentID,
 	startGen Generation,
 	probe FulfillmentRunProbe,
-	sa *SignerAssertion,
-	relation *SignedRelation,
+	evidence *ResolvedEvidence,
 ) ([]TargetID, error) {
 	resolved, err := RunActivity(record, s.ResolvePlacement(), ResolvePlacementInput{
 		Spec: f.PlacementStrategy,
@@ -662,7 +636,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	if err := s.executeRolloutPlan(record, f, plan, fulfillmentID, startGen, probe, sa, relation); err != nil {
+	if err := s.executeRolloutPlan(record, f, plan, fulfillmentID, startGen, probe, evidence); err != nil {
 		return nil, err
 	}
 
@@ -684,8 +658,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	f Fulfillment,
 	pool []TargetInfo,
 	fulfillmentID FulfillmentID,
-	sa *SignerAssertion,
-	relation *SignedRelation,
+	evidence *ResolvedEvidence,
 ) error {
 	targets := targetInfosByID(f.ResolvedTargets, pool)
 	for _, target := range targets {
@@ -695,8 +668,8 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 			FulfillmentID: fulfillmentID,
 			Auth:          f.Auth,
 		}
-		if sa != nil {
-			in.Attestation = assembleRemoveAttestation(f, *sa, relation)
+		if evidence != nil {
+			in.Attestation = assembleRemoveAttestation(f, evidence)
 		}
 		if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 			return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
@@ -719,24 +692,23 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	fulfillmentID FulfillmentID,
 	startGen Generation,
 	probe FulfillmentRunProbe,
-	sa *SignerAssertion,
-	relation *SignedRelation,
+	evidence *ResolvedEvidence,
 ) error {
 	policy := f.RolloutStrategy.EffectiveVersionConflictPolicy()
 
 	for i, step := range plan.Steps {
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
-				// TODO: need to call the manifest generator on remove hook
-				in := RemoveInput{
-					Target:        target,
-					DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
-					FulfillmentID: fulfillmentID,
-					Auth:          f.Auth,
-				}
-				if sa != nil {
-					in.Attestation = assembleRemoveAttestation(f, *sa, relation)
-				}
+			// TODO: need to call the manifest generator on remove hook
+			in := RemoveInput{
+				Target:        target,
+				DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
+				FulfillmentID: fulfillmentID,
+				Auth:          f.Auth,
+			}
+			if evidence != nil {
+				in.Attestation = assembleRemoveAttestation(f, evidence)
+			}
 				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
 				}
@@ -770,8 +742,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					Manifests:     manifests,
 					Auth:          f.Auth,
 				}
-				if sa != nil {
-					in.Attestation = assembleDeliverAttestation(f, manifests, *sa, relation)
+				if evidence != nil {
+					in.Attestation = assembleDeliverAttestation(f, manifests, evidence)
 				}
 				result, err := RunActivity(record, s.DeliverToTarget(), in)
 				if err != nil {
@@ -917,43 +889,29 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	return delta
 }
 
-func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, sa SignerAssertion, relation *SignedRelation) *Attestation {
+func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, ev *ResolvedEvidence) *Attestation {
 	return &Attestation{
 		Input: SignedInput{
 			Provenance: *f.Provenance,
-			Signer:     sa,
+			Signer:     *ev.SignerAssertion,
 		},
-		SignedRelation: relation,
+		SignedRelation: ev.SignedRelation,
 		Output: &PutManifests{
 			Manifests: manifests,
 		},
 	}
 }
 
-func assembleRemoveAttestation(f Fulfillment, sa SignerAssertion, relation *SignedRelation) *Attestation {
+func assembleRemoveAttestation(f Fulfillment, ev *ResolvedEvidence) *Attestation {
 	return &Attestation{
 		Input: SignedInput{
 			Provenance: *f.Provenance,
-			Signer:     sa,
+			Signer:     *ev.SignerAssertion,
 		},
-		SignedRelation: relation,
+		SignedRelation: ev.SignedRelation,
 		Output: &RemoveByDeploymentId{
 			DeploymentID: DeploymentID(f.Provenance.Content.ContentID()),
 		},
-	}
-}
-
-func asManagedResourceContent(content InputContent) (ManagedResourceContent, bool) {
-	switch v := content.(type) {
-	case ManagedResourceContent:
-		return v, true
-	case *ManagedResourceContent:
-		if v == nil {
-			return ManagedResourceContent{}, false
-		}
-		return *v, true
-	default:
-		return ManagedResourceContent{}, false
 	}
 }
 

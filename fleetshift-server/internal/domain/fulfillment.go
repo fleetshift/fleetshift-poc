@@ -42,6 +42,7 @@ type Fulfillment struct {
 	StatusReason       string
 	Auth               DeliveryAuth
 	Provenance         *Provenance
+	AttestationRef     *AttestationRef
 	Generation         Generation
 	ObservedGeneration Generation
 	ActiveWorkflowGen  *Generation

@@ -63,13 +63,20 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 
 		ms, ps, rs := in.TypeDef.Relation.DeriveStrategies(intent)
 
+		var attestRef *AttestationRef
+		if in.Provenance != nil {
+			rt := in.ResourceType
+			attestRef = &AttestationRef{RelationRef: &rt}
+		}
+
 		f := Fulfillment{
-			ID:         fID,
-			State:      FulfillmentStateCreating,
-			Provenance: in.Provenance,
-			Generation: 0,
-			CreatedAt:  now,
-			UpdatedAt:  now,
+			ID:             fID,
+			State:          FulfillmentStateCreating,
+			Provenance:     in.Provenance,
+			AttestationRef: attestRef,
+			Generation:     0,
+			CreatedAt:      now,
+			UpdatedAt:      now,
 		}
 		f.AdvanceManifestStrategy(ms, now)
 		f.AdvancePlacementStrategy(ps, now)
