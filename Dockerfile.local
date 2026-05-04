@@ -1,4 +1,4 @@
-FROM localhost/fleetshift-server:latest
+FROM fleetshift-server
 
 ARG KIND_VERSION=v0.31.0
 ARG KUBECTL_VERSION=v1.33.0
