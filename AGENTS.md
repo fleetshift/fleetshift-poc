@@ -28,7 +28,7 @@ The architecture documentation lives in docs/design/ and is the primary source o
 - Never remove comments unless they are truly no longer relevant (e.g. a TODO that is now implemented or obsolete). Prefer updating out of date explanations unless new behavior is trivially obvious.
 - Prefer modern stdlib abstractions and utilities where relevant (especially around crypto or low level encoding / decoding)
 - Follow test-driven development. When at all possible, write failing tests **first**, then write the code to make the test pass.
-- See the Taskfile (used w/ `task` cli) for common development tasks like running tests, generating proto, and building binaries
+- See the Taskfile (used w/ `task` cli) for common development tasks like running tests, generating proto, and building binaries (`task -l` for available tasks)
 
 ## fleetshift-server
 
