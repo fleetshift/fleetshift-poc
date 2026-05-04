@@ -95,9 +95,12 @@ type PlanRolloutInput struct {
 
 // FulfillmentAndPool is the result of loading a fulfillment and the target pool
 // in a single step. Used to avoid separate durable steps for fulfillment and pool.
+// When the fulfillment carries [Provenance], the signer enrollment is also
+// resolved eagerly so attestation assembly is deterministic on replay.
 type FulfillmentAndPool struct {
-	Fulfillment Fulfillment
-	Pool        []TargetInfo
+	Fulfillment     Fulfillment
+	Pool            []TargetInfo
+	SignerAssertion *SignerAssertion
 }
 
 // PersistAndCompleteInput carries the reconciliation result and the
@@ -168,10 +171,29 @@ func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID,
 		if err != nil {
 			return FulfillmentAndPool{}, err
 		}
+
+		var sa *SignerAssertion
+		if f.Provenance != nil {
+			found, err := tx.SignerEnrollments().ListBySubject(ctx, f.Provenance.Sig.Signer)
+			if err != nil {
+				return FulfillmentAndPool{}, fmt.Errorf("list signer enrollments: %w", err)
+			}
+			if len(found) == 0 {
+				return FulfillmentAndPool{}, fmt.Errorf("no signer enrollment found for %s / %s",
+					f.Provenance.Sig.Signer.Subject, f.Provenance.Sig.Signer.Issuer)
+			}
+			enrollment := found[0]
+			sa = &SignerAssertion{
+				IdentityToken:   enrollment.IdentityToken,
+				RegistryID:      enrollment.RegistryID,
+				RegistrySubject: enrollment.RegistrySubject,
+			}
+		}
+
 		if err := tx.Commit(); err != nil {
 			return FulfillmentAndPool{}, fmt.Errorf("commit: %w", err)
 		}
-		return FulfillmentAndPool{Fulfillment: f, Pool: pool}, nil
+		return FulfillmentAndPool{Fulfillment: f, Pool: pool, SignerAssertion: sa}, nil
 	})
 }
 
@@ -331,23 +353,18 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 	})
 }
 
-// SignalDeleteReady signals the [DeleteCleanupWorkflow] that delivery
-// data has been cleaned up and the deployment + fulfillment rows may
-// be hard-deleted.
-func (s *OrchestrationWorkflowSpec) SignalDeleteReady() Activity[FulfillmentID, struct{}] {
-	return NewActivity("signal-delete-ready", func(ctx context.Context, id FulfillmentID) (struct{}, error) {
-		return struct{}{}, s.Registry.SignalDeleteCleanupComplete(ctx, id, DeleteCleanupCompleteEvent{
-			FulfillmentID: id,
-		})
-	})
-}
-
 // PersistAndCompleteReconciliation atomically applies a
 // [ReconciliationResult] and completes reconciliation in a single
 // read-modify-write cycle. It reads the latest fulfillment aggregate
 // (preserving concurrent generation bumps), applies the result, and
 // advances [Fulfillment.ObservedGeneration]. Returns needsRestart when
 // the generation has advanced during the pipeline.
+//
+// For [FulfillmentStateDeleting] results, the activity also signals the
+// [DeleteCleanupWorkflow] after the commit succeeds. Combining the
+// signal with the persist step eliminates a retry window where a
+// separate signal activity could fail and force a redundant full
+// re-execution of the delete pipeline.
 //
 // Combining persist and complete eliminates the window where the
 // fulfillment's state is updated but the lock has not yet been released,
@@ -373,7 +390,19 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 		if err := tx.Fulfillments().Update(ctx, fresh); err != nil {
 			return false, err
 		}
-		return needsRestart, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			return false, err
+		}
+
+		if in.Result.State == FulfillmentStateDeleting {
+			if err := s.Registry.SignalDeleteCleanupComplete(ctx, in.Result.FulfillmentID, DeleteCleanupCompleteEvent{
+				FulfillmentID: in.Result.FulfillmentID,
+			}); err != nil {
+				return false, fmt.Errorf("signal delete cleanup: %w", err)
+			}
+		}
+
+		return needsRestart, nil
 	})
 }
 
@@ -515,7 +544,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 
 		switch f.State {
 		case FulfillmentStateDeleting:
-			if err := s.executeDelete(record, f, pool, fulfillmentID); err != nil {
+			if err := s.executeDelete(record, f, pool, fulfillmentID, loaded.SignerAssertion); err != nil {
 				probe.Error(err)
 				if !IsTerminal(err) {
 					return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
@@ -534,7 +563,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 			}
 
 		default:
-			resolvedIDs, err := s.executePlacementPipeline(record, f, pool, fulfillmentID, startGen, probe)
+			resolvedIDs, err := s.executePlacementPipeline(record, f, pool, fulfillmentID, startGen, probe, loaded.SignerAssertion)
 			if errors.Is(err, errAuthPaused) {
 				probe.Error(err)
 				result = NewPausedAuthResult(fulfillmentID, f.Auth)
@@ -557,13 +586,6 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 		if err != nil {
 			probe.Error(err)
 			return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
-		}
-
-		if result.State == FulfillmentStateDeleting {
-			if _, err := RunActivity(record, s.SignalDeleteReady(), fulfillmentID); err != nil {
-				probe.Error(err)
-				return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
-			}
 		}
 
 		if !needsRestart {
@@ -594,6 +616,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	fulfillmentID FulfillmentID,
 	startGen Generation,
 	probe FulfillmentRunProbe,
+	sa *SignerAssertion,
 ) ([]TargetID, error) {
 	resolved, err := RunActivity(record, s.ResolvePlacement(), ResolvePlacementInput{
 		Spec: f.PlacementStrategy,
@@ -618,7 +641,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 		return nil, fmt.Errorf("plan rollout: %w", err)
 	}
 
-	if err := s.executeRolloutPlan(record, f, plan, fulfillmentID, startGen, probe); err != nil {
+	if err := s.executeRolloutPlan(record, f, plan, fulfillmentID, startGen, probe, sa); err != nil {
 		return nil, err
 	}
 
@@ -630,25 +653,18 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 }
 
 // executeDelete removes the fulfillment from all currently resolved
-// targets. Delivery-data cleanup and the actual row hard-deletes are
-// handled separately: [CleanupDeliveryData] and
-// [SignalDeleteReady] in the DELETING branch of [Run], and the
-// [DeleteCleanupWorkflow] respectively.
+// targets. Delivery-data cleanup is handled by [CleanupDeliveryData]
+// in the DELETING branch of [Run]. The delete-ready signal and the
+// actual row hard-deletes are handled by
+// [PersistAndCompleteReconciliation] and [DeleteCleanupWorkflow]
+// respectively.
 func (s *OrchestrationWorkflowSpec) executeDelete(
 	record Record,
 	f Fulfillment,
 	pool []TargetInfo,
 	fulfillmentID FulfillmentID,
+	sa *SignerAssertion,
 ) error {
-	var sa *SignerAssertion
-	if f.Provenance != nil {
-		looked, err := lookupSignerAssertion(record.Context(), s.Store, f.Provenance)
-		if err != nil {
-			return fmt.Errorf("lookup signer enrollment for attestation assembly: %w", err)
-		}
-		sa = &looked
-	}
-
 	targets := targetInfosByID(f.ResolvedTargets, pool)
 	for _, target := range targets {
 		in := RemoveInput{
@@ -681,17 +697,9 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	fulfillmentID FulfillmentID,
 	startGen Generation,
 	probe FulfillmentRunProbe,
+	sa *SignerAssertion,
 ) error {
 	policy := f.RolloutStrategy.EffectiveVersionConflictPolicy()
-
-	var sa *SignerAssertion
-	if f.Provenance != nil {
-		looked, err := lookupSignerAssertion(record.Context(), s.Store, f.Provenance)
-		if err != nil {
-			return fmt.Errorf("lookup signer enrollment for attestation assembly: %w", err)
-		}
-		sa = &looked
-	}
 
 	for i, step := range plan.Steps {
 		if step.Remove != nil {
@@ -884,31 +892,6 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	}
 
 	return delta
-}
-
-func lookupSignerAssertion(ctx context.Context, store Store, prov *Provenance) (SignerAssertion, error) {
-	tx, err := store.BeginReadOnly(ctx)
-	if err != nil {
-		return SignerAssertion{}, fmt.Errorf("begin read tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	found, err := tx.SignerEnrollments().ListBySubject(ctx, prov.Sig.Signer)
-	if err != nil {
-		return SignerAssertion{}, fmt.Errorf("list signer enrollments: %w", err)
-	}
-	if len(found) == 0 {
-		return SignerAssertion{}, fmt.Errorf("no signer enrollment found for %s / %s", prov.Sig.Signer.Subject, prov.Sig.Signer.Issuer)
-	}
-	if err := tx.Commit(); err != nil {
-		return SignerAssertion{}, fmt.Errorf("commit read tx: %w", err)
-	}
-	enrollment := found[0]
-	return SignerAssertion{
-		IdentityToken:   enrollment.IdentityToken,
-		RegistryID:      enrollment.RegistryID,
-		RegistrySubject: enrollment.RegistrySubject,
-	}, nil
 }
 
 func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, sa SignerAssertion) *Attestation {
