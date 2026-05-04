@@ -73,8 +73,7 @@
         "web-origins",
         "profile",
         "roles",
-        "email",
-        "fleetshift-audience"
+        "email"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
@@ -99,8 +98,7 @@
         "basic",
         "profile",
         "roles",
-        "email",
-        "fleetshift-audience"
+        "email"
       ],
       "attributes": {
         "oauth2.device.authorization.grant.enabled": "true",
@@ -168,25 +166,6 @@
   ],
   "clientScopes": [
     {
-      "name": "fleetshift-audience",
-      "attributes": {
-        "include.in.token.scope": "false",
-        "display.on.consent.screen": "false"
-      },
-      "protocolMappers": [
-        {
-          "name": "fleetshift-audience-mapper",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.client.audience": "fleetshift",
-            "id.token.claim": "false",
-            "access.token.claim": "true"
-          }
-        }
-      ]
-    },
-    {
       "name": "fleetshift-claims",
       "attributes": {
         "include.in.token.scope": "false",
@@ -222,6 +201,13 @@
       ]
     }
   ],
+  "clientScopeMappings": {
+    "fleetshift": [
+      { "client": "fleetshift-ui", "roles": ["fleetshift-user"] },
+      { "client": "fleetshift-cli", "roles": ["fleetshift-user"] },
+      { "client": "fleetshift-signing", "roles": ["fleetshift-user"] }
+    ]
+  },
   "users": [
     {
       "username": "ops",
