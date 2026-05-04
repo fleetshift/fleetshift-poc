@@ -64,6 +64,157 @@ func TestBuildSignedInputEnvelope_OmitsZeroGeneration(t *testing.T) {
 	}
 }
 
+func TestSignedInput_ComposesProvenanceAndSigner(t *testing.T) {
+	prov := domain.Provenance{
+		Content: domain.DeploymentContent{
+			DeploymentID: "dep-42",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type: domain.ManifestStrategyInline,
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type: domain.PlacementStrategyAll,
+			},
+		},
+		Sig: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "alice", Issuer: "https://idp.example.com"},
+			ContentHash:    []byte("fakehash"),
+			SignatureBytes: []byte("fakesig"),
+		},
+		ValidUntil:         testValidUntil,
+		ExpectedGeneration: 3,
+		OutputConstraints:  []domain.OutputConstraint{{Name: "c1", Expression: "true"}},
+	}
+	signer := domain.SignerAssertion{
+		IdentityToken:   "tok",
+		RegistryID:      "github.com",
+		RegistrySubject: "alice-gh",
+	}
+
+	si := domain.SignedInput{
+		Provenance: prov,
+		Signer:     signer,
+	}
+
+	if si.Provenance.Content.ContentID() != "dep-42" {
+		t.Errorf("Content accessible through Provenance: got %q", si.Provenance.Content.ContentID())
+	}
+	if si.Signer.RegistrySubject != "alice-gh" {
+		t.Errorf("Signer: got %q", si.Signer.RegistrySubject)
+	}
+}
+
+func TestSignedInput_JSONRoundTrip(t *testing.T) {
+	si := domain.SignedInput{
+		Provenance: domain.Provenance{
+			Content: domain.DeploymentContent{
+				DeploymentID: "dep-rt",
+				ManifestStrategy: domain.ManifestStrategySpec{
+					Type: domain.ManifestStrategyInline,
+				},
+				PlacementStrategy: domain.PlacementStrategySpec{
+					Type: domain.PlacementStrategyAll,
+				},
+			},
+			Sig: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: "bob", Issuer: "https://idp.example.com"},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
+			ValidUntil:         testValidUntil,
+			ExpectedGeneration: 1,
+		},
+		Signer: domain.SignerAssertion{
+			IdentityToken:   "tok",
+			RegistryID:      "github.com",
+			RegistrySubject: "bob-gh",
+		},
+	}
+
+	data, err := json.Marshal(si)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got domain.SignedInput
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.Provenance.Content.ContentID() != "dep-rt" {
+		t.Errorf("Content.ContentID = %q, want dep-rt", got.Provenance.Content.ContentID())
+	}
+	if got.Provenance.Sig.Signer.Subject != "bob" {
+		t.Errorf("Sig.Signer.Subject = %q, want bob", got.Provenance.Sig.Signer.Subject)
+	}
+	if got.Signer.RegistrySubject != "bob-gh" {
+		t.Errorf("Signer.RegistrySubject = %q, want bob-gh", got.Signer.RegistrySubject)
+	}
+	if !got.Provenance.ValidUntil.Equal(testValidUntil) {
+		t.Errorf("ValidUntil = %v, want %v", got.Provenance.ValidUntil, testValidUntil)
+	}
+	if got.Provenance.ExpectedGeneration != 1 {
+		t.Errorf("ExpectedGeneration = %d, want 1", got.Provenance.ExpectedGeneration)
+	}
+}
+
+func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
+	att := domain.Attestation{
+		Input: domain.SignedInput{
+			Provenance: domain.Provenance{
+				Content: domain.DeploymentContent{
+					DeploymentID: "dep-att",
+					ManifestStrategy: domain.ManifestStrategySpec{
+						Type:      domain.ManifestStrategyInline,
+						Manifests: []domain.Manifest{{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
+					},
+					PlacementStrategy: domain.PlacementStrategySpec{
+						Type: domain.PlacementStrategyAll,
+					},
+				},
+				Sig: domain.Signature{
+					Signer:         domain.FederatedIdentity{Subject: "carol", Issuer: "https://idp.example.com"},
+					ContentHash:    []byte("hash"),
+					SignatureBytes: []byte("sig"),
+				},
+				ValidUntil:         testValidUntil,
+				ExpectedGeneration: 2,
+			},
+			Signer: domain.SignerAssertion{
+				IdentityToken:   "tok",
+				RegistryID:      "github.com",
+				RegistrySubject: "carol-gh",
+			},
+		},
+		Output: &domain.PutManifests{
+			Manifests: []domain.Manifest{{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
+		},
+	}
+
+	data, err := json.Marshal(att)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var got domain.Attestation
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	if got.Input.Provenance.Content.ContentID() != "dep-att" {
+		t.Errorf("Input.Provenance.Content.ContentID = %q, want dep-att", got.Input.Provenance.Content.ContentID())
+	}
+	if got.Input.Signer.RegistrySubject != "carol-gh" {
+		t.Errorf("Input.Signer = %q, want carol-gh", got.Input.Signer.RegistrySubject)
+	}
+	pm, ok := got.Output.(*domain.PutManifests)
+	if !ok {
+		t.Fatalf("Output type = %T, want *PutManifests", got.Output)
+	}
+	if len(pm.Manifests) != 1 {
+		t.Errorf("Output.Manifests len = %d, want 1", len(pm.Manifests))
+	}
+}
+
 func TestHashIntent_ProducesFixedLength(t *testing.T) {
 	data := []byte(`{"content":{"deployment_id":"test"}}`)
 	hash := domain.HashIntent(data)

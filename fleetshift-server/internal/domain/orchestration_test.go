@@ -1267,15 +1267,15 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 		t.Fatal("Attestation is nil; expected it to be assembled from Provenance")
 	}
 
-	depContent, ok := att.Input.Content.(domain.DeploymentContent)
+	depContent, ok := att.Input.Provenance.Content.(domain.DeploymentContent)
 	if !ok {
-		t.Fatalf("Input.Content is %T, want DeploymentContent", att.Input.Content)
+		t.Fatalf("Input.Provenance.Content is %T, want DeploymentContent", att.Input.Provenance.Content)
 	}
 	if depContent.DeploymentID != "attested-dep" {
 		t.Errorf("DeploymentContent.DeploymentID = %q, want %q", depContent.DeploymentID, "attested-dep")
 	}
-	if att.Input.Sig.Signer != prov.Sig.Signer {
-		t.Errorf("Input.Sig.Signer = %v, want %v", att.Input.Sig.Signer, prov.Sig.Signer)
+	if att.Input.Provenance.Sig.Signer != prov.Sig.Signer {
+		t.Errorf("Input.Provenance.Sig.Signer = %v, want %v", att.Input.Provenance.Sig.Signer, prov.Sig.Signer)
 	}
 	if att.Input.Signer.RegistrySubject != "gh-test-signer" {
 		t.Errorf("Input.Signer.RegistrySubject = %q, want %q", att.Input.Signer.RegistrySubject, "gh-test-signer")
@@ -1441,9 +1441,9 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	if att == nil {
 		t.Fatal("Attestation is nil; expected remove attestation")
 	}
-	depContent, ok := att.Input.Content.(domain.DeploymentContent)
+	depContent, ok := att.Input.Provenance.Content.(domain.DeploymentContent)
 	if !ok {
-		t.Fatalf("Input.Content is %T, want DeploymentContent", att.Input.Content)
+		t.Fatalf("Input.Provenance.Content is %T, want DeploymentContent", att.Input.Provenance.Content)
 	}
 	if depContent.DeploymentID != "rm-attested" {
 		t.Errorf("DeploymentContent.DeploymentID = %q, want %q", depContent.DeploymentID, "rm-attested")
@@ -1521,9 +1521,9 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 			continue
 		}
 		att := rm.Attestation
-		depContent, ok := att.Input.Content.(domain.DeploymentContent)
+		depContent, ok := att.Input.Provenance.Content.(domain.DeploymentContent)
 		if !ok {
-			t.Errorf("remove[%d]: Input.Content is %T, want DeploymentContent", i, att.Input.Content)
+			t.Errorf("remove[%d]: Input.Provenance.Content is %T, want DeploymentContent", i, att.Input.Provenance.Content)
 			continue
 		}
 		if depContent.DeploymentID != "del-attested" {

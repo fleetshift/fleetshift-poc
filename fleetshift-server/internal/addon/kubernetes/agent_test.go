@@ -271,9 +271,11 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},
@@ -302,9 +304,11 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},
@@ -335,9 +339,11 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},
@@ -372,9 +378,11 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},
@@ -408,9 +416,11 @@ func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},
@@ -439,9 +449,11 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReturnsError(t *testing.T) {
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Sig: domain.Signature{
-				Signer: domain.FederatedIdentity{
-					Issuer: "https://untrusted.example.com",
+			Provenance: domain.Provenance{
+				Sig: domain.Signature{
+					Signer: domain.FederatedIdentity{
+						Issuer: "https://untrusted.example.com",
+					},
 				},
 			},
 		},

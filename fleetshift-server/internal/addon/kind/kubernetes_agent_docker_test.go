@@ -334,9 +334,11 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 		bogusAtt := &domain.Attestation{
 			Input: domain.SignedInput{
-				Sig: domain.Signature{
-					Signer: domain.FederatedIdentity{
-						Issuer: "https://untrusted.example.com",
+				Provenance: domain.Provenance{
+					Sig: domain.Signature{
+						Signer: domain.FederatedIdentity{
+							Issuer: "https://untrusted.example.com",
+						},
 					},
 				},
 			},
@@ -410,23 +412,25 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
-			Content: domain.DeploymentContent{
-				DeploymentID:      depID,
-				ManifestStrategy:  ms,
-				PlacementStrategy: ps,
-			},
-			Sig: domain.Signature{
-				Signer:         domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
-				ContentHash:    envelopeHash,
-				SignatureBytes: sigBytes,
+			Provenance: domain.Provenance{
+				Content: domain.DeploymentContent{
+					DeploymentID:      depID,
+					ManifestStrategy:  ms,
+					PlacementStrategy: ps,
+				},
+				Sig: domain.Signature{
+					Signer:         domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
+					ContentHash:    envelopeHash,
+					SignatureBytes: sigBytes,
+				},
+				ValidUntil:         validUntil,
+				ExpectedGeneration: gen,
 			},
 			Signer: domain.SignerAssertion{
 				IdentityToken:   domain.RawToken(identityToken),
 				RegistryID:      "github.com",
 				RegistrySubject: registrySubject,
 			},
-			ValidUntil:         validUntil,
-			ExpectedGeneration: gen,
 		},
 		Output: &domain.PutManifests{Manifests: manifests},
 	}

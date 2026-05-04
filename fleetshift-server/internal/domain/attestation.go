@@ -45,9 +45,9 @@ func (c DeploymentContent) ContentType() string  { return "deployment" }
 func (DeploymentContent) inputContent()          {}
 
 // Provenance carries the cryptographic proof that a user authorized
-// a fulfillment. Stored on the [Fulfillment]. Content carries the
-// typed [InputContent] that was signed -- matches the hybrid PoC
-// where SignedInput.content IS the typed content.
+// a fulfillment. Stored on the [Fulfillment] and composed into
+// [SignedInput] at delivery time. Content carries the typed
+// [InputContent] that was signed.
 type Provenance struct {
 	Content            InputContent // what the user signed (typed)
 	Sig                Signature
@@ -127,71 +127,8 @@ type SignerAssertion struct {
 // assembled at delivery time from stored Provenance plus the signer
 // assertion derived from the enrollment record.
 type SignedInput struct {
-	Content            InputContent
-	Sig                Signature
-	Signer             SignerAssertion // replaces the former full key binding bundle
-	ValidUntil         time.Time
-	OutputConstraints  []OutputConstraint
-	ExpectedGeneration Generation
-}
-
-// signedInputJSON is the wire representation for [SignedInput].
-type signedInputJSON struct {
-	ContentType        string             `json:"ContentType"`
-	DeploymentContent  *DeploymentContent `json:"DeploymentContent,omitempty"`
-	Sig                Signature          `json:"Sig"`
-	Signer             SignerAssertion    `json:"Signer"`
-	ValidUntil         time.Time          `json:"ValidUntil"`
-	OutputConstraints  []OutputConstraint `json:"OutputConstraints,omitempty"`
-	ExpectedGeneration Generation         `json:"ExpectedGeneration"`
-}
-
-// MarshalJSON implements [json.Marshaler] for SignedInput.
-func (si SignedInput) MarshalJSON() ([]byte, error) {
-	j := signedInputJSON{
-		Sig:                si.Sig,
-		Signer:             si.Signer,
-		ValidUntil:         si.ValidUntil,
-		OutputConstraints:  si.OutputConstraints,
-		ExpectedGeneration: si.ExpectedGeneration,
-	}
-	switch c := si.Content.(type) {
-	case DeploymentContent:
-		j.ContentType = "deployment"
-		j.DeploymentContent = &c
-	case *DeploymentContent:
-		j.ContentType = "deployment"
-		j.DeploymentContent = c
-	case nil:
-		// no content
-	default:
-		return nil, fmt.Errorf("signed input: unknown InputContent type %T", si.Content)
-	}
-	return json.Marshal(j)
-}
-
-// UnmarshalJSON implements [json.Unmarshaler] for SignedInput.
-func (si *SignedInput) UnmarshalJSON(data []byte) error {
-	var j signedInputJSON
-	if err := json.Unmarshal(data, &j); err != nil {
-		return err
-	}
-	si.Sig = j.Sig
-	si.Signer = j.Signer
-	si.ValidUntil = j.ValidUntil
-	si.OutputConstraints = j.OutputConstraints
-	si.ExpectedGeneration = j.ExpectedGeneration
-	switch j.ContentType {
-	case "deployment":
-		if j.DeploymentContent != nil {
-			si.Content = *j.DeploymentContent
-		}
-	case "":
-		si.Content = nil
-	default:
-		return fmt.Errorf("signed input: unknown ContentType %q", j.ContentType)
-	}
-	return nil
+	Provenance Provenance
+	Signer     SignerAssertion
 }
 
 // Attestation is the self-contained verification bundle assembled at

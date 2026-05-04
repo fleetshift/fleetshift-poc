@@ -104,7 +104,7 @@ func (v *Verifier) Verify(ctx context.Context, att *domain.Attestation) error {
 //  7. Signature verification
 //  8. Temporal validity
 func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedInput) error {
-	sig := &input.Sig
+	sig := &input.Provenance.Sig
 	sa := &input.Signer
 
 	// 1. Issuer trusted
@@ -163,7 +163,8 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 	}
 
 	// 6. Envelope reconstruction
-	dc, err := asDeploymentContent(input.Content)
+	prov := &input.Provenance
+	dc, err := asDeploymentContent(prov.Content)
 	if err != nil {
 		return fmt.Errorf("signed input content: %w", err)
 	}
@@ -171,9 +172,9 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 		dc.DeploymentID,
 		dc.ManifestStrategy,
 		dc.PlacementStrategy,
-		input.ValidUntil,
-		input.OutputConstraints,
-		input.ExpectedGeneration,
+		prov.ValidUntil,
+		prov.OutputConstraints,
+		prov.ExpectedGeneration,
 	)
 	if err != nil {
 		return fmt.Errorf("reconstruct signed input envelope: %w", err)
@@ -190,8 +191,8 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 
 	// 8. Temporal validity
 	now := v.now()
-	if now.After(input.ValidUntil) {
-		return fmt.Errorf("attestation expired: valid_until %s, now %s", input.ValidUntil, now)
+	if now.After(prov.ValidUntil) {
+		return fmt.Errorf("attestation expired: valid_until %s, now %s", prov.ValidUntil, now)
 	}
 
 	return nil
@@ -242,7 +243,7 @@ func asDeploymentContent(c domain.InputContent) (domain.DeploymentContent, error
 }
 
 func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) error {
-	dc, err := asDeploymentContent(input.Content)
+	dc, err := asDeploymentContent(input.Provenance.Content)
 	if err != nil {
 		return err
 	}
@@ -264,7 +265,7 @@ func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) err
 }
 
 func verifyRemoveByDeploymentId(input *domain.SignedInput, remove *domain.RemoveByDeploymentId) error {
-	dc, err := asDeploymentContent(input.Content)
+	dc, err := asDeploymentContent(input.Provenance.Content)
 	if err != nil {
 		return err
 	}

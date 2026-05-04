@@ -114,23 +114,25 @@ func (h *testHarness) buildValidAttestation(t *testing.T) *domain.Attestation {
 
 	return &domain.Attestation{
 		Input: domain.SignedInput{
-			Content: domain.DeploymentContent{
-				DeploymentID:      "dep-1",
-				ManifestStrategy:  ms,
-				PlacementStrategy: ps,
-			},
-			Sig: domain.Signature{
-				Signer:         domain.FederatedIdentity{Subject: h.signerID, Issuer: h.issuer},
-				ContentHash:    envelopeHash,
-				SignatureBytes: sigBytes,
+			Provenance: domain.Provenance{
+				Content: domain.DeploymentContent{
+					DeploymentID:      "dep-1",
+					ManifestStrategy:  ms,
+					PlacementStrategy: ps,
+				},
+				Sig: domain.Signature{
+					Signer:         domain.FederatedIdentity{Subject: h.signerID, Issuer: h.issuer},
+					ContentHash:    envelopeHash,
+					SignatureBytes: sigBytes,
+				},
+				ValidUntil:         validUntil,
+				ExpectedGeneration: gen,
 			},
 			Signer: domain.SignerAssertion{
 				IdentityToken:   domain.RawToken(h.identityToken),
 				RegistryID:      "github.com",
 				RegistrySubject: h.registrySubject,
 			},
-			ValidUntil:         validUntil,
-			ExpectedGeneration: gen,
 		},
 		Output: &domain.PutManifests{
 			Manifests: manifests,
@@ -151,7 +153,7 @@ func TestVerifyAttestation_HappyPath(t *testing.T) {
 func TestVerifyAttestation_BadSignature(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.Sig.SignatureBytes = []byte("tampered-sig")
+	att.Input.Provenance.Sig.SignatureBytes = []byte("tampered-sig")
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -220,7 +222,7 @@ func TestVerifyAttestation_WrongAudience_Rejected(t *testing.T) {
 func TestVerifyAttestation_SignerSubjectMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.Sig.Signer.Subject = "wrong-signer"
+	att.Input.Provenance.Sig.Signer.Subject = "wrong-signer"
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -284,7 +286,7 @@ func TestVerifyAttestation_RemoveDeploymentIDMatch(t *testing.T) {
 func TestVerifyAttestation_UntrustedIssuer(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.Sig.Signer.Issuer = "https://evil.example.com"
+	att.Input.Provenance.Sig.Signer.Issuer = "https://evil.example.com"
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -312,7 +314,7 @@ func TestVerifyAttestation_IdentityTokenSubjectMismatch(t *testing.T) {
 func TestVerifyAttestation_ContentHashMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.Sig.ContentHash = []byte("wrong-hash")
+	att.Input.Provenance.Sig.ContentHash = []byte("wrong-hash")
 
 	err := h.verifier.Verify(context.Background(), att)
 	if err == nil {
@@ -336,7 +338,7 @@ func TestVerifyAttestation_NoKeyResolver(t *testing.T) {
 
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Input.Sig.Signer.Issuer = issuer
+	att.Input.Provenance.Sig.Signer.Issuer = issuer
 
 	err := verifier.Verify(context.Background(), att)
 	if err == nil {

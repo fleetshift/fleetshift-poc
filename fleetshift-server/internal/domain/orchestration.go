@@ -912,15 +912,10 @@ func lookupSignerAssertion(ctx context.Context, store Store, prov *Provenance) (
 }
 
 func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, sa SignerAssertion) *Attestation {
-	prov := f.Provenance
 	return &Attestation{
 		Input: SignedInput{
-			Content:            prov.Content,
-			Sig:                prov.Sig,
-			Signer:             sa,
-			ValidUntil:         prov.ValidUntil,
-			OutputConstraints:  prov.OutputConstraints,
-			ExpectedGeneration: prov.ExpectedGeneration,
+			Provenance: *f.Provenance,
+			Signer:     sa,
 		},
 		Output: &PutManifests{
 			Manifests: manifests,
@@ -929,18 +924,13 @@ func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, sa SignerAs
 }
 
 func assembleRemoveAttestation(f Fulfillment, sa SignerAssertion) *Attestation {
-	prov := f.Provenance
 	return &Attestation{
 		Input: SignedInput{
-			Content:            prov.Content,
-			Sig:                prov.Sig,
-			Signer:             sa,
-			ValidUntil:         prov.ValidUntil,
-			OutputConstraints:  prov.OutputConstraints,
-			ExpectedGeneration: prov.ExpectedGeneration,
+			Provenance: *f.Provenance,
+			Signer:     sa,
 		},
 		Output: &RemoveByDeploymentId{
-			DeploymentID: DeploymentID(prov.Content.ContentID()),
+			DeploymentID: DeploymentID(f.Provenance.Content.ContentID()),
 		},
 	}
 }

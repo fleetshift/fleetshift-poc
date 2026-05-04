@@ -99,9 +99,9 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		t.Fatal("delivery agent received nil Attestation; expected assembled attestation")
 	}
 
-	if att.Input.Content.ContentID() != "e2e-dep" {
-		t.Errorf("Attestation.Input.Content.ContentID() = %q, want %q",
-			att.Input.Content.ContentID(), "e2e-dep")
+	if att.Input.Provenance.Content.ContentID() != "e2e-dep" {
+		t.Errorf("Attestation.Input.Provenance.Content.ContentID() = %q, want %q",
+			att.Input.Provenance.Content.ContentID(), "e2e-dep")
 	}
 	if att.Input.Signer.RegistrySubject != registrySubject {
 		t.Errorf("Attestation.Input.Signer.RegistrySubject = %q, want %q",
