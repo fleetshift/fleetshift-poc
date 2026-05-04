@@ -10,6 +10,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/managedresourcerepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/storetest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
@@ -85,6 +86,18 @@ func TestStore(t *testing.T) {
 	storetest.Run(t, func(t *testing.T) domain.Store {
 		db := sqlite.OpenTestDB(t)
 		return &sqlite.Store{DB: db}
+	})
+}
+
+func TestManagedResourceRepo(t *testing.T) {
+	managedresourcerepotest.Run(t, func(t *testing.T) domain.Tx {
+		store := beginTestTx(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { tx.Rollback() })
+		return tx
 	})
 }
 

@@ -16,7 +16,7 @@ type FulfillmentRepo struct {
 	DB *sql.Tx
 }
 
-func (r *FulfillmentRepo) Create(ctx context.Context, f domain.Fulfillment) error {
+func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) error {
 	rt, err := json.Marshal(f.ResolvedTargets)
 	if err != nil {
 		return fmt.Errorf("marshal resolved targets: %w", err)
@@ -60,10 +60,10 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f domain.Fulfillment) erro
 		return fmt.Errorf("insert fulfillment: %w", err)
 	}
 
-	return r.flushPendingStrategyRecords(ctx, &f)
+	return r.flushPendingStrategyRecords(ctx, f)
 }
 
-func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (domain.Fulfillment, error) {
+func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (*domain.Fulfillment, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT `+fulfillmentColumnsJoined("f")+`
 		 FROM fulfillments f
@@ -71,10 +71,14 @@ func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (dom
 		 WHERE f.id = $1`,
 		string(id),
 	)
-	return scanFulfillment(row)
+	f, err := scanFulfillment(row)
+	if err != nil {
+		return nil, err
+	}
+	return &f, nil
 }
 
-func (r *FulfillmentRepo) Update(ctx context.Context, f domain.Fulfillment) error {
+func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) error {
 	rt, _ := json.Marshal(f.ResolvedTargets)
 	auth, _ := json.Marshal(f.Auth)
 	var provJSON []byte
@@ -110,7 +114,7 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f domain.Fulfillment) erro
 		return fmt.Errorf("fulfillment %q: %w", f.ID, domain.ErrNotFound)
 	}
 
-	return r.flushPendingStrategyRecords(ctx, &f)
+	return r.flushPendingStrategyRecords(ctx, f)
 }
 
 func (r *FulfillmentRepo) Delete(ctx context.Context, id domain.FulfillmentID) error {

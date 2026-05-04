@@ -394,7 +394,7 @@ func TestRepoRoundTrip_ProvenanceOnFulfillment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	if err := tx.Fulfillments().Create(ctx, f); err != nil {
+	if err := tx.Fulfillments().Create(ctx, &f); err != nil {
 		t.Fatalf("create fulfillment: %v", err)
 	}
 	if err := tx.Deployments().Create(ctx, domain.Deployment{

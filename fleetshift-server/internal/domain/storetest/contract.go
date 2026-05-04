@@ -15,7 +15,7 @@ import (
 // Factory creates a fresh [domain.Store] for each test invocation.
 type Factory func(t *testing.T) domain.Store
 
-func sampleFulfillment(id domain.FulfillmentID, now time.Time) domain.Fulfillment {
+func sampleFulfillment(id domain.FulfillmentID, now time.Time) *domain.Fulfillment {
 	f := domain.Fulfillment{
 		ID:        id,
 		State:     domain.FulfillmentStateCreating,
@@ -29,7 +29,7 @@ func sampleFulfillment(id domain.FulfillmentID, now time.Time) domain.Fulfillmen
 	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
 		Type: domain.PlacementStrategyAll,
 	}, now)
-	return f
+	return &f
 }
 
 // Run exercises the [domain.Store] contract.

@@ -71,7 +71,7 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 		f.AdvancePlacementStrategy(in.PlacementStrategy, now)
 		f.AdvanceRolloutStrategy(in.RolloutStrategy, now)
 
-		if err := tx.Fulfillments().Create(ctx, f); err != nil {
+		if err := tx.Fulfillments().Create(ctx, &f); err != nil {
 			return DeploymentView{}, err
 		}
 

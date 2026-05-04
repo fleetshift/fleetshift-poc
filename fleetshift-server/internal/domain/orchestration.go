@@ -193,7 +193,7 @@ func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID,
 		if err := tx.Commit(); err != nil {
 			return FulfillmentAndPool{}, fmt.Errorf("commit: %w", err)
 		}
-		return FulfillmentAndPool{Fulfillment: f, Pool: pool, SignerAssertion: sa}, nil
+		return FulfillmentAndPool{Fulfillment: *f, Pool: pool, SignerAssertion: sa}, nil
 	})
 }
 

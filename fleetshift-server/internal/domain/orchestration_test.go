@@ -68,7 +68,7 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	if err := tx.Fulfillments().Create(context.Background(), f); err != nil {
+	if err := tx.Fulfillments().Create(context.Background(), &f); err != nil {
 		t.Fatalf("seed fulfillment %q: %v", f.ID, err)
 	}
 	if err := tx.Deployments().Create(context.Background(), dep); err != nil {
@@ -122,7 +122,7 @@ func getFulfillment(t *testing.T, store domain.Store, id domain.DeploymentID) do
 	if err != nil {
 		t.Fatalf("get fulfillment for deployment %q: %v", id, err)
 	}
-	return f
+	return *f
 }
 
 func getThinDeployment(t *testing.T, store domain.Store, id domain.DeploymentID) domain.Deployment {
@@ -359,6 +359,14 @@ func (r *stubRegistry) RegisterResumeDeployment(_ *domain.ResumeDeploymentWorkfl
 }
 
 func (r *stubRegistry) RegisterProvisionIdP(_ *domain.ProvisionIdPWorkflowSpec) (domain.ProvisionIdPWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterCreateManagedResource(_ *domain.CreateManagedResourceWorkflowSpec) (domain.CreateManagedResourceWorkflow, error) {
+	return nil, nil
+}
+
+func (r *stubRegistry) RegisterDeleteManagedResource(_ *domain.DeleteManagedResourceWorkflowSpec) (domain.DeleteManagedResourceWorkflow, error) {
 	return nil, nil
 }
 

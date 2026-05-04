@@ -11,6 +11,7 @@ require (
 	github.com/cschleiden/go-workflows v1.4.1
 	github.com/fleetshift/fleetshift-poc/gen v0.0.0-00010101000000-000000000000
 	github.com/google/cel-go v0.27.0
+	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0
 	github.com/jackc/pgx/v5 v5.9.2

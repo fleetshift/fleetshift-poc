@@ -55,7 +55,7 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID,
 			return MutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 		return MutationResult{
-			View:          DeploymentView{Deployment: dep, Fulfillment: f},
+			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
 			FulfillmentID: dep.FulfillmentID,
 			MyGen:         f.Generation,
 		}, nil
@@ -78,7 +78,7 @@ func (s *DeleteDeploymentWorkflowSpec) LoadFulfillment() Activity[FulfillmentID,
 		if err != nil {
 			return nil, err
 		}
-		return &f, tx.Commit()
+		return f, tx.Commit()
 	})
 }
 

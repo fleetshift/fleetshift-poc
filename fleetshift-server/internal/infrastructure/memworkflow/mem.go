@@ -142,6 +142,14 @@ func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (
 	return &provisionIdPWorkflow{spec: spec}, nil
 }
 
+func (r *Registry) RegisterCreateManagedResource(spec *domain.CreateManagedResourceWorkflowSpec) (domain.CreateManagedResourceWorkflow, error) {
+	return &createManagedResourceWorkflow{spec: spec}, nil
+}
+
+func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResourceWorkflowSpec) (domain.DeleteManagedResourceWorkflow, error) {
+	return &deleteManagedResourceWorkflow{registry: r, spec: spec}, nil
+}
+
 // --- OrchestrationWorkflow ---
 
 type orchestrationWorkflow struct {
@@ -603,13 +611,81 @@ func (e *provisionExecution) AwaitResult(ctx context.Context) (domain.AuthMethod
 	}
 }
 
+// --- CreateManagedResourceWorkflow ---
+
+type createManagedResourceWorkflow struct {
+	spec *domain.CreateManagedResourceWorkflowSpec
+}
+
+func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+	done := make(chan managedResourceResult, 1)
+
+	go func() {
+		record := &baseRecord{
+			id:  "create-mr-" + string(input.Name),
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, input)
+		done <- managedResourceResult{val: val, err: err}
+	}()
+
+	return &managedResourceExecution{id: "create-mr-" + string(input.Name), done: done}, nil
+}
+
+// --- DeleteManagedResourceWorkflow ---
+
+type deleteManagedResourceWorkflow struct {
+	registry *Registry
+	spec     *domain.DeleteManagedResourceWorkflowSpec
+}
+
+func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+	done := make(chan managedResourceResult, 1)
+
+	go func() {
+		record := &baseRecord{
+			id:  fmt.Sprintf("delete-mr-%s-%s", input.ResourceType, input.Name),
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, input)
+		done <- managedResourceResult{val: val, err: err}
+	}()
+
+	return &managedResourceExecution{
+		id:   fmt.Sprintf("delete-mr-%s-%s", input.ResourceType, input.Name),
+		done: done,
+	}, nil
+}
+
+type managedResourceResult struct {
+	val domain.ManagedResourceView
+	err error
+}
+
+type managedResourceExecution struct {
+	id   string
+	done <-chan managedResourceResult
+}
+
+func (e *managedResourceExecution) WorkflowID() string { return e.id }
+func (e *managedResourceExecution) AwaitResult(ctx context.Context) (domain.ManagedResourceView, error) {
+	select {
+	case r := <-e.done:
+		return r.val, r.err
+	case <-ctx.Done():
+		return domain.ManagedResourceView{}, ctx.Err()
+	}
+}
+
 // Compile-time interface checks.
 var (
-	_ domain.Registry                  = (*Registry)(nil)
-	_ domain.OrchestrationWorkflow     = (*orchestrationWorkflow)(nil)
-	_ domain.CreateDeploymentWorkflow  = (*createDeploymentWorkflow)(nil)
-	_ domain.DeleteDeploymentWorkflow  = (*deleteDeploymentWorkflow)(nil)
-	_ domain.DeleteCleanupWorkflow     = (*deleteCleanupWorkflow)(nil)
-	_ domain.ResumeDeploymentWorkflow  = (*resumeDeploymentWorkflow)(nil)
-	_ domain.ProvisionIdPWorkflow      = (*provisionIdPWorkflow)(nil)
+	_ domain.Registry                      = (*Registry)(nil)
+	_ domain.OrchestrationWorkflow         = (*orchestrationWorkflow)(nil)
+	_ domain.CreateDeploymentWorkflow      = (*createDeploymentWorkflow)(nil)
+	_ domain.DeleteDeploymentWorkflow      = (*deleteDeploymentWorkflow)(nil)
+	_ domain.DeleteCleanupWorkflow         = (*deleteCleanupWorkflow)(nil)
+	_ domain.ResumeDeploymentWorkflow      = (*resumeDeploymentWorkflow)(nil)
+	_ domain.ProvisionIdPWorkflow          = (*provisionIdPWorkflow)(nil)
+	_ domain.CreateManagedResourceWorkflow = (*createManagedResourceWorkflow)(nil)
+	_ domain.DeleteManagedResourceWorkflow = (*deleteManagedResourceWorkflow)(nil)
 )

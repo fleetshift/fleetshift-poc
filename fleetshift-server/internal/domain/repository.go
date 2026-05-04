@@ -16,9 +16,9 @@ type TargetRepository interface {
 // [Fulfillment.DrainPendingStrategyRecords]) and insert them.
 // Get materializes current strategy specs by joining the version tables.
 type FulfillmentRepository interface {
-	Create(ctx context.Context, f Fulfillment) error
-	Get(ctx context.Context, id FulfillmentID) (Fulfillment, error)
-	Update(ctx context.Context, f Fulfillment) error
+	Create(ctx context.Context, f *Fulfillment) error
+	Get(ctx context.Context, id FulfillmentID) (*Fulfillment, error)
+	Update(ctx context.Context, f *Fulfillment) error
 	Delete(ctx context.Context, id FulfillmentID) error
 }
 
@@ -51,4 +51,29 @@ type DeliveryRepository interface {
 	GetByFulfillmentTarget(ctx context.Context, fID FulfillmentID, tID TargetID) (Delivery, error)
 	ListByFulfillment(ctx context.Context, fID FulfillmentID) ([]Delivery, error)
 	DeleteByFulfillment(ctx context.Context, fID FulfillmentID) error
+}
+
+// ManagedResourceRepository persists managed resource types, versioned
+// intents, and instance HEAD records. Grouped into a single repository
+// because these three tables form a cohesive aggregate boundary.
+//
+// Intent versioning is owned by the [ManagedResource] aggregate.
+// CreateInstance (and future UpdateInstance) drain pending intents via
+// [ManagedResource.DrainPendingIntents] and flush them to storage.
+type ManagedResourceRepository interface {
+	// Type registration
+	CreateType(ctx context.Context, def ManagedResourceTypeDef) error
+	GetType(ctx context.Context, rt ResourceType) (ManagedResourceTypeDef, error)
+	ListTypes(ctx context.Context) ([]ManagedResourceTypeDef, error)
+	DeleteType(ctx context.Context, rt ResourceType) error
+
+	// Versioned intent (read-only; writes go through the aggregate drain)
+	GetIntent(ctx context.Context, rt ResourceType, name ResourceName, version IntentVersion) (ResourceIntent, error)
+
+	// Instance aggregate (Create drains pending intents)
+	CreateInstance(ctx context.Context, mr *ManagedResource) error
+	GetInstance(ctx context.Context, rt ResourceType, name ResourceName) (*ManagedResource, error)
+	GetView(ctx context.Context, rt ResourceType, name ResourceName) (ManagedResourceView, error)
+	ListViewsByType(ctx context.Context, rt ResourceType) ([]ManagedResourceView, error)
+	DeleteInstance(ctx context.Context, rt ResourceType, name ResourceName) error
 }

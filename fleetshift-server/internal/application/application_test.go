@@ -561,7 +561,7 @@ func seedDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID,
 		t.Fatalf("Begin: %v", err)
 	}
 	defer tx.Rollback()
-	if err := tx.Fulfillments().Create(ctx, f); err != nil {
+	if err := tx.Fulfillments().Create(ctx, &f); err != nil {
 		t.Fatalf("Create fulfillment: %v", err)
 	}
 	d := domain.Deployment{

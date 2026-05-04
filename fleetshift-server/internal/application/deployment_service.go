@@ -197,7 +197,7 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	}
 
 	if fulfillment.State == domain.FulfillmentStateDeleting {
-		return domain.DeploymentView{Deployment: dep, Fulfillment: fulfillment}, nil
+		return domain.DeploymentView{Deployment: dep, Fulfillment: *fulfillment}, nil
 	}
 
 	exec, err := s.DeleteWF.Start(ctx, id, fulfillment.Generation)

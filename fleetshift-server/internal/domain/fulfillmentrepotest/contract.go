@@ -54,7 +54,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -97,7 +97,7 @@ func Run(t *testing.T, factory Factory) {
 			VersionConflictPolicy: domain.VersionConflictCompleteAll,
 		}, fixedTime)
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -139,7 +139,7 @@ func Run(t *testing.T, factory Factory) {
 			},
 		}
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -177,8 +177,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
-		err := repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
+		err := repo.Create(ctx, &f)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second Create: got %v, want ErrAlreadyExists", err)
 		}
@@ -196,7 +196,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
 		f.DrainPendingStrategyRecords()
 
 		laterTime := fixedTime.Add(5 * time.Minute)
@@ -204,7 +204,7 @@ func Run(t *testing.T, factory Factory) {
 		f.ResolvedTargets = []domain.TargetID{"t1", "t2"}
 		f.UpdatedAt = laterTime
 		f.Generation = 3
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 
@@ -225,7 +225,7 @@ func Run(t *testing.T, factory Factory) {
 
 	t.Run("UpdateNotFound", func(t *testing.T) {
 		repo := factory(t)
-		err := repo.Update(context.Background(), domain.Fulfillment{ID: "nonexistent"})
+		err := repo.Update(context.Background(), &domain.Fulfillment{ID: "nonexistent"})
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Update: got %v, want ErrNotFound", err)
 		}
@@ -234,7 +234,8 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("Delete", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		_ = repo.Create(ctx, sampleFulfillment())
+		f := sampleFulfillment()
+		_ = repo.Create(ctx, &f)
 		if err := repo.Delete(ctx, "f1"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
@@ -261,7 +262,7 @@ func Run(t *testing.T, factory Factory) {
 			VersionConflictPolicy: domain.VersionConflictCompleteAll,
 		}, fixedTime)
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
@@ -295,7 +296,7 @@ func Run(t *testing.T, factory Factory) {
 			Targets: []domain.TargetID{"t3"},
 		}, fixedTime)
 
-		if err := repo.Create(ctx, f2); err != nil {
+		if err := repo.Create(ctx, &f2); err != nil {
 			t.Fatalf("re-Create after delete: %v", err)
 		}
 
@@ -321,7 +322,7 @@ func Run(t *testing.T, factory Factory) {
 		f.Generation = 3
 		f.ObservedGeneration = 2
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		got, err := repo.Get(ctx, "f1")
@@ -340,12 +341,12 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
 		f.DrainPendingStrategyRecords()
 
 		f.Generation = 5
 		f.ObservedGeneration = 3
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 
@@ -365,7 +366,7 @@ func Run(t *testing.T, factory Factory) {
 		gen := domain.Generation(5)
 		f.ActiveWorkflowGen = &gen
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		got, err := repo.Get(ctx, "f1")
@@ -385,7 +386,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		f := sampleFulfillment()
 
-		if err := repo.Create(ctx, f); err != nil {
+		if err := repo.Create(ctx, &f); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		got, err := repo.Get(ctx, "f1")
@@ -401,13 +402,13 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
 		f.DrainPendingStrategyRecords()
 
 		gen := domain.Generation(2)
 		f.ActiveWorkflowGen = &gen
 		f.UpdatedAt = fixedTime.Add(time.Minute)
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update (set): %v", err)
 		}
 		got, _ := repo.Get(ctx, "f1")
@@ -417,7 +418,7 @@ func Run(t *testing.T, factory Factory) {
 
 		f.ActiveWorkflowGen = nil
 		f.UpdatedAt = fixedTime.Add(2 * time.Minute)
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update (clear): %v", err)
 		}
 		got, _ = repo.Get(ctx, "f1")
@@ -430,7 +431,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
 		f.DrainPendingStrategyRecords()
 
 		advTime := fixedTime.Add(time.Hour)
@@ -440,7 +441,7 @@ func Run(t *testing.T, factory Factory) {
 				{Raw: json.RawMessage(`{"kind":"Secret"}`)},
 			},
 		}, advTime)
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 
@@ -457,7 +458,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 		f := sampleFulfillment()
-		_ = repo.Create(ctx, f)
+		_ = repo.Create(ctx, &f)
 		f.DrainPendingStrategyRecords()
 
 		f.AdvanceRolloutStrategy(&domain.RolloutStrategySpec{
@@ -477,7 +478,7 @@ func Run(t *testing.T, factory Factory) {
 			ExpectedGeneration: 1,
 		}
 		f.UpdatedAt = fixedTime.Add(time.Minute)
-		if err := repo.Update(ctx, f); err != nil {
+		if err := repo.Update(ctx, &f); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
 

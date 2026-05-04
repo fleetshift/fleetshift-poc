@@ -22,7 +22,7 @@ func Run(t *testing.T, factory Factory) {
 	fixedTime := time.Date(2026, 3, 2, 12, 0, 0, 0, time.UTC)
 	ctx := context.Background()
 
-	sampleFulfillment := func(id domain.FulfillmentID) domain.Fulfillment {
+	sampleFulfillment := func(id domain.FulfillmentID) *domain.Fulfillment {
 		f := domain.Fulfillment{
 			ID:        id,
 			State:     domain.FulfillmentStateCreating,
@@ -37,7 +37,7 @@ func Run(t *testing.T, factory Factory) {
 			Type:    domain.PlacementStrategyStatic,
 			Targets: []domain.TargetID{"t1", "t2"},
 		}, fixedTime)
-		return f
+		return &f
 	}
 
 	sampleThinDeployment := func(depID domain.DeploymentID, fid domain.FulfillmentID) domain.Deployment {

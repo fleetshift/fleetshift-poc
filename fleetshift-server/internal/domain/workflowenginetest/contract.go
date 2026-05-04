@@ -481,7 +481,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			}
 			ful := view.Fulfillment
 			ful.BumpGeneration()
-			if err := tx.Fulfillments().Update(ctx, ful); err != nil {
+			if err := tx.Fulfillments().Update(ctx, &ful); err != nil {
 				t.Fatalf("Fulfillments.Update: %v", err)
 			}
 			if err := tx.Commit(); err != nil {
@@ -1025,7 +1025,7 @@ func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, dep
 		t.Fatalf("Begin: %v", err)
 	}
 	defer tx.Rollback()
-	must(t, tx.Fulfillments().Create(ctx, f))
+	must(t, tx.Fulfillments().Create(ctx, &f))
 	must(t, tx.Deployments().Create(ctx, dep))
 	must(t, tx.Commit())
 	return fID

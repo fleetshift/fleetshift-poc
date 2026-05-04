@@ -121,6 +121,8 @@ type Registry interface {
 	RegisterDeleteCleanup(spec *DeleteCleanupWorkflowSpec) (DeleteCleanupWorkflow, error)
 	RegisterResumeDeployment(spec *ResumeDeploymentWorkflowSpec) (ResumeDeploymentWorkflow, error)
 	RegisterProvisionIdP(spec *ProvisionIdPWorkflowSpec) (ProvisionIdPWorkflow, error)
+	RegisterCreateManagedResource(spec *CreateManagedResourceWorkflowSpec) (CreateManagedResourceWorkflow, error)
+	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
 	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
 	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
 }
@@ -170,6 +172,18 @@ type DeleteCleanupWorkflow interface {
 // instance ID for same-type dedup.
 type ResumeDeploymentWorkflow interface {
 	Start(ctx context.Context, input ResumeDeploymentInput, observedGen Generation) (Execution[DeploymentView], error)
+}
+
+// CreateManagedResourceWorkflow is a registered create-managed-resource
+// workflow. Returned by [Registry.RegisterCreateManagedResource].
+type CreateManagedResourceWorkflow interface {
+	Start(ctx context.Context, input CreateManagedResourceInput) (Execution[ManagedResourceView], error)
+}
+
+// DeleteManagedResourceWorkflow is a registered delete-managed-resource
+// workflow. Returned by [Registry.RegisterDeleteManagedResource].
+type DeleteManagedResourceWorkflow interface {
+	Start(ctx context.Context, input DeleteManagedResourceInput) (Execution[ManagedResourceView], error)
 }
 
 // ContinueAsNewError is returned by a workflow body to request that

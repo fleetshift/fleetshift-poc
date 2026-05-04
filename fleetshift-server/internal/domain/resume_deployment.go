@@ -109,7 +109,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			return MutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 		return MutationResult{
-			View:          DeploymentView{Deployment: dep, Fulfillment: f},
+			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
 			FulfillmentID: dep.FulfillmentID,
 			MyGen:         f.Generation,
 		}, nil
@@ -132,7 +132,7 @@ func (s *ResumeDeploymentWorkflowSpec) LoadFulfillment() Activity[FulfillmentID,
 		if err != nil {
 			return nil, err
 		}
-		return &f, tx.Commit()
+		return f, tx.Commit()
 	})
 }
 

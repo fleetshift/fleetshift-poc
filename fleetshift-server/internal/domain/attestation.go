@@ -24,8 +24,8 @@ type OutputConstraint struct {
 
 // InputContent is a typed union for the content that a signer
 // authorizes. Matches the hybrid attestation PoC's InputContent
-// protocol. Valid implementations are [DeploymentContent] and (in
-// OME-44) ManagedResourceContent.
+// protocol. Valid implementations are [DeploymentContent] and
+// [ManagedResourceContent].
 type InputContent interface {
 	ContentID() string
 	ContentType() string
@@ -40,9 +40,26 @@ type DeploymentContent struct {
 	PlacementStrategy PlacementStrategySpec
 }
 
-func (c DeploymentContent) ContentID() string   { return string(c.DeploymentID) }
-func (c DeploymentContent) ContentType() string  { return "deployment" }
-func (DeploymentContent) inputContent()          {}
+func (c DeploymentContent) ContentID() string  { return string(c.DeploymentID) }
+func (c DeploymentContent) ContentType() string { return "deployment" }
+func (DeploymentContent) inputContent()         {}
+
+// ManagedResourceContent is the user's signed intent for a managed
+// resource. Contains only what the user knows and authorizes: the
+// resource type, name, and spec. The addon routing (which addon handles
+// it) comes from the [ManagedResourceTypeDef]'s relation and is carried
+// separately as a [SignedRelation] in the attestation bundle.
+//
+// Matches the hybrid attestation PoC's ManagedResourceContent.
+type ManagedResourceContent struct {
+	ResourceType ResourceType    `json:"resource_type"`
+	ResourceName ResourceName    `json:"resource_name"`
+	Spec         json.RawMessage `json:"spec"`
+}
+
+func (c ManagedResourceContent) ContentID() string  { return string(c.ResourceName) }
+func (c ManagedResourceContent) ContentType() string { return "managed_resource" }
+func (ManagedResourceContent) inputContent()         {}
 
 // Provenance carries the cryptographic proof that a user authorized
 // a fulfillment. Stored on the [Fulfillment] and composed into
@@ -60,12 +77,13 @@ type Provenance struct {
 // Content field uses a discriminated union (ContentType + typed field)
 // for polymorphic InputContent serialization.
 type provenanceJSON struct {
-	ContentType        string             `json:"ContentType"`
-	DeploymentContent  *DeploymentContent `json:"DeploymentContent,omitempty"`
-	Sig                Signature          `json:"Sig"`
-	ValidUntil         time.Time          `json:"ValidUntil"`
-	ExpectedGeneration Generation         `json:"ExpectedGeneration"`
-	OutputConstraints  []OutputConstraint `json:"OutputConstraints,omitempty"`
+	ContentType            string                  `json:"ContentType"`
+	DeploymentContent      *DeploymentContent      `json:"DeploymentContent,omitempty"`
+	ManagedResourceContent *ManagedResourceContent `json:"ManagedResourceContent,omitempty"`
+	Sig                    Signature               `json:"Sig"`
+	ValidUntil             time.Time               `json:"ValidUntil"`
+	ExpectedGeneration     Generation              `json:"ExpectedGeneration"`
+	OutputConstraints      []OutputConstraint      `json:"OutputConstraints,omitempty"`
 }
 
 // MarshalJSON implements [json.Marshaler] for Provenance.
@@ -83,6 +101,12 @@ func (p Provenance) MarshalJSON() ([]byte, error) {
 	case *DeploymentContent:
 		j.ContentType = "deployment"
 		j.DeploymentContent = c
+	case ManagedResourceContent:
+		j.ContentType = "managed_resource"
+		j.ManagedResourceContent = &c
+	case *ManagedResourceContent:
+		j.ContentType = "managed_resource"
+		j.ManagedResourceContent = c
 	case nil:
 		// no content
 	default:
@@ -105,6 +129,10 @@ func (p *Provenance) UnmarshalJSON(data []byte) error {
 	case "deployment":
 		if j.DeploymentContent != nil {
 			p.Content = *j.DeploymentContent
+		}
+	case "managed_resource":
+		if j.ManagedResourceContent != nil {
+			p.Content = *j.ManagedResourceContent
 		}
 	case "":
 		p.Content = nil
