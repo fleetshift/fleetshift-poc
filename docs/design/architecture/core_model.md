@@ -4,7 +4,7 @@
 
 The stable vocabulary and contracts at the center of the architecture:
 
-- the deployment abstraction
+- the deployment abstraction and the fulfillment kernel primitive
 - delivery authorization
 - strategy types
 - the delivery contract
@@ -31,7 +31,7 @@ Read this when you need the platform's core mental model before diving into exec
 
 ## Deployment as three strategy axes
 
-> **Implementation note.** In the codebase, the three strategy axes and orchestration state live on the **Fulfillment** kernel primitive — a separate aggregate from the user-facing `Deployment`. A `Deployment` is a thin aggregate that holds a `FulfillmentID` reference; the `DeploymentView` read model joins the two for the API. Orchestration operates on `Fulfillment` directly. This separation enables other user-facing concepts (managed resources, campaigns) to drive the same orchestration pipeline. See [managed_resources.md](../managed_resources.md#architectural-layering) for the full layering model.
+> **Implementation note.** In the codebase, the three strategy axes and orchestration state live on the **Fulfillment** kernel primitive — a separate aggregate from the user-facing `Deployment`. A `Deployment` is a thin aggregate holding identity (`DeploymentID`, `UID`, `Etag`) and a `FulfillmentID` reference; the `DeploymentView` read model joins the two for the API layer. Orchestration operates on `Fulfillment` directly. This separation enables other user-facing concepts (managed resources, campaigns) to drive the same orchestration pipeline without conflating their identity, lifecycle, or API with each other. See [managed_resources.md](../managed_resources.md#architectural-layering) for the full layering model.
 
 The management plane decomposes every deployment into three orthogonal, pluggable strategies:
 
@@ -77,6 +77,20 @@ graph TB
     rolloutSpec --> rolloutTypes
 ```
 
+## Fulfillment as kernel primitive
+
+The **Fulfillment** is the kernel's unit of orchestration. It owns:
+
+- the three strategy axes (manifest, placement, rollout) with independent version streams
+- resolved target state
+- lifecycle state and status reason
+- delivery authorization context and provenance
+- generation and observed-generation for convergence tracking
+
+Fulfillments are not directly created or edited by users. User-facing concepts — deployments, managed resources, and future concepts like campaigns — each own exactly one Fulfillment. They mutate it through domain services that bump the Fulfillment's generation, triggering reconciliation. The Fulfillment has no direct edit API; it is inert by default, and each owning concept grants specific capabilities.
+
+This design avoids the problem where a general-purpose primitive must restrict itself based on who owns it ("you can't edit this deployment because it's owned by a managed resource"). Instead, the kernel primitive is always internal, and the concept that created it defines its own API surface and lifecycle rules.
+
 ## Delivery authorization
 
 The platform is designed to limit the trust placed in the platform itself: a compromise of the management platform should not compromise an entire multi-tenant provider estate.
@@ -92,7 +106,7 @@ Delivery authorization = CredentialPresentation × Provenance
 
 These are orthogonal. Any provenance mode can compose with any credential-presentation mode. They describe delivery authority, not orchestration behavior, so they are not modeled as a fourth strategy axis.
 
-When credentials or attestation are missing, expired, or insufficient, the deployment transitions to `PausedAuth`. This is the universal fallback: it pauses the deployment in a recoverable state until an authorized user resumes it with fresh approval.
+When credentials or attestation are missing, expired, or insufficient, the fulfillment transitions to `PausedAuth`. This is the universal fallback: it pauses the fulfillment in a recoverable state until an authorized user resumes it with fresh approval.
 
 This document keeps only the architectural boundary. The full trust model, signing model, and operational details live in [../authentication.md](../authentication.md).
 

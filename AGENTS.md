@@ -7,8 +7,8 @@ This is the monorepo for FleetShift, a fleet management platform. It contains th
 The architecture documentation lives in docs/design/ and is the primary source of truth for domain concepts, system design, and open questions.
 
 - Start with docs/design/architecture.md -- it gives the system's core mental model, names the major subsystems, and contains a reading guide that routes to the detailed sub-documents in docs/design/architecture/:
-  - core_model.md -- core vocabulary, strategy axes, target model, delivery contract, single-pod invariant
-  - orchestration.md -- deployment execution, re-evaluation, rollout
+  - core_model.md -- core vocabulary, strategy axes, fulfillment kernel primitive, target model, delivery contract, single-pod invariant
+  - orchestration.md -- fulfillment execution, re-evaluation, rollout
   - fleetlet_and_transport.md -- fleetlets, channels, proxying, routing, data paths
   - tenancy_and_permissions.md -- provider/tenant/workspace model, generic permission boundary
   - addon_integration.md -- capability registration, addon strategy contracts, managed-resource bridging, UI/API extensions

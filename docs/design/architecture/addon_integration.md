@@ -85,9 +85,9 @@ The fleetlet-channel model is the primary production path because it preserves t
 
 ## `InvalidateManifests`
 
-`InvalidateManifests` is the direct signal that an addon's internal state changed and its manifests should be regenerated for affected deployments.
+`InvalidateManifests` is the direct signal that an addon's internal state changed and its manifests should be regenerated for affected fulfillments.
 
-The platform responds by:
+The platform responds by advancing the manifest strategy version on each affected fulfillment (bumping its generation), which triggers reconciliation:
 
 1. re-running the addon's `ManifestGenerator`
 2. diffing new output against previously stored output
@@ -116,10 +116,10 @@ The important architectural relationship here is structural:
 
 - the user submits a managed-resource spec
 - the platform stores that signed spec
-- the platform derives a deployment that targets the addon itself
+- the platform derives a fulfillment that targets the addon itself
 - the addon fulfills that resource through the normal orchestration pipeline
 
-This gives managed resources provenance continuity and reuse of the same delivery shell without hard-coding a different control path in the platform.
+Managed resources, like deployments, are user-facing concepts that own a fulfillment. The fulfillment is the kernel primitive that drives orchestration. This gives managed resources provenance continuity and reuse of the same delivery shell without hard-coding a different control path in the platform.
 
 The full managed-resource API shape, lifecycle, and open questions live in [../managed_resources.md](../managed_resources.md).
 

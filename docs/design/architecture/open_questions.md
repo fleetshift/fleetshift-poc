@@ -28,10 +28,10 @@ Read this when you are working in an area that still has intentional design unce
 
 ### Rollout strategy
 
-This is resolved and retained here only because it previously lived in the open-questions section: rollout is a first-class third strategy axis on deployments.
+This is resolved and retained here only because it previously lived in the open-questions section: rollout is a first-class third strategy axis on the fulfillment kernel primitive (user-facing deployments compose these three axes through their owned fulfillment).
 
 ```text
-Deployment = ManifestStrategy × PlacementStrategy × RolloutStrategy
+Fulfillment = ManifestStrategy × PlacementStrategy × RolloutStrategy
 ```
 
 The built-in default is `immediate`. Non-trivial rollout remains addon-driven through the same integration model as manifest and placement strategies.
@@ -68,7 +68,7 @@ The built-in default is `immediate`. Non-trivial rollout remains addon-driven th
 
 ### Deployment defaults for registered capabilities
 
-**Question:** When an addon registers a capability but no deployment exists yet, should the platform auto-create a default deployment or stay fully explicit?
+**Question:** When an addon registers a capability but no deployment exists yet, should the platform auto-create a default deployment (and thus a fulfillment) or stay fully explicit?
 
 **Context:** Some existing systems, such as OCM's `global` Placement, default to deploying everywhere. The explicit-opt-in model, where no deployment means nothing happens, is cleaner long term. This is primarily a UX decision rather than an architectural one.
 
@@ -78,6 +78,8 @@ The built-in default is `immediate`. Non-trivial rollout remains addon-driven th
 
 **Trade-off:** Whole-capability invalidation is simpler for addon authors. Per-target invalidation, such as when only one target's secret rotated, is more efficient at scale. A middle ground is to keep invalidation broad but always diff generated output against the previous version and skip delivery when unchanged, making whole-capability invalidation efficient in practice.
 
+**Context (Fulfillment split):** Invalidation now bumps the manifest strategy version on each affected fulfillment, advancing its generation. The orchestration pipeline diffs after re-generation, so unchanged targets are never re-delivered regardless of invalidation scope.
+
 ### `ManifestGenerator` error handling
 
 **Question:** If generation fails for one target, should the platform retry that target, skip it, or fail the whole invalidation batch?
@@ -86,9 +88,9 @@ The built-in default is `immediate`. Non-trivial rollout remains addon-driven th
 
 ### Rollback pacing
 
-**Question:** Should rollback use the deployment's rollout strategy or bypass it with immediate rollback to all targets?
+**Question:** Should rollback use the fulfillment's rollout strategy or bypass it with immediate rollback to all targets?
 
-**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. FleetShift's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the deployment's rollout strategy.
+**Context:** KubeFleet has no built-in rollback; operators manually stop the update run and fix the CRP. FleetShift's `Rollback` endpoint is an explicit addition. The trade-off is safety versus speed: staged rollback is safer if the rollback itself is risky, but rollback also exists to recover quickly. The current leaning is immediate rollback by default with an optional `"paced": true` flag that reuses the fulfillment's rollout strategy.
 
 ### Delivery-agent rollback mechanics
 
@@ -122,13 +124,17 @@ Sub-questions if that direction is worthwhile:
 
 **Question:** What happens when manifest invalidation fires while a rollout is already in progress?
 
-**Context:** The architecture already says that if the user changes the rollout strategy spec, the change governs the next rollout rather than retroactively changing the one in flight. Manifest invalidation during an active rollout is harder: does the platform supersede the current rollout and restart, push new manifests only to remaining steps, or do something else entirely? This is a state-machine problem that still needs a dedicated design.
+**Context:** The architecture already says that if the user changes the rollout strategy spec, the change governs the next rollout rather than retroactively changing the one in flight. Manifest invalidation during an active rollout is harder: does the platform supersede the current rollout and restart, push new manifests only to remaining steps, or do something else entirely?
+
+**Partial resolution:** The fulfillment's generation-based convergence provides a partial answer. Any mutation (including invalidation) bumps the fulfillment's generation. The orchestration workflow checks generation between rollout steps: if the generation advanced and the `VersionConflictPolicy` is `restart`, the current reconciliation completes early and a new pass starts from scratch with the latest state. The remaining design work is around non-restart policies and whether partial step completion should be preserved.
 
 ### Generation failures inside rollout batches
 
 **Question:** How should per-target generation failures propagate through a rollout batch, especially in relation to task evaluation and batch progression?
 
 **Context:** `Generate` runs per target inside the batch loop. If generation fails for a target, that target never enters the delivery pipeline. The missing design work is whether the platform should skip that target and continue the batch, block the batch until retry succeeds, or fail the batch entirely, and how any of those choices interact with rollout-strategy task evaluation.
+
+**Current behavior:** The orchestration workflow currently treats any generation failure as a terminal error for the fulfillment, transitioning it to `Failed` state. This is conservative but may be too aggressive for multi-target rollouts where one target has a transient issue.
 
 ### `DeploymentGroup` controller design
 

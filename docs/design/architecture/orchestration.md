@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-How deployments execute over time:
+How fulfillments execute over time:
 
 - pool and placement semantics
 - the orchestration pipeline
@@ -33,7 +33,7 @@ Read this when you need to understand how the platform computes target sets, pla
 
 The orchestration pipeline is always the same regardless of which concrete strategies are plugged in:
 
-1. Resolve the placement strategy against the deployment's pool
+1. Resolve the placement strategy against the fulfillment's pool
 2. Compute the delta against the previous target set
 3. Plan the rollout from that delta
 4. Generate manifests per target in each batch
@@ -47,7 +47,7 @@ A **pool** produces a target set from nothing: `Pool() -> Target[]`.
 
 A **placement** produces a target set from a target set: `Resolve(Target[]) -> Target[]`.
 
-These are orthogonal. The pool determines which targets exist as candidates; placement selects among those candidates. Every deployment has a pool. Placement never fetches targets on its own.
+These are orthogonal. The pool determines which targets exist as candidates; placement selects among those candidates. Every fulfillment has a pool. Placement never fetches targets on its own.
 
 Pools can be:
 
@@ -66,28 +66,28 @@ This has two important effects:
 
 ### Why pool is a first-class input
 
-- **Persistent authority.** A deployment keeps running after the original request. The pool fixes its scope even when there is no current user in memory.
+- **Persistent authority.** A fulfillment keeps running after the original request. The pool fixes its scope even when there is no current user in memory.
 - **Composition.** Placement can keep the uniform shape `Resolve(ctx, pool) -> targets`, which enables chaining or layering of placement logic.
 - **Re-evaluation.** When pool membership or target labels change, the platform reloads the pool and re-runs placement without changing the placement contract.
 
 ## Execution model
 
 ```text
-for each deployment in workspace:
-    targets = deployment.PlacementStrategy.Resolve(deployment.pool)
+for each fulfillment requiring reconciliation:
+    targets = fulfillment.PlacementStrategy.Resolve(fulfillment.pool)
     delta = diff(targets, previous_targets)
 
-    plan = deployment.RolloutStrategy.Plan(delta)
+    plan = fulfillment.RolloutStrategy.Plan(delta)
     for step in plan.steps:
         if step.remove:
             for target in step.remove.targets:
-                deployment.ManifestStrategy.OnRemoved(target)
+                fulfillment.ManifestStrategy.OnRemoved(target)
                 remove(target)
             evaluate(step.remove.afterTasks)
         if step.deliver:
             evaluate(step.deliver.beforeTasks)
             for target in step.deliver.targets:
-                manifests = deployment.ManifestStrategy.Generate(gctx)
+                manifests = fulfillment.ManifestStrategy.Generate(gctx)
                 if manifests != stored_previous(target):
                     deliver(target, manifests)
             evaluate(step.deliver.afterTasks)
@@ -101,7 +101,7 @@ Removals are not a separate subsystem. They are part of the rollout plan and can
 
 Manifest diffing is two-phase:
 
-1. The platform compares newly generated output to the stored previous output per deployment and target.
+1. The platform compares newly generated output to the stored previous output per fulfillment and target.
 2. If the output changed, the platform sends the full new payload to the target's delivery agent.
 
 This allows the platform to skip unchanged deliveries entirely.
@@ -122,8 +122,10 @@ This implies at-least-once invocation for strategy callbacks. Strategy implement
 
 Placement and manifest strategies can become stale. Re-evaluation happens in two broad ways:
 
-1. **User input changes.** The user PATCHes the deployment spec.
-2. **Strategy state changes.** The strategy's own state changes and it signals recompute.
+1. **User input changes.** The owning concept (deployment, managed resource) mutates the fulfillment's strategy, advancing its generation.
+2. **Strategy state changes.** The strategy's own state changes and the addon signals recompute (e.g. `InvalidateManifests`), advancing the fulfillment's generation.
+
+In both cases, a generation advance triggers a new reconciliation pass through the pipeline.
 
 ### Downstream effects by axis
 
@@ -133,7 +135,7 @@ Placement and manifest strategies can become stale. Re-evaluation happens in two
 
 A strategy-triggered signal only re-runs that strategy and its downstream effects. Manifest invalidation does not force placement to re-run. A score change does not force regeneration for unchanged targets.
 
-Rollout is categorically different from manifest or placement output. A rollout task completing is not invalidation; it is the rollout moving forward in time.
+Rollout is categorically different from manifest or placement output. A rollout task completing is not invalidation; it is the fulfillment moving forward in time.
 
 ## Rollout strategies
 
@@ -146,9 +148,13 @@ Each step can include before-tasks and after-tasks. The platform executes steps 
 
 The built-in `immediate` strategy emits one remove step followed by one deliver step, both ungated. Addon-provided rollout strategies can implement batching, approvals, time delays, disruption policies, health gates, and other sequencing logic without changing the platform's executor.
 
+### Generation-aware mid-rollout preemption
+
+Between rollout steps, the orchestration checks whether the fulfillment's generation has advanced since the current reconciliation started. If it has and the rollout strategy's `VersionConflictPolicy` is `restart`, the current reconciliation completes early so the next generation can be reconciled from scratch. This prevents stale deliveries when a new user mutation or invalidation arrives mid-rollout.
+
 ## DeploymentGroup
 
-Complex applications often consist of multiple components with ordering dependencies. `DeploymentGroup` is a platform-native manifest kind that orchestrates these multi-component applications while still using the standard deployment model.
+Complex applications often consist of multiple components with ordering dependencies. `DeploymentGroup` is a platform-native manifest kind that orchestrates these multi-component applications while still using the standard deployment and fulfillment model.
 
 ### `DeploymentGroup` as a manifest
 

@@ -100,7 +100,7 @@ A compromised platform cannot subvert IdP trust on existing targets, so long as 
 
 The platform's delivery authority is contingent on target delivery authorizing a credential and validating provenance. It is only a courier.
 
-Credentials and provenance are often time and scope bound. Tokens expire. Keys rotate. Permissions change. When the platform isn't a super authority–when it's just a courier–it can reach a scenario when what it's trying to be delivered is refused. This design treats this as an expected and recoverable state: e.g. "PausedAuth". **PausedAuth** is the universal fallback. Whenever credentials or attestation is missing, expired, or no longer sufficient, the deployment transitions to `PausedAuth` instead of failing. An authorized user can resume it with fresh approval or fresh credentials. CIBA (Client-Initiated Backchannel Authentication) composes naturally with this: `PausedAuth` is the state ("we need credentials"), and CIBA is one way to obtain them ("prompt the user on another device").
+Credentials and provenance are often time and scope bound. Tokens expire. Keys rotate. Permissions change. When the platform isn't a super authority–when it's just a courier–it can reach a scenario when what it's trying to be delivered is refused. This design treats this as an expected and recoverable state: e.g. "PausedAuth". **PausedAuth** is the universal fallback. Whenever credentials or attestation is missing, expired, or no longer sufficient, the fulfillment transitions to `PausedAuth` instead of failing. An authorized user can resume it with fresh approval or fresh credentials. CIBA (Client-Initiated Backchannel Authentication) composes naturally with this: `PausedAuth` is the state ("we need credentials"), and CIBA is one way to obtain them ("prompt the user on another device").
 
 ## Credential presentation
 
@@ -110,7 +110,7 @@ Whose credential applies the resources at the target. This is the user-facing ch
 
 The simplest model: the user's bearer token is passed through to the target. Full end-to-end user identity. Works while the token lives. Prefer keeping it in memory only; if replay/recovery requires persistence, treat it as a short-lived credential and handle it accordingly.
 
-When the token expires mid-rollout, or on workflow replay, the deployment transitions to `PausedAuth` and waits for an authorized user to resume it with a fresh token. Any authorized user can resume; this gives approval-gate semantics for free.
+When the token expires mid-rollout, or on workflow replay, the fulfillment transitions to `PausedAuth` and waits for an authorized user to resume it with a fresh token. Any authorized user can resume; this gives approval-gate semantics for free.
 
 #### Refresh tokens (credential durability for run as me)
 
@@ -144,7 +144,7 @@ Ideally:
 - Something expires these over time
 - When the user's permissions shrink below those of their shadow service accounts, the delegated service accounts are automatically restricted too
 
-You could also "just" create specific service accounts to run workloads that you wanted long-running, with strict permissions. If they ever tried to escape that, the deployment pauses for approval.
+You could also "just" create specific service accounts to run workloads that you wanted long-running, with strict permissions. If they ever tried to escape that, the fulfillment pauses for approval.
 
 Trade-offs:
 
@@ -346,9 +346,9 @@ For derived inputs (updates), the delivery agent recursively verifies the entire
 
 Both sources are combined; all constraints must pass. This replaces a simple "derivation consistency" check with a more general model: the signed input is not just data — it is a compact declaration of how verification must work.
 
-**Phase 3: Generation check.** If the signed input includes an `expected_generation`, the delivery agent checks it against its local deployment state for replay protection.
+**Phase 3: Generation check.** If the signed input includes an `expected_generation`, the delivery agent checks it against its local fulfillment state for replay protection.
 
-Any check failure transitions the deployment to `PausedAuth`.
+Any check failure transitions the fulfillment to `PausedAuth`.
 
 This is compatible with manifest invalidation. When manifests are re-generated (e.g., config rotation triggers `InvalidateManifests`), the intent hasn't changed — the same signature is still valid. New manifests must still satisfy the same constraints. See "Verification level: intent signing vs. output signing" above for the tradeoffs between signing the intent vs. the output.
 

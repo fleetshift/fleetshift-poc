@@ -142,13 +142,13 @@ SQLite remains viable for smaller instances, while Postgres is the expected prod
 
 Initial syncs stay manageable as well. After an agent restart, a full resource dump is roughly 11 MB per target. Even a worst-case rolling restart across 500 targets is about 5.5 GB over 5 minutes, and in practice restarts can be staggered or prioritized for high-value resource types first.
 
-## Relationship to platform deployments
+## Relationship to fulfillment intent
 
-The platform knows what it intended through deployment resources. Inventory knows what is actually observed, including resources that may not map 1:1 to delivered manifests. Joining those two views enables:
+The platform knows what it intended through fulfillments and their delivery records. Inventory knows what is actually observed, including resources that may not map 1:1 to delivered manifests. Joining those two views enables:
 
-- deployment-aware search
-- drift detection
-- richer deployment status views
+- intent-aware search (which fulfillment delivered what to where)
+- drift detection between delivered manifests and observed state
+- richer status views for user-facing concepts (deployments, managed resources)
 - impact analysis for placement changes
 
 This is one of the reasons indexing belongs in the core architecture rather than as an addon-only concern.

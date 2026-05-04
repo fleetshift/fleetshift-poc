@@ -61,21 +61,23 @@ Target types can be things like:
 - `platform`: manifests are FleetShift API objects delivered to a child platform
 - `local`: the platform itself, addressed in-process
 
-Addons can register their own target types and delivery agents while still participating in the same deployment pipeline.
+Addons can register their own target types and delivery agents while still participating in the same orchestration pipeline.
 
 The detailed model for targets, delivery agents, and the delivery contract lives in [docs/design/architecture/core_model.md](architecture/core_model.md).
 
 ### Orchestration spine
 
-Every deployment follows the same high-level execution flow:
+Every fulfillment follows the same high-level execution flow:
 
-1. Resolve placement against the deployment pool
+1. Resolve placement against the fulfillment's pool
 2. Compute the delta from the previous target set
 3. Plan rollout steps
 4. Generate manifests per target
 5. Deliver to the target through its delivery agent
 6. Diff and apply
 7. Evaluate rollout tasks and continue or pause
+
+User-facing concepts (deployments, managed resources) trigger this pipeline by mutating their owned Fulfillment — advancing its generation and triggering reconciliation.
 
 The detailed orchestration semantics, including pools, invalidation, durable execution, rollout planning, and `DeploymentGroup`, live in [docs/design/architecture/orchestration.md](architecture/orchestration.md).
 
@@ -130,7 +132,7 @@ That design lives in [docs/design/architecture/platform_hierarchy.md](architectu
 Start here when you need a fast map of the system. Then continue with the smallest document that matches your question:
 
 - Read [docs/design/architecture/core_model.md](architecture/core_model.md) for the core vocabulary, strategy axes, target model, delivery contract, and single-pod invariant.
-- Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how deployments execute, re-evaluate, and roll out over time.
+- Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
 - Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
 - Read [docs/design/architecture/addon_integration.md](architecture/addon_integration.md) for capability registration, addon strategy contracts, managed-resource bridging, and UI/API extension points.
@@ -141,7 +143,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 ## Related design documents
 
 - [docs/design/authentication.md](authentication.md): full delivery-authorization model, including credential presentation, provenance, trust anchors, and `PausedAuth`
-- [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to deployments
+- [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
 - [docs/design/provider_consumer_model.md](provider_consumer_model.md): provider/consumer/factory topology built on top of the core architecture
 - [docs/design/mcoa_migration.md](mcoa_migration.md): migration notes from the current MCOA architecture to this model
 - [docs/design/security.md](security.md): redirect to the authentication design

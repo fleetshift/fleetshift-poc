@@ -51,18 +51,18 @@ This makes recursion part of the main architecture rather than a special-purpose
 
 ## Multi-platform placement and rollout
 
-Placement can resolve to multiple platform targets. A parent-level deployment can therefore fan out to many child platforms the same way it fans out to many Kubernetes targets.
+Placement can resolve to multiple platform targets. A parent-level fulfillment can therefore fan out to many child platforms the same way it fans out to many Kubernetes targets.
 
 Two rollout layers then apply:
 
-- the parent rollout decides which platform instances receive the deployment and when
+- the parent rollout decides which platform instances receive the delivery and when
 - each child platform runs its own internal rollout across its own targets
 
 This gives the hierarchy a uniform execution model without inventing a second orchestration system for "federation."
 
 ## Lifecycle and identity boundaries
 
-Child platforms are managed as normal deployments to Kubernetes targets. Upgrades, configuration changes, and health observation all use the ordinary deployment pipeline.
+Child platforms are managed as normal deployments to Kubernetes targets. Upgrades, configuration changes, and health observation all use the ordinary orchestration pipeline through their fulfillments.
 
 Each platform instance also keeps its own identity boundary. Three modes are important:
 
@@ -151,7 +151,7 @@ An addon can mix these levels across different endpoints.
 
 ## Infrastructure provisioning as deployment
 
-Creating new targets is itself a deployment to an existing target. The platform does not hardcode a single provisioner. Provisioning is just another combination of manifest strategy, placement, rollout, and target delivery.
+Creating new targets is itself a fulfillment delivered to an existing target. The platform does not hardcode a single provisioner. Provisioning is just another combination of manifest strategy, placement, rollout, and target delivery — orchestrated through the same fulfillment pipeline as any other work.
 
 Examples include:
 
@@ -164,11 +164,11 @@ The delivery agent applies the provisioning manifests to a management target. Th
 
 ### Target correlation
 
-The platform correlates a provisioning deployment to the targets it creates. That lets it:
+The platform correlates a provisioning fulfillment to the targets it creates. That lets it:
 
 - roll up health from created targets back to the provisioning deployment
 - cascade delete through deprovisioning
-- show lifecycle lineage between provisioning deployments and resulting targets
+- show lifecycle lineage between the provisioning work and resulting targets
 
 ## Bootstrap and pivot
 
