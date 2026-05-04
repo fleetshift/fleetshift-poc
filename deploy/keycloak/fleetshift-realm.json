@@ -1,5 +1,6 @@
 {
   "realm": "fleetshift",
+  "enabled": true,
   "sslRequired": "external",
   "loginWithEmailAllowed": true,
   "bruteForceProtected": true,
@@ -68,13 +69,6 @@
       "webOrigins": [
         "http://localhost:8085"
       ],
-      "defaultClientScopes": [
-        "basic",
-        "web-origins",
-        "profile",
-        "roles",
-        "email"
-      ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       }
@@ -94,12 +88,6 @@
         "http://127.0.0.1",
         "http://localhost:8080"
       ],
-      "defaultClientScopes": [
-        "basic",
-        "profile",
-        "roles",
-        "email"
-      ],
       "attributes": {
         "oauth2.device.authorization.grant.enabled": "true",
         "pkce.code.challenge.method": "S256"
@@ -114,13 +102,6 @@
         "http://127.0.0.1/callback"
       ],
       "webOrigins": ["+"],
-      "defaultClientScopes": [
-        "basic",
-        "profile",
-        "roles",
-        "email",
-        "fleetshift-claims"
-      ],
       "attributes": {
         "pkce.code.challenge.method": "S256"
       },
@@ -134,44 +115,7 @@
             "id.token.claim": "true",
             "access.token.claim": "true"
           }
-        }
-      ]
-    },
-    {
-      "clientId": "ocp-console",
-      "name": "OCP Web Console",
-      "fullScopeAllowed": false,
-      "secret": "GENERATED_AT_DEPLOY_TIME",
-      "redirectUris": [],
-      "webOrigins": ["+"],
-      "defaultClientScopes": [
-        "basic",
-        "profile",
-        "roles",
-        "email"
-      ],
-      "protocolMappers": [
-        {
-          "name": "ocp-console-audience",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-audience-mapper",
-          "config": {
-            "included.client.audience": "ocp-console",
-            "id.token.claim": "true",
-            "access.token.claim": "true"
-          }
-        }
-      ]
-    }
-  ],
-  "clientScopes": [
-    {
-      "name": "fleetshift-claims",
-      "attributes": {
-        "include.in.token.scope": "false",
-        "display.on.consent.screen": "false"
-      },
-      "protocolMappers": [
+        },
         {
           "name": "github-username",
           "protocol": "openid-connect",
@@ -199,6 +143,26 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "ocp-console",
+      "name": "OCP Web Console",
+      "fullScopeAllowed": false,
+      "secret": "GENERATED_AT_DEPLOY_TIME",
+      "redirectUris": [],
+      "webOrigins": ["+"],
+      "protocolMappers": [
+        {
+          "name": "ocp-console-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "config": {
+            "included.client.audience": "ocp-console",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+          }
+        }
+      ]
     }
   ],
   "clientScopeMappings": {
@@ -214,6 +178,7 @@
       "email": "ops@fleetshift.local",
       "firstName": "Ops",
       "lastName": "User",
+      "enabled": true,
       "emailVerified": true,
       "credentials": [
         {
@@ -234,6 +199,7 @@
       "email": "dev@fleetshift.local",
       "firstName": "Dev",
       "lastName": "User",
+      "enabled": true,
       "emailVerified": true,
       "credentials": [
         {
