@@ -89,7 +89,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 			Properties: map[string]string{
 				"foo": "bar",
 			},
-			AcceptedResourceTypes: []domain.ResourceType{"managed_resource_spec"},
+			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
 		})
 		_ = tx.Commit()
 	}

@@ -29,8 +29,8 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 manifest, got %d", len(got))
 	}
-	if got[0].ResourceType != "managed_resource_spec" {
-		t.Errorf("ResourceType = %q, want %q", got[0].ResourceType, "managed_resource_spec")
+	if got[0].ResourceType != "clusters" {
+		t.Errorf("ResourceType = %q, want %q", got[0].ResourceType, "clusters")
 	}
 	if string(got[0].Raw) != string(spec) {
 		t.Errorf("Raw = %s, want %s", got[0].Raw, spec)

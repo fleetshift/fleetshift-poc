@@ -90,7 +90,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 			ID:                    "addon-cluster-mgmt",
 			Name:                  "Cluster Management Addon",
 			Type:                  "addon",
-			AcceptedResourceTypes: []domain.ResourceType{"managed_resource_spec"},
+			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
 		})
 		_ = tx.Commit()
 	}
@@ -176,8 +176,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if len(manifests) == 0 {
 		t.Fatal("no manifests delivered")
 	}
-	if manifests[0].ResourceType != "managed_resource_spec" {
-		t.Errorf("Manifest.ResourceType = %q, want %q", manifests[0].ResourceType, "managed_resource_spec")
+	if manifests[0].ResourceType != "clusters" {
+		t.Errorf("Manifest.ResourceType = %q, want %q", manifests[0].ResourceType, "clusters")
 	}
 	if string(manifests[0].Raw) != string(validSpec) {
 		t.Errorf("Manifest.Raw = %s, want %s", manifests[0].Raw, validSpec)
