@@ -1,4 +1,4 @@
-# Addon Architecture: Bundle Model & Engine-Centric Assets
+# Addon Architecture: Bundle Model & Decoupled Asset Distribution
 
 ## Summary
 
@@ -22,7 +22,7 @@ graph TB
     subgraph Bundle["Addon Bundle (e.g. monitoring)"]
         direction LR
         BE["Backend<br/><i>go-plugin sidecar</i><br/>Runs on cluster"]
-        UI["UI Plugin<br/><i>JS bundle + manifest</i><br/>Served by engine"]
+        UI["UI Plugin<br/><i>OCI artifact + manifest</i><br/>Hosted externally"]
         CLI["CLI Extension<br/><i>cobra commands</i><br/>Runs on workstation"]
     end
 
@@ -40,7 +40,7 @@ the backend being installed on at least one cluster.
 | Component | What it is | Where it runs | When it activates |
 |-----------|-----------|---------------|-------------------|
 | **Backend** | go-plugin sidecar or operator | Managed cluster (via fleetlet) | When installed on a cluster |
-| **UI** | Scalprum plugin (JS bundle + manifest) | Browser (served by engine) | When backend is installed on >= 1 cluster |
+| **UI** | Scalprum plugin (OCI artifact: JS bundle + manifest) | Browser (assets hosted externally) | When backend is installed on >= 1 cluster |
 | **CLI** | CLI extension commands | Developer workstation | When backend is installed on >= 1 cluster |
 
 **Key constraint**: An addon must declare its backend dependencies. It does
@@ -82,16 +82,18 @@ Each entry in the catalog describes one addon bundle:
 | `name` | Unique addon identifier (e.g. `monitoring`) |
 | `version` | Semver — used for upgrades and cache-busting |
 | `components` | Which surfaces this addon ships (backend, UI, CLI — at least one) |
-| `install_spec` | How to install the addon (OCI artifact reference, container image, JS bundle URL — depends on distribution mechanism) |
-| `manifest` | Scalprum-compatible JSON for the UI component (if present) |
-| `assets` | JS bundle files for the UI component (if present) |
+| `install_spec` | OCI artifact reference for the backend component (e.g. `ghcr.io/org/addon-monitoring:v1.2.0`) |
+| `manifest_url` | URL to the `plugin-manifest.json` on the external asset host (if UI component present) |
+| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`) |
 | `extends_core` | Which core plugin surface this addon extends (if any) |
 
-The `install_spec` is the key piece — it tells the engine *how* to pull and
-run the addon's backend, not just *that* it exists. If addons are distributed
-as OCI artifacts, the spec points to a registry and tag. If they are container
-images, it points to an image reference. The distribution mechanism is
-pluggable; the catalog just stores the pointer.
+The engine does **not** store or serve addon UI assets. The catalog stores
+metadata and URLs — pointers to where the assets live. The `install_spec`
+tells the engine how to deploy the backend. The `manifest_url` and
+`assets_base_url` tell the shell where to fetch the UI plugin. Asset hosting
+is a deployment concern: a CDN, an nginx server, S3, or any static file
+host. See [OCI Artifact Distribution](#oci-artifact-distribution) for the
+packaging and deployment model.
 
 ### Per-instance catalogs
 
@@ -136,28 +138,35 @@ The engine already knows the full universe of available addons before any
 cluster installs anything. A cluster cannot install an addon the engine does
 not offer. This means:
 
-1. **The engine has every addon's bundle at registration time.** When an
-   addon is registered via the API, all its components -- backend definition,
-   UI assets, CLI extensions -- are stored in the engine's addon catalog.
+1. **The engine knows every addon at registration time.** When an addon is
+   registered via the API, the engine stores its metadata — backend install
+   spec, UI manifest URL, asset base URL, dependencies. The engine does not
+   store UI assets; it stores pointers to where they are hosted.
 2. **Clusters only toggle state.** Installing an addon on a cluster is a
    state change ("cluster X has addon Y enabled"), not a data transfer.
 3. **No asset upload from fleetlets is necessary.** The push-to-platform
    model (fleetlets uploading JS bundles over gRPC) adds complexity without
-   value. The engine already has the assets.
+   value. Assets are hosted externally and loaded directly by the browser.
 
 ## Architecture
 
 ```mermaid
 graph TD
     subgraph Engine["Management Engine"]
-        CAT["Addon Catalog<br/>(all available addons)"]
-        ASSETS["Asset Store<br/>(JS bundles, manifests)"]
-        HTTP["HTTP Asset Server<br/>/v1/addon-plugins/"]
+        CAT["Addon Catalog<br/>(metadata + URLs)"]
         STATE["Cluster State<br/>(which addons enabled where)"]
+        API["Plugin Registry API<br/>GET /v1/addon-plugins"]
 
-        CAT --> ASSETS
         CAT --> STATE
-        ASSETS --> HTTP
+        CAT --> API
+    end
+
+    subgraph AssetHost["External Asset Host"]
+        CDN["Static File Server<br/>(CDN, nginx, S3)"]
+        MANIFEST["plugin-manifest.json"]
+        JS["JS/CSS bundles"]
+
+        MANIFEST --- JS
     end
 
     subgraph Clusters["Remote Clusters"]
@@ -171,8 +180,8 @@ graph TD
         SCALPRUM["Scalprum Runtime"]
     end
 
-    STATE -->|"enabled addons"| SHELL
-    HTTP -->|"JS bundles"| SCALPRUM
+    API -->|"manifest URLs +<br/>asset base URLs"| SHELL
+    CDN -->|"JS bundles"| SCALPRUM
     C1 -.->|"install/uninstall"| STATE
     C2 -.->|"install/uninstall"| STATE
 ```
@@ -184,12 +193,13 @@ sequenceDiagram
     participant Admin
     participant Engine
     participant Catalog as Addon Catalog
+    participant AssetHost as Asset Host
     participant Cluster
     participant Shell as Web Console
 
     Note over Admin,Shell: Phase 1: Addon Registration (one-time)
-    Admin->>Engine: Register addon (backend + UI assets)
-    Engine->>Catalog: Store addon definition + JS bundles
+    Admin->>Engine: Register addon (install_spec + manifest_url + assets_base_url)
+    Engine->>Catalog: Store addon metadata and URLs
     Engine-->>Admin: Addon available in catalog
 
     Note over Admin,Shell: Phase 2: Addon Installation (per-cluster)
@@ -199,26 +209,35 @@ sequenceDiagram
 
     Note over Admin,Shell: Phase 3: UI Discovery (automatic)
     Shell->>Engine: GET /v1/addon-plugins
-    Engine-->>Shell: List of registered addons + manifests
-    Shell->>Engine: GET /v1/addon-plugins/{name}/assets/*.js
-    Engine-->>Shell: JS bundle
-    Shell->>Shell: Merge into Scalprum config, render UI
+    Engine-->>Shell: Plugin registry (manifest URLs + assets_base_url per addon)
+    Shell->>AssetHost: GET plugin-manifest.json
+    AssetHost-->>Shell: Manifest (relative loadScripts)
+    Shell->>Shell: transformManifest: prepend assets_base_url to loadScripts
+    Shell->>Shell: Merge into Scalprum config
+    Shell->>AssetHost: GET *.js bundles
+    AssetHost-->>Shell: JS bundles
+    Shell->>Shell: Render UI
 ```
 
 ## What the Engine Stores
 
-Each addon in the catalog has:
+The engine stores **metadata only** — no JS bytes, no asset blobs:
 
 | Field | Description |
 |-------|-------------|
 | `name` | Unique addon identifier (e.g. `addon-monitoring-plugin`) |
 | `version` | Semver for cache-busting and upgrades |
-| `manifest` | Scalprum-compatible JSON (extensions, loadScripts) |
-| `assets` | JS bundle files (one or more) |
+| `manifest_url` | URL to the `plugin-manifest.json` on the external host |
+| `assets_base_url` | Base URL for the addon's JS/CSS assets |
+| `install_spec` | OCI reference for the backend component |
 | `extends_core` | Which core plugin surface this addon extends |
+| `dependencies` | Other addons or core APIs this addon requires |
 
-The asset store is append-only with version deduplication: same name + same
-version = no-op; same name + newer version = replace.
+The engine does not read or modify the manifest. It provides the
+`assets_base_url` alongside each addon entry in the plugin registry
+response. The shell's Scalprum `transformManifest` callback prepends
+the base URL to each relative `loadScripts` entry at runtime, resolving
+them to absolute URLs before loading.
 
 ## What the Cluster Controls
 
@@ -241,14 +260,14 @@ An alternative model has each fleetlet discover addon UI assets from a shared
 volume and upload them to the engine over gRPC. This was considered and
 rejected:
 
-| Concern | Push Model | Engine-Centric Model |
-|---------|-----------|---------------------|
-| Asset availability | Only after a cluster connects | Always available |
+| Concern | Push Model | Decoupled Model |
+|---------|-----------|-----------------|
+| Asset availability | Only after a cluster connects | Always available (hosted externally) |
 | Duplicate uploads | N clusters with same addon = N uploads | Zero uploads |
 | Offline clusters | No UI until cluster reconnects | UI always works |
-| Version consistency | Race between fleetlets uploading different versions | Single source of truth |
-| Bandwidth | Large JS bundles over gRPC on every reconnect | Zero network cost |
-| Complexity | Fleetlet needs asset discovery + upload logic | Engine already has the assets |
+| Version consistency | Race between fleetlets uploading different versions | Single source of truth (OCI tag) |
+| Bandwidth | Large JS bundles over gRPC on every reconnect | Zero network cost to engine |
+| Complexity | Fleetlet needs asset discovery + upload logic | Assets served by static file host |
 
 The push model solves a problem that does not exist: addons cannot appear on
 clusters that the engine does not know about.
@@ -256,31 +275,163 @@ clusters that the engine does not know about.
 ## Shell Integration
 
 The shell (web console) discovers addon plugins the same way it discovers
-built-in plugins:
+built-in plugins. The only difference is where the assets are hosted — the
+shell does not know or care.
 
 ```mermaid
 graph LR
     SHELL["Shell App"] -->|"GET /v1/addon-plugins"| ENGINE["Engine API"]
-    ENGINE -->|"JSON: name, version, manifest"| SHELL
+    ENGINE -->|"JSON: name, manifest URL,<br/>resolved loadScripts"| SHELL
     SHELL -->|"Merge into Scalprum config"| SCALPRUM["Scalprum Runtime"]
-    SCALPRUM -->|"GET /{name}/assets/*.js"| ENGINE
-    ENGINE -->|"JS bundle"| SCALPRUM
+    SCALPRUM -->|"GET manifest + JS"| CDN["External Asset Host"]
 ```
 
-The Scalprum config for an addon plugin looks identical to a built-in plugin:
+The Scalprum config for an addon plugin looks identical to a built-in plugin.
+The `manifestLocation` and `assetsHost` point to the external asset host,
+not the engine:
 
 ```json
 {
   "addon-monitoring-plugin": {
     "name": "addon-monitoring-plugin",
-    "manifestLocation": "http://engine:8080/v1/addon-plugins/addon-monitoring-plugin/manifest.json",
-    "assetsHost": "http://engine:8080/v1/addon-plugins/addon-monitoring-plugin/assets"
+    "manifestLocation": "https://cdn.example.com/addons/monitoring/v1.2.0/plugin-manifest.json",
+    "assetsHost": "https://cdn.example.com/addons/monitoring/v1.2.0"
   }
 }
 ```
 
-The shell does not know or care whether a plugin is built-in or an addon. It
-loads them all the same way through Scalprum.
+The shell does not know or care whether a plugin is built-in or an addon,
+or whether assets are served from the same origin or a CDN. Scalprum loads
+them all the same way.
+
+## OCI Artifact Distribution
+
+Addon UI plugins are packaged as **OCI artifacts** — minimal container images
+that contain only the compiled frontend assets. This leverages the OCI
+distribution spec to treat web modules as versioned, immutable packages
+that can be hosted anywhere.
+
+### The artifact format
+
+Each addon UI plugin builds into a `FROM scratch` container image:
+
+```dockerfile
+FROM scratch
+COPY dist/ /dist/
+```
+
+The `/dist` directory contains everything the browser needs:
+
+```
+/dist/
+├── plugin-manifest.json    # Scalprum manifest (extensions, loadScripts)
+├── plugin-entry.js         # Federated module entry point
+├── 123.js                  # Code-split chunks
+└── styles.css              # Optional stylesheets
+```
+
+### Location-agnostic builds
+
+The build toolchain must produce artifacts that work on **any host and
+domain** without rebuilding. This requires two things working together:
+
+1. **Webpack `publicPath: "auto"`** — the bundler does not hardcode any
+   domain or path prefix into the compiled chunks. At runtime, chunks
+   resolve their URLs relative to the script that loaded them.
+
+2. **`@openshift/dynamic-plugin-sdk-webpack`** — the SDK produces the
+   `plugin-manifest.json` with relative `loadScripts` entries (e.g.
+   `"plugin-entry.js"`, not `"https://cdn.example.com/.../plugin-entry.js"`).
+
+This combination is what makes the same OCI artifact deployable to any
+host — a CDN, an internal nginx, S3, GitHub Pages — without rebuilding.
+The domain is never baked into the artifact at build time.
+
+### Publishing and deployment
+
+The OCI artifact lifecycle is separate from the engine:
+
+```mermaid
+sequenceDiagram
+    participant Dev as Developer
+    participant CI as CI/CD Pipeline
+    participant Registry as OCI Registry
+    participant Host as Asset Host
+    participant Engine as OME Engine
+
+    Dev->>CI: Push code
+    CI->>CI: Build (webpack + SDK)
+    CI->>Registry: Push OCI artifact (ghcr.io/org/addon:v1.2.0)
+    CI->>Host: Pull artifact, extract /dist to host
+    CI->>Engine: Register addon (manifest_url + assets_base_url)
+```
+
+1. **Build**: CI runs webpack with the Dynamic Plugin SDK. Output goes into
+   a `FROM scratch` image with `/dist`.
+2. **Publish**: Push to any OCI-compliant registry (ghcr.io, quay.io, ECR,
+   private registry).
+3. **Deploy**: Pull the artifact and extract `/dist` to a static file host.
+   This is an ops pipeline step — `docker create` + `docker cp` or
+   equivalent. The engine is not involved.
+4. **Register**: An API call (or CLI command) tells the engine where the
+   assets landed: the `manifest_url` and `assets_base_url`.
+
+The engine never touches the JS bytes. It stores the URLs and serves them
+to the shell as part of the plugin registry response.
+
+### Manifest resolution (client-side)
+
+The `plugin-manifest.json` in the OCI artifact uses relative paths:
+
+```json
+{
+  "name": "addon-monitoring-plugin",
+  "extensions": [...],
+  "loadScripts": ["plugin-entry.js"]
+}
+```
+
+At registration time, the engine stores the `assets_base_url` alongside
+the manifest URL. The manifest itself is never mutated — it stays on the
+asset host with its original relative paths.
+
+When the shell fetches the manifest, Scalprum's `transformManifest`
+callback prepends the `assets_base_url` to each `loadScripts` entry at
+runtime:
+
+```
+manifest.loadScripts = ["plugin-entry.js"]
+              ↓  transformManifest(manifest, assetsHost)
+manifest.loadScripts = ["https://cdn.example.com/addons/monitoring/v1.2.0/plugin-entry.js"]
+```
+
+The engine only stores the base URL. The shell does the resolution. The
+same OCI artifact can be deployed to different hosts in different
+environments — only the registered `assets_base_url` changes.
+
+### Versioning and rollback
+
+OCI tags provide immutable versioning for free:
+
+- `ghcr.io/org/addon-monitoring:v1.2.0` — specific release
+- `ghcr.io/org/addon-monitoring:v1.1.0` — previous version, still in registry
+
+Old versions remain on the asset host (or can be re-extracted). Rolling
+back is updating the catalog entry's `assets_base_url` to point to the
+previous version's directory — no rebuild, no redeployment of the artifact.
+
+### Environment portability
+
+The same OCI artifact works across all environments:
+
+| Environment | Asset Host | `assets_base_url` |
+|-------------|-----------|-------------------|
+| Dev (local) | `localhost:8001` | `http://localhost:8001/addons/monitoring/v1.2.0` |
+| Staging | Internal nginx | `https://assets.staging.internal/addons/monitoring/v1.2.0` |
+| Production | CDN | `https://cdn.example.com/addons/monitoring/v1.2.0` |
+
+The artifact is built once. Where it is hosted and how it is registered
+are deployment decisions, not build decisions.
 
 ## Addon Visibility Rules
 
@@ -626,19 +777,20 @@ The long-term vision is an addon SDK that bundles backend + frontend + cli:
 
 ```
 fleetshift addon create monitoring
-fleetshift addon build          # produces backend binary + UI bundle
-fleetshift addon publish        # registers in engine catalog
+fleetshift addon build          # produces backend binary + UI OCI artifact
+fleetshift addon publish        # pushes OCI artifact to registry + registers with engine
 ```
 
-The `publish` step pushes the UI assets to the engine's addon catalog via the
-CLI/API. The engine stores them and serves them to browsers. No fleetlet
-involvement in asset delivery.
+The `publish` step pushes the UI artifact to an OCI registry, deploys the
+assets to the configured asset host, and registers the addon metadata
+(manifest URL, asset base URL, install spec) with the engine. The engine
+never stores or serves JS — it stores pointers.
 
 ## Consistency with Prior Design Decisions
 
-The engine-centric asset model is not a new direction -- it follows directly
-from decisions already made across the platform's architecture. This section
-traces how existing designs lead to this conclusion.
+The engine-centric catalog model is not a new direction -- it follows
+directly from decisions already made across the platform's architecture.
+This section traces how existing designs lead to this conclusion.
 
 ### Addon registration is platform-side (architecture.md, Section 8)
 
@@ -657,8 +809,9 @@ console plugin pattern:
 > domain-specific content.
 
 The plugin registry lives on the platform. Addons contribute content to it.
-Storing UI assets in this registry is the natural implementation of this
-design.
+Storing plugin metadata and asset URLs in this registry is the natural
+implementation of this design — the platform is the registry, not the
+file server.
 
 ### Managed resources register schemas with the platform (managed_resources.md)
 
@@ -687,8 +840,7 @@ OME-13 (Web UI addon integration) specifies:
 > model provides the metadata the frontend needs to load the correct plugin.
 
 The frontend asks the platform what plugins exist. The platform answers based
-on what addons have registered. The assets need to be where the platform can
-serve them -- which means the platform's own store.
+on what addons have registered, providing the URLs where assets are hosted.
 
 ### The kernel owns the UI shell (OME-30 layered model)
 
@@ -707,11 +859,12 @@ capabilities or assets.
 ## Relationship to Existing Implementation
 
 The current codebase has proto definitions (`UIPluginSpec`, `RegisterPlugin`)
-and platform-side storage (`addon_plugins` table, HTTP serving) that align
-with this model. The fleetlet-side asset discovery code exists but is
-unnecessary under the engine-centric model and should not be used in
-production.
+that will evolve to store metadata and URLs rather than asset blobs. The
+plugin registry API (`/v1/addon-plugins`) and the Scalprum config merge
+logic in the shell remain the correct integration points — the change is
+in what the engine stores (metadata + URLs) and where assets are served
+from (external host, not engine).
 
-The HTTP serving endpoints (`/v1/addon-plugins/*`) and the Scalprum config
-merge logic in the shell are correct and reusable regardless of how assets
-arrive in the engine.
+The fleetlet-side asset discovery code is unnecessary under this model
+and should not be used in production. Assets flow from OCI registry →
+asset host → browser, never through the engine or fleetlets.
