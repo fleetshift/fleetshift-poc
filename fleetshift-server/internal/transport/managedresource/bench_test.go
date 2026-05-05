@@ -134,32 +134,10 @@ func BenchmarkDynamicMessage_SetFieldsWithSpec(b *testing.B) {
 	}
 }
 
-// BenchmarkSpecValidation measures the cost of the spec validation roundtrip:
-// marshal spec to JSON from dynamic message, unmarshal into original descriptor,
-// then validate with protovalidate.
-func BenchmarkSpecValidation(b *testing.B) {
-	env := setupBench(b)
-	resourceDesc := env.svc.Descriptors.Resource
-	specField := resourceDesc.Fields().ByName("spec")
-	_ = specField
-
-	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
-
-	b.ResetTimer()
-	for range b.N {
-		specJSON, _ := protojson.Marshal(specMsg)
-		validationMsg := dynamicpb.NewMessage(env.specDesc)
-		_ = protojson.Unmarshal(specJSON, validationMsg)
-		_ = env.validator.Validate(validationMsg)
-	}
-}
-
-// BenchmarkSpecValidation_SkipRoundtrip measures only the protovalidate call
-// (no JSON roundtrip) to show how much overhead the roundtrip adds.
-func BenchmarkSpecValidation_SkipRoundtrip(b *testing.B) {
+// BenchmarkSpecValidation_Direct measures the cost of direct protovalidate
+// validation (current approach — no JSON roundtrip needed since the spec
+// descriptor carries annotations through the synthesized file).
+func BenchmarkSpecValidation_Direct(b *testing.B) {
 	env := setupBench(b)
 
 	specMsg := dynamicpb.NewMessage(env.specDesc)
@@ -170,6 +148,23 @@ func BenchmarkSpecValidation_SkipRoundtrip(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		_ = env.validator.Validate(specMsg)
+	}
+}
+
+// BenchmarkSpecValidation_WithJSONMarshal measures validation + the single
+// JSON marshal needed for downstream persistence.
+func BenchmarkSpecValidation_WithJSONMarshal(b *testing.B) {
+	env := setupBench(b)
+
+	specMsg := dynamicpb.NewMessage(env.specDesc)
+	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
+	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
+	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+
+	b.ResetTimer()
+	for range b.N {
+		_ = env.validator.Validate(specMsg)
+		_, _ = protojson.Marshal(specMsg)
 	}
 }
 
@@ -270,13 +265,13 @@ func BenchmarkFullCreatePath(b *testing.B) {
 		specField := resourceDesc.Fields().ByName("spec")
 		specM := resourceM.Get(specField).Message()
 
-		// Validation roundtrip
-		specJSON, _ := protojson.Marshal(specM.Interface())
-		validationMsg := dynamicpb.NewMessage(env.specDesc)
-		_ = protojson.Unmarshal(specJSON, validationMsg)
-		_ = env.validator.Validate(validationMsg)
+		// Direct validation (no roundtrip)
+		_ = env.validator.Validate(specM.Interface())
 
-		// Build domain input (what we'd pass to the application layer)
+		// Single JSON marshal for persistence
+		specJSON, _ := protojson.Marshal(specM.Interface())
+
+		// Build domain input
 		_ = domain.ResourceName(id)
 		_ = json.RawMessage(specJSON)
 	}

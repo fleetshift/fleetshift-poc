@@ -176,23 +176,19 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 	}
 	specMsg := resourceMsg.Get(specField).Message()
 
-	// Validate spec using protovalidate against buf.validate annotations.
-	// We need to copy into a dynamicpb backed by the original spec descriptor
-	// (which carries the validation annotations).
-	specForValidation := dynamicpb.NewMessage(h.descs.Spec)
-	specJSON, err := protojson.Marshal(specMsg.Interface())
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "marshal spec for validation: %v", err)
-	}
-	if err := protojson.Unmarshal(specJSON, specForValidation); err != nil {
-		return nil, status.Errorf(codes.Internal, "unmarshal spec for validation: %v", err)
-	}
-
-	if err := h.validator.Validate(specForValidation); err != nil {
+	// Validate spec directly — the spec field's message descriptor is the
+	// original addon descriptor (with buf.validate annotations), so
+	// protovalidate can evaluate constraints without a copy.
+	if err := h.validator.Validate(specMsg.Interface()); err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "spec validation failed: %v", err)
 	}
 
-	// Build application input.
+	// Marshal to JSON for downstream persistence (the domain/repo store JSON).
+	specJSON, err := protojson.Marshal(specMsg.Interface())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "marshal spec: %v", err)
+	}
+
 	in := application.CreateManagedResourceInput{
 		ResourceType: h.cfg.ResourceType,
 		Name:         domain.ResourceName(id),

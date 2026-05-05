@@ -407,3 +407,89 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 		t.Error("marshaled bytes are empty")
 	}
 }
+
+func TestDynamic_SpecDescriptorIdentity(t *testing.T) {
+	cfg := clusterConfig(t)
+
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("protovalidate.New: %v", err)
+	}
+
+	svc, err := managedresource.Build(cfg, managedresource.Deps{Validator: validator})
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	// The spec field in the resource message should resolve to the same
+	// descriptor as svc.Descriptors.Spec (which carries buf.validate annotations).
+	specFieldDesc := svc.Descriptors.Resource.Fields().ByName("spec").Message()
+	if specFieldDesc.FullName() != svc.Descriptors.Spec.FullName() {
+		t.Fatalf("spec field descriptor = %q, want %q", specFieldDesc.FullName(), svc.Descriptors.Spec.FullName())
+	}
+
+	// Build a request, marshal/unmarshal (simulating wire transit), then
+	// extract the spec and validate directly — no JSON roundtrip.
+	createReq := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
+	idField := svc.Descriptors.CreateRequest.Fields().ByNumber(1)
+	createReq.Set(idField, protoreflect.ValueOfString("test-cluster"))
+
+	resource := dynamicpb.NewMessage(svc.Descriptors.Resource)
+	specMsg := dynamicpb.NewMessage(svc.Descriptors.Spec)
+	specMsg.Set(svc.Descriptors.Spec.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
+	specMsg.Set(svc.Descriptors.Spec.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
+	specMsg.Set(svc.Descriptors.Spec.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+
+	specField := svc.Descriptors.Resource.Fields().ByName("spec")
+	resource.Set(specField, protoreflect.ValueOfMessage(specMsg))
+
+	resourceField := svc.Descriptors.CreateRequest.Fields().ByNumber(2)
+	createReq.Set(resourceField, protoreflect.ValueOfMessage(resource))
+
+	// Simulate wire transit.
+	wire, err := proto.Marshal(createReq)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	incoming := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
+	if err := proto.Unmarshal(wire, incoming); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	// Extract spec from the unmarshaled request.
+	incomingResource := incoming.Get(resourceField).Message()
+	incomingSpec := incomingResource.Get(specField).Message()
+
+	// Verify the descriptor is the original (annotation-carrying) one.
+	if incomingSpec.Descriptor().FullName() != svc.Descriptors.Spec.FullName() {
+		t.Fatalf("unmarshaled spec descriptor = %q, want %q",
+			incomingSpec.Descriptor().FullName(), svc.Descriptors.Spec.FullName())
+	}
+
+	// Direct validation should work without JSON roundtrip.
+	if err := validator.Validate(incomingSpec.Interface()); err != nil {
+		t.Fatalf("direct validation failed: %v", err)
+	}
+
+	// Also verify that invalid spec is caught directly.
+	invalidReq := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
+	invalidReq.Set(idField, protoreflect.ValueOfString("bad-cluster"))
+	invalidResource := dynamicpb.NewMessage(svc.Descriptors.Resource)
+	emptySpec := dynamicpb.NewMessage(svc.Descriptors.Spec)
+	// provider is required by buf.validate — leave it empty
+	invalidResource.Set(specField, protoreflect.ValueOfMessage(emptySpec))
+	invalidReq.Set(resourceField, protoreflect.ValueOfMessage(invalidResource))
+
+	wire2, _ := proto.Marshal(invalidReq)
+	incoming2 := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
+	_ = proto.Unmarshal(wire2, incoming2)
+
+	incomingResource2 := incoming2.Get(resourceField).Message()
+	incomingSpec2 := incomingResource2.Get(specField).Message()
+
+	err = validator.Validate(incomingSpec2.Interface())
+	if err == nil {
+		t.Fatal("expected validation error for empty spec, got nil")
+	}
+	t.Logf("validation error (expected): %v", err)
+}
