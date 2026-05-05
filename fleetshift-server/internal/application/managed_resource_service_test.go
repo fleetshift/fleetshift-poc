@@ -9,7 +9,6 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/jsonschema"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
@@ -70,14 +69,12 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 
 	return mrTestHarness{
 		typeSvc: &application.ManagedResourceTypeService{
-			Store:          store,
-			SchemaCompiler: jsonschema.Compiler{},
+			Store: store,
 		},
 		resourceSvc: &application.ManagedResourceService{
-			Store:          store,
-			SchemaCompiler: jsonschema.Compiler{},
-			CreateWF:       createWf,
-			DeleteWF:       deleteWf,
+			Store:    store,
+			CreateWF: createWf,
+			DeleteWF: deleteWf,
 		},
 		store: store,
 	}
@@ -103,8 +100,6 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 		_ = tx.Commit()
 	}
 
-	schema := domain.RawSchema(`{"type":"object","properties":{"provider":{"type":"string"},"version":{"type":"string"}},"required":["provider"]}`)
-
 	// Register a type.
 	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType: "clusters",
@@ -114,7 +109,6 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 			ContentHash:    []byte("hash"),
 			SignatureBytes: []byte("sig"),
 		},
-		SpecSchema: &schema,
 	})
 	if err != nil {
 		t.Fatalf("RegisterType: %v", err)
@@ -186,36 +180,6 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
 }
 
-func TestManagedResourceService_CreateInvalidSpec(t *testing.T) {
-	ctx := context.Background()
-	h := setupManagedResources(t)
-
-	schema := domain.RawSchema(`{"type":"object","required":["provider"]}`)
-
-	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon"},
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "s", Issuer: "i"},
-			ContentHash:    []byte("h"),
-			SignatureBytes: []byte("s"),
-		},
-		SpecSchema: &schema,
-	})
-	if err != nil {
-		t.Fatalf("RegisterType: %v", err)
-	}
-
-	// Invalid spec (missing required "provider" field).
-	_, err = h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "bad-spec",
-		Spec:         json.RawMessage(`{"version":"4.16.2"}`),
-	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create with invalid spec: got %v, want ErrInvalidArgument", err)
-	}
-}
 
 func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	ctx := context.Background()

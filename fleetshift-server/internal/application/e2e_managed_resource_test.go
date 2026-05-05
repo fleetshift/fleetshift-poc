@@ -5,7 +5,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/rand"
 	"encoding/json"
-	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -13,7 +12,6 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/jsonschema"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
@@ -93,12 +91,10 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 
 	typeSvc := &application.ManagedResourceTypeService{
-		Store:          store,
-		SchemaCompiler: jsonschema.Compiler{},
+		Store: store,
 	}
 	resourceSvc := &application.ManagedResourceService{
 		Store:             store,
-		SchemaCompiler:    jsonschema.Compiler{},
 		CreateWF:          createWf,
 		DeleteWF:          deleteWf,
 		ProvenanceBuilder: provenanceBuilder,
@@ -116,16 +112,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		_ = tx.Commit()
 	}
 
-	// --- Step 2: Register managed resource type with schema ---
-	specSchema := domain.RawSchema(`{
-		"type": "object",
-		"properties": {
-			"provider": {"type": "string", "enum": ["rosa", "aro", "eks"]},
-			"version": {"type": "string"}
-		},
-		"required": ["provider", "version"]
-	}`)
-
+	// --- Step 2: Register managed resource type ---
 	addonSig := domain.Signature{
 		Signer:         domain.FederatedIdentity{Subject: "addon-cluster-svc", Issuer: "https://addon-issuer.test"},
 		ContentHash:    []byte("relation-hash"),
@@ -136,33 +123,12 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		ResourceType: "clusters",
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
 		Signature:    addonSig,
-		SpecSchema:   &specSchema,
 	})
 	if err != nil {
 		t.Fatalf("RegisterType: %v", err)
 	}
 
-	// --- Step 3: Verify invalid spec is rejected ---
-	_, err = resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "invalid-cluster",
-		Spec:         json.RawMessage(`{"provider":"invalid-provider","version":"4.16"}`),
-	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create with invalid spec: got %v, want ErrInvalidArgument", err)
-	}
-
-	// Also test missing required field.
-	_, err = resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "missing-fields",
-		Spec:         json.RawMessage(`{"provider":"rosa"}`),
-	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create with missing field: got %v, want ErrInvalidArgument", err)
-	}
-
-	// --- Step 4: Create valid signed resource ---
+	// --- Step 3: Create valid signed resource ---
 	subjectID := domain.SubjectID("user-1")
 	issuer := domain.IssuerURL("https://issuer.example.com")
 	privateKey := enrollSigner(t, store, fakeReg, subjectID, issuer)

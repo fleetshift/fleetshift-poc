@@ -10,10 +10,10 @@ import (
 )
 
 // ManagedResourceService manages the lifecycle of managed resource
-// instances: create, read, list, and delete.
+// instances: create, read, list, and delete. Spec validation is handled
+// at the transport layer via protovalidate before reaching this service.
 type ManagedResourceService struct {
 	Store             domain.Store
-	SchemaCompiler    domain.SchemaCompiler
 	CreateWF          domain.CreateManagedResourceWorkflow
 	DeleteWF          domain.DeleteManagedResourceWorkflow
 	ProvenanceBuilder ManagedResourceProvenanceBuilder // nil when signing is not configured
@@ -106,17 +106,6 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 
 	if err := tx.Commit(); err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
-	}
-
-	// Validate spec against the registered schema.
-	if typeDef.SpecSchema != nil && s.SchemaCompiler != nil {
-		schema, err := s.SchemaCompiler.Compile(*typeDef.SpecSchema)
-		if err != nil {
-			return domain.ManagedResourceView{}, fmt.Errorf("compile schema for %q: %w", in.ResourceType, err)
-		}
-		if err := schema.Validate(in.Spec); err != nil {
-			return domain.ManagedResourceView{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
-		}
 	}
 
 	exec, err := s.CreateWF.Start(ctx, domain.CreateManagedResourceInput{

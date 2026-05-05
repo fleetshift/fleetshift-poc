@@ -8,6 +8,7 @@ import (
 	"net"
 	"testing"
 
+	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
@@ -17,6 +18,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -116,11 +118,47 @@ func Start(t *testing.T) string {
 		t.Fatalf("RegisterResumeDeployment: %v", err)
 	}
 
+	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+
+	mrCleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store}
+	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(mrCleanupSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+	}
+
+	deleteMRSpec := &domain.DeleteManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+		Cleanup:       mrCleanupWf,
+	}
+	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResource: %v", err)
+	}
+
 	deploymentSvc := &application.DeploymentService{
 		Store:    store,
 		CreateWF: createWf,
 		DeleteWF: deleteWf,
 		ResumeWF: resumeWf,
+	}
+
+	managedResourceSvc := &application.ManagedResourceService{
+		Store:    store,
+		CreateWF: createMRWf,
+		DeleteWF: deleteMRWf,
+	}
+
+	specValidator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("protovalidate.New: %v", err)
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
@@ -140,6 +178,28 @@ func Start(t *testing.T) string {
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
+	clusterSpecDesc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
+		SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
+		MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
+		ImportPaths: []string{"../proto/"},
+	})
+	if err != nil {
+		t.Fatalf("compile cluster spec proto: %v", err)
+	}
+	clusterTypeCfg := &managedresource.ResourceTypeConfig{
+		ResourceType:   "clusters",
+		Singular:       "Cluster",
+		Plural:         "clusters",
+		ProtoPackage:   "fleetshift.v1",
+		SpecMessage:    "addons.cluster_mgmt.v1.ClusterSpec",
+		SpecDescriptor: clusterSpecDesc.Message,
+	}
+	if _, err := managedresource.BuildAndRegister(srv, clusterTypeCfg, managedresource.Deps{
+		Resources: managedResourceSvc,
+		Validator: specValidator,
+	}); err != nil {
+		t.Fatalf("BuildAndRegister cluster: %v", err)
+	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

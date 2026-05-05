@@ -70,8 +70,6 @@ func runTypeTests(t *testing.T, factory Factory) {
 		repo := tx.ManagedResources()
 
 		def := sampleTypeDef("clusters")
-		schema := domain.RawSchema(`{"type":"object","required":["provider"]}`)
-		def.SpecSchema = &schema
 
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("CreateType: %v", err)
@@ -90,9 +88,6 @@ func runTypeTests(t *testing.T, factory Factory) {
 		}
 		if rst.AddonTarget != "addon-clusters" {
 			t.Errorf("AddonTarget = %q, want %q", rst.AddonTarget, "addon-clusters")
-		}
-		if got.SpecSchema == nil {
-			t.Fatal("SpecSchema is nil")
 		}
 		if !got.CreatedAt.Equal(fixedTime) {
 			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, fixedTime)

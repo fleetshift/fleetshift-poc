@@ -3,6 +3,7 @@ modules:
   - path: proto
 deps:
   - buf.build/googleapis/googleapis
+  - buf.build/bufbuild/protovalidate
 lint:
   except:
     # AIP-131/133: standard Get and Create methods return the resource directly,

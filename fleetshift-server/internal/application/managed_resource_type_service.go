@@ -12,8 +12,7 @@ import (
 // type definitions. These are metadata records registered by addons to
 // declare ownership of a resource type and its fulfillment relation.
 type ManagedResourceTypeService struct {
-	Store          domain.Store
-	SchemaCompiler domain.SchemaCompiler // validates schemas at registration time; nil disables validation
+	Store domain.Store
 }
 
 // CreateTypeInput carries the fields needed to register a new managed
@@ -22,11 +21,9 @@ type CreateTypeInput struct {
 	ResourceType domain.ResourceType
 	Relation     domain.FulfillmentRelation
 	Signature    domain.Signature
-	SpecSchema   *domain.RawSchema
 }
 
-// Create registers a new managed resource type. If a schema is
-// provided, it is compiled and validated at registration time.
+// Create registers a new managed resource type.
 func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeInput) (domain.ManagedResourceTypeDef, error) {
 	if in.ResourceType == "" {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: resource type is required", domain.ErrInvalidArgument)
@@ -35,18 +32,11 @@ func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeIn
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: relation is required", domain.ErrInvalidArgument)
 	}
 
-	if in.SpecSchema != nil && s.SchemaCompiler != nil {
-		if _, err := s.SchemaCompiler.Compile(*in.SpecSchema); err != nil {
-			return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: invalid spec schema: %v", domain.ErrInvalidArgument, err)
-		}
-	}
-
 	now := time.Now().UTC()
 	def := domain.ManagedResourceTypeDef{
 		ResourceType: in.ResourceType,
 		Relation:     in.Relation,
 		Signature:    in.Signature,
-		SpecSchema:   in.SpecSchema,
 		CreatedAt:    now,
 		UpdatedAt:    now,
 	}

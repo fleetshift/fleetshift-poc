@@ -5,13 +5,14 @@ go 1.25.0
 replace github.com/fleetshift/fleetshift-poc/gen => ../gen
 
 require (
+	buf.build/go/protovalidate v1.2.0
 	github.com/aws/aws-sdk-go-v2 v1.41.5
 	github.com/aws/aws-sdk-go-v2/config v1.32.14
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
+	github.com/bufbuild/protocompile v0.14.1
 	github.com/cschleiden/go-workflows v1.4.1
 	github.com/fleetshift/fleetshift-poc/gen v0.0.0-00010101000000-000000000000
-	github.com/google/cel-go v0.27.0
-	github.com/google/jsonschema-go v0.4.3
+	github.com/google/cel-go v0.28.0
 	github.com/google/uuid v1.6.0
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.28.0
 	github.com/jackc/pgx/v5 v5.9.2
@@ -36,6 +37,7 @@ require (
 
 require (
 	al.essio.dev/pkg/shellescape v1.5.1 // indirect
+	buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go v1.36.11-20260415201107-50325440f8f2.1 // indirect
 	cel.dev/expr v0.25.1 // indirect
 	dario.cat/mergo v1.0.2 // indirect
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect

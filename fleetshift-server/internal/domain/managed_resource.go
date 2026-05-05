@@ -16,33 +16,18 @@ type ResourceName string
 // a new version; the HEAD table tracks which version is current.
 type IntentVersion int64
 
-// RawSchema is an unparsed JSON Schema document as stored in the
-// database. It is compiled into a [Schema] for runtime validation.
-type RawSchema json.RawMessage
-
-// MarshalJSON implements json.Marshaler.
-func (r RawSchema) MarshalJSON() ([]byte, error) {
-	if r == nil {
-		return []byte("null"), nil
-	}
-	return json.RawMessage(r).MarshalJSON()
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (r *RawSchema) UnmarshalJSON(data []byte) error {
-	return (*json.RawMessage)(r).UnmarshalJSON(data)
-}
-
 // ManagedResourceTypeDef is the metadata record that an addon registers
 // to declare ownership of a managed resource type. It carries the
-// fulfillment relation (how resources of this type map to fulfillments),
-// the addon's cryptographic proof of that claim, and an optional JSON
-// Schema for validating resource specs.
+// fulfillment relation (how resources of this type map to fulfillments)
+// and the addon's cryptographic proof of that claim.
+//
+// Spec validation is handled at the transport layer by protovalidate
+// using buf.validate annotations from the addon's spec proto. No schema
+// is stored in the type definition.
 type ManagedResourceTypeDef struct {
 	ResourceType ResourceType
 	Relation     FulfillmentRelation
 	Signature    Signature
-	SpecSchema   *RawSchema
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -58,7 +43,6 @@ func (d ManagedResourceTypeDef) MarshalJSON() ([]byte, error) {
 		ResourceType ResourceType       `json:"ResourceType"`
 		Relation     fulfillmentRelJSON `json:"Relation"`
 		Signature    Signature          `json:"Signature"`
-		SpecSchema   *RawSchema         `json:"SpecSchema,omitempty"`
 		CreatedAt    time.Time          `json:"CreatedAt"`
 		UpdatedAt    time.Time          `json:"UpdatedAt"`
 	}
@@ -66,7 +50,6 @@ func (d ManagedResourceTypeDef) MarshalJSON() ([]byte, error) {
 		ResourceType: d.ResourceType,
 		Relation:     rel,
 		Signature:    d.Signature,
-		SpecSchema:   d.SpecSchema,
 		CreatedAt:    d.CreatedAt,
 		UpdatedAt:    d.UpdatedAt,
 	})
@@ -78,7 +61,6 @@ func (d *ManagedResourceTypeDef) UnmarshalJSON(data []byte) error {
 		ResourceType ResourceType       `json:"ResourceType"`
 		Relation     fulfillmentRelJSON `json:"Relation"`
 		Signature    Signature          `json:"Signature"`
-		SpecSchema   *RawSchema         `json:"SpecSchema,omitempty"`
 		CreatedAt    time.Time          `json:"CreatedAt"`
 		UpdatedAt    time.Time          `json:"UpdatedAt"`
 	}
@@ -88,7 +70,6 @@ func (d *ManagedResourceTypeDef) UnmarshalJSON(data []byte) error {
 	}
 	d.ResourceType = a.ResourceType
 	d.Signature = a.Signature
-	d.SpecSchema = a.SpecSchema
 	d.CreatedAt = a.CreatedAt
 	d.UpdatedAt = a.UpdatedAt
 	rel, err := unmarshalFulfillmentRelation(a.Relation)

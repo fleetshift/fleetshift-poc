@@ -40,7 +40,10 @@ import (
 	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"buf.build/go/protovalidate"
+
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
@@ -133,6 +136,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		authMethodRepo = &sqlite.AuthMethodRepo{DB: db}
 	}
 	defer db.Close()
+
+	specValidator, err := protovalidate.New()
+	if err != nil {
+		return fmt.Errorf("create spec validator: %w", err)
+	}
 
 	router := delivery.NewRoutingDeliveryService()
 
@@ -265,6 +273,35 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register delete-deployment: %w", err)
 	}
 
+	// --- managed resource workflows ---
+
+	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
+	if err != nil {
+		return fmt.Errorf("register create-managed-resource: %w", err)
+	}
+
+	mrCleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{
+		Store: store,
+	}
+	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(mrCleanupSpec)
+	if err != nil {
+		return fmt.Errorf("register delete-managed-resource-cleanup: %w", err)
+	}
+
+	deleteMRSpec := &domain.DeleteManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+		Cleanup:       mrCleanupWf,
+	}
+	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
+	if err != nil {
+		return fmt.Errorf("register delete-managed-resource: %w", err)
+	}
+
 	// --- seed default targets ---
 
 	targetSvc := &application.TargetService{Store: store}
@@ -393,6 +430,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodRepo,
 	}
 
+	managedResourceSvc := &application.ManagedResourceService{
+		Store:             store,
+		CreateWF:          createMRWf,
+		DeleteWF:          deleteMRWf,
+		ProvenanceBuilder: provenanceBuilder,
+	}
+
 	// --- kubernetes delivery agent ---
 
 	kubeAgentOpts := []kubernetesaddon.AgentOption{
@@ -421,6 +465,32 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
+	// Dynamic managed resource type services — compiled from addon spec proto
+	// source at startup. No pre-generated Go code or pre-built descriptor sets.
+	clusterSpecDesc, err := managedresource.CompileSpec(ctx, managedresource.CompileInput{
+		SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
+		MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
+		ImportPaths: []string{"proto/"},
+	})
+	if err != nil {
+		return fmt.Errorf("compile cluster spec proto: %w", err)
+	}
+
+	clusterTypeCfg := &managedresource.ResourceTypeConfig{
+		ResourceType:   "clusters",
+		Singular:       "Cluster",
+		Plural:         "clusters",
+		ProtoPackage:   "fleetshift.v1",
+		SpecMessage:    "addons.cluster_mgmt.v1.ClusterSpec",
+		SpecDescriptor: clusterSpecDesc.Message,
+	}
+	clusterSvc, err := managedresource.BuildAndRegister(grpcServer, clusterTypeCfg, managedresource.Deps{
+		Resources: managedResourceSvc,
+		Validator: specValidator,
+	})
+	if err != nil {
+		return fmt.Errorf("register dynamic cluster service: %w", err)
+	}
 	reflection.Register(grpcServer)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
@@ -441,8 +511,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
+	// Dynamic HTTP for managed resource types — routes directly to gRPC.
+	clusterHTTPMux := http.NewServeMux()
+	if err := managedresource.RegisterHTTP(clusterHTTPMux, clusterSvc, f.grpcAddr); err != nil {
+		return fmt.Errorf("register cluster HTTP: %w", err)
+	}
 
 	topMux := http.NewServeMux()
+	topMux.Handle("/v1/clusters", clusterHTTPMux)
+	topMux.Handle("/v1/clusters/", clusterHTTPMux)
 	topMux.Handle("/v1/", gwMux)
 
 	if f.webDir != "" {

@@ -29,14 +29,10 @@ func (r *ManagedResourceRepo) CreateType(ctx context.Context, def domain.Managed
 	if err != nil {
 		return fmt.Errorf("marshal signature: %w", err)
 	}
-	var schemaBytes []byte
-	if def.SpecSchema != nil {
-		schemaBytes = []byte(*def.SpecSchema)
-	}
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO managed_resource_types (resource_type, relation, signature, spec_schema, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)`,
-		def.ResourceType, relJSON, sigJSON, schemaBytes,
+		`INSERT INTO managed_resource_types (resource_type, relation, signature, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?)`,
+		def.ResourceType, relJSON, sigJSON,
 		def.CreatedAt.UTC().Format(time.RFC3339),
 		def.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
@@ -50,14 +46,14 @@ func (r *ManagedResourceRepo) CreateType(ctx context.Context, def domain.Managed
 
 func (r *ManagedResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ManagedResourceTypeDef, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, relation, signature, spec_schema, created_at, updated_at
+		`SELECT resource_type, relation, signature, created_at, updated_at
 		 FROM managed_resource_types WHERE resource_type = ?`, rt)
 	return r.scanTypeDef(row)
 }
 
 func (r *ManagedResourceRepo) ListTypes(ctx context.Context) ([]domain.ManagedResourceTypeDef, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_type, relation, signature, spec_schema, created_at, updated_at
+		`SELECT resource_type, relation, signature, created_at, updated_at
 		 FROM managed_resource_types ORDER BY resource_type`)
 	if err != nil {
 		return nil, err
@@ -208,9 +204,8 @@ func (r *ManagedResourceRepo) DeleteInstance(ctx context.Context, rt domain.Reso
 func (r *ManagedResourceRepo) scanTypeDef(s interface{ Scan(...any) error }) (domain.ManagedResourceTypeDef, error) {
 	var def domain.ManagedResourceTypeDef
 	var relJSON, sigJSON []byte
-	var schemaBytes []byte
 	var createdAt, updatedAt string
-	if err := s.Scan(&def.ResourceType, &relJSON, &sigJSON, &schemaBytes, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&def.ResourceType, &relJSON, &sigJSON, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ManagedResourceTypeDef{}, domain.ErrNotFound
 		}
@@ -223,10 +218,6 @@ func (r *ManagedResourceRepo) scanTypeDef(s interface{ Scan(...any) error }) (do
 	def.Relation = rel
 	if err := json.Unmarshal(sigJSON, &def.Signature); err != nil {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("unmarshal signature: %w", err)
-	}
-	if len(schemaBytes) > 0 {
-		s := domain.RawSchema(schemaBytes)
-		def.SpecSchema = &s
 	}
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		def.CreatedAt = t

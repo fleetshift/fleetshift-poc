@@ -7,22 +7,18 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/jsonschema"
 )
 
 func newTypeService(t *testing.T) *application.ManagedResourceTypeService {
 	t.Helper()
 	return &application.ManagedResourceTypeService{
-		Store:          newStore(t),
-		SchemaCompiler: jsonschema.Compiler{},
+		Store: newStore(t),
 	}
 }
 
 func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	ctx := context.Background()
 	svc := newTypeService(t)
-
-	schema := domain.RawSchema(`{"type":"object","properties":{"provider":{"type":"string"}},"required":["provider"]}`)
 
 	// Create
 	def, err := svc.Create(ctx, application.CreateTypeInput{
@@ -33,7 +29,6 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 			ContentHash:    []byte("hash"),
 			SignatureBytes: []byte("sig"),
 		},
-		SpecSchema: &schema,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -77,26 +72,6 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	_, err = svc.Get(ctx, "clusters")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
-	}
-}
-
-func TestManagedResourceTypeService_CreateInvalidSchema(t *testing.T) {
-	ctx := context.Background()
-	svc := newTypeService(t)
-
-	bad := domain.RawSchema(`{"type": "not-a-real-type"}`)
-	_, err := svc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "bad-schema",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon"},
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "s", Issuer: "i"},
-			ContentHash:    []byte("h"),
-			SignatureBytes: []byte("s"),
-		},
-		SpecSchema: &bad,
-	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create with invalid schema: got %v, want ErrInvalidArgument", err)
 	}
 }
 
