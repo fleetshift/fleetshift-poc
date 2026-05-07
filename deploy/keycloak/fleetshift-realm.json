@@ -174,7 +174,7 @@
   },
   "users": [
     {
-      "username": "ops",
+      "username": "ops-user",
       "email": "ops@fleetshift.local",
       "firstName": "Ops",
       "lastName": "User",
@@ -186,7 +186,7 @@
           "value": "GENERATED_AT_DEPLOY_TIME"
         }
       ],
-      "realmRoles": ["ops"],
+      "realmRoles": ["ops", "default-roles-fleetshift"],
       "clientRoles": {
         "account": ["manage-account", "view-profile"]
       },
@@ -195,7 +195,7 @@
       }
     },
     {
-      "username": "dev",
+      "username": "dev-user",
       "email": "dev@fleetshift.local",
       "firstName": "Dev",
       "lastName": "User",
@@ -207,7 +207,7 @@
           "value": "GENERATED_AT_DEPLOY_TIME"
         }
       ],
-      "realmRoles": ["dev"],
+      "realmRoles": ["dev", "default-roles-fleetshift"],
       "clientRoles": {
         "account": ["manage-account", "view-profile"]
       },

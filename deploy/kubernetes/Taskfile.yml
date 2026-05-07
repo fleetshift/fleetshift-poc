@@ -2,23 +2,31 @@ version: '3'
 
 vars:
   NAMESPACE: fleetshift
+  OME_CLUSTER_CHECK: '[ -n "${OME_CLUSTER_API}" ] && oc whoami --show-server 2>/dev/null | grep -qF "${OME_CLUSTER_API}"'
+  OME_CLUSTER_MSG: "Wrong cluster or OME_CLUSTER_API not set. This task requires the OME OCP cluster. Set OME_CLUSTER_API in .env and run: oc login ${OME_CLUSTER_API:-<ome-cluster-url>}"
 
 tasks:
   deploy:
     desc: Deploy FleetShift to OpenShift (kustomize manifests, images, auth-setup)
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - ./scripts/deploy.sh
 
   teardown:
     desc: Tear down FleetShift from OpenShift (kustomize delete + namespace)
     preconditions:
-      - sh: oc get namespace {{.NAMESPACE}} &>/dev/null
-        msg: "Namespace '{{.NAMESPACE}}' not found — nothing to tear down."
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - ./scripts/teardown.sh
 
   status:
     desc: Show pods, services, and routes in the fleetshift namespace
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc get all -n {{.NAMESPACE}}
       - |
@@ -30,6 +38,9 @@ tasks:
 
   logs:
     desc: Tail logs from the fleetshift-server deployment
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc logs -f deployment/fleetshift-server -n {{.NAMESPACE}} --all-containers
 
@@ -37,6 +48,9 @@ tasks:
     desc: "Tail logs from a specific pod (e.g. task kubernetes:logs:postgres-0)"
     vars:
       POD: '{{index .MATCH 0}}'
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc logs -f {{.POD}} -n {{.NAMESPACE}} --all-containers
 
@@ -45,6 +59,8 @@ tasks:
     preconditions:
       - sh: test -n "{{.TAG}}"
         msg: "TAG is required. Usage: task kubernetes:set-image TAG=<image-tag>"
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc tag quay.io/stolostron/fleetshift-server:{{.TAG}} fleetshift-server:latest -n {{.NAMESPACE}}
       - echo "ImageStream fleetshift-server:latest → quay.io/stolostron/fleetshift-server:{{.TAG}}"
@@ -52,12 +68,18 @@ tasks:
 
   reset-image:
     desc: Reset fleetshift-server image to the default :latest tag
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc tag --scheduled quay.io/stolostron/fleetshift-server:latest fleetshift-server:latest -n {{.NAMESPACE}}
       - echo "ImageStream fleetshift-server:latest → quay.io/stolostron/fleetshift-server:latest (scheduled import restored)"
 
   import-images:
     desc: Force reimport of images from quay.io
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc import-image fleetshift-server:latest -n {{.NAMESPACE}} --confirm
       - oc import-image fleetshift-web:latest -n {{.NAMESPACE}} --confirm
@@ -69,11 +91,16 @@ tasks:
         msg: "USER is required. Usage: task kubernetes:register-redirect USER=admin PASSWORD=secret"
       - sh: test -n "{{.PASSWORD}}"
         msg: "PASSWORD is required. Usage: task kubernetes:register-redirect USER=admin PASSWORD=secret"
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - ./scripts/register-redirect.sh {{.USER}} {{.PASSWORD}}
 
   auth-setup:
     desc: Re-run the auth-setup job (deletes previous job first)
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - oc delete job auth-setup -n {{.NAMESPACE}} --ignore-not-found=true
       - oc apply -f auth-setup/job.yaml -n {{.NAMESPACE}}
@@ -85,6 +112,8 @@ tasks:
     preconditions:
       - sh: test -n "{{.ACME_EMAIL}}"
         msg: "ACME_EMAIL is required. Usage: task kubernetes:grpc-route-cert:deploy ACME_EMAIL=you@example.com"
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - >-
         ./grpc-route-cert/scripts/deploy.sh
@@ -94,5 +123,8 @@ tasks:
   'grpc-route-cert:teardown':
     desc: Remove the cert-manager-backed certificate integration from the grpc Route
     interactive: true
+    preconditions:
+      - sh: '{{.OME_CLUSTER_CHECK}}'
+        msg: '{{.OME_CLUSTER_MSG}}'
     cmds:
       - ./grpc-route-cert/scripts/teardown.sh

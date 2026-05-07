@@ -264,7 +264,6 @@ fi
 # Generate realm user passwords (used during realm import)
 OPS_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
 DEV_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
-ADMIN_USER_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 16)
 
 # --- Step 7: Deploy PostgreSQL ---
 info "Deploying PostgreSQL..."
@@ -288,11 +287,9 @@ info "Importing FleetShift realm..."
 REALM_JSON=$(jq \
     --arg ops "$OPS_PASSWORD" \
     --arg dev "$DEV_PASSWORD" \
-    --arg adm "$ADMIN_USER_PASSWORD" \
     '.users |= map(
-        if .username == "ops" then .credentials[0].value = $ops
-        elif .username == "dev" then .credentials[0].value = $dev
-        elif .username == "admin" then .credentials[0].value = $adm
+        if .username == "ops-user" then .credentials[0].value = $ops
+        elif .username == "dev-user" then .credentials[0].value = $dev
         else .
         end
     )' "${KEYCLOAK_DIR}/fleetshift-realm.json")
@@ -435,9 +432,13 @@ echo "    Username: ${ADMIN_USERNAME}"
 echo "    Password: ${ADMIN_PASSWORD}"
 echo ""
 echo "  FleetShift Realm Users:"
-echo "    ops / ${OPS_PASSWORD}"
-echo "    dev / ${DEV_PASSWORD}"
-echo "    admin / ${ADMIN_USER_PASSWORD}"
+echo "    ops-user / ${OPS_PASSWORD}"
+echo "    dev-user / ${DEV_PASSWORD}"
+echo ""
+echo "  Run 'task kc:add-user' to create personal dev accounts."
+echo ""
+echo "  Redirect URIs were removed by the reset."
+echo "  Re-run 'task k8s:register-redirect' for OME."
 echo ""
 if [[ "$CERT_READY" == "true" ]]; then
     echo "  TLS: Trusted certificate (restored from backup or issued by CA)"

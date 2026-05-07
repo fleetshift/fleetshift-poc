@@ -1,5 +1,9 @@
 version: '3'
 
+vars:
+  KC_CLUSTER_CHECK: '[ -n "${KC_CLUSTER_API}" ] && oc whoami --show-server 2>/dev/null | grep -qF "${KC_CLUSTER_API}"'
+  KC_CLUSTER_MSG: "Wrong cluster or KC_CLUSTER_API not set. This task requires the Keycloak OCP cluster. Set KC_CLUSTER_API in .env and run: oc login ${KC_CLUSTER_API:-<keycloak-cluster-url>}"
+
 tasks:
   deploy:
     desc: Deploy Keycloak to OpenShift (cert-manager, RHBK, PostgreSQL, realm import)
@@ -8,6 +12,9 @@ tasks:
     vars:
       BASE_DOMAIN: '{{.BASE_DOMAIN | default ""}}'
       FRESH_CERT: '{{.FRESH_CERT | default ""}}'
+    preconditions:
+      - sh: '{{.KC_CLUSTER_CHECK}}'
+        msg: '{{.KC_CLUSTER_MSG}}'
     cmds:
       - >-
         ./scripts/deploy.sh
@@ -19,8 +26,8 @@ tasks:
     desc: Tear down Keycloak deployment from OpenShift (interactive)
     interactive: true
     preconditions:
-      - sh: oc get namespace keycloak-prod &>/dev/null
-        msg: "Namespace 'keycloak-prod' not found — Keycloak does not appear to be deployed on this cluster."
+      - sh: '{{.KC_CLUSTER_CHECK}}'
+        msg: '{{.KC_CLUSTER_MSG}}'
     cmds:
       - ./scripts/teardown.sh
 
@@ -28,8 +35,20 @@ tasks:
     desc: Add a cluster's console redirect URI to the ocp-console Keycloak client
     requires:
       vars: [BASE_DOMAIN, CLUSTER_NAME]
+    preconditions:
+      - sh: '{{.KC_CLUSTER_CHECK}}'
+        msg: '{{.KC_CLUSTER_MSG}}'
     cmds:
       - ./scripts/add-base-domain.sh --base-domain {{.BASE_DOMAIN}} --cluster-name {{.CLUSTER_NAME}}
+
+  reset-realm:
+    desc: Reset the FleetShift realm to match the realm config file (Keycloak stays up)
+    interactive: true
+    preconditions:
+      - sh: '{{.KC_CLUSTER_CHECK}}'
+        msg: '{{.KC_CLUSTER_MSG}}'
+    cmds:
+      - ./scripts/reset-realm.sh
 
   add-user:
     desc: Add or update a user in the FleetShift Keycloak realm
@@ -38,6 +57,9 @@ tasks:
     vars:
       ROLES: '{{.ROLES | default ""}}'
       ADMIN_PASSWORD: '{{.ADMIN_PASSWORD | default ""}}'
+    preconditions:
+      - sh: '[ -n "{{.ADMIN_PASSWORD}}" ] || ({{.KC_CLUSTER_CHECK}})'
+        msg: "Wrong cluster or KC_CLUSTER_API not set. This task requires the Keycloak OCP cluster. For local mode, pass ADMIN_PASSWORD instead. Set KC_CLUSTER_API in .env and run: oc login ${KC_CLUSTER_API:-<keycloak-cluster-url>}"
     cmds:
       - >-
         ./scripts/add-user.sh

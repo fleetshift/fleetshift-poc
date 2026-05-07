@@ -45,8 +45,8 @@ if [ "$AUTH_MODE" = "local" ]; then
     --arg ops "$OPS_PASSWORD" \
     --arg dev "$DEV_PASSWORD" \
     '.users |= map(
-        if .username == "ops" then .credentials[0].value = $ops
-        elif .username == "dev" then .credentials[0].value = $dev
+        if .username == "ops-user" then .credentials[0].value = $ops
+        elif .username == "dev-user" then .credentials[0].value = $dev
         else .
         end
     )' "$REALM_TEMPLATE" > "$REALM_JSON"
@@ -119,8 +119,8 @@ if [ "$AUTH_MODE" = "local" ]; then
   echo "    admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"
   echo ""
   echo "  FleetShift Realm Credentials:"
-  echo "    ops / ${OPS_PASSWORD}"
-  echo "    dev / ${DEV_PASSWORD}"
+  echo "    ops-user / ${OPS_PASSWORD}"
+  echo "    dev-user / ${DEV_PASSWORD}"
 fi
 echo ""
 if [ "$AUTH_MODE" = "local" ]; then
