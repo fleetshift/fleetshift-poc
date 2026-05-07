@@ -19,12 +19,12 @@ import (
 
 // TestEndToEnd_ManagedResource_DeliveryWithAttestation exercises the
 // full managed resource tracer bullet:
-//  1. Register a managed resource type (with SignedRelation fields)
-//  2. Verify that creating a resource with invalid spec is rejected
-//  3. Create a managed resource instance with a valid spec
-//  4. Verify orchestration derives the fulfillment and delivers to the addon
+//  1. Register a delivery target (the addon)
+//  2. Register a managed resource type (with SignedRelation fields)
+//  3. Create a signed managed resource instance
+//  4. Wait for orchestration to deliver to the addon
 //  5. Verify the delivery carries attestation with ManagedResourceContent
-//  6. Verify the delivered manifests contain the resource spec
+//  6. Verify the resource is retrievable from the service
 func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -178,10 +178,10 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Errorf("AttestationRef.RelationRef = %v, want clusters", view.Fulfillment.AttestationRef.RelationRef)
 	}
 
-	// --- Step 5: Wait for delivery (orchestration runs async) ---
+	// --- Step 4: Wait for delivery (orchestration runs async) ---
 	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
 
-	// --- Step 6: Verify attestation and delivered manifests ---
+	// --- Step 5: Verify attestation and delivered manifests ---
 	att := agent.capturedAttestation()
 	if att == nil {
 		t.Fatal("expected delivery attestation for signed managed resource")
@@ -230,7 +230,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Errorf("Manifest.Raw = %s, want %s", manifests[0].Raw, validSpec)
 	}
 
-	// --- Step 7: Verify the resource is retrievable from the service ---
+	// --- Step 6: Verify the resource is retrievable from the service ---
 	got, err := resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)

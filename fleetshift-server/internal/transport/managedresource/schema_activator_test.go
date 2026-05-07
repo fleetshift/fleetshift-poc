@@ -175,6 +175,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 	schema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
 	}
+	schema.EntryFile = "cluster_spec.proto"
 	schema.SpecMessage = "ClusterSpecV2"
 
 	h2, err := activator.Activate(context.Background(), schema)
@@ -316,6 +317,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 	schema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
 	}
+	schema.EntryFile = "cluster_spec.proto"
 	schema.SpecMessage = "ClusterSpecV2"
 
 	_, err = env.activator.Activate(context.Background(), schema)

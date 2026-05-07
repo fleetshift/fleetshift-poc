@@ -657,6 +657,47 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 	}
 }
 
+func TestAddonManager_ReEnableAfterDisable(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	desc := clusterMgmtDescriptor()
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+	}); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{clusterSchema()},
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	if err := env.mgr.Disconnect(ctx, "cluster-mgmt"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+	if err := env.mgr.Disable(ctx, "cluster-mgmt"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	addon, _ := env.mgr.Get("cluster-mgmt")
+	if addon.State != domain.AddonStateDefined {
+		t.Fatalf("state after Disable = %d, want %d (defined)", addon.State, domain.AddonStateDefined)
+	}
+
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("re-Enable after Disable: %v", err)
+	}
+
+	addon, _ = env.mgr.Get("cluster-mgmt")
+	if addon.State != domain.AddonStateEnabled {
+		t.Errorf("state after re-Enable = %d, want %d (enabled)", addon.State, domain.AddonStateEnabled)
+	}
+}
+
 func TestAddonManager_DuplicateEnableReturnsError(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()

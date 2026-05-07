@@ -94,7 +94,13 @@ type ManagedResourceSchema struct {
 	// ProtoFiles maps virtual filenames to proto source content.
 	// The compiler resolves imports within this map first, then
 	// falls back to well-known types (google/protobuf/*, buf.validate/*).
-	ProtoFiles  map[string]string
+	ProtoFiles map[string]string
+
+	// EntryFile is the proto file the compiler starts from. Required
+	// for multi-file schemas; for single-file schemas the compiler
+	// infers it automatically.
+	EntryFile string
+
 	SpecMessage protoreflect.FullName
 
 	Relation FulfillmentRelation

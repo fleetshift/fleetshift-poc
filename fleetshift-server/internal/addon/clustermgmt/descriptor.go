@@ -42,6 +42,7 @@ func Schema() domain.ManagedResourceSchema {
 		ProtoFiles: map[string]string{
 			specProtoPath: clusterSpecProto,
 		},
+		EntryFile:   specProtoPath,
 		SpecMessage: "addons.cluster_mgmt.v1.ClusterSpec",
 		Relation: domain.RegisteredSelfTarget{
 			AddonTarget: "kind-local",

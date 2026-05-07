@@ -195,7 +195,7 @@ func buildServiceInfo(desc *grpc.ServiceDesc) grpc.ServiceInfo {
 type DynamicHTTPMux struct {
 	mu       sync.RWMutex
 	mux      *http.ServeMux
-	handlers map[string]http.Handler // prefix → current handler
+	handlers map[string]*httpHandlerEntry // prefix → current handler + connection
 }
 
 // NewDynamicHTTPMux creates a new dynamic HTTP mux backed by the given
@@ -206,7 +206,7 @@ func NewDynamicHTTPMux(mux *http.ServeMux) *DynamicHTTPMux {
 	}
 	return &DynamicHTTPMux{
 		mux:      mux,
-		handlers: make(map[string]http.Handler),
+		handlers: make(map[string]*httpHandlerEntry),
 	}
 }
 
@@ -236,15 +236,19 @@ func (m *DynamicHTTPMux) Replace(svc *RegisteredService, grpcAddr string) error 
 
 // setHandler builds the handler and installs it. If the prefix has
 // never been seen, a stable dispatcher is registered on the underlying
-// mux. Must be called with m.mu held.
+// mux. Closes the previous entry's gRPC connection when replacing.
+// Must be called with m.mu held.
 func (m *DynamicHTTPMux) setHandler(svc *RegisteredService, grpcAddr, prefix string) error {
-	handler, err := buildHTTPHandler(svc, grpcAddr)
+	entry, err := buildHTTPHandler(svc, grpcAddr)
 	if err != nil {
 		return err
 	}
 
-	_, dispatched := m.handlers[prefix]
-	m.handlers[prefix] = handler
+	prev, dispatched := m.handlers[prefix]
+	if dispatched && prev != nil && prev.conn != nil {
+		go prev.conn.Close()
+	}
+	m.handlers[prefix] = entry
 
 	if !dispatched {
 		dispatcher := m.dispatcher(prefix)
@@ -259,8 +263,11 @@ func (m *DynamicHTTPMux) setHandler(svc *RegisteredService, grpcAddr, prefix str
 func (m *DynamicHTTPMux) Deregister(plural string) {
 	prefix := "/v1/" + plural
 	m.mu.Lock()
+	defer m.mu.Unlock()
+	if entry, ok := m.handlers[prefix]; ok && entry != nil && entry.conn != nil {
+		go entry.conn.Close()
+	}
 	delete(m.handlers, prefix)
-	m.mu.Unlock()
 }
 
 // dispatcher returns a stable handler function for a prefix. It looks
@@ -269,13 +276,13 @@ func (m *DynamicHTTPMux) Deregister(plural string) {
 func (m *DynamicHTTPMux) dispatcher(prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		m.mu.RLock()
-		h, ok := m.handlers[prefix]
+		entry, ok := m.handlers[prefix]
 		m.mu.RUnlock()
-		if !ok {
+		if !ok || entry == nil {
 			http.NotFound(w, r)
 			return
 		}
-		h.ServeHTTP(w, r)
+		entry.handler.ServeHTTP(w, r)
 	}
 }
 

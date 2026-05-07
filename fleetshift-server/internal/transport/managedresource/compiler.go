@@ -1,4 +1,4 @@
-// Package managedtype provides in-process proto compilation and dynamic
+// Package managedresource provides in-process proto compilation and dynamic
 // gRPC service registration for addon-defined managed resource types.
 // It enables the platform to host typed, AIP-compliant gRPC services
 // without requiring compile-time Go stub generation for each addon type.
@@ -7,7 +7,6 @@ package managedresource
 import (
 	"context"
 	"fmt"
-	"io/fs"
 	"os"
 	"strings"
 
@@ -221,19 +220,6 @@ func findMessageByFullName(fd protoreflect.FileDescriptor, fullName protoreflect
 // It checks for the proto sources directory at the given root.
 func FindImportPaths(protoRoot string) ([]string, error) {
 	paths := []string{protoRoot}
-
-	// Check for well-known types in the proto root
-	_, err := fs.Stat(os.DirFS(protoRoot), "google/protobuf/any.proto")
-	if err != nil {
-		// Try GOPATH-based locations for well-known types
-		gopath := os.Getenv("GOPATH")
-		if gopath == "" {
-			gopath = os.Getenv("HOME") + "/go"
-		}
-		// protocompile's WithStandardImports handles WKT automatically,
-		// but buf.validate needs to be found on the import path.
-		_ = gopath
-	}
 
 	// buf.validate protos are typically available via the buf module cache
 	// or bundled with the binary. For now, we rely on protocompile's

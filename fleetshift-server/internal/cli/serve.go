@@ -90,7 +90,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
 	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
-	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes", "comma-separated list of addons to enable (default: all)")
+	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes,cluster-mgmt", "comma-separated list of addons to enable (default: all)")
 	return cmd
 }
 
@@ -198,15 +198,18 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		)
 	}
 
-	ocpAgent := ocpaddon.NewAgent(
-		ocpaddon.WithVault(vault),
-		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
-	)
-	if err := ocpAgent.Start(); err != nil {
-		return fmt.Errorf("start ocp agent: %w", err)
+	var ocpAgent *ocpaddon.Agent
+	if enabledAddons["ocp"] {
+		ocpAgent = ocpaddon.NewAgent(
+			ocpaddon.WithVault(vault),
+			ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
+		)
+		if err := ocpAgent.Start(); err != nil {
+			return fmt.Errorf("start ocp agent: %w", err)
+		}
+		defer ocpAgent.Shutdown(ctx)
+		logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
 	}
-	defer ocpAgent.Shutdown(ctx)
-	logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
 
 	var wfBackend wfbackend.Backend
 	if f.databaseURL != "" {
@@ -415,14 +418,17 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- kubernetes delivery agent ---
 
-	kubeAgentOpts := []kubernetesaddon.AgentOption{
-		kubernetesaddon.WithKeyResolver(keyResolver),
-		kubernetesaddon.WithVault(vault),
+	var kubeAgent domain.DeliveryAgent
+	if enabledAddons["kubernetes"] {
+		kubeAgentOpts := []kubernetesaddon.AgentOption{
+			kubernetesaddon.WithKeyResolver(keyResolver),
+			kubernetesaddon.WithVault(vault),
+		}
+		if oidcHTTPClient != nil {
+			kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
+		}
+		kubeAgent = kubernetesaddon.NewAgent(kubeAgentOpts...)
 	}
-	if oidcHTTPClient != nil {
-		kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
-	}
-	kubeAgent := kubernetesaddon.NewAgent(kubeAgentOpts...)
 
 	// --- dynamic service infrastructure ---
 
@@ -513,14 +519,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			return fmt.Errorf("enable kind addon: %w", err)
 		}
 	}
-	if err := addonMgr.Enable(ctx, ocpaddon.Descriptor()); err != nil {
-		return fmt.Errorf("enable ocp addon: %w", err)
+	if enabledAddons["ocp"] {
+		if err := addonMgr.Enable(ctx, ocpaddon.Descriptor()); err != nil {
+			return fmt.Errorf("enable ocp addon: %w", err)
+		}
 	}
-	if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
-		return fmt.Errorf("enable kubernetes addon: %w", err)
+	if enabledAddons["kubernetes"] {
+		if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
+			return fmt.Errorf("enable kubernetes addon: %w", err)
+		}
 	}
-	if err := addonMgr.Enable(ctx, clustermgmt.Descriptor()); err != nil {
-		return fmt.Errorf("enable cluster-mgmt addon: %w", err)
+	if enabledAddons["cluster-mgmt"] {
+		if err := addonMgr.Enable(ctx, clustermgmt.Descriptor()); err != nil {
+			return fmt.Errorf("enable cluster-mgmt addon: %w", err)
+		}
 	}
 
 	// --- start ---
@@ -556,28 +568,34 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
-		Agent: ocpAgent,
-		Targets: []domain.TargetInfo{{
-			ID:                    "ocp-aws",
-			Type:                  ocpaddon.TargetType,
-			Name:                  "OCP on AWS",
-			AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
-		}},
-	}); err != nil {
-		return fmt.Errorf("connect ocp addon: %w", err)
+	if enabledAddons["ocp"] {
+		if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
+			Agent: ocpAgent,
+			Targets: []domain.TargetInfo{{
+				ID:                    "ocp-aws",
+				Type:                  ocpaddon.TargetType,
+				Name:                  "OCP on AWS",
+				AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
+			}},
+		}); err != nil {
+			return fmt.Errorf("connect ocp addon: %w", err)
+		}
 	}
 
-	if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
-		Agent: kubeAgent,
-	}); err != nil {
-		return fmt.Errorf("connect kubernetes addon: %w", err)
+	if enabledAddons["kubernetes"] {
+		if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
+			Agent: kubeAgent,
+		}); err != nil {
+			return fmt.Errorf("connect kubernetes addon: %w", err)
+		}
 	}
 
-	if err := addonMgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clustermgmt.Schema()},
-	}); err != nil {
-		return fmt.Errorf("connect cluster-mgmt addon: %w", err)
+	if enabledAddons["cluster-mgmt"] {
+		if err := addonMgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+			Schemas: []domain.ManagedResourceSchema{clustermgmt.Schema()},
+		}); err != nil {
+			return fmt.Errorf("connect cluster-mgmt addon: %w", err)
+		}
 	}
 
 	// --- shutdown ---

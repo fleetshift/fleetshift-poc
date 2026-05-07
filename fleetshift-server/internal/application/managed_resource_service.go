@@ -48,8 +48,17 @@ type CreateManagedResourceInput struct {
 	ExpectedGeneration domain.Generation
 }
 
-// Create validates the spec against the registered schema, applies the
-// fulfillment relation, and starts the create workflow.
+// Create persists a pre-validated managed resource, derives fulfillment
+// strategies from the type's relation, and starts the create workflow.
+// Spec validation is handled at the transport layer via protovalidate
+// before reaching this method.
+//
+// NOTE: the application layer intentionally does not re-validate the
+// spec against the schema. Doing so would couple this layer to proto
+// descriptors and the transport's compilation pipeline. The E2E test
+// bypasses the transport layer, so it does not exercise validation —
+// that trade-off is accepted. Revisit if non-transport callers are
+// added in production.
 func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedResourceInput) (domain.ManagedResourceView, error) {
 	if in.ResourceType == "" {
 		return domain.ManagedResourceView{}, fmt.Errorf("%w: resource type is required", domain.ErrInvalidArgument)
@@ -61,7 +70,7 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 		return domain.ManagedResourceView{}, fmt.Errorf("%w: spec is required", domain.ErrInvalidArgument)
 	}
 
-	// Look up the type definition to get the relation and schema.
+	// Look up the type definition to get the fulfillment relation.
 	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("begin tx: %w", err)

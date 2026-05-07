@@ -80,12 +80,22 @@ func NewAddonManager(deps AddonManagerDeps) *AddonManager {
 // Enable authorizes and records an addon's declared capabilities.
 // The addon transitions to [domain.AddonStateEnabled]. No schemas are
 // compiled and no gRPC surface is created — that happens at Connect.
+//
+// If the addon was previously disabled (state [domain.AddonStateDefined]),
+// Enable re-enables it by updating the record in place.
 func (m *AddonManager) Enable(_ context.Context, desc domain.AddonDescriptor) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if _, exists := m.addons[desc.ID]; exists {
-		return fmt.Errorf("%w: addon %q is already enabled", domain.ErrAlreadyExists, desc.ID)
+	if rec, exists := m.addons[desc.ID]; exists {
+		if rec.addon.State != domain.AddonStateDefined {
+			return fmt.Errorf("%w: addon %q is already enabled", domain.ErrAlreadyExists, desc.ID)
+		}
+		rec.addon.Name = desc.Name
+		rec.addon.State = domain.AddonStateEnabled
+		rec.addon.Capabilities = desc.Capabilities
+		rec.addon.EnabledAt = time.Now().UTC()
+		return nil
 	}
 
 	now := time.Now().UTC()
@@ -142,6 +152,10 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 		return fmt.Errorf("%w: addon %q is in state %d, expected enabled", domain.ErrInvalidArgument, addonID, rec.addon.State)
 	}
 
+	// TODO: Connect is not transactional — partial failures leave
+	// inconsistent state (e.g. schemas activated but agent not
+	// registered). Add compensation/rollback so a failed step
+	// undoes earlier side effects.
 	if err := m.connectSchemas(ctx, rec, in.Schemas); err != nil {
 		return err
 	}

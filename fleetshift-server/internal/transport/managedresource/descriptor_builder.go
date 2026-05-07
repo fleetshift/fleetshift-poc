@@ -54,6 +54,16 @@ type ServiceDescriptors struct {
 // The resulting descriptors are used to instantiate dynamicpb.Message
 // instances for gRPC marshaling at runtime.
 func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.MessageDescriptor) (*ServiceDescriptors, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("resource type config is required")
+	}
+	if cfg.Singular == "" || cfg.Plural == "" || cfg.ProtoPackage == "" {
+		return nil, fmt.Errorf("singular, plural, and proto package are required")
+	}
+	if specDesc == nil {
+		return nil, fmt.Errorf("spec descriptor is required")
+	}
+
 	singular := cfg.Singular
 	lower := strings.ToLower(singular[:1]) + singular[1:]
 	plural := cfg.Plural

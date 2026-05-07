@@ -44,10 +44,28 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		return application.SchemaHandle{}, fmt.Errorf("schema for %q has no proto files", schema.ResourceType)
 	}
 
-	var entryFile string
-	for name := range schema.ProtoFiles {
-		entryFile = name
-		break
+	// Compute handle and content hash before expensive compilation so
+	// we can short-circuit when the schema is unchanged.
+	serviceName := "fleetshift.v1." + schema.Singular + "Service"
+	handle := application.SchemaHandle{
+		ServiceName: serviceName,
+		Plural:      schema.Plural,
+	}
+	hash := schemaContentHash(schema)
+
+	a.mu.Lock()
+	if a.hashes == nil {
+		a.hashes = make(map[string][32]byte)
+	}
+	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
+		a.mu.Unlock()
+		return handle, nil
+	}
+	a.mu.Unlock()
+
+	entryFile, err := resolveEntryFile(schema)
+	if err != nil {
+		return application.SchemaHandle{}, err
 	}
 
 	specDesc, err := CompileInline(
@@ -74,29 +92,22 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		return application.SchemaHandle{}, fmt.Errorf("build service: %w", err)
 	}
 
-	handle := application.SchemaHandle{
-		ServiceName: svc.Desc.ServiceName,
-		Plural:      schema.Plural,
-	}
-
-	hash := schemaContentHash(schema)
-
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	if a.hashes == nil {
-		a.hashes = make(map[string][32]byte)
-	}
 
-	if prev, ok := a.hashes[handle.ServiceName]; ok && prev == hash {
+	// Re-check after compilation in case a concurrent Activate completed
+	// between our initial check and now.
+	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
 		return handle, nil
 	}
 
 	// Either new or changed — register or atomically replace.
-	_, alreadyRegistered := a.hashes[handle.ServiceName]
+	_, alreadyRegistered := a.hashes[serviceName]
 	if alreadyRegistered {
 		a.GRPCMux.Replace(svc)
 		if a.HTTPMux != nil && a.GRPCAddr != "" {
 			if err := a.HTTPMux.Replace(svc, a.GRPCAddr); err != nil {
+				// TODO: roll back gRPC replace for atomicity.
 				return application.SchemaHandle{}, fmt.Errorf("replace HTTP: %w", err)
 			}
 		}
@@ -112,8 +123,27 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		}
 	}
 
-	a.hashes[handle.ServiceName] = hash
+	a.hashes[serviceName] = hash
 	return handle, nil
+}
+
+// resolveEntryFile determines the compiler entry file for a schema.
+// If EntryFile is set, it is used directly. For single-file schemas,
+// the sole file is used. Multi-file schemas without an explicit
+// entry file are rejected.
+func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
+	if schema.EntryFile != "" {
+		if _, ok := schema.ProtoFiles[schema.EntryFile]; !ok {
+			return "", fmt.Errorf("entry file %q not found in schema proto files for %q", schema.EntryFile, schema.ResourceType)
+		}
+		return schema.EntryFile, nil
+	}
+	if len(schema.ProtoFiles) == 1 {
+		for name := range schema.ProtoFiles {
+			return name, nil
+		}
+	}
+	return "", fmt.Errorf("schema for %q has %d proto files but no EntryFile specified", schema.ResourceType, len(schema.ProtoFiles))
 }
 
 // Deactivate removes the gRPC and HTTP registrations for the schema

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
@@ -206,8 +207,13 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 	if validUntilField != nil && reqMsg.Has(validUntilField) {
 		tsMsg := reqMsg.Get(validUntilField).Message()
 		ts := &timestamppb.Timestamp{}
-		b, _ := proto.Marshal(tsMsg.Interface())
-		_ = proto.Unmarshal(b, ts)
+		b, err := proto.Marshal(tsMsg.Interface())
+		if err != nil {
+			return nil, status.Errorf(codes.Internal, "marshal valid_until: %v", err)
+		}
+		if err := proto.Unmarshal(b, ts); err != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal valid_until: %v", err)
+		}
 		in.ValidUntil = ts.AsTime()
 	}
 
@@ -397,31 +403,31 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	// create_time
 	if !mr.CreatedAt.IsZero() {
 		createTimeField := h.descs.Resource.Fields().ByName("create_time")
-		ts := timestamppb.New(mr.CreatedAt)
-		tsMsg := dynamicpb.NewMessage(createTimeField.Message())
-		b, _ := proto.Marshal(ts)
-		_ = proto.Unmarshal(b, tsMsg)
-		resource.Set(createTimeField, protoreflect.ValueOfMessage(tsMsg))
+		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt); err != nil {
+			return nil, err
+		} else {
+			resource.Set(createTimeField, tsVal)
+		}
 	}
 
 	// update_time
 	if !mr.UpdatedAt.IsZero() {
 		updateTimeField := h.descs.Resource.Fields().ByName("update_time")
-		ts := timestamppb.New(mr.UpdatedAt)
-		tsMsg := dynamicpb.NewMessage(updateTimeField.Message())
-		b, _ := proto.Marshal(ts)
-		_ = proto.Unmarshal(b, tsMsg)
-		resource.Set(updateTimeField, protoreflect.ValueOfMessage(tsMsg))
+		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt); err != nil {
+			return nil, err
+		} else {
+			resource.Set(updateTimeField, tsVal)
+		}
 	}
 
 	// delete_time
 	if mr.DeletedAt != nil {
 		deleteTimeField := h.descs.Resource.Fields().ByName("delete_time")
-		ts := timestamppb.New(*mr.DeletedAt)
-		tsMsg := dynamicpb.NewMessage(deleteTimeField.Message())
-		b, _ := proto.Marshal(ts)
-		_ = proto.Unmarshal(b, tsMsg)
-		resource.Set(deleteTimeField, protoreflect.ValueOfMessage(tsMsg))
+		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt); err != nil {
+			return nil, err
+		} else {
+			resource.Set(deleteTimeField, tsVal)
+		}
 	}
 
 	// etag
@@ -448,6 +454,21 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 	}
 }
 
+// marshalTimestamp converts a time.Time to a protoreflect.Value suitable
+// for setting on a dynamic Timestamp field.
+func marshalTimestamp(field protoreflect.FieldDescriptor, t time.Time) (protoreflect.Value, error) {
+	ts := timestamppb.New(t)
+	tsMsg := dynamicpb.NewMessage(field.Message())
+	b, err := proto.Marshal(ts)
+	if err != nil {
+		return protoreflect.Value{}, fmt.Errorf("marshal %s: %w", field.Name(), err)
+	}
+	if err := proto.Unmarshal(b, tsMsg); err != nil {
+		return protoreflect.Value{}, fmt.Errorf("unmarshal %s: %w", field.Name(), err)
+	}
+	return protoreflect.ValueOfMessage(tsMsg), nil
+}
+
 func toDomainError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
@@ -457,6 +478,6 @@ func toDomainError(err error) error {
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:
-		return status.Error(codes.Internal, err.Error())
+		return status.Error(codes.Internal, "internal error")
 	}
 }

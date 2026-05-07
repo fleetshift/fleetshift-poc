@@ -3,6 +3,7 @@ package managedresource
 import (
 	"io"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"google.golang.org/grpc"
@@ -27,7 +28,7 @@ import (
 // For dynamic (hot-swappable) registration, prefer [DynamicHTTPMux] which
 // uses handler indirection to support atomic replace and deregister.
 func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) error {
-	handler, err := buildHTTPHandler(svc, grpcAddr)
+	entry, err := buildHTTPHandler(svc, grpcAddr)
 	if err != nil {
 		return err
 	}
@@ -38,16 +39,24 @@ func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) e
 	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
 	// delete) are both routed here instead of falling through to the
 	// grpc-gateway catch-all on /v1/.
-	mux.HandleFunc(prefix, handler)
-	mux.HandleFunc(prefix+"/", handler)
+	mux.HandleFunc(prefix, entry.handler)
+	mux.HandleFunc(prefix+"/", entry.handler)
 
 	return nil
+}
+
+// httpHandlerEntry pairs an HTTP handler with its gRPC client
+// connection so the connection can be closed when the handler is
+// replaced or deregistered.
+type httpHandlerEntry struct {
+	handler http.HandlerFunc
+	conn    *grpc.ClientConn
 }
 
 // buildHTTPHandler creates the HTTP handler function for a managed
 // resource service without registering it on any mux. Used by both
 // [RegisterHTTP] (static) and [DynamicHTTPMux] (dynamic).
-func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (http.HandlerFunc, error) {
+func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (*httpHandlerEntry, error) {
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
@@ -55,7 +64,7 @@ func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (http.HandlerFunc
 
 	prefix := "/v1/" + svc.Config.Plural
 
-	return func(w http.ResponseWriter, r *http.Request) {
+	handler := func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
 
 		switch {
@@ -72,7 +81,8 @@ func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (http.HandlerFunc
 		default:
 			http.NotFound(w, r)
 		}
-	}, nil
+	}
+	return &httpHandlerEntry{handler: handler, conn: conn}, nil
 }
 
 func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
@@ -130,6 +140,22 @@ func handleHTTPGet(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn
 
 func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
 	listReq := dynamicpb.NewMessage(svc.Descriptors.ListRequest)
+
+	if v := r.URL.Query().Get("page_size"); v != "" {
+		if field := svc.Descriptors.ListRequest.Fields().ByName("page_size"); field != nil {
+			n, err := strconv.ParseInt(v, 10, 32)
+			if err != nil {
+				httpError(w, codes.InvalidArgument, "invalid page_size: "+err.Error())
+				return
+			}
+			listReq.Set(field, protoreflect.ValueOfInt32(int32(n)))
+		}
+	}
+	if v := r.URL.Query().Get("page_token"); v != "" {
+		if field := svc.Descriptors.ListRequest.Fields().ByName("page_token"); field != nil {
+			listReq.Set(field, protoreflect.ValueOfString(v))
+		}
+	}
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.ListResponse)
 	titlePlural := strings.ToUpper(svc.Config.Plural[:1]) + svc.Config.Plural[1:]

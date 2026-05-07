@@ -181,15 +181,18 @@ func Start(t *testing.T) string {
 		AuthMethods: authMethodSvc,
 	})
 	schema := clustermgmt.Schema()
-	var entryFile string
-	for name := range schema.ProtoFiles {
-		entryFile = name
-		break
+	if schema.EntryFile == "" {
+		if len(schema.ProtoFiles) != 1 {
+			t.Fatalf("expected exactly 1 cluster schema proto, got %d (or set EntryFile)", len(schema.ProtoFiles))
+		}
+		for name := range schema.ProtoFiles {
+			schema.EntryFile = name
+		}
 	}
 	clusterSpecDesc, err := managedresource.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
-		entryFile,
+		schema.EntryFile,
 		protoreflect.FullName(schema.SpecMessage),
 	)
 	if err != nil {
