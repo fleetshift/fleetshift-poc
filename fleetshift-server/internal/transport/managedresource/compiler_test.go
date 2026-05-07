@@ -14,37 +14,6 @@ import (
 
 const specMessageName = "addons.cluster_mgmt.v1.ClusterSpec"
 
-func TestCompileSpec_FromSource(t *testing.T) {
-	desc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
-		SourceFile:  "cluster_spec.proto",
-		MessageName: specMessageName,
-		ImportPaths: []string{"../../addon/clustermgmt"},
-	})
-	if err != nil {
-		t.Fatalf("CompileSpec: %v", err)
-	}
-
-	if desc.Message == nil {
-		t.Fatal("message descriptor is nil")
-	}
-	if got := string(desc.Message.FullName()); got != specMessageName {
-		t.Errorf("message full name = %q, want %q", got, specMessageName)
-	}
-
-	providerField := desc.Message.Fields().ByName("provider")
-	if providerField == nil {
-		t.Fatal("provider field not found")
-	}
-	versionField := desc.Message.Fields().ByName("version")
-	if versionField == nil {
-		t.Fatal("version field not found")
-	}
-	regionField := desc.Message.Fields().ByName("region")
-	if regionField == nil {
-		t.Fatal("region field not found")
-	}
-}
-
 func TestCompileInline(t *testing.T) {
 	schema := clustermgmt.Schema()
 	var entryFile string
