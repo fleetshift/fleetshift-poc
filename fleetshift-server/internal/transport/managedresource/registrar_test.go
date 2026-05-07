@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -30,13 +31,20 @@ const clusterTargetType domain.TargetType = "cluster-addon"
 func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 	t.Helper()
 
-	desc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
-		SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
-		MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
-		ImportPaths: []string{"../../../../proto"},
-	})
+	schema := clustermgmt.Schema()
+	var entryFile string
+	for name := range schema.ProtoFiles {
+		entryFile = name
+		break
+	}
+	desc, err := managedresource.CompileInline(
+		context.Background(),
+		schema.ProtoFiles,
+		entryFile,
+		protoreflect.FullName(schema.SpecMessage),
+	)
 	if err != nil {
-		t.Fatalf("CompileSpec: %v", err)
+		t.Fatalf("CompileInline: %v", err)
 	}
 
 	return &managedresource.ResourceTypeConfig{
@@ -44,7 +52,7 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 		Singular:       "Cluster",
 		Plural:         "clusters",
 		ProtoPackage:   "fleetshift.v1",
-		SpecMessage:    "addons.cluster_mgmt.v1.ClusterSpec",
+		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: desc.Message,
 	}
 }

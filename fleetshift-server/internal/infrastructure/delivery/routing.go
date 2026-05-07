@@ -36,6 +36,14 @@ func (r *RoutingDeliveryService) Register(targetType domain.TargetType, agent do
 	r.agents[targetType] = agent
 }
 
+// Deregister removes the [domain.DeliveryAgent] for a [domain.TargetType].
+// No-op if no agent is registered for the type.
+func (r *RoutingDeliveryService) Deregister(targetType domain.TargetType) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.agents, targetType)
+}
+
 // Deliver routes to the agent registered for target.Type.
 func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	agent, err := r.agentFor(target.Type)

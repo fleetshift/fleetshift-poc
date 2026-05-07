@@ -23,17 +23,39 @@ import (
 //	DELETE /v1/{collection}/{id}     -> Delete
 //
 // The handler connects to the gRPC server at grpcAddr to forward requests.
+//
+// For dynamic (hot-swappable) registration, prefer [DynamicHTTPMux] which
+// uses handler indirection to support atomic replace and deregister.
 func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) error {
-	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	handler, err := buildHTTPHandler(svc, grpcAddr)
 	if err != nil {
 		return err
 	}
 
 	prefix := "/v1/" + svc.Config.Plural
 
-	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
-		// Route: POST /v1/clusters -> Create
-		// Route: GET  /v1/clusters -> List
+	// Register both the exact path and the subtree pattern so that
+	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
+	// delete) are both routed here instead of falling through to the
+	// grpc-gateway catch-all on /v1/.
+	mux.HandleFunc(prefix, handler)
+	mux.HandleFunc(prefix+"/", handler)
+
+	return nil
+}
+
+// buildHTTPHandler creates the HTTP handler function for a managed
+// resource service without registering it on any mux. Used by both
+// [RegisterHTTP] (static) and [DynamicHTTPMux] (dynamic).
+func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (http.HandlerFunc, error) {
+	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := "/v1/" + svc.Config.Plural
+
+	return func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
 
 		switch {
@@ -50,9 +72,7 @@ func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) e
 		default:
 			http.NotFound(w, r)
 		}
-	})
-
-	return nil
+	}, nil
 }
 
 func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
@@ -77,25 +97,15 @@ func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 		return
 	}
 
-	// Build the create request.
 	createReq := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	idField := svc.Descriptors.CreateRequest.Fields().ByNumber(1)
 	resourceField := svc.Descriptors.CreateRequest.Fields().ByNumber(2)
-	createReq.Set(idField, resource.NewField(idField))
-	createReq.Set(idField, resource.ProtoReflect().NewField(idField))
-
-	// Actually set fields correctly
-	createReq = dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
-	createReq.Set(svc.Descriptors.CreateRequest.Fields().ByNumber(1),
-		resource.ProtoReflect().NewField(svc.Descriptors.CreateRequest.Fields().ByNumber(1)))
-	// Simpler: just set string and message directly
-	createReq2 := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
-	createReq2.Set(idField, stringValue(id))
-	createReq2.Set(resourceField, messageValue(resource))
+	createReq.Set(idField, stringValue(id))
+	createReq.Set(resourceField, messageValue(resource))
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.ServiceName() + "/Create" + svc.Config.Singular
-	if err := conn.Invoke(r.Context(), method, createReq2, resp); err != nil {
+	if err := conn.Invoke(r.Context(), method, createReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
 	}

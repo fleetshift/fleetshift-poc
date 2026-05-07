@@ -10,8 +10,10 @@ import (
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
+	"google.golang.org/protobuf/reflect/protoreflect"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -178,11 +180,18 @@ func Start(t *testing.T) string {
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
-	clusterSpecDesc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
-		SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
-		MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
-		ImportPaths: []string{"../proto/"},
-	})
+	schema := clustermgmt.Schema()
+	var entryFile string
+	for name := range schema.ProtoFiles {
+		entryFile = name
+		break
+	}
+	clusterSpecDesc, err := managedresource.CompileInline(
+		context.Background(),
+		schema.ProtoFiles,
+		entryFile,
+		protoreflect.FullName(schema.SpecMessage),
+	)
 	if err != nil {
 		t.Fatalf("compile cluster spec proto: %v", err)
 	}
@@ -191,7 +200,7 @@ func Start(t *testing.T) string {
 		Singular:       "Cluster",
 		Plural:         "clusters",
 		ProtoPackage:   "fleetshift.v1",
-		SpecMessage:    "addons.cluster_mgmt.v1.ClusterSpec",
+		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: clusterSpecDesc.Message,
 	}
 	if _, err := managedresource.BuildAndRegister(srv, clusterTypeCfg, managedresource.Deps{

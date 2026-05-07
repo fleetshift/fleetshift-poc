@@ -36,13 +36,9 @@ type SpecDescriptor struct {
 // are resolved from the Go process's global proto registry, which contains
 // descriptors for all transitively imported proto Go packages.
 //
-// Example:
-//
-//	desc, err := CompileSpec(ctx, CompileInput{
-//	    SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
-//	    MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
-//	    ImportPaths: []string{"proto/"},
-//	})
+// For the addon lifecycle's production path, prefer [CompileInline] which
+// compiles from inline proto content provided by the addon workload at
+// connect time.
 func CompileSpec(ctx context.Context, in CompileInput) (*SpecDescriptor, error) {
 	resolver := protocompile.CompositeResolver{
 		protocompile.WithStandardImports(
@@ -107,6 +103,66 @@ type CompileInput struct {
 
 	// ImportPaths are filesystem directories to search for imported protos.
 	ImportPaths []string
+}
+
+// CompileInline compiles proto definitions provided as inline content
+// (a map of virtual filename to proto source). The entryFile must be a
+// key in the map. Well-known imports (google/protobuf/*, buf.validate/*)
+// are resolved from the global proto registry.
+//
+// This is the compilation path used when an addon workload provides its
+// schema at connect time — the proto content is transmitted inline,
+// not read from the filesystem.
+func CompileInline(ctx context.Context, protoFiles map[string]string, entryFile string, messageName protoreflect.FullName) (*SpecDescriptor, error) {
+	resolver := protocompile.CompositeResolver{
+		protocompile.WithStandardImports(
+			inlineResolver(protoFiles),
+		),
+		globalRegistryResolver{},
+	}
+
+	compiler := &protocompile.Compiler{
+		Resolver:       resolver,
+		SourceInfoMode: protocompile.SourceInfoStandard,
+		Reporter:       reporter.NewReporter(nil, nil),
+	}
+
+	files, err := compiler.Compile(ctx, entryFile)
+	if err != nil {
+		return nil, fmt.Errorf("compile inline %s: %w", entryFile, err)
+	}
+
+	if len(files) == 0 {
+		return nil, fmt.Errorf("no files compiled from inline %s", entryFile)
+	}
+
+	fd := files[0]
+	msgDesc := fd.Messages().ByName(protoreflect.Name(messageName.Name()))
+	if msgDesc == nil {
+		msgDesc = findMessageByFullName(fd, messageName)
+	}
+	if msgDesc == nil {
+		return nil, fmt.Errorf("message %q not found in inline %s", messageName, entryFile)
+	}
+
+	return &SpecDescriptor{
+		File:    fd,
+		Message: msgDesc,
+	}, nil
+}
+
+// inlineResolver resolves proto imports from a map of virtual filenames
+// to proto source content.
+type inlineResolver map[string]string
+
+func (r inlineResolver) FindFileByPath(path string) (protocompile.SearchResult, error) {
+	content, ok := r[path]
+	if !ok {
+		return protocompile.SearchResult{}, os.ErrNotExist
+	}
+	return protocompile.SearchResult{
+		Source: strings.NewReader(content),
+	}, nil
 }
 
 // CompileFromDescriptorSet loads a pre-compiled FileDescriptorSet

@@ -5,7 +5,6 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
-	"errors"
 	"fmt"
 	"log/slog"
 	"maps"
@@ -20,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"buf.build/go/protovalidate"
 	wfbackend "github.com/cschleiden/go-workflows/backend"
 	wfpostgres "github.com/cschleiden/go-workflows/backend/postgres"
 	wfsqlite "github.com/cschleiden/go-workflows/backend/sqlite"
@@ -32,18 +32,15 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/reflection"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"buf.build/go/protovalidate"
-
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/goworkflows"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/observability"
@@ -53,6 +50,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 type serveFlags struct {
@@ -161,6 +159,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	enabledAddons := parseAddons(f.addons)
 	logger.Info("enabled addons", "addons", slices.Sorted(maps.Keys(enabledAddons)))
 
+	// --- construct addon agents ---
+	//
+	// Agent construction stays here because agents have external
+	// dependencies (Docker, AWS creds, etc.) that the addon manager
+	// should not own. Registration with the router and targets happens
+	// later via AddonManager.Connect / RegisterTarget.
+
+	var kindAgent domain.DeliveryAgent
 	if enabledAddons["kind"] {
 		kindOpts := []kindaddon.AgentOption{
 			kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
@@ -180,7 +186,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			kindOpts = append(kindOpts, kindaddon.WithOIDCHTTPSPort(httpsPort))
 			logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
 		}
-		kindAgent := kindaddon.NewAgent(
+		kindAgent = kindaddon.NewAgent(
 			func(logger kindlog.Logger) kindaddon.ClusterProvider {
 				var opts []cluster.ProviderOption
 				if logger != nil {
@@ -190,10 +196,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			},
 			kindOpts...,
 		)
-		router.Register(kindaddon.TargetType, kindAgent)
 	}
 
-	// --- OCP agent ---
 	ocpAgent := ocpaddon.NewAgent(
 		ocpaddon.WithVault(vault),
 		ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
@@ -203,11 +207,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 	defer ocpAgent.Shutdown(ctx)
 	logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
-
-	router.Register(ocpaddon.TargetType, ocpAgent)
-
-	// Kubernetes agent is registered after the attestation verifier is
-	// built (see below). The router is only consulted at delivery time.
 
 	var wfBackend wfbackend.Backend
 	if f.databaseURL != "" {
@@ -300,29 +299,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
 	if err != nil {
 		return fmt.Errorf("register delete-managed-resource: %w", err)
-	}
-
-	// --- seed default targets ---
-
-	targetSvc := &application.TargetService{Store: store}
-	if enabledAddons["kind"] {
-		if err := targetSvc.Register(ctx, domain.TargetInfo{
-			ID:                    "kind-local",
-			Type:                  kindaddon.TargetType,
-			Name:                  "Local Kind Provider",
-			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-			return fmt.Errorf("seed kind target: %w", err)
-		}
-	}
-
-	if err := targetSvc.Register(ctx, domain.TargetInfo{
-		ID:                    "ocp-aws",
-		Type:                  ocpaddon.TargetType,
-		Name:                  "OCP on AWS",
-		AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
-	}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-		return fmt.Errorf("seed ocp-aws target: %w", err)
 	}
 
 	workerCtx, workerCancel := context.WithCancel(ctx)
@@ -447,13 +423,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
 	}
 	kubeAgent := kubernetesaddon.NewAgent(kubeAgentOpts...)
-	router.Register(kubernetesaddon.TargetType, kubeAgent)
 
-	// --- gRPC server ---
+	// --- dynamic service infrastructure ---
+
+	dynamicMux := managedresource.NewDynamicServiceMux()
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
 		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
+		grpc.UnknownServiceHandler(dynamicMux.Handle),
 	)
 	pb.RegisterDeploymentServiceServer(grpcServer, &transportgrpc.DeploymentServer{
 		Deployments: deploymentSvc,
@@ -465,33 +443,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
-	// Dynamic managed resource type services — compiled from addon spec proto
-	// source at startup. No pre-generated Go code or pre-built descriptor sets.
-	clusterSpecDesc, err := managedresource.CompileSpec(ctx, managedresource.CompileInput{
-		SourceFile:  "addons/cluster_mgmt/v1/cluster_spec.proto",
-		MessageName: "addons.cluster_mgmt.v1.ClusterSpec",
-		ImportPaths: []string{"proto/"},
-	})
-	if err != nil {
-		return fmt.Errorf("compile cluster spec proto: %w", err)
-	}
-
-	clusterTypeCfg := &managedresource.ResourceTypeConfig{
-		ResourceType:   "clusters",
-		Singular:       "Cluster",
-		Plural:         "clusters",
-		ProtoPackage:   "fleetshift.v1",
-		SpecMessage:    "addons.cluster_mgmt.v1.ClusterSpec",
-		SpecDescriptor: clusterSpecDesc.Message,
-	}
-	clusterSvc, err := managedresource.BuildAndRegister(grpcServer, clusterTypeCfg, managedresource.Deps{
-		Resources: managedResourceSvc,
-		Validator: specValidator,
-	})
-	if err != nil {
-		return fmt.Errorf("register dynamic cluster service: %w", err)
-	}
-	reflection.Register(grpcServer)
+	managedresource.RegisterCompositeReflection(grpcServer, dynamicMux)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
 	if err != nil {
@@ -511,16 +463,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
-	// Dynamic HTTP for managed resource types — routes directly to gRPC.
-	clusterHTTPMux := http.NewServeMux()
-	if err := managedresource.RegisterHTTP(clusterHTTPMux, clusterSvc, f.grpcAddr); err != nil {
-		return fmt.Errorf("register cluster HTTP: %w", err)
-	}
 
+	// Dynamic managed resource HTTP routes are registered directly on
+	// topMux by the SchemaActivator. Go 1.22+ ServeMux uses
+	// longest-prefix matching, so explicit paths like /v1/clusters
+	// always take precedence over the gateway's /v1/ catch-all.
 	topMux := http.NewServeMux()
-	topMux.Handle("/v1/clusters", clusterHTTPMux)
-	topMux.Handle("/v1/clusters/", clusterHTTPMux)
 	topMux.Handle("/v1/", gwMux)
+	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 
 	if f.webDir != "" {
 		uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
@@ -539,6 +489,40 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Handler: topMux,
 	}
 
+	// --- addon lifecycle ---
+
+	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	activator := &managedresource.DynamicSchemaActivator{
+		GRPCMux:  dynamicMux,
+		HTTPMux:  dynamicHTTPMux,
+		GRPCAddr: f.grpcAddr,
+		Deps: managedresource.Deps{
+			Resources: managedResourceSvc,
+			Validator: specValidator,
+		},
+	}
+	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:    router,
+		TypeSvc:   typeSvc,
+		Activator: activator,
+	})
+
+	// Phase 2: enable addons — records capabilities, no API surface yet.
+	if enabledAddons["kind"] {
+		if err := addonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+			return fmt.Errorf("enable kind addon: %w", err)
+		}
+	}
+	if err := addonMgr.Enable(ctx, ocpaddon.Descriptor()); err != nil {
+		return fmt.Errorf("enable ocp addon: %w", err)
+	}
+	if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
+		return fmt.Errorf("enable kubernetes addon: %w", err)
+	}
+	if err := addonMgr.Enable(ctx, clustermgmt.Descriptor()); err != nil {
+		return fmt.Errorf("enable cluster-mgmt addon: %w", err)
+	}
+
 	// --- start ---
 
 	errCh := make(chan error, 2)
@@ -554,6 +538,47 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			errCh <- err
 		}
 	}()
+
+	// Phase 3: connect addons — schemas compiled, delivery agents
+	// registered, targets seeded. Happens AFTER the servers are serving
+	// so the DynamicServiceMux can dispatch immediately.
+	if enabledAddons["kind"] {
+		if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
+			Agent: kindAgent,
+			Targets: []domain.TargetInfo{{
+				ID:                    "kind-local",
+				Type:                  kindaddon.TargetType,
+				Name:                  "Local Kind Provider",
+				AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
+			}},
+		}); err != nil {
+			return fmt.Errorf("connect kind addon: %w", err)
+		}
+	}
+
+	if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
+		Agent: ocpAgent,
+		Targets: []domain.TargetInfo{{
+			ID:                    "ocp-aws",
+			Type:                  ocpaddon.TargetType,
+			Name:                  "OCP on AWS",
+			AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
+		}},
+	}); err != nil {
+		return fmt.Errorf("connect ocp addon: %w", err)
+	}
+
+	if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		Agent: kubeAgent,
+	}); err != nil {
+		return fmt.Errorf("connect kubernetes addon: %w", err)
+	}
+
+	if err := addonMgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{clustermgmt.Schema()},
+	}); err != nil {
+		return fmt.Errorf("connect cluster-mgmt addon: %w", err)
+	}
 
 	// --- shutdown ---
 

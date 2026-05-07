@@ -8,25 +8,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
-const specProtoFile = "addons/cluster_mgmt/v1/cluster_spec.proto"
 const specMessageName = "addons.cluster_mgmt.v1.ClusterSpec"
-
-// protoImportPaths returns the import paths that resolve both the addon spec
-// proto source and its transitive dependencies on the filesystem. Dependencies
-// not found on the filesystem (like buf.validate) are resolved from the global
-// proto registry at runtime.
-func protoImportPaths() []string {
-	return []string{"../../../../proto"}
-}
 
 func TestCompileSpec_FromSource(t *testing.T) {
 	desc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
-		SourceFile:  specProtoFile,
+		SourceFile:  "cluster_spec.proto",
 		MessageName: specMessageName,
-		ImportPaths: protoImportPaths(),
+		ImportPaths: []string{"../../addon/clustermgmt"},
 	})
 	if err != nil {
 		t.Fatalf("CompileSpec: %v", err)
@@ -53,14 +45,54 @@ func TestCompileSpec_FromSource(t *testing.T) {
 	}
 }
 
-func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
-	desc, err := managedresource.CompileSpec(context.Background(), managedresource.CompileInput{
-		SourceFile:  specProtoFile,
-		MessageName: specMessageName,
-		ImportPaths: protoImportPaths(),
-	})
+func TestCompileInline(t *testing.T) {
+	schema := clustermgmt.Schema()
+	var entryFile string
+	for name := range schema.ProtoFiles {
+		entryFile = name
+		break
+	}
+
+	desc, err := managedresource.CompileInline(
+		context.Background(),
+		schema.ProtoFiles,
+		entryFile,
+		protoreflect.FullName(schema.SpecMessage),
+	)
 	if err != nil {
-		t.Fatalf("CompileSpec: %v", err)
+		t.Fatalf("CompileInline: %v", err)
+	}
+
+	if desc.Message == nil {
+		t.Fatal("message descriptor is nil")
+	}
+	if got := string(desc.Message.FullName()); got != specMessageName {
+		t.Errorf("message full name = %q, want %q", got, specMessageName)
+	}
+
+	for _, field := range []string{"provider", "version", "region", "compute_pools", "network"} {
+		if desc.Message.Fields().ByName(protoreflect.Name(field)) == nil {
+			t.Errorf("field %q not found", field)
+		}
+	}
+}
+
+func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
+	schema := clustermgmt.Schema()
+	var entryFile string
+	for name := range schema.ProtoFiles {
+		entryFile = name
+		break
+	}
+
+	desc, err := managedresource.CompileInline(
+		context.Background(),
+		schema.ProtoFiles,
+		entryFile,
+		protoreflect.FullName(schema.SpecMessage),
+	)
+	if err != nil {
+		t.Fatalf("CompileInline: %v", err)
 	}
 
 	msg := dynamicpb.NewMessage(desc.Message)
