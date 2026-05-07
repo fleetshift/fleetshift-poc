@@ -8,40 +8,55 @@ with the management engine, which is the single authority on what addons exist.
 Remote clusters install addons (running their backend component), but they
 never introduce new ones.
 
-A UI or CLI component only activates when the addon's backend is installed on
-at least one managed cluster. If a UI surface does not need a backend addon for
-its data, it belongs in a core plugin, not an addon.
+A UI or CLI component activates when its declared dependencies are satisfied.
+If the addon ships its own backend, that means the backend must be connected.
+If it depends only on core APIs or other addons, it activates as soon as
+those dependencies are available — no backend of its own is required.
+
+This document focuses on the UI distribution and shell integration model.
+UI plugins are a capability within the unified addon framework — the same
+lifecycle (enable, connect, disconnect, disable) applies to all addons, with
+each phase doing different things based on declared capabilities. A UI plugin
+capability is active at Enable; Connect is only relevant for capabilities
+that require runtime workload assets (managed resource schemas, delivery
+agents). See [addon_integration.md](architecture/addon_integration.md) for
+the full addon lifecycle and capability model.
 
 ## Addon Bundle Model
 
-An addon bundle is the unit of packaging, registration, and installation. It
-declares which components it ships:
+An addon bundle is the unit of packaging, registration, and installation. Each
+component maps to a capability in the addon descriptor — backend components
+declare `ManagedResourceCapability` or `DeliveryCapability`, UI components
+declare a UI plugin capability, and so on. The addon lifecycle phases do
+different things based on which capabilities are present. An addon can ship
+any combination:
 
 ```mermaid
 graph TB
     subgraph Bundle["Addon Bundle (e.g. monitoring)"]
         direction LR
-        BE["Backend<br/><i>go-plugin sidecar</i><br/>Runs on cluster"]
+        BE["Backend<br/><i>addon workload</i>"]
         UI["UI Plugin<br/><i>OCI artifact + manifest</i><br/>Hosted externally"]
         CLI["CLI Extension<br/><i>cobra commands</i><br/>Runs on workstation"]
     end
 
-    BE -.-|"required for"| UI
-    BE -.-|"required for"| CLI
+    BE -.-|"may depend on"| UI
+    BE -.-|"may depend on"| CLI
 
     style BE fill:#4a9,stroke:#2a7,color:#fff
     style UI fill:#49a,stroke:#27a,color:#fff
     style CLI fill:#94a,stroke:#72a,color:#fff
 ```
 
-At least one component is required. UI and CLI are optional but depend on
-the backend being installed on at least one cluster.
+At least one capability is required. UI and CLI capabilities activate when
+their declared dependencies are satisfied — they do not inherently require
+a backend capability in the same addon.
 
 | Component | What it is | Where it runs | When it activates |
 |-----------|-----------|---------------|-------------------|
-| **Backend** | go-plugin sidecar or operator | Managed cluster (via fleetlet) | When installed on a cluster |
-| **UI** | Scalprum plugin (OCI artifact: JS bundle + manifest) | Browser (assets hosted externally) | When backend is installed on >= 1 cluster |
-| **CLI** | CLI extension commands | Developer workstation | When backend is installed on >= 1 cluster |
+| **Backend** | Addon workload (any process) | Cluster, sidecar, or standalone | At Connect — when workload provides runtime assets |
+| **UI** | Scalprum plugin (OCI artifact: JS bundle + manifest) | Browser (assets hosted externally) | At Enable — when declared dependencies are satisfied |
+| **CLI** | CLI extension commands | Developer workstation | At Enable — when declared dependencies are satisfied |
 
 **Key constraint**: An addon must declare its backend dependencies. It does
 not have to ship its own backend, but it must specify which backends it
@@ -55,7 +70,7 @@ dependencies:
   - addon-monitoring        # depends on the monitoring addon's backend
 ```
 
-The platform validates these dependencies at install time:
+The platform validates these dependencies at enable time:
 
 - If all dependencies are available → addon installs normally
 - If a dependency is missing → installation is blocked with a clear error
@@ -69,27 +84,40 @@ dependencies is valid only for fully static content.
 
 The addon catalog is a **runtime data structure** — not something compiled
 into the binary. It is the engine's authoritative registry of what addons
-are available, what each addon ships, and how to install it. The engine reads
-the catalog at runtime; adding a new addon means registering it in the catalog
-via API, not rebuilding the server.
+are available, what each addon ships, and how to enable it. The engine reads
+the catalog at runtime; adding a new addon means registering it in the
+catalog via API, not rebuilding the server.
+
+The catalog builds on the addon lifecycle described in
+[addon_integration.md](architecture/addon_integration.md#addon-lifecycle).
+An addon in the catalog is in the **Defined** state — the descriptor has
+been loaded but no authorization or trust configuration exists. Enabling
+the addon transitions it to **Enabled**, which activates capabilities
+that don't require workload interaction (e.g. UI plugins). Capabilities
+that need runtime assets (managed resource schemas, delivery agents)
+become active at **Connect**.
 
 ### What the catalog contains
 
-Each entry in the catalog describes one addon bundle:
+Each entry in the catalog is an `AddonDescriptor` extended with
+distribution metadata. The core fields come from the descriptor; the
+catalog adds versioning and asset location:
 
 | Field | Description |
 |-------|-------------|
-| `name` | Unique addon identifier (e.g. `monitoring`) |
+| `id` | Unique addon identifier (maps to `AddonDescriptor.ID`) |
+| `name` | Human-readable name (maps to `AddonDescriptor.Name`) |
 | `version` | Semver — used for upgrades and cache-busting |
-| `components` | Which surfaces this addon ships (backend, UI, CLI — at least one) |
-| `install_spec` | OCI artifact reference for the backend component (e.g. `ghcr.io/org/addon-monitoring:v1.2.0`) |
-| `manifest_url` | URL to the `plugin-manifest.json` on the external asset host (if UI component present) |
-| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`) |
+| `capabilities` | Declared capability types (maps to `AddonDescriptor.Capabilities`) |
+| `install_spec` | OCI artifact reference for the backend workload (e.g. `ghcr.io/org/addon-monitoring:v1.2.0`), if backend capabilities present |
+| `manifest_url` | URL to the `plugin-manifest.json` on the external asset host, if UI plugin capability present |
+| `assets_base_url` | Base URL where JS/CSS assets are hosted (e.g. `https://cdn.example.com/addons/monitoring/v1.2.0`), if UI plugin capability present |
 | `extends_core` | Which core plugin surface this addon extends (if any) |
+| `dependencies` | Other addons or core APIs this addon requires |
 
 The engine does **not** store or serve addon UI assets. The catalog stores
 metadata and URLs — pointers to where the assets live. The `install_spec`
-tells the engine how to deploy the backend. The `manifest_url` and
+tells the engine how to deploy the backend workload. The `manifest_url` and
 `assets_base_url` tell the shell where to fetch the UI plugin. Asset hosting
 is a deployment concern: a CDN, an nginx server, S3, or any static file
 host. See [OCI Artifact Distribution](#oci-artifact-distribution) for the
@@ -103,34 +131,43 @@ optionally point to a public catalog as well. This is analogous to Helm's
 configurable chart repositories or VS Code's extension marketplace — the
 catalog source is a deployment decision, not a build decision.
 
-### Catalog vs. installed
+### Catalog vs. enabled vs. connected
 
-The catalog and installation are separate concerns:
+The catalog, enablement, and connection are separate concerns that map to
+the addon lifecycle phases:
 
-- **Catalog** = "these addons are available" (like a Helm repo — you can
-  browse charts but haven't installed them yet)
-- **Installed** = "this addon is active on this OME instance" (its backend
-  is running on one or more clusters, its UI is loaded in the shell, its CLI
-  extensions are available)
+- **Defined** (in catalog) = "this addon is available" — the descriptor
+  and distribution metadata are registered, but nothing is authorized or
+  active. Like a Helm chart in a repo you haven't installed.
+- **Enabled** = "this addon is authorized and its non-workload capabilities
+  are active" — UI plugins are discoverable by the shell, dependencies are
+  validated. No backend workload is running yet.
+- **Connected** = "a workload has provided runtime assets" — managed
+  resource schemas are compiled, delivery agents are routed, targets are
+  seeded. Only relevant for addons with backend capabilities.
 
-The catalog tells the engine *how* to install; the install action actually
-pulls the artifact, starts the backend, registers the UI plugin, etc.
-Uninstalling removes the runtime state but does not remove the addon from
-the catalog — it remains available for reinstallation.
+Disabling an addon removes its runtime state (API surfaces, delivery
+agents, UI plugin entries) but does not remove it from the catalog — it
+returns to Defined and remains available for re-enablement.
 
 ### Runtime registration — not baked into the binary
 
-The engine does **not** need to know about addons at build time. Bundling
-the universe of addons into the binary would require bespoke builds for
-different product configurations and would prevent users from shipping their
-own addons without a custom build.
+The production model is that the engine does **not** need to know about
+addons at build time. Bundling the universe of addons into the binary would
+require bespoke builds for different product configurations and would
+prevent users from shipping their own addons without a custom build.
 
 Instead, addons are registered at runtime via API (or CLI, which calls the
 API). The catalog is just data in the engine's database. This means:
 
-1. **Adding an addon** = an API call that creates a catalog entry
+1. **Adding an addon** = an API call that creates a catalog entry (Defined)
 2. **Different deployments** can have completely different catalogs
 3. **Third-party addons** work without any changes to the engine binary
+
+> **Current POC:** Addon descriptors are compiled into the server binary
+> (e.g. `clustermgmt.Descriptor()` with `go:embed` for proto sources).
+> Enable and Connect happen at startup. This is an interim model — the
+> lifecycle framework is designed for runtime registration.
 
 ## The Core Insight
 
@@ -188,6 +225,10 @@ graph TD
 
 ## Lifecycle
 
+The UI plugin lifecycle is part of the unified addon lifecycle, not a
+separate flow. The phases below show what happens for an addon that
+declares a UI plugin capability — possibly alongside backend capabilities.
+
 ```mermaid
 sequenceDiagram
     participant Admin
@@ -197,17 +238,17 @@ sequenceDiagram
     participant Cluster
     participant Shell as Web Console
 
-    Note over Admin,Shell: Phase 1: Addon Registration (one-time)
-    Admin->>Engine: Register addon (install_spec + manifest_url + assets_base_url)
-    Engine->>Catalog: Store addon metadata and URLs
-    Engine-->>Admin: Addon available in catalog
+    Note over Admin,Shell: Enable (addon-level, one-time)
+    Admin->>Engine: Enable addon (descriptor with UI + backend capabilities)
+    Engine->>Catalog: Store addon metadata, manifest URL, asset base URL
+    Engine-->>Admin: Addon enabled — UI plugin active immediately
 
-    Note over Admin,Shell: Phase 2: Addon Installation (per-cluster)
-    Admin->>Engine: Install addon on Cluster A
+    Note over Admin,Shell: Connect (only if addon has backend capabilities)
+    Admin->>Engine: Connect addon workload (schemas, agents, targets)
     Engine->>Cluster: Deploy addon backend (via fleetlet)
-    Engine->>Engine: Mark "Cluster A has addon X"
+    Engine->>Engine: Compile schemas, register delivery agents
 
-    Note over Admin,Shell: Phase 3: UI Discovery (automatic)
+    Note over Admin,Shell: UI Discovery (automatic, independent of Connect)
     Shell->>Engine: GET /v1/addon-plugins
     Engine-->>Shell: Plugin registry (manifest URLs + assets_base_url per addon)
     Shell->>AssetHost: GET plugin-manifest.json
@@ -219,20 +260,16 @@ sequenceDiagram
     Shell->>Shell: Render UI
 ```
 
+For a frontend-only addon, the Connect phase is skipped entirely — Enable
+is sufficient. For an addon with both UI and backend capabilities, the UI
+plugin is active at Enable while the backend capabilities activate at
+Connect. See [addon_integration.md](architecture/addon_integration.md#addon-lifecycle)
+for the full lifecycle.
+
 ## What the Engine Stores
 
-The engine stores **metadata only** — no JS bytes, no asset blobs:
-
-| Field | Description |
-|-------|-------------|
-| `name` | Unique addon identifier (e.g. `addon-monitoring-plugin`) |
-| `version` | Semver for cache-busting and upgrades |
-| `manifest_url` | URL to the `plugin-manifest.json` on the external host |
-| `assets_base_url` | Base URL for the addon's JS/CSS assets |
-| `install_spec` | OCI reference for the backend component |
-| `extends_core` | Which core plugin surface this addon extends |
-| `dependencies` | Other addons or core APIs this addon requires |
-
+The engine stores **metadata only** — no JS bytes, no asset blobs. The
+catalog fields are described in [What the catalog contains](#what-the-catalog-contains).
 The engine does not read or modify the manifest. It provides the
 `assets_base_url` alongside each addon entry in the plugin registry
 response. The shell's Scalprum `transformManifest` callback prepends
@@ -250,9 +287,9 @@ Cluster A:
     - logging (v1.0.0)
 ```
 
-The cluster does not hold or transmit UI assets. It runs the addon backend
-(go-plugin sidecar or standalone operator) and reports health/metrics via the
-fleetlet. The UI surfaces are entirely server-side in the engine.
+The cluster does not hold or transmit UI assets. It runs the addon workload
+and reports health/metrics via the fleetlet. The UI surfaces are entirely
+server-side in the engine.
 
 ## Why Not Push-from-Fleetlet?
 
@@ -437,16 +474,16 @@ are deployment decisions, not build decisions.
 
 An addon's UI plugin appears in the console when:
 
-1. The addon bundle is registered in the engine's addon catalog
-2. The addon's **declared dependencies** are satisfied (all required backends
-   — core APIs or other addons — are available)
+1. The addon is **enabled** in the engine (not just defined in the catalog)
+2. The addon's **declared dependencies** are satisfied (all required
+   capabilities — core APIs or other addons — are available)
 3. The user has the addon's nav items enabled in their preferences
 
-Rule 2 is the critical gate. If an addon ships its own backend, that backend
-must be installed on at least one managed cluster. If an addon depends on
-other addons' backends, those addons must be installed. If an addon only
-depends on core APIs, it activates as soon as it is registered (core is
-always available).
+Rule 2 is the critical gate. If an addon ships its own backend, those
+backend capabilities must be connected. If an addon depends on other
+addons' capabilities, those addons must be enabled (and connected, if
+they have backend capabilities). If an addon only depends on core APIs,
+it activates as soon as it is enabled (core is always available).
 
 The same rule applies to CLI extensions: an addon's CLI commands are only
 relevant when its dependencies are satisfied.
@@ -815,11 +852,16 @@ file server.
 
 ### Managed resources register schemas with the platform (managed_resources.md)
 
-When an addon connects, it registers its managed resource types -- including
-schemas, delivery targets, and status projections -- as part of capability
-registration. The platform stores this registration and exposes consumer-facing
-APIs based on it. UI plugin metadata is analogous: the addon declares its
-extensions and the platform exposes them to the shell.
+When an addon connects, it registers its managed resource types as part of
+capability registration. The addon declares a `ManagedResourceCapability` at
+enable time and provides the full `ManagedResourceSchema` (inline proto
+source, spec message name, fulfillment relation) at connect time. The platform
+compiles the schema, builds dynamic gRPC/HTTP services, and exposes
+consumer-facing APIs. UI plugin metadata follows the same pattern — it is
+another capability type in the same addon descriptor, activated at Enable
+rather than Connect. See
+[addon_integration.md](architecture/addon_integration.md#addon-lifecycle)
+for the unified addon lifecycle.
 
 ### Addon discovery flows from the platform (OME-12)
 
@@ -858,12 +900,28 @@ capabilities or assets.
 
 ## Relationship to Existing Implementation
 
-The current codebase has proto definitions (`UIPluginSpec`, `RegisterPlugin`)
-that will evolve to store metadata and URLs rather than asset blobs. The
-plugin registry API (`/v1/addon-plugins`) and the Scalprum config merge
-logic in the shell remain the correct integration points — the change is
-in what the engine stores (metadata + URLs) and where assets are served
-from (external host, not engine).
+The addon lifecycle is partially implemented. The `AddonManager` supports
+the three-phase lifecycle (Defined → Enabled → Connected) with
+`AddonDescriptor` for capability declaration and `ManagedResourceSchema`
+for runtime schema registration. The implemented capability types are
+`ManagedResourceCapability` and `DeliveryCapability`. Managed resource API
+extensibility — dynamic gRPC services via `DynamicServiceMux` and HTTP
+routes via `DynamicHTTPMux` — is implemented and tested, including atomic
+schema replacement with content hashing. See
+[addon_integration.md](architecture/addon_integration.md#addon-lifecycle)
+for the lifecycle and
+[managed_resources.md](managed_resources.md#api-grpc--rest) for the
+dynamic API surface.
+
+A UI plugin capability type has not yet been implemented, but the framework
+is designed to support it — it would be another capability variant in the
+descriptor, activated at Enable time (no Connect needed). The current
+codebase has proto definitions (`UIPluginSpec`, `RegisterPlugin`) that will
+evolve to store metadata and URLs rather than asset blobs. The plugin
+registry API (`/v1/addon-plugins`) and the Scalprum config merge logic in
+the shell remain the correct integration points — the change is in what
+the engine stores (metadata + URLs) and where assets are served from
+(external host, not engine).
 
 The fleetlet-side asset discovery code is unnecessary under this model
 and should not be used in production. Assets flow from OCI registry →

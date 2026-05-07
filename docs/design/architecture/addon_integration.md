@@ -4,13 +4,15 @@
 
 The platform's primary extension surface:
 
+- addon lifecycle: defined, enabled, connected
+- the capability model and schema reconciliation
 - why addons are separate trust and execution boundaries
 - how addons extend manifest, placement, and rollout behavior
 - strategy transport options
 - `InvalidateManifests`
 - the `ManifestGenerator` contract
 - managed resources as a structural bridge
-- UI and API extensibility
+- UI and API extensibility — plugin model and dynamic gRPC/HTTP
 
 ## When to read this
 
@@ -28,6 +30,7 @@ Read this when you are designing or implementing an addon, extending the strateg
 
 - [../architecture.md](../architecture.md)
 - [tenancy_and_permissions.md](tenancy_and_permissions.md)
+- [../addon-ui-architecture.md](../addon-ui-architecture.md) — addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability
 
 ## Addons as trust boundaries
 
@@ -40,6 +43,46 @@ In practice, that means:
 - the platform remains an orchestrator and courier rather than the only trusted authority
 
 The full signing model lives in [../authentication.md](../authentication.md).
+
+## Addon lifecycle
+
+An addon is a single unit — not "a backend addon" or "a frontend addon." Each addon declares one or more capabilities of different types. The lifecycle phases do different things depending on what capabilities are present. An addon can be purely backend (managed resources, delivery agents), purely frontend (UI plugin), or a combination.
+
+Addons follow a three-phase lifecycle managed by the `AddonManager`:
+
+1. **Defined** — the addon descriptor has been loaded into the catalog, but no authorization or trust configuration exists yet.
+2. **Enabled** — an admin has authorized the addon and configured its trust policy. Capability expectations are recorded. For capabilities that don't require runtime workload interaction (e.g. UI plugins), Enable is sufficient — the capability is active. For capabilities that require workload-provided assets (schemas, delivery agents), the capability is recorded but not yet activated.
+3. **Connected** — a workload has connected and provided runtime assets for capabilities that need them. Managed resource schemas are compiled, delivery agents are registered, targets are seeded. This phase is only relevant for capabilities that require workload interaction; a frontend-only addon never transitions to Connected.
+
+The transitions are:
+
+- **Enable** (Defined → Enabled): records the addon's declared capabilities. This is the authorization gate — the admin decides which addons can participate. For UI capabilities, the plugin metadata (manifest URL, asset base URL) is available immediately from the descriptor. For backend capabilities, the runtime assets come later at Connect.
+- **Connect** (Enabled → Connected): the addon workload provides its runtime assets — delivery agents, managed resource schemas (inline proto sources), and target definitions. The platform compiles schemas, registers dynamic gRPC/HTTP services, wires delivery agents into the router, and seeds targets. Connect is idempotent on reconnection: schemas that haven't changed are left in place (content-hashed by the activator), stale schemas are deactivated, and new schemas are compiled and registered. Connect is irrelevant for addons that only declare capabilities without runtime workload assets (e.g. UI-only addons).
+- **Disconnect** (Connected → Enabled): the delivery agent is deregistered, but the API surface (gRPC/HTTP for managed resources) stays live so consumers can still CRUD resources. This reflects the design intent that addon unavailability should not prevent users from submitting or reading managed resources — delivery is paused, not the API.
+- **Disable** (any → Defined): full teardown. Schema activations are torn down, delivery agents removed, managed resource type definitions deleted, UI plugin entries removed. The addon returns to catalog-only state.
+
+### Capability model
+
+Each addon declares capabilities in its descriptor. The set of capabilities determines which lifecycle phases are meaningful and what each phase activates:
+
+- **`ManagedResourceCapability`**: declares that the addon will provide a managed resource type (e.g. `clusters`). The full schema — inline proto files, spec message name, singular/plural — comes from the workload at connect time via `ManagedResourceSchema`. The platform validates at connect time that every schema matches a declared capability. Requires Connect.
+- **`DeliveryCapability`**: declares that the addon provides a `DeliveryAgent` for a target type (e.g. `kind`, `ocp`, `kubernetes`). The concrete agent is provided at connect time and registered in the delivery router. Requires Connect.
+- **UI plugin capability** (not yet implemented): declares that the addon ships a UI plugin. The manifest URL and asset base URL are provided in the descriptor. Active at Enable — no Connect needed. See [addon-ui-architecture.md](../addon-ui-architecture.md) for the distribution model.
+
+An addon can declare multiple capabilities of different types. For example, a cluster management addon might declare a `ManagedResourceCapability` for `clusters`, a `DeliveryCapability` for its provisioning target type, and a UI plugin capability for its management dashboard — all in a single addon descriptor.
+
+### Schema reconciliation on reconnection
+
+When an addon reconnects (after a disconnect), `Connect` receives the addon's current truth — the full set of schemas and agents it now provides. The manager reconciles against the previous state:
+
+1. Schemas that were active but are absent from the new input are deactivated (stale removal).
+2. Every schema in the new input is passed to the `SchemaActivator`. The activator uses content hashing (SHA-256 over proto files, spec message, singular, and plural) to determine whether the schema changed. Unchanged schemas are left in place (no recompilation). Changed schemas are atomically replaced — the gRPC and HTTP mux entries are swapped without a deregister/register gap.
+
+This design pushes content-change detection into the transport layer (`DynamicSchemaActivator`), keeping the application layer (`AddonManager`) free of proto or hash concerns.
+
+### In-process POC model
+
+In the current proof-of-concept, addon descriptors and schemas are compiled into the server binary (e.g. `clustermgmt.Descriptor()`, `clustermgmt.Schema()` with `go:embed` for the proto source). Enable and Connect happen at startup. In a production deployment, addons would register dynamically via API and provide schemas over their connect channel.
 
 ## Addon surface
 
@@ -137,13 +180,16 @@ The platform's API model is polymorphic enough for CLIs and APIs, but the UI can
 
 ### Plugin model
 
-The intended model follows the dynamic-plugin pattern used by products such as Grafana and OpenShift: the platform provides the shell and plugin registry, while addons provide domain-specific content.
+The UI plugin model follows the Scalprum dynamic-plugin pattern: the platform provides the shell and plugin registry, addons provide domain-specific content via federated modules. Addon UI components are packaged as OCI artifacts and served from an external asset host — the platform stores metadata and URLs, not JS bytes. The full design is in [addon-ui-architecture.md](../addon-ui-architecture.md).
 
-The exact loading and isolation mechanism is still open. Candidate shapes include:
+### API extensibility — dynamic gRPC and HTTP
 
-- micro-frontends
-- module federation
-- web components
-- iframe isolation
+Addons extend the platform's gRPC and HTTP API surface at runtime. When a managed resource schema is activated, the platform compiles inline proto sources, builds a dynamic gRPC service descriptor, and registers it in the `DynamicServiceMux`. HTTP routes are registered in the `DynamicHTTPMux` and proxy to the gRPC service for REST access.
 
-The architecture establishes the extension points. The concrete SDK and runtime mechanism remain a separate design exercise.
+The key components:
+
+- **`DynamicServiceMux`**: wired as the gRPC server's `UnknownServiceHandler`. Requests to services that were not registered at server creation time are routed here. Services can be added, replaced (atomically), or removed at any time. Composite reflection merges dynamic services with statically registered ones so they are discoverable via `grpcurl` and similar tools.
+- **`DynamicHTTPMux`**: wraps an `http.ServeMux` with handler indirection. A stable dispatcher function is registered once per URL prefix; the actual handler is stored in an internal map and swapped atomically on replacement. This avoids Go 1.22's panic on duplicate `ServeMux` pattern registration and provides zero-downtime replacement.
+- **`DynamicSchemaActivator`**: the `SchemaActivator` implementation in the transport layer. It compiles inline proto, builds the service, and manages registration in both muxes. Content hashing (SHA-256) ensures that unchanged schemas skip recompilation and that changed schemas are atomically replaced rather than deregistered-then-registered.
+
+Proto schemas are transmitted as inline source content at addon connect time (see [addon lifecycle](#addon-lifecycle)). The platform's compiler combines inline sources with a built-in resolver for well-known imports (`google/protobuf/*`, `buf/validate/*`), so addon-defined specs can use `protovalidate` annotations that the platform enforces at the API boundary.

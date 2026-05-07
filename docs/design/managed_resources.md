@@ -146,52 +146,41 @@ This Fulfillment flows through the standard orchestration pipeline: Resolve → 
 
 #### Addon resource type registration
 
-When the cluster management addon connects, it registers its managed resource types as part of capability registration:
+When the cluster management addon connects, it provides its managed resource schemas as part of the connect handshake. Schemas are proto-based: the addon transmits inline proto source content, and the platform compiles it to build the API surface. This parallels how an application carries its DB migration SQL — the workload owns and transmits its schema.
 
-```json
-{
-  "capabilities": [
-    {
-      "name": "cluster-mgmt",
-      "managed_resource_types": [
-        {
-          "resource_type": "clusters",
-          "schema": {
-            "format": "JSON_SCHEMA",
-            "definition": {
-              "type": "object",
-              "required": ["provider", "version", "region"],
-              "properties": {
-                "provider": {
-                  "type": "string",
-                  "enum": ["rosa", "aro", "hypershift", "assisted-installer"]
-                },
-                "version": {
-                  "type": "string",
-                  "pattern": "^4\\.[0-9]+\\.[0-9]+$"
-                },
-                "region": { "type": "string" },
-                "compute_pools": { "..." },
-                "network": { "..." },
-                "encryption": { "..." }
-              }
-            }
-          },
-          "delivery_target": "self",
-          "status_projection": {
-            "fields": ["state", "conditions", "api_url", "console_url"]
-          }
-        }
-      ]
-    }
-  ]
+The addon first declares its capabilities at enable time:
+
+```go
+domain.AddonDescriptor{
+    ID:   "cluster-mgmt",
+    Name: "Cluster Management",
+    Capabilities: []domain.Capability{
+        domain.ManagedResourceCapability{ResourceType: "clusters"},
+    },
 }
 ```
 
-- **`resource_type`**: the API path segment. The platform exposes `POST /clusters`, `GET /clusters/{name}`, etc. using this name.
-- **`schema`**: validates consumer input before storage. Rejections happen at the API boundary, not during delivery.
-- **`delivery_target: "self"`**: the mechanical derivation rule. The derived Fulfillment always targets this addon. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). The OPEN QUESTION above asks whether we should support other targets; for now, `"self"` is the only option.
-- **`status_projection`**: which fields from the addon's status reports are surfaced to the consumer. The addon may track internal details (which management cluster hosts this HCP, how many DNS records were created, provisioning step progress) — only the projected fields appear in the consumer-facing `GET /clusters/{name}` response.
+Then at connect time, the workload provides the full schema:
+
+```go
+domain.ManagedResourceSchema{
+    ResourceType: "clusters",
+    Singular:     "Cluster",
+    Plural:       "clusters",
+    ProtoFiles: map[string]string{
+        "addons/cluster_mgmt/v1/cluster_spec.proto": clusterSpecProto,
+    },
+    SpecMessage: "addons.cluster_mgmt.v1.ClusterSpec",
+    Relation:    domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+}
+```
+
+- **`ResourceType`** / **`Plural`**: the API path segment. The platform exposes `POST /v1/clusters`, `GET /v1/clusters/{id}`, etc. using the plural.
+- **`ProtoFiles`**: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
+- **`SpecMessage`**: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
+- **`Relation`**: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
+
+The platform validates at connect time that every schema matches a declared `ManagedResourceCapability`. On reconnection, schemas are reconciled: removed types are deactivated, unchanged types are left in place (content-hashed), and changed types are atomically replaced. See [addon lifecycle](architecture/addon_integration.md#addon-lifecycle) for details.
 
 This registration is itself signed by the addon and stored as part of the addon's capability record. A delivery-side verifier uses it as evidence: "the addon claimed ownership of `clusters` resources with `delivery_target: self`, so a Fulfillment derived from a `clusters` resource that targets this addon is consistent with the addon's registration."
 
@@ -484,13 +473,16 @@ Addons need to be able to integrate with each other.
 
 ### API (gRPC / REST)
 
-**WIP / DRAFT**
+Managed resource types extend both the gRPC and HTTP API surface at runtime. When a schema is activated, the platform:
 
-Implementing REST extensibility is straightforward. The question is do we want to maintain a gRPC-first design and therefore support gRPC extensions as well?
+1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/*`, `google/protobuf/*`) from a built-in registry.
+2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the pattern `fleetshift.v1.{Singular}Service` (e.g. `fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
+3. **Registers** the service in the `DynamicServiceMux`, which is wired as the gRPC server's `UnknownServiceHandler`. Requests to services not registered at server creation time are routed here instead of being rejected. Composite reflection merges dynamic services with static ones so they are discoverable via `grpcurl`.
+4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/v1/{plural}` and `/v1/{plural}/{id}`.
 
-This would mean extensions would be defined as proto at some level.
+Atomic replacement is a first-class operation. When an addon reconnects with a changed schema, the `DynamicSchemaActivator` detects the change via content hashing (SHA-256 over proto files, spec message, singular, and plural), recompiles, and atomically swaps both the gRPC and HTTP service entries. In-flight requests that already resolved the old entry complete normally; new requests route to the replacement immediately. Unchanged schemas skip recompilation entirely.
 
-There is dynamic dispatch support in gRPC. We'd implement an "unimplemented server" which catches the not explicitly implemented RPCs and dispatches them dynamically.
+The transport-layer components (`DynamicServiceMux`, `DynamicHTTPMux`, `DynamicSchemaActivator`) are documented in [addon_integration.md — API extensibility](architecture/addon_integration.md#api-extensibility--dynamic-grpc-and-http). See also [addon lifecycle](architecture/addon_integration.md#addon-lifecycle) for how schemas flow from addon connect to API registration.
 
 ### Durability
 

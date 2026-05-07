@@ -144,6 +144,7 @@ Start here when you need a fast map of the system. Then continue with the smalle
 
 - [docs/design/authentication.md](authentication.md): full delivery-authorization model, including credential presentation, provenance, trust anchors, and `PausedAuth`
 - [docs/design/managed_resources.md](managed_resources.md): consumer-facing managed resources and their structural relationship to fulfillments
+- [docs/design/addon-ui-architecture.md](addon-ui-architecture.md): addon bundle model, OCI artifact distribution, shell integration, and UI plugin capability
 - [docs/design/provider_consumer_model.md](provider_consumer_model.md): provider/consumer/factory topology built on top of the core architecture
 - [docs/design/mcoa_migration.md](mcoa_migration.md): migration notes from the current MCOA architecture to this model
 - [docs/design/security.md](security.md): redirect to the authentication design
