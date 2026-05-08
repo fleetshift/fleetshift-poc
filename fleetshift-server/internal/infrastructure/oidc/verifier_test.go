@@ -2,6 +2,7 @@ package oidc_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -72,6 +73,18 @@ func TestVerifier_WrongIssuer(t *testing.T) {
 	_, err = verifier.Verify(ctx, config, rawToken)
 	if err == nil {
 		t.Fatal("Verify: expected error for wrong issuer, got nil")
+	}
+
+	errMsg := err.Error()
+	actualIssuer := string(idp.IssuerURL())
+	if !strings.Contains(errMsg, actualIssuer) {
+		t.Errorf("error should contain token's actual issuer %q, got: %s", actualIssuer, errMsg)
+	}
+	if !strings.Contains(errMsg, "https://wrong-issuer") {
+		t.Errorf("error should contain expected issuer %q, got: %s", "https://wrong-issuer", errMsg)
+	}
+	if !strings.Contains(errMsg, "expected:") || !strings.Contains(errMsg, "got:") {
+		t.Errorf("error should contain expected/got diagnostics, got: %s", errMsg)
 	}
 }
 

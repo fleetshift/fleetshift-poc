@@ -102,7 +102,8 @@ func (v *Verifier) Verify(ctx context.Context, config domain.OIDCConfig, rawToke
 
 	tok, err := jwt.ParseString(rawToken, parseOpts...)
 	if err != nil {
-		return domain.SubjectClaims{}, fmt.Errorf("parse/verify token: %w", err)
+		return domain.SubjectClaims{}, fmt.Errorf("parse/verify token: %w%s",
+			err, tokenDiagnostics(rawToken, config))
 	}
 
 	sub, _ := tok.Subject()
@@ -152,6 +153,20 @@ func getStringSliceClaim(tok jwt.Token, key string) []string {
 		}
 	}
 	return out
+}
+
+// tokenDiagnostics does a best-effort insecure parse of the token and returns
+// a suffix string with claim values useful for debugging verification failures.
+// Returns empty string if the token cannot be decoded.
+func tokenDiagnostics(rawToken string, config domain.OIDCConfig) string {
+	tok, err := jwt.ParseInsecure([]byte(rawToken))
+	if err != nil {
+		return ""
+	}
+	iss, _ := tok.Issuer()
+	aud, _ := tok.Audience()
+	return fmt.Sprintf(" [expected: iss=%q aud=%q, got: iss=%q aud=%v]",
+		config.IssuerURL, config.Audience, iss, aud)
 }
 
 func (v *Verifier) getKeySet(ctx context.Context, jwksURI domain.EndpointURL) (jwk.Set, error) {
