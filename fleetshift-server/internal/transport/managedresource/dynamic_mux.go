@@ -311,12 +311,19 @@ func (c *CompositeServiceInfoProvider) GetServiceInfo() map[string]grpc.ServiceI
 
 // RegisterCompositeReflection registers gRPC reflection (both v1 and
 // v1alpha) using a [CompositeServiceInfoProvider] that merges static
-// server services with dynamic mux services. This replaces the standard
-// [reflection.Register] call so dynamically registered managed resource
-// services are discoverable via reflection (e.g. grpcurl).
-func RegisterCompositeReflection(s *grpc.Server, mux *DynamicServiceMux) {
+// server services with dynamic mux services, and a
+// [CompositeDescriptorResolver] that resolves file descriptors for
+// dynamically compiled services alongside statically compiled ones.
+// This replaces the standard [reflection.Register] call so dynamically
+// registered managed resource services are fully discoverable via
+// reflection (e.g. grpcurl list, grpcurl describe).
+func RegisterCompositeReflection(s *grpc.Server, mux *DynamicServiceMux, fileRegistry *DynamicFileRegistry) {
 	composite := &CompositeServiceInfoProvider{Server: s, DynamicMux: mux}
-	opts := reflection.ServerOptions{Services: composite}
+	resolver := NewCompositeDescriptorResolver(fileRegistry)
+	opts := reflection.ServerOptions{
+		Services:           composite,
+		DescriptorResolver: resolver,
+	}
 	v1alphareflectiongrpc.RegisterServerReflectionServer(s, reflection.NewServer(opts))
 	v1reflectiongrpc.RegisterServerReflectionServer(s, reflection.NewServerV1(opts))
 }

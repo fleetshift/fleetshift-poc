@@ -432,6 +432,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- dynamic service infrastructure ---
 
 	dynamicMux := managedresource.NewDynamicServiceMux()
+	fileRegistry := managedresource.NewDynamicFileRegistry()
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
@@ -448,7 +449,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
-	managedresource.RegisterCompositeReflection(grpcServer, dynamicMux)
+	managedresource.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
 	if err != nil {
@@ -498,9 +499,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	typeSvc := &application.ManagedResourceTypeService{Store: store}
 	activator := &managedresource.DynamicSchemaActivator{
-		GRPCMux:  dynamicMux,
-		HTTPMux:  dynamicHTTPMux,
-		GRPCAddr: f.grpcAddr,
+		GRPCMux:      dynamicMux,
+		HTTPMux:      dynamicHTTPMux,
+		FileRegistry: fileRegistry,
+		GRPCAddr:     f.grpcAddr,
 		Deps: managedresource.Deps{
 			Resources: managedResourceSvc,
 			Validator: specValidator,

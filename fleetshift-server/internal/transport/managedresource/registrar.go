@@ -101,7 +101,7 @@ func Build(cfg *ResourceTypeConfig, deps Deps) (*RegisteredService, error) {
 			},
 		},
 		Streams:  []grpc.StreamDesc{},
-		Metadata: "dynamic/" + strings.ToLower(cfg.Singular) + "_service.proto",
+		Metadata: "dynamic/" + strings.ToLower(cfg.Singular[:1]) + cfg.Singular[1:] + "_service.proto",
 	}
 
 	return &RegisteredService{

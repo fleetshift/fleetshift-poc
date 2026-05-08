@@ -58,6 +58,7 @@ func New() *cobra.Command {
 
 	root.AddCommand(newDeploymentCmd(ctx))
 	root.AddCommand(newAuthCmd(ctx))
+	root.AddCommand(newResourceCmd(ctx))
 
 	return root
 }

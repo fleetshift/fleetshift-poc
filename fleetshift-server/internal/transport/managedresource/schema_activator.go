@@ -16,17 +16,19 @@ import (
 
 // DynamicSchemaActivator implements [application.SchemaActivator] by
 // compiling proto from inline sources, building a dynamic gRPC service,
-// and registering it in the [DynamicServiceMux] and [DynamicHTTPMux].
+// and registering it in the [DynamicServiceMux], [DynamicHTTPMux], and
+// [DynamicFileRegistry] (for gRPC reflection).
 //
 // It keeps a content hash per service so that repeated Activate calls
 // with unchanged schemas skip recompilation. When the schema content
 // changes, the mux entry is atomically replaced — no deregister/register
 // gap.
 type DynamicSchemaActivator struct {
-	GRPCMux  *DynamicServiceMux
-	HTTPMux  *DynamicHTTPMux
-	GRPCAddr string
-	Deps     Deps
+	GRPCMux      *DynamicServiceMux
+	HTTPMux      *DynamicHTTPMux
+	FileRegistry *DynamicFileRegistry
+	GRPCAddr     string
+	Deps         Deps
 
 	mu     sync.Mutex
 	hashes map[string][32]byte // service name → content hash
@@ -111,6 +113,9 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 				return application.SchemaHandle{}, fmt.Errorf("replace HTTP: %w", err)
 			}
 		}
+		if a.FileRegistry != nil {
+			a.FileRegistry.Replace(svc.Descriptors.File)
+		}
 	} else {
 		if err := a.GRPCMux.Register(svc); err != nil {
 			return application.SchemaHandle{}, fmt.Errorf("register gRPC: %w", err)
@@ -119,6 +124,15 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 			if err := a.HTTPMux.Register(svc, a.GRPCAddr); err != nil {
 				a.GRPCMux.Deregister(handle.ServiceName)
 				return application.SchemaHandle{}, fmt.Errorf("register HTTP: %w", err)
+			}
+		}
+		if a.FileRegistry != nil {
+			if err := a.FileRegistry.Register(svc.Descriptors.File); err != nil {
+				a.GRPCMux.Deregister(handle.ServiceName)
+				if a.HTTPMux != nil {
+					a.HTTPMux.Deregister(handle.Plural)
+				}
+				return application.SchemaHandle{}, fmt.Errorf("register file descriptor: %w", err)
 			}
 		}
 	}
@@ -146,16 +160,29 @@ func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
 	return "", fmt.Errorf("schema for %q has %d proto files but no EntryFile specified", schema.ResourceType, len(schema.ProtoFiles))
 }
 
-// Deactivate removes the gRPC and HTTP registrations for the schema
-// and clears the cached content hash.
+// Deactivate removes the gRPC, HTTP, and file descriptor registrations
+// for the schema and clears the cached content hash.
 func (a *DynamicSchemaActivator) Deactivate(handle application.SchemaHandle) {
 	a.GRPCMux.Deregister(handle.ServiceName)
 	if a.HTTPMux != nil {
 		a.HTTPMux.Deregister(handle.Plural)
 	}
+	if a.FileRegistry != nil {
+		a.FileRegistry.Deregister(dynamicFilePath(handle.ServiceName))
+	}
 	a.mu.Lock()
 	delete(a.hashes, handle.ServiceName)
 	a.mu.Unlock()
+}
+
+// dynamicFilePath derives the synthesized proto file path from a
+// service name. Must match the path used in [BuildServiceDescriptors].
+func dynamicFilePath(serviceName string) string {
+	const prefix = "fleetshift.v1."
+	const suffix = "Service"
+	singular := serviceName[len(prefix) : len(serviceName)-len(suffix)]
+	lower := strings.ToLower(singular[:1]) + singular[1:]
+	return "dynamic/" + lower + "_service.proto"
 }
 
 // schemaContentHash returns a deterministic SHA-256 over the schema's

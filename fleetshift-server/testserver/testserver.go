@@ -10,7 +10,6 @@ import (
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/reflect/protoreflect"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
@@ -170,9 +169,13 @@ func Start(t *testing.T) string {
 	}
 	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, stubVerifier{}, domain.NoOpAuthnObserver{})
 
+	dynamicMux := managedresource.NewDynamicServiceMux()
+	fileRegistry := managedresource.NewDynamicFileRegistry()
+
 	srv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
 		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
+		grpc.UnknownServiceHandler(dynamicMux.Handle),
 	)
 	pb.RegisterDeploymentServiceServer(srv, &transportgrpc.DeploymentServer{
 		Deployments: deploymentSvc,
@@ -180,37 +183,43 @@ func Start(t *testing.T) string {
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
+	managedresource.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
+
+	activator := &managedresource.DynamicSchemaActivator{
+		GRPCMux:      dynamicMux,
+		FileRegistry: fileRegistry,
+		Deps: managedresource.Deps{
+			Resources: managedResourceSvc,
+			Validator: specValidator,
+		},
+	}
+
+	// Use the AddonManager lifecycle (Enable → Connect) to match
+	// production wiring in serve.go. This registers targets, creates
+	// managed resource type definitions, and activates schemas.
+	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:    router,
+		TypeSvc:   typeSvc,
+		Activator: activator,
+	})
+
+	ctx := context.Background()
+	if err := addonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatalf("enable kind addon: %v", err)
+	}
+
 	schema := kindaddon.Schema()
-	if schema.EntryFile == "" {
-		if len(schema.ProtoFiles) != 1 {
-			t.Fatalf("expected exactly 1 cluster schema proto, got %d (or set EntryFile)", len(schema.ProtoFiles))
-		}
-		for name := range schema.ProtoFiles {
-			schema.EntryFile = name
-		}
-	}
-	clusterSpecDesc, err := managedresource.CompileInline(
-		context.Background(),
-		schema.ProtoFiles,
-		schema.EntryFile,
-		protoreflect.FullName(schema.SpecMessage),
-	)
-	if err != nil {
-		t.Fatalf("compile cluster spec proto: %v", err)
-	}
-	clusterTypeCfg := &managedresource.ResourceTypeConfig{
-		ResourceType:   kindaddon.ClusterResourceType,
-		Singular:       schema.Singular,
-		Plural:         schema.Plural,
-		ProtoPackage:   "fleetshift.v1",
-		SpecMessage:    schema.SpecMessage,
-		SpecDescriptor: clusterSpecDesc.Message,
-	}
-	if _, err := managedresource.BuildAndRegister(srv, clusterTypeCfg, managedresource.Deps{
-		Resources: managedResourceSvc,
-		Validator: specValidator,
+	if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
+		Targets: []domain.TargetInfo{{
+			ID:                    "kind-local",
+			Type:                  kindaddon.TargetType,
+			Name:                  "Local Kind Provider",
+			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+		}},
+		Schemas: []domain.ManagedResourceSchema{schema},
 	}); err != nil {
-		t.Fatalf("BuildAndRegister cluster: %v", err)
+		t.Fatalf("connect kind addon: %v", err)
 	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
