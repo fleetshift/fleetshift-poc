@@ -50,6 +50,26 @@ func TestParseClusterManifest(t *testing.T) {
 			},
 		},
 		{
+			name:    "workers only is allowed",
+			raw:     `{"name":"workers","nodes":[{"role":"worker"},{"role":"worker"}]}`,
+			want:    ClusterSpec{Name: "workers", Nodes: []NodeSpec{{Role: "worker"}, {Role: "worker"}}},
+		},
+		{
+			name:    "empty name",
+			raw:     `{"nodes":[{"role":"control-plane"}]}`,
+			wantErr: true,
+		},
+		{
+			name:    "whitespace-only name",
+			raw:     `{"name":"  "}`,
+			wantErr: true,
+		},
+		{
+			name:    "invalid node role",
+			raw:     `{"name":"bad-role","nodes":[{"role":"master"}]}`,
+			wantErr: true,
+		},
+		{
 			name:    "invalid json",
 			raw:     `{not valid}`,
 			wantErr: true,

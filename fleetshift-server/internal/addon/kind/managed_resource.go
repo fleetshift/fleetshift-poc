@@ -3,6 +3,7 @@ package kind
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -15,7 +16,24 @@ func parseClusterManifest(raw json.RawMessage) (ClusterSpec, error) {
 	if err := json.Unmarshal(raw, &spec); err != nil {
 		return ClusterSpec{}, fmt.Errorf("%w: unmarshal kind cluster spec: %v", domain.ErrInvalidArgument, err)
 	}
+	if err := validateClusterSpec(spec); err != nil {
+		return ClusterSpec{}, err
+	}
 	return spec, nil
+}
+
+func validateClusterSpec(spec ClusterSpec) error {
+	if strings.TrimSpace(spec.Name) == "" {
+		return fmt.Errorf("%w: kind cluster spec requires a name", domain.ErrInvalidArgument)
+	}
+	for _, n := range spec.Nodes {
+		switch n.Role {
+		case "control-plane", "worker":
+		default:
+			return fmt.Errorf("%w: invalid node role %q (must be \"control-plane\" or \"worker\")", domain.ErrInvalidArgument, n.Role)
+		}
+	}
+	return nil
 }
 
 // buildKindConfig generates kind's v1alpha4 cluster configuration JSON

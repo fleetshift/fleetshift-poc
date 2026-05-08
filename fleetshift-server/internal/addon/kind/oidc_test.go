@@ -139,6 +139,42 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 	}
 }
 
+func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
+	provider := newFakeProvider()
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	agent := kind.NewAgent(fakeFactory(provider))
+
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  "https://issuer.example.com",
+			},
+		},
+		// Audience intentionally empty — should fail, not panic.
+	}
+
+	manifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          json.RawMessage(`{"name": "empty-aud"}`),
+	}}
+
+	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, signaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+
+	result := <-obs.done
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
+	}
+	if provider.hasCluster("empty-aud") {
+		t.Error("cluster should not have been created")
+	}
+}
+
 func assertContains(t *testing.T, haystack, needle string) {
 	t.Helper()
 	if !strings.Contains(haystack, needle) {

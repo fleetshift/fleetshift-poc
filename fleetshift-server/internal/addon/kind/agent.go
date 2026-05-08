@@ -266,9 +266,6 @@ func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, e
 			return nil, err
 		}
 		specs[i] = spec
-		if specs[i].Name == "" {
-			return nil, fmt.Errorf("%w: kind cluster spec requires a name", domain.ErrInvalidArgument)
-		}
 	}
 	return specs, nil
 }
@@ -422,6 +419,9 @@ func failDelivery(ctx context.Context, signaler *domain.DeliverySignaler, format
 // are used as-is. Returns nil when neither applies (kind defaults).
 func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byte, ConfigSource, error) {
 	if auth.Caller != nil {
+		if len(auth.Audience) == 0 {
+			return nil, "", fmt.Errorf("%w: OIDC config requires at least one audience", domain.ErrInvalidArgument)
+		}
 		var caCertHostPath string
 		if len(a.oidcCABundle) > 0 {
 			path, err := writeCABundle(a.oidcCABundle, a.tempDir)
