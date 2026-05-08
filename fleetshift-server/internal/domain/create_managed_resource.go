@@ -18,6 +18,7 @@ type CreateManagedResourceInput struct {
 	Spec         json.RawMessage
 	TypeDef      ManagedResourceTypeDef
 	Provenance   *Provenance
+	Auth         DeliveryAuth
 }
 
 // CreateManagedResourceWorkflowSpec persists a managed resource
@@ -72,6 +73,7 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		f := Fulfillment{
 			ID:             fID,
 			State:          FulfillmentStateCreating,
+			Auth:           in.Auth,
 			Provenance:     in.Provenance,
 			AttestationRef: attestRef,
 			Generation:     0,

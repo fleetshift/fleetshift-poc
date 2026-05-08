@@ -13,7 +13,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
+	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -180,7 +180,7 @@ func Start(t *testing.T) string {
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	if schema.EntryFile == "" {
 		if len(schema.ProtoFiles) != 1 {
 			t.Fatalf("expected exactly 1 cluster schema proto, got %d (or set EntryFile)", len(schema.ProtoFiles))
@@ -199,9 +199,9 @@ func Start(t *testing.T) string {
 		t.Fatalf("compile cluster spec proto: %v", err)
 	}
 	clusterTypeCfg := &managedresource.ResourceTypeConfig{
-		ResourceType:   "clusters",
-		Singular:       "Cluster",
-		Plural:         "clusters",
+		ResourceType:   kindaddon.ClusterResourceType,
+		Singular:       schema.Singular,
+		Plural:         schema.Plural,
 		ProtoPackage:   "fleetshift.v1",
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: clusterSpecDesc.Message,

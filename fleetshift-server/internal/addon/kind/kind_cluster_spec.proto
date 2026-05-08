@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package addons.kind.v1;
+
+import "buf/validate/validate.proto";
+
+// KindClusterSpec defines the desired state of a kind cluster. This is
+// the canonical spec used by both the managed resource API and the
+// delivery agent.
+message KindClusterSpec {
+  // Name of the kind cluster.
+  string name = 1 [(buf.validate.field).required = true];
+
+  // Nodes to provision. Defaults to a single control-plane node when
+  // empty.
+  repeated Node nodes = 2;
+
+  // Networking configuration. Omit for kind defaults.
+  Networking networking = 3;
+
+  // OIDC configures the API server's OpenID Connect authentication.
+  OIDC oidc = 4;
+}
+
+// Node describes a node in the kind cluster.
+message Node {
+  // Role must be "control-plane" or "worker".
+  string role = 1 [
+    (buf.validate.field).required = true,
+    (buf.validate.field).string = {in: ["control-plane", "worker"]}
+  ];
+
+  // Image is the node image (e.g. "kindest/node:v1.31.0"). When
+  // empty, kind uses its default image for the installed version.
+  string image = 2;
+}
+
+// Networking holds cluster networking settings.
+message Networking {
+  // API server port on the host. Zero means kind picks an available
+  // port.
+  int32 api_server_port = 1;
+
+  // Pod CIDR (e.g. "10.244.0.0/16"). Empty uses kind's default.
+  string pod_subnet = 2;
+
+  // Service CIDR (e.g. "10.96.0.0/16"). Empty uses kind's default.
+  string service_subnet = 3;
+}
+
+// OIDC configures API server OpenID Connect authentication.
+message OIDC {
+  // Claim used as the username. Defaults to "sub" when empty.
+  string username_claim = 1;
+
+  // Claim used for group membership. Defaults to "groups" when empty.
+  string groups_claim = 2;
+}

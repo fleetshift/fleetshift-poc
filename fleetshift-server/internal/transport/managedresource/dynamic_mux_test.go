@@ -21,6 +21,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
+	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -121,16 +122,16 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
-		ID: "cluster-mgmt-addon", Type: clusterTargetType, Name: "Cluster Management Addon",
-		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+		ID: "kind-local", Type: clusterTargetType, Name: "Kind Cluster Addon",
+		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
 	}); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
 	typeSvc := &application.ManagedResourceTypeService{Store: store}
 	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "cluster-mgmt-addon"},
+		ResourceType: kindaddon.ClusterResourceType,
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 		Signature:    domain.Signature{},
 	}); err != nil {
 		t.Fatalf("register cluster type: %v", err)
@@ -175,17 +176,15 @@ func dialMux(t *testing.T, mux *managedresource.DynamicServiceMux, opts ...grpc.
 	return conn
 }
 
-// createClusterRequest builds a valid CreateCluster request from the
-// service's dynamic message descriptors.
+// createClusterRequest builds a valid CreateKindCluster request from
+// the service's dynamic message descriptors.
 func createClusterRequest(svc *managedresource.RegisteredService, id string) *dynamicpb.Message {
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	req.Set(svc.Descriptors.CreateRequest.Fields().ByNumber(1), protoreflect.ValueOfString(id))
 
 	resource := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	spec := dynamicpb.NewMessage(svc.Descriptors.Spec)
-	spec.Set(svc.Descriptors.Spec.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	spec.Set(svc.Descriptors.Spec.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	spec.Set(svc.Descriptors.Spec.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	spec.Set(svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString(id))
 	resource.Set(svc.Descriptors.Resource.Fields().ByName("spec"), protoreflect.ValueOfMessage(spec))
 	req.Set(svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
@@ -220,7 +219,7 @@ func TestDynamicMux_ReplaceSwapsService(t *testing.T) {
 	mux.Replace(svc2)
 
 	info := mux.ServiceInfo()
-	if _, ok := info["fleetshift.v1.ClusterService"]; !ok {
+	if _, ok := info["fleetshift.v1.KindClusterService"]; !ok {
 		t.Fatal("expected service present after Replace")
 	}
 }
@@ -232,7 +231,7 @@ func TestDynamicMux_ReplaceAddsIfAbsent(t *testing.T) {
 	mux.Replace(svc)
 
 	info := mux.ServiceInfo()
-	if _, ok := info["fleetshift.v1.ClusterService"]; !ok {
+	if _, ok := info["fleetshift.v1.KindClusterService"]; !ok {
 		t.Fatal("expected service added by Replace")
 	}
 }
@@ -248,7 +247,7 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 
 	req1 := createClusterRequest(svc1, "before-replace")
 	resp1 := dynamicpb.NewMessage(svc1.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req1, resp1); err != nil {
+	if err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req1, resp1); err != nil {
 		t.Fatalf("CreateCluster before replace: %v", err)
 	}
 
@@ -258,9 +257,9 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 
 	getReq := dynamicpb.NewMessage(svc2.Descriptors.GetRequest)
 	getReq.Set(svc2.Descriptors.GetRequest.Fields().ByName("name"),
-		protoreflect.ValueOfString("clusters/before-replace"))
+		protoreflect.ValueOfString("kindclusters/before-replace"))
 	getResp := dynamicpb.NewMessage(svc2.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/GetCluster", getReq, getResp)
+	err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp)
 	if err == nil {
 		t.Fatal("expected NotFound from replaced handler, got nil")
 	}
@@ -275,12 +274,12 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 	// But a new create through the replaced handler should succeed.
 	req2 := createClusterRequest(svc2, "after-replace")
 	resp2 := dynamicpb.NewMessage(svc2.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req2, resp2); err != nil {
+	if err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req2, resp2); err != nil {
 		t.Fatalf("CreateCluster after replace: %v", err)
 	}
 	nameField := svc2.Descriptors.Resource.Fields().ByName("name")
-	if got := resp2.Get(nameField).String(); got != "clusters/after-replace" {
-		t.Errorf("name = %q, want clusters/after-replace", got)
+	if got := resp2.Get(nameField).String(); got != "kindclusters/after-replace" {
+		t.Errorf("name = %q, want kindclusters/after-replace", got)
 	}
 }
 
@@ -293,9 +292,9 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	}
 
 	info := mux.ServiceInfo()
-	si, ok := info["fleetshift.v1.ClusterService"]
+	si, ok := info["fleetshift.v1.KindClusterService"]
 	if !ok {
-		t.Fatal("ServiceInfo missing fleetshift.v1.ClusterService")
+		t.Fatal("ServiceInfo missing fleetshift.v1.KindClusterService")
 	}
 	if len(si.Methods) != 4 {
 		t.Errorf("method count = %d, want 4", len(si.Methods))
@@ -305,7 +304,7 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	for _, m := range si.Methods {
 		methodNames[m.Name] = true
 	}
-	for _, want := range []string{"CreateCluster", "GetCluster", "ListClusters", "DeleteCluster"} {
+	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindclusters", "DeleteKindCluster"} {
 		if !methodNames[want] {
 			t.Errorf("missing method %q in ServiceInfo", want)
 		}
@@ -326,8 +325,8 @@ func TestDynamicMux_CompositeServiceInfoProvider(t *testing.T) {
 	}
 
 	info := composite.GetServiceInfo()
-	if _, ok := info["fleetshift.v1.ClusterService"]; !ok {
-		t.Error("composite info missing dynamic service fleetshift.v1.ClusterService")
+	if _, ok := info["fleetshift.v1.KindClusterService"]; !ok {
+		t.Error("composite info missing dynamic service fleetshift.v1.KindClusterService")
 	}
 }
 
@@ -342,7 +341,7 @@ func TestDynamicMux_UnregisteredServiceReturnsUnimplemented(t *testing.T) {
 
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req, resp)
+	err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req, resp)
 	if err == nil {
 		t.Fatal("expected error for unregistered service, got nil")
 	}
@@ -365,11 +364,11 @@ func TestDynamicMux_DeregisterMakesServiceUnreachable(t *testing.T) {
 		t.Fatalf("Register: %v", err)
 	}
 
-	mux.Deregister("fleetshift.v1.ClusterService")
+	mux.Deregister("fleetshift.v1.KindClusterService")
 
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req, resp)
+	err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req, resp)
 	if err == nil {
 		t.Fatal("expected error after deregister, got nil")
 	}
@@ -397,14 +396,14 @@ func TestDynamicMux_RegisterAndDispatch(t *testing.T) {
 
 	req := createClusterRequest(svc, "dyn-cluster-1")
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req, resp); err != nil {
+	if err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req, resp); err != nil {
 		t.Fatalf("CreateCluster via dynamic mux: %v", err)
 	}
 
 	nameField := svc.Descriptors.Resource.Fields().ByName("name")
 	got := resp.Get(nameField).String()
-	if got != "clusters/dyn-cluster-1" {
-		t.Errorf("name = %q, want %q", got, "clusters/dyn-cluster-1")
+	if got != "kindclusters/dyn-cluster-1" {
+		t.Errorf("name = %q, want %q", got, "kindclusters/dyn-cluster-1")
 	}
 }
 
@@ -425,7 +424,7 @@ func TestDynamicMux_StreamInterceptorFires(t *testing.T) {
 
 	req := createClusterRequest(svc, "interceptor-test")
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	if err := conn.Invoke(context.Background(), "/fleetshift.v1.ClusterService/CreateCluster", req, resp); err != nil {
+	if err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/CreateKindCluster", req, resp); err != nil {
 		t.Fatalf("Invoke: %v", err)
 	}
 
@@ -459,19 +458,19 @@ func serveGRPCOverTCP(t *testing.T, svc *managedresource.RegisteredService) stri
 
 func httpCreateCluster(t *testing.T, baseURL, id string) *http.Response {
 	t.Helper()
-	body := `{"spec": {"provider": "rosa", "version": "4.15.2", "region": "us-east-1"}}`
-	resp, err := http.Post(baseURL+"/v1/clusters?cluster_id="+id, "application/json", strings.NewReader(body))
+	body := `{"spec": {"name": "` + id + `"}}`
+	resp, err := http.Post(baseURL+"/v1/kindclusters?kindCluster_id="+id, "application/json", strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("POST /v1/clusters: %v", err)
+		t.Fatalf("POST /v1/kindclusters: %v", err)
 	}
 	return resp
 }
 
 func httpGetCluster(t *testing.T, baseURL, id string) *http.Response {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/v1/clusters/" + id)
+	resp, err := http.Get(baseURL + "/v1/kindclusters/" + id)
 	if err != nil {
-		t.Fatalf("GET /v1/clusters/%s: %v", id, err)
+		t.Fatalf("GET /v1/kindclusters/%s: %v", id, err)
 	}
 	return resp
 }
@@ -521,7 +520,7 @@ func TestDynamicHTTPMux_DeregisterReturns404(t *testing.T) {
 		t.Fatalf("POST before deregister: status = %d, want 200", resp.StatusCode)
 	}
 
-	httpMux.Deregister("clusters")
+	httpMux.Deregister("kindclusters")
 
 	resp2 := httpGetCluster(t, ts.URL, "will-deregister")
 	resp2.Body.Close()

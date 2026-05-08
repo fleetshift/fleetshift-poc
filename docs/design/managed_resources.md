@@ -113,18 +113,18 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
 
 ```json
 {
-  "name": "fulfillments/_managed/clusters/prod-us-east-1",
+  "name": "fulfillments/_managed/kindclusters/dev-cluster",
   "manifest_strategy": {
     "type": "MANAGED_RESOURCE",
     "managed_resource": {
-      "resource_type": "clusters",
-      "resource_name": "clusters/prod-us-east-1"
+      "resource_type": "api.kind.cluster",
+      "resource_name": "kindclusters/dev-cluster"
     }
   },
   "placement_strategy": {
     "type": "STATIC",
     "static": {
-      "targets": ["targets/cluster-mgmt-addon"]
+      "targets": ["targets/kind-local"]
     }
   },
   "rollout_strategy": {
@@ -132,12 +132,12 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
   },
   "provenance": {
     "signature": { "..." },
-    "managed_resource_ref": "clusters/prod-us-east-1"
+    "managed_resource_ref": "kindclusters/dev-cluster"
   }
 }
 ```
 
-- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document. The addon interprets it — in this case, calling the ROSA API to create a HyperShift-based HostedCluster, configuring networking, setting up the KMS-backed etcd encryption, and registering the resulting cluster as a new target.
+- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document as a `Manifest` with `ResourceType` matching the managed resource type. The addon interprets it — in this case, provisioning a kind cluster with the specified configuration.
 - **Placement**: a single static target — the addon's own delivery endpoint. The addon registered this target during capability registration. Since the addon is a delivery agent for its own target type, it receives the managed resource through the standard delivery channel.
 - **Rollout**: immediate. A single managed resource means a single target means a single delivery — rollout strategy is degenerate.
 - **Provenance**: derived from the original managed resource's signature. A verifier can chain from the Fulfillment's provenance back to the user's signed resource intent. The `managed_resource_ref` links the two, and the derivation rule is mechanically fixed (the addon is always the target), so a verifier can confirm the Fulfillment was correctly derived without trusting the platform.
@@ -146,16 +146,17 @@ This Fulfillment flows through the standard orchestration pipeline: Resolve → 
 
 #### Addon resource type registration
 
-When the cluster management addon connects, it provides its managed resource schemas as part of the connect handshake. Schemas are proto-based: the addon transmits inline proto source content, and the platform compiles it to build the API surface. This parallels how an application carries its DB migration SQL — the workload owns and transmits its schema.
+When an addon connects, it provides its managed resource schemas as part of the connect handshake. Schemas are proto-based: the addon transmits inline proto source content, and the platform compiles it to build the API surface. This parallels how an application carries its DB migration SQL — the workload owns and transmits its schema.
 
 The addon first declares its capabilities at enable time:
 
 ```go
 domain.AddonDescriptor{
-    ID:   "cluster-mgmt",
-    Name: "Cluster Management",
+    ID:   "kind",
+    Name: "Kind Cluster Provider",
     Capabilities: []domain.Capability{
-        domain.ManagedResourceCapability{ResourceType: "clusters"},
+        domain.DeliveryCapability{TargetType: "kind"},
+        domain.ManagedResourceCapability{ResourceType: "api.kind.cluster"},
     },
 }
 ```
@@ -164,25 +165,25 @@ Then at connect time, the workload provides the full schema:
 
 ```go
 domain.ManagedResourceSchema{
-    ResourceType: "clusters",
-    Singular:     "Cluster",
-    Plural:       "clusters",
+    ResourceType: "api.kind.cluster",
+    Singular:     "KindCluster",
+    Plural:       "kindclusters",
     ProtoFiles: map[string]string{
-        "addons/cluster_mgmt/v1/cluster_spec.proto": clusterSpecProto,
+        "addons/kind/v1/kind_cluster_spec.proto": kindClusterSpecProto,
     },
-    SpecMessage: "addons.cluster_mgmt.v1.ClusterSpec",
+    SpecMessage: "addons.kind.v1.KindClusterSpec",
     Relation:    domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 }
 ```
 
-- **`ResourceType`** / **`Plural`**: the API path segment. The platform exposes `POST /v1/clusters`, `GET /v1/clusters/{id}`, etc. using the plural.
+- **`ResourceType`** / **`Plural`**: the API path segment. The platform exposes `POST /v1/kindclusters`, `GET /v1/kindclusters/{id}`, etc. using the plural.
 - **`ProtoFiles`**: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
 - **`SpecMessage`**: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
 - **`Relation`**: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
 
 The platform validates at connect time that every schema matches a declared `ManagedResourceCapability`. On reconnection, schemas are reconciled: removed types are deactivated, unchanged types are left in place (content-hashed), and changed types are atomically replaced. See [addon lifecycle](architecture/addon_integration.md#addon-lifecycle) for details.
 
-This registration is itself signed by the addon and stored as part of the addon's capability record. A delivery-side verifier uses it as evidence: "the addon claimed ownership of `clusters` resources with `delivery_target: self`, so a Fulfillment derived from a `clusters` resource that targets this addon is consistent with the addon's registration."
+This registration is itself signed by the addon and stored as part of the addon's capability record. A delivery-side verifier uses it as evidence: "the addon claimed ownership of `api.kind.cluster` resources with `delivery_target: self`, so a Fulfillment derived from an `api.kind.cluster` resource that targets this addon is consistent with the addon's registration."
 
 ### Attestation
 

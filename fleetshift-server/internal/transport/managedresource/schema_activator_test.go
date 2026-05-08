@@ -18,7 +18,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
+	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -99,23 +99,23 @@ func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	activator, mux := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	handle, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if handle.ServiceName != "fleetshift.v1.ClusterService" {
-		t.Errorf("handle.ServiceName = %q, want fleetshift.v1.ClusterService", handle.ServiceName)
+	if handle.ServiceName != "fleetshift.v1.KindClusterService" {
+		t.Errorf("handle.ServiceName = %q, want fleetshift.v1.KindClusterService", handle.ServiceName)
 	}
-	if handle.Plural != "clusters" {
-		t.Errorf("handle.Plural = %q, want clusters", handle.Plural)
+	if handle.Plural != "kindclusters" {
+		t.Errorf("handle.Plural = %q, want kindclusters", handle.Plural)
 	}
 
 	info := mux.ServiceInfo()
-	si, ok := info["fleetshift.v1.ClusterService"]
+	si, ok := info["fleetshift.v1.KindClusterService"]
 	if !ok {
-		t.Fatal("expected ClusterService in mux ServiceInfo after Activate")
+		t.Fatal("expected KindClusterService in mux ServiceInfo after Activate")
 	}
 	if len(si.Methods) != 4 {
 		t.Errorf("method count = %d, want 4", len(si.Methods))
@@ -125,7 +125,7 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 	activator, mux := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	handle, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
@@ -133,11 +133,11 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 
 	activator.Deactivate(handle)
 
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.ClusterService"]; ok {
-		t.Error("expected ClusterService removed from mux after Deactivate")
+	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; ok {
+		t.Error("expected KindClusterService removed from mux after Deactivate")
 	}
 
-	if _, ok := activator.ContentHash("fleetshift.v1.ClusterService"); ok {
+	if _, ok := activator.ContentHash("fleetshift.v1.KindClusterService"); ok {
 		t.Error("expected content hash cleared after Deactivate")
 	}
 }
@@ -145,7 +145,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 func TestDynamicSchemaActivator_DuplicateActivateIsIdempotent(t *testing.T) {
 	activator, _ := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	h1, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("first Activate: %v", err)
@@ -164,7 +164,7 @@ func TestDynamicSchemaActivator_DuplicateActivateIsIdempotent(t *testing.T) {
 func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 	activator, mux := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	h1, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("first Activate: %v", err)
@@ -192,15 +192,15 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 		t.Error("expected content hash to change after schema update")
 	}
 
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.ClusterService"]; !ok {
-		t.Error("expected ClusterService still in mux after atomic swap")
+	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; !ok {
+		t.Error("expected KindClusterService still in mux after atomic swap")
 	}
 }
 
 func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	activator, mux := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	handle, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
@@ -214,15 +214,15 @@ func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	if h2.ServiceName != handle.ServiceName {
 		t.Errorf("service name changed: %q vs %q", handle.ServiceName, h2.ServiceName)
 	}
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.ClusterService"]; !ok {
-		t.Error("expected ClusterService in mux after re-activation")
+	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; !ok {
+		t.Error("expected KindClusterService in mux after re-activation")
 	}
 }
 
 func TestDynamicSchemaActivator_EmptyProtoFilesReturnsError(t *testing.T) {
 	activator, _ := newActivator(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	schema.ProtoFiles = nil
 
 	_, err := activator.Activate(context.Background(), schema)
@@ -271,13 +271,13 @@ func httpStatus(t *testing.T, url string) int {
 func TestDynamicSchemaActivator_ActivateRegistersHTTPRoutes(t *testing.T) {
 	env := newActivatorWithHTTP(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	_, err := env.activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	code := httpStatus(t, env.httpURL+"/v1/clusters/test-id")
+	code := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
 	if code == http.StatusNotFound {
 		t.Fatal("expected route to exist after Activate, got 404")
 	}
@@ -286,7 +286,7 @@ func TestDynamicSchemaActivator_ActivateRegistersHTTPRoutes(t *testing.T) {
 func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 	env := newActivatorWithHTTP(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	handle, err := env.activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
@@ -294,7 +294,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 
 	env.activator.Deactivate(handle)
 
-	code := httpStatus(t, env.httpURL+"/v1/clusters/test-id")
+	code := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
 	if code != http.StatusNotFound {
 		t.Errorf("expected 404 after Deactivate, got %d", code)
 	}
@@ -303,13 +303,13 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 	env := newActivatorWithHTTP(t)
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	_, err := env.activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	code1 := httpStatus(t, env.httpURL+"/v1/clusters/test-id")
+	code1 := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
 	if code1 == http.StatusNotFound {
 		t.Fatal("expected route to exist after first Activate")
 	}
@@ -325,7 +325,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("second Activate (changed): %v", err)
 	}
 
-	code2 := httpStatus(t, env.httpURL+"/v1/clusters/test-id")
+	code2 := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
 	if code2 == http.StatusNotFound {
 		t.Fatal("expected route to survive atomic swap, got 404")
 	}

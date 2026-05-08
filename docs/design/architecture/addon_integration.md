@@ -82,7 +82,7 @@ This design pushes content-change detection into the transport layer (`DynamicSc
 
 ### In-process POC model
 
-In the current proof-of-concept, addon descriptors and schemas are compiled into the server binary (e.g. `clustermgmt.Descriptor()`, `clustermgmt.Schema()` with `go:embed` for the proto source). Enable and Connect happen at startup. In a production deployment, addons would register dynamically via API and provide schemas over their connect channel.
+In the current proof-of-concept, addon descriptors and schemas are compiled into the server binary (e.g. `kindaddon.Descriptor()`, `kindaddon.Schema()` with `go:embed` for the proto source). Enable and Connect happen at startup. In a production deployment, addons would register dynamically via API and provide schemas over their connect channel.
 
 ## Addon surface
 

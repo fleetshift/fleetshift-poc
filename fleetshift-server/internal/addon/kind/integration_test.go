@@ -98,8 +98,8 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	clusterConfig := kindaddon.ClusterSpec{
-		Name:   "dev-cluster",
-		Config: json.RawMessage(`{"kind":"Cluster","apiVersion":"kind.x-k8s.io/v1alpha4","nodes":[{"role":"control-plane"}]}`),
+		Name:  "dev-cluster",
+		Nodes: []kindaddon.NodeSpec{{Role: "control-plane"}},
 	}
 	configBytes, err := json.Marshal(clusterConfig)
 	if err != nil {
@@ -138,6 +138,107 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 }
 
+// TestKindAddon_ManagedResource_EndToEnd exercises the managed resource
+// path through to the kind delivery agent:
+//
+//  1. Register a kind delivery agent with the routing service.
+//  2. Register a target that accepts kind cluster resources.
+//  3. Register the kind managed resource type.
+//  4. Create a managed resource via the service.
+//  5. Verify the fulfillment reaches Active and the fake provider
+//     received the cluster creation.
+//
+// Auth threading (DeliveryAuth.Caller propagation) is covered
+// separately in application/e2e_managed_resource_test.go because
+// a non-nil Caller triggers RBAC bootstrap which requires a live
+// Kubernetes API server.
+func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	provider := newFakeProvider()
+	kindAgent := kindaddon.NewAgent(fakeFactory(provider))
+	router := delivery.NewRoutingDeliveryService()
+	router.Register(kindaddon.TargetType, kindAgent)
+
+	reg := &memworkflow.Registry{}
+
+	orchSpec := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.StrategyFactory{Store: store},
+		Registry:   reg,
+	}
+	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+
+	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+
+	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	resourceSvc := &application.ManagedResourceService{
+		Store:    store,
+		CreateWF: createMRWf,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// --- Step 1-2: Register target ---
+	{
+		tx, _ := store.Begin(ctx)
+		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+			ID:                    "kind-local",
+			Type:                  kindaddon.TargetType,
+			Name:                  "Local Kind Provider",
+			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+		})
+		_ = tx.Commit()
+	}
+
+	// --- Step 3: Register managed resource type ---
+	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
+			ContentHash:    []byte("hash"),
+			SignatureBytes: []byte("sig"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterType: %v", err)
+	}
+
+	// --- Step 4: Create managed resource ---
+	spec := json.RawMessage(`{"name":"mr-cluster","nodes":[{"role":"control-plane"},{"role":"worker"}]}`)
+
+	view, err := resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		Name:         "mr-cluster",
+		Spec:         spec,
+	})
+	if err != nil {
+		t.Fatalf("Create managed resource: %v", err)
+	}
+
+	// --- Step 5: Wait for delivery and verify ---
+	awaitFulfillment(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	<-provider.created
+	if !provider.hasCluster("mr-cluster") {
+		t.Error("expected kind cluster 'mr-cluster' to be created by the provider")
+	}
+}
+
 func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.FulfillmentState) domain.DeploymentView {
 	t.Helper()
 	for {
@@ -153,6 +254,30 @@ func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for deployment %s to reach state %q", id, want)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func awaitFulfillment(ctx context.Context, t *testing.T, store domain.Store, fID domain.FulfillmentID, want domain.FulfillmentState) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		f, err := tx.Fulfillments().Get(ctx, fID)
+		tx.Rollback()
+		if err == nil && f.State == want {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			var state domain.FulfillmentState
+			if f != nil {
+				state = f.State
+			}
+			t.Fatalf("timed out waiting for fulfillment %s to reach state %q (current: %q)", fID, want, state)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

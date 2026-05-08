@@ -18,8 +18,12 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
 // containerHostAddr returns the hostname (or IP) that kind containers
@@ -395,5 +399,169 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for bob delivery")
+	}
+}
+
+// TestKindAddon_ManagedResource_OIDCAuth exercises the managed resource
+// path with authenticated delivery against a real Docker daemon. It:
+//  1. Starts a fake OIDC provider reachable from inside Docker.
+//  2. Registers the kind managed resource type.
+//  3. Creates a managed resource with an authenticated caller context.
+//  4. Verifies the fulfillment reaches Active (including RBAC bootstrap).
+//  5. Verifies the cluster is provisioned and the OIDC-issued JWT is
+//     accepted by the K8s API server.
+//
+// This test catches regressions where DeliveryAuth is not threaded
+// through the managed resource path. Skipped when Docker is not
+// available or when running with -short.
+func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real Docker test in short mode")
+	}
+
+	checker := cluster.NewProvider()
+
+	if _, err := checker.List(); err != nil {
+		t.Skipf("Docker not available: %v", err)
+	}
+
+	const clusterName = "fleetshift-mr-oidc"
+
+	t.Cleanup(func() {
+		_ = checker.Delete(clusterName, "")
+	})
+	_ = checker.Delete(clusterName, "")
+
+	// --- Start fake OIDC provider ---
+	hostAddr, extraSANIPs := containerHostAddr(t)
+	idp := oidctest.Start(t,
+		oidctest.WithListenAddress("0.0.0.0:0"),
+		oidctest.WithAudience("fleetshift"),
+		oidctest.WithExtraSANIPs(extraSANIPs...),
+	)
+	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostAddr, idp.Port()))
+	idp.SetIssuerURL(dockerIssuer)
+
+	// --- Wire agent with OIDC CA trust ---
+	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
+		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
+	},
+		kindaddon.WithTempDir(t.TempDir()),
+		kindaddon.WithOIDCCABundle(idp.CACertPEM()),
+	)
+	router := delivery.NewRoutingDeliveryService()
+	router.Register(kindaddon.TargetType, kindAgent)
+
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	reg := &memworkflow.Registry{}
+
+	orchSpec := &domain.OrchestrationWorkflowSpec{
+		Store:      store,
+		Delivery:   router,
+		Strategies: domain.StrategyFactory{Store: store},
+		Registry:   reg,
+	}
+	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+
+	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+
+	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	resourceSvc := &application.ManagedResourceService{
+		Store:    store,
+		CreateWF: createMRWf,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	// Register target with accepted resource types.
+	{
+		tx, _ := store.Begin(ctx)
+		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+			ID:                    "kind-mr-oidc",
+			Type:                  kindaddon.TargetType,
+			Name:                  "Docker Kind Provider (MR OIDC)",
+			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+		})
+		_ = tx.Commit()
+	}
+
+	// Register managed resource type.
+	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-mr-oidc"},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
+			ContentHash:    []byte("hash"),
+			SignatureBytes: []byte("sig"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterType: %v", err)
+	}
+
+	// Create managed resource with authenticated caller context.
+	spec := json.RawMessage(`{"name":"` + clusterName + `"}`)
+
+	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{
+			FederatedIdentity: domain.FederatedIdentity{
+				Subject: "alice",
+				Issuer:  dockerIssuer,
+			},
+		},
+		Audience: []domain.Audience{"fleetshift"},
+		Token:    "platform-token",
+	})
+
+	view, err := resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		Name:         domain.ResourceName(clusterName),
+		Spec:         spec,
+	})
+	if err != nil {
+		t.Fatalf("Create managed resource: %v", err)
+	}
+
+	// Wait for fulfillment to reach Active (includes RBAC bootstrap).
+	awaitFulfillment(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	// Verify OIDC auth works: issue a JWT and authenticate against the cluster.
+	token := idp.IssueToken(t, oidctest.TokenClaims{
+		Subject: "alice",
+		Groups:  []string{"developers"},
+	})
+
+	kc, err := checker.KubeConfig(clusterName, false)
+	if err != nil {
+		t.Fatalf("KubeConfig: %v", err)
+	}
+
+	client := oidcK8sClient(t, kc, token)
+	review, err := client.AuthenticationV1().TokenReviews().Create(ctx,
+		&authv1.TokenReview{
+			Spec: authv1.TokenReviewSpec{Token: token},
+		}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("TokenReview: %v", err)
+	}
+	if !review.Status.Authenticated {
+		t.Fatalf("expected token to be authenticated; got error: %s", review.Status.Error)
+	}
+	wantUser := string(dockerIssuer) + "#alice"
+	if review.Status.User.Username != wantUser {
+		t.Errorf("Username = %q, want %q", review.Status.User.Username, wantUser)
 	}
 }

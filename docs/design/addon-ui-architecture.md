@@ -165,7 +165,7 @@ API). The catalog is just data in the engine's database. This means:
 3. **Third-party addons** work without any changes to the engine binary
 
 > **Current POC:** Addon descriptors are compiled into the server binary
-> (e.g. `clustermgmt.Descriptor()` with `go:embed` for proto sources).
+> (e.g. `kindaddon.Descriptor()` with `go:embed` for proto sources).
 > Enable and Connect happen at startup. This is an interim model — the
 > lifecycle framework is designed for runtime registration.
 

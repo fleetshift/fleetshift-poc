@@ -3,7 +3,6 @@ package kind_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"strings"
 	"testing"
 
@@ -97,13 +96,20 @@ func callerAuth() domain.DeliveryAuth {
 	}
 }
 
-func TestAgent_Deliver_ConfigWithCallerRejected(t *testing.T) {
+func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(provider))
+	obs := newChannelDeliveryObserver()
+	signaler := newChannelSignaler(obs)
+
+	agentObs := &recordingAgentObserver{}
+	agent := kind.NewAgent(fakeFactory(provider), kind.WithObserver(agentObs))
 
 	spec := kind.ClusterSpec{
-		Name:   "bad-cluster",
-		Config: json.RawMessage(`{"kind":"Cluster"}`),
+		Name: "multi-oidc",
+		Nodes: []kind.NodeSpec{
+			{Role: "control-plane"},
+			{Role: "worker"},
+		},
 	}
 	specBytes, _ := json.Marshal(spec)
 
@@ -113,15 +119,23 @@ func TestAgent_Deliver_ConfigWithCallerRejected(t *testing.T) {
 		Raw:          json.RawMessage(specBytes),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil, nop)
-	if err == nil {
-		t.Fatal("expected error for config + authenticated caller")
+	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil, signaler)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
 	}
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("expected ErrInvalidArgument, got: %v", err)
+	<-obs.done
+
+	agentObs.mu.Lock()
+	defer agentObs.mu.Unlock()
+
+	if len(agentObs.probes) != 1 {
+		t.Fatalf("expected 1 probe, got %d", len(agentObs.probes))
 	}
-	if result.State != domain.DeliveryStateFailed {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
+	if agentObs.probes[0].source != kind.ConfigSourceOIDC {
+		t.Errorf("source = %q, want %q", agentObs.probes[0].source, kind.ConfigSourceOIDC)
+	}
+	if !provider.hasCluster("multi-oidc") {
+		t.Error("cluster was not created")
 	}
 }
 

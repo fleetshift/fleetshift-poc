@@ -12,7 +12,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
+	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
@@ -28,7 +28,7 @@ type benchEnv struct {
 func setupBench(b *testing.B) *benchEnv {
 	b.Helper()
 
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	var entryFile string
 	for name := range schema.ProtoFiles {
 		entryFile = name
@@ -50,9 +50,9 @@ func setupBench(b *testing.B) *benchEnv {
 	}
 
 	cfg := &managedresource.ResourceTypeConfig{
-		ResourceType:   "clusters",
-		Singular:       "Cluster",
-		Plural:         "clusters",
+		ResourceType:   kindaddon.ClusterResourceType,
+		Singular:       schema.Singular,
+		Plural:         schema.Plural,
 		ProtoPackage:   "fleetshift.v1",
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: desc.Message,
@@ -101,7 +101,7 @@ func BenchmarkDynamicMessage_SetFields(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("clusters/prod-us-east-1"))
+		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
 		msg.Set(uidField, protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 		msg.Set(versionField, protoreflect.ValueOfInt64(3))
 		msg.Set(stateField, protoreflect.ValueOfInt32(2))
@@ -115,7 +115,7 @@ func BenchmarkDynamicMessage_SetFields(b *testing.B) {
 func BenchmarkDynamicMessage_SetFieldsWithSpec(b *testing.B) {
 	env := setupBench(b)
 	resourceDesc := env.svc.Descriptors.Resource
-	specJSON := json.RawMessage(`{"provider":"rosa","version":"4.15.2","region":"us-east-1"}`)
+	specJSON := json.RawMessage(`{"name":"prod-us-east-1"}`)
 
 	nameField := resourceDesc.Fields().ByName("name")
 	uidField := resourceDesc.Fields().ByName("uid")
@@ -128,7 +128,7 @@ func BenchmarkDynamicMessage_SetFieldsWithSpec(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("clusters/prod-us-east-1"))
+		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
 		msg.Set(uidField, protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)
@@ -149,9 +149,7 @@ func BenchmarkSpecValidation_Direct(b *testing.B) {
 	env := setupBench(b)
 
 	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	specMsg.Set(env.specDesc.Fields().ByName("name"), protoreflect.ValueOfString("prod-us-east-1"))
 
 	b.ResetTimer()
 	for range b.N {
@@ -165,9 +163,7 @@ func BenchmarkSpecValidation_WithJSONMarshal(b *testing.B) {
 	env := setupBench(b)
 
 	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	specMsg.Set(env.specDesc.Fields().ByName("name"), protoreflect.ValueOfString("prod-us-east-1"))
 
 	b.ResetTimer()
 	for range b.N {
@@ -183,7 +179,7 @@ func BenchmarkResponseMarshal(b *testing.B) {
 	resourceDesc := env.svc.Descriptors.Resource
 
 	msg := dynamicpb.NewMessage(resourceDesc)
-	msg.Set(resourceDesc.Fields().ByName("name"), protoreflect.ValueOfString("clusters/prod-us-east-1"))
+	msg.Set(resourceDesc.Fields().ByName("name"), protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
 	msg.Set(resourceDesc.Fields().ByName("uid"), protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 	msg.Set(resourceDesc.Fields().ByName("intent_version"), protoreflect.ValueOfInt64(3))
 	msg.Set(resourceDesc.Fields().ByName("state"), protoreflect.ValueOfInt32(2))
@@ -191,9 +187,7 @@ func BenchmarkResponseMarshal(b *testing.B) {
 	msg.Set(resourceDesc.Fields().ByName("etag"), protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 
 	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	specMsg.Set(env.specDesc.Fields().ByName("name"), protoreflect.ValueOfString("prod-us-east-1"))
 	msg.Set(resourceDesc.Fields().ByName("spec"), protoreflect.ValueOfMessage(specMsg))
 
 	b.ResetTimer()
@@ -216,9 +210,7 @@ func BenchmarkRequestUnmarshal(b *testing.B) {
 	resourceDesc := env.svc.Descriptors.Resource
 	resource := dynamicpb.NewMessage(resourceDesc)
 	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	specMsg.Set(env.specDesc.Fields().ByName("name"), protoreflect.ValueOfString("prod-us-east-1"))
 	resource.Set(resourceDesc.Fields().ByName("spec"), protoreflect.ValueOfMessage(specMsg))
 	req.Set(createReqDesc.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
@@ -248,9 +240,7 @@ func BenchmarkFullCreatePath(b *testing.B) {
 
 	resource := dynamicpb.NewMessage(resourceDesc)
 	specMsg := dynamicpb.NewMessage(env.specDesc)
-	specMsg.Set(env.specDesc.Fields().ByName("provider"), protoreflect.ValueOfString("rosa"))
-	specMsg.Set(env.specDesc.Fields().ByName("version"), protoreflect.ValueOfString("4.15.2"))
-	specMsg.Set(env.specDesc.Fields().ByName("region"), protoreflect.ValueOfString("us-east-1"))
+	specMsg.Set(env.specDesc.Fields().ByName("name"), protoreflect.ValueOfString("prod-us-east-1"))
 	resource.Set(resourceDesc.Fields().ByName("spec"), protoreflect.ValueOfMessage(specMsg))
 	req.Set(createReqDesc.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
@@ -294,7 +284,7 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	now := time.Now()
 	view := domain.ManagedResourceView{
 		ManagedResource: domain.ManagedResource{
-			ResourceType:   "clusters",
+			ResourceType:   kindaddon.ClusterResourceType,
 			Name:           "prod-us-east-1",
 			UID:            "550e8400-e29b-41d4-a716-446655440000",
 			CurrentVersion: 3,
@@ -303,7 +293,7 @@ func BenchmarkFullResponsePath(b *testing.B) {
 			UpdatedAt:      now,
 		},
 		Intent: domain.ResourceIntent{
-			Spec: json.RawMessage(`{"provider":"rosa","version":"4.15.2","region":"us-east-1"}`),
+			Spec: json.RawMessage(`{"name":"prod-us-east-1"}`),
 		},
 		Fulfillment: domain.Fulfillment{
 			State: domain.FulfillmentStateActive,
@@ -321,7 +311,7 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("clusters/"+string(view.ManagedResource.Name)))
+		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/"+string(view.ManagedResource.Name)))
 		msg.Set(uidField, protoreflect.ValueOfString(view.ManagedResource.UID))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)

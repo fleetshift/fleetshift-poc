@@ -27,15 +27,34 @@ const TargetType domain.TargetType = "kind"
 // specifications.
 const ClusterResourceType domain.ResourceType = "api.kind.cluster"
 
-// ClusterSpec is the manifest payload accepted by the kind delivery
-// agent. Name identifies the kind cluster; Config holds the raw kind
-// cluster configuration YAML/JSON (the same format accepted by
-// kind create cluster --config). OIDC optionally configures the API
-// server's OIDC authentication; it is mutually exclusive with Config.
+// ClusterSpec is the canonical spec for a kind cluster resource. It
+// mirrors the proto KindClusterSpec message and is used by both the
+// managed resource API and the delivery agent. Structured fields
+// (Nodes, Networking) map directly to kind's v1alpha4 Cluster config.
 type ClusterSpec struct {
-	Name   string          `json:"name"`
-	Config json.RawMessage `json:"config,omitempty"`
-	OIDC   *OIDCSpec       `json:"oidc,omitempty"`
+	// TODO: consider kube go-to-protobuf for addons to define this shape once if they want to support a struct + proto
+	// Or should tooling allow them to go the other way?
+	Name       string       `json:"name"`
+	Nodes      []NodeSpec   `json:"nodes,omitempty"`
+	Networking *NetworkSpec `json:"networking,omitempty"`
+	OIDC       *OIDCSpec    `json:"oidc,omitempty"`
+}
+
+// NodeSpec describes a node in the kind cluster.
+type NodeSpec struct {
+	Role  string `json:"role"`
+	Image string `json:"image,omitempty"`
+}
+
+// NetworkSpec holds cluster networking settings.
+type NetworkSpec struct {
+	APIServerPort int32  `json:"apiServerPort,omitempty"`
+	PodSubnet     string `json:"podSubnet,omitempty"`
+	ServiceSubnet string `json:"serviceSubnet,omitempty"`
+}
+
+func (s ClusterSpec) hasClusterConfig() bool {
+	return len(s.Nodes) > 0 || s.Networking != nil
 }
 
 // ClusterProvider abstracts the kind cluster operations needed by the
@@ -61,8 +80,8 @@ type Agent struct {
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
-	containerHost string // hostname containers use to reach the host machine (replaces localhost)
-	oidcHTTPSPort string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
+	containerHost   string // hostname containers use to reach the host machine (replaces localhost)
+	oidcHTTPSPort   string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -162,7 +181,7 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.Deliv
 		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 	}
 
-	specs, err := a.validateManifests(clusterManifests, auth)
+	specs, err := a.validateManifests(clusterManifests)
 	if err != nil {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
 	}
@@ -221,7 +240,7 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
 func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
-	specs, err := a.validateManifests(manifests, domain.DeliveryAuth{})
+	specs, err := a.validateManifests(manifests)
 	if err != nil {
 		return fmt.Errorf("validate manifests: %w", err)
 	}
@@ -239,20 +258,16 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.Delivery
 	return nil
 }
 
-func (a *Agent) validateManifests(manifests []domain.Manifest, auth domain.DeliveryAuth) ([]ClusterSpec, error) {
+func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, error) {
 	specs := make([]ClusterSpec, len(manifests))
 	for i, m := range manifests {
-		if err := json.Unmarshal(m.Raw, &specs[i]); err != nil {
-			return nil, fmt.Errorf("unmarshal kind cluster spec: %w", err)
+		spec, err := parseClusterManifest(m.Raw)
+		if err != nil {
+			return nil, err
 		}
+		specs[i] = spec
 		if specs[i].Name == "" {
 			return nil, fmt.Errorf("%w: kind cluster spec requires a name", domain.ErrInvalidArgument)
-		}
-		if specs[i].OIDC != nil && len(specs[i].Config) > 0 {
-			return nil, fmt.Errorf("%w: kind cluster spec cannot have both config and oidc", domain.ErrInvalidArgument)
-		}
-		if len(specs[i].Config) > 0 && auth.Caller != nil {
-			return nil, fmt.Errorf("%w: kind cluster spec cannot have both config and an authenticated caller", domain.ErrInvalidArgument)
 		}
 	}
 	return specs, nil
@@ -401,10 +416,10 @@ func failDelivery(ctx context.Context, signaler *domain.DeliverySignaler, format
 
 // resolveConfig returns the raw kind config bytes and the
 // [ConfigSource] for a ClusterSpec. When an authenticated caller is
-// present, the config includes OIDC API server flags derived from the
-// caller's identity, with an optional CA cert mount. When Config is
-// set (no caller), it is returned as-is. Returns nil when neither
-// applies (default kind config).
+// present, the spec's structured fields (nodes, networking) are used
+// as the base config and OIDC API server flags are overlaid on top.
+// When no caller is present but the spec has structured fields, those
+// are used as-is. Returns nil when neither applies (kind defaults).
 func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byte, ConfigSource, error) {
 	if auth.Caller != nil {
 		var caCertHostPath string
@@ -423,11 +438,22 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		// the caller's token. This couples the cluster's oidc-client-id to
 		// whatever audience the platform validated the user against.
 		issuer := a.rewriteIssuerForDocker(auth.Caller.Issuer)
-		cfg, err := BuildKindOIDCConfig(issuer, auth.Audience[0], oidcSpec, caCertHostPath)
-		return cfg, ConfigSourceOIDC, err
+
+		config := toKindConfig(spec)
+		applyOIDCOverlay(&config, oidcSpec, string(issuer), string(auth.Audience[0]), caCertHostPath)
+
+		raw, err := json.Marshal(config)
+		if err != nil {
+			return nil, "", fmt.Errorf("marshal oidc kind config: %w", err)
+		}
+		return raw, ConfigSourceOIDC, nil
 	}
-	if len(spec.Config) > 0 {
-		return spec.Config, ConfigSourceCustom, nil
+	if spec.hasClusterConfig() {
+		cfg, err := buildKindConfig(spec)
+		if err != nil {
+			return nil, "", err
+		}
+		return cfg, ConfigSourceCustom, nil
 	}
 	return nil, ConfigSourceDefault, nil
 }

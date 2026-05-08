@@ -34,7 +34,6 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
@@ -90,7 +89,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
 	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
-	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes,cluster-mgmt", "comma-separated list of addons to enable (default: all)")
+	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes", "comma-separated list of addons to enable (default: all)")
 	return cmd
 }
 
@@ -529,11 +528,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			return fmt.Errorf("enable kubernetes addon: %w", err)
 		}
 	}
-	if enabledAddons["cluster-mgmt"] {
-		if err := addonMgr.Enable(ctx, clustermgmt.Descriptor()); err != nil {
-			return fmt.Errorf("enable cluster-mgmt addon: %w", err)
-		}
-	}
 
 	// --- start ---
 
@@ -563,6 +557,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				Name:                  "Local Kind Provider",
 				AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
 			}},
+			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
 		}); err != nil {
 			return fmt.Errorf("connect kind addon: %w", err)
 		}
@@ -590,13 +585,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	if enabledAddons["cluster-mgmt"] {
-		if err := addonMgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-			Schemas: []domain.ManagedResourceSchema{clustermgmt.Schema()},
-		}); err != nil {
-			return fmt.Errorf("connect cluster-mgmt addon: %w", err)
-		}
-	}
 
 	// --- shutdown ---
 

@@ -117,12 +117,23 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
+	var auth domain.DeliveryAuth
+	ac := AuthFromContext(ctx)
+	if ac != nil && ac.Subject != nil {
+		auth = domain.DeliveryAuth{
+			Caller:   ac.Subject,
+			Audience: ac.Audience,
+			Token:    ac.Token,
+		}
+	}
+
 	exec, err := s.CreateWF.Start(ctx, domain.CreateManagedResourceInput{
 		ResourceType: in.ResourceType,
 		Name:         in.Name,
 		Spec:         in.Spec,
 		TypeDef:      typeDef,
 		Provenance:   prov,
+		Auth:         auth,
 	})
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start create workflow: %w", err)

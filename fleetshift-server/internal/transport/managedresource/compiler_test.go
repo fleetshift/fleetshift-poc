@@ -8,14 +8,14 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/clustermgmt"
+	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
-const specMessageName = "addons.cluster_mgmt.v1.ClusterSpec"
+const specMessageName = "addons.kind.v1.KindClusterSpec"
 
 func TestCompileInline(t *testing.T) {
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	var entryFile string
 	for name := range schema.ProtoFiles {
 		entryFile = name
@@ -39,7 +39,7 @@ func TestCompileInline(t *testing.T) {
 		t.Errorf("message full name = %q, want %q", got, specMessageName)
 	}
 
-	for _, field := range []string{"provider", "version", "region", "compute_pools", "network"} {
+	for _, field := range []string{"name", "nodes", "networking"} {
 		if desc.Message.Fields().ByName(protoreflect.Name(field)) == nil {
 			t.Errorf("field %q not found", field)
 		}
@@ -47,7 +47,7 @@ func TestCompileInline(t *testing.T) {
 }
 
 func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
-	schema := clustermgmt.Schema()
+	schema := kindaddon.Schema()
 	var entryFile string
 	for name := range schema.ProtoFiles {
 		entryFile = name
@@ -65,13 +65,9 @@ func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
 	}
 
 	msg := dynamicpb.NewMessage(desc.Message)
-	providerField := desc.Message.Fields().ByName("provider")
-	versionField := desc.Message.Fields().ByName("version")
-	regionField := desc.Message.Fields().ByName("region")
+	nameField := desc.Message.Fields().ByName("name")
 
-	msg.Set(providerField, protoreflect.ValueOfString("rosa"))
-	msg.Set(versionField, protoreflect.ValueOfString("4.15.2"))
-	msg.Set(regionField, protoreflect.ValueOfString("us-east-1"))
+	msg.Set(nameField, protoreflect.ValueOfString("test-cluster"))
 
 	jsonBytes, err := protojson.Marshal(msg)
 	if err != nil {
@@ -83,10 +79,7 @@ func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
 		t.Fatalf("protojson.Unmarshal: %v", err)
 	}
 
-	if got := roundTrip.Get(providerField).String(); got != "rosa" {
-		t.Errorf("provider = %q, want %q", got, "rosa")
-	}
-	if got := roundTrip.Get(versionField).String(); got != "4.15.2" {
-		t.Errorf("version = %q, want %q", got, "4.15.2")
+	if got := roundTrip.Get(nameField).String(); got != "test-cluster" {
+		t.Errorf("name = %q, want %q", got, "test-cluster")
 	}
 }

@@ -510,7 +510,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
-		Raw:          json.RawMessage(`{"name": "custom-cfg", "config": "kind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4"}`),
+		Raw:          json.RawMessage(`{"name": "custom-cfg", "nodes": [{"role": "control-plane"}, {"role": "worker"}]}`),
 	}}
 
 	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)

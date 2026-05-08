@@ -230,6 +230,17 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Errorf("Manifest.Raw = %s, want %s", manifests[0].Raw, validSpec)
 	}
 
+	deliveredAuth := agent.capturedAuth()
+	if deliveredAuth.Caller == nil {
+		t.Fatal("expected DeliveryAuth.Caller to be populated for authenticated managed resource create")
+	}
+	if deliveredAuth.Caller.Subject != subjectID {
+		t.Errorf("DeliveryAuth.Caller.Subject = %q, want %q", deliveredAuth.Caller.Subject, subjectID)
+	}
+	if deliveredAuth.Token != "access-token" {
+		t.Errorf("DeliveryAuth.Token = %q, want %q", deliveredAuth.Token, "access-token")
+	}
+
 	// --- Step 6: Verify the resource is retrievable from the service ---
 	got, err := resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
@@ -264,18 +275,20 @@ func awaitFulfillmentState(ctx context.Context, t *testing.T, store domain.Store
 }
 
 // mrCapturingDeliveryAgent wraps another delivery service and captures
-// the last attestation and manifests delivered.
+// the last attestation, manifests, and auth delivered.
 type mrCapturingDeliveryAgent struct {
 	inner     domain.DeliveryService
 	mu        sync.Mutex
 	att       *domain.Attestation
 	manifests []domain.Manifest
+	auth      domain.DeliveryAuth
 }
 
 func (a *mrCapturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
 	a.mu.Lock()
 	a.att = att
 	a.manifests = manifests
+	a.auth = auth
 	a.mu.Unlock()
 	return a.inner.Deliver(ctx, target, id, manifests, auth, att, signaler)
 }
@@ -294,6 +307,12 @@ func (a *mrCapturingDeliveryAgent) capturedManifests() []domain.Manifest {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.manifests
+}
+
+func (a *mrCapturingDeliveryAgent) capturedAuth() domain.DeliveryAuth {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.auth
 }
 
 func signManagedResourceEnvelope(
