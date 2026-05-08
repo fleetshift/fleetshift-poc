@@ -10,6 +10,7 @@ func newResourceCmd(ctx *cmdContext) *cobra.Command {
 	}
 
 	cmd.AddCommand(newResourceTypesCmd(ctx))
+	cmd.AddCommand(newResourceDescribeCmd(ctx))
 	cmd.AddCommand(newResourceCreateCmd(ctx))
 	cmd.AddCommand(newResourceGetCmd(ctx))
 	cmd.AddCommand(newResourceListCmd(ctx))

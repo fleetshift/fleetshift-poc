@@ -216,8 +216,8 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 	}
 
 	stateField := env.svc.Descriptors.Resource.Fields().ByName("state")
-	if createResp.Get(stateField).Int() != 1 { // STATE_CREATING
-		t.Errorf("state = %d, want 1 (STATE_CREATING)", createResp.Get(stateField).Int())
+	if int32(createResp.Get(stateField).Enum()) != 1 { // CREATING
+		t.Errorf("state = %d, want 1 (CREATING)", createResp.Get(stateField).Enum())
 	}
 
 	reconcilingField := env.svc.Descriptors.Resource.Fields().ByName("reconciling")
@@ -325,8 +325,8 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	}
 
 	stateField := env.svc.Descriptors.Resource.Fields().ByName("state")
-	if deleteResp.Get(stateField).Int() != 3 { // STATE_DELETING
-		t.Errorf("deleted state = %d, want 3 (STATE_DELETING)", deleteResp.Get(stateField).Int())
+	if int32(deleteResp.Get(stateField).Enum()) != 3 { // DELETING
+		t.Errorf("deleted state = %d, want 3 (DELETING)", deleteResp.Get(stateField).Enum())
 	}
 }
 

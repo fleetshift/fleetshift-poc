@@ -91,6 +91,149 @@ func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) 
 	return types, nil
 }
 
+// FieldSchema describes a single field in a protobuf message,
+// including nested message structure recursively.
+type FieldSchema struct {
+	Name     string
+	Type     string
+	Number   int
+	Repeated bool
+	Optional bool
+	MapKey   *FieldSchema
+	MapValue *FieldSchema
+	Fields   []FieldSchema // populated for message-typed fields
+}
+
+// MessageSchema describes a protobuf message with its full nested
+// field tree.
+type MessageSchema struct {
+	FullName string
+	Fields   []FieldSchema
+}
+
+// SchemaInfo holds the described schema for a managed resource type.
+type SchemaInfo struct {
+	ResourceType ResourceType
+	Spec         *MessageSchema
+	Methods      []string
+}
+
+// Describe returns the schema information for a resource type,
+// including the full recursive spec message schema and available
+// RPC methods.
+func (c *Client) Describe(ctx context.Context, rt ResourceType) (*SchemaInfo, error) {
+	descs, err := c.resolveServiceDescriptors(ctx, rt.ServiceName)
+	if err != nil {
+		return nil, fmt.Errorf("resolve descriptors: %w", err)
+	}
+
+	svcDesc := findService(descs, rt.ServiceName)
+	if svcDesc == nil {
+		return nil, fmt.Errorf("service %s not found in descriptors", rt.ServiceName)
+	}
+
+	info := &SchemaInfo{ResourceType: rt}
+
+	for i := range svcDesc.Methods().Len() {
+		info.Methods = append(info.Methods, string(svcDesc.Methods().Get(i).Name()))
+	}
+
+	resourceMsgDesc := findMessage(descs, "fleetshift.v1."+rt.Singular)
+	if resourceMsgDesc == nil {
+		return info, nil
+	}
+
+	specField := resourceMsgDesc.Fields().ByName("spec")
+	if specField == nil || specField.Message() == nil {
+		return info, nil
+	}
+
+	info.Spec = describeMessage(specField.Message(), nil)
+	return info, nil
+}
+
+func describeMessage(md protoreflect.MessageDescriptor, seen map[protoreflect.FullName]bool) *MessageSchema {
+	if seen == nil {
+		seen = make(map[protoreflect.FullName]bool)
+	}
+	if seen[md.FullName()] {
+		return &MessageSchema{FullName: string(md.FullName())}
+	}
+	seen[md.FullName()] = true
+
+	schema := &MessageSchema{FullName: string(md.FullName())}
+	for i := range md.Fields().Len() {
+		f := md.Fields().Get(i)
+		schema.Fields = append(schema.Fields, describeField(f, seen))
+	}
+	return schema
+}
+
+func describeField(f protoreflect.FieldDescriptor, seen map[protoreflect.FullName]bool) FieldSchema {
+	fs := FieldSchema{
+		Name:     string(f.Name()),
+		Type:     fieldTypeName(f),
+		Number:   int(f.Number()),
+		Repeated: f.IsList(),
+		Optional: f.HasOptionalKeyword(),
+	}
+
+	if f.IsMap() {
+		fs.Repeated = false
+		keyField := f.MapKey()
+		valField := f.MapValue()
+		key := describeField(keyField, seen)
+		val := describeField(valField, seen)
+		fs.MapKey = &key
+		fs.MapValue = &val
+		fs.Type = fmt.Sprintf("map<%s, %s>", key.Type, val.Type)
+		return fs
+	}
+
+	if f.Message() != nil && !isWellKnown(f.Message().FullName()) {
+		nested := describeMessage(f.Message(), seen)
+		fs.Fields = nested.Fields
+	}
+
+	return fs
+}
+
+func fieldTypeName(f protoreflect.FieldDescriptor) string {
+	if f.Message() != nil {
+		return string(f.Message().FullName())
+	}
+	if f.Enum() != nil {
+		return string(f.Enum().FullName())
+	}
+	return f.Kind().String()
+}
+
+// isWellKnown returns true for standard protobuf wrapper and utility
+// types that should be shown as leaf types rather than recursed into.
+func isWellKnown(name protoreflect.FullName) bool {
+	switch name {
+	case "google.protobuf.Timestamp",
+		"google.protobuf.Duration",
+		"google.protobuf.Any",
+		"google.protobuf.Struct",
+		"google.protobuf.Value",
+		"google.protobuf.ListValue",
+		"google.protobuf.FieldMask",
+		"google.protobuf.Empty",
+		"google.protobuf.StringValue",
+		"google.protobuf.BytesValue",
+		"google.protobuf.Int32Value",
+		"google.protobuf.Int64Value",
+		"google.protobuf.UInt32Value",
+		"google.protobuf.UInt64Value",
+		"google.protobuf.FloatValue",
+		"google.protobuf.DoubleValue",
+		"google.protobuf.BoolValue":
+		return true
+	}
+	return false
+}
+
 // Create invokes the Create RPC for the given resource type.
 func (c *Client) Create(ctx context.Context, rt ResourceType, id string, specJSON []byte) (proto.Message, error) {
 	descs, err := c.resolveServiceDescriptors(ctx, rt.ServiceName)

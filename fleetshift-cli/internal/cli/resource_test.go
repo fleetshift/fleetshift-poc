@@ -26,6 +26,32 @@ func TestResource_TypesCommand(t *testing.T) {
 	}
 }
 
+func TestResource_DescribeCommand(t *testing.T) {
+	addr := testserver.Start(t)
+
+	out := runCLI(t, "--server", addr, "resource", "describe", "kindclusters")
+
+	if !strings.Contains(out, "Service:  fleetshift.v1.KindClusterService") {
+		t.Fatalf("expected service name in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Spec (addons.kind.v1.KindClusterSpec):") {
+		t.Fatalf("expected spec message header in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "string name = 1") {
+		t.Fatalf("expected 'name' field in spec output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "CreateKindCluster") {
+		t.Fatalf("expected 'CreateKindCluster' method in output, got:\n%s", out)
+	}
+	// Verify nested messages are shown.
+	if !strings.Contains(out, "Networking networking") {
+		t.Fatalf("expected nested 'networking' field in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "api_server_port") {
+		t.Fatalf("expected nested 'api_server_port' field in output, got:\n%s", out)
+	}
+}
+
 func TestResource_CreateGetListDelete(t *testing.T) {
 	addr := testserver.Start(t)
 
@@ -39,10 +65,12 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 		"--output", "json",
 	)
 	assertJSONHasField(t, out, "name", "kindclusters/test-cluster")
+	assertJSONHasField(t, out, "state", "CREATING")
 
 	// Get
 	out = runCLI(t, "--server", addr, "resource", "get", "kindclusters", "test-cluster", "--output", "json")
 	assertJSONHasField(t, out, "name", "kindclusters/test-cluster")
+	assertJSONHasField(t, out, "state", "CREATING")
 
 	// List
 	out = runCLI(t, "--server", addr, "resource", "list", "kindclusters", "--output", "json")
