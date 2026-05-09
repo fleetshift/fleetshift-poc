@@ -38,7 +38,7 @@ func newResourceCreateCmd(ctx *cmdContext) *cobra.Command {
 				return fmt.Errorf("create %s: %w", plural, err)
 			}
 
-			return ctx.printer.PrintResource(resp, nil)
+			return ctx.printer.PrintResource(resp, resourceColumns())
 		},
 	}
 

@@ -92,6 +92,59 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 	defer conn.Close()
 }
 
+func TestResource_GetTableOutput(t *testing.T) {
+	addr := testserver.Start(t)
+
+	specJSON := `{"name": "tbl-cluster"}`
+	specFile := writeSpecFile(t, specJSON)
+
+	// Create a resource first.
+	runCLI(t, "--server", addr, "resource", "create", "kindclusters",
+		"--id", "tbl-cluster",
+		"--spec-file", specFile,
+		"--output", "json",
+	)
+
+	// Get with default (table) output.
+	out := runCLI(t, "--server", addr, "resource", "get", "kindclusters", "tbl-cluster")
+
+	if !strings.Contains(out, "NAME") {
+		t.Fatalf("expected NAME header in table output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "STATE") {
+		t.Fatalf("expected STATE header in table output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "kindClusters/tbl-cluster") {
+		t.Fatalf("expected resource name in table output, got:\n%s", out)
+	}
+}
+
+func TestResource_ListTableOutput(t *testing.T) {
+	addr := testserver.Start(t)
+
+	specJSON := `{"name": "tbl-list-cluster"}`
+	specFile := writeSpecFile(t, specJSON)
+
+	runCLI(t, "--server", addr, "resource", "create", "kindclusters",
+		"--id", "tbl-list-cluster",
+		"--spec-file", specFile,
+		"--output", "json",
+	)
+
+	// List with default (table) output.
+	out := runCLI(t, "--server", addr, "resource", "list", "kindclusters")
+
+	if !strings.Contains(out, "NAME") {
+		t.Fatalf("expected NAME header in table output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "STATE") {
+		t.Fatalf("expected STATE header in table output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "kindClusters/tbl-list-cluster") {
+		t.Fatalf("expected resource name in list output, got:\n%s", out)
+	}
+}
+
 func writeSpecFile(t *testing.T, content string) string {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "spec.json")

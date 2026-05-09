@@ -28,7 +28,7 @@ func newResourceListCmd(ctx *cmdContext) *cobra.Command {
 				return fmt.Errorf("list %s: %w", plural, err)
 			}
 
-			return ctx.printer.PrintResourceList(msgs, nil)
+			return ctx.printer.PrintResourceList(msgs, resourceColumns())
 		},
 	}
 

@@ -27,7 +27,7 @@ func newResourceGetCmd(ctx *cmdContext) *cobra.Command {
 				return fmt.Errorf("get %s/%s: %w", plural, id, err)
 			}
 
-			return ctx.printer.PrintResource(resp, nil)
+			return ctx.printer.PrintResource(resp, resourceColumns())
 		},
 	}
 }
