@@ -92,7 +92,7 @@ func Build(cfg *ResourceTypeConfig, deps Deps) (*RegisteredService, error) {
 				Handler:    handler.handleGet,
 			},
 			{
-				MethodName: "List" + strings.ToUpper(cfg.Plural[:1]) + cfg.Plural[1:],
+				MethodName: "List" + cfg.Plural,
 				Handler:    handler.handleList,
 			},
 			{
@@ -283,7 +283,7 @@ func (h *dynamicHandler) handleList(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/List" + strings.ToUpper(h.cfg.Plural[:1]) + h.cfg.Plural[1:],
+			FullMethod: "/" + h.cfg.ServiceName() + "/List" + h.cfg.Plural,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doList(ctx, r.(proto.Message))

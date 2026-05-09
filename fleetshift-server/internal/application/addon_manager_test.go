@@ -185,7 +185,7 @@ func clusterSchema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
 		ResourceType: "clusters",
 		Singular:     "Cluster",
-		Plural:       "clusters",
+		Plural:       "Clusters",
 		ProtoFiles:   map[string]string{"fake.proto": "syntax = \"proto3\";"},
 		SpecMessage:  "fake.ClusterSpec",
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},

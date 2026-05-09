@@ -37,8 +37,8 @@ func TestClient_ListResourceTypes(t *testing.T) {
 			if rt.Singular != "KindCluster" {
 				t.Errorf("singular = %q, want KindCluster", rt.Singular)
 			}
-			if rt.Plural != "kindclusters" {
-				t.Errorf("plural = %q, want kindclusters", rt.Plural)
+			if rt.Plural != "KindClusters" {
+				t.Errorf("plural = %q, want KindClusters", rt.Plural)
 			}
 		}
 	}

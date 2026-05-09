@@ -101,7 +101,7 @@ func BenchmarkDynamicMessage_SetFields(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
+		msg.Set(nameField, protoreflect.ValueOfString("kindClusters/prod-us-east-1"))
 		msg.Set(uidField, protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 		msg.Set(versionField, protoreflect.ValueOfInt64(3))
 		msg.Set(stateField, protoreflect.ValueOfInt32(2))
@@ -128,7 +128,7 @@ func BenchmarkDynamicMessage_SetFieldsWithSpec(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
+		msg.Set(nameField, protoreflect.ValueOfString("kindClusters/prod-us-east-1"))
 		msg.Set(uidField, protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)
@@ -179,7 +179,7 @@ func BenchmarkResponseMarshal(b *testing.B) {
 	resourceDesc := env.svc.Descriptors.Resource
 
 	msg := dynamicpb.NewMessage(resourceDesc)
-	msg.Set(resourceDesc.Fields().ByName("name"), protoreflect.ValueOfString("kindclusters/prod-us-east-1"))
+	msg.Set(resourceDesc.Fields().ByName("name"), protoreflect.ValueOfString("kindClusters/prod-us-east-1"))
 	msg.Set(resourceDesc.Fields().ByName("uid"), protoreflect.ValueOfString("550e8400-e29b-41d4-a716-446655440000"))
 	msg.Set(resourceDesc.Fields().ByName("intent_version"), protoreflect.ValueOfInt64(3))
 	msg.Set(resourceDesc.Fields().ByName("state"), protoreflect.ValueOfInt32(2))
@@ -311,7 +311,7 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("kindclusters/"+string(view.ManagedResource.Name)))
+		msg.Set(nameField, protoreflect.ValueOfString("kindClusters/"+string(view.ManagedResource.Name)))
 		msg.Set(uidField, protoreflect.ValueOfString(view.ManagedResource.UID))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)

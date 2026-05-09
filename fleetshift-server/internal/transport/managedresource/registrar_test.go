@@ -206,8 +206,8 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 	// Verify the response.
 	nameField := env.svc.Descriptors.Resource.Fields().ByName("name")
 	gotName := createResp.Get(nameField).String()
-	if gotName != "kindclusters/dev-cluster" {
-		t.Errorf("name = %q, want %q", gotName, "kindclusters/dev-cluster")
+	if gotName != "kindClusters/dev-cluster" {
+		t.Errorf("name = %q, want %q", gotName, "kindClusters/dev-cluster")
 	}
 
 	uidField := env.svc.Descriptors.Resource.Fields().ByName("uid")
@@ -237,7 +237,7 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 
 	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
 	getNameField := env.svc.Descriptors.GetRequest.Fields().ByName("name")
-	getReq.Set(getNameField, protoreflect.ValueOfString("kindclusters/dev-cluster"))
+	getReq.Set(getNameField, protoreflect.ValueOfString("kindClusters/dev-cluster"))
 
 	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
 	err = env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp)
@@ -245,8 +245,8 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 		t.Fatalf("GetKindCluster: %v", err)
 	}
 
-	if getResp.Get(nameField).String() != "kindclusters/dev-cluster" {
-		t.Errorf("get name = %q, want %q", getResp.Get(nameField).String(), "kindclusters/dev-cluster")
+	if getResp.Get(nameField).String() != "kindClusters/dev-cluster" {
+		t.Errorf("get name = %q, want %q", getResp.Get(nameField).String(), "kindClusters/dev-cluster")
 	}
 }
 
@@ -304,8 +304,8 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	// List
 	listReq := dynamicpb.NewMessage(env.svc.Descriptors.ListRequest)
 	listResp := dynamicpb.NewMessage(env.svc.Descriptors.ListResponse)
-	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/ListKindclusters", listReq, listResp); err != nil {
-		t.Fatalf("ListKindclusters: %v", err)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/ListKindClusters", listReq, listResp); err != nil {
+		t.Fatalf("ListKindClusters: %v", err)
 	}
 
 	resourcesField := env.svc.Descriptors.ListResponse.Fields().ByNumber(1)
@@ -317,7 +317,7 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	// Delete
 	deleteReq := dynamicpb.NewMessage(env.svc.Descriptors.DeleteRequest)
 	deleteNameField := env.svc.Descriptors.DeleteRequest.Fields().ByName("name")
-	deleteReq.Set(deleteNameField, protoreflect.ValueOfString("kindclusters/cluster-a"))
+	deleteReq.Set(deleteNameField, protoreflect.ValueOfString("kindClusters/cluster-a"))
 
 	deleteResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
 	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/DeleteKindCluster", deleteReq, deleteResp); err != nil {
@@ -336,7 +336,7 @@ func TestDynamic_GetNotFound(t *testing.T) {
 
 	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
 	nameField := env.svc.Descriptors.GetRequest.Fields().ByName("name")
-	getReq.Set(nameField, protoreflect.ValueOfString("kindclusters/nonexistent"))
+	getReq.Set(nameField, protoreflect.ValueOfString("kindClusters/nonexistent"))
 
 	resp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
 	err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, resp)
@@ -379,7 +379,7 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	for _, m := range svc.Desc.Methods {
 		methods[m.MethodName] = true
 	}
-	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindclusters", "DeleteKindCluster"} {
+	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster"} {
 		if !methods[want] {
 			t.Errorf("missing method %q", want)
 		}
@@ -397,7 +397,7 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	// Verify we can create a dynamic message from the resource descriptor
 	msg := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	nameField := svc.Descriptors.Resource.Fields().ByName("name")
-	msg.Set(nameField, protoreflect.ValueOfString("kindclusters/test"))
+	msg.Set(nameField, protoreflect.ValueOfString("kindClusters/test"))
 
 	b, err := proto.Marshal(msg)
 	if err != nil {

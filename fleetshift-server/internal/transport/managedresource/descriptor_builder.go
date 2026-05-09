@@ -60,6 +60,12 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	if cfg.Singular == "" || cfg.Plural == "" || cfg.ProtoPackage == "" {
 		return nil, fmt.Errorf("singular, plural, and proto package are required")
 	}
+	if cfg.Singular[0] < 'A' || cfg.Singular[0] > 'Z' {
+		return nil, fmt.Errorf("singular %q must start with an uppercase letter (PascalCase)", cfg.Singular)
+	}
+	if cfg.Plural[0] < 'A' || cfg.Plural[0] > 'Z' {
+		return nil, fmt.Errorf("plural %q must start with an uppercase letter (PascalCase)", cfg.Plural)
+	}
 	if specDesc == nil {
 		return nil, fmt.Errorf("spec descriptor is required")
 	}
@@ -67,6 +73,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	singular := cfg.Singular
 	lower := strings.ToLower(singular[:1]) + singular[1:]
 	plural := cfg.Plural
+	collectionID := cfg.CollectionID()
 
 	specFullName := string(specDesc.FullName())
 	specFile := specDesc.ParentFile()
@@ -88,7 +95,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 			buildCreateRequest(singular, lower, fqn(singular)),
 			buildGetRequest(singular),
 			buildListRequest(plural),
-			buildListResponse(singular, plural, fqn(singular)),
+			buildListResponse(singular, plural, collectionID, fqn(singular)),
 			buildDeleteRequest(singular),
 		},
 		Service: []*descriptorpb.ServiceDescriptorProto{
@@ -122,15 +129,14 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 		return nil, fmt.Errorf("service %sService not found in built descriptor", singular)
 	}
 
-	titlePlural := strings.ToUpper(plural[:1]) + plural[1:]
 	return &ServiceDescriptors{
 		File:          fd,
 		Service:       svc,
 		Resource:      fd.Messages().ByName(protoreflect.Name(singular)),
 		CreateRequest: fd.Messages().ByName(protoreflect.Name("Create" + singular + "Request")),
 		GetRequest:    fd.Messages().ByName(protoreflect.Name("Get" + singular + "Request")),
-		ListRequest:   fd.Messages().ByName(protoreflect.Name("List" + titlePlural + "Request")),
-		ListResponse:  fd.Messages().ByName(protoreflect.Name("List" + titlePlural + "Response")),
+		ListRequest:   fd.Messages().ByName(protoreflect.Name("List" + plural + "Request")),
+		ListResponse:  fd.Messages().ByName(protoreflect.Name("List" + plural + "Response")),
 		DeleteRequest: fd.Messages().ByName(protoreflect.Name("Delete" + singular + "Request")),
 		Spec:          specDesc,
 	}, nil
@@ -177,9 +183,8 @@ func buildGetRequest(singular string) *descriptorpb.DescriptorProto {
 }
 
 func buildListRequest(plural string) *descriptorpb.DescriptorProto {
-	titlePlural := strings.ToUpper(plural[:1]) + plural[1:]
 	return &descriptorpb.DescriptorProto{
-		Name: proto.String("List" + titlePlural + "Request"),
+		Name: proto.String("List" + plural + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
 			int32Field("page_size", 1),
 			stringField("page_token", 2),
@@ -187,12 +192,11 @@ func buildListRequest(plural string) *descriptorpb.DescriptorProto {
 	}
 }
 
-func buildListResponse(singular, plural, resourceFQN string) *descriptorpb.DescriptorProto {
-	titlePlural := strings.ToUpper(plural[:1]) + plural[1:]
+func buildListResponse(singular, plural, collectionID, resourceFQN string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
-		Name: proto.String("List" + titlePlural + "Response"),
+		Name: proto.String("List" + plural + "Response"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			repeatedMessageField(plural, 1, resourceFQN),
+			repeatedMessageField(collectionID, 1, resourceFQN),
 			stringField("next_page_token", 2),
 		},
 	}
@@ -223,9 +227,9 @@ func buildService(singular, plural, pkg string) *descriptorpb.ServiceDescriptorP
 				OutputType: proto.String(fqnPrefix + singular),
 			},
 			{
-				Name:            proto.String("List" + strings.ToUpper(plural[:1]) + plural[1:]),
-				InputType:       proto.String(fqnPrefix + "List" + strings.ToUpper(plural[:1]) + plural[1:] + "Request"),
-				OutputType:      proto.String(fqnPrefix + "List" + strings.ToUpper(plural[:1]) + plural[1:] + "Response"),
+				Name:       proto.String("List" + plural),
+				InputType:  proto.String(fqnPrefix + "List" + plural + "Request"),
+				OutputType: proto.String(fqnPrefix + "List" + plural + "Response"),
 			},
 			{
 				Name:       proto.String("Delete" + singular),

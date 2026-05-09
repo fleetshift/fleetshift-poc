@@ -88,8 +88,14 @@ func (DeliveryCapability) CapabilityType() string { return "delivery" }
 // sources with a built-in resolver for well-known imports.
 type ManagedResourceSchema struct {
 	ResourceType ResourceType
-	Singular     string
-	Plural       string // HTTP path derived as /v1/{Plural}
+	// Singular is the singular resource name in PascalCase (e.g. "KindCluster").
+	Singular string
+
+	// Plural is the plural resource name in PascalCase (e.g. "KindClusters").
+	// The lowerCamelCase collection identifier for HTTP paths and proto field
+	// names (e.g. "kindClusters") is derived automatically by the transport
+	// layer via [managedresource.ResourceTypeConfig.CollectionID].
+	Plural string
 
 	// ProtoFiles maps virtual filenames to proto source content.
 	// The compiler resolves imports within this map first, then

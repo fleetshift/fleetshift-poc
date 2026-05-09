@@ -113,12 +113,12 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
 
 ```json
 {
-  "name": "fulfillments/_managed/kindclusters/dev-cluster",
+  "name": "fulfillments/_managed/kindClusters/dev-cluster",
   "manifest_strategy": {
     "type": "MANAGED_RESOURCE",
     "managed_resource": {
       "resource_type": "api.kind.cluster",
-      "resource_name": "kindclusters/dev-cluster"
+      "resource_name": "kindClusters/dev-cluster"
     }
   },
   "placement_strategy": {
@@ -132,7 +132,7 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
   },
   "provenance": {
     "signature": { "..." },
-    "managed_resource_ref": "kindclusters/dev-cluster"
+    "managed_resource_ref": "kindClusters/dev-cluster"
   }
 }
 ```
@@ -167,7 +167,7 @@ Then at connect time, the workload provides the full schema:
 domain.ManagedResourceSchema{
     ResourceType: "api.kind.cluster",
     Singular:     "KindCluster",
-    Plural:       "kindclusters",
+    Plural:       "KindClusters",
     ProtoFiles: map[string]string{
         "addons/kind/v1/kind_cluster_spec.proto": kindClusterSpecProto,
     },
@@ -176,7 +176,7 @@ domain.ManagedResourceSchema{
 }
 ```
 
-- **`ResourceType`** / **`Plural`**: the API path segment. The platform exposes `POST /v1/kindclusters`, `GET /v1/kindclusters/{id}`, etc. using the plural.
+- **`Singular`** / **`Plural`**: PascalCase resource names. The platform derives gRPC method names directly (e.g. `CreateKindCluster`, `ListKindClusters`) and lowerCamelCase HTTP paths per AIP-122 (e.g. `POST /v1/kindClusters`, `GET /v1/kindClusters/{id}`).
 - **`ProtoFiles`**: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
 - **`SpecMessage`**: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
 - **`Relation`**: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.

@@ -257,7 +257,7 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 
 	getReq := dynamicpb.NewMessage(svc2.Descriptors.GetRequest)
 	getReq.Set(svc2.Descriptors.GetRequest.Fields().ByName("name"),
-		protoreflect.ValueOfString("kindclusters/before-replace"))
+		protoreflect.ValueOfString("kindClusters/before-replace"))
 	getResp := dynamicpb.NewMessage(svc2.Descriptors.Resource)
 	err := conn.Invoke(context.Background(), "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp)
 	if err == nil {
@@ -278,8 +278,8 @@ func TestDynamicMux_ReplaceDispatchesToNewHandler(t *testing.T) {
 		t.Fatalf("CreateCluster after replace: %v", err)
 	}
 	nameField := svc2.Descriptors.Resource.Fields().ByName("name")
-	if got := resp2.Get(nameField).String(); got != "kindclusters/after-replace" {
-		t.Errorf("name = %q, want kindclusters/after-replace", got)
+	if got := resp2.Get(nameField).String(); got != "kindClusters/after-replace" {
+		t.Errorf("name = %q, want kindClusters/after-replace", got)
 	}
 }
 
@@ -304,7 +304,7 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	for _, m := range si.Methods {
 		methodNames[m.Name] = true
 	}
-	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindclusters", "DeleteKindCluster"} {
+	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster"} {
 		if !methodNames[want] {
 			t.Errorf("missing method %q in ServiceInfo", want)
 		}
@@ -402,8 +402,8 @@ func TestDynamicMux_RegisterAndDispatch(t *testing.T) {
 
 	nameField := svc.Descriptors.Resource.Fields().ByName("name")
 	got := resp.Get(nameField).String()
-	if got != "kindclusters/dyn-cluster-1" {
-		t.Errorf("name = %q, want %q", got, "kindclusters/dyn-cluster-1")
+	if got != "kindClusters/dyn-cluster-1" {
+		t.Errorf("name = %q, want %q", got, "kindClusters/dyn-cluster-1")
 	}
 }
 
@@ -459,18 +459,18 @@ func serveGRPCOverTCP(t *testing.T, svc *managedresource.RegisteredService) stri
 func httpCreateCluster(t *testing.T, baseURL, id string) *http.Response {
 	t.Helper()
 	body := `{"spec": {"name": "` + id + `"}}`
-	resp, err := http.Post(baseURL+"/v1/kindclusters?kindCluster_id="+id, "application/json", strings.NewReader(body))
+	resp, err := http.Post(baseURL+"/v1/kindClusters?kindCluster_id="+id, "application/json", strings.NewReader(body))
 	if err != nil {
-		t.Fatalf("POST /v1/kindclusters: %v", err)
+		t.Fatalf("POST /v1/kindClusters: %v", err)
 	}
 	return resp
 }
 
 func httpGetCluster(t *testing.T, baseURL, id string) *http.Response {
 	t.Helper()
-	resp, err := http.Get(baseURL + "/v1/kindclusters/" + id)
+	resp, err := http.Get(baseURL + "/v1/kindClusters/" + id)
 	if err != nil {
-		t.Fatalf("GET /v1/kindclusters/%s: %v", id, err)
+		t.Fatalf("GET /v1/kindClusters/%s: %v", id, err)
 	}
 	return resp
 }
@@ -520,7 +520,7 @@ func TestDynamicHTTPMux_DeregisterReturns404(t *testing.T) {
 		t.Fatalf("POST before deregister: status = %d, want 200", resp.StatusCode)
 	}
 
-	httpMux.Deregister("kindclusters")
+	httpMux.Deregister("KindClusters")
 
 	resp2 := httpGetCluster(t, ts.URL, "will-deregister")
 	resp2.Body.Close()

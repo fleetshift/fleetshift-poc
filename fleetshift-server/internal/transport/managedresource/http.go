@@ -33,7 +33,7 @@ func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) e
 		return err
 	}
 
-	prefix := "/v1/" + svc.Config.Plural
+	prefix := "/v1/" + svc.Config.CollectionID()
 
 	// Register both the exact path and the subtree pattern so that
 	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
@@ -62,7 +62,7 @@ func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (*httpHandlerEntr
 		return nil, err
 	}
 
-	prefix := "/v1/" + svc.Config.Plural
+	prefix := "/v1/" + svc.Config.CollectionID()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
@@ -158,8 +158,7 @@ func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientCon
 	}
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.ListResponse)
-	titlePlural := strings.ToUpper(svc.Config.Plural[:1]) + svc.Config.Plural[1:]
-	method := "/" + svc.Config.ServiceName() + "/List" + titlePlural
+	method := "/" + svc.Config.ServiceName() + "/List" + svc.Config.Plural
 	if err := conn.Invoke(r.Context(), method, listReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return

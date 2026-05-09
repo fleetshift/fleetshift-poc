@@ -108,8 +108,8 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	if handle.ServiceName != "fleetshift.v1.KindClusterService" {
 		t.Errorf("handle.ServiceName = %q, want fleetshift.v1.KindClusterService", handle.ServiceName)
 	}
-	if handle.Plural != "kindclusters" {
-		t.Errorf("handle.Plural = %q, want kindclusters", handle.Plural)
+	if handle.Plural != "KindClusters" {
+		t.Errorf("handle.Plural = %q, want KindClusters", handle.Plural)
 	}
 
 	info := mux.ServiceInfo()
@@ -235,7 +235,7 @@ func TestSchemaContentHash_Deterministic(t *testing.T) {
 	s := domain.ManagedResourceSchema{
 		ResourceType: "clusters",
 		Singular:     "Cluster",
-		Plural:       "clusters",
+		Plural:       "Clusters",
 		SpecMessage:  "ClusterSpec",
 		ProtoFiles:   map[string]string{"a.proto": "syntax=\"proto3\";", "b.proto": "message B {}"},
 	}
@@ -277,7 +277,7 @@ func TestDynamicSchemaActivator_ActivateRegistersHTTPRoutes(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	code := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
+	code := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
 	if code == http.StatusNotFound {
 		t.Fatal("expected route to exist after Activate, got 404")
 	}
@@ -294,7 +294,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 
 	env.activator.Deactivate(handle)
 
-	code := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
+	code := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
 	if code != http.StatusNotFound {
 		t.Errorf("expected 404 after Deactivate, got %d", code)
 	}
@@ -309,7 +309,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	code1 := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
+	code1 := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
 	if code1 == http.StatusNotFound {
 		t.Fatal("expected route to exist after first Activate")
 	}
@@ -325,7 +325,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("second Activate (changed): %v", err)
 	}
 
-	code2 := httpStatus(t, env.httpURL+"/v1/kindclusters/test-id")
+	code2 := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
 	if code2 == http.StatusNotFound {
 		t.Fatal("expected route to survive atomic swap, got 404")
 	}
@@ -489,7 +489,7 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 	v1 := domain.ManagedResourceSchema{
 		ResourceType: "widgets",
 		Singular:     "Widget",
-		Plural:       "widgets",
+		Plural:       "Widgets",
 		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
@@ -505,7 +505,7 @@ message WidgetSpec {
 	v2 := domain.ManagedResourceSchema{
 		ResourceType: "widgets",
 		Singular:     "Widget",
-		Plural:       "widgets",
+		Plural:       "Widgets",
 		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";

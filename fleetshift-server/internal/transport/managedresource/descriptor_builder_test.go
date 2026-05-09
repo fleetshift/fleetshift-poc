@@ -18,10 +18,12 @@ func TestBuildServiceDescriptors_InvalidInputs(t *testing.T) {
 		spec bool // false = nil spec descriptor
 	}{
 		{name: "nil config", cfg: nil, spec: true},
-		{name: "empty singular", cfg: &ResourceTypeConfig{Singular: "", Plural: "clusters", ProtoPackage: "pkg"}, spec: true},
+		{name: "empty singular", cfg: &ResourceTypeConfig{Singular: "", Plural: "Clusters", ProtoPackage: "pkg"}, spec: true},
 		{name: "empty plural", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "", ProtoPackage: "pkg"}, spec: true},
-		{name: "empty proto package", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "clusters", ProtoPackage: ""}, spec: true},
-		{name: "nil spec descriptor", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "clusters", ProtoPackage: "pkg"}, spec: false},
+		{name: "empty proto package", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "Clusters", ProtoPackage: ""}, spec: true},
+		{name: "nil spec descriptor", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "Clusters", ProtoPackage: "pkg"}, spec: false},
+		{name: "lowercase singular", cfg: &ResourceTypeConfig{Singular: "cluster", Plural: "Clusters", ProtoPackage: "pkg"}, spec: true},
+		{name: "lowercase plural", cfg: &ResourceTypeConfig{Singular: "Cluster", Plural: "clusters", ProtoPackage: "pkg"}, spec: true},
 	}
 
 	for _, tt := range tests {

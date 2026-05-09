@@ -18,8 +18,8 @@ func TestResource_TypesCommand(t *testing.T) {
 
 	out := runCLI(t, "--server", addr, "resource", "types")
 
-	if !strings.Contains(out, "kindclusters") {
-		t.Fatalf("expected 'kindclusters' in output, got:\n%s", out)
+	if !strings.Contains(out, "KindClusters") {
+		t.Fatalf("expected 'KindClusters' in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "KindCluster") {
 		t.Fatalf("expected 'KindCluster' in output, got:\n%s", out)
@@ -64,23 +64,23 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 		"--spec-file", specFile,
 		"--output", "json",
 	)
-	assertJSONHasField(t, out, "name", "kindclusters/test-cluster")
+	assertJSONHasField(t, out, "name", "kindClusters/test-cluster")
 	assertJSONHasField(t, out, "state", "CREATING")
 
 	// Get
 	out = runCLI(t, "--server", addr, "resource", "get", "kindclusters", "test-cluster", "--output", "json")
-	assertJSONHasField(t, out, "name", "kindclusters/test-cluster")
+	assertJSONHasField(t, out, "name", "kindClusters/test-cluster")
 	assertJSONHasField(t, out, "state", "CREATING")
 
 	// List
 	out = runCLI(t, "--server", addr, "resource", "list", "kindclusters", "--output", "json")
-	if !strings.Contains(out, "kindclusters/test-cluster") {
+	if !strings.Contains(out, "kindClusters/test-cluster") {
 		t.Fatalf("expected resource in list output, got:\n%s", out)
 	}
 
 	// Delete
 	out = runCLI(t, "--server", addr, "resource", "delete", "kindclusters", "test-cluster", "--output", "json")
-	if !strings.Contains(out, "kindclusters/test-cluster") {
+	if !strings.Contains(out, "kindClusters/test-cluster") {
 		t.Fatalf("expected deleted resource in output, got:\n%s", out)
 	}
 

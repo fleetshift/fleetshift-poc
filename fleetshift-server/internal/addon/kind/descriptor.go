@@ -33,7 +33,7 @@ func Schema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
 		ResourceType: ClusterResourceType,
 		Singular:     "KindCluster",
-		Plural:       "kindclusters",
+		Plural:       "KindClusters",
 		ProtoFiles: map[string]string{
 			specProtoPath: kindClusterSpecProto,
 		},
