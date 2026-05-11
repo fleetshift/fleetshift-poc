@@ -371,3 +371,119 @@ def cmd_create(cluster_name: str, config: dict) -> None:
     print(f"NodePool created: {nodepool.get('name', 'unknown')} (ID: {nodepool.get('id', 'unknown')})")
 
     poll_cluster_ready(cluster_id, token, email, config)
+
+
+def resolve_cluster_id(cluster_name: str, token: str, email: str, config: dict) -> str:
+    """Resolve a cluster name to its ID by listing clusters."""
+    resp = api_request("GET", "/api/v1/clusters", token, email, config)
+    if resp.status_code >= 400:
+        print(f"Error: failed to list clusters (HTTP {resp.status_code})")
+        print(resp.text)
+        sys.exit(1)
+
+    clusters = resp.json().get("clusters", [])
+    for c in clusters:
+        if c.get("name") == cluster_name:
+            return c["id"]
+
+    print(f"Error: cluster '{cluster_name}' not found")
+    sys.exit(1)
+
+
+def poll_cluster_deleted(cluster_id: str, token: str, email: str, config: dict) -> None:
+    """Poll until cluster returns 404 (deleted). Timeout after 20 minutes."""
+    max_polls = 80
+    interval = 15
+    print(f"Polling cluster deletion every {interval}s (timeout: {max_polls * interval // 60} min)...")
+
+    for i in range(max_polls):
+        resp = api_request("GET", f"/api/v1/clusters/{cluster_id}", token, email, config)
+        if resp.status_code == 404:
+            print(f"Cluster {cluster_id} deleted.")
+            return
+
+        phase = "Unknown"
+        if resp.status_code < 400:
+            phase = resp.json().get("status", {}).get("phase", "Unknown")
+        print(f"  [{i+1}/{max_polls}] Status: {resp.status_code}, Phase: {phase}")
+        time.sleep(interval)
+
+    print("Error: timed out waiting for cluster deletion")
+    sys.exit(1)
+
+
+def destroy_infra_with_retry(
+    infra_id: str,
+    project_id: str,
+    region: str,
+    max_retries: int = 40,
+    interval: int = 30,
+) -> None:
+    """Retry hypershift destroy infra until success (nodepools must be fully deleted first)."""
+    print(f"Destroying network infrastructure (retrying every {interval}s, timeout: {max_retries * interval // 60} min)...")
+    for i in range(max_retries):
+        try:
+            destroy_infra_gcp(infra_id, project_id, region)
+            return
+        except HypershiftError as e:
+            print(f"  [{i+1}/{max_retries}] Infra destroy not ready yet, retrying... ({e})")
+            time.sleep(interval)
+
+    print("Error: timed out waiting for infrastructure destroy")
+    sys.exit(1)
+
+
+def cmd_delete(cluster_name: str, config: dict) -> None:
+    """Delete a cluster end-to-end: API delete → poll → hypershift destroy."""
+    token, email = authenticate(config)
+
+    print("\n=== Resolving Cluster ===")
+    cluster_id = resolve_cluster_id(cluster_name, token, email, config)
+    print(f"Found cluster: {cluster_name} (ID: {cluster_id})")
+
+    print("\n=== Deleting Cluster ===")
+    resp = api_request("DELETE", f"/api/v1/clusters/{cluster_id}?force=true", token, email, config)
+    if resp.status_code >= 400 and resp.status_code != 404:
+        print(f"Error: cluster delete failed (HTTP {resp.status_code})")
+        print(resp.text)
+        sys.exit(1)
+
+    if resp.status_code == 404:
+        print("Cluster already deleted from API.")
+    else:
+        print(f"Cluster deletion initiated (HTTP {resp.status_code})")
+        poll_cluster_deleted(cluster_id, token, email, config)
+
+    print("\n=== Destroying IAM Infrastructure ===")
+    try:
+        destroy_iam_gcp(cluster_name, config["project"])
+    except HypershiftError as e:
+        print(f"Warning: IAM destroy failed: {e}")
+
+    print("\n=== Destroying Network Infrastructure ===")
+    destroy_infra_with_retry(cluster_name, config["project"], config["region"])
+
+    print(f"\nCluster {cluster_name} fully deleted.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="HCP Cluster Lifecycle")
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    create_parser = subparsers.add_parser("create", help="Create an HCP cluster")
+    create_parser.add_argument("name", help="Cluster name (also used as infra ID, max 15 chars)")
+
+    delete_parser = subparsers.add_parser("delete", help="Delete an HCP cluster")
+    delete_parser.add_argument("name", help="Cluster name to delete")
+
+    args = parser.parse_args()
+    config = load_config()
+
+    if args.command == "create":
+        cmd_create(args.name, config)
+    elif args.command == "delete":
+        cmd_delete(args.name, config)
+
+
+if __name__ == "__main__":
+    main()
