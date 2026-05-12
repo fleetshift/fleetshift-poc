@@ -490,12 +490,3 @@ python hcp_lifecycle.py delete <cluster-name>
 Why: tears down the API-side cluster plus HyperShift-created IAM and network resources for the same cluster name.
 
 Success: the script reports that the cluster is fully deleted.
-
-## Known Boundary
-
-If cluster creation is accepted but the cluster does not become `Ready`, compare the failure with `docs/fleetshift/gcphcp/2026-05-11-gcp-hcp-cluster-creation-rca.md`.
-
-That is currently the known external boundary for this POC:
-- keep the GCP recreation and Python flow validation in scope
-- document the blocker clearly if it still appears
-- do not treat it as a reason to undo the clean-slate GCP setup work
