@@ -16,6 +16,7 @@ import os
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from pathlib import Path
+from typing import Any
 
 import requests
 import yaml
@@ -34,7 +35,7 @@ from lib.hypershift import (
 )
 
 
-def load_config(config_path: str = "config.yaml") -> dict:
+def load_config(config_path: str = "config.yaml") -> dict[str, Any]:
     path = Path(config_path)
     if not path.exists():
         print(f"Error: {config_path} not found. Copy config.yaml.example to config.yaml and fill in values.")
@@ -54,7 +55,7 @@ def load_config(config_path: str = "config.yaml") -> dict:
     return config
 
 
-def keycloak_login(config: dict) -> tuple[str, str]:
+def keycloak_login(config: dict[str, Any]) -> tuple[str, str]:
     """Keycloak PKCE login. Opens browser, returns (id_token_jwt, user_email)."""
     base_url = config["keycloak_url"]
     realm = config["keycloak_realm"]
@@ -118,7 +119,7 @@ def _wait_for_callback(port: int = 8888, timeout: int = 120) -> str:
             self.end_headers()
             self.wfile.write(b"<html><body><h2>Login successful. You can close this tab.</h2></body></html>")
 
-        def log_message(self, format, *args):
+        def log_message(self, format: str, *args: Any) -> None:
             pass
 
     server = HTTPServer(("localhost", port), CallbackHandler)
@@ -133,7 +134,7 @@ def _wait_for_callback(port: int = 8888, timeout: int = 120) -> str:
     return callback_url
 
 
-def sts_exchange(keycloak_jwt: str, config: dict) -> str:
+def sts_exchange(keycloak_jwt: str, config: dict[str, Any]) -> str:
     """Exchange Keycloak JWT for a Google Workforce access token via STS."""
     audience = (
         f"//iam.googleapis.com/locations/global/workforcePools/"
@@ -165,7 +166,7 @@ def sts_exchange(keycloak_jwt: str, config: dict) -> str:
     return token
 
 
-def generate_broker_id_token(workforce_token: str, config: dict) -> str:
+def generate_broker_id_token(workforce_token: str, config: dict[str, Any]) -> str:
     """Mint a Google-signed ID token for the broker service account."""
     url = (
         f"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/"
@@ -197,7 +198,7 @@ def generate_broker_id_token(workforce_token: str, config: dict) -> str:
     return token
 
 
-def authenticate(config: dict) -> tuple[str, str]:
+def authenticate(config: dict[str, Any]) -> tuple[str, str]:
     """Full auth chain. Returns (broker_id_token, user_email)."""
     print("\n=== Authentication ===")
     keycloak_jwt, email = keycloak_login(config)
@@ -206,7 +207,7 @@ def authenticate(config: dict) -> tuple[str, str]:
     return broker_token, email
 
 
-def api_request(method: str, path: str, token: str, email: str, config: dict, json_data: dict = None) -> requests.Response:
+def api_request(method: str, path: str, token: str, email: str, config: dict[str, Any], json_data: dict[str, Any] | None = None) -> requests.Response:
     """Make an authenticated request to the CLS Backend API."""
     url = f"{config['gateway_url'].rstrip('/')}{path}"
     resp = requests.request(
@@ -224,11 +225,11 @@ def api_request(method: str, path: str, token: str, email: str, config: dict, js
 
 def build_cluster_spec(
     cluster_name: str,
-    config: dict,
-    iam_config: dict,
-    infra_config: dict,
+    config: dict[str, Any],
+    iam_config: dict[str, Any],
+    infra_config: dict[str, Any],
     signing_key_base64: str,
-) -> dict:
+) -> dict[str, Any]:
     """Build the cluster creation request body."""
     wif_spec = iam_config_to_wif_spec(iam_config)
     return {
@@ -253,7 +254,7 @@ def build_cluster_spec(
     }
 
 
-def build_nodepool_spec(cluster_name: str, cluster_id: str, config: dict) -> dict:
+def build_nodepool_spec(cluster_name: str, cluster_id: str, config: dict[str, Any]) -> dict[str, Any]:
     """Build the nodepool creation request body."""
     return {
         "name": f"{cluster_name}-nodepool-1",
@@ -278,7 +279,7 @@ def build_nodepool_spec(cluster_name: str, cluster_id: str, config: dict) -> dic
     }
 
 
-def poll_cluster_ready(cluster_id: str, token: str, email: str, config: dict) -> None:
+def poll_cluster_ready(cluster_id: str, token: str, email: str, config: dict[str, Any]) -> None:
     """Poll until cluster reaches Ready or Failed. Timeout after 20 minutes."""
     max_polls = 80
     interval = 15
@@ -319,7 +320,7 @@ def poll_cluster_ready(cluster_id: str, token: str, email: str, config: dict) ->
     sys.exit(1)
 
 
-def cmd_create(cluster_name: str, config: dict) -> None:
+def cmd_create(cluster_name: str, config: dict[str, Any]) -> None:
     """Create a cluster end-to-end: infra → cluster → nodepool → poll."""
     token, email = authenticate(config)
 
@@ -377,7 +378,7 @@ def cmd_create(cluster_name: str, config: dict) -> None:
     poll_cluster_ready(cluster_id, token, email, config)
 
 
-def resolve_cluster_id(cluster_name: str, token: str, email: str, config: dict) -> str:
+def resolve_cluster_id(cluster_name: str, token: str, email: str, config: dict[str, Any]) -> str:
     """Resolve a cluster name to its ID by listing clusters."""
     resp = api_request("GET", "/api/v1/clusters", token, email, config)
     if resp.status_code >= 400:
@@ -394,7 +395,7 @@ def resolve_cluster_id(cluster_name: str, token: str, email: str, config: dict) 
     sys.exit(1)
 
 
-def poll_cluster_deleted(cluster_id: str, token: str, email: str, config: dict) -> None:
+def poll_cluster_deleted(cluster_id: str, token: str, email: str, config: dict[str, Any]) -> None:
     """Poll until cluster returns 404 (deleted). Timeout after 20 minutes."""
     max_polls = 80
     interval = 15
@@ -437,7 +438,7 @@ def destroy_infra_with_retry(
     sys.exit(1)
 
 
-def cmd_delete(cluster_name: str, config: dict) -> None:
+def cmd_delete(cluster_name: str, config: dict[str, Any]) -> None:
     """Delete a cluster end-to-end: API delete → poll → hypershift destroy."""
     token, email = authenticate(config)
 
