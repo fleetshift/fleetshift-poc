@@ -1,9 +1,8 @@
 # HCP Lifecycle Script Configuration
 # Copy to config.yaml and fill in your values.
 
-# OIDC Identity Provider
-oidc_authorize_url: "https://your-idp.example.com/realms/your-realm/protocol/openid-connect/auth"
-oidc_token_url: "https://your-idp.example.com/realms/your-realm/protocol/openid-connect/token"
+# OIDC Identity Provider (endpoints discovered via .well-known/openid-configuration)
+oidc_issuer_url: "https://your-idp.example.com/realms/your-realm"
 oidc_client_id: "your-client-id"
 
 # GCP Workforce Identity Federation

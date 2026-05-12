@@ -37,7 +37,7 @@ def load_config(config_path: str = "config.yaml") -> Config:
     with open(path) as f:
         config: Config = yaml.safe_load(f)
     required = [
-        "oidc_authorize_url", "oidc_token_url", "oidc_client_id",
+        "oidc_issuer_url", "oidc_client_id",
         "gcp_project", "workforce_pool", "workforce_provider",
         "broker_sa_email", "gateway_url", "gateway_audience",
         "project", "region",
@@ -49,10 +49,25 @@ def load_config(config_path: str = "config.yaml") -> Config:
     return config
 
 
+def discover_oidc_endpoints(issuer_url: str) -> tuple[str, str]:
+    """Fetch OIDC discovery document and return (authorize_url, token_url)."""
+    discovery_url = f"{issuer_url.rstrip('/')}/.well-known/openid-configuration"
+    resp = requests.get(discovery_url, timeout=10)
+    if resp.status_code >= 400:
+        print(f"Error: OIDC discovery failed (HTTP {resp.status_code}): {discovery_url}")
+        sys.exit(1)
+    doc: dict[str, str] = resp.json()
+    authorize = doc.get("authorization_endpoint", "")
+    token = doc.get("token_endpoint", "")
+    if not authorize or not token:
+        print("Error: OIDC discovery response missing authorization_endpoint or token_endpoint")
+        sys.exit(1)
+    return authorize, token
+
+
 def oidc_login(config: Config) -> tuple[str, str]:
     """OIDC PKCE login. Opens browser, returns (id_token_jwt, user_email)."""
-    authorize_url = config["oidc_authorize_url"]
-    token_url = config["oidc_token_url"]
+    authorize_url, token_url = discover_oidc_endpoints(config["oidc_issuer_url"])
 
     code_verifier = generate_token(48)
 
