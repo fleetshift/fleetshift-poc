@@ -28,6 +28,9 @@ const config: Configuration = {
     clean: true,
   },
   mode: "development",
+  cache: {
+    type: "filesystem",
+  },
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
     // Don't follow symlinks so workspace packages resolve via their package.json exports

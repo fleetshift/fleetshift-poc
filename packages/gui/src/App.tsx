@@ -156,7 +156,7 @@ const AppRoutes = () => {
         {sortedPages.map((page) => (
           <Route
             key={page.id}
-            path={`/${page.path}`}
+            path={`/${page.path}/*`}
             element={
               <PluginPage
                 scope={page.scope}
