@@ -36,6 +36,24 @@ task deploy:dev       # builds frontend in a container, starts Go backend servin
 
 Open [http://localhost:8085](http://localhost:8085) once the stack is up.
 
+### Local Watch Mode
+
+For iterating on the frontend without rebuilding containers on every change:
+
+```bash
+# Terminal 1 — start the stack with local web assets
+cd ../fleetshift-poc
+task podman:dev LOCAL_WEB=true
+
+# Terminal 2 — watch & rebuild on file changes
+npm install
+npm run dev              # full build + watch mode
+```
+
+Changes to plugin or GUI source are automatically rebuilt by webpack and merged into `web/`. The Go backend serves them from the host bind mount — just refresh the browser.
+
+Use `npm run dev:watch` to skip the initial full build if `web/` already has current assets.
+
 ### Building Locally (optional)
 
 If you do have Node.js 22+ and npm installed:

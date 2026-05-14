@@ -5,6 +5,8 @@
     "packages/*"
   ],
   "scripts": {
+    "dev": "node scripts/dev.mjs",
+    "dev:watch": "node scripts/dev.mjs --watch",
     "build:all": "npm run build -w packages/common && npm run build -w packages/mock-ui-plugins && npm run build -w packages/gui && node scripts/merge-web.mjs",
     "lint": "eslint packages/",
     "lint:fix": "eslint packages/ --fix",
