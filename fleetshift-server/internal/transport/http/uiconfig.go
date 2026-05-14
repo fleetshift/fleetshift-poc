@@ -151,9 +151,7 @@ func buildScalprumConfig(registry pluginRegistry) map[string]interface{} {
 		cfg := map[string]interface{}{
 			"name":             entry.Name,
 			"manifestLocation": entry.ManifestPath,
-		}
-		if entry.Key == "management" {
-			cfg["pluginManifest"] = entry.PluginManifest
+			"pluginManifest":   entry.PluginManifest,
 		}
 		config[name] = cfg
 	}
@@ -183,10 +181,6 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 	}
 
 	for _, entry := range registry.Plugins {
-		if entry.Key != "management" {
-			continue
-		}
-
 		for _, ext := range entry.PluginManifest.Extensions {
 			if ext.Type != "fleetshift.module" {
 				continue

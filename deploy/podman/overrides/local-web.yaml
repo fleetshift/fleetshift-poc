@@ -1,0 +1,27 @@
+# Local web override — serve UI from host filesystem instead of Docker build.
+#
+# Use with `npm run dev` in fleetshift-user-interface for watch mode.
+# The web-builder init container is replaced with a no-op.
+#
+# Usage: add LOCAL_WEB=true to your task/compose invocation, or layer manually:
+#   podman compose -f compose.yaml -f overrides/local-web.yaml up
+
+services:
+
+  # Skip the Docker web build — assets come from the host
+  web-builder:
+    image: busybox
+    command: ["true"]
+    volumes: []
+
+  # Override the web-assets volume mount with a host bind mount.
+  # !override replaces the entire volumes list so the bind mount wins
+  # over the named web-assets volume from the base compose anchor.
+  # Re-declares all mounts from base + earlier overrides (sqlite data, socket, tmp).
+  fleetshift-server:
+    volumes: !override
+      - ${PODMAN_SOCKET:-/dev/null}:/var/run/docker.sock
+      - ${KIND_TEMP_DIR:-/tmp}:${KIND_TEMP_DIR:-/tmp}
+      - fleetshift-data:/data
+      - keycloak-certs:/certs:ro
+      - ${UI_DIR:-../../../fleetshift-user-interface}/web:/srv/web:ro

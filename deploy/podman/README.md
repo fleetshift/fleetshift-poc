@@ -51,6 +51,23 @@ task podman:up DB=postgres AUTH=local
 
 After changing Go code, run `task podman:rebuild` to rebuild and restart. After changing frontend code, run `task podman:clean` then `task podman:dev` to rebuild the web assets.
 
+### Local Web Watch Mode
+
+For faster frontend iteration, serve assets directly from your host filesystem instead of rebuilding the Docker web-builder on every change:
+
+```bash
+# Terminal 1 — start the stack with local web assets
+task podman:dev LOCAL_WEB=true
+
+# Terminal 2 — watch & rebuild in the UI repo
+cd /path/to/fleetshift-user-interface
+npm run dev
+```
+
+This skips the Docker web-builder and bind-mounts the UI repo's `web/` directory into the container. Webpack watches for source changes, rebuilds, and the Go backend picks up the new assets — just refresh the browser.
+
+Set `UI_DIR` in `.env` if the UI repo is not at the default `../../../fleetshift-user-interface` relative path.
+
 ## Tasks
 
 All tasks use the `podman:` namespace (alias `pd:`).
