@@ -11,6 +11,7 @@ vars:
   RESOLVED_DB: '{{if not (empty .DB_INPUT)}}{{.DB_INPUT}}{{else if not (empty .ACTIVE_DB)}}{{.ACTIVE_DB}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}postgres{{else}}sqlite{{end}}'
   RESOLVED_AUTH: '{{if not (empty .AUTH_INPUT)}}{{.AUTH_INPUT}}{{else if not (empty .ACTIVE_AUTH)}}{{.ACTIVE_AUTH}}{{else if eq .RESOLVED_DEPLOY_MODE "prod"}}external{{else}}local{{end}}'
   DEV: '{{if not (empty .DEV_INPUT)}}{{.DEV_INPUT}}{{else if not (empty .ACTIVE_DEV)}}{{.ACTIVE_DEV}}{{else}}false{{end}}'
+  LOCAL_WEB: '{{.LOCAL_WEB | default "false"}}'
   BUILD: '{{.BUILD | default "false"}}'
   RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}http://{{.KC_HOSTNAME | default "localhost"}}:{{.KC_HTTP_PORT | default "8180"}}/auth/realms/fleetshift{{end}}'
   RESOLVED_DB_FLAG:
@@ -30,7 +31,7 @@ tasks:
       DB: '{{.RESOLVED_DB}}'
       AUTH: '{{.RESOLVED_AUTH}}'
       DB_FLAG: '{{.RESOLVED_DB_FLAG}}'
-      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}'
+      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}'
       DEV: '{{.DEV}}'
       BUILD: '{{.BUILD}}'
       OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
