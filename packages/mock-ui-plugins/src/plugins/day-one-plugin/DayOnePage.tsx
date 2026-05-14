@@ -1,5 +1,8 @@
-import { Routes, Route, useNavigate } from "react-router-dom";
+import { type ReactNode, lazy, Suspense } from "react";
+import { Routes, Route, useNavigate, Link } from "react-router-dom";
 import {
+  Breadcrumb,
+  BreadcrumbItem,
   Title,
   Card,
   CardHeader,
@@ -9,54 +12,28 @@ import {
   Label,
 } from "@patternfly/react-core";
 
+const InitialSetupForm = lazy(() => import("./InitialSetupForm"));
+
 interface ComponentCard {
   title: string;
   slug: string;
   description: string;
   status: "planned" | "in-progress" | "done";
+  element?: ReactNode;
 }
 
 const components: ComponentCard[] = [
   {
-    title: "Cluster Overview",
-    slug: "cluster-overview",
+    title: "Initial Setup",
+    slug: "setup",
     description:
-      "Summary view of all managed clusters with status indicators and quick actions.",
-    status: "planned",
-  },
-  {
-    title: "Cluster Detail",
-    slug: "cluster-detail",
-    description:
-      "Detailed cluster view with node pools, status, and lifecycle actions.",
-    status: "planned",
-  },
-  {
-    title: "Create Cluster Wizard",
-    slug: "create-cluster",
-    description:
-      "Step-by-step wizard for provisioning new clusters with template selection.",
-    status: "planned",
-  },
-  {
-    title: "Node Pool Management",
-    slug: "node-pools",
-    description: "Scale, add, or remove node pools within a cluster.",
-    status: "planned",
-  },
-  {
-    title: "Cluster Credentials",
-    slug: "credentials",
-    description:
-      "Download kubeconfig and view access credentials for a cluster.",
-    status: "planned",
-  },
-  {
-    title: "Activity & Events",
-    slug: "activity",
-    description:
-      "Timeline of cluster lifecycle events, provisioning progress, and alerts.",
-    status: "planned",
+      "Day-one configuration form: backing store, auth provider, signing keys, and claim mapping.",
+    status: "in-progress",
+    element: (
+      <Suspense>
+        <InitialSetupForm />
+      </Suspense>
+    ),
   },
 ];
 
@@ -65,6 +42,20 @@ const statusColor = {
   "in-progress": "orange" as const,
   done: "green" as const,
 };
+
+function SubPage({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div>
+      <Breadcrumb style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}>
+        <BreadcrumbItem>
+          <Link to="/day-one">Day One</Link>
+        </BreadcrumbItem>
+        <BreadcrumbItem isActive>{title}</BreadcrumbItem>
+      </Breadcrumb>
+      {children}
+    </div>
+  );
+}
 
 function Placeholder({ title }: { title: string }) {
   return (
@@ -121,7 +112,11 @@ export default function DayOnePage() {
         <Route
           key={c.slug}
           path={c.slug}
-          element={<Placeholder title={c.title} />}
+          element={
+            <SubPage title={c.title}>
+              {c.element ?? <Placeholder title={c.title} />}
+            </SubPage>
+          }
         />
       ))}
     </Routes>
