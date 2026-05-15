@@ -30,6 +30,7 @@ Config = dict[str, str]
 IamConfig = dict[str, str | dict[str, str]]
 InfraConfig = dict[str, str]
 ClusterSpec = dict[str, Any]
+WorkforceADCPaths = dict[str, str]
 OIDC_CALLBACK_URL = "http://localhost:8888/callback"
 OIDC_CALLBACK_PORT = 8888
 
@@ -53,6 +54,7 @@ def gcloud_regional_resource_exists(
     resource_name: str,
     project_id: str,
     region: str,
+    env: dict[str, str] | None = None,
 ) -> bool:
     """Return True if the named regional GCP resource exists."""
     cmd = [
@@ -68,7 +70,13 @@ def gcloud_regional_resource_exists(
         "--format=json",
     ]
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
     except FileNotFoundError as e:
         raise GCloudError(f"failed to run gcloud: {e}") from e
     except subprocess.TimeoutExpired as e:
@@ -91,6 +99,7 @@ def wait_for_psc_cleanup(
     cluster_id: str,
     project_id: str,
     region: str,
+    env: dict[str, str] | None = None,
     max_retries: int = 40,
     interval: int = 30,
 ) -> None:
@@ -106,10 +115,10 @@ def wait_for_psc_cleanup(
 
     for i in range(max_retries):
         endpoint_exists = gcloud_regional_resource_exists(
-            "forwarding-rules", endpoint_name, project_id, region
+            "forwarding-rules", endpoint_name, project_id, region, env=env
         )
         ip_exists = gcloud_regional_resource_exists(
-            "addresses", ip_name, project_id, region
+            "addresses", ip_name, project_id, region, env=env
         )
 
         remaining = []
@@ -140,13 +149,122 @@ def load_config(config_path: str = "config.yaml") -> Config:
         "oidc_issuer_url", "oidc_client_id",
         "gcp_project", "workforce_pool", "workforce_provider",
         "broker_sa_email", "gateway_url", "gateway_audience",
-        "project", "region",
+        "region",
     ]
     missing = [k for k in required if not config.get(k)]
     if missing:
         print(f"Error: missing required config keys: {', '.join(missing)}")
         sys.exit(1)
     return config
+
+
+def build_workforce_provider_audience(config: Config) -> str:
+    """Return the Workforce provider audience resource string."""
+    return (
+        f"//iam.googleapis.com/locations/global/workforcePools/"
+        f"{config['workforce_pool']}/providers/{config['workforce_provider']}"
+    )
+
+
+def build_workforce_cred_config(config: Config, subject_token_file: str) -> str:
+    """Build an ADC-compatible Workforce external_account credential config."""
+    cred_config = {
+        "type": "external_account",
+        "audience": build_workforce_provider_audience(config),
+        "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+        "token_url": "https://sts.googleapis.com/v1/token",
+        "workforce_pool_user_project": config["gcp_project"],
+        "credential_source": {
+            "file": subject_token_file,
+        },
+    }
+    return json.dumps(cred_config, indent=2)
+
+
+def write_workforce_adc_files(
+    workforce_subject_token: str,
+    config: Config,
+    temp_dir: str | None = None,
+) -> WorkforceADCPaths:
+    """Write the Workforce subject token and external_account config for ADC use."""
+    adc_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp(prefix="workforce-adc-"))
+    adc_dir.mkdir(parents=True, exist_ok=True)
+
+    subject_token_file = adc_dir / "subject_token.txt"
+    credential_file = adc_dir / "workforce-cred.json"
+
+    subject_token_file.write_text(workforce_subject_token, encoding="utf-8")
+    credential_file.write_text(
+        build_workforce_cred_config(config, str(subject_token_file)),
+        encoding="utf-8",
+    )
+
+    return {
+        "subject_token_file": str(subject_token_file),
+        "credential_file": str(credential_file),
+    }
+
+
+def prepare_hypershift_google_env(
+    credential_file: str,
+    base_env: dict[str, str] | None = None,
+    isolated_root_dir: str | None = None,
+) -> dict[str, str]:
+    """Build an explicit Google auth env for hypershift without local ADC fallback."""
+    env = dict(base_env or os.environ)
+    isolated_root = Path(isolated_root_dir) if isolated_root_dir else Path(
+        tempfile.mkdtemp(prefix="hypershift-google-auth-")
+    )
+    home_dir = isolated_root / "home"
+    cloudsdk_dir = isolated_root / "cloudsdk"
+    xdg_dir = isolated_root / "xdg"
+    home_dir.mkdir(parents=True, exist_ok=True)
+    cloudsdk_dir.mkdir(parents=True, exist_ok=True)
+    xdg_dir.mkdir(parents=True, exist_ok=True)
+
+    env["GOOGLE_APPLICATION_CREDENTIALS"] = credential_file
+    env["GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES"] = "1"
+    env["HOME"] = str(home_dir)
+    env["CLOUDSDK_CONFIG"] = str(cloudsdk_dir)
+    env["XDG_CONFIG_HOME"] = str(xdg_dir)
+    return env
+
+
+def activate_gcloud_auth(env: dict[str, str]) -> None:
+    """Log gcloud into the isolated config using the external_account cred file."""
+    credential_file = env.get("GOOGLE_APPLICATION_CREDENTIALS")
+    if not credential_file:
+        raise GCloudError(
+            "GOOGLE_APPLICATION_CREDENTIALS is required to activate isolated gcloud auth."
+        )
+
+    cmd = [
+        get_gcloud_binary(),
+        "auth",
+        "login",
+        "--cred-file",
+        credential_file,
+        "--brief",
+        "--quiet",
+    ]
+    try:
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=60,
+            env=env,
+        )
+    except FileNotFoundError as e:
+        raise GCloudError(f"failed to run gcloud auth login: {e}") from e
+    except subprocess.TimeoutExpired as e:
+        raise GCloudError("gcloud auth login timed out for isolated auth config") from e
+
+    if result.returncode != 0:
+        raise GCloudError(
+            f"gcloud auth login failed for isolated auth config "
+            f"(exit {result.returncode}):\n{result.stderr}"
+        )
 
 
 def discover_oidc_endpoints(issuer_url: str) -> tuple[str, str]:
@@ -180,8 +298,8 @@ def open_browser_for_login(uri: str) -> None:
         print("Warning: automatic browser launch did not report success.")
 
 
-def oidc_login(config: Config) -> tuple[str, str]:
-    """OIDC PKCE login. Opens browser, returns (id_token_jwt, user_email)."""
+def oidc_login(config: Config) -> tuple[str, str, str]:
+    """OIDC PKCE login. Opens browser, returns (id_token_jwt, user_email, access_token_jwt)."""
     authorize_url, token_url = discover_oidc_endpoints(config["oidc_issuer_url"])
 
     code_verifier = generate_token(48)
@@ -222,6 +340,12 @@ def oidc_login(config: Config) -> tuple[str, str]:
         sys.exit(1)
     id_token: str = str(id_token_val)
 
+    access_token_val: str | None = token_response.get("access_token")
+    if not access_token_val:
+        print("Error: no access_token in OIDC token response")
+        sys.exit(1)
+    access_token: str = str(access_token_val)
+
     payload: dict[str, str] = json.loads(
         base64.urlsafe_b64decode(id_token.split(".")[1] + "==")
     )
@@ -231,7 +355,7 @@ def oidc_login(config: Config) -> tuple[str, str]:
         sys.exit(1)
 
     print(f"Logged in as: {email}")
-    return id_token, email
+    return id_token, email, access_token
 
 
 def _wait_for_callback(port: int = OIDC_CALLBACK_PORT, timeout: int = 120) -> str:
@@ -262,12 +386,9 @@ def _wait_for_callback(port: int = OIDC_CALLBACK_PORT, timeout: int = 120) -> st
     return callback_url
 
 
-def sts_exchange(oidc_jwt: str, config: Config) -> str:
-    """Exchange an OIDC JWT for a Google Workforce access token via STS."""
-    audience = (
-        f"//iam.googleapis.com/locations/global/workforcePools/"
-        f"{config['workforce_pool']}/providers/{config['workforce_provider']}"
-    )
+def sts_exchange(workforce_subject_token: str, config: Config) -> str:
+    """Exchange a Workforce subject token for a Google Workforce access token via STS."""
+    audience = build_workforce_provider_audience(config)
     resp = requests.post(
         "https://sts.googleapis.com/v1/token",
         data={
@@ -276,7 +397,7 @@ def sts_exchange(oidc_jwt: str, config: Config) -> str:
             "requested_token_type": "urn:ietf:params:oauth:token-type:access_token",
             "scope": "https://www.googleapis.com/auth/cloud-platform",
             "subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-            "subject_token": oidc_jwt,
+            "subject_token": workforce_subject_token,
         },
         headers={"Content-Type": "application/x-www-form-urlencoded"},
     )
@@ -328,13 +449,27 @@ def generate_broker_id_token(workforce_token: str, config: Config) -> str:
     return token
 
 
-def authenticate(config: Config) -> tuple[str, str]:
-    """Full auth chain. Returns (broker_id_token, user_email)."""
+def authenticate(config: Config) -> tuple[str, str, str]:
+    """Full auth chain. Returns (broker_id_token, user_email, workforce_subject_token)."""
     print("\n=== Authentication ===")
-    oidc_jwt, email = oidc_login(config)
-    workforce_token = sts_exchange(oidc_jwt, config)
+    _, email, access_token = oidc_login(config)
+    workforce_token = sts_exchange(access_token, config)
     broker_token = generate_broker_id_token(workforce_token, config)
-    return broker_token, email
+    return broker_token, email, access_token
+
+
+def build_hypershift_auth_env(workforce_subject_token: str, config: Config, temp_dir: str) -> dict[str, str]:
+    """Create explicit ADC material and an isolated env for hypershift commands."""
+    adc_paths = write_workforce_adc_files(workforce_subject_token, config, temp_dir=temp_dir)
+    env = prepare_hypershift_google_env(
+        adc_paths["credential_file"],
+        isolated_root_dir=temp_dir,
+    )
+    print("Prepared isolated Workforce-backed ADC for hypershift.")
+    print(f"  ADC config: {adc_paths['credential_file']}")
+    print(f"  Subject token file: {adc_paths['subject_token_file']}")
+    print(f"  Isolated HOME: {env['HOME']}")
+    return env
 
 
 def api_request(method: str, path: str, token: str, email: str, config: Config, json_data: ClusterSpec | None = None) -> requests.Response:
@@ -345,7 +480,8 @@ def api_request(method: str, path: str, token: str, email: str, config: Config, 
         url,
         headers={
             "Authorization": f"Bearer {token}",
-            "X-User-Email": email,
+            #"X-User-Email": email,
+            "X-User-Email": config["broker_sa_email"],
             "Content-Type": "application/json",
         },
         json=json_data,
@@ -358,7 +494,7 @@ def build_cluster_spec(cluster_name: str, config: Config, iam_config: IamConfig,
     wif_spec = iam_config_to_wif_spec(iam_config)
     return {
         "name": cluster_name,
-        "target_project_id": config["project"],
+        "target_project_id": config["gcp_project"],
         "spec": {
             "infraID": infra_config["infraId"],
             "issuerURL": f"https://hypershift-{infra_config['infraId']}-oidc",
@@ -366,7 +502,7 @@ def build_cluster_spec(cluster_name: str, config: Config, iam_config: IamConfig,
             "platform": {
                 "type": "GCP",
                 "gcp": {
-                    "projectID": config["project"],
+                    "projectID": config["gcp_project"],
                     "region": config["region"],
                     "network": infra_config["networkName"],
                     "subnet": infra_config["subnetName"],
@@ -446,7 +582,7 @@ def poll_cluster_ready(cluster_id: str, token: str, email: str, config: Config) 
 
 def cmd_create(cluster_name: str, config: Config) -> None:
     """Create a cluster end-to-end: infra → cluster → nodepool → poll."""
-    token, email = authenticate(config)
+    token, email, workforce_subject_token = authenticate(config)
 
     infra_id = cluster_name
     try:
@@ -459,20 +595,28 @@ def cmd_create(cluster_name: str, config: Config) -> None:
     keypair = generate_cluster_keypair()
     print(f"Generated keypair (kid: {keypair.kid})")
 
-    jwks_tmp = None
-    try:
-        jwks_fd, jwks_tmp = tempfile.mkstemp(suffix=".json", prefix="jwks-")
-        os.write(jwks_fd, keypair.jwks_json.encode("utf-8"))
-        os.close(jwks_fd)
+    with tempfile.TemporaryDirectory(prefix="gcphcp-hypershift-") as temp_dir:
+        jwks_tmp = os.path.join(temp_dir, "jwks.json")
+        with open(jwks_tmp, "w", encoding="utf-8") as f:
+            f.write(keypair.jwks_json)
+
+        hypershift_env = build_hypershift_auth_env(workforce_subject_token, config, temp_dir)
 
         print("\n=== Creating IAM Infrastructure ===")
-        iam_config = create_iam_gcp(infra_id, config["project"], jwks_tmp)
+        iam_config = create_iam_gcp(
+            infra_id,
+            config["gcp_project"],
+            jwks_tmp,
+            env=hypershift_env,
+        )
 
         print("\n=== Creating Network Infrastructure ===")
-        infra_config = create_infra_gcp(infra_id, config["project"], config["region"])
-    finally:
-        if jwks_tmp and os.path.exists(jwks_tmp):
-            os.unlink(jwks_tmp)
+        infra_config = create_infra_gcp(
+            infra_id,
+            config["gcp_project"],
+            config["region"],
+            env=hypershift_env,
+        )
 
     print("\n=== Creating Cluster ===")
     cluster_data = build_cluster_spec(
@@ -545,6 +689,7 @@ def destroy_infra_with_retry(
     infra_id: str,
     project_id: str,
     region: str,
+    env: dict[str, str] | None = None,
     max_retries: int = 40,
     interval: int = 30,
 ) -> None:
@@ -552,7 +697,7 @@ def destroy_infra_with_retry(
     print(f"Destroying network infrastructure (retrying every {interval}s, timeout: {max_retries * interval // 60} min)...")
     for i in range(max_retries):
         try:
-            destroy_infra_gcp(infra_id, project_id, region)
+            destroy_infra_gcp(infra_id, project_id, region, env=env)
             return
         except HypershiftError as e:
             print(f"  [{i+1}/{max_retries}] Infra destroy not ready yet, retrying... ({e})")
@@ -562,37 +707,70 @@ def destroy_infra_with_retry(
     sys.exit(1)
 
 
-def cmd_delete(cluster_name: str, config: Config) -> None:
-    """Delete a cluster end-to-end: API delete → poll → hypershift destroy."""
-    token, email = authenticate(config)
+def cmd_delete(cluster_name: str, config: Config, skip_api: bool = False) -> None:
+    """Delete a cluster end-to-end, with optional fallback to infra-only cleanup."""
+    token, email, workforce_subject_token = authenticate(config)
+    cluster_id: str | None = None
+    should_wait_for_psc_cleanup = False
 
-    print("\n=== Resolving Cluster ===")
-    cluster_id = resolve_cluster_id(cluster_name, token, email, config)
-    print(f"Found cluster: {cluster_name} (ID: {cluster_id})")
-
-    print("\n=== Deleting Cluster ===")
-    resp = api_request("DELETE", f"/api/v1/clusters/{cluster_id}?force=true", token, email, config)
-    if resp.status_code >= 400 and resp.status_code != 404:
-        print(f"Error: cluster delete failed (HTTP {resp.status_code})")
-        print(resp.text)
-        sys.exit(1)
-
-    if resp.status_code == 404:
-        print("Cluster already deleted from API.")
+    if skip_api:
+        print("\n=== Skipping API Delete ===")
+        print("Proceeding directly to GCP infrastructure cleanup.")
     else:
-        print(f"Cluster deletion initiated (HTTP {resp.status_code})")
-        poll_cluster_deleted(cluster_id, token, email, config)
+        print("\n=== Resolving Cluster ===")
+        try:
+            cluster_id = resolve_cluster_id(cluster_name, token, email, config)
+        except SystemExit:
+            print(
+                f"Warning: cluster '{cluster_name}' could not be resolved in the API. "
+                "Continuing with GCP infrastructure cleanup only."
+            )
+        else:
+            print(f"Found cluster: {cluster_name} (ID: {cluster_id})")
 
-    wait_for_psc_cleanup(cluster_id, config["project"], config["region"])
+            print("\n=== Deleting Cluster ===")
+            resp = api_request("DELETE", f"/api/v1/clusters/{cluster_id}?force=true", token, email, config)
+            if resp.status_code == 404:
+                print("Cluster already deleted from API.")
+                should_wait_for_psc_cleanup = True
+            elif resp.status_code >= 400:
+                print(
+                    f"Warning: cluster delete failed (HTTP {resp.status_code}). "
+                    "Continuing with GCP infrastructure cleanup."
+                )
+                print(resp.text)
+            else:
+                print(f"Cluster deletion initiated (HTTP {resp.status_code})")
+                poll_cluster_deleted(cluster_id, token, email, config)
+                should_wait_for_psc_cleanup = True
 
-    print("\n=== Destroying Network Infrastructure ===")
-    destroy_infra_with_retry(cluster_name, config["project"], config["region"])
+    with tempfile.TemporaryDirectory(prefix="gcphcp-hypershift-") as temp_dir:
+        hypershift_env = build_hypershift_auth_env(workforce_subject_token, config, temp_dir)
+        activate_gcloud_auth(hypershift_env)
 
-    print("\n=== Destroying IAM Infrastructure ===")
-    try:
-        destroy_iam_gcp(cluster_name, config["project"])
-    except HypershiftError as e:
-        print(f"Warning: IAM destroy failed: {e}")
+        if cluster_id and should_wait_for_psc_cleanup:
+            wait_for_psc_cleanup(
+                cluster_id,
+                config["gcp_project"],
+                config["region"],
+                env=hypershift_env,
+            )
+        else:
+            print("Skipping PSC cleanup wait because API deletion was skipped or not confirmed.")
+
+        print("\n=== Destroying Network Infrastructure ===")
+        destroy_infra_with_retry(
+            cluster_name,
+            config["gcp_project"],
+            config["region"],
+            env=hypershift_env,
+        )
+
+        print("\n=== Destroying IAM Infrastructure ===")
+        try:
+            destroy_iam_gcp(cluster_name, config["gcp_project"], env=hypershift_env)
+        except HypershiftError as e:
+            print(f"Warning: IAM destroy failed: {e}")
 
     print(f"\nCluster {cluster_name} fully deleted.")
 
@@ -606,6 +784,11 @@ def main() -> None:
 
     delete_parser = subparsers.add_parser("delete", help="Delete an HCP cluster")
     delete_parser.add_argument("name", help="Cluster name to delete")
+    delete_parser.add_argument(
+        "--skip-api",
+        action="store_true",
+        help="Skip CLS API deletion and run GCP teardown only",
+    )
 
     args = parser.parse_args()
     config = load_config()
@@ -613,7 +796,7 @@ def main() -> None:
     if args.command == "create":
         cmd_create(args.name, config)
     elif args.command == "delete":
-        cmd_delete(args.name, config)
+        cmd_delete(args.name, config, skip_api=args.skip_api)
 
 
 if __name__ == "__main__":

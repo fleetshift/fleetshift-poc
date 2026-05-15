@@ -1,6 +1,6 @@
-# GCP HCP Lifecycle POC — Clean-Slate Runbook
+# GCP HCP Lifecycle POC — Validated Runbook
 
-This runbook rebuilds the **GCP side only** for the current Python flow in `hcp_lifecycle.py`.
+This runbook captures the **validated GCP-side setup** for the current Python flow in `hcp_lifecycle.py`.
 
 It assumes:
 - the OIDC issuer already exists
@@ -11,19 +11,15 @@ It assumes:
 
 The script uses this sequence:
 
-`OIDC browser login -> Workforce STS -> broker SA generateIdToken -> gateway -> HyperShift infra -> cluster create/delete`
+`OIDC browser login -> access_token Workforce STS -> broker SA generateIdToken -> gateway -> HyperShift infra -> cluster create/delete`
 
-There are **two separate GCP projects** in this flow:
+Everything lives in a **single GCP project**:
 
-1. **Broker/workforce project**
-   - Workforce Identity Federation pool/provider
-   - broker service account
-   - quota context for `generateIdToken`
-
-2. **Target HCP project**
-   - HyperShift-created IAM resources
-   - HyperShift-created network resources
-   - hosted cluster resources
+- Workforce Identity Federation pool/provider (org-level, references this project for quota)
+- Broker service account (mints Google-signed ID tokens for the gateway)
+- HyperShift-created IAM resources
+- HyperShift-created network resources
+- Hosted cluster resources
 
 ## Important Inputs
 
@@ -32,7 +28,8 @@ This guide intentionally avoids committed environment-specific values.
 - Put real values only in:
   - your current shell session
   - your local git-ignored `config.yaml`
-- Do not treat any placeholder in this file as a default.
+  - your local git-ignored export file such as `export.txt`
+- Do not commit real project IDs, account emails, org IDs, billing accounts, gateway audiences, or issuer URLs into this file.
 - `gateway_url` and `gateway_audience` should be filled only in your local `config.yaml`.
 - `gateway_audience` is the `aud` claim for the **final Google-signed broker ID token**. It is **not** the Workforce STS audience.
 
@@ -42,6 +39,7 @@ This guide intentionally avoids committed environment-specific values.
 - The OIDC client used by the Python script must support **authorization code + PKCE**.
 - The OIDC client must allow redirect URI `http://localhost:8888/callback`.
 - The OIDC `id_token` used by the script must contain an `email` claim.
+- The Keycloak `access_token` used for Workforce STS must contain `resource_access.fleetshift.roles`.
 - The Google account running these commands must already have permission to:
   - create projects
   - link billing
@@ -49,44 +47,36 @@ This guide intentionally avoids committed environment-specific values.
 
 ## 0. Gather The Values You Will Need Later
 
-Do **not** export anything yet if you do not know the values.
-
 Before you reach the export step later in this guide, collect or decide:
 
-- `BROKER_PROJECT`
-  - choose the new broker/workforce project ID for this run
-- `TARGET_PROJECT`
-  - choose the new target HCP project ID for this run
+- `GCP_PROJECT`
+  - the GCP project ID for all resources (workforce quota, broker SA, HyperShift infra)
 - `GCP_ORG_ID`
   - discover this from `gcloud organizations list`
 - `BILLING_ACCOUNT`
   - discover this from `gcloud billing accounts list`
-- `OIDC_ISSUER_URL`
-  - get this from the OIDC environment you are testing
-- `OIDC_CLIENT_ID`
-  - get this from the OIDC client you will use for browser login
-- `USER_EMAIL`
-  - this must match the `email` claim of the OIDC user you will log in as later
-- `gateway_url`
-  - keep this only in local `config.yaml`
-- `gateway_audience`
-  - keep this only in local `config.yaml`
-
-You will also need to choose names for these resources later:
 - `WORKFORCE_POOL`
+  - the Workforce Identity Federation pool name
 - `WORKFORCE_PROVIDER`
+  - the Workforce OIDC provider name
 - `BROKER_SA_NAME`
+  - the broker service account short name
 - `REGION`
+  - the GCP region for HyperShift network resources
+- `OIDC_ISSUER_URL`
+  - the OIDC issuer used for browser login and Workforce trust
+- `OIDC_BROWSER_CLIENT_ID`
+  - the OIDC client ID used by `hcp_lifecycle.py` for the browser login flow
+- `WORKFORCE_OIDC_CLIENT_ID`
+  - the Workforce provider client ID that must match the access token audience used for STS
+- `GATEWAY_AUDIENCE`
+  - the audience expected by the final Google-signed broker ID token
+- `FLEETSHIFT_ROLE`
+  - the Keycloak client role used for Workforce admission and GCP IAM binding
 
-Suggested defaults if you want simple names:
-- `WORKFORCE_POOL="hcp-lifecycle-pool"`
-- `WORKFORCE_PROVIDER="fleetshift-oidc"`
-- `BROKER_SA_NAME="hcp-idtoken-broker"`
-- `REGION="us-central1"`
+Why: later commands reference these values repeatedly, but the real values should live only in your local gitignored shell exports.
 
-Why: later commands reference these values repeatedly, but exporting placeholders too early creates confusion.
-
-Success: you know which values are already known and which ones still need discovery.
+Success: you have a complete local export file or shell setup and nothing in this document needs to contain environment-specific secrets or identifiers.
 
 ## 1. Install And Verify Local Tooling
 
@@ -106,7 +96,7 @@ Success: `hypershift version` prints a client version instead of `command not fo
 
 ### 1.2 Install Python dependencies for the POC
 
-From `poc/gcp-hcp-api-validation/`:
+From `poc/gcp-hcp/`:
 
 ```bash
 python3 -m venv .venv
@@ -132,23 +122,9 @@ Why: authenticates the account that will create resources and shows the org ID a
 
 Success: `gcloud auth list` shows the expected active account, `gcloud organizations list` shows your org, and `gcloud billing accounts list` shows the billing account you intend to use.
 
-### 1.4 Set up Application Default Credentials
-
-```bash
-gcloud auth application-default login
-gcloud auth application-default print-access-token >/dev/null && echo "adc ok"
-```
-
-Why: `hypershift` uses ADC, not the `gcloud auth login` session.
-
-Success: the final command prints `adc ok`.
-
-Note: if ADC reports or later shows a deleted or wrong `quota_project_id`, do not stop here. You can reset it after you create a valid project in section `7`.
-
 ## 2. Validate The External OIDC Issuer
 
 ```bash
-OIDC_ISSUER_URL="https://your-idp.example.com/realms/your-realm"
 curl -s "${OIDC_ISSUER_URL}/.well-known/openid-configuration" | jq '{issuer, authorization_endpoint, token_endpoint, jwks_uri}'
 ```
 
@@ -163,45 +139,45 @@ If your IdP is Keycloak and the Python script later says the `id_token` has no `
 Run this section only after you know the values from sections `0`, `1`, and `2`.
 
 ```bash
-export BROKER_PROJECT="your-broker-project-id"
-export TARGET_PROJECT="your-target-project-id"
+export GCP_PROJECT="your-gcp-project-id"
 export GCP_ORG_ID="your-org-id"
 export BILLING_ACCOUNT="your-billing-account-id"
 export WORKFORCE_POOL="your-workforce-pool"
 export WORKFORCE_PROVIDER="your-workforce-provider"
 export BROKER_SA_NAME="your-broker-service-account-name"
-export USER_EMAIL="your-email@example.com"
-export OIDC_ISSUER_URL="https://your-idp.example.com/realms/your-realm"
-export OIDC_CLIENT_ID="your-client-id"
-export GATEWAY_AUDIENCE="your-gateway-audience"
 export REGION="your-region"
-export BROKER_SA_EMAIL="${BROKER_SA_NAME}@${BROKER_PROJECT}.iam.gserviceaccount.com"
-export WORKFORCE_PRINCIPAL="principalSet://iam.googleapis.com/locations/global/workforcePools/${WORKFORCE_POOL}/attribute.email/${USER_EMAIL}"
+export OIDC_ISSUER_URL="https://your-oidc-issuer.example.com/realms/your-realm"
+export OIDC_BROWSER_CLIENT_ID="your-browser-login-client-id"
+export WORKFORCE_OIDC_CLIENT_ID="your-workforce-oidc-client-id"
+export GATEWAY_AUDIENCE="your-gateway-audience"
+export BROKER_SA_EMAIL="${BROKER_SA_NAME}@${GCP_PROJECT}.iam.gserviceaccount.com"
+export FLEETSHIFT_ROLE="your-fleetshift-provisioning-role"
+export WORKFORCE_PROVISIONER_PRINCIPAL="principalSet://iam.googleapis.com/locations/global/workforcePools/${WORKFORCE_POOL}/group/${FLEETSHIFT_ROLE}"
 ```
 
 Why: keeps all later `gcloud` commands copy/pasteable once the real values are known.
 
-Success: `echo "$BROKER_PROJECT $TARGET_PROJECT $WORKFORCE_POOL $BROKER_SA_EMAIL"` prints the values you expect and nothing is still a placeholder.
+Success: `echo "$GCP_PROJECT $WORKFORCE_POOL $BROKER_SA_EMAIL $FLEETSHIFT_ROLE"` prints the values you expect and nothing is still a placeholder in your live shell setup.
 
-## 4. Create The Broker/Workforce Project
+## 4. Create The GCP Project
 
 ### 4.1 Create the project
 
 ```bash
-gcloud projects create "${BROKER_PROJECT}" --organization="${GCP_ORG_ID}"
+gcloud projects create "${GCP_PROJECT}" --organization="${GCP_ORG_ID}"
 ```
 
-Why: creates the project that holds the workforce-related resources and broker service account.
+Why: creates the project that holds all resources — workforce quota, broker service account, and HyperShift cluster infrastructure.
 
 Success: the command returns the created project ID without an error.
 
 ### 4.2 Link billing
 
 ```bash
-gcloud billing projects link "${BROKER_PROJECT}" --billing-account="${BILLING_ACCOUNT}"
+gcloud billing projects link "${GCP_PROJECT}" --billing-account="${BILLING_ACCOUNT}"
 ```
 
-Why: ensures the broker project is fully usable for API-backed operations.
+Why: ensures the project is fully usable for API-backed operations.
 
 Success: `billingEnabled: true` appears in the response.
 
@@ -209,29 +185,31 @@ Success: `billingEnabled: true` appears in the response.
 
 ```bash
 gcloud services enable \
+  compute.googleapis.com \
   iam.googleapis.com \
   sts.googleapis.com \
   iamcredentials.googleapis.com \
   cloudresourcemanager.googleapis.com \
-  --project="${BROKER_PROJECT}"
+  dns.googleapis.com \
+  --project="${GCP_PROJECT}"
 ```
 
-Why: these APIs are required for workforce setup and `generateIdToken`.
+Why: these APIs are required for workforce STS exchange, broker `generateIdToken`, and the `hypershift create iam gcp` / `hypershift create infra gcp` steps.
 
 Success: the command finishes without an API enablement error.
 
 ### 4.4 Verify the project
 
 ```bash
-gcloud projects describe "${BROKER_PROJECT}"
-gcloud services list --enabled --project="${BROKER_PROJECT}" \
-  --filter="name:(iam.googleapis.com OR sts.googleapis.com OR iamcredentials.googleapis.com OR cloudresourcemanager.googleapis.com)" \
+gcloud projects describe "${GCP_PROJECT}"
+gcloud services list --enabled --project="${GCP_PROJECT}" \
+  --filter="name:(compute.googleapis.com OR iam.googleapis.com OR sts.googleapis.com OR iamcredentials.googleapis.com OR cloudresourcemanager.googleapis.com OR dns.googleapis.com)" \
   --format="table(name)"
 ```
 
 Why: confirms the project exists and the expected APIs are enabled.
 
-Success: the project describes cleanly and the service list shows the four APIs.
+Success: the project describes cleanly and the service list shows the six APIs.
 
 ## 5. Create Workforce Identity Federation Resources
 
@@ -256,18 +234,17 @@ gcloud iam workforce-pools providers create-oidc "${WORKFORCE_PROVIDER}" \
   --location="global" \
   --workforce-pool="${WORKFORCE_POOL}" \
   --issuer-uri="${OIDC_ISSUER_URL}" \
-  --client-id="${OIDC_CLIENT_ID}" \
-  --attribute-mapping="google.subject=assertion.sub,attribute.email=assertion.email" \
+  --client-id="${WORKFORCE_OIDC_CLIENT_ID}" \
+  --attribute-mapping="google.subject=assertion.sub,google.groups=assertion.resource_access.fleetshift.roles,attribute.email=assertion.email" \
+  --attribute-condition="'${FLEETSHIFT_ROLE}' in google.groups" \
   --display-name="HCP lifecycle OIDC provider" \
   --web-sso-response-type="id-token" \
   --web-sso-assertion-claims-behavior="only-id-token-claims"
 ```
 
-Why: configures GCP STS to trust the same OIDC client used by the Python browser login.
+Why: a first-time setup can create the provider in its final validated shape with a single command.
 
 Success: the provider is created without issuer or client-id validation errors.
-
-Note: the old archived shell flow used an extra `providers update-oidc --client-id=...` workaround for an access-token experiment. Do **not** carry that step into this Python flow. The Python code submits the OIDC `id_token`, so the provider should use the real OIDC client ID directly.
 
 ### 5.3 Verify pool and provider
 
@@ -279,16 +256,18 @@ gcloud iam workforce-pools describe "${WORKFORCE_POOL}" \
 gcloud iam workforce-pools providers describe "${WORKFORCE_PROVIDER}" \
   --location="global" \
   --workforce-pool="${WORKFORCE_POOL}" \
-  --format="yaml(name,state,attributeMapping,oidc)"
+  --format="yaml(name,state,attributeMapping,attributeCondition,oidc)"
 ```
 
 Why: confirms the workforce resources are active and pointing at the expected issuer/client.
 
 Success: both resources show `state: ACTIVE` and the provider output includes:
 - `attribute.email: assertion.email`
+- `google.groups: assertion.resource_access.fleetshift.roles`
 - `google.subject: assertion.sub`
+- `attributeCondition` referencing your `${FLEETSHIFT_ROLE}` value
 - `oidc.issuerUri` matching your chosen OIDC issuer
-- `oidc.clientId` matching your chosen OIDC client ID
+- `oidc.clientId` matching your chosen `${WORKFORCE_OIDC_CLIENT_ID}`
 
 ## 6. Create The Broker Service Account And Bindings
 
@@ -296,7 +275,7 @@ Success: both resources show `state: ACTIVE` and the provider output includes:
 
 ```bash
 gcloud iam service-accounts create "${BROKER_SA_NAME}" \
-  --project="${BROKER_PROJECT}" \
+  --project="${GCP_PROJECT}" \
   --display-name="HCP lifecycle ID token broker"
 ```
 
@@ -308,8 +287,8 @@ Success: the command prints the created service account email.
 
 ```bash
 gcloud iam service-accounts add-iam-policy-binding "${BROKER_SA_EMAIL}" \
-  --project="${BROKER_PROJECT}" \
-  --member="${WORKFORCE_PRINCIPAL}" \
+  --project="${GCP_PROJECT}" \
+  --member="${WORKFORCE_PROVISIONER_PRINCIPAL}" \
   --role="roles/iam.serviceAccountOpenIdTokenCreator" \
   --condition=None
 ```
@@ -318,15 +297,15 @@ Why: allows the federated user to call `generateIdToken` on the broker service a
 
 Success: the returned IAM policy includes the `roles/iam.serviceAccountOpenIdTokenCreator` binding.
 
-### 6.3 Grant quota-project usage on the broker project
+### 6.3 Grant quota-project usage
 
 ```bash
-gcloud projects add-iam-policy-binding "${BROKER_PROJECT}" \
-  --member="${WORKFORCE_PRINCIPAL}" \
+gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
+  --member="${WORKFORCE_PROVISIONER_PRINCIPAL}" \
   --role="roles/serviceusage.serviceUsageConsumer"
 ```
 
-Why: allows the workforce token to use the broker project as `x-goog-user-project` when calling IAM Credentials.
+Why: allows the workforce token to use the project as `x-goog-user-project` when calling IAM Credentials.
 
 Success: the returned policy includes `roles/serviceusage.serviceUsageConsumer`.
 
@@ -334,81 +313,37 @@ Success: the returned policy includes `roles/serviceusage.serviceUsageConsumer`.
 
 ```bash
 gcloud iam service-accounts get-iam-policy "${BROKER_SA_EMAIL}" \
-  --project="${BROKER_PROJECT}"
+  --project="${GCP_PROJECT}"
 ```
 
 Why: confirms the broker service account policy includes the expected workforce principal binding.
 
-Success: you can see the `roles/iam.serviceAccountOpenIdTokenCreator` binding for `${WORKFORCE_PRINCIPAL}`.
+Success: you can see the `roles/iam.serviceAccountOpenIdTokenCreator` binding for `${WORKFORCE_PROVISIONER_PRINCIPAL}`.
 
-## 7. Create The Target HCP Project
-
-### 7.1 Create the project
+## 7. Grant The HyperShift Project Roles
 
 ```bash
-gcloud projects create "${TARGET_PROJECT}" --organization="${GCP_ORG_ID}"
+for role in \
+  roles/browser \
+  roles/iam.workloadIdentityPoolAdmin \
+  roles/iam.serviceAccountAdmin \
+  roles/resourcemanager.projectIamAdmin \
+  roles/compute.networkAdmin \
+  roles/compute.securityAdmin
+do
+  gcloud projects add-iam-policy-binding "${GCP_PROJECT}" \
+    --member="${WORKFORCE_PROVISIONER_PRINCIPAL}" \
+    --role="${role}"
+done
 ```
 
-Why: creates the separate project where HyperShift will create IAM and network resources for the hosted cluster.
+Why: these are the roles required to let the federated principal complete `hypershift create iam gcp` and `hypershift create infra gcp`.
 
-Success: the command returns the created project ID without an error.
-
-### 7.2 Link billing
-
-```bash
-gcloud billing projects link "${TARGET_PROJECT}" --billing-account="${BILLING_ACCOUNT}"
-```
-
-Why: the target project needs billing before compute and networking resources can be created.
-
-Success: `billingEnabled: true` appears in the response.
-
-### 7.3 Enable the target-project APIs
-
-```bash
-gcloud services enable \
-  compute.googleapis.com \
-  iam.googleapis.com \
-  cloudresourcemanager.googleapis.com \
-  dns.googleapis.com \
-  --project="${TARGET_PROJECT}"
-```
-
-Why: these APIs are required by the current `hypershift create iam gcp` and `hypershift create infra gcp` steps.
-
-Success: the command finishes without API enablement errors.
-
-### 7.4 Verify the target project
-
-```bash
-gcloud projects describe "${TARGET_PROJECT}"
-gcloud services list --enabled --project="${TARGET_PROJECT}" \
-  --filter="name:(compute.googleapis.com OR iam.googleapis.com OR cloudresourcemanager.googleapis.com OR dns.googleapis.com)" \
-  --format="table(name)"
-```
-
-Why: confirms the target project exists and the required APIs are enabled.
-
-Success: the project describes cleanly and the service list shows the four APIs.
-
-Important: the current Python flow uses your **local ADC identity** for `hypershift`. It does **not** make `hypershift` run as the workforce principal. Use the same Google account for ADC that has permission to create IAM and network resources in `${TARGET_PROJECT}`.
-
-### 7.5 Optional: reset the ADC quota project if needed
-
-If `gcloud auth application-default login` attached ADC to a deleted or unrelated project, reset it now to the new target project:
-
-```bash
-gcloud auth application-default set-quota-project "${TARGET_PROJECT}"
-gcloud auth application-default print-access-token >/dev/null && echo "adc ok"
-```
-
-Why: fixes ADC quota/project-context issues before `hypershift` uses ADC against the target project.
-
-Success: the command succeeds and the final check prints `adc ok`.
+Success: each command updates IAM successfully.
 
 ## 8. Populate `config.yaml`
 
-From `poc/gcp-hcp-api-validation/`:
+From `poc/gcp-hcp/`:
 
 ```bash
 cp config.yaml.example config.yaml
@@ -421,25 +356,25 @@ Success: `config.yaml` exists in the working directory.
 Then edit `config.yaml` so it looks like this:
 
 ```yaml
-oidc_issuer_url: "https://your-idp.example.com/realms/your-realm"
-oidc_client_id: "your-client-id"
+oidc_issuer_url: "https://your-oidc-issuer.example.com/realms/your-realm"
+oidc_client_id: "your-browser-login-client-id"
 
-gcp_project: "your-broker-project-id"
+gcp_project: "your-gcp-project-id"
+
 workforce_pool: "your-workforce-pool"
 workforce_provider: "your-workforce-provider"
 
-broker_sa_email: "hcp-idtoken-broker@your-broker-project-id.iam.gserviceaccount.com"
+broker_sa_email: "hcp-idtoken-broker@your-gcp-project-id.iam.gserviceaccount.com"
 
 gateway_url: "https://your-gateway.example.com"
 gateway_audience: "your-gateway-audience"
 
-project: "your-target-project-id"
 region: "us-central1"
 endpoint_access: "PublicAndPrivate"
 replicas: 2
 ```
 
-Why: the Python script needs both the broker/workforce project and the separate target HCP project.
+Why: the Python script needs the project, workforce config, broker SA, and gateway details.
 
 Success: every placeholder has been replaced with your real values.
 
@@ -447,18 +382,17 @@ Note: keep the real `gateway_url` only in your local git-ignored `config.yaml`.
 
 ## 9. Sanity-Check The Local Runtime
 
-From `poc/gcp-hcp-api-validation/`:
+From `poc/gcp-hcp/`:
 
 ```bash
 source .venv/bin/activate
 python hcp_lifecycle.py --help
 hypershift version
-gcloud auth application-default print-access-token >/dev/null && echo "adc ok"
 ```
 
-Why: catches local Python, `hypershift`, and ADC issues before you start creating real resources.
+Why: catches local Python and `hypershift` issues before you start creating real resources.
 
-Success: `python hcp_lifecycle.py --help` prints usage, `hypershift version` works, and the final command prints `adc ok`.
+Success: `python hcp_lifecycle.py --help` prints usage and `hypershift version` works.
 
 ## 10. Run The Python Flow
 
@@ -467,10 +401,26 @@ Use a short cluster name that already satisfies the script's infra-ID rules:
 - starts with a lowercase letter
 - only lowercase letters, digits, and hyphens
 
-### 10.1 Create the cluster resources
+### 10.1 Prepare a clean validation shell
 
 ```bash
 source .venv/bin/activate
+unset GOOGLE_APPLICATION_CREDENTIALS
+unset CLOUDSDK_AUTH_CREDENTIAL_FILE_OVERRIDE
+unset GOOGLE_OAUTH_ACCESS_TOKEN
+unset GOOGLE_EXTERNAL_ACCOUNT_ALLOW_EXECUTABLES
+export CLOUDSDK_CONFIG="$(mktemp -d)"
+export XDG_CONFIG_HOME="$(mktemp -d)"
+export HOME="$(mktemp -d)"
+```
+
+Why: prevents ambient local Google credentials from contaminating the validation run and matches the clean-shell flow used in the successful proof pass.
+
+Success: the shell has the temporary config roots set and no inherited Google credential overrides remain.
+
+### 10.2 Create the cluster resources
+
+```bash
 python hcp_lifecycle.py create <cluster-name>
 ```
 
@@ -480,13 +430,22 @@ Success: the script reaches `Ready`, or at minimum gets far enough to prove the 
 
 Note: if automatic browser launch does not work in your terminal environment, the script now prints the full OIDC login URL. Open that URL manually in a browser and complete the login flow, then let the script continue waiting for the localhost callback.
 
-### 10.2 Delete the cluster resources
+### 10.3 Delete the cluster resources
 
 ```bash
-source .venv/bin/activate
 python hcp_lifecycle.py delete <cluster-name>
 ```
 
 Why: tears down the API-side cluster plus HyperShift-created IAM and network resources for the same cluster name.
 
 Success: the script reports that the cluster is fully deleted.
+
+If the cluster is incomplete or stuck and the CLS API will not delete it cleanly, use:
+
+```bash
+python hcp_lifecycle.py delete <cluster-name> --skip-api
+```
+
+Why: skips the CLS API delete step and runs GCP cleanup directly for partial validation clusters.
+
+Success: the script proceeds to `Destroying Network Infrastructure` and `Destroying IAM Infrastructure` even if the cluster cannot be resolved or deleted through the API.

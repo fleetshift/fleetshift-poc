@@ -36,7 +36,7 @@
         "composite": true,
         "composites": {
           "client": {
-            "fleetshift": ["fleetshift-user"],
+            "fleetshift": ["fleetshift-user", "gcphcp-provision-cluster"],
             "account": ["manage-account", "view-profile"]
           }
         }
@@ -47,6 +47,10 @@
         {
           "name": "fleetshift-user",
           "description": "Baseline role for all FleetShift users"
+        },
+        {
+          "name": "gcphcp-provision-cluster",
+          "description": "Allowed to provision GCP HCP clusters"
         }
       ]
     }
@@ -250,7 +254,7 @@
   "clientScopeMappings": {
     "fleetshift": [
       { "client": "fleetshift-ui", "roles": ["fleetshift-user"] },
-      { "client": "fleetshift-cli", "roles": ["fleetshift-user"] },
+      { "client": "fleetshift-cli", "roles": ["fleetshift-user", "gcphcp-provision-cluster"] },
       { "client": "fleetshift-signing", "roles": ["fleetshift-user"] }
     ],
     "account": [

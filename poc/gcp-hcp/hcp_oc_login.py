@@ -5,11 +5,9 @@ Usage:
     python hcp_oc_login.py <cluster-name>
     python hcp_oc_login.py --id <cluster-id>
     python hcp_oc_login.py <cluster-name> --server https://api.example.com:6443
-    python hcp_oc_login.py <cluster-name> --gcloud-account user@example.com
 """
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
@@ -41,12 +39,12 @@ def resolve_cluster_endpoint(
     identifier_is_id: bool,
     server: str | None,
     config: hl.Config,
+    token: str,
+    email: str,
 ) -> str:
     """Resolve the cluster API server endpoint."""
     if server:
         return server
-
-    token, email = hl.authenticate(config)
     cluster_id = (
         cluster_identifier
         if identifier_is_id
@@ -72,37 +70,6 @@ def resolve_cluster_endpoint(
         "Could not resolve cluster API endpoint from CLS backend status. "
         "Pass --server explicitly."
     )
-
-
-def get_google_id_token(gcloud_account: str | None = None) -> str:
-    """Get a Google ID token using gcloud, mirroring gcphcp cluster login."""
-    gcloud_bin = shutil.which("gcloud")
-    if not gcloud_bin:
-        raise ClusterLoginError("gcloud CLI not found")
-
-    env = None
-    if gcloud_account:
-        env = os.environ.copy()
-        env["CLOUDSDK_CORE_ACCOUNT"] = gcloud_account
-
-    result = subprocess.run(
-        [gcloud_bin, "auth", "print-identity-token"],
-        capture_output=True,
-        env=env,
-        text=True,
-        timeout=30,
-    )
-    if result.returncode != 0:
-        error_msg = result.stderr.strip() or "Unknown error"
-        raise ClusterLoginError(
-            f"Failed to get Google identity token: {error_msg}. "
-            "Run 'gcloud auth login' first."
-        )
-
-    token = result.stdout.strip()
-    if not token:
-        raise ClusterLoginError("No Google identity token returned")
-    return token
 
 
 def validate_token(
@@ -196,10 +163,6 @@ def main() -> None:
         help="Optional kubeconfig path. Defaults to the normal oc behavior.",
     )
     parser.add_argument(
-        "--gcloud-account",
-        help="Override the gcloud account used for print-identity-token without changing your global gcloud config.",
-    )
-    parser.add_argument(
         "--no-insecure-skip-tls-verify",
         action="store_false",
         dest="insecure_skip_tls_verify",
@@ -211,21 +174,17 @@ def main() -> None:
     config = hl.load_config()
 
     try:
+        token, email, _ = hl.authenticate(config)
         endpoint = resolve_cluster_endpoint(
             cluster_identifier=args.cluster,
             identifier_is_id=args.id,
             server=args.server,
             config=config,
+            token=token,
+            email=email,
         )
         print(f"Resolved cluster API endpoint: {endpoint}")
-
-        token = get_google_id_token(args.gcloud_account)
-        if args.gcloud_account:
-            print(
-                f"Got Google identity token from gcloud account: {args.gcloud_account}"
-            )
-        else:
-            print("Got Google identity token from gcloud.")
+        print(f"Got broker ID token for: {config['broker_sa_email']}")
 
         validate_token(endpoint, token, args.insecure_skip_tls_verify)
         print("Cluster API accepted the token.")

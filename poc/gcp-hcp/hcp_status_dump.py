@@ -104,7 +104,7 @@ def main() -> None:
     args = parser.parse_args()
 
     config = hl.load_config()
-    token, email = hl.authenticate(config)
+    token, email, _ = hl.authenticate(config)
 
     try:
         bundle = collect_status_bundle(args.cluster, args.id, token, email, config)
