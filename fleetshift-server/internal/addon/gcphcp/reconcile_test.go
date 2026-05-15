@@ -10,6 +10,8 @@ func TestBuildCLSClusterSpec(t *testing.T) {
 	spec := gcphcp.ClusterSpec{
 		Name:           "test-cluster",
 		EndpointAccess: "PublicAndPrivate",
+		ReleaseVersion: "4.16.1",
+		ChannelGroup:   "stable",
 	}
 
 	target := gcphcp.TargetConfig{
@@ -74,6 +76,14 @@ func TestBuildCLSClusterSpec(t *testing.T) {
 		t.Errorf("expected spec.serviceAccountSigningKey=%s, got %v", signingKeyBase64, signingKey)
 	}
 
+	if releaseVersion := specMap["releaseVersion"]; releaseVersion != "4.16.1" {
+		t.Errorf("expected spec.releaseVersion=4.16.1, got %v", releaseVersion)
+	}
+
+	if channelGroup := specMap["channelGroup"]; channelGroup != "stable" {
+		t.Errorf("expected spec.channelGroup=stable, got %v", channelGroup)
+	}
+
 	// Verify platform fields
 	platformMap, ok := specMap["platform"].(map[string]any)
 	if !ok {
@@ -125,6 +135,92 @@ func TestBuildCLSClusterSpec(t *testing.T) {
 
 	if providerID := wifMap["providerID"]; providerID != "test-provider" {
 		t.Errorf("expected workloadIdentity.providerID=test-provider, got %v", providerID)
+	}
+}
+
+func TestBuildCLSClusterUpdateSpec(t *testing.T) {
+	observed := map[string]any{
+		"id":                "c-123",
+		"name":              "test-cluster",
+		"target_project_id": "existing-project",
+		"spec": map[string]any{
+			"infraID":                  "existing-infra",
+			"issuerURL":                "https://hypershift-existing-infra-oidc",
+			"serviceAccountSigningKey": "existing-signing-key",
+			"releaseVersion":           "4.15.0",
+			"channelGroup":             "candidate",
+			"platform": map[string]any{
+				"type": "GCP",
+				"gcp": map[string]any{
+					"projectID":      "existing-project",
+					"region":         "us-central1",
+					"network":        "existing-network",
+					"subnet":         "existing-subnet",
+					"endpointAccess": "PublicAndPrivate",
+					"workloadIdentity": map[string]any{
+						"projectNumber": "123456789",
+					},
+				},
+			},
+		},
+	}
+
+	updated, err := gcphcp.BuildCLSClusterUpdateSpec(gcphcp.ClusterSpec{
+		Name:           "test-cluster",
+		EndpointAccess: "Private",
+		ReleaseVersion: "4.16.1",
+		ChannelGroup:   "stable",
+	}, observed)
+	if err != nil {
+		t.Fatalf("BuildCLSClusterUpdateSpec failed: %v", err)
+	}
+
+	if targetProject := updated["target_project_id"]; targetProject != "existing-project" {
+		t.Errorf("expected target_project_id=existing-project, got %v", targetProject)
+	}
+
+	specMap, ok := updated["spec"].(map[string]any)
+	if !ok {
+		t.Fatal("updated spec is not a map")
+	}
+
+	if infraID := specMap["infraID"]; infraID != "existing-infra" {
+		t.Errorf("expected spec.infraID=existing-infra, got %v", infraID)
+	}
+
+	if issuerURL := specMap["issuerURL"]; issuerURL != "https://hypershift-existing-infra-oidc" {
+		t.Errorf("expected existing issuerURL to be preserved, got %v", issuerURL)
+	}
+
+	if signingKey := specMap["serviceAccountSigningKey"]; signingKey != "existing-signing-key" {
+		t.Errorf("expected existing signing key to be preserved, got %v", signingKey)
+	}
+
+	if releaseVersion := specMap["releaseVersion"]; releaseVersion != "4.16.1" {
+		t.Errorf("expected spec.releaseVersion=4.16.1, got %v", releaseVersion)
+	}
+
+	if channelGroup := specMap["channelGroup"]; channelGroup != "stable" {
+		t.Errorf("expected spec.channelGroup=stable, got %v", channelGroup)
+	}
+
+	platformMap, ok := specMap["platform"].(map[string]any)
+	if !ok {
+		t.Fatal("updated platform is not a map")
+	}
+	gcpMap, ok := platformMap["gcp"].(map[string]any)
+	if !ok {
+		t.Fatal("updated platform.gcp is not a map")
+	}
+
+	if endpointAccess := gcpMap["endpointAccess"]; endpointAccess != "Private" {
+		t.Errorf("expected spec.platform.gcp.endpointAccess=Private, got %v", endpointAccess)
+	}
+	if network := gcpMap["network"]; network != "existing-network" {
+		t.Errorf("expected spec.platform.gcp.network=existing-network, got %v", network)
+	}
+	if subnet := gcpMap["subnet"]; subnet != "existing-subnet" {
+		t.Errorf("expected spec.platform.gcp.subnet=existing-subnet, got %v", subnet)
 	}
 }
 

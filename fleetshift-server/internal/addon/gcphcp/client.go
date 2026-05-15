@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 )
+
+var ErrClusterNotFound = errors.New("cluster not found")
 
 type CLSClient struct {
 	baseURL    string
@@ -35,6 +39,10 @@ func (c *CLSClient) CreateCluster(ctx context.Context, spec map[string]any) (map
 
 func (c *CLSClient) GetCluster(ctx context.Context, clusterID string) (map[string]any, error) {
 	return c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID, nil)
+}
+
+func (c *CLSClient) UpdateCluster(ctx context.Context, clusterID string, spec map[string]any) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodPut, "/api/v1/clusters/"+clusterID, spec)
 }
 
 func (c *CLSClient) GetClusterStatus(ctx context.Context, clusterID string) (map[string]any, error) {
@@ -72,8 +80,15 @@ func (c *CLSClient) CreateNodepool(ctx context.Context, spec map[string]any) (ma
 	return c.doJSON(ctx, http.MethodPost, "/api/v1/nodepools", spec)
 }
 
+func (c *CLSClient) UpdateNodepool(ctx context.Context, nodepoolID string, spec map[string]any) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodPut, "/api/v1/nodepools/"+nodepoolID, spec)
+}
+
 func (c *CLSClient) ListNodepools(ctx context.Context, clusterID string) ([]map[string]any, error) {
-	result, err := c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID+"/nodepools", nil)
+	query := url.Values{}
+	query.Set("clusterId", clusterID)
+
+	result, err := c.doJSON(ctx, http.MethodGet, "/api/v1/nodepools?"+query.Encode(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -94,6 +109,11 @@ func (c *CLSClient) ListNodepools(ctx context.Context, clusterID string) ([]map[
 	return out, nil
 }
 
+func (c *CLSClient) DeleteNodepool(ctx context.Context, nodepoolID string) error {
+	_, err := c.doJSON(ctx, http.MethodDelete, "/api/v1/nodepools/"+nodepoolID, nil)
+	return err
+}
+
 // ResolveClusterID finds a cluster by name and returns its backend ID.
 func (c *CLSClient) ResolveClusterID(ctx context.Context, clusterName string) (string, error) {
 	clusters, err := c.ListClusters(ctx)
@@ -107,7 +127,7 @@ func (c *CLSClient) ResolveClusterID(ctx context.Context, clusterName string) (s
 			}
 		}
 	}
-	return "", fmt.Errorf("cluster %q not found", clusterName)
+	return "", fmt.Errorf("%w: %q", ErrClusterNotFound, clusterName)
 }
 
 func (c *CLSClient) doJSON(ctx context.Context, method, path string, body any) (map[string]any, error) {

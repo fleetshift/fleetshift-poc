@@ -2,6 +2,7 @@ package gcphcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -48,18 +49,6 @@ func (r *Reconciler) TrustBundles() []domain.TrustBundleEntry {
 }
 
 // Reconcile performs the full cluster creation flow:
-// 1. Apply defaults to spec
-// 2. Exchange caller token for broker credentials
-// 3. Create CLS client with broker token
-// 4. Generate cluster keypair and write JWKS
-// 5. Prepare hypershift environment
-// 6. Create IAM resources
-// 7. Create infrastructure
-// 8. Build and submit CLS cluster spec
-// 9. Create nodepools
-// 10. Poll until cluster is ready
-// 11. Bootstrap guest cluster with platform SA
-// 12. Build and return ClusterOutput
 func (r *Reconciler) Reconcile(
 	ctx context.Context,
 	spec ClusterSpec,
@@ -102,111 +91,136 @@ func (r *Reconciler) Reconcile(
 	signaler.Emit(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
-		Message:   "Generating cluster keypair",
+		Message:   "Reconciling cluster via CLS API",
 	})
 
-	// Create temp directory for workspace
-	tempDir, err := os.MkdirTemp("", "gcphcp-*")
-	if err != nil {
-		return nil, fmt.Errorf("create temp dir: %w", err)
-	}
-	defer os.RemoveAll(tempDir)
+	clusterID, err := clsClient.ResolveClusterID(ctx, spec.Name)
+	switch {
+	case err == nil:
+		observedCluster, err := clsClient.GetCluster(ctx, clusterID)
+		if err != nil {
+			return nil, fmt.Errorf("get existing cluster %s: %w", clusterID, err)
+		}
 
-	// Generate cluster keypair
-	keypair, err := GenerateClusterKeypair()
-	if err != nil {
-		return nil, fmt.Errorf("generate cluster keypair: %w", err)
-	}
+		updateSpec, err := BuildCLSClusterUpdateSpec(spec, observedCluster)
+		if err != nil {
+			return nil, fmt.Errorf("build CLS cluster update spec: %w", err)
+		}
 
-	// Write JWKS to temp file
-	jwksPath := filepath.Join(tempDir, "jwks.json")
-	if err := os.WriteFile(jwksPath, keypair.JWKSJSON, 0600); err != nil {
-		return nil, fmt.Errorf("write JWKS file: %w", err)
-	}
+		if _, err := clsClient.UpdateCluster(ctx, clusterID, updateSpec); err != nil {
+			return nil, fmt.Errorf("update cluster %s: %w", spec.Name, err)
+		}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Preparing hypershift environment",
-	})
-
-	// Prepare hypershift environment
-	hypershiftEnv, err := PrepareHypershiftEnv(callerToken, target, tempDir)
-	if err != nil {
-		return nil, fmt.Errorf("prepare hypershift env: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Creating IAM resources",
-	})
-
-	// Create IAM
-	iamConfig, err := r.infra.CreateIAM(ctx, spec.Name, target.GCPProject, jwksPath, hypershiftEnv)
-	if err != nil {
-		return nil, fmt.Errorf("create IAM: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Creating infrastructure",
-	})
-
-	// Create infrastructure
-	infraConfig, err := r.infra.CreateInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
-	if err != nil {
-		return nil, fmt.Errorf("create infra: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Building CLS cluster spec",
-	})
-
-	// Build CLS cluster spec
-	clsClusterSpec, err := BuildCLSClusterSpec(spec, target, infraConfig, iamConfig, keypair.PrivateKeyPEMBase64)
-	if err != nil {
-		return nil, fmt.Errorf("build CLS cluster spec: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Creating cluster via CLS API",
-	})
-
-	// Create cluster
-	clusterData, err := clsClient.CreateCluster(ctx, clsClusterSpec)
-	if err != nil {
-		return nil, fmt.Errorf("create cluster: %w", err)
-	}
-
-	clusterID, ok := clusterData["id"].(string)
-	if !ok || clusterID == "" {
-		return nil, fmt.Errorf("cluster creation response missing id field")
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   fmt.Sprintf("Cluster created with ID: %s", clusterID),
-	})
-
-	// Create nodepools
-	for i, np := range spec.Nodepools {
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
-			Message:   fmt.Sprintf("Creating nodepool %d/%d: %s", i+1, len(spec.Nodepools), np.Name),
+			Message:   fmt.Sprintf("Cluster updated with ID: %s", clusterID),
 		})
 
-		nodepoolSpec := BuildCLSNodepoolSpec(np, clusterID)
-		if _, err := clsClient.CreateNodepool(ctx, nodepoolSpec); err != nil {
-			return nil, fmt.Errorf("create nodepool %s: %w", np.Name, err)
+	case errors.Is(err, ErrClusterNotFound):
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Generating cluster keypair",
+		})
+
+		// Create temp directory for workspace
+		tempDir, err := os.MkdirTemp("", "gcphcp-*")
+		if err != nil {
+			return nil, fmt.Errorf("create temp dir: %w", err)
 		}
+		defer os.RemoveAll(tempDir)
+
+		// Generate cluster keypair
+		keypair, err := GenerateClusterKeypair()
+		if err != nil {
+			return nil, fmt.Errorf("generate cluster keypair: %w", err)
+		}
+
+		// Write JWKS to temp file
+		jwksPath := filepath.Join(tempDir, "jwks.json")
+		if err := os.WriteFile(jwksPath, keypair.JWKSJSON, 0600); err != nil {
+			return nil, fmt.Errorf("write JWKS file: %w", err)
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Preparing hypershift environment",
+		})
+
+		// Prepare hypershift environment
+		hypershiftEnv, err := PrepareHypershiftEnv(callerToken, target, tempDir)
+		if err != nil {
+			return nil, fmt.Errorf("prepare hypershift env: %w", err)
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Creating IAM resources",
+		})
+
+		// Create IAM
+		iamConfig, err := r.infra.CreateIAM(ctx, spec.Name, target.GCPProject, jwksPath, hypershiftEnv)
+		if err != nil {
+			return nil, fmt.Errorf("create IAM: %w", err)
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Creating infrastructure",
+		})
+
+		// Create infrastructure
+		infraConfig, err := r.infra.CreateInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
+		if err != nil {
+			return nil, fmt.Errorf("create infra: %w", err)
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Building CLS cluster spec",
+		})
+
+		// Build CLS cluster spec
+		clsClusterSpec, err := BuildCLSClusterSpec(spec, target, infraConfig, iamConfig, keypair.PrivateKeyPEMBase64)
+		if err != nil {
+			return nil, fmt.Errorf("build CLS cluster spec: %w", err)
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Creating cluster via CLS API",
+		})
+
+		// Create cluster
+		clusterData, err := clsClient.CreateCluster(ctx, clsClusterSpec)
+		if err != nil {
+			return nil, fmt.Errorf("create cluster: %w", err)
+		}
+
+		var ok bool
+		clusterID, ok = clusterData["id"].(string)
+		if !ok || clusterID == "" {
+			return nil, fmt.Errorf("cluster creation response missing id field")
+		}
+
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   fmt.Sprintf("Cluster created with ID: %s", clusterID),
+		})
+
+	default:
+		return nil, fmt.Errorf("resolve cluster ID: %w", err)
+	}
+
+	if err := reconcileNodepools(ctx, clsClient, clusterID, spec.Nodepools, signaler); err != nil {
+		return nil, err
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{
@@ -477,25 +491,29 @@ func BuildCLSClusterSpec(
 		return nil, fmt.Errorf("convert IAM config to WIF spec: %w", err)
 	}
 
+	clusterSpec := map[string]any{
+		"infraID":                  infraID,
+		"issuerURL":                fmt.Sprintf("https://hypershift-%s-oidc", infraID),
+		"serviceAccountSigningKey": signingKeyBase64,
+		"platform": map[string]any{
+			"type": "GCP",
+			"gcp": map[string]any{
+				"projectID":        target.GCPProject,
+				"region":           target.Region,
+				"network":          networkName,
+				"subnet":           subnetName,
+				"endpointAccess":   spec.EndpointAccess,
+				"workloadIdentity": wifSpec,
+			},
+		},
+	}
+	setOptionalString(clusterSpec, "releaseVersion", spec.ReleaseVersion)
+	setOptionalString(clusterSpec, "channelGroup", spec.ChannelGroup)
+
 	return map[string]any{
 		"name":              spec.Name,
 		"target_project_id": target.GCPProject,
-		"spec": map[string]any{
-			"infraID":                  infraID,
-			"issuerURL":                fmt.Sprintf("https://hypershift-%s-oidc", infraID),
-			"serviceAccountSigningKey": signingKeyBase64,
-			"platform": map[string]any{
-				"type": "GCP",
-				"gcp": map[string]any{
-					"projectID":        target.GCPProject,
-					"region":           target.Region,
-					"network":          networkName,
-					"subnet":           subnetName,
-					"endpointAccess":   spec.EndpointAccess,
-					"workloadIdentity": wifSpec,
-				},
-			},
-		},
+		"spec":              clusterSpec,
 	}, nil
 }
 
