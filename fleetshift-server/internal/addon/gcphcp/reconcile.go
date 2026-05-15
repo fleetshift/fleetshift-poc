@@ -305,7 +305,17 @@ func (r *Reconciler) Reconcile(
 	signaler.Emit(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
-		Message:   "Building cluster output",
+		Message:   "Waiting for desired nodepools to become healthy",
+	})
+
+	if err := PollDesiredNodepoolsHealthy(ctx, clsClient, clusterID, spec.Nodepools, signaler); err != nil {
+		return nil, fmt.Errorf("wait for desired nodepools healthy: %w", err)
+	}
+
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Timestamp: time.Now(),
+		Kind:      domain.DeliveryEventProgress,
+		Message:   "Desired nodepools are healthy; building cluster output",
 	})
 
 	// Build ClusterOutput with trust bundles

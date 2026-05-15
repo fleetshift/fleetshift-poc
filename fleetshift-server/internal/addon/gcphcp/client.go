@@ -49,6 +49,10 @@ func (c *CLSClient) GetClusterStatus(ctx context.Context, clusterID string) (map
 	return c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID+"/status", nil)
 }
 
+func (c *CLSClient) GetNodepoolStatus(ctx context.Context, nodepoolID string) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodGet, "/api/v1/nodepools/"+nodepoolID+"/status", nil)
+}
+
 func (c *CLSClient) ListClusters(ctx context.Context) ([]map[string]any, error) {
 	result, err := c.doJSON(ctx, http.MethodGet, "/api/v1/clusters", nil)
 	if err != nil {

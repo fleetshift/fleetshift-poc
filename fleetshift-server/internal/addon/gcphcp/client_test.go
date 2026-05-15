@@ -224,6 +224,32 @@ func TestCLSClient_GetClusterStatus(t *testing.T) {
 	}
 }
 
+func TestCLSClient_GetNodepoolStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/nodepools/np-123/status" {
+			t.Errorf("unexpected path %q", r.URL.Path)
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"nodepool_id": "np-123",
+			"status": map[string]any{
+				"phase":   "Ready",
+				"message": "all replicas available",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := gcphcp.NewCLSClient(server.URL, "token", "email@example.com", nil)
+	result, err := client.GetNodepoolStatus(context.Background(), "np-123")
+	if err != nil {
+		t.Fatalf("GetNodepoolStatus failed: %v", err)
+	}
+	status := result["status"].(map[string]any)
+	if status["phase"] != "Ready" {
+		t.Errorf("phase = %v", status["phase"])
+	}
+}
+
 func TestCLSClient_ListClusters(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]any{
