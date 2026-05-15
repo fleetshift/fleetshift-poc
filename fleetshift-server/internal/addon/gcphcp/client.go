@@ -1,0 +1,152 @@
+package gcphcp
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+)
+
+type CLSClient struct {
+	baseURL    string
+	token      string
+	userEmail  string
+	httpClient *http.Client
+}
+
+func NewCLSClient(baseURL, brokerToken, brokerEmail string, httpClient *http.Client) *CLSClient {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &CLSClient{
+		baseURL:    strings.TrimRight(baseURL, "/"),
+		token:      brokerToken,
+		userEmail:  brokerEmail,
+		httpClient: httpClient,
+	}
+}
+
+func (c *CLSClient) CreateCluster(ctx context.Context, spec map[string]any) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodPost, "/api/v1/clusters", spec)
+}
+
+func (c *CLSClient) GetCluster(ctx context.Context, clusterID string) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID, nil)
+}
+
+func (c *CLSClient) GetClusterStatus(ctx context.Context, clusterID string) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID+"/status", nil)
+}
+
+func (c *CLSClient) ListClusters(ctx context.Context) ([]map[string]any, error) {
+	result, err := c.doJSON(ctx, http.MethodGet, "/api/v1/clusters", nil)
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := result["clusters"]
+	if !ok {
+		return nil, nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected clusters field type")
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+func (c *CLSClient) DeleteCluster(ctx context.Context, clusterID string) error {
+	_, err := c.doJSON(ctx, http.MethodDelete, "/api/v1/clusters/"+clusterID+"?force=true", nil)
+	return err
+}
+
+func (c *CLSClient) CreateNodepool(ctx context.Context, spec map[string]any) (map[string]any, error) {
+	return c.doJSON(ctx, http.MethodPost, "/api/v1/nodepools", spec)
+}
+
+func (c *CLSClient) ListNodepools(ctx context.Context, clusterID string) ([]map[string]any, error) {
+	result, err := c.doJSON(ctx, http.MethodGet, "/api/v1/clusters/"+clusterID+"/nodepools", nil)
+	if err != nil {
+		return nil, err
+	}
+	raw, ok := result["nodepools"]
+	if !ok {
+		return nil, nil
+	}
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("unexpected nodepools field type")
+	}
+	out := make([]map[string]any, 0, len(list))
+	for _, item := range list {
+		if m, ok := item.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out, nil
+}
+
+// ResolveClusterID finds a cluster by name and returns its backend ID.
+func (c *CLSClient) ResolveClusterID(ctx context.Context, clusterName string) (string, error) {
+	clusters, err := c.ListClusters(ctx)
+	if err != nil {
+		return "", fmt.Errorf("list clusters: %w", err)
+	}
+	for _, cl := range clusters {
+		if name, _ := cl["name"].(string); name == clusterName {
+			if id, _ := cl["id"].(string); id != "" {
+				return id, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("cluster %q not found", clusterName)
+}
+
+func (c *CLSClient) doJSON(ctx context.Context, method, path string, body any) (map[string]any, error) {
+	var bodyReader io.Reader
+	if body != nil {
+		data, err := json.Marshal(body)
+		if err != nil {
+			return nil, fmt.Errorf("marshal request body: %w", err)
+		}
+		bodyReader = bytes.NewReader(data)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, bodyReader)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("X-User-Email", c.userEmail)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	respBody, _ := io.ReadAll(resp.Body)
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("CLS API %s %s failed (HTTP %d): %s", method, path, resp.StatusCode, respBody)
+	}
+
+	if len(respBody) == 0 {
+		return nil, nil
+	}
+
+	var result map[string]any
+	if err := json.Unmarshal(respBody, &result); err != nil {
+		return nil, fmt.Errorf("parse CLS response: %w", err)
+	}
+	return result, nil
+}
