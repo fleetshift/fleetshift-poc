@@ -5,6 +5,7 @@ import (
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 
+	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
@@ -28,6 +29,34 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 
 	cfg := &managedresource.ResourceTypeConfig{
 		ResourceType:   kindaddon.ClusterResourceType,
+		Singular:       schema.Singular,
+		Plural:         schema.Plural,
+		ProtoPackage:   "fleetshift.v1",
+		SpecMessage:    schema.SpecMessage,
+		SpecDescriptor: spec.Message,
+	}
+	descs, err := managedresource.BuildServiceDescriptors(cfg, spec.Message)
+	if err != nil {
+		t.Fatalf("BuildServiceDescriptors: %v", err)
+	}
+	return descs.File
+}
+
+func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
+	t.Helper()
+	schema := gcphcpaddon.Schema("gcphcp-example")
+	spec, err := managedresource.CompileInline(
+		t.Context(),
+		schema.ProtoFiles,
+		schema.EntryFile,
+		protoreflect.FullName(schema.SpecMessage),
+	)
+	if err != nil {
+		t.Fatalf("CompileInline: %v", err)
+	}
+
+	cfg := &managedresource.ResourceTypeConfig{
+		ResourceType:   gcphcpaddon.ClusterResourceType,
 		Singular:       schema.Singular,
 		Plural:         schema.Plural,
 		ProtoPackage:   "fleetshift.v1",
@@ -65,6 +94,32 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 	}
 	if desc.FullName() != svcName {
 		t.Fatalf("got name %q, want %q", desc.FullName(), svcName)
+	}
+}
+
+func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.T) {
+	reg := managedresource.NewDynamicFileRegistry()
+	kindFD := buildClusterFileDescriptor(t)
+	gcphcpFD := buildGCPHCPClusterFileDescriptor(t)
+
+	if err := reg.Register(kindFD); err != nil {
+		t.Fatalf("Register(kind): %v", err)
+	}
+	if err := reg.Register(gcphcpFD); err != nil {
+		t.Fatalf("Register(gcphcp): %v", err)
+	}
+
+	for _, svcName := range []protoreflect.FullName{
+		"fleetshift.v1.KindClusterService",
+		"fleetshift.v1.GCPHCPClusterService",
+	} {
+		desc, err := reg.FindDescriptorByName(svcName)
+		if err != nil {
+			t.Fatalf("FindDescriptorByName(%s): %v", svcName, err)
+		}
+		if desc.FullName() != svcName {
+			t.Fatalf("got name %q, want %q", desc.FullName(), svcName)
+		}
 	}
 }
 

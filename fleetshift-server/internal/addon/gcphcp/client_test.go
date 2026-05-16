@@ -326,6 +326,27 @@ func TestCLSClient_ListNodepools(t *testing.T) {
 	}
 }
 
+func TestCLSClient_ListNodepools_TreatsNullAsEmptyList(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("clusterId") != "c-123" {
+			t.Errorf("unexpected clusterId query %q", r.URL.Query().Get("clusterId"))
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"nodepools": nil,
+		})
+	}))
+	defer server.Close()
+
+	client := gcphcp.NewCLSClient(server.URL, "token", "email@example.com", nil)
+	nodepools, err := client.ListNodepools(context.Background(), "c-123")
+	if err != nil {
+		t.Fatalf("ListNodepools failed: %v", err)
+	}
+	if len(nodepools) != 0 {
+		t.Fatalf("count = %d, want 0", len(nodepools))
+	}
+}
+
 func TestCLSClient_ListNodepools_RejectsMissingNodepoolsField(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Query().Get("clusterId") != "c-123" {

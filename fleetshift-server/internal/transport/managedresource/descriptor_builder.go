@@ -74,6 +74,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	lower := strings.ToLower(singular[:1]) + singular[1:]
 	plural := cfg.Plural
 	collectionID := cfg.CollectionID()
+	resourceStateEnumName := singular + "State"
 
 	specFullName := string(specDesc.FullName())
 	specFile := specDesc.ParentFile()
@@ -87,11 +88,8 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 		Package:    proto.String(pkg),
 		Syntax:     proto.String("proto3"),
 		Dependency: []string{string(specFile.Path()), "google/protobuf/timestamp.proto"},
-		EnumType: []*descriptorpb.EnumDescriptorProto{
-			buildResourceStateEnum(),
-		},
 		MessageType: []*descriptorpb.DescriptorProto{
-			buildResourceMessage(singular, pkg, specFullName),
+			buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName),
 			buildCreateRequest(singular, lower, fqn(singular)),
 			buildGetRequest(singular),
 			buildListRequest(plural),
@@ -142,15 +140,18 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	}, nil
 }
 
-func buildResourceMessage(singular, pkg, specFullName string) *descriptorpb.DescriptorProto {
+func buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String(singular),
+		EnumType: []*descriptorpb.EnumDescriptorProto{
+			buildResourceStateEnum(resourceStateEnumName),
+		},
 		Field: []*descriptorpb.FieldDescriptorProto{
 			stringField("name", 1),
 			stringField("uid", 2),
 			messageField("spec", 3, specFullName),
 			int64Field("intent_version", 4),
-			enumField("state", 5, pkg+".ResourceState"),
+			enumField("state", 5, pkg+"."+singular+"."+resourceStateEnumName),
 			boolField("reconciling", 6),
 			messageField("create_time", 7, "google.protobuf.Timestamp"),
 			messageField("update_time", 8, "google.protobuf.Timestamp"),
@@ -242,9 +243,9 @@ func buildService(singular, plural, pkg string) *descriptorpb.ServiceDescriptorP
 
 // --- enum helpers ---
 
-func buildResourceStateEnum() *descriptorpb.EnumDescriptorProto {
+func buildResourceStateEnum(name string) *descriptorpb.EnumDescriptorProto {
 	return &descriptorpb.EnumDescriptorProto{
-		Name: proto.String("ResourceState"),
+		Name: proto.String(name),
 		Value: []*descriptorpb.EnumValueDescriptorProto{
 			{Name: proto.String("STATE_UNSPECIFIED"), Number: proto.Int32(0)},
 			{Name: proto.String("CREATING"), Number: proto.Int32(1)},

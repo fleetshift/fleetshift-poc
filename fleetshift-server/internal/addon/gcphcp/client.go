@@ -178,6 +178,9 @@ func requiredObjectListField(result map[string]any, field string) ([]map[string]
 	if !ok {
 		return nil, fmt.Errorf("CLS response missing %s field", field)
 	}
+	if raw == nil {
+		return []map[string]any{}, nil
+	}
 
 	list, ok := raw.([]any)
 	if !ok {
