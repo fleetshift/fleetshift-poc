@@ -3,6 +3,7 @@ package gcphcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"time"
@@ -15,6 +16,16 @@ type nodepoolReconcileClient interface {
 	CreateNodepool(ctx context.Context, spec map[string]any) (map[string]any, error)
 	UpdateNodepool(ctx context.Context, nodepoolID string, spec map[string]any) (map[string]any, error)
 	DeleteNodepool(ctx context.Context, nodepoolID string) error
+}
+
+type createCleanupInfra interface {
+	DestroyInfra(ctx context.Context, infraID, projectID, region string, env []string) error
+	DestroyIAM(ctx context.Context, infraID, projectID string, env []string) error
+}
+
+type clusterDeleteClient interface {
+	ResolveClusterID(ctx context.Context, clusterName string) (string, error)
+	DeleteCluster(ctx context.Context, clusterID string) error
 }
 
 // BuildCLSClusterUpdateSpec preserves observed bootstrap/infra fields while
@@ -126,6 +137,54 @@ func reconcileNodepools(
 	}
 
 	return nil
+}
+
+func cleanupCreateResources(
+	ctx context.Context,
+	infra createCleanupInfra,
+	spec ClusterSpec,
+	target TargetConfig,
+	hypershiftEnv []string,
+	createdInfra bool,
+	createdIAM bool,
+) error {
+	var cleanupErr error
+
+	if createdInfra {
+		if err := infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("destroy infra: %w", err))
+		}
+	}
+	if createdIAM {
+		if err := infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
+			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("destroy IAM: %w", err))
+		}
+	}
+
+	return cleanupErr
+}
+
+func deleteClusterIfPresent(
+	ctx context.Context,
+	client clusterDeleteClient,
+	clusterName string,
+	signaler *domain.DeliverySignaler,
+) (string, bool, error) {
+	clusterID, err := client.ResolveClusterID(ctx, clusterName)
+	if err != nil {
+		if errors.Is(err, ErrClusterNotFound) {
+			emitProgress(signaler, ctx, fmt.Sprintf("Cluster %s already absent; continuing cleanup", clusterName))
+			return "", false, nil
+		}
+		return "", false, fmt.Errorf("resolve cluster ID: %w", err)
+	}
+
+	emitProgress(signaler, ctx, fmt.Sprintf("Deleting cluster %s (ID: %s)", clusterName, clusterID))
+	if err := client.DeleteCluster(ctx, clusterID); err != nil {
+		return "", false, fmt.Errorf("delete cluster: %w", err)
+	}
+
+	return clusterID, true, nil
 }
 
 func cloneAnyMap(in map[string]any) (map[string]any, error) {

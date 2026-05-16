@@ -19,12 +19,6 @@ targets:
     workforce_pool: "example-workforce-pool"
     workforce_provider: "example-oidc-provider"
     broker_sa_email: "hcp-idtoken-broker@example.iam.gserviceaccount.com"
-  - id: "gcphcp-another-region-prod"
-    gcp_project: "another-hcp-target-project"
-    region: "us-east1"
-    workforce_pool: "another-workforce-pool"
-    workforce_provider: "another-oidc-provider"
-    broker_sa_email: "hcp-broker@another.iam.gserviceaccount.com"
 `
 
 	tmpDir := t.TempDir()
@@ -47,8 +41,8 @@ targets:
 	}
 
 	// Verify targets
-	if len(cfg.Targets) != 2 {
-		t.Fatalf("expected 2 targets, got %d", len(cfg.Targets))
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(cfg.Targets))
 	}
 
 	target := cfg.Targets[0]
@@ -74,17 +68,48 @@ targets:
 	// Verify TargetProperties
 	props := target.TargetProperties()
 	expectedProps := map[string]string{
-		"id":                  "gcphcp-example-region-staging",
-		"gcp_project":         "example-hcp-target-project",
-		"region":              "us-central1",
-		"workforce_pool":      "example-workforce-pool",
-		"workforce_provider":  "example-oidc-provider",
-		"broker_sa_email":     "hcp-idtoken-broker@example.iam.gserviceaccount.com",
+		"id":                 "gcphcp-example-region-staging",
+		"gcp_project":        "example-hcp-target-project",
+		"region":             "us-central1",
+		"workforce_pool":     "example-workforce-pool",
+		"workforce_provider": "example-oidc-provider",
+		"broker_sa_email":    "hcp-idtoken-broker@example.iam.gserviceaccount.com",
 	}
 	for key, expected := range expectedProps {
 		if props[key] != expected {
 			t.Errorf("TargetProperties[%s] = %s, want %s", key, props[key], expected)
 		}
+	}
+}
+
+func TestParseConfig_RejectsMultipleTargets(t *testing.T) {
+	configYAML := `gateway:
+  url: "https://hcp-backend-gateway.example.invalid"
+  audience: "test-client-id.apps.googleusercontent.com"
+targets:
+  - id: "gcphcp-example-region-staging"
+    gcp_project: "example-hcp-target-project"
+    region: "us-central1"
+    workforce_pool: "example-workforce-pool"
+    workforce_provider: "example-oidc-provider"
+    broker_sa_email: "hcp-idtoken-broker@example.iam.gserviceaccount.com"
+  - id: "gcphcp-another-region-prod"
+    gcp_project: "another-hcp-target-project"
+    region: "us-east1"
+    workforce_pool: "another-workforce-pool"
+    workforce_provider: "another-oidc-provider"
+    broker_sa_email: "hcp-broker@another.iam.gserviceaccount.com"
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := gcphcp.ParseConfig(configPath)
+	if err == nil {
+		t.Fatal("expected error for multiple targets, got nil")
 	}
 }
 

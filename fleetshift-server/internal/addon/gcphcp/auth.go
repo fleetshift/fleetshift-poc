@@ -8,7 +8,10 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"time"
 )
+
+const defaultBrokerHTTPTimeout = 30 * time.Second
 
 // BrokerAuthConfig holds the configuration for workforce identity federation
 // and broker service account token generation.
@@ -68,7 +71,7 @@ func NewBrokerAuth(cfg BrokerAuthConfig) *BrokerAuth {
 		cfg.IAMEndpoint = "https://iamcredentials.googleapis.com"
 	}
 	if cfg.HTTPClient == nil {
-		cfg.HTTPClient = http.DefaultClient
+		cfg.HTTPClient = &http.Client{Timeout: defaultBrokerHTTPTimeout}
 	}
 
 	return &BrokerAuth{cfg: cfg}
@@ -208,10 +211,10 @@ func WorkforceCredentialConfig(cfg TargetConfig, subjectTokenFile string) []byte
 		cfg.BrokerSAEmail)
 
 	credConfig := map[string]interface{}{
-		"type":                      "external_account",
-		"audience":                  audience,
-		"subject_token_type":        "urn:ietf:params:oauth:token-type:jwt",
-		"token_url":                 "https://sts.googleapis.com/v1/token",
+		"type":               "external_account",
+		"audience":           audience,
+		"subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
+		"token_url":          "https://sts.googleapis.com/v1/token",
 		"credential_source": map[string]interface{}{
 			"file": subjectTokenFile,
 		},

@@ -16,6 +16,35 @@ type fakeNodepoolClient struct {
 	deletedIDs   []string
 }
 
+type fakeCleanupInfra struct {
+	ops []string
+}
+
+func (f *fakeCleanupInfra) DestroyInfra(_ context.Context, infraID, projectID, region string, _ []string) error {
+	f.ops = append(f.ops, "infra:"+infraID+":"+projectID+":"+region)
+	return nil
+}
+
+func (f *fakeCleanupInfra) DestroyIAM(_ context.Context, infraID, projectID string, _ []string) error {
+	f.ops = append(f.ops, "iam:"+infraID+":"+projectID)
+	return nil
+}
+
+type fakeClusterDeleteClient struct {
+	clusterID  string
+	resolveErr error
+	deleteIDs  []string
+}
+
+func (f *fakeClusterDeleteClient) ResolveClusterID(_ context.Context, _ string) (string, error) {
+	return f.clusterID, f.resolveErr
+}
+
+func (f *fakeClusterDeleteClient) DeleteCluster(_ context.Context, clusterID string) error {
+	f.deleteIDs = append(f.deleteIDs, clusterID)
+	return nil
+}
+
 func (f *fakeNodepoolClient) ListNodepools(_ context.Context, _ string) ([]map[string]any, error) {
 	return f.listedNodepools, nil
 }
@@ -115,5 +144,51 @@ func TestReconcileNodepools_DuplicateDesiredNames(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "duplicate desired nodepool name") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCleanupCreateResources_DestroysCreatedInfraAndIAM(t *testing.T) {
+	infra := &fakeCleanupInfra{}
+
+	err := cleanupCreateResources(
+		context.Background(),
+		infra,
+		ClusterSpec{Name: "test-cluster"},
+		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
+		[]string{"EXAMPLE=1"},
+		true,
+		true,
+	)
+	if err != nil {
+		t.Fatalf("cleanupCreateResources() error = %v", err)
+	}
+
+	if got := strings.Join(infra.ops, ","); got != "infra:test-cluster:project-123:us-central1,iam:test-cluster:project-123" {
+		t.Fatalf("unexpected cleanup operations: %s", got)
+	}
+}
+
+func TestDeleteClusterIfPresent_SkipsMissingCluster(t *testing.T) {
+	client := &fakeClusterDeleteClient{
+		resolveErr: ErrClusterNotFound,
+	}
+
+	clusterID, deleted, err := deleteClusterIfPresent(
+		context.Background(),
+		client,
+		"test-cluster",
+		&domain.DeliverySignaler{},
+	)
+	if err != nil {
+		t.Fatalf("deleteClusterIfPresent() error = %v", err)
+	}
+	if clusterID != "" {
+		t.Fatalf("expected empty cluster ID, got %q", clusterID)
+	}
+	if deleted {
+		t.Fatal("expected missing cluster to skip delete")
+	}
+	if len(client.deleteIDs) != 0 {
+		t.Fatalf("expected no delete calls, got %v", client.deleteIDs)
 	}
 }

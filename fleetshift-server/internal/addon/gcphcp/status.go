@@ -214,13 +214,16 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 
 	// Check immediately first
 	_, err := client.GetCluster(ctx, clusterID)
-	if err != nil && strings.Contains(err.Error(), "404") {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Timestamp: time.Now(),
-			Kind:      domain.DeliveryEventProgress,
-			Message:   "Cluster deleted",
-		})
-		return nil
+	if err != nil {
+		if strings.Contains(err.Error(), "404") {
+			signaler.Emit(ctx, domain.DeliveryEvent{
+				Timestamp: time.Now(),
+				Kind:      domain.DeliveryEventProgress,
+				Message:   "Cluster deleted",
+			})
+			return nil
+		}
+		return fmt.Errorf("get cluster: %w", err)
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{
@@ -237,13 +240,16 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 			return fmt.Errorf("timeout waiting for cluster deletion")
 		case <-ticker.C:
 			_, err := client.GetCluster(ctx, clusterID)
-			if err != nil && strings.Contains(err.Error(), "404") {
-				signaler.Emit(ctx, domain.DeliveryEvent{
-					Timestamp: time.Now(),
-					Kind:      domain.DeliveryEventProgress,
-					Message:   "Cluster deleted",
-				})
-				return nil
+			if err != nil {
+				if strings.Contains(err.Error(), "404") {
+					signaler.Emit(ctx, domain.DeliveryEvent{
+						Timestamp: time.Now(),
+						Kind:      domain.DeliveryEventProgress,
+						Message:   "Cluster deleted",
+					})
+					return nil
+				}
+				return fmt.Errorf("get cluster: %w", err)
 			}
 
 			signaler.Emit(ctx, domain.DeliveryEvent{

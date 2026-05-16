@@ -21,12 +21,12 @@ type GatewayConfig struct {
 
 // TargetConfig holds the configuration for a single GCP HCP target.
 type TargetConfig struct {
-	ID                 string `yaml:"id"`
-	GCPProject         string `yaml:"gcp_project"`
-	Region             string `yaml:"region"`
-	WorkforcePool      string `yaml:"workforce_pool"`
-	WorkforceProvider  string `yaml:"workforce_provider"`
-	BrokerSAEmail      string `yaml:"broker_sa_email"`
+	ID                string `yaml:"id"`
+	GCPProject        string `yaml:"gcp_project"`
+	Region            string `yaml:"region"`
+	WorkforcePool     string `yaml:"workforce_pool"`
+	WorkforceProvider string `yaml:"workforce_provider"`
+	BrokerSAEmail     string `yaml:"broker_sa_email"`
 }
 
 // TargetProperties returns the target configuration as a string map
@@ -72,9 +72,9 @@ func validateConfig(cfg Config) error {
 		return fmt.Errorf("gateway.audience is required")
 	}
 
-	// Validate targets
-	if len(cfg.Targets) == 0 {
-		return fmt.Errorf("at least one target is required")
+	// V1 routes fulfillment through exactly one active target.
+	if len(cfg.Targets) != 1 {
+		return fmt.Errorf("exactly one target is required in v1, got %d", len(cfg.Targets))
 	}
 
 	for i, target := range cfg.Targets {

@@ -3,6 +3,7 @@ package gcphcp_test
 import (
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
@@ -48,8 +49,8 @@ func TestParseClusterSpec_NameTooLong(t *testing.T) {
 
 func TestParseClusterSpec_InvalidNamePattern(t *testing.T) {
 	tests := []struct {
-		name     string
-		rawName  string
+		name    string
+		rawName string
 	}{
 		{"uppercase", "TestCluster"},
 		{"starts with number", "1cluster"},
@@ -230,6 +231,29 @@ func TestApplyDefaults_FillsPartialNodepool(t *testing.T) {
 	}
 }
 
+func TestApplyDefaults_MultipleUnnamedNodepoolsGetUniqueNames(t *testing.T) {
+	spec := gcphcp.ClusterSpec{
+		Name: "test",
+		Nodepools: []gcphcp.NodepoolSpec{
+			{},
+			{},
+			{Name: "custom"},
+		},
+	}
+
+	spec.ApplyDefaults()
+
+	if spec.Nodepools[0].Name != "test-nodepool-1" {
+		t.Fatalf("expected first unnamed nodepool to be test-nodepool-1, got %s", spec.Nodepools[0].Name)
+	}
+	if spec.Nodepools[1].Name != "test-nodepool-2" {
+		t.Fatalf("expected second unnamed nodepool to be test-nodepool-2, got %s", spec.Nodepools[1].Name)
+	}
+	if spec.Nodepools[2].Name != "custom" {
+		t.Fatalf("expected named nodepool to be preserved, got %s", spec.Nodepools[2].Name)
+	}
+}
+
 func TestParseClusterSpec_FullSpec(t *testing.T) {
 	raw := json.RawMessage(`{
 		"name": "prod-cluster",
@@ -292,5 +316,39 @@ func TestParseClusterSpec_FullSpec(t *testing.T) {
 	}
 	if np.UpgradeType != "InPlace" {
 		t.Errorf("expected nodepool UpgradeType=InPlace, got %s", np.UpgradeType)
+	}
+}
+
+func TestParseClusterSpec_NegativeNodepoolNumbers(t *testing.T) {
+	tests := []struct {
+		name    string
+		rawJSON string
+		want    string
+	}{
+		{
+			name:    "negative replicas",
+			rawJSON: `{"name":"test","nodepools":[{"replicas":-1}]}`,
+			want:    "nodepools[0].replicas",
+		},
+		{
+			name:    "negative root volume size",
+			rawJSON: `{"name":"test","nodepools":[{"rootVolumeSize":-10}]}`,
+			want:    "nodepools[0].rootVolumeSize",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := gcphcp.ParseClusterSpec(json.RawMessage(tt.rawJSON))
+			if err == nil {
+				t.Fatal("expected invalid argument error")
+			}
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("expected ErrInvalidArgument, got %v", err)
+			}
+			if got := err.Error(); got == "" || !strings.Contains(got, tt.want) {
+				t.Fatalf("expected error to mention %q, got %q", tt.want, got)
+			}
+		})
 	}
 }

@@ -94,7 +94,8 @@ func (a *Agent) Deliver(
 
 	// If only trust bundles (no cluster manifests), signal done and return accepted
 	if len(clusterManifests) == 0 {
-		go signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		asyncCtx := context.WithoutCancel(ctx)
+		go signaler.Done(asyncCtx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 	}
 
@@ -131,7 +132,8 @@ func (a *Agent) Deliver(
 	targetCfg := targetConfigFromProperties(target.Properties)
 
 	// Launch async provisioning
-	go a.deliverAsync(ctx, spec, targetCfg, string(auth.Token), signaler)
+	asyncCtx := context.WithoutCancel(ctx)
+	go a.deliverAsync(asyncCtx, spec, targetCfg, string(auth.Token), signaler)
 
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }

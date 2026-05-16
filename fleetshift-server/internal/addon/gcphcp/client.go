@@ -10,9 +10,12 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 )
 
 var ErrClusterNotFound = errors.New("cluster not found")
+
+const defaultCLSHTTPTimeout = 30 * time.Second
 
 type CLSClient struct {
 	baseURL    string
@@ -23,7 +26,7 @@ type CLSClient struct {
 
 func NewCLSClient(baseURL, brokerToken, brokerEmail string, httpClient *http.Client) *CLSClient {
 	if httpClient == nil {
-		httpClient = http.DefaultClient
+		httpClient = &http.Client{Timeout: defaultCLSHTTPTimeout}
 	}
 	return &CLSClient{
 		baseURL:    strings.TrimRight(baseURL, "/"),
@@ -158,7 +161,10 @@ func (c *CLSClient) doJSON(ctx context.Context, method, path string, body any) (
 	}
 	defer resp.Body.Close()
 
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read CLS response body: %w", err)
+	}
 
 	if resp.StatusCode >= 400 {
 		return nil, fmt.Errorf("CLS API %s %s failed (HTTP %d): %s", method, path, resp.StatusCode, respBody)

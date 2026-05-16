@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -114,7 +115,7 @@ func TestAgent_Deliver_TrustBundleOnly(t *testing.T) {
 		if finalResult.State != domain.DeliveryStateDelivered {
 			t.Errorf("expected final state %s, got %s", domain.DeliveryStateDelivered, finalResult.State)
 		}
-	case <-context.Background().Done():
+	case <-time.After(2 * time.Second):
 		t.Fatal("timeout waiting for Done signal")
 	}
 
@@ -125,5 +126,65 @@ func TestAgent_Deliver_TrustBundleOnly(t *testing.T) {
 	}
 	if bundles[0].IssuerURL != trustBundle.IssuerURL {
 		t.Errorf("expected issuer URL %s, got %s", trustBundle.IssuerURL, bundles[0].IssuerURL)
+	}
+}
+
+func TestAgent_Deliver_TrustBundleOnly_CompletesEvenIfRequestContextCanceled(t *testing.T) {
+	agent := gcphcp.NewAgent(gcphcp.AgentDeps{
+		Gateway: gcphcp.GatewayConfig{
+			URL:      "https://test-gateway",
+			Audience: "test-audience",
+		},
+	})
+
+	done := make(chan error, 1)
+	signaler := &domain.DeliverySignaler{
+		Signal: func(ctx context.Context, _ domain.FulfillmentID, event domain.FulfillmentEvent) error {
+			if event.DeliveryCompleted != nil {
+				done <- ctx.Err()
+			}
+			return nil
+		},
+	}
+
+	trustBundle := domain.TrustBundleEntry{
+		IssuerURL:          "https://test-issuer",
+		JWKSURI:            "https://test-jwks",
+		EnrollmentAudience: "test-audience",
+	}
+	trustBundleJSON, err := json.Marshal(trustBundle)
+	if err != nil {
+		t.Fatalf("failed to marshal trust bundle: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := agent.Deliver(
+		ctx,
+		domain.TargetInfo{},
+		domain.DeliveryID("test-delivery"),
+		[]domain.Manifest{{
+			ResourceType: domain.TrustBundleResourceType,
+			Raw:          json.RawMessage(trustBundleJSON),
+		}},
+		domain.DeliveryAuth{},
+		nil,
+		signaler,
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Fatalf("expected state %s, got %s", domain.DeliveryStateAccepted, result.State)
+	}
+
+	select {
+	case signalCtxErr := <-done:
+		if signalCtxErr != nil {
+			t.Fatalf("expected completion signal to use uncanceled context, got %v", signalCtxErr)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for completion signal")
 	}
 }

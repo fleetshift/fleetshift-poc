@@ -155,6 +155,20 @@ func (r *Reconciler) Reconcile(
 			return nil, fmt.Errorf("prepare hypershift env: %w", err)
 		}
 
+		var createdIAM bool
+		var createdInfra bool
+		cleanupCreateFailure := func(createErr error) error {
+			if !createdIAM && !createdInfra {
+				return createErr
+			}
+			emitProgress(signaler, ctx, "Create flow failed; cleaning up partial IAM/infra resources")
+			cleanupErr := cleanupCreateResources(ctx, r.infra, spec, target, hypershiftEnv, createdInfra, createdIAM)
+			if cleanupErr != nil {
+				return errors.Join(createErr, cleanupErr)
+			}
+			return createErr
+		}
+
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
@@ -166,6 +180,7 @@ func (r *Reconciler) Reconcile(
 		if err != nil {
 			return nil, fmt.Errorf("create IAM: %w", err)
 		}
+		createdIAM = true
 
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
@@ -176,8 +191,9 @@ func (r *Reconciler) Reconcile(
 		// Create infrastructure
 		infraConfig, err := r.infra.CreateInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
 		if err != nil {
-			return nil, fmt.Errorf("create infra: %w", err)
+			return nil, cleanupCreateFailure(fmt.Errorf("create infra: %w", err))
 		}
+		createdInfra = true
 
 		signaler.Emit(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
@@ -188,7 +204,7 @@ func (r *Reconciler) Reconcile(
 		// Build CLS cluster spec
 		clsClusterSpec, err := BuildCLSClusterSpec(spec, target, infraConfig, iamConfig, keypair.PrivateKeyPEMBase64)
 		if err != nil {
-			return nil, fmt.Errorf("build CLS cluster spec: %w", err)
+			return nil, cleanupCreateFailure(fmt.Errorf("build CLS cluster spec: %w", err))
 		}
 
 		signaler.Emit(ctx, domain.DeliveryEvent{
@@ -200,13 +216,13 @@ func (r *Reconciler) Reconcile(
 		// Create cluster
 		clusterData, err := clsClient.CreateCluster(ctx, clsClusterSpec)
 		if err != nil {
-			return nil, fmt.Errorf("create cluster: %w", err)
+			return nil, cleanupCreateFailure(fmt.Errorf("create cluster: %w", err))
 		}
 
 		var ok bool
 		clusterID, ok = clusterData["id"].(string)
 		if !ok || clusterID == "" {
-			return nil, fmt.Errorf("cluster creation response missing id field")
+			return nil, cleanupCreateFailure(fmt.Errorf("cluster creation response missing id field"))
 		}
 
 		signaler.Emit(ctx, domain.DeliveryEvent{
@@ -389,31 +405,22 @@ func (r *Reconciler) Delete(
 	})
 
 	// Resolve cluster ID by name
-	clusterID, err := clsClient.ResolveClusterID(ctx, spec.Name)
+	clusterID, deletedCluster, err := deleteClusterIfPresent(ctx, clsClient, spec.Name, signaler)
 	if err != nil {
-		return fmt.Errorf("resolve cluster ID: %w", err)
+		return err
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   fmt.Sprintf("Deleting cluster %s (ID: %s)", spec.Name, clusterID),
-	})
+	if deletedCluster {
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   "Polling for cluster deletion",
+		})
 
-	// Delete cluster
-	if err := clsClient.DeleteCluster(ctx, clusterID); err != nil {
-		return fmt.Errorf("delete cluster: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Polling for cluster deletion",
-	})
-
-	// Poll until deleted
-	if err := PollClusterDeleted(ctx, clsClient, clusterID, signaler); err != nil {
-		return fmt.Errorf("poll cluster deleted: %w", err)
+		// Poll until deleted
+		if err := PollClusterDeleted(ctx, clsClient, clusterID, signaler); err != nil {
+			return fmt.Errorf("poll cluster deleted: %w", err)
+		}
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{

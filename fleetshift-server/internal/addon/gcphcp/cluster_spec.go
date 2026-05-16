@@ -59,6 +59,17 @@ func validateClusterSpec(spec *ClusterSpec) error {
 			domain.ErrInvalidArgument, spec.Name)
 	}
 
+	for i, np := range spec.Nodepools {
+		if np.Replicas < 0 {
+			return fmt.Errorf("%w: nodepools[%d].replicas must be >= 0 (got %d)",
+				domain.ErrInvalidArgument, i, np.Replicas)
+		}
+		if np.RootVolumeSize < 0 {
+			return fmt.Errorf("%w: nodepools[%d].rootVolumeSize must be >= 0 (got %d)",
+				domain.ErrInvalidArgument, i, np.RootVolumeSize)
+		}
+	}
+
 	return nil
 }
 
@@ -83,7 +94,7 @@ func (s *ClusterSpec) ApplyDefaults() {
 		wasDefault := np.Replicas == 0
 
 		if np.Name == "" {
-			np.Name = fmt.Sprintf("%s-nodepool-1", s.Name)
+			np.Name = fmt.Sprintf("%s-nodepool-%d", s.Name, i+1)
 		}
 		if np.Replicas == 0 {
 			np.Replicas = 2
