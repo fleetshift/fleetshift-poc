@@ -41,9 +41,9 @@ GCPHCP_WORKFORCE_POOL=<your-workforce-pool>
 GCPHCP_WORKFORCE_PROVIDER=<your-workforce-provider>
 GCPHCP_BROKER_SA_EMAIL=hcp-idtoken-broker@<your-gcp-project>.iam.gserviceaccount.com
 
-task podman:up                   # local auth (default)
 task podman:up AUTH=external
 ```
+For GCPHCP_ENABLED=true, you must also use AUTH=external. gcphcp does not work with local keycloak.
 
 For `AUTH=external`, make sure `OIDC_ISSUER_URL` is also set in `.env`.
 
