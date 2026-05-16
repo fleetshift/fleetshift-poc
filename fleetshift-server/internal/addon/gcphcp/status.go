@@ -3,6 +3,7 @@ package gcphcp
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"sort"
 	"strings"
 	"time"
@@ -215,7 +216,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 	// Check immediately first
 	_, err := client.GetCluster(ctx, clusterID)
 	if err != nil {
-		if strings.Contains(err.Error(), "404") {
+		if isCLSHTTPStatus(err, http.StatusNotFound) {
 			signaler.Emit(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
@@ -241,7 +242,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 		case <-ticker.C:
 			_, err := client.GetCluster(ctx, clusterID)
 			if err != nil {
-				if strings.Contains(err.Error(), "404") {
+				if isCLSHTTPStatus(err, http.StatusNotFound) {
 					signaler.Emit(ctx, domain.DeliveryEvent{
 						Timestamp: time.Now(),
 						Kind:      domain.DeliveryEventProgress,

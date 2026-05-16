@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
@@ -273,6 +274,26 @@ func TestCLSClient_ListClusters(t *testing.T) {
 	}
 }
 
+func TestCLSClient_ListClusters_RejectsMissingClustersField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": "c-1", "name": "cluster-a"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := gcphcp.NewCLSClient(server.URL, "token", "email@example.com", nil)
+	_, err := client.ListClusters(context.Background())
+	if err == nil {
+		t.Fatal("expected missing clusters field error")
+	}
+	if !strings.Contains(err.Error(), "clusters") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestCLSClient_ListNodepools(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -302,6 +323,29 @@ func TestCLSClient_ListNodepools(t *testing.T) {
 	}
 	if nodepools[0]["name"] != "worker-a" {
 		t.Errorf("name = %v", nodepools[0]["name"])
+	}
+}
+
+func TestCLSClient_ListNodepools_RejectsMissingNodepoolsField(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("clusterId") != "c-123" {
+			t.Errorf("unexpected clusterId query %q", r.URL.Query().Get("clusterId"))
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": "np-1", "name": "worker-a"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := gcphcp.NewCLSClient(server.URL, "token", "email@example.com", nil)
+	_, err := client.ListNodepools(context.Background(), "c-123")
+	if err == nil {
+		t.Fatal("expected missing nodepools field error")
+	}
+	if !strings.Contains(err.Error(), "nodepools") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -342,5 +386,28 @@ func TestCLSClient_ResolveClusterID_NotFound(t *testing.T) {
 	}
 	if !errors.Is(err, gcphcp.ErrClusterNotFound) {
 		t.Fatalf("expected ErrClusterNotFound, got %v", err)
+	}
+}
+
+func TestCLSClient_ResolveClusterID_DoesNotTreatMalformedListAsNotFound(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"items": []map[string]any{
+				{"id": "c-1", "name": "cluster-a"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := gcphcp.NewCLSClient(server.URL, "token", "email@example.com", nil)
+	_, err := client.ResolveClusterID(context.Background(), "cluster-a")
+	if err == nil {
+		t.Fatal("expected malformed list error")
+	}
+	if errors.Is(err, gcphcp.ErrClusterNotFound) {
+		t.Fatalf("expected protocol error, got ErrClusterNotFound: %v", err)
+	}
+	if !strings.Contains(err.Error(), "clusters") {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

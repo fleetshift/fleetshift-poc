@@ -196,3 +196,55 @@ func TestPollClusterDeleted_ReturnsNon404Errors(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestPollClusterDeleted_SucceedsOnHTTP404(t *testing.T) {
+	origInterval := clusterPollInterval
+	origTimeout := clusterPollTimeout
+	clusterPollInterval = 5 * time.Millisecond
+	clusterPollTimeout = 20 * time.Millisecond
+	defer func() {
+		clusterPollInterval = origInterval
+		clusterPollTimeout = origTimeout
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clusters/c-123" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		http.Error(w, "not found", http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	if err := PollClusterDeleted(context.Background(), client, "c-123", &domain.DeliverySignaler{}); err != nil {
+		t.Fatalf("expected HTTP 404 to count as deleted, got %v", err)
+	}
+}
+
+func TestPollClusterDeleted_DoesNotTreat404TextInBodyAsDeletion(t *testing.T) {
+	origInterval := clusterPollInterval
+	origTimeout := clusterPollTimeout
+	clusterPollInterval = 5 * time.Millisecond
+	clusterPollTimeout = 20 * time.Millisecond
+	defer func() {
+		clusterPollInterval = origInterval
+		clusterPollTimeout = origTimeout
+	}()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clusters/c-123" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		http.Error(w, "upstream lookup mentioned stale 404 cache entry", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterDeleted(context.Background(), client, "c-123", &domain.DeliverySignaler{})
+	if err == nil {
+		t.Fatal("expected non-404 status with 404 text in body to remain an error")
+	}
+	if !strings.Contains(err.Error(), "get cluster") || !strings.Contains(err.Error(), "HTTP 502") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}

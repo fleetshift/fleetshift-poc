@@ -24,6 +24,17 @@ type CLSClient struct {
 	httpClient *http.Client
 }
 
+type clsHTTPError struct {
+	Method     string
+	Path       string
+	StatusCode int
+	Body       string
+}
+
+func (e *clsHTTPError) Error() string {
+	return fmt.Sprintf("CLS API %s %s failed (HTTP %d): %s", e.Method, e.Path, e.StatusCode, e.Body)
+}
+
 func NewCLSClient(baseURL, brokerToken, brokerEmail string, httpClient *http.Client) *CLSClient {
 	if httpClient == nil {
 		httpClient = &http.Client{Timeout: defaultCLSHTTPTimeout}
@@ -61,21 +72,7 @@ func (c *CLSClient) ListClusters(ctx context.Context) ([]map[string]any, error) 
 	if err != nil {
 		return nil, err
 	}
-	raw, ok := result["clusters"]
-	if !ok {
-		return nil, nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected clusters field type")
-	}
-	out := make([]map[string]any, 0, len(list))
-	for _, item := range list {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out, nil
+	return requiredObjectListField(result, "clusters")
 }
 
 func (c *CLSClient) DeleteCluster(ctx context.Context, clusterID string) error {
@@ -99,21 +96,7 @@ func (c *CLSClient) ListNodepools(ctx context.Context, clusterID string) ([]map[
 	if err != nil {
 		return nil, err
 	}
-	raw, ok := result["nodepools"]
-	if !ok {
-		return nil, nil
-	}
-	list, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("unexpected nodepools field type")
-	}
-	out := make([]map[string]any, 0, len(list))
-	for _, item := range list {
-		if m, ok := item.(map[string]any); ok {
-			out = append(out, m)
-		}
-	}
-	return out, nil
+	return requiredObjectListField(result, "nodepools")
 }
 
 func (c *CLSClient) DeleteNodepool(ctx context.Context, nodepoolID string) error {
@@ -167,7 +150,12 @@ func (c *CLSClient) doJSON(ctx context.Context, method, path string, body any) (
 	}
 
 	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("CLS API %s %s failed (HTTP %d): %s", method, path, resp.StatusCode, respBody)
+		return nil, &clsHTTPError{
+			Method:     method,
+			Path:       path,
+			StatusCode: resp.StatusCode,
+			Body:       string(respBody),
+		}
 	}
 
 	if len(respBody) == 0 {
@@ -179,4 +167,35 @@ func (c *CLSClient) doJSON(ctx context.Context, method, path string, body any) (
 		return nil, fmt.Errorf("parse CLS response: %w", err)
 	}
 	return result, nil
+}
+
+func requiredObjectListField(result map[string]any, field string) ([]map[string]any, error) {
+	if result == nil {
+		return nil, fmt.Errorf("CLS response missing %s field", field)
+	}
+
+	raw, ok := result[field]
+	if !ok {
+		return nil, fmt.Errorf("CLS response missing %s field", field)
+	}
+
+	list, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("CLS response field %q has unexpected type %T", field, raw)
+	}
+
+	out := make([]map[string]any, 0, len(list))
+	for i, item := range list {
+		m, ok := item.(map[string]any)
+		if !ok {
+			return nil, fmt.Errorf("CLS response field %q item %d has unexpected type %T", field, i, item)
+		}
+		out = append(out, m)
+	}
+	return out, nil
+}
+
+func isCLSHTTPStatus(err error, statusCode int) bool {
+	var httpErr *clsHTTPError
+	return errors.As(err, &httpErr) && httpErr.StatusCode == statusCode
 }
