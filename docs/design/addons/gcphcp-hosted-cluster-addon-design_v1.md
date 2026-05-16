@@ -785,18 +785,23 @@ Deliver()
   -> create or update hosted cluster
   -> reconcile desired nodepool set
   -> poll management-plane status
-  -> if guest bootstrap is actually available:
+  -> if guest bootstrap succeeds within the current retry window:
        -> gather guest endpoint / trust / credentials
        -> bootstrap platform delivery access
        -> emit ProvisionedTarget + ProducedSecrets
      else:
-       -> complete without guest target registration
+       -> fail with explicit "cluster provisioned, registration incomplete" message
   -> signaler.Done(...)
 ```
 
 In v1, that async flow is still part of a single spec-triggered orchestration pass. If the addon
 times out or reaches a terminal result without guest delivery readiness, it should report that
-state through the current pass rather than request a second reconcile from the platform.
+state through the current pass rather than request a second reconcile from the platform. Because v1
+has no addon-driven requeue, no periodic resync, and no durable managed-resource status surface for
+"provisioned but not registered yet", the preferred behavior is to fail the current delivery
+explicitly once the bounded guest-bootstrap retry window is exhausted. That failure message should
+make clear that the hosted cluster reached management-plane readiness and only guest target
+registration is incomplete.
 
 ### 9.6 Reconcile is the target design, even though the PoC demonstrates create/delete first
 
@@ -843,8 +848,10 @@ ServiceAccount token.
 
 **Phase 3 — Register:** Emit `ProvisionedTarget` + `ProducedSecret` only after bootstrap succeeds
 and the durable output contract is complete. If cluster phase is `Ready` but bootstrap is still
-failing or pending, the addon should report status only and should **not** register the guest
-cluster yet.
+failing or pending, the addon should keep retrying within the current delivery. If that bounded
+retry window is exhausted, the addon should fail the current delivery with an explicit message that
+the hosted cluster is provisioned and management-plane ready, but guest target registration did not
+complete. In all cases it should **not** register the guest cluster until bootstrap succeeds.
 
 The only CLS status field the addon needs beyond cluster phase is the **APIServer endpoint URL**
 from `controller_status[cls-hypershift-client].conditions[type=APIServer].message`, which tells the
@@ -879,8 +886,11 @@ In v1, that means all of the following must be true:
 - TLS trust material or the narrow bootstrap fallback from section 10.5 is available
 - a durable delivery credential is successfully created and captured
 
-If any of those are still pending, the addon should keep reporting managed-resource status and defer
-guest target registration.
+If any of those are still pending, the addon should keep retrying within the current delivery. If
+they are still not available when that bounded retry window is exhausted, the addon should fail the
+current pass with an explicit message that provisioning reached management-plane ready but guest
+target registration is incomplete. It should not emit a guest target and it should not rely on a
+follow-up reconcile being scheduled automatically.
 
 ### 10.3 PoC-proven guest-cluster auth
 
@@ -1212,8 +1222,9 @@ If the next step is implementation planning, the v1 direction is:
 9. trigger reconciliation only from FleetShift-side spec changes; no addon-driven requeue
 10. register a `kubernetes` target only after cluster phase is `Ready`, the guest API is reachable
     for bootstrap, and guest bootstrap succeeds, including `api_server`, `ca_cert`,
-    `service_account_token_ref`, and `trust_bundle` so attested follow-on delivery also works in v1
-    (see section 10.4)
+    `service_account_token_ref`, and `trust_bundle` so attested follow-on delivery also works in v1;
+    if bootstrap still does not complete by the end of the bounded retry window, fail the delivery
+    explicitly rather than silently succeeding without registration (see section 10.4)
 11. report status through delivery events with a full status dump on completion (see section 12)
 12. implement delivery-owned cleanup for emitted guest targets, inventory, and referenced vault
     secrets so hosted-cluster outputs are removed automatically during teardown (see section 11.6)

@@ -2,8 +2,12 @@ package gcphcp
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 type reconcileContextKey string
@@ -39,5 +43,24 @@ func TestNewReconcileContext_AddsDeadlineAndPreservesValues(t *testing.T) {
 	case <-runCtx.Done():
 		t.Fatal("reconcile context should not be done immediately")
 	default:
+	}
+}
+
+func TestDeliveryResultForReconcileError_PostProvisionRegistrationErrorUsesExplicitMessage(t *testing.T) {
+	result := deliveryResultForReconcileError(
+		newPostProvisionRegistrationError(fmt.Errorf("bootstrap guest cluster after 3 attempts: RBAC not ready")),
+	)
+
+	if result.State != domain.DeliveryStateFailed {
+		t.Fatalf("state = %q, want %q", result.State, domain.DeliveryStateFailed)
+	}
+	if !strings.Contains(result.Message, "cluster provisioned and management-plane ready") {
+		t.Fatalf("message = %q, want management-plane ready context", result.Message)
+	}
+	if !strings.Contains(result.Message, "guest target registration did not complete") {
+		t.Fatalf("message = %q, want guest registration context", result.Message)
+	}
+	if !strings.Contains(result.Message, "RBAC not ready") {
+		t.Fatalf("message = %q, want wrapped bootstrap cause", result.Message)
 	}
 }

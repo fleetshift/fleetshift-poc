@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -637,5 +639,55 @@ func TestRecoverFromAmbiguousCreateFailure_SkipsCleanupWhenProbeFails(t *testing
 	}
 	if !strings.Contains(err.Error(), "request timeout") || !strings.Contains(err.Error(), "probe for cluster after ambiguous create") {
 		t.Fatalf("expected combined create/probe error, got %v", err)
+	}
+}
+
+func TestCompleteGuestRegistration_ReturnsPostProvisionRegistrationErrorAfterBootstrapRetries(t *testing.T) {
+	origAttempts := guestBootstrapMaxAttempts
+	origDelay := guestBootstrapRetryDelay
+	origBootstrap := bootstrapGuestCluster
+	guestBootstrapMaxAttempts = 3
+	guestBootstrapRetryDelay = 0
+	defer func() {
+		guestBootstrapMaxAttempts = origAttempts
+		guestBootstrapRetryDelay = origDelay
+		bootstrapGuestCluster = origBootstrap
+	}()
+
+	bootstrapCalls := 0
+	bootstrapGuestCluster = func(context.Context, string, string, domain.TargetID) (BootstrapResult, error) {
+		bootstrapCalls++
+		return BootstrapResult{}, errors.New("rbac setup job not ready")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/clusters/c-123/status" {
+			t.Fatalf("unexpected path %q", r.URL.Path)
+		}
+		fmt.Fprint(w, `{"controller_status":[{"conditions":[{"type":"APIServer","message":"https://guest.example:6443"}]}]}`)
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "broker-token", "broker@example.com", nil)
+
+	_, _, err := completeGuestRegistration(
+		context.Background(),
+		client,
+		"c-123",
+		"broker-token",
+		domain.TargetID("guest-target"),
+		&domain.DeliverySignaler{},
+	)
+	if err == nil {
+		t.Fatal("expected guest registration error")
+	}
+	if !isPostProvisionRegistrationError(err) {
+		t.Fatalf("expected post-provision registration error, got %T: %v", err, err)
+	}
+	if bootstrapCalls != 3 {
+		t.Fatalf("bootstrap calls = %d, want 3", bootstrapCalls)
+	}
+	if !strings.Contains(err.Error(), "bootstrap guest cluster after 3 attempts") {
+		t.Fatalf("error = %v, want retry exhaustion context", err)
 	}
 }

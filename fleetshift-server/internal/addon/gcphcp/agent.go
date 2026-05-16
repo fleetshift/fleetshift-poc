@@ -162,10 +162,7 @@ func (a *Agent) deliverAsync(
 	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, signaler)
 	if err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
-		signaler.Done(ctx, domain.DeliveryResult{
-			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("cluster provisioning failed: %v", err),
-		})
+		signaler.Done(ctx, deliveryResultForReconcileError(err))
 		return
 	}
 

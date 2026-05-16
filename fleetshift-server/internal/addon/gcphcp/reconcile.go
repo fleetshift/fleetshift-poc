@@ -12,6 +12,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+var (
+	guestBootstrapMaxAttempts = 10
+	guestBootstrapRetryDelay  = 15 * time.Second
+	bootstrapGuestCluster     = BootstrapGuestCluster
+)
+
 // Reconciler coordinates the full cluster create/update and delete flows.
 // It sequences auth, infra, client, status, and bootstrap modules to manage
 // the lifecycle of GCP HCP clusters.
@@ -46,6 +52,89 @@ func (r *Reconciler) TrustBundles() []domain.TrustBundleEntry {
 	result := make([]domain.TrustBundleEntry, len(r.trustBundles))
 	copy(result, r.trustBundles)
 	return result
+}
+
+func completeGuestRegistration(
+	ctx context.Context,
+	clsClient *CLSClient,
+	clusterID string,
+	brokerToken string,
+	guestTargetID domain.TargetID,
+	signaler *domain.DeliverySignaler,
+) (string, BootstrapResult, error) {
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Timestamp: time.Now(),
+		Kind:      domain.DeliveryEventProgress,
+		Message:   "Resolving guest API endpoint",
+	})
+
+	statusData, err := clsClient.GetClusterStatus(ctx, clusterID)
+	if err != nil {
+		return "", BootstrapResult{}, newPostProvisionRegistrationError(
+			fmt.Errorf("get cluster status: %w", err),
+		)
+	}
+
+	guestEndpoint, err := ResolveGuestAPIEndpoint(statusData)
+	if err != nil {
+		return "", BootstrapResult{}, newPostProvisionRegistrationError(
+			fmt.Errorf("resolve guest API endpoint: %w", err),
+		)
+	}
+
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Timestamp: time.Now(),
+		Kind:      domain.DeliveryEventProgress,
+		Message:   fmt.Sprintf("Guest API endpoint: %s", guestEndpoint),
+	})
+
+	var bootstrapResult BootstrapResult
+	var bootstrapErr error
+	for attempt := 1; attempt <= guestBootstrapMaxAttempts; attempt++ {
+		signaler.Emit(ctx, domain.DeliveryEvent{
+			Timestamp: time.Now(),
+			Kind:      domain.DeliveryEventProgress,
+			Message:   fmt.Sprintf("Bootstrapping guest cluster (attempt %d/%d)", attempt, guestBootstrapMaxAttempts),
+		})
+
+		bootstrapResult, bootstrapErr = bootstrapGuestCluster(
+			ctx,
+			guestEndpoint,
+			brokerToken,
+			guestTargetID,
+		)
+		if bootstrapErr == nil {
+			signaler.Emit(ctx, domain.DeliveryEvent{
+				Timestamp: time.Now(),
+				Kind:      domain.DeliveryEventProgress,
+				Message:   "Bootstrap successful",
+			})
+			return guestEndpoint, bootstrapResult, nil
+		}
+
+		if attempt < guestBootstrapMaxAttempts {
+			signaler.Emit(ctx, domain.DeliveryEvent{
+				Timestamp: time.Now(),
+				Kind:      domain.DeliveryEventWarning,
+				Message:   fmt.Sprintf("Bootstrap failed, retrying in %v: %v", guestBootstrapRetryDelay, bootstrapErr),
+			})
+			select {
+			case <-ctx.Done():
+				return "", BootstrapResult{}, newPostProvisionRegistrationError(ctx.Err())
+			case <-time.After(guestBootstrapRetryDelay):
+			}
+		}
+	}
+
+	signaler.Emit(ctx, domain.DeliveryEvent{
+		Timestamp: time.Now(),
+		Kind:      domain.DeliveryEventWarning,
+		Message:   fmt.Sprintf("Hosted cluster is ready, but guest target registration did not complete: %v", bootstrapErr),
+	})
+
+	return "", BootstrapResult{}, newPostProvisionRegistrationError(
+		fmt.Errorf("bootstrap guest cluster after %d attempts: %w", guestBootstrapMaxAttempts, bootstrapErr),
+	)
 }
 
 // Reconcile performs the full cluster creation flow:
@@ -282,76 +371,17 @@ func (r *Reconciler) Reconcile(
 		return nil, fmt.Errorf("poll cluster ready: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Resolving guest API endpoint",
-	})
-
-	// Get cluster status and resolve guest API endpoint
-	statusData, err := clsClient.GetClusterStatus(ctx, clusterID)
-	if err != nil {
-		return nil, fmt.Errorf("get cluster status: %w", err)
-	}
-
-	guestEndpoint, err := ResolveGuestAPIEndpoint(statusData)
-	if err != nil {
-		return nil, fmt.Errorf("resolve guest API endpoint: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   fmt.Sprintf("Guest API endpoint: %s", guestEndpoint),
-	})
-
 	guestTargetID := GuestTargetID(spec.Name)
-
-	// Bootstrap guest cluster with retry loop
-	var bootstrapResult BootstrapResult
-	var bootstrapErr error
-	maxAttempts := 10
-	retryDelay := 15 * time.Second
-
-	for attempt := 1; attempt <= maxAttempts; attempt++ {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Timestamp: time.Now(),
-			Kind:      domain.DeliveryEventProgress,
-			Message:   fmt.Sprintf("Bootstrapping guest cluster (attempt %d/%d)", attempt, maxAttempts),
-		})
-
-		bootstrapResult, bootstrapErr = BootstrapGuestCluster(
-			ctx,
-			guestEndpoint,
-			authResult.BrokerToken,
-			guestTargetID,
-		)
-
-		if bootstrapErr == nil {
-			signaler.Emit(ctx, domain.DeliveryEvent{
-				Timestamp: time.Now(),
-				Kind:      domain.DeliveryEventProgress,
-				Message:   "Bootstrap successful",
-			})
-			break
-		}
-
-		if attempt < maxAttempts {
-			signaler.Emit(ctx, domain.DeliveryEvent{
-				Timestamp: time.Now(),
-				Kind:      domain.DeliveryEventProgress,
-				Message:   fmt.Sprintf("Bootstrap failed, retrying in %v: %v", retryDelay, bootstrapErr),
-			})
-			select {
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			case <-time.After(retryDelay):
-			}
-		}
-	}
-
-	if bootstrapErr != nil {
-		return nil, fmt.Errorf("bootstrap guest cluster after %d attempts: %w", maxAttempts, bootstrapErr)
+	guestEndpoint, bootstrapResult, err := completeGuestRegistration(
+		ctx,
+		clsClient,
+		clusterID,
+		authResult.BrokerToken,
+		guestTargetID,
+		signaler,
+	)
+	if err != nil {
+		return nil, err
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{
