@@ -3,6 +3,7 @@ package gcphcp_test
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
@@ -117,6 +118,34 @@ func TestParseConfig_MissingFile(t *testing.T) {
 	_, err := gcphcp.ParseConfig("/nonexistent/path/config.yaml")
 	if err == nil {
 		t.Fatal("expected error for missing file, got nil")
+	}
+}
+
+func TestParseConfig_RejectsUnknownFields(t *testing.T) {
+	configYAML := `gateway:
+  url: "https://hcp-backend-gateway.example.invalid"
+  audience: "test-client-id.apps.googleusercontent.com"
+targets:
+  - id: "gcphcp-example-region-staging"
+    gcp_project: "example-hcp-target-project"
+    region: "us-central1"
+    workforce_pool: "example-workforce-pool"
+    workforce_provier: "example-oidc-provider"
+    broker_sa_email: "hcp-idtoken-broker@example.iam.gserviceaccount.com"
+`
+
+	tmpDir := t.TempDir()
+	configPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		t.Fatalf("failed to write test config: %v", err)
+	}
+
+	_, err := gcphcp.ParseConfig(configPath)
+	if err == nil {
+		t.Fatal("expected error for unknown field, got nil")
+	}
+	if !strings.Contains(err.Error(), "field workforce_provier not found") {
+		t.Fatalf("expected unknown field error, got %v", err)
 	}
 }
 

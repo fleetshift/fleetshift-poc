@@ -1,6 +1,7 @@
 package gcphcp
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 
@@ -51,7 +52,9 @@ func ParseConfig(path string) (Config, error) {
 	}
 
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil {
 		return Config{}, fmt.Errorf("failed to parse config YAML: %w", err)
 	}
 
