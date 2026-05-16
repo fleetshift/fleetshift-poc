@@ -1,0 +1,6 @@
+services:
+  fleetshift-server:
+    environment:
+      GCPHCP_CONFIG: /config/gcphcp.yaml
+    volumes:
+      - ${GCPHCP_CONFIG}:/config/gcphcp.yaml:ro

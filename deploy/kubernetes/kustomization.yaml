@@ -16,6 +16,8 @@ configMapGenerator:
   - name: fleetshift-server-config
     envs:
       - config.env
+    files:
+      - gcphcp.yaml=gcphcp.yaml
 secretGenerator:
   - name: postgres-credentials
     envs:

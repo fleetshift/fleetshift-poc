@@ -44,6 +44,7 @@ services:
       - --http-addr=:${FLEETSHIFT_SERVER_HTTP_PORT}
       - --grpc-addr=:${FLEETSHIFT_SERVER_GRPC_PORT}
       - --log-level=${FLEETSHIFT_LOG_LEVEL}
+      - --addons=${FLEETSHIFT_SERVER_ADDONS:-kind,ocp,kubernetes}
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-ca-file=/certs/ca.crt
       - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift}

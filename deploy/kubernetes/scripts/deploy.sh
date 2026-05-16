@@ -29,6 +29,17 @@ K8S_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${K8S_DIR}/../.." && pwd)"
 NAMESPACE="fleetshift"
 
+is_truthy() {
+  case "${1,,}" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 echo "=== FleetShift Kubernetes Deployment ==="
 echo "Manifests: ${K8S_DIR}"
 echo ""
@@ -44,6 +55,15 @@ set -a
 source "${ROOT_DIR}/.env"
 set +a
 
+FLEETSHIFT_SERVER_ADDONS="ocp,kubernetes"
+GCPHCP_CONFIG_PATH=""
+if is_truthy "${GCPHCP_ENABLED:-false}"; then
+  FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS},gcphcp"
+  GCPHCP_CONFIG_PATH="/etc/fleetshift/gcphcp/gcphcp.yaml"
+fi
+
+"${ROOT_DIR}/deploy/render-gcphcp-config.sh" --output "${K8S_DIR}/gcphcp.yaml"
+
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
 OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
@@ -52,6 +72,9 @@ OIDC_AUDIENCE=${OIDC_AUDIENCE}
 KEY_ENROLLMENT_CLIENT_ID=${KEY_ENROLLMENT_CLIENT_ID}
 KEY_REGISTRY_ID=${KEY_REGISTRY_ID}
 KEY_REGISTRY_SUBJECT_EXPR=${KEY_REGISTRY_SUBJECT_EXPR}
+FLEETSHIFT_LOG_LEVEL=${FLEETSHIFT_LOG_LEVEL:-info}
+FLEETSHIFT_SERVER_ADDONS=${FLEETSHIFT_SERVER_ADDONS}
+GCPHCP_CONFIG_PATH=${GCPHCP_CONFIG_PATH}
 EOF
 
 cat > "${K8S_DIR}/secrets.env" <<EOF

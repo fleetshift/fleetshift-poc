@@ -43,14 +43,26 @@ func (tc TargetConfig) TargetProperties() map[string]string {
 	}
 }
 
-// ParseConfig reads and parses a YAML configuration file.
+// LoadConfig reads and parses a YAML configuration file.
 // It validates that all required fields are present.
-func ParseConfig(path string) (Config, error) {
+func LoadConfig(path string) (Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, fmt.Errorf("failed to read config file: %w", err)
 	}
 
+	return ParseConfigBytes(data)
+}
+
+// ParseConfig reads and parses a YAML configuration file.
+// It validates that all required fields are present.
+func ParseConfig(path string) (Config, error) {
+	return LoadConfig(path)
+}
+
+// ParseConfigBytes parses YAML configuration data and validates
+// that all required fields are present.
+func ParseConfigBytes(data []byte) (Config, error) {
 	var cfg Config
 	dec := yaml.NewDecoder(bytes.NewReader(data))
 	dec.KnownFields(true)

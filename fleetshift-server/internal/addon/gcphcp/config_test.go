@@ -83,6 +83,35 @@ targets:
 	}
 }
 
+func TestParseConfigBytes_Valid(t *testing.T) {
+	configYAML := []byte(`gateway:
+  url: "https://hcp-backend-gateway.example.invalid"
+  audience: "test-client-id.apps.googleusercontent.com"
+targets:
+  - id: "gcphcp-example-region-staging"
+    gcp_project: "example-hcp-target-project"
+    region: "us-central1"
+    workforce_pool: "example-workforce-pool"
+    workforce_provider: "example-oidc-provider"
+    broker_sa_email: "hcp-idtoken-broker@example.iam.gserviceaccount.com"
+`)
+
+	cfg, err := gcphcp.ParseConfigBytes(configYAML)
+	if err != nil {
+		t.Fatalf("ParseConfigBytes failed: %v", err)
+	}
+
+	if cfg.Gateway.URL != "https://hcp-backend-gateway.example.invalid" {
+		t.Errorf("unexpected gateway URL: %s", cfg.Gateway.URL)
+	}
+	if len(cfg.Targets) != 1 {
+		t.Fatalf("expected 1 target, got %d", len(cfg.Targets))
+	}
+	if cfg.Targets[0].ID != "gcphcp-example-region-staging" {
+		t.Errorf("unexpected target ID: %s", cfg.Targets[0].ID)
+	}
+}
+
 func TestParseConfig_RejectsMultipleTargets(t *testing.T) {
 	configYAML := `gateway:
   url: "https://hcp-backend-gateway.example.invalid"

@@ -35,8 +35,9 @@ spec:
             - --database-url-file=/run/secrets/fleetshift/database-url
             - --http-addr=:8085
             - --grpc-addr=:50051
-            - --log-level=info
-            - --addons=ocp,kubernetes
+            - --log-level=$(FLEETSHIFT_LOG_LEVEL)
+            - --addons=$(FLEETSHIFT_SERVER_ADDONS)
+            - --gcphcp-config=$(GCPHCP_CONFIG_PATH)
             - --web-dir=/srv/web
             - --oidc-ui-authority=$(OIDC_ISSUER_URL)
             - --oidc-ui-client-id=$(OIDC_UI_CLIENT_ID)
@@ -65,6 +66,9 @@ spec:
             - name: db-credentials
               mountPath: /run/secrets/fleetshift
               readOnly: true
+            - name: fleetshift-config-files
+              mountPath: /etc/fleetshift/gcphcp
+              readOnly: true
             - name: web-assets
               mountPath: /srv/web
               readOnly: true
@@ -80,5 +84,11 @@ spec:
               - key: DATABASE_URL
                 path: database-url
             defaultMode: 0400
+        - name: fleetshift-config-files
+          configMap:
+            name: fleetshift-server-config
+            items:
+              - key: gcphcp.yaml
+                path: gcphcp.yaml
         - name: web-assets
           emptyDir: {}

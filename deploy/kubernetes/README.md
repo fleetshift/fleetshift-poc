@@ -5,7 +5,7 @@ Deploy FleetShift to an OpenShift cluster using Kustomize manifests. Everything 
 ## What gets deployed
 
 - **PostgreSQL** — StatefulSet with PVC (5Gi), headless Service, file-based secret mounting (`_FILE` convention)
-- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, `--addons=ocp,kubernetes` (no kind)
+- **FleetShift server** — Deployment with web UI init container, `--database-url-file` for credentials, env-driven addon selection, and optional mounted `gcphcp.yaml`
 - **Networking** — OpenShift Routes (edge TLS) for HTTP/UI and gRPC, Service with ports 8085 (http) and 50051 (grpc)
 - **ImageStreams** — Pull from quay.io with scheduled import and deployment triggers
 - **Auth setup** — Job that registers the OIDC auth method via `fleetctl auth setup`
@@ -26,7 +26,10 @@ task kubernetes:status          # check pods, services, routes
 task kubernetes:teardown        # remove everything
 ```
 
-The deploy script generates `config.env` and `secrets.env` from the root `.env`, applies Kustomize manifests, waits for PostgreSQL and the server, imports images, and runs the auth-setup job. On completion it prints the frontend and gRPC URLs.
+The deploy script generates `config.env`, `secrets.env`, and `gcphcp.yaml`
+from the root `.env`, applies Kustomize manifests, waits for PostgreSQL and the
+server, imports images, and runs the auth-setup job. On completion it prints
+the frontend and gRPC URLs.
 
 ## Tasks
 
@@ -47,13 +50,23 @@ All tasks use the `kubernetes:` namespace (alias `k8:`).
 
 ## Configuration
 
-The deploy script reads the root `.env` and generates two files consumed by Kustomize generators:
+The deploy script reads the root `.env` and generates three files consumed by
+Kustomize generators:
 
-**`config.env`** (ConfigMap) — OIDC issuer URL, client IDs, audience, key enrollment settings.
+**`config.env`** (ConfigMap) — OIDC issuer URL, client IDs, audience, key
+enrollment settings, log level, resolved addon list, and optional
+`GCPHCP_CONFIG_PATH`.
 
 **`secrets.env`** (Secret) — PostgreSQL user, password, database name, and `DATABASE_URL`.
 
-See `config.env.template` and `secrets.env.template` for the full set of keys.
+**`gcphcp.yaml`** (ConfigMap file entry) — rendered from the `GCPHCP_*` values
+in `.env`. When `GCPHCP_ENABLED=true`, the server mounts this file and starts
+with `gcphcp` enabled. When `false`, the generated file is a disabled
+placeholder and the addon list stays `ocp,kubernetes`.
+
+Use the root `.env.template` for the authoritative input keys. The exact
+generated `config.env`, `secrets.env`, and `gcphcp.yaml` shapes are defined by
+`deploy/kubernetes/scripts/deploy.sh`.
 
 ## Image Management
 

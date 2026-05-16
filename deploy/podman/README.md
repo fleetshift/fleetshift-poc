@@ -25,6 +25,32 @@ task podman:cli-setup         # configure fleetctl CLI
 bin/fleetctl auth login       # log in (opens browser)
 ```
 
+`gcphcp` is opt-in in the Podman harness. A plain `task podman:up` starts the
+default local addon set without `gcphcp`. To enable `gcphcp`, set the
+`GCPHCP_*` values in `.env`, flip the enable flag, and choose the auth mode you
+want to run with:
+
+```bash
+GCPHCP_ENABLED=true
+GCPHCP_GATEWAY_URL=https://<your-cls-gateway>
+GCPHCP_GATEWAY_AUDIENCE=<your-cls-gateway-audience>
+GCPHCP_TARGET_ID=gcphcp-example-us-central1
+GCPHCP_GCP_PROJECT=<your-gcp-project>
+GCPHCP_GCP_REGION=us-central1
+GCPHCP_WORKFORCE_POOL=<your-workforce-pool>
+GCPHCP_WORKFORCE_PROVIDER=<your-workforce-provider>
+GCPHCP_BROKER_SA_EMAIL=hcp-idtoken-broker@<your-gcp-project>.iam.gserviceaccount.com
+
+task podman:up                   # local auth (default)
+task podman:up AUTH=external
+```
+
+For `AUTH=external`, make sure `OIDC_ISSUER_URL` is also set in `.env`.
+
+At startup, the harness renders `deploy/podman/.gcphcp.yaml` from `.env`,
+mounts that file into `fleetshift-server`, and adds `gcphcp` to the explicit
+addon list for the deployment.
+
 For development with hot-reload:
 
 ```bash
@@ -93,3 +119,13 @@ All tasks use the `podman:` namespace (alias `pd:`).
 ## Configuration
 
 Copy `.env.template` to `.env` and edit. All available settings are documented in the template. Command-line variables always override `.env`.
+
+### `gcphcp` Addon Toggle
+
+- Default: `kind,ocp,kubernetes`
+- Add `gcphcp`: set `GCPHCP_ENABLED=true` and fill in the `GCPHCP_*` values in
+  `.env`
+- Runtime artifact: Podman renders `deploy/podman/.gcphcp.yaml` from `.env` and
+  mounts it as `/config/gcphcp.yaml`
+- Follow-on tasks such as `task podman:logs`, `task podman:status`, and
+  `task podman:rebuild` recalculate the rendered config from the current `.env`
