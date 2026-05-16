@@ -28,6 +28,8 @@ type fakeCleanupInfra struct {
 	ops                []string
 	createIAMErr       error
 	createInfraErr     error
+	destroyIAMErr      error
+	destroyInfraErr    error
 	createIAMResults   []createAttemptResult
 	createInfraResults []createAttemptResult
 	createIAMCalls     int
@@ -88,12 +90,12 @@ func (f *fakeCleanupInfra) CreateInfra(_ context.Context, infraID, projectID, re
 
 func (f *fakeCleanupInfra) DestroyInfra(_ context.Context, infraID, projectID, region string, _ []string) error {
 	f.ops = append(f.ops, "infra:"+infraID+":"+projectID+":"+region)
-	return nil
+	return f.destroyInfraErr
 }
 
 func (f *fakeCleanupInfra) DestroyIAM(_ context.Context, infraID, projectID string, _ []string) error {
 	f.ops = append(f.ops, "iam:"+infraID+":"+projectID)
-	return nil
+	return f.destroyIAMErr
 }
 
 type fakeClusterDeleteClient struct {
@@ -269,6 +271,30 @@ func TestCleanupCreateResources_DestroysCreatedInfraAndIAM(t *testing.T) {
 		t.Fatalf("cleanupCreateResources() error = %v", err)
 	}
 
+	if got := strings.Join(infra.ops, ","); got != "infra:test-cluster:project-123:us-central1,iam:test-cluster:project-123" {
+		t.Fatalf("unexpected cleanup operations: %s", got)
+	}
+}
+
+func TestCleanupDeleteResources_ReturnsIAMFailure(t *testing.T) {
+	infra := &fakeCleanupInfra{
+		destroyIAMErr: errors.New("iam destroy failed"),
+	}
+
+	err := cleanupDeleteResources(
+		context.Background(),
+		infra,
+		ClusterSpec{Name: "test-cluster"},
+		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
+		[]string{"EXAMPLE=1"},
+		&domain.DeliverySignaler{},
+	)
+	if err == nil {
+		t.Fatal("expected IAM destroy failure")
+	}
+	if !strings.Contains(err.Error(), "destroy IAM") || !strings.Contains(err.Error(), "iam destroy failed") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if got := strings.Join(infra.ops, ","); got != "infra:test-cluster:project-123:us-central1,iam:test-cluster:project-123" {
 		t.Fatalf("unexpected cleanup operations: %s", got)
 	}

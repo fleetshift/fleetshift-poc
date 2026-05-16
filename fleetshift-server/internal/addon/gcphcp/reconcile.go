@@ -483,24 +483,8 @@ func (r *Reconciler) Delete(
 		Message:   "Destroying infrastructure",
 	})
 
-	// Destroy infrastructure
-	if err := r.infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
-		return fmt.Errorf("destroy infra: %w", err)
-	}
-
-	signaler.Emit(ctx, domain.DeliveryEvent{
-		Timestamp: time.Now(),
-		Kind:      domain.DeliveryEventProgress,
-		Message:   "Destroying IAM resources",
-	})
-
-	// Destroy IAM (best-effort, warn on failure)
-	if err := r.infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Timestamp: time.Now(),
-			Kind:      domain.DeliveryEventProgress,
-			Message:   fmt.Sprintf("Warning: IAM cleanup failed (non-fatal): %v", err),
-		})
+	if err := cleanupDeleteResources(ctx, r.infra, spec, target, hypershiftEnv, signaler); err != nil {
+		return err
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{

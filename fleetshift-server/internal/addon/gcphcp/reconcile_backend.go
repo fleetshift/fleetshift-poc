@@ -191,6 +191,24 @@ func cleanupCreateResources(
 	return cleanupErr
 }
 
+func cleanupDeleteResources(
+	ctx context.Context,
+	infra createCleanupInfra,
+	spec ClusterSpec,
+	target TargetConfig,
+	hypershiftEnv []string,
+	signaler *domain.DeliverySignaler,
+) error {
+	if err := infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
+		return fmt.Errorf("destroy infra: %w", err)
+	}
+	emitProgress(signaler, ctx, "Destroying IAM resources")
+	if err := infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
+		return fmt.Errorf("destroy IAM: %w", err)
+	}
+	return nil
+}
+
 func ensureIAMWithRecovery(
 	ctx context.Context,
 	infra prereqRecoveryInfra,
