@@ -4,9 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
+
+const defaultReconcileTimeout = 55 * time.Minute
+
+var reconcileTimeout = defaultReconcileTimeout
 
 // AgentDeps holds dependencies for creating an Agent.
 type AgentDeps struct {
@@ -138,6 +143,10 @@ func (a *Agent) Deliver(
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
+func newReconcileContext(parent context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(parent, reconcileTimeout)
+}
+
 // deliverAsync performs the asynchronous cluster provisioning.
 // It calls the reconciler and signals completion through the signaler.
 func (a *Agent) deliverAsync(
@@ -147,7 +156,10 @@ func (a *Agent) deliverAsync(
 	callerToken string,
 	signaler *domain.DeliverySignaler,
 ) {
-	output, err := a.reconciler.Reconcile(ctx, spec, target, callerToken, signaler)
+	runCtx, cancel := newReconcileContext(ctx)
+	defer cancel()
+
+	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, signaler)
 	if err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
 		signaler.Done(ctx, domain.DeliveryResult{

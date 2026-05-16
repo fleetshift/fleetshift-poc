@@ -1344,3 +1344,19 @@ That stronger model likely depends on `cls-backend` changes, because the current
 surface the guest API endpoint and kubeconfig secret name but do not provide the CA bundle itself.
 Until such a backend path exists, v1 still accepts a narrow insecure first hop during bootstrap.
 
+### 14.10 Durable and deterministic trust-bundle reconstruction
+
+V1 treats `idp-trust-bundle` input as process-local addon state: trust-bundle entries delivered to
+the seeded `gcphcp` target are retained in memory and copied into the emitted guest target's
+`trust_bundle` property during provisioning/reconcile.
+
+That means the trust set is not rebuilt from durable platform state on reconcile:
+
+- addon restart loses the in-memory set until trust-bundle deliveries happen again
+- duplicate deliveries can accumulate duplicate entries
+- two reconciles for the same desired cluster can emit different `trust_bundle` values depending on
+  prior process history
+
+Future work should make `trust_bundle` output durable and strictly idempotent by reconstructing the
+current trust set deterministically from durable source of truth before emitting guest targets.
+

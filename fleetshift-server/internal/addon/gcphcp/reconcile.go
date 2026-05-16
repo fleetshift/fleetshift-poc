@@ -342,7 +342,11 @@ func (r *Reconciler) Reconcile(
 				Kind:      domain.DeliveryEventProgress,
 				Message:   fmt.Sprintf("Bootstrap failed, retrying in %v: %v", retryDelay, bootstrapErr),
 			})
-			time.Sleep(retryDelay)
+			select {
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-time.After(retryDelay):
+			}
 		}
 	}
 

@@ -6,7 +6,9 @@ import (
 	"crypto/tls"
 	"encoding/pem"
 	"fmt"
+	"net"
 	"strings"
+	"time"
 
 	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -21,10 +23,13 @@ import (
 )
 
 const (
-	platformSAName      = "fleetshift-platform"
-	platformSANamespace = "kube-system"
-	platformTokenExpiry = 24 * 3600
+	platformSAName           = "fleetshift-platform"
+	platformSANamespace      = "kube-system"
+	platformTokenExpiry      = 24 * 3600
+	defaultCACertReadTimeout = 30 * time.Second
 )
+
+var caCertReadTimeout = defaultCACertReadTimeout
 
 // BootstrapResult contains the credentials and metadata obtained from
 // bootstrapping a guest cluster.
@@ -77,7 +82,10 @@ func BootstrapGuestCluster(ctx context.Context, guestEndpoint, brokerToken strin
 		return BootstrapResult{}, err
 	}
 
-	caCert, err := readCACert(guestEndpoint)
+	caCtx, cancel := context.WithTimeout(ctx, caCertReadTimeout)
+	defer cancel()
+
+	caCert, err := readCACert(caCtx, guestEndpoint)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -141,16 +149,23 @@ func createSAToken(ctx context.Context, client kubernetes.Interface) ([]byte, er
 
 // readCACert retrieves the CA certificate from the guest cluster endpoint
 // by establishing a TLS connection and reading the peer certificates.
-func readCACert(endpoint string) ([]byte, error) {
+func readCACert(ctx context.Context, endpoint string) ([]byte, error) {
 	host := endpoint
 	for _, prefix := range []string{"https://", "http://"} {
 		host = strings.TrimPrefix(host, prefix)
 	}
-	conn, err := tls.Dial("tcp", host, &tls.Config{InsecureSkipVerify: true})
+
+	rawConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
 	if err != nil {
 		return nil, fmt.Errorf("dial guest endpoint for CA: %w", err)
 	}
+	conn := tls.Client(rawConn, &tls.Config{InsecureSkipVerify: true})
 	defer conn.Close()
+
+	if err := conn.HandshakeContext(ctx); err != nil {
+		return nil, fmt.Errorf("handshake guest endpoint for CA: %w", err)
+	}
+
 	certs := conn.ConnectionState().PeerCertificates
 	if len(certs) == 0 {
 		return nil, fmt.Errorf("no certificates from guest endpoint")
