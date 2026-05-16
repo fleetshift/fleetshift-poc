@@ -1,16 +1,10 @@
 package gcphcp
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
-	"encoding/pem"
 	"fmt"
-	"net"
-	"strings"
 	"time"
 
-	authv1 "k8s.io/api/authentication/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -18,19 +12,22 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-	"k8s.io/utils/ptr"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 const (
-	platformSAName           = "fleetshift-platform"
-	platformSANamespace      = "kube-system"
-	platformTokenExpiry      = 24 * 3600
-	defaultCACertReadTimeout = 30 * time.Second
+	platformSAName                     = "fleetshift-platform"
+	platformSANamespace                = "kube-system"
+	platformSATokenSecretName          = platformSAName + "-token"
+	defaultPlatformSATokenPollInterval = 250 * time.Millisecond
+	defaultPlatformSATokenWaitTimeout  = 30 * time.Second
 )
 
-var caCertReadTimeout = defaultCACertReadTimeout
+var (
+	platformSATokenSecretPollInterval = defaultPlatformSATokenPollInterval
+	platformSATokenSecretWaitTimeout  = defaultPlatformSATokenWaitTimeout
+)
 
 // BootstrapResult contains the credentials and metadata obtained from
 // bootstrapping a guest cluster.
@@ -47,9 +44,8 @@ func DeliverySecretRef(targetID domain.TargetID) domain.SecretRef {
 }
 
 // BootstrapGuestCluster creates a ServiceAccount with cluster-admin RBAC
-// on the guest cluster and returns a bearer token and CA certificate for it.
-// This simulates the credential provisioning that a real fleetlet agent
-// would perform.
+// on the guest cluster and returns a durable bearer token and CA certificate
+// for it, sourced from a manually managed service-account-token Secret.
 //
 // The function uses the broker token to authenticate to the guest cluster
 // endpoint, creates the necessary resources, and extracts the credentials
@@ -78,15 +74,12 @@ func BootstrapGuestCluster(ctx context.Context, guestEndpoint, brokerToken strin
 		return BootstrapResult{}, err
 	}
 
-	token, err := createSAToken(ctx, client)
+	secretName, err := ensurePlatformSATokenSecret(ctx, client)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
 
-	caCtx, cancel := context.WithTimeout(ctx, caCertReadTimeout)
-	defer cancel()
-
-	caCert, err := readCACert(caCtx, guestEndpoint)
+	token, caCert, err := waitForPlatformSATokenSecretData(ctx, client, secretName)
 	if err != nil {
 		return BootstrapResult{}, err
 	}
@@ -164,49 +157,85 @@ func createPlatformRBAC(ctx context.Context, client kubernetes.Interface) error 
 	return nil
 }
 
-// createSAToken creates a token for the fleetshift-platform ServiceAccount
-// with a 24-hour expiry.
-func createSAToken(ctx context.Context, client kubernetes.Interface) ([]byte, error) {
-	tokenReq, err := client.CoreV1().ServiceAccounts(platformSANamespace).CreateToken(
-		ctx, platformSAName, &authv1.TokenRequest{
-			Spec: authv1.TokenRequestSpec{
-				ExpirationSeconds: ptr.To[int64](platformTokenExpiry),
+func ensurePlatformSATokenSecret(ctx context.Context, client kubernetes.Interface) (string, error) {
+	secrets := client.CoreV1().Secrets(platformSANamespace)
+	desired := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      platformSATokenSecretName,
+			Namespace: platformSANamespace,
+			Annotations: map[string]string{
+				corev1.ServiceAccountNameKey: platformSAName,
 			},
-		}, metav1.CreateOptions{})
-	if err != nil {
-		return nil, fmt.Errorf("create token for %s/%s: %w", platformSANamespace, platformSAName, err)
+		},
+		Type: corev1.SecretTypeServiceAccountToken,
 	}
-	return []byte(tokenReq.Status.Token), nil
+
+	if _, err := secrets.Create(ctx, desired, metav1.CreateOptions{}); err != nil && !apierrors.IsAlreadyExists(err) {
+		return "", fmt.Errorf("create service account token secret %s/%s: %w", platformSANamespace, desired.Name, err)
+	}
+
+	secret, err := secrets.Get(ctx, desired.Name, metav1.GetOptions{})
+	if err != nil {
+		return "", fmt.Errorf("get service account token secret %s/%s: %w", platformSANamespace, desired.Name, err)
+	}
+	if err := validatePlatformSATokenSecret(secret); err != nil {
+		return "", err
+	}
+	return secret.Name, nil
 }
 
-// readCACert retrieves the CA certificate from the guest cluster endpoint
-// by establishing a TLS connection and reading the peer certificates.
-func readCACert(ctx context.Context, endpoint string) ([]byte, error) {
-	host := endpoint
-	for _, prefix := range []string{"https://", "http://"} {
-		host = strings.TrimPrefix(host, prefix)
+func validatePlatformSATokenSecret(secret *corev1.Secret) error {
+	if secret.Type != corev1.SecretTypeServiceAccountToken {
+		return fmt.Errorf(
+			"service account token secret %s/%s has type %q, want %q",
+			secret.Namespace, secret.Name, secret.Type, corev1.SecretTypeServiceAccountToken,
+		)
 	}
+	if secret.Annotations[corev1.ServiceAccountNameKey] != platformSAName {
+		return fmt.Errorf(
+			"service account token secret %s/%s targets service account %q, want %q",
+			secret.Namespace, secret.Name, secret.Annotations[corev1.ServiceAccountNameKey], platformSAName,
+		)
+	}
+	return nil
+}
 
-	rawConn, err := (&net.Dialer{}).DialContext(ctx, "tcp", host)
-	if err != nil {
-		return nil, fmt.Errorf("dial guest endpoint for CA: %w", err)
-	}
-	conn := tls.Client(rawConn, &tls.Config{InsecureSkipVerify: true})
-	defer conn.Close()
+func waitForPlatformSATokenSecretData(
+	ctx context.Context,
+	client kubernetes.Interface,
+	secretName string,
+) ([]byte, []byte, error) {
+	waitCtx, cancel := context.WithTimeout(ctx, platformSATokenSecretWaitTimeout)
+	defer cancel()
 
-	if err := conn.HandshakeContext(ctx); err != nil {
-		return nil, fmt.Errorf("handshake guest endpoint for CA: %w", err)
-	}
+	ticker := time.NewTicker(platformSATokenSecretPollInterval)
+	defer ticker.Stop()
 
-	certs := conn.ConnectionState().PeerCertificates
-	if len(certs) == 0 {
-		return nil, fmt.Errorf("no certificates from guest endpoint")
-	}
-	var buf bytes.Buffer
-	for _, cert := range certs {
-		if err := pem.Encode(&buf, &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}); err != nil {
-			return nil, fmt.Errorf("encode certificate: %w", err)
+	for {
+		secret, err := client.CoreV1().Secrets(platformSANamespace).Get(waitCtx, secretName, metav1.GetOptions{})
+		if err != nil {
+			return nil, nil, fmt.Errorf("get service account token secret %s/%s: %w", platformSANamespace, secretName, err)
+		}
+		if err := validatePlatformSATokenSecret(secret); err != nil {
+			return nil, nil, err
+		}
+
+		token := secret.Data["token"]
+		caCert := secret.Data["ca.crt"]
+		if len(token) > 0 && len(caCert) > 0 {
+			return token, caCert, nil
+		}
+
+		select {
+		case <-waitCtx.Done():
+			if waitCtx.Err() == context.DeadlineExceeded {
+				return nil, nil, fmt.Errorf(
+					"timeout waiting for service account token secret %s/%s to be populated: %w",
+					platformSANamespace, secretName, waitCtx.Err(),
+				)
+			}
+			return nil, nil, waitCtx.Err()
+		case <-ticker.C:
 		}
 	}
-	return buf.Bytes(), nil
 }
