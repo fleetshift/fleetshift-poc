@@ -16,6 +16,7 @@ var (
 	guestBootstrapMaxAttempts = 10
 	guestBootstrapRetryDelay  = 15 * time.Second
 	bootstrapGuestCluster     = BootstrapGuestCluster
+	failureSnapshotTimeout    = 10 * time.Second
 )
 
 // Reconciler coordinates the full cluster create/update and delete flows.
@@ -144,7 +145,7 @@ func (r *Reconciler) Reconcile(
 	target TargetConfig,
 	callerToken string,
 	signaler *domain.DeliverySignaler,
-) (*ClusterOutput, error) {
+) (_ *ClusterOutput, retErr error) {
 	signaler.Emit(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
@@ -173,6 +174,32 @@ func (r *Reconciler) Reconcile(
 
 	// Create CLS client
 	clsClient := NewCLSClient(r.gateway.URL, authResult.BrokerToken, authResult.BrokerEmail, nil)
+	var clusterID string
+	defer func() {
+		if retErr == nil {
+			return
+		}
+
+		snapshotCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), failureSnapshotTimeout)
+		defer cancel()
+
+		snapshotClusterID := clusterID
+		if snapshotClusterID == "" {
+			resolvedID, err := clsClient.ResolveClusterID(snapshotCtx, spec.Name)
+			switch {
+			case err == nil:
+				snapshotClusterID = resolvedID
+			case !errors.Is(err, ErrClusterNotFound):
+				emitProgress(signaler, snapshotCtx, fmt.Sprintf("Unable to resolve cluster for failure snapshot: %v", err))
+			}
+		}
+		if snapshotClusterID == "" {
+			return
+		}
+		if err := emitFailureStatusSnapshot(snapshotCtx, clsClient, snapshotClusterID, spec.Name, signaler); err != nil {
+			emitProgress(signaler, snapshotCtx, fmt.Sprintf("Unable to emit failure snapshot: %v", err))
+		}
+	}()
 
 	signaler.Emit(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
@@ -180,7 +207,7 @@ func (r *Reconciler) Reconcile(
 		Message:   "Reconciling cluster via CLS API",
 	})
 
-	clusterID, err := clsClient.ResolveClusterID(ctx, spec.Name)
+	clusterID, err = clsClient.ResolveClusterID(ctx, spec.Name)
 	switch {
 	case err == nil:
 		observedCluster, err := clsClient.GetCluster(ctx, clusterID)
@@ -367,6 +394,8 @@ func (r *Reconciler) Reconcile(
 	if err := PollClusterReady(ctx, clsClient, clusterID, signaler); err != nil {
 		return nil, fmt.Errorf("poll cluster ready: %w", err)
 	}
+
+	emitClusterReadyTransition(ctx, signaler)
 
 	guestTargetID := GuestTargetID(spec.Name)
 	guestEndpoint, bootstrapResult, err := completeGuestRegistration(

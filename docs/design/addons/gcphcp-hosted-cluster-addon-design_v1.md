@@ -530,8 +530,15 @@ API surface, and Go validation in `ParseClusterSpec` for the internal delivery p
 
 **Example: creating a cluster via fleetctl**
 
+Current `fleetctl` uses the generic managed-resource surface:
+
+- list available reflected resource collections with `fleetctl resource types`
+- create a cluster with `fleetctl resource create <plural> --id <id> --spec-file <path-or->`
+- for `gcphcp`, the current reflected plural is `GCPHCPClusters`
+
 ```bash
-fleetctl managed-resource create api.gcphcp.cluster --spec '{
+fleetctl resource create GCPHCPClusters --id my-cluster --spec-file - <<'EOF'
+{
   "name": "my-cluster",
   "endpointAccess": "PublicAndPrivate",
   "releaseVersion": "4.22.0",
@@ -547,7 +554,8 @@ fleetctl managed-resource create api.gcphcp.cluster --spec '{
       "upgradeType": "Replace"
     }
   ]
-}'
+}
+EOF
 ```
 
 ### 6.4 Startup sequence
@@ -1236,9 +1244,32 @@ logged/observed during the run rather than treated as durable managed-resource s
 [progress] Delivery credentials created, registering target
 ```
 
-On both success and failure, the addon should emit/log a **complete status dump** of the cluster and
-nodepool statuses from the CLS backend at the end of the run. This gives users a full snapshot for
-debugging without needing to query the CLS backend directly during that reconcile pass.
+On **failure only**, the addon should emit/log a **redacted, curated failure snapshot** derived from
+the CLS backend's cluster and nodepool status surfaces at the end of the run. The snapshot should
+capture the most useful operator-facing debug fields without dumping raw backend payloads.
+
+The failure snapshot should include:
+
+- cluster ID and cluster name
+- cluster phase, reason, and message
+- release version when available
+- whether an `APIServer` endpoint was present in CLS status
+- selected degraded / failed / unknown controller conditions for the cluster
+- per-nodepool ID, name, phase, reason, and message
+- selected degraded / failed / unknown controller conditions for each nodepool
+
+The failure snapshot must **not** include raw CLS objects or sensitive provider/bootstrap data such
+as:
+
+- raw cluster `spec`
+- `serviceAccountSigningKey`
+- secret or kubeconfig object names
+- full controller metadata payloads
+- project numbers
+- service-account email addresses
+
+Successful runs should end with the normal progress/completion events only. They should not emit a
+full status snapshot by default.
 
 For failures, the addon forwards the CLS backend's error message directly into the delivery result:
 
@@ -1273,7 +1304,8 @@ If the next step is implementation planning, the v1 direction is:
     delivery also works in v1; if bootstrap or desired nodepool readiness still does not complete
     by the end of the bounded delivery window, fail the delivery explicitly rather than silently
     succeeding without registration (see section 10.4)
-11. report status through delivery events with a full status dump on completion (see section 12)
+11. report status through delivery events and emit a redacted curated failure snapshot only when a
+    reconcile run fails after a hosted cluster exists (see section 12)
 12. implement delivery-owned cleanup for emitted guest targets, inventory, and referenced vault
     secrets so hosted-cluster outputs are removed automatically during teardown (see section 11.6)
 
@@ -1382,8 +1414,9 @@ hosted-cluster teardown.
 
 ### 14.8 Structured status reporting
 
-V1 reports status through emitted/logged delivery events (message strings) and a status dump at
-completion. This is intentionally an execution-time observability model, not durable
+V1 reports status through emitted/logged delivery events (message strings) and a curated redacted
+failure snapshot on failed completion. This is intentionally an execution-time observability model,
+not durable
 managed-resource status. It is sufficient for provisioning visibility but has significant gaps:
 
 - after delivery completes, status is frozen — FleetShift has no live view of cluster health
@@ -1392,6 +1425,8 @@ managed-resource status. It is sufficient for provisioning visibility but has si
 - the CLS backend exposes rich per-controller and per-nodepool conditions (30+ HostedCluster
   conditions, per-nodepool machine/node health, version progression) that are lost in the v1
   event log
+- the addon intentionally does not emit raw full CLS payloads on success or failure because those
+  payloads can contain sensitive bootstrap/provider data that is inappropriate for normal logs
 
 Future work should add structured status to the managed resource, including curated cluster and
 nodepool status derived from the CLS backend's controller status surfaces. This likely requires
