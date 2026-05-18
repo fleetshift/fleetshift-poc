@@ -1,6 +1,6 @@
 # Target delivery contract
 
-A fleetshift <i>Target</i> is a logical "location" that can *either* fulfill manifest delivery and/or report inventory. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
+A fleetshift *Target* is a logical "location" that can *either* fulfill manifest delivery and/or report inventory. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
 
@@ -14,7 +14,7 @@ Targets have to handle two main things:
 1. Fulfillment (eventually converging on latest fulfillment intent)
 2. Reporting back (status, inventory)
 
-> Note: See [./managed_resources.md ](../managed_resources.md) description of condition events and inventory
+> Note: See [./managed_resources.md](../managed_resources.md)  description of condition events and inventory
 
 This contract is intentionally Kubernetes-like. It is also intentionally not 1-1 defined and coupled to the kubernetes API. A kubernetes cluster is, and should be, a natural target. However, to the extent that other targets may fit that shape, they can also be targets, without forcing them to be fronted by a Kubernetes resource and controller (and thus API server semantics like the security and tenancy model). 
 
@@ -47,8 +47,8 @@ When an addon starts up, it should:
 1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
 2. Wait, asynchronously, for delivery requests and ONLY "ack" once enough there is just enough state, and no more, to guarantee progress (see next steps). The quicker the ack the more responsive progression will be. Acks should generally be quick (i.e. within a typical response time of a single synchronous RPC).
 3. Ask for what fulfillments are in progress (creating or deleting)
-   - Based on 2, whatever is received here should be enough to finish
-   - Due to the platforms guarantees, an addon will never receive a follow-up delivery for a fulfillment that is still in progress. So races between 3 and 2 should never happen.
+  - Based on 2, whatever is received here should be enough to finish
+  - Due to the platforms guarantees, an addon will never receive a follow-up delivery for a fulfillment that is still in progress. So races between 3 and 2 should never happen.
 
 > NOTE: Somewhere the addon needs to discover new targets that come over time. Does this just come as part of deliveries from step 2?
 
@@ -61,12 +61,11 @@ The platform enforces a concurrency limit of one in-flight delivery per fulfillm
 This decomposes into two independent subproblems:
 
 1. **Platform-side stale delivery.** The addon receives a delivery with an older generation than one it has already processed for the same fulfillment. Solutions:
-   - **Resource metadata.** Store the generation as target-side metadata (Kubernetes annotation, cloud resource tag, etc.). Before applying, check the stored generation; skip if the delivery's generation is not newer.
-   - **Platform-provided journal.** If the addon uses the platform journal (see [Journaling](#journaling) below), the journal write enforces generation ordering: the platform rejects a journal entry for an older generation when a newer one is already recorded. The journal becomes the generation fence — the addon writes before acting, and the write itself is the high-water mark check. The platform also discards stale acks (the workflow eventually realizes its lock is lost.)
-
+  - **Resource metadata.** Store the generation as target-side metadata (Kubernetes annotation, cloud resource tag, etc.). Before applying, check the stored generation; skip if the delivery's generation is not newer.
+  - **Platform-provided journal.** If the addon uses the platform journal (see [Journaling](#journaling) below), the journal write enforces generation ordering: the platform rejects a journal entry for an older generation when a newer one is already recorded. The journal becomes the generation fence — the addon writes before acting, and the write itself is the high-water mark check. The platform also discards stale acks (the workflow eventually realizes its lock is lost.)
 2. **Addon-side concurrency.** The addon itself may have concurrent processes (e.g. one still alive when another connects), causing read-modify-write races against the target. Solutions:
-   - **At-most-one leaseholder per target.** A Kubernetes `Lease` or equivalent ensures only one active process per target. This is the same pattern Kubernetes controllers use via leader election.
-   - **Optimistic concurrency.** Use the target's native concurrency control (Kubernetes `resourceVersion`, Azure ARM etags) to detect and retry conflicting writes.
+  - **At-most-one leaseholder per target.** A Kubernetes `Lease` or equivalent ensures only one active process per target. This is the same pattern Kubernetes controllers use via leader election.
+  - **Optimistic concurrency.** Use the target's native concurrency control (Kubernetes `resourceVersion`, Azure ARM etags) to detect and retry conflicting writes.
 
 > NOTE: "The workflow eventually realizes its lock is lost" – we should be careful that within an activity, these races are detected. For example, we don't want an old ack to overwrite a more recent one.
 
@@ -99,7 +98,7 @@ This is the key question:
 
 The platform can handle guaranteed delivery. But the target needs to know what to do with that deterministically for idempotency and correctness (as required by step 2 above). If you create a bunch of things, how do you uniquely identify those things for deletion or reconciliation later?
 
-That is, journaling may be necessary to make progress at all, regardless of whethere it is a removal.
+That is, journaling may be necessary to make progress at all, regardless of whether it is a removal.
 
 Sometimes identifying a resource is easy–it's "self-identifying." A kube manifest itself is self-identifying. In other cases, the identity of resources resulting may be sourced from input not contained within that manifest itself. This could be other state known only to the addon at runtime, obtained via I/O like syscalls or service calls or otherwise. In this case, identifiers must be stored so they can be retrieved later.
 
@@ -131,10 +130,10 @@ For OCM, drift is simply reprocessing manifests periodically and querying agains
 These should all be achievable, generally, by adding two more steps to the protocol above:
 
 1. Ask for what active fulfillments (those not creating, deleting, or terminal) it should watch for state (drift) and conditions.
-   - This can be done in one or more ways: either by asking for active fulfillments directly, or by asking for what targets the addon is currently fulfilling.
+  - This can be done in one or more ways: either by asking for active fulfillments directly, or by asking for what targets the addon is currently fulfilling.
 2. Watch the implied resources for changes.
-   - How this is done is implementation dependent. A target may have native, efficient change detection. Or, it may just poll.
-   - The scope of what is reported may vary based on configuration TBD. For example, it is unlikely we'd index all state about all resources in a managed kubernetes clusters, but some subset.
+  - How this is done is implementation dependent. A target may have native, efficient change detection. Or, it may just poll.
+  - The scope of what is reported may vary based on configuration TBD. For example, it is unlikely we'd index all state about all resources in a managed kubernetes clusters, but some subset.
 
 ## Open questions / notes
 
