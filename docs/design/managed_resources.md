@@ -14,7 +14,7 @@ Example: imagine a full featured cluster management addon. It should handle many
 - Provision & configure clusters through native self managed options (e.g. wrapping openshift assisted installer)
 - Provision & configure clusters through operators like CAPI or HyperShift
 - Import existing clusters
-- Upgrade these clusters (either individually or through a campaign, see https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81 )
+- Upgrade these clusters (either individually or through a campaign, see [https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81](https://redhat.atlassian.net/jira/software/c/projects/FM/list?selectedIssue=FM-81) )
 - Full exploitation of the core placement and rollout strategy abstractions for progressive delivery, maintenance windows, etc., encoding specific cluster management best practices
 - Assist in knowable operational issues in the course of provisioning, upgrades, or other configuration changes
 - Manage cluster pooling strategies
@@ -35,10 +35,9 @@ These are the consumer-facing "nouns" of the platform, in contrast to the addon-
 
 ## Proposal
 
-_Managed resources_ are the "consumer-facing nouns" of the platform. They are addon-driven. Addons register to provide the functions for one or more managed resource types.
+*Managed resources* are the "consumer-facing nouns" of the platform. They are addon-driven. Addons register to provide the functions for one or more managed resource types.
 
-Managed resources are driven by the core Fulfillment abstraction. A managed resource is a _registered resource type_ (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
-
+Managed resources are driven by the core Fulfillment abstraction. A managed resource is a *registered resource type* (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
 
 Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a ROSA cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the actual API shape. Field names, nesting, and conventions are assumed for readability.**)
 
@@ -176,10 +175,10 @@ domain.ManagedResourceSchema{
 }
 ```
 
-- **`Singular`** / **`Plural`**: PascalCase resource names. The platform derives gRPC method names directly (e.g. `CreateKindCluster`, `ListKindClusters`) and lowerCamelCase HTTP paths per AIP-122 (e.g. `POST /v1/kindClusters`, `GET /v1/kindClusters/{id}`).
-- **`ProtoFiles`**: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
-- **`SpecMessage`**: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
-- **`Relation`**: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
+- `**Singular**` / `**Plural**`: PascalCase resource names. The platform derives gRPC method names directly (e.g. `CreateKindCluster`, `ListKindClusters`) and lowerCamelCase HTTP paths per AIP-122 (e.g. `POST /v1/kindClusters`, `GET /v1/kindClusters/{id}`).
+- `**ProtoFiles**`: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
+- `**SpecMessage**`: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
+- `**Relation**`: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
 
 The platform validates at connect time that every schema matches a declared `ManagedResourceCapability`. On reconnection, schemas are reconciled: removed types are deactivated, unchanged types are left in place (content-hashed), and changed types are atomically replaced. See [addon lifecycle](architecture/addon_integration.md#addon-lifecycle) for details.
 
@@ -240,6 +239,8 @@ sequenceDiagram
     User->>Platform: GET /clusters/prod-us-east-1
     Platform-->>User: state: ACTIVE,<br/>api_url: https://...,<br/>console_url: https://...
 ```
+
+
 
 The key property: the platform is a courier throughout. It stores the user's signed intent, mechanically derives a Fulfillment, and delivers the resource spec to the addon through the standard pipeline. The addon — a separate process with its own identity — is the only component that interprets the spec and interacts with the cloud provider. Provenance chains from the user's signature through the managed resource to the derived Fulfillment to the delivery attestation, without the platform ever needing to understand what a "ROSA cluster" is.
 
@@ -325,7 +326,7 @@ Deliveries are keyed on `(fulfillment_id, target_id)`. For bundled intents with 
 
 manifest_results has a narrow purpose: "what happened when I tried to apply each manifest." Written at apply time, overwritten on next apply. Not historical — delivery condition events cover the transition story. Failed applies don't produce inventory; manifest_results covers failures.
 
-**Delivery conditions** are addon-reported _operational_ status on this target — the addon's own assessment of its ability to function ("can't reach API server", "auth failed", "apply batch completed"). These are NOT a semantic health aggregate of deployed resources. The addon is the thing doing the delivery, so if there's aggregate status only it knows about, it needs a place to put it.
+**Delivery conditions** are addon-reported *operational* status on this target — the addon's own assessment of its ability to function ("can't reach API server", "auth failed", "apply batch completed"). These are NOT a semantic health aggregate of deployed resources. The addon is the thing doing the delivery, so if there's aggregate status only it knows about, it needs a place to put it.
 
 **Fulfillment conditions** are platform-aggregated from delivery conditions via CEL. Single-target = pass-through. Built-in defaults when no CEL registered. Two stored condition levels: delivery (addon-reported) and Fulfillment (platform-aggregated). No per-manifest condition layer on deliveries — per-manifest health comes from inventory.
 
@@ -476,7 +477,7 @@ Addons need to be able to integrate with each other.
 
 Managed resource types extend both the gRPC and HTTP API surface at runtime. When a schema is activated, the platform:
 
-1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/*`, `google/protobuf/*`) from a built-in registry.
+1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/`*, `google/protobuf/*`) from a built-in registry.
 2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the pattern `fleetshift.v1.{Singular}Service` (e.g. `fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
 3. **Registers** the service in the `DynamicServiceMux`, which is wired as the gRPC server's `UnknownServiceHandler`. Requests to services not registered at server creation time are routed here instead of being rejected. Composite reflection merges dynamic services with static ones so they are discoverable via `grpcurl`.
 4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/v1/{plural}` and `/v1/{plural}/{id}`.
@@ -487,6 +488,8 @@ The transport-layer components (`DynamicServiceMux`, `DynamicHTTPMux`, `DynamicS
 
 ### Durability
 
+> NOTE: This topic has been expanded on in [target_delivery_contract.md](./architecture/target_delivery_contract.md).
+
 How does this design guarantee that (under failure conditions)...
 
 - no resources are orphaned
@@ -495,13 +498,13 @@ How does this design guarantee that (under failure conditions)...
 When an addon [re]connects...
 
 - it has to ask about what work it has left to do
-- it has to ensure it's reported the state it knows about. This may require querying for all the things it _should_ know about and updating those.
+- it has to ensure it's reported the state it knows about. This may require querying for all the things it *should* know about and updating those.
 
 ### What was eliminated
 
 - **Mutable managed_resources table** — replaced by versioned intent
 - **Separate managed resource status table** — observed state through inventory
-- **`state` field on Fulfillments as the sole observed-state mechanism** — stable outputs only; historical observed state through inventory
+- `**state` field on Fulfillments as the sole observed-state mechanism** — stable outputs only; historical observed state through inventory
 - **Per-manifest condition layer on deliveries** — inventory is the per-resource condition system
 - **Three-level condition hierarchy** — two levels sufficient (delivery + Fulfillment)
 - **Multiple intent pointers per Fulfillment** — bundled intent preferred; strategy versioning is per strategy type, not per intent
@@ -536,7 +539,6 @@ Completed in OME-43. The codebase now has `Fulfillment` as its own aggregate wit
 ### Phasing
 
 1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle (phase). No rich status. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
-
 2. **Phase 2:** Inventory as observation system. Inventory items with state + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
-
 3. **Phase 3:** CEL-based aggregation for multi-target. Fleet-wide condition and inventory queries. Campaign and deployment as user-facing concepts over Fulfillments.
+

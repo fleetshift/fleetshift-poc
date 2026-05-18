@@ -1,325 +1,322 @@
 ## Core model
 
-In OCM, workload reconciliation is primarily a **spoke-side convergence loop** driven by **hub-side desired state**.
+OCM workload delivery is a **spoke-side, eventually consistent controller system**.
 
 - **Desired state** lives on the hub as `ManifestWork`
-- **Actual state** lives on the managed cluster as normal Kubernetes objects
-- **Spoke-side bookkeeping** lives on the managed cluster as `AppliedManifestWork`
-- The **hub does not directly apply manifests to the managed cluster**; the spoke `work-agent` does
+- **Actual state** lives on the managed cluster as ordinary Kubernetes objects
+- **Local inventory and cleanup state** lives on the managed cluster as `AppliedManifestWork`
+- The **hub does not directly apply manifests**; the spoke `work-agent` does
 
-The API contract says this explicitly:
+The important mental model is:
 
-```13:18:github.com/open-cluster-management-io/ocm/vendor/open-cluster-management.io/api/work/v1/types.go
-// ManifestWork represents a manifests workload that hub wants to deploy on the managed cluster.
-// A manifest workload is defined as a set of Kubernetes resources.
-// ManifestWork must be created in the cluster namespace on the hub, so that agent on the
-// corresponding managed cluster can access this resource and deploy on the managed
-// cluster.
-```
+- `ManifestWork` is the current desired bundle for this cluster
+- `AppliedManifestWork` is a durable local checkpoint of what the spoke believes it applied and may later need to clean up
+- controllers reconcile by replay, not by transaction
 
-So the high-level split is:
+## Hub vs spoke responsibilities
 
-- **Hub**: store desired work, place/fan it out, accept status
-- **Spoke**: apply, observe, and report
+On the hub, OCM mostly stores and fans out desired work. The hub-side `work-manager` creates and manages `ManifestWork` objects, but it does not reconcile the leaf `Deployment`, `ConfigMap`, or other resource directly on the managed cluster.
 
-## Hub-side responsibilities
+On the spoke, the `work-agent`:
 
-The hub-side `work-manager` does **not** reconcile the delivered `ConfigMap` or `Deployment` on the managed cluster.
-
-Its main work is in `pkg/work/hub/manager.go`:
-
-- build a hub-side `ManifestWork` client/informer
-- run `ManifestWorkReplicaSet` reconciliation
-- optionally garbage-collect completed `ManifestWork`
-
-That means hub-side work reconciliation is mostly:
-
-- `ManifestWorkReplicaSet` -> per-cluster `ManifestWork`
-- cleanup of hub-side work objects
+- watches a cluster-scoped view of hub `ManifestWork`
+- applies manifests locally
+- reads back local status and feedback
+- tracks local applied inventory
+- finalizes and evicts local work when the hub work changes or disappears
 
 The actual leaf-object convergence loop lives on the spoke.
 
 ## Spoke runtime
 
-The spoke `work-agent` is started by `pkg/cmd/spoke/work.go`, which calls `RunWorkloadAgent()` in `pkg/work/spoke/spokeagent.go`.
+`RunWorkloadAgent()` in `reference/ocm/pkg/work/spoke/spokeagent.go` builds:
 
-At startup it builds:
+- spoke clients against the managed cluster API
+- a hub `ManifestWork` client/informer
+- a spoke `AppliedManifestWork` client/informer
+- local controllers for apply, status, finalization, and orphan cleanup
 
-- **spoke clients** against the managed cluster API
-- a **hub `ManifestWork` client/informer** against the hub source of truth
-- local controllers for apply, status, finalization, eviction
+By default, the hub source is the hub Kubernetes API. The hub informer is namespace-scoped to the spoke cluster name, so each spoke only watches its own `ManifestWork` namespace on the hub.
 
-By default the hub source is the hub Kubernetes API via a mounted kubeconfig:
+The main controllers are:
 
-```220:269:github.com/open-cluster-management-io/ocm/pkg/work/spoke/spokeagent.go
-if o.workOptions.WorkloadSourceDriver == "kube" {
-	config, err := clientcmd.BuildConfigFromFlags("", o.workOptions.WorkloadSourceConfig)
-	// ...
-	workClient, err = workclientset.NewForConfig(config)
-	// ...
-} else {
-	// For cloudevents drivers, we build ManifestWork client that implements the
-	// ManifestWorkInterface and ManifestWork informer based on different driver configuration.
-	// ...
-}
-factory := workinformers.NewSharedInformerFactoryWithOptions(
-	workClient,
-	24*time.Hour,
-	workinformers.WithNamespace(o.agentOptions.SpokeClusterName),
-)
-informer := factory.Work().V1().ManifestWorks()
-```
-
-Important details:
-
-- the informer is scoped to `WithNamespace(o.agentOptions.SpokeClusterName)`
-- so each spoke only watches **its own namespace on the hub**
-- controllers mostly read desired state from the informer/lister cache, not repeated live GETs
-
-The main controllers started by the work agent are:
-
+- `AddFinalizerController`
 - `ManifestWorkController`
 - `AvailableStatusController`
-- `AddFinalizerController`
 - `ManifestWorkFinalizeController`
 - `AppliedManifestWorkFinalizeController`
 - `UnManagedAppliedWorkController`
 
-## The main spoke-side reconciliation loop
+These controllers mostly read from informer/lister caches, not repeated live GETs to the hub.
 
-The core apply loop is `ManifestWorkController` in `pkg/work/spoke/controllers/manifestcontroller/manifestwork_controller.go`.
+## Main reconciliation flow
 
-Its own comment is the best summary:
+The core apply loop is `ManifestWorkController`.
 
-```125:128:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/manifestcontroller/manifestwork_controller.go
-// sync is the main reconcile loop for manifest work. It is triggered in two scenarios
-// 1. ManifestWork API changes
-// 2. Resources defined in manifest changed on spoke
-```
+At a high level, one reconcile pass does this:
 
-Inside that loop:
+1. read the current `ManifestWork` from the hub informer cache
+2. ensure the `ManifestWork` cleanup finalizer is present
+3. ensure a corresponding local `AppliedManifestWork` exists
+4. parse the desired manifests, derive concrete resource identities, and apply them locally
+5. update `ManifestWork.Status` on the hub
+6. update `AppliedManifestWork.Status.AppliedResources` on the spoke
+7. requeue for another pass later
 
-1. it reads the current `ManifestWork` from the **hub lister cache**
-2. it ensures there is a corresponding local `AppliedManifestWork`
-3. it runs reconcilers that:
-   - apply manifests locally
-   - update `AppliedManifestWork.Status.AppliedResources`
-4. it patches `ManifestWork.Status` back to the hub
-5. it requeues itself for another pass later
-
-So the spoke is constantly doing:
+That means OCM is always reconciling:
 
 - **desired** = cached hub `ManifestWork`
-- **actual** = live/local resource state
-- **action** = apply/patch/delete/record status
+- **actual** = live local resource state
+- **local inventory** = `AppliedManifestWork`
 
-## Trigger path 1: immediate reconcile on hub `ManifestWork` changes
+This is not a cross-object transaction. Individual API writes are durable, but the overall flow is replayed and retried until it converges.
 
-The spoke adds event handlers to the **hub `ManifestWork` informer**. New works or spec/label changes get queued immediately:
+## What triggers reconciliation
 
-```236:280:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/manifestcontroller/manifestwork_controller.go
-func onAddFunc(queue workqueue.TypedRateLimitingInterface[string]) func(obj interface{}) {
-	return func(obj interface{}) {
-		// ...
-		if commonhelper.HasFinalizer(accessor.GetFinalizers(), workapiv1.ManifestWorkFinalizer) {
-			queue.Add(accessor.GetName())
-		}
-	}
-}
+OCM uses three trigger families:
 
-func onUpdateFunc(queue workqueue.TypedRateLimitingInterface[string]) func(oldObj, newObj interface{}) {
-	return func(oldObj, newObj interface{}) {
-		// enqueue when finalizer is added, spec or label is changed.
-		// ...
-		if !apiequality.Semantic.DeepEqual(newWork.Spec, oldWork.Spec) ||
-			!apiequality.Semantic.DeepEqual(newWork.Labels, oldWork.Labels) {
-			queue.Forget(newWork.GetName())
-			queue.Add(newWork.GetName())
-		}
-	}
-}
-```
+1. **Hub `ManifestWork` events**
+2. **Selected local resource events**
+3. **Periodic requeues**
 
-This is the “hub desired state changed, reconcile now” path.
+### 1. Hub events
 
-## Trigger path 2: local requeues when watched local resources change
+The main apply loop listens to the hub `ManifestWork` informer. New work, finalizer addition, spec changes, and label changes enqueue the work immediately.
 
-OCM also has a spoke-local path for status/feedback.
+This is the primary "desired state changed" trigger.
 
-`AvailableStatusController` reads local objects and, for manifests configured with `FeedbackScrapeType == Watch`, registers local informers on those actual resources:
+### 2. Selected local resource events
 
-```122:139:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/statuscontroller/availablestatus_controller.go
-for index, manifest := range manifestWork.Status.ResourceStatus.Manifests {
-	obj, availableStatusCondition, err := c.objectReader.Get(ctx, manifest.ResourceMeta)
-	// ...
-	option := helper.FindManifestConfiguration(manifest.ResourceMeta, manifestWork.Spec.ManifestConfigs)
-	if option != nil && option.FeedbackScrapeType == workapiv1.FeedbackWatchType {
-		if err := c.objectReader.RegisterInformer(ctx, manifestWork.Name, manifest.ResourceMeta, controllerContext.Queue()); err != nil {
-			// ...
-		}
-	} else {
-		if err := c.objectReader.UnRegisterInformer(manifestWork.Name, manifest.ResourceMeta); err != nil {
-			// ...
-		}
-	}
-}
-```
+OCM also has a spoke-local feedback path. `AvailableStatusController` reads local objects and, when `FeedbackScrapeType == Watch`, registers dynamic informers for those specific resources.
 
-Those local resource events are then mapped back to the owning `ManifestWork` and requeued:
+Those local resource add/update events are mapped back to the owning `ManifestWork` and requeued.
 
-```200:207:github.com/open-cluster-management-io/ocm/pkg/work/spoke/objectreader/reader.go
-registration, err := informer.informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-	AddFunc: o.queueWorkByResourceFunc(ctx, gvr, queue),
-	UpdateFunc: func(old, new interface{}) {
-		o.queueWorkByResourceFunc(ctx, gvr, queue)(new)
-	},
-})
-```
+Important nuance: this watch path is mainly for **availability, feedback, and condition freshness**. It is not a global "watch everything on the cluster and re-apply it" mechanism.
 
-```259:279:github.com/open-cluster-management-io/ocm/pkg/work/spoke/objectreader/reader.go
-func (o *objectReader) queueWorkByResourceFunc(ctx context.Context, gvr schema.GroupVersionResource, queue workqueue.TypedRateLimitingInterface[string]) func(object interface{}) {
-	return func(object interface{}) {
-		// ...
-		objects, err := o.indexer.ByIndex(byWorkIndex, key)
-		// ...
-		for _, obj := range objects {
-			work := obj.(*workapiv1.ManifestWork)
-			queue.Add(work.Name)
-		}
-	}
-}
-```
+### 3. Periodic requeues
 
-This is the “actual local state changed, revisit the owning work” path.
+OCM also has timer-based safety nets:
 
-One nuance: this local watch path is mainly used for **availability/status feedback**. It is not a global “watch everything always” mechanism.
+- the main `ManifestWorkController` requeues each work on a slower interval (default base ~4 minutes)
+- the `AvailableStatusController` requeues each work on a faster interval for status/feedback (default 10 seconds)
 
-## Trigger path 3: periodic requeues even without events
+So OCM is not purely event-driven. It also periodically reruns reconciliation even if no event was observed.
 
-OCM also has timer-based safety nets.
+## How OCM knows what to query on the spoke
 
-### Main apply loop
-The main `ManifestWorkController` requeues every work after each reconcile. The base interval is 4 minutes:
+For resources that are still part of the **current desired work**, OCM does not need `AppliedManifestWork` to know what to query.
 
-```37:40:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/manifestcontroller/manifestwork_controller.go
-var (
-	// ResyncInterval defines the base interval for periodic reconciliation via AddAfter.
-	ResyncInterval = 4 * time.Minute
-)
-```
+When applying a manifest, OCM parses the desired object and derives a concrete `ManifestResourceMeta` using the REST mapper:
 
-```169:202:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/manifestcontroller/manifestwork_controller.go
-var requeueTime = wait.Jitter(ResyncInterval, 0.5)
-// ...
-logger.V(2).Info("Requeue manifestwork", "requeue time", requeueTime)
-controllerContext.Queue().AddAfter(manifestWorkName, requeueTime)
-```
+- group
+- version
+- kind
+- resource
+- namespace
+- name
 
-This is the drift-repair safety net even if neither hub events nor local watch events fired.
+Those concrete resource identities are then used for:
 
-### Status loop
-The status controller also requeues periodically. The default status sync interval is 10 seconds:
+- apply and drift repair
+- availability checks
+- status feedback
+- condition rule evaluation
 
-```30:37:github.com/open-cluster-management-io/ocm/pkg/work/spoke/options.go
-return &WorkloadAgentOptions{
-	MaxJSONRawLength:                       1024,
-	StatusSyncInterval:                     10 * time.Second,
-	AppliedManifestWorkEvictionGracePeriod: 60 * time.Minute,
-	WorkloadSourceDriver:                   "kube",
-	WorkloadSourceConfig:                   "/spoke/hub-kubeconfig/kubeconfig",
-```
+`AvailableStatusController` reads those identities from `ManifestWork.Status.ResourceStatus.Manifests[*].ResourceMeta` and asks `objectReader` to `Get` or `Watch` the corresponding local objects.
 
-And it uses that interval to requeue:
+So for the **current desired set**, OCM can derive what to query from the work itself.
 
-```97:104:github.com/open-cluster-management-io/ocm/pkg/work/spoke/controllers/statuscontroller/availablestatus_controller.go
-err = c.syncManifestWork(ctx, controllerContext, manifestWork)
-if err != nil {
-	return fmt.Errorf("unable to sync manifestwork %q: %w", manifestWork.Name, err)
-}
+## Why `AppliedManifestWork` exists
 
-// requeue with a certain jitter
-controllerContext.Queue().AddAfter(manifestWorkName, wait.Jitter(c.syncInterval, 0.9))
-```
+`AppliedManifestWork` is not the desired state for reconciliation. It is the local inventory and cleanup checkpoint.
 
-So there is a separate fast periodic loop for status/feedback.
+Its main jobs are:
 
-## What “requeue” means in OCM
+- link local state to the hub work (`hubHash`, `manifestWorkName`, `agentID`)
+- record which concrete resources were applied
+- record enough information to safely delete them later
+- carry deletion/eviction progress across retries and restarts
 
-“Requeue” does **not** mean “update local state now.”
+This matters because the **current desired spec is not enough** to answer all cleanup questions.
 
-It means:
+Examples:
 
-- put the `ManifestWork` key back on the controller queue
-- when a worker picks it up, run `sync()` again
-- that new pass reads the **current** desired state from the hub cache and the **current** actual state from the spoke
+- a `ManifestWork` spec shrinks, so the current desired set no longer names some previously applied resources
+- a `ManifestWork` is deleted while the agent is down
+- a local cleanup is in progress and some resources are already deleting or blocked on their own finalizers
+- the hub work is gone, but the spoke still has local applied inventory
 
-So it schedules another convergence pass.
+So the real distinction is:
 
-## What is actually authoritative
+- `ManifestWork` tells OCM what **should exist now**
+- `AppliedManifestWork` tells OCM what it **believes it applied previously and may still need to clean up**
 
-For a delivered resource like a `ConfigMap`:
+## How cleanup works
 
-- **authoritative desired state**: `ManifestWork.Spec.Workload.Manifests` on the hub
-- **authoritative actual state**: the live `ConfigMap` in the spoke cluster API
-- **supporting tracking state**: `AppliedManifestWork`
+OCM has three important cleanup paths.
 
-`AppliedManifestWork` is not where the `ConfigMap` reconciles from. It is used for:
+### 1. Spec shrink: resource removed from a still-existing `ManifestWork`
 
-- naming/ownership linkage (`hubHash`, `manifestWorkName`, `agentID`)
-- inventory of applied resources
-- deletion/finalization/eviction
+When the desired work still exists but now contains fewer resources, OCM compares:
 
-That is why editing `AppliedManifestWork` does not redefine the desired `ConfigMap`, but it can interfere with cleanup logic.
+- the new applied set derived from the current work
+- the previous applied set recorded in `AppliedManifestWork.Status.AppliedResources`
 
-## How apply itself works
+Any previously applied resource that is no longer tracked by the current work is deleted.
 
-When the main reconcile runs, `manifestworkReconciler` iterates the manifests from the hub `ManifestWork`, validates executor permissions, picks an update strategy, and applies locally.
+This is why some local applied inventory is needed: the current `ManifestWork.Spec` no longer names the removed resources.
 
-The update strategy matters for drift:
+### 2. Hub `ManifestWork` delete: normal finalization path
 
-- `Update` or `ServerSideApply`: local drift is repaired on the next reconcile
-- `CreateOnly`: no automatic correction after initial create
-- `ReadOnly`: no corrective apply at all
+`AddFinalizerController` makes sure the `ManifestWork` cleanup finalizer is present before normal apply proceeds.
 
-So “spoke-side reconciliation” in OCM really means:
+When a `ManifestWork` is deleted on the hub:
 
-- keep an eventually consistent cache of desired work from the hub
-- react to hub events
-- react to selected local events
-- run periodic reconciliation anyway
-- use that to make the local cluster converge toward desired state over time
+1. `ManifestWorkFinalizeController` sees the deleting hub work
+2. it marks the work deleting and deletes the corresponding local `AppliedManifestWork`
+3. `AppliedManifestWorkFinalizeController` deletes the tracked local resources from `AppliedManifestWork.Status.AppliedResources`
+4. once cleanup completes, finalizers are removed and deletion finishes
 
-## What changes in alternate deployments
+This is the normal "hub work is terminating, clean up the spoke" path.
 
-Two big things can vary, but the logical model stays the same:
+### 3. Hub work missing: orphaned local work path
 
-- **transport**
-  - default: hub Kubernetes API (`WorkloadSourceDriver = kube`)
-  - alternate: CloudEvents-backed drivers like `grpc`, `mqtt`, `kafka`
-- **process placement**
-  - hosted/singleton modes move where the agent process runs
+Reprocessing known hub `ManifestWork`s is not enough to detect all cleanup cases.
 
-But in all of those, the controllers still see the same abstraction:
+If the agent is down while the hub work is deleted, then on restart:
+
+- the hub informer only sees the works that still exist
+- there is no retroactive delete event for the already-missing work
+- the spoke may still have a local `AppliedManifestWork`
+
+That case is handled by `UnManagedAppliedWorkController`.
+
+This controller watches **both**:
+
+- hub `ManifestWork`
+- local `AppliedManifestWork`
+
+and explicitly checks:
+
+- "I have this local applied work, does the corresponding hub `ManifestWork` still exist?"
+
+If the hub work is missing, or the local record points at a different hub hash, the controller starts an eviction timer and eventually deletes the orphaned `AppliedManifestWork`. That in turn triggers the normal local finalizer cleanup.
+
+This is the "check both directions" path that catches orphaned local work after missed history or restart.
+
+## Drift detection vs cleanup inventory
+
+It helps to separate two questions:
+
+### How does OCM detect drift for resources that are still desired?
+
+From the current `ManifestWork`, derived `ManifestResourceMeta`, local reads, and periodic requeues.
+
+For the current desired set, OCM mostly does not need `AppliedManifestWork` to know what to query.
+
+### How does OCM know what to remove when resources are no longer desired?
+
+From `AppliedManifestWork.Status.AppliedResources`.
+
+That inventory is what lets OCM say:
+
+- "this used to be managed"
+- "it no longer appears in the current work"
+- "I still need to delete or finish deleting it"
+
+So `AppliedManifestWork` is mainly about **cleanup and replay of previously managed state**, not about querying the current desired set.
+
+## Watch-based feedback
+
+`FeedbackScrapeType == Watch` is an optimization for **status and availability freshness**, not the main apply mechanism.
+
+Without watch-based feedback, OCM already has periodic status polling/requeue.
+
+With watch-based feedback, OCM:
+
+- registers a dynamic informer for the specific local resource
+- maps local add/update events back to the owning `ManifestWork`
+- refreshes feedback and conditions sooner than the normal status interval
+
+This is useful for:
+
+- faster availability updates
+- faster condition-rule evaluation
+- quicker feedback when another controller mutates the resource's status
+
+It is not required for correctness. It is a responsiveness improvement, and OCM caps the number of such watches and falls back to poll if the cap is exceeded.
+
+## Failure and consistency model
+
+OCM does **not** provide ACID atomicity across:
+
+- creating or updating `AppliedManifestWork`
+- mutating local resources
+- patching `ManifestWork.Status`
+- patching `AppliedManifestWork.Status`
+
+Instead, it relies on:
+
+- durable individual API writes
+- idempotent apply and delete behavior
+- finalizers as completion barriers
+- `AppliedManifestWork` as a durable local checkpoint
+- informer events plus periodic requeues to replay reconciliation after failures
+
+So the guarantee is best understood as:
+
+- **replayable, eventually consistent convergence**
+
+not:
+
+- **all-or-nothing transaction**
+
+## Update strategies and repair behavior
+
+The update strategy on a manifest affects what "drift repair" means:
+
+- `Update` and `ServerSideApply`: local drift is corrected on later reconcile passes
+- `CreateOnly`: create once, then stop trying to modify the object
+- `ReadOnly`: do not apply corrective changes at all
+
+So "reconcile" in OCM does not always mean "force the live object back to spec." It depends on the update strategy chosen for that manifest.
+
+## Transport does not change the contract
+
+OCM can source desired work from different transports:
+
+- default Kubernetes API (`WorkloadSourceDriver = kube`)
+- CloudEvents-backed drivers like `grpc`, `mqtt`, and `kafka`
+
+But the controller contract stays the same:
 
 - a `ManifestWork` client/informer for desired state
 - spoke clients for actual state
-- the same local convergence logic
+- the same local convergence, feedback, and cleanup logic
 
-So the contract does not change even if the transport does.
+So transport changes where the desired work view comes from, not the core reconciliation model.
+
+## Adaptation takeaway
+
+The most important lessons for adapting OCM-style behavior elsewhere are:
+
+- current desired-state drift detection can often be driven from the current work itself
+- cleanup of previously managed resources needs some durable notion of prior concrete inventory
+- in OCM, `AppliedManifestWork` is that local inventory and cleanup checkpoint
+
+Another system could replace `AppliedManifestWork` with a thinner local journal or a stronger replay contract, but it still needs to preserve the same essential information:
+
+- what the current desired set is
+- what previously applied resources may still need cleanup
+- enough identity to delete them safely and resume after restart
 
 ## Bottom line
 
-What we learned about OCM reconciliation is:
+OCM workload reconciliation is best understood as:
 
-- it is **not hub-direct apply**
-- it is **not purely polling**
-- it is a **spoke-side controller system** fed by a watched/cached view of hub desired state
-- it converges local resources using:
-  - immediate hub-driven enqueue
-  - local watch-driven enqueue for status/feedback
-  - periodic requeue safety nets
-- it reports status back to the hub through `ManifestWork.Status`
-- it uses `AppliedManifestWork` as local inventory/ownership/cleanup state, not as desired state
+- **spoke-side convergence** driven by a watched view of hub desired state
+- **current-resource drift detection** derived from the current work
+- **local cleanup and orphan handling** driven by `AppliedManifestWork`
+- **eventual convergence** using informer events, periodic requeues, and replay
 
-If useful, I can turn this into a single end-to-end timeline for one `ConfigMap`:
-hub create -> informer event -> local apply -> local drift -> local/hybrid requeue -> repair -> status patch back.
+`AppliedManifestWork` is not the source of desired state. It is the durable local record that makes cleanup, eviction, and restart recovery work.
