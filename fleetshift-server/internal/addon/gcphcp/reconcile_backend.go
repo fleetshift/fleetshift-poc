@@ -25,7 +25,11 @@ type createCleanupInfra interface {
 
 type deleteCleanupInfra interface {
 	createCleanupInfra
-	WaitForPSCCleanup(ctx context.Context, clusterID, projectID, region, workforceToken string) error
+	WaitForPSCCleanup(
+		ctx context.Context,
+		clusterID, projectID, region, workforceToken string,
+		signaler *domain.DeliverySignaler,
+	) error
 }
 
 type clusterDeleteClient interface {
@@ -207,8 +211,14 @@ func cleanupDeleteResources(
 	signaler *domain.DeliverySignaler,
 ) error {
 	if clusterID != "" {
-		emitProgress(signaler, ctx, "Waiting for PSC endpoint cleanup")
-		if err := infra.WaitForPSCCleanup(ctx, clusterID, target.GCPProject, target.Region, workforceToken); err != nil {
+		if err := infra.WaitForPSCCleanup(
+			ctx,
+			clusterID,
+			target.GCPProject,
+			target.Region,
+			workforceToken,
+			signaler,
+		); err != nil {
 			return fmt.Errorf("wait for PSC cleanup: %w", err)
 		}
 	}

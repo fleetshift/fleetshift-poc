@@ -174,9 +174,20 @@ func (s *ManagedResourceService) List(ctx context.Context, rt domain.ResourceTyp
 
 // Delete starts the delete workflow for a managed resource.
 func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) (domain.ManagedResourceView, error) {
+	var auth domain.DeliveryAuth
+	ac := AuthFromContext(ctx)
+	if ac != nil && ac.Subject != nil {
+		auth = domain.DeliveryAuth{
+			Caller:   ac.Subject,
+			Audience: ac.Audience,
+			Token:    ac.Token,
+		}
+	}
+
 	exec, err := s.DeleteWF.Start(ctx, domain.DeleteManagedResourceInput{
 		ResourceType: rt,
 		Name:         name,
+		Auth:         auth,
 	})
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start delete workflow: %w", err)

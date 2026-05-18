@@ -164,7 +164,7 @@ authenticate
   -> poll until 404
   -> wait for PSC endpoint artifacts to disappear
   -> hypershift destroy infra gcp
-  -> hypershift destroy iam gcp (best-effort warning on failure)
+  -> hypershift destroy iam gcp
 ```
 
 Important facts:
@@ -172,7 +172,9 @@ Important facts:
 - delete is multi-stage
 - PSC cleanup keys off the backend cluster ID
 - infra destroy keys off the infra ID / cluster name
-- IAM cleanup is less strict than infra cleanup
+- IAM cleanup failure is treated as a delete failure after infra cleanup succeeds
+- the initial auth exchange produces both the broker token for CLS requests and the Workforce access
+  token later materialized for `hypershift` teardown
 
 ### 3.6 Guest-cluster login uses the broker token
 
@@ -325,7 +327,8 @@ A good package split would be:
     - caller token from `DeliveryAuth.Token`
     - Workforce STS exchange (using target's workforce pool/provider config)
     - broker service account `generateIdToken()` (using target's broker SA) for gateway requests
-    - explicit short-lived federated Google credentials for tenant bootstrap
+    - explicit short-lived federated Google credentials for tenant bootstrap and `hypershift`
+      teardown
   - should set `X-User-Email` to the broker SA email from target config (v1 constraint; see
     section 14.4 for future per-user identity work)
   - should hide the identity federation mechanics from the rest of the addon
@@ -709,6 +712,11 @@ bootstrap/teardown. If `hypershift` requires file-based inputs (e.g., JWKS, cred
 the addon must write them to a temporary directory and register cleanup immediately — before any
 fallible work — so files are removed even on error or panic. Temp directories must not be reused
 across reconcile passes.
+
+For delete specifically, the addon should reuse the Workforce access token minted during the
+initial auth exchange when materializing the `hypershift` credential source for teardown. It
+should not perform a second STS exchange from the raw caller token just to prepare destroy-time
+credential files.
 
 ### 8.5 Token lifetime concern
 
@@ -1109,6 +1117,10 @@ resolve backend cluster identity
   -> wait for PSC endpoint cleanup
   -> destroy tenant network infra
   -> destroy IAM infra
+
+Current implementation detail: once hosted-cluster deletion, PSC cleanup, and infra destroy have
+succeeded, an IAM destroy failure still fails the current delete pass rather than being downgraded
+to a warning.
 ```
 
 That is the external lifecycle the addon ultimately needs to drive.
@@ -1156,9 +1168,9 @@ take many minutes, but the bigger concern is delete-input correctness, not just 
 
 Within that synchronous delete pass, the addon should keep only the waits that correspond to known
 external-state convergence points (cluster 404 and PSC endpoint cleanup). Once those gates have
-been satisfied, infrastructure destroy should be attempted once per delete pass; if it fails,
-FleetShift can retry the delete reconcile rather than the addon holding `Remove()` open in an
-additional long local retry loop.
+been satisfied, infrastructure destroy and IAM destroy should each be attempted once per delete
+pass; if either step fails, FleetShift can retry the delete reconcile rather than the addon holding
+`Remove()` open in an additional long local retry loop.
 
 Async delete support remains deferred (see section 14.7).
 

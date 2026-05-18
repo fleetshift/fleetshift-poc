@@ -89,6 +89,7 @@ func TestWaitForPSCCleanup_PollsUntilEndpointArtifactsDisappear(t *testing.T) {
 		"project-123",
 		"us-central1",
 		"workforce-token",
+		nil,
 	); err != nil {
 		t.Fatalf("WaitForPSCCleanup() error = %v", err)
 	}
@@ -107,6 +108,49 @@ func TestWaitForPSCCleanup_PollsUntilEndpointArtifactsDisappear(t *testing.T) {
 	}
 	if len(lookup.addressNames) == 0 || lookup.addressNames[0] != "psc-cluster-123-ip" {
 		t.Fatalf("address names = %v, want psc-cluster-123-ip", lookup.addressNames)
+	}
+}
+
+func TestWaitForPSCCleanup_EmitsProgressWhileArtifactsRemain(t *testing.T) {
+	origLookup := newPSCResourceLookup
+	origInterval := pscCleanupPollInterval
+	origTimeout := pscCleanupWaitTimeout
+	pscCleanupPollInterval = time.Millisecond
+	pscCleanupWaitTimeout = 25 * time.Millisecond
+	defer func() {
+		newPSCResourceLookup = origLookup
+		pscCleanupPollInterval = origInterval
+		pscCleanupWaitTimeout = origTimeout
+	}()
+
+	newPSCResourceLookup = func(_ context.Context, _ string) (pscResourceLookup, error) {
+		return &fakePSCResourceLookup{
+			forwardingRuleResults: []bool{true, true, false},
+			addressResults:        []bool{true, true, false},
+		}, nil
+	}
+
+	obs := &recordingDeliveryObserver{}
+	runner := &InfraRunner{HypershiftBinary: "hypershift"}
+	if err := runner.WaitForPSCCleanup(
+		context.Background(),
+		"cluster-123",
+		"project-123",
+		"us-central1",
+		"workforce-token",
+		newRecordingSignaler(obs),
+	); err != nil {
+		t.Fatalf("WaitForPSCCleanup() error = %v", err)
+	}
+
+	waitMessages := 0
+	for _, event := range obs.snapshot() {
+		if event.Message == "Waiting for PSC endpoint cleanup" {
+			waitMessages++
+		}
+	}
+	if waitMessages != 2 {
+		t.Fatalf("waiting progress messages = %d, want 2", waitMessages)
 	}
 }
 
@@ -136,6 +180,7 @@ func TestWaitForPSCCleanup_TimesOutWhenArtifactsRemain(t *testing.T) {
 		"project-123",
 		"us-central1",
 		"workforce-token",
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected timeout waiting for PSC cleanup")
@@ -162,6 +207,7 @@ func TestWaitForPSCCleanup_ReturnsLookupCreationError(t *testing.T) {
 		"project-123",
 		"us-central1",
 		"workforce-token",
+		nil,
 	)
 	if err == nil {
 		t.Fatal("expected lookup creation error")

@@ -121,6 +121,7 @@ func (f *fakeCleanupInfra) DestroyIAM(_ context.Context, infraID, projectID stri
 func (f *fakeCleanupInfra) WaitForPSCCleanup(
 	_ context.Context,
 	clusterID, projectID, region, workforceToken string,
+	_ *domain.DeliverySignaler,
 ) error {
 	f.ops = append(f.ops, "psc:"+clusterID+":"+projectID+":"+region)
 	f.waitPSCCalls++
@@ -893,5 +894,107 @@ func TestCompleteGuestRegistration_ReturnsRetryExhaustedWhenGuestAPIEndpointNeve
 	}
 	if bootstrapCalls != 0 {
 		t.Fatalf("bootstrap calls = %d, want 0", bootstrapCalls)
+	}
+}
+
+type fakeBrokerAuth struct {
+	result      BrokerAuthResult
+	err         error
+	callerToken string
+}
+
+func (f *fakeBrokerAuth) Exchange(_ context.Context, callerToken string) (BrokerAuthResult, error) {
+	f.callerToken = callerToken
+	if f.err != nil {
+		return BrokerAuthResult{}, f.err
+	}
+	return f.result, nil
+}
+
+func TestReconcilerDelete_UsesCallerTokenForHypershiftEnvAndWorkforceTokenForPSCCleanup(t *testing.T) {
+	origNewBrokerAuth := newBrokerAuth
+	origBuildHypershiftEnv := buildHypershiftEnv
+	defer func() {
+		newBrokerAuth = origNewBrokerAuth
+		buildHypershiftEnv = origBuildHypershiftEnv
+	}()
+
+	fakeAuth := &fakeBrokerAuth{
+		result: BrokerAuthResult{
+			BrokerToken:    "broker-token",
+			BrokerEmail:    "broker@example.com",
+			WorkforceToken: "workforce-token",
+		},
+	}
+	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
+		return fakeAuth
+	}
+
+	var gotHypershiftToken string
+	buildHypershiftEnv = func(token string, _ TargetConfig, _ string) ([]string, error) {
+		gotHypershiftToken = token
+		return []string{"PATH=/usr/bin"}, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer broker-token" {
+			t.Errorf("authorization header = %q, want Bearer broker-token", got)
+		}
+		if got := r.Header.Get("X-User-Email"); got != "broker@example.com" {
+			t.Errorf("X-User-Email = %q, want broker@example.com", got)
+		}
+
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters":
+			fmt.Fprint(w, `{"clusters":[{"id":"c-123","name":"test-cluster"}]}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/clusters/c-123":
+			if got := r.URL.Query().Get("force"); got != "true" {
+				t.Errorf("force query param = %q, want true", got)
+			}
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters/c-123":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":"not found"}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
+			http.Error(w, "unexpected request", http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	infra := &fakeCleanupInfra{}
+	reconciler := &Reconciler{
+		gateway: GatewayConfig{
+			URL:      server.URL,
+			Audience: "test-audience",
+		},
+		infra: infra,
+	}
+
+	err := reconciler.Delete(
+		context.Background(),
+		ClusterSpec{Name: "test-cluster"},
+		TargetConfig{
+			GCPProject:        "test-project",
+			Region:            "us-central1",
+			WorkforcePool:     "test-pool",
+			WorkforceProvider: "test-provider",
+			BrokerSAEmail:     "broker@example.com",
+		},
+		"caller-token",
+		&domain.DeliverySignaler{},
+	)
+	if err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+
+	if fakeAuth.callerToken != "caller-token" {
+		t.Fatalf("broker auth caller token = %q, want caller-token", fakeAuth.callerToken)
+	}
+	if gotHypershiftToken != "caller-token" {
+		t.Fatalf("hypershift env token = %q, want caller-token", gotHypershiftToken)
+	}
+	if infra.waitPSCWorkforceToken != "workforce-token" {
+		t.Fatalf("PSC cleanup workforce token = %q, want workforce-token", infra.waitPSCWorkforceToken)
 	}
 }

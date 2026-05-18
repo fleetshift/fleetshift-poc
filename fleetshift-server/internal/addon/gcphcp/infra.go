@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"strings"
 	"time"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 const (
@@ -259,6 +261,7 @@ func (r *InfraRunner) DestroyInfra(ctx context.Context, infraID, projectID, regi
 func (r *InfraRunner) WaitForPSCCleanup(
 	ctx context.Context,
 	clusterID, projectID, region, workforceToken string,
+	signaler *domain.DeliverySignaler,
 ) error {
 	lookup, err := newPSCResourceLookup(ctx, workforceToken)
 	if err != nil {
@@ -282,25 +285,41 @@ func (r *InfraRunner) WaitForPSCCleanup(
 	timeout := time.NewTimer(waitTimeout)
 	defer timeout.Stop()
 
-	for {
-		endpointExists, err := lookup.ForwardingRuleExists(ctx, projectID, region, endpointName)
-		if err != nil {
-			return err
-		}
-		ipExists, err := lookup.AddressExists(ctx, projectID, region, ipName)
-		if err != nil {
-			return err
-		}
-		if !endpointExists && !ipExists {
-			return nil
-		}
+	// Check immediately first so already-removed artifacts don't incur a delay.
+	endpointExists, err := lookup.ForwardingRuleExists(ctx, projectID, region, endpointName)
+	if err != nil {
+		return err
+	}
+	ipExists, err := lookup.AddressExists(ctx, projectID, region, ipName)
+	if err != nil {
+		return err
+	}
+	if !endpointExists && !ipExists {
+		return nil
+	}
 
+	emitProgress(signaler, ctx, "Waiting for PSC endpoint cleanup")
+
+	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
 		case <-timeout.C:
 			return fmt.Errorf("timeout waiting for PSC endpoint cleanup")
 		case <-ticker.C:
+			endpointExists, err = lookup.ForwardingRuleExists(ctx, projectID, region, endpointName)
+			if err != nil {
+				return err
+			}
+			ipExists, err = lookup.AddressExists(ctx, projectID, region, ipName)
+			if err != nil {
+				return err
+			}
+			if !endpointExists && !ipExists {
+				return nil
+			}
+
+			emitProgress(signaler, ctx, "Waiting for PSC endpoint cleanup")
 		}
 	}
 }

@@ -17,14 +17,25 @@ var (
 	guestBootstrapRetryDelay  = 15 * time.Second
 	bootstrapGuestCluster     = BootstrapGuestCluster
 	failureSnapshotTimeout    = 10 * time.Second
+	newBrokerAuth             = func(cfg BrokerAuthConfig) brokerAuthExchanger { return NewBrokerAuth(cfg) }
+	buildHypershiftEnv        = PrepareHypershiftEnv
 )
+
+type brokerAuthExchanger interface {
+	Exchange(ctx context.Context, callerToken string) (BrokerAuthResult, error)
+}
+
+type reconcileInfra interface {
+	ambiguousCreateRecoveryInfra
+	deleteCleanupInfra
+}
 
 // Reconciler coordinates the full cluster create/update and delete flows.
 // It sequences auth, infra, client, status, and bootstrap modules to manage
 // the lifecycle of GCP HCP clusters.
 type Reconciler struct {
 	gateway      GatewayConfig
-	infra        *InfraRunner
+	infra        reconcileInfra
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
 }
@@ -178,7 +189,7 @@ func (r *Reconciler) Reconcile(
 	})
 
 	// Exchange caller token for broker credentials
-	brokerAuth := NewBrokerAuth(BrokerAuthConfig{
+	brokerAuth := newBrokerAuth(BrokerAuthConfig{
 		WorkforcePool:     target.WorkforcePool,
 		WorkforceProvider: target.WorkforceProvider,
 		GCPProject:        target.GCPProject,
@@ -288,7 +299,7 @@ func (r *Reconciler) Reconcile(
 		})
 
 		// Prepare hypershift environment
-		hypershiftEnv, err := PrepareHypershiftEnv(callerToken, target, tempDir)
+		hypershiftEnv, err := buildHypershiftEnv(callerToken, target, tempDir)
 		if err != nil {
 			return nil, fmt.Errorf("prepare hypershift env: %w", err)
 		}
@@ -493,7 +504,7 @@ func (r *Reconciler) Delete(
 	})
 
 	// Exchange caller token for broker credentials
-	brokerAuth := NewBrokerAuth(BrokerAuthConfig{
+	brokerAuth := newBrokerAuth(BrokerAuthConfig{
 		WorkforcePool:     target.WorkforcePool,
 		WorkforceProvider: target.WorkforceProvider,
 		GCPProject:        target.GCPProject,
@@ -553,7 +564,7 @@ func (r *Reconciler) Delete(
 	}
 	defer os.RemoveAll(tempDir)
 
-	hypershiftEnv, err := PrepareHypershiftEnv(callerToken, target, tempDir)
+	hypershiftEnv, err := buildHypershiftEnv(callerToken, target, tempDir)
 	if err != nil {
 		return fmt.Errorf("prepare hypershift env: %w", err)
 	}

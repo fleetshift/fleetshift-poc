@@ -230,7 +230,7 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 	invokers := make(map[string]activityInvoker)
 	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.DeleteFulfillment(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.DeleteManagedResourceAndFulfillment(), opts); err != nil {
 		return nil, err
 	}
 
@@ -353,6 +353,9 @@ func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResou
 	opts := r.activityOptions()
 
 	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting(), opts); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.StartCleanup(), opts); err != nil {
 		return nil, err
 	}
 	if err := registerActivity(r.Worker, invokers, spec.StartOrchestration(), opts); err != nil {

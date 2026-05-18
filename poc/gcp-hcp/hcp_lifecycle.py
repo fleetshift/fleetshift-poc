@@ -654,7 +654,8 @@ def resolve_cluster_id(cluster_name: str, token: str, email: str, config: Config
         print(resp.text)
         sys.exit(1)
 
-    clusters: list[dict[str, str]] = resp.json().get("clusters", [])
+    clusters_data = resp.json().get("clusters")
+    clusters: list[dict[str, str]] = clusters_data or []
     for c in clusters:
         if c.get("name") == cluster_name:
             return c["id"]

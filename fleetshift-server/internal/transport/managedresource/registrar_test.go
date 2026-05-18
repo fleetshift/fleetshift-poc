@@ -63,14 +63,78 @@ type testEnv struct {
 }
 
 func setup(t *testing.T) *testEnv {
+	return setupWithDelivery(t, nil)
+}
+
+type blockingRemoveDynamicDelivery struct {
+	inner   *sqlite.RecordingDeliveryService
+	started chan struct{}
+	release chan struct{}
+}
+
+func newBlockingRemoveDynamicDelivery(store domain.Store) *blockingRemoveDynamicDelivery {
+	return &blockingRemoveDynamicDelivery{
+		inner: &sqlite.RecordingDeliveryService{
+			Store: store,
+			Now:   func() time.Time { return time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC) },
+		},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (d *blockingRemoveDynamicDelivery) Deliver(
+	ctx context.Context,
+	target domain.TargetInfo,
+	deliveryID domain.DeliveryID,
+	manifests []domain.Manifest,
+	auth domain.DeliveryAuth,
+	att *domain.Attestation,
+	signaler *domain.DeliverySignaler,
+) (domain.DeliveryResult, error) {
+	return d.inner.Deliver(ctx, target, deliveryID, manifests, auth, att, signaler)
+}
+
+func (d *blockingRemoveDynamicDelivery) Remove(
+	ctx context.Context,
+	target domain.TargetInfo,
+	deliveryID domain.DeliveryID,
+	manifests []domain.Manifest,
+	auth domain.DeliveryAuth,
+	att *domain.Attestation,
+	signaler *domain.DeliverySignaler,
+) error {
+	if err := d.inner.Remove(ctx, target, deliveryID, manifests, auth, att, signaler); err != nil {
+		return err
+	}
+	select {
+	case <-d.started:
+	default:
+		close(d.started)
+	}
+	select {
+	case <-d.release:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func setupWithDelivery(
+	t *testing.T,
+	buildDelivery func(store domain.Store) domain.DeliveryService,
+) *testEnv {
 	t.Helper()
 
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 
-	recordingAgent := &sqlite.RecordingDeliveryService{
+	recordingAgent := domain.DeliveryService(&sqlite.RecordingDeliveryService{
 		Store: store,
 		Now:   func() time.Time { return time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC) },
+	})
+	if buildDelivery != nil {
+		recordingAgent = buildDelivery(store)
 	}
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(clusterTargetType, recordingAgent)
@@ -115,7 +179,7 @@ func setup(t *testing.T) *testEnv {
 	}
 
 	managedResourceSvc := &application.ManagedResourceService{
-		Store:          store,
+		Store:    store,
 		CreateWF: createMRWf,
 		DeleteWF: deleteMRWf,
 	}
@@ -328,6 +392,108 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 	stateField := env.svc.Descriptors.Resource.Fields().ByName("state")
 	if int32(deleteResp.Get(stateField).Enum()) != 3 { // DELETING
 		t.Errorf("deleted state = %d, want 3 (DELETING)", deleteResp.Get(stateField).Enum())
+	}
+}
+
+func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var blocker *blockingRemoveDynamicDelivery
+	env := setupWithDelivery(t, func(store domain.Store) domain.DeliveryService {
+		blocker = newBlockingRemoveDynamicDelivery(store)
+		return blocker
+	})
+
+	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	idField := env.svc.Descriptors.CreateRequest.Fields().ByNumber(1)
+	createReq.Set(idField, protoreflect.ValueOfString("cluster-a"))
+
+	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	specField := env.svc.Descriptors.Resource.Fields().ByName("spec")
+	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("cluster-a"))
+	resource.Set(specField, protoreflect.ValueOfMessage(spec))
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
+
+	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/CreateKindCluster", createReq, createResp); err != nil {
+		t.Fatalf("CreateKindCluster: %v", err)
+	}
+
+	awaitDynamicState(t, ctx, env, "cluster-a", 2)
+
+	deleteReq := dynamicpb.NewMessage(env.svc.Descriptors.DeleteRequest)
+	deleteNameField := env.svc.Descriptors.DeleteRequest.Fields().ByName("name")
+	deleteReq.Set(deleteNameField, protoreflect.ValueOfString("kindClusters/cluster-a"))
+
+	deleteResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/DeleteKindCluster", deleteReq, deleteResp); err != nil {
+		t.Fatalf("DeleteKindCluster: %v", err)
+	}
+
+	stateField := env.svc.Descriptors.Resource.Fields().ByName("state")
+	if int32(deleteResp.Get(stateField).Enum()) != 3 { // DELETING
+		t.Fatalf("deleted state = %d, want 3 (DELETING)", deleteResp.Get(stateField).Enum())
+	}
+
+	select {
+	case <-blocker.started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for remove to start")
+	}
+
+	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
+	getNameField := env.svc.Descriptors.GetRequest.Fields().ByName("name")
+	getReq.Set(getNameField, protoreflect.ValueOfString("kindClusters/cluster-a"))
+
+	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp); err != nil {
+		t.Fatalf("GetKindCluster during delete: %v", err)
+	}
+	if int32(getResp.Get(stateField).Enum()) != 3 { // DELETING
+		t.Fatalf("get state during delete = %d, want 3 (DELETING)", getResp.Get(stateField).Enum())
+	}
+
+	listReq := dynamicpb.NewMessage(env.svc.Descriptors.ListRequest)
+	listResp := dynamicpb.NewMessage(env.svc.Descriptors.ListResponse)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/ListKindClusters", listReq, listResp); err != nil {
+		t.Fatalf("ListKindClusters during delete: %v", err)
+	}
+
+	resourcesField := env.svc.Descriptors.ListResponse.Fields().ByNumber(1)
+	list := listResp.Get(resourcesField).List()
+	if list.Len() != 1 {
+		t.Fatalf("list count during delete = %d, want 1", list.Len())
+	}
+	if int32(list.Get(0).Message().Get(stateField).Enum()) != 3 { // DELETING
+		t.Fatalf("list state during delete = %d, want 3 (DELETING)", list.Get(0).Message().Get(stateField).Enum())
+	}
+
+	close(blocker.release)
+}
+
+func awaitDynamicState(t *testing.T, ctx context.Context, env *testEnv, id string, want protoreflect.EnumNumber) {
+	t.Helper()
+
+	getNameField := env.svc.Descriptors.GetRequest.Fields().ByName("name")
+	stateField := env.svc.Descriptors.Resource.Fields().ByName("state")
+	for {
+		getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
+		getReq.Set(getNameField, protoreflect.ValueOfString("kindClusters/"+id))
+
+		getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+		if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp); err == nil {
+			if getResp.Get(stateField).Enum() == want {
+				return
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for kindClusters/%s to reach state %d", id, want)
+		case <-time.After(5 * time.Millisecond):
+		}
 	}
 }
 
