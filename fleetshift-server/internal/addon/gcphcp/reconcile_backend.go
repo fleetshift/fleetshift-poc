@@ -58,8 +58,6 @@ var (
 	ambiguousCreateProbeTimeout  = 30 * time.Second
 	ambiguousPrereqRetryInterval = 2 * time.Second
 	ambiguousPrereqMaxAttempts   = 3
-	deleteInfraRetryInterval     = 30 * time.Second
-	deleteInfraMaxAttempts       = 40
 )
 
 // BuildCLSClusterUpdateSpec preserves observed bootstrap/infra fields while
@@ -216,10 +214,8 @@ func cleanupDeleteResources(
 	}
 
 	emitProgress(signaler, ctx, "Destroying infrastructure")
-	if err := retryDeleteInfraDestroy(ctx, signaler, func() error {
-		return infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
-	}); err != nil {
-		return err
+	if err := infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
+		return fmt.Errorf("destroy infra: %w", err)
 	}
 	emitProgress(signaler, ctx, "Destroying IAM resources")
 	if err := infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
@@ -229,55 +225,6 @@ func cleanupDeleteResources(
 		)
 	}
 	return nil
-}
-
-func retryDeleteInfraDestroy(
-	ctx context.Context,
-	signaler *domain.DeliverySignaler,
-	destroy func() error,
-) error {
-	totalAttempts := deleteInfraMaxAttempts
-	if totalAttempts < 1 {
-		totalAttempts = 1
-	}
-
-	attemptErrs := make([]error, 0, totalAttempts)
-	for attempt := 1; attempt <= totalAttempts; attempt++ {
-		if err := ctx.Err(); err != nil {
-			return errors.Join(append(attemptErrs, err)...)
-		}
-
-		err := destroy()
-		if err == nil {
-			if attempt > 1 {
-				emitProgress(signaler, ctx, fmt.Sprintf("Recovered infrastructure destroy on attempt %d", attempt))
-			}
-			return nil
-		}
-
-		attemptErrs = append(attemptErrs, fmt.Errorf("attempt %d: %w", attempt, err))
-		if attempt == totalAttempts {
-			attemptErrs = append(attemptErrs, fmt.Errorf("destroy infra failed after %d attempts", totalAttempts))
-			return fmt.Errorf("destroy infra: %w", errors.Join(attemptErrs...))
-		}
-
-		emitProgress(signaler, ctx, fmt.Sprintf("Infrastructure destroy not ready yet, retrying (%d/%d)", attempt+1, totalAttempts))
-		if deleteInfraRetryInterval <= 0 {
-			continue
-		}
-
-		timer := time.NewTimer(deleteInfraRetryInterval)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				<-timer.C
-			}
-			return fmt.Errorf("destroy infra: %w", errors.Join(append(attemptErrs, ctx.Err())...))
-		case <-timer.C:
-		}
-	}
-
-	return fmt.Errorf("destroy infra: unreachable retry state")
 }
 
 func ensureIAMWithRecovery(

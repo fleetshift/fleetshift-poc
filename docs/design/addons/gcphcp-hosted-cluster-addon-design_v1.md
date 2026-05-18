@@ -163,7 +163,7 @@ authenticate
   -> DELETE /api/v1/clusters/{id}?force=true
   -> poll until 404
   -> wait for PSC endpoint artifacts to disappear
-  -> hypershift destroy infra gcp (with retry)
+  -> hypershift destroy infra gcp
   -> hypershift destroy iam gcp (best-effort warning on failure)
 ```
 
@@ -207,7 +207,12 @@ Important meaning:
 The repo material already shows a useful distinction:
 
 - the create script gates on cluster phase only
-- the status dump shows a richer multi-object lifecycle view
+- captured status examples show `cluster.status.phase == Ready` while a desired nodepool still
+  reports `status.phase == Progressing` with `Ready=False`
+- later captured status shows the cluster still `Ready` only after the nodepool eventually reaches
+  its own ready / healthy state
+- the status dump therefore shows a richer multi-object lifecycle view than top-level cluster phase
+  alone
 
 That distinction should influence the addon design's readiness model.
 
@@ -809,7 +814,8 @@ Deliver()
   -> create or update hosted cluster
   -> reconcile desired nodepool set
   -> poll management-plane status
-  -> if guest bootstrap succeeds within the current retry window:
+  -> if guest bootstrap succeeds and the desired nodepool set becomes ready within the current
+     delivery window:
        -> gather guest endpoint / trust / credentials
        -> bootstrap platform delivery access
        -> emit ProvisionedTarget + ProducedSecrets
@@ -823,9 +829,9 @@ times out or reaches a terminal result without guest delivery readiness, it shou
 state through the current pass rather than request a second reconcile from the platform. Because v1
 has no addon-driven requeue, no periodic resync, and no durable managed-resource status surface for
 "provisioned but not registered yet", the preferred behavior is to fail the current delivery
-explicitly once the bounded guest-bootstrap retry window is exhausted. That failure message should
-make clear that the hosted cluster reached management-plane readiness and only guest target
-registration is incomplete.
+explicitly once the bounded bootstrap / nodepool-readiness window is exhausted. That failure
+message should make clear that the hosted cluster reached management-plane readiness and only guest
+target registration is incomplete.
 
 ### 9.6 Reconcile is the target design, even though the PoC demonstrates create/delete first
 
@@ -840,26 +846,27 @@ So the addon design should say both of these at once:
 
 That is more accurate than pretending the PoC already validates reconcile semantics.
 
-### 9.7 Readiness is a three-phase flow with distinct gates
+### 9.7 Readiness is a multi-gate flow
 
-The addon's readiness model still has three phases, but v1 should treat them as **four distinct
-gates** rather than one generic "ready" condition:
+The addon should treat "cluster ready" as only one gate in a broader registration sequence. In v1
+there are **five distinct gates**:
 
 1. **Management-plane ready:** `cluster.status.phase == Ready`
 2. **Guest API discoverable/reachable:** the CLS status exposes an `APIServer` URL and the addon can
    successfully connect to that endpoint
 3. **Guest bootstrap ready:** the broker token can perform the required bootstrap writes inside the
    guest cluster
-4. **Registered target ready:** the addon has all durable output data and can emit
+4. **Desired nodepool set ready:** every desired nodepool is present and reports `Ready`
+5. **Registered target ready:** the addon has all durable output data and can emit
    `ProvisionedTarget` + `ProducedSecret`
 
 Those gates intentionally separate "the hosted cluster finished provisioning" from "FleetShift can
 now treat the guest cluster as a normal Kubernetes delivery target."
 
-**Phase 1 — Provision:** Poll `cluster.status.phase` until `Ready`. The CLS backend aggregates all
-controller statuses (control plane availability, nodepool readiness, version resolution) into a
-single phase. The addon does not need to decompose those controller states for provisioning
-purposes, but it also must not treat this phase alone as delivery-readiness.
+**Phase 1 — Provision:** Poll `cluster.status.phase` until `Ready`. This only proves
+control-plane / management-plane readiness. Captured status examples show that
+`cluster.status.phase == Ready` can coexist with a desired nodepool whose own
+`status.phase == Progressing`, so this gate is necessary but not sufficient for registration.
 
 **Phase 2 — Bootstrap:** Once cluster phase is `Ready`, resolve the guest API endpoint from the
 `APIServer` condition in `controller_status`, then attempt guest bootstrap with the broker ID token.
@@ -870,17 +877,24 @@ is only satisfied when the addon can complete the real registration prerequisite
 guest API, create the delivery ServiceAccount and RBAC, read the guest CA bundle, and obtain the
 ServiceAccount token.
 
-**Phase 3 — Register:** Emit `ProvisionedTarget` + `ProducedSecret` only after bootstrap succeeds
-and the durable output contract is complete. If cluster phase is `Ready` but bootstrap is still
-failing or pending, the addon should keep retrying within the current delivery. If that bounded
-retry window is exhausted, the addon should fail the current delivery with an explicit message that
-the hosted cluster is provisioned and management-plane ready, but guest target registration did not
-complete. In all cases it should **not** register the guest cluster until bootstrap succeeds.
+**Phase 3 — Desired nodepool readiness:** After guest bootstrap succeeds, poll the desired nodepool
+set until every desired nodepool is present and reports `Ready`. This extra gate is required
+because top-level cluster readiness does not guarantee that the requested worker/nodepool capacity
+has converged yet. If any desired nodepool reports `Failed`, the addon should fail the current
+delivery explicitly.
 
-The only CLS status field the addon needs beyond cluster phase is the **APIServer endpoint URL**
-from `controller_status[cls-hypershift-client].conditions[type=APIServer].message`, which tells the
-addon where to connect for guest bootstrap. That field is necessary for phases 2 and 3, but it is
-not by itself sufficient to register the target.
+**Phase 4 — Register:** Emit `ProvisionedTarget` + `ProducedSecret` only after bootstrap succeeds,
+the desired nodepool set is ready, and the durable output contract is complete. If cluster phase is
+`Ready` but bootstrap or nodepool readiness is still pending, the addon should keep retrying within
+the current delivery. If that bounded retry window is exhausted, the addon should fail the current
+delivery with an explicit message that the hosted cluster is provisioned and management-plane ready,
+but guest target registration did not complete. In all cases it should **not** register the guest
+cluster until those gates succeed.
+
+The addon therefore needs more than the top-level cluster phase: it needs the **APIServer endpoint
+URL** from `controller_status[cls-hypershift-client].conditions[type=APIServer].message` to
+bootstrap the guest cluster, and it needs per-nodepool status surfaces to determine whether the
+desired worker set has actually converged.
 
 ---
 
@@ -909,12 +923,14 @@ In v1, that means all of the following must be true:
 - the guest API endpoint is resolved and actually reachable for bootstrap
 - TLS trust material or the narrow bootstrap fallback from section 10.5 is available
 - a durable delivery credential is successfully created and captured
+- every desired nodepool is present and reports `Ready`
 
-If any of those are still pending, the addon should keep retrying within the current delivery. If
-they are still not available when that bounded retry window is exhausted, the addon should fail the
-current pass with an explicit message that provisioning reached management-plane ready but guest
-target registration is incomplete. It should not emit a guest target and it should not rely on a
-follow-up reconcile being scheduled automatically.
+If any of those are still pending, including desired nodepools that are still progressing after the
+top-level cluster has already flipped to `Ready`, the addon should keep retrying within the current
+delivery. If they are still not available when that bounded retry window is exhausted, the addon
+should fail the current pass with an explicit message that provisioning reached management-plane
+ready but guest target registration is incomplete. It should not emit a guest target and it should
+not rely on a follow-up reconcile being scheduled automatically.
 
 ### 10.3 PoC-proven guest-cluster auth
 
@@ -1063,9 +1079,10 @@ should remain the target design rather than leaving `InsecureSkipVerify` as the 
 
 ### 10.6 Recommendation
 
-> Register a `kubernetes` target as part of the reconcile flow once the cluster is `Ready` and the
-> guest API endpoint is resolvable. Use the broker ID token for initial bootstrap access, create a
-> durable ServiceAccount credential inside the guest cluster, and emit a guest target that includes
+> Register a `kubernetes` target as part of the reconcile flow only after the cluster is `Ready`,
+> the guest API endpoint is resolvable, guest bootstrap succeeds, and every desired nodepool
+> reports `Ready`. Use the broker ID token for initial bootstrap access, create a durable
+> ServiceAccount credential inside the guest cluster, and emit a guest target that includes
 > `api_server`, `ca_cert`, `service_account_token_ref`, and `trust_bundle` so both verified
 > platform delivery and attested follow-on delivery work in v1.
 
@@ -1082,7 +1099,7 @@ resolve backend cluster identity
   -> delete hosted cluster with force
   -> poll until API returns 404
   -> wait for PSC endpoint cleanup
-  -> destroy tenant network infra with retry
+  -> destroy tenant network infra
   -> destroy IAM infra
 ```
 
@@ -1128,6 +1145,12 @@ surface is not yet proven to hand that sequence the right inputs in every case.
 If the required destroy data is available, v1 can still block and poll inside `Remove()`, matching
 the existing platform pattern. That is still a poor fit for hosted-cluster deletion because it may
 take many minutes, but the bigger concern is delete-input correctness, not just runtime length.
+
+Within that synchronous delete pass, the addon should keep only the waits that correspond to known
+external-state convergence points (cluster 404 and PSC endpoint cleanup). Once those gates have
+been satisfied, infrastructure destroy should be attempted once per delete pass; if it fails,
+FleetShift can retry the delete reconcile rather than the addon holding `Remove()` open in an
+additional long local retry loop.
 
 Async delete support remains deferred (see section 14.7).
 
@@ -1245,17 +1268,18 @@ If the next step is implementation planning, the v1 direction is:
 8. reconcile all spec fields authoritatively — no blocked-field classification (see section 14.5)
 9. trigger reconciliation only from FleetShift-side spec changes; no addon-driven requeue
 10. register a `kubernetes` target only after cluster phase is `Ready`, the guest API is reachable
-    for bootstrap, and guest bootstrap succeeds, including `api_server`, `ca_cert`,
-    `service_account_token_ref`, and `trust_bundle` so attested follow-on delivery also works in v1;
-    if bootstrap still does not complete by the end of the bounded retry window, fail the delivery
-    explicitly rather than silently succeeding without registration (see section 10.4)
+    for bootstrap, guest bootstrap succeeds, and every desired nodepool reports `Ready`, including
+    `api_server`, `ca_cert`, `service_account_token_ref`, and `trust_bundle` so attested follow-on
+    delivery also works in v1; if bootstrap or desired nodepool readiness still does not complete
+    by the end of the bounded delivery window, fail the delivery explicitly rather than silently
+    succeeding without registration (see section 10.4)
 11. report status through delivery events with a full status dump on completion (see section 12)
 12. implement delivery-owned cleanup for emitted guest targets, inventory, and referenced vault
     secrets so hosted-cluster outputs are removed automatically during teardown (see section 11.6)
 
 ---
 
-## 14. Intentionally Left Out Of V1
+## 14. Intentionally Left Out Of V1 OR TODO Items
 
 The initial implementation should leave several capabilities out on purpose so the first addon
 flow stays small, understandable, and aligned with what FleetShift already implements.
@@ -1290,6 +1314,16 @@ Practical v1 consequence:
   lifetime window
 - if a reconcile pass outlives that window, the pass should fail and be retried from FleetShift
   rather than attempting in-place refresh
+
+Current implementation gap to revisit:
+
+- once `Deliver()` has already returned `Accepted`, async auth failures are not yet cleanly mapped
+  back to `auth_failed` / `paused_auth`
+- those failures currently surface as generic delivery failure and are retried by FleetShift with
+  the existing `DeliveryAuth`, rather than pausing for fresh credentials
+- follow-up work should detect post-accept auth expiry / unauthorized failures, preserve that
+  distinction from ordinary provider errors, and add a managed-resource resume path before relying
+  on outer retries for auth recovery
 
 ### 14.3 Periodic resync
 

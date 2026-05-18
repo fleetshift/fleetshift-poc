@@ -306,21 +306,9 @@ func TestCleanupCreateResources_DestroysCreatedInfraAndIAM(t *testing.T) {
 	}
 }
 
-func TestCleanupDeleteResources_RetriesInfraAfterPSCWait(t *testing.T) {
-	origInterval := deleteInfraRetryInterval
-	origAttempts := deleteInfraMaxAttempts
-	deleteInfraRetryInterval = 0
-	deleteInfraMaxAttempts = 2
-	defer func() {
-		deleteInfraRetryInterval = origInterval
-		deleteInfraMaxAttempts = origAttempts
-	}()
-
+func TestCleanupDeleteResources_DestroysInfraOnceAfterPSCWait(t *testing.T) {
 	infra := &fakeCleanupInfra{
-		destroyInfraResults: []error{
-			errors.New("infra not ready"),
-			nil,
-		},
+		destroyInfraResults: []error{nil},
 	}
 
 	err := cleanupDeleteResources(
@@ -336,7 +324,7 @@ func TestCleanupDeleteResources_RetriesInfraAfterPSCWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cleanupDeleteResources() error = %v", err)
 	}
-	if got := strings.Join(infra.ops, ","); got != "psc:cluster-123:project-123:us-central1,infra:test-cluster:project-123:us-central1,infra:test-cluster:project-123:us-central1,iam:test-cluster:project-123" {
+	if got := strings.Join(infra.ops, ","); got != "psc:cluster-123:project-123:us-central1,infra:test-cluster:project-123:us-central1,iam:test-cluster:project-123" {
 		t.Fatalf("unexpected cleanup operations: %s", got)
 	}
 	if infra.waitPSCWorkforceToken != "workforce-token" {
@@ -372,22 +360,9 @@ func TestCleanupDeleteResources_ReturnsIAMFailureWithDeleteSuccessContext(t *tes
 	}
 }
 
-func TestCleanupDeleteResources_ReturnsInfraFailureAfterRetries(t *testing.T) {
-	origInterval := deleteInfraRetryInterval
-	origAttempts := deleteInfraMaxAttempts
-	deleteInfraRetryInterval = 0
-	deleteInfraMaxAttempts = 3
-	defer func() {
-		deleteInfraRetryInterval = origInterval
-		deleteInfraMaxAttempts = origAttempts
-	}()
-
+func TestCleanupDeleteResources_ReturnsInfraFailureWithoutRetry(t *testing.T) {
 	infra := &fakeCleanupInfra{
-		destroyInfraResults: []error{
-			errors.New("infra not ready"),
-			errors.New("infra not ready"),
-			errors.New("infra still not ready"),
-		},
+		destroyInfraResults: []error{errors.New("infra not ready")},
 	}
 
 	err := cleanupDeleteResources(
@@ -403,11 +378,14 @@ func TestCleanupDeleteResources_ReturnsInfraFailureAfterRetries(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected infra destroy failure")
 	}
-	if !strings.Contains(err.Error(), "destroy infra") || !strings.Contains(err.Error(), "after 3 attempts") {
+	if !strings.Contains(err.Error(), "destroy infra") || !strings.Contains(err.Error(), "infra not ready") {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got := strings.Join(infra.ops, ","); got != "psc:cluster-123:project-123:us-central1,infra:test-cluster:project-123:us-central1,infra:test-cluster:project-123:us-central1,infra:test-cluster:project-123:us-central1" {
+	if got := strings.Join(infra.ops, ","); got != "psc:cluster-123:project-123:us-central1,infra:test-cluster:project-123:us-central1" {
 		t.Fatalf("unexpected cleanup operations: %s", got)
+	}
+	if infra.destroyInfraCalls != 1 {
+		t.Fatalf("destroy infra calls = %d, want 1", infra.destroyInfraCalls)
 	}
 }
 
