@@ -74,8 +74,9 @@ func (h *SetupHub) unsubscribe(ch chan []byte) {
 	h.mu.Unlock()
 }
 
-// AuthMethodCreated satisfies [domain.AuthMethodObserver] so the hub
-// can be wired directly as the observer on ProvisionIdPWorkflowSpec.
+// AuthMethodCreated satisfies [domain.ProvisionIdPEventSink] so the
+// hub can be wired directly as the event sink on
+// [domain.ProvisionIdPWorkflowSpec].
 func (h *SetupHub) AuthMethodCreated(method domain.AuthMethod) {
 	h.Broadcast(SetupEvent{
 		Type:       "auth_method_created",
@@ -127,7 +128,7 @@ func authMethodToWS(m domain.AuthMethod) *wsAuthMethod {
 	return out
 }
 
-// AuthMethodFailed broadcasts a failure event to all WS clients.
+// AuthMethodFailed broadcasts a setup failure event to all WS clients.
 func (h *SetupHub) AuthMethodFailed(err error) {
 	h.Broadcast(SetupEvent{
 		Type:  "auth_method_failed",

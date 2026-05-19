@@ -15,9 +15,9 @@ type ProvisionIdPInput struct {
 	AuthMethod   AuthMethod
 }
 
-// AuthMethodObserver is notified when an auth method is persisted or
-// when provisioning fails.
-type AuthMethodObserver interface {
+// ProvisionIdPEventSink receives events emitted while provisioning an
+// identity provider.
+type ProvisionIdPEventSink interface {
 	AuthMethodCreated(method AuthMethod)
 	AuthMethodFailed(err error)
 }
@@ -29,12 +29,12 @@ type AuthMethodObserver interface {
 // Pass this spec to [Registry.RegisterProvisionIdP] to obtain a
 // [ProvisionIdPWorkflow] that can start instances.
 type ProvisionIdPWorkflowSpec struct {
-	AuthMethods            AuthMethodRepository
-	Discovery              OIDCDiscoveryClient
-	CreateDeployment       CreateDeploymentWorkflow
-	TrustBundlePlacement   PlacementStrategySpec
-	Observer               AuthMethodObserver
-	Now                    func() time.Time
+	AuthMethods          AuthMethodRepository
+	Discovery            OIDCDiscoveryClient
+	CreateDeployment     CreateDeploymentWorkflow
+	TrustBundlePlacement PlacementStrategySpec
+	EventSink            ProvisionIdPEventSink
+	Now                  func() time.Time
 }
 
 func (s *ProvisionIdPWorkflowSpec) now() time.Time {
@@ -76,8 +76,8 @@ func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInpu
 		if err := s.AuthMethods.Save(ctx, method); err != nil {
 			return AuthMethod{}, fmt.Errorf("save auth method: %w", err)
 		}
-		if s.Observer != nil {
-			s.Observer.AuthMethodCreated(method)
+		if s.EventSink != nil {
+			s.EventSink.AuthMethodCreated(method)
 		}
 		return method, nil
 	})
@@ -94,11 +94,11 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 		}
 
 		entry := TrustBundleEntry{
-			IssuerURL:              method.OIDC.IssuerURL,
-			JWKSURI:                method.OIDC.JWKSURI,
-			EnrollmentAudience:     method.OIDC.KeyEnrollmentAudience,
+			IssuerURL:                method.OIDC.IssuerURL,
+			JWKSURI:                  method.OIDC.JWKSURI,
+			EnrollmentAudience:       method.OIDC.KeyEnrollmentAudience,
 			PublicKeyClaimExpression: method.OIDC.PublicKeyClaimExpression,
-			RegistrySubjectMapping: method.OIDC.RegistrySubjectMapping,
+			RegistrySubjectMapping:   method.OIDC.RegistrySubjectMapping,
 		}
 
 		raw, err := json.Marshal(entry)
@@ -129,8 +129,8 @@ func (s *ProvisionIdPWorkflowSpec) Run(record Record, input ProvisionIdPInput) (
 	method, err := RunActivity(record, s.ResolveAndPersist(), input)
 	if err != nil {
 		err = fmt.Errorf("resolve and persist auth method: %w", err)
-		if s.Observer != nil {
-			s.Observer.AuthMethodFailed(err)
+		if s.EventSink != nil {
+			s.EventSink.AuthMethodFailed(err)
 		}
 		return AuthMethod{}, err
 	}

@@ -341,7 +341,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods:      authMethodRepo,
 		Discovery:        discoveryClient,
 		CreateDeployment: createWf,
-		Observer:         setupHub,
+		EventSink:        setupHub,
 	}
 	if enabledAddons["kind"] {
 		provSpec.TrustBundlePlacement = domain.PlacementStrategySpec{
@@ -589,7 +589,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			return fmt.Errorf("connect kubernetes addon: %w", err)
 		}
 	}
-
 
 	// --- shutdown ---
 

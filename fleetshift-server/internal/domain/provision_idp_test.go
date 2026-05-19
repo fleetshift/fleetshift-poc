@@ -13,6 +13,7 @@ import (
 func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 	var savedMethod domain.AuthMethod
 	var startedInput domain.CreateDeploymentInput
+	sink := &recordingProvisionIdPEventSink{}
 
 	spec := &domain.ProvisionIdPWorkflowSpec{
 		AuthMethods: &fakeAuthMethodRepo{saveFn: func(_ context.Context, m domain.AuthMethod) error {
@@ -30,6 +31,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 			Type:    domain.PlacementStrategyStatic,
 			Targets: []domain.TargetID{"kind-local"},
 		},
+		EventSink: sink,
 	}
 
 	input := domain.ProvisionIdPInput{
@@ -96,12 +98,23 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 	if startedInput.PlacementStrategy.Type != domain.PlacementStrategyStatic {
 		t.Errorf("placement type = %q, want static", startedInput.PlacementStrategy.Type)
 	}
+	if len(sink.created) != 1 {
+		t.Fatalf("created events = %d, want 1", len(sink.created))
+	}
+	if sink.created[0].ID != result.ID {
+		t.Errorf("created event ID = %q, want %q", sink.created[0].ID, result.ID)
+	}
+	if len(sink.failed) != 0 {
+		t.Errorf("failed events = %d, want 0", len(sink.failed))
+	}
 }
 
 func TestProvisionIdPWorkflowSpec_Run_InvalidMethod(t *testing.T) {
+	sink := &recordingProvisionIdPEventSink{}
 	spec := &domain.ProvisionIdPWorkflowSpec{
 		AuthMethods: &fakeAuthMethodRepo{},
 		Discovery:   fakeDiscovery{},
+		EventSink:   sink,
 	}
 
 	input := domain.ProvisionIdPInput{
@@ -113,6 +126,12 @@ func TestProvisionIdPWorkflowSpec_Run_InvalidMethod(t *testing.T) {
 	_, err := spec.Run(record, input)
 	if err == nil {
 		t.Fatal("expected error for invalid auth method")
+	}
+	if len(sink.created) != 0 {
+		t.Errorf("created events = %d, want 0", len(sink.created))
+	}
+	if len(sink.failed) != 1 {
+		t.Fatalf("failed events = %d, want 1", len(sink.failed))
 	}
 }
 
@@ -159,6 +178,19 @@ func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDepl
 	return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
 		Deployment: domain.Deployment{ID: in.ID},
 	}}, nil
+}
+
+type recordingProvisionIdPEventSink struct {
+	created []domain.AuthMethod
+	failed  []error
+}
+
+func (s *recordingProvisionIdPEventSink) AuthMethodCreated(method domain.AuthMethod) {
+	s.created = append(s.created, method)
+}
+
+func (s *recordingProvisionIdPEventSink) AuthMethodFailed(err error) {
+	s.failed = append(s.failed, err)
 }
 
 // provisionSyncRecord is a synchronous [domain.Record] that runs
