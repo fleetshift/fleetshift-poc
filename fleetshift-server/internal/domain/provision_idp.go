@@ -15,6 +15,13 @@ type ProvisionIdPInput struct {
 	AuthMethod   AuthMethod
 }
 
+// AuthMethodObserver is notified when an auth method is persisted or
+// when provisioning fails.
+type AuthMethodObserver interface {
+	AuthMethodCreated(method AuthMethod)
+	AuthMethodFailed(err error)
+}
+
 // ProvisionIdPWorkflowSpec is a durable workflow that atomically
 // persists an auth method and starts a trust-bundle deployment to
 // distribute the IdP's trust configuration to delivery agents.
@@ -26,6 +33,7 @@ type ProvisionIdPWorkflowSpec struct {
 	Discovery              OIDCDiscoveryClient
 	CreateDeployment       CreateDeploymentWorkflow
 	TrustBundlePlacement   PlacementStrategySpec
+	Observer               AuthMethodObserver
 	Now                    func() time.Time
 }
 
@@ -67,6 +75,9 @@ func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInpu
 
 		if err := s.AuthMethods.Save(ctx, method); err != nil {
 			return AuthMethod{}, fmt.Errorf("save auth method: %w", err)
+		}
+		if s.Observer != nil {
+			s.Observer.AuthMethodCreated(method)
 		}
 		return method, nil
 	})
@@ -117,7 +128,11 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 func (s *ProvisionIdPWorkflowSpec) Run(record Record, input ProvisionIdPInput) (AuthMethod, error) {
 	method, err := RunActivity(record, s.ResolveAndPersist(), input)
 	if err != nil {
-		return AuthMethod{}, fmt.Errorf("resolve and persist auth method: %w", err)
+		err = fmt.Errorf("resolve and persist auth method: %w", err)
+		if s.Observer != nil {
+			s.Observer.AuthMethodFailed(err)
+		}
+		return AuthMethod{}, err
 	}
 
 	if _, err := RunActivity(record, s.DeployTrustBundle(), method); err != nil {

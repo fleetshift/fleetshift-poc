@@ -49,3 +49,24 @@ Copy `.env.template` to `.env` and edit. All available settings are documented i
 | Podman (local) | Local dev, demos | [deploy/podman/](deploy/podman/README.md) |
 | Kubernetes / OpenShift | Cluster deployment | [deploy/kubernetes/](deploy/kubernetes/README.md) |
 | Keycloak (OpenShift) | External OIDC provider | [deploy/keycloak/](deploy/keycloak/README.md) |
+
+## Day One Setup
+
+The Day One setup flow is an unauthenticated UI page at `/setup` that guides initial OIDC configuration before any identity provider has been registered. A WebSocket endpoint at `/api/ui/setup/ws` broadcasts auth method lifecycle events to the UI in real time so the setup page can react as provisioning progresses.
+
+The equivalent CLI command:
+
+```bash
+fleetctl auth setup \
+  --issuer-url=<URL> \
+  --client-id=<CLIENT_ID> \
+  --audience=<AUDIENCE> \
+  --key-enrollment-client-id=<AUDIENCE>
+```
+
+Optional flags for key registry configuration:
+
+```bash
+--registry-id=github.com \
+--registry-subject-expression=claims.github_username
+```

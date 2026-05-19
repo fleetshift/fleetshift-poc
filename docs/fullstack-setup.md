@@ -33,6 +33,54 @@ The browser accesses Keycloak via HTTP on port 8180. HTTPS (port 8443) is used
 internally by kube-apiserver in kind clusters — the CA cert is auto-generated
 and mounted automatically.
 
+## Auth bootstrap
+
+There are two ways to configure authentication: the browser UI or the CLI.
+
+### Option A: Browser setup (UI_SETUP=true)
+
+Skip the CLI auth-setup init container and configure auth from the browser:
+
+```bash
+task up UI_SETUP=true
+```
+
+Then open http://localhost:8085/setup and fill in:
+
+| Field | Value | Description |
+|-------|-------|-------------|
+| Issuer URL | `http://keycloak:8180/auth/realms/fleetshift` | Your OIDC provider's issuer URL |
+| Audience | `fleetshift` | The `aud` claim in JWT tokens (not the client ID) |
+| Signing public key registry | OIDC-hosted keys or GitHub SSH keys | Where verification public keys are stored |
+
+Click **Configure** and wait for the success banner. The server runs OIDC
+discovery in the background and reports success/failure via WebSocket.
+
+The audience must match what your identity provider puts in the `aud` claim of
+access tokens. This is the shared resource server audience — not the OAuth2
+client ID (e.g. `fleetshift-ui` or `fleetshift-cli`).
+
+### Option B: CLI init container (default)
+
+The default `task up` runs an `auth-setup` init container that calls:
+
+```bash
+fleetctl auth setup \
+  --server fleetshift-server:50051 \
+  --issuer-url http://keycloak:8180/auth/realms/fleetshift \
+  --client-id fleetshift-cli \
+  --audience fleetshift
+```
+
+Additional flags are added from `.env` when set:
+
+| `.env` variable | CLI flag | Purpose |
+|-----------------|----------|---------|
+| `KEY_ENROLLMENT_CLIENT_ID` | `--key-enrollment-client-id` | OAuth2 client for signing key enrollment |
+| `KEY_REGISTRY_ID` | `--registry-id` | External key registry (e.g. `github.com`) |
+| `KEY_REGISTRY_SUBJECT_EXPR` | `--registry-subject-expression` | CEL expression mapping token claims to registry subject |
+| `PUBLIC_KEY_CLAIM_EXPR` | `--public-key-claim-expression` | CEL expression extracting signer's public key from token claims |
+
 ## Signing key enrollment
 
 The UI includes a signing key management page. After logging in:

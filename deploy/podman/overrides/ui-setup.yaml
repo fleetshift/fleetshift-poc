@@ -1,0 +1,16 @@
+# UI-driven setup override — skip the CLI auth-setup init container.
+#
+# Auth configuration is done from the Day One setup form in the browser
+# instead of the `fleetctl auth setup` container.
+#
+# Usage: add UI_SETUP=true to your task invocation, or layer manually:
+#   podman compose -f compose.yaml -f overrides/ui-setup.yaml up
+
+services:
+
+  # Replace auth-setup with a no-op
+  auth-setup:
+    image: busybox
+    entrypoint: ["true"]
+    command: []
+    depends_on: {}

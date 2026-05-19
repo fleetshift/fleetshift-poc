@@ -10,6 +10,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/config v1.32.14
 	github.com/aws/aws-sdk-go-v2/service/sts v1.41.10
 	github.com/bufbuild/protocompile v0.14.1
+	github.com/coder/websocket v1.8.14
 	github.com/cschleiden/go-workflows v1.4.1
 	github.com/fleetshift/fleetshift-poc/gen v0.0.0-00010101000000-000000000000
 	github.com/google/cel-go v0.28.0

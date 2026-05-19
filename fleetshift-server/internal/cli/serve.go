@@ -336,10 +336,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("create OIDC verifier: %w", err)
 	}
 
+	setupHub := transporthttp.NewSetupHub(logger)
 	provSpec := &domain.ProvisionIdPWorkflowSpec{
 		AuthMethods:      authMethodRepo,
 		Discovery:        discoveryClient,
 		CreateDeployment: createWf,
+		Observer:         setupHub,
 	}
 	if enabledAddons["kind"] {
 		provSpec.TrustBundlePlacement = domain.PlacementStrategySpec{
@@ -476,6 +478,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// always take precedence over the gateway's /v1/ catch-all.
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
+	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 
 	if f.webDir != "" {

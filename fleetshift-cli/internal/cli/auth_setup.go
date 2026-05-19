@@ -51,9 +51,9 @@ func runAuthSetup(cmd *cobra.Command, ctx *cmdContext, f *authSetupFlags) error 
 	client := pb.NewAuthMethodServiceClient(ctx.conn)
 
 	oidcConfig := &pb.OIDCConfig{
-		IssuerUrl:             f.issuerURL,
-		Audience:              f.audience,
-		KeyEnrollmentAudience: f.keyEnrollmentClientID,
+		IssuerUrl:               f.issuerURL,
+		Audience:                f.audience,
+		KeyEnrollmentAudience:   f.keyEnrollmentClientID,
 		PublicKeyClaimExpression: f.publicKeyClaimExpr,
 	}
 	if f.registryID != "" && f.registrySubjectExpr != "" {
