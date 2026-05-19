@@ -1,9 +1,16 @@
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
-import { ScalprumProvider } from "@scalprum/react-core";
+import {
+  BrowserRouter,
+  Routes,
+  Route,
+  Navigate,
+  useLocation,
+} from "react-router-dom";
+import { ScalprumProvider, ScalprumComponent } from "@scalprum/react-core";
 import { useScalprum } from "@scalprum/react-core";
 import { initSharedScope } from "@scalprum/core";
 import { PropsWithChildren, useEffect, useMemo, useRef, useState } from "react";
 import { AppLayout } from "./layouts/AppLayout";
+import { SetupLayout } from "./layouts/SetupLayout";
 import { ClusterProvider } from "./contexts/ClusterContext";
 import { ScopeProvider, useScope } from "./contexts/ScopeContext";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
@@ -180,14 +187,42 @@ const AppConfigBridge = ({ children }: PropsWithChildren) => {
       assetsHost={assetsHost}
     >
       <ClusterProvider>
-        <ScalprumShell>
-          <ScopeProvider>
-            <ScopeBridge />
-            {children}
-          </ScopeProvider>
-        </ScalprumShell>
+        <ScopeProvider>
+          <ScopeBridge />
+          {children}
+        </ScopeProvider>
       </ClusterProvider>
     </PluginRegistryProvider>
+  );
+};
+
+const SetupPluginPage = () => (
+  <ScalprumComponent scope="day-one-plugin" module="InitialSetupForm" />
+);
+
+const SetupRoutes = () => (
+  <Routes>
+    <Route path="/setup" element={<SetupLayout />}>
+      <Route index element={<SetupPluginPage />} />
+    </Route>
+  </Routes>
+);
+
+const AppShell = () => {
+  const location = useLocation();
+
+  if (location.pathname.startsWith("/setup")) {
+    return <SetupRoutes />;
+  }
+
+  return (
+    <AuthProvider>
+      <AuthGate>
+        <AppConfigBridge>
+          <AppRoutes />
+        </AppConfigBridge>
+      </AuthGate>
+    </AuthProvider>
   );
 };
 
@@ -195,15 +230,11 @@ export const App = () => (
   <AnimationsProvider config={{ hasAnimations: true }}>
     <ScopeInitializer>
       <BrowserRouter>
-        <AuthProvider>
-          <AuthGate>
-            <AppConfigProvider>
-              <AppConfigBridge>
-                <AppRoutes />
-              </AppConfigBridge>
-            </AppConfigProvider>
-          </AuthGate>
-        </AuthProvider>
+        <AppConfigProvider>
+          <ScalprumShell>
+            <AppShell />
+          </ScalprumShell>
+        </AppConfigProvider>
       </BrowserRouter>
     </ScopeInitializer>
   </AnimationsProvider>

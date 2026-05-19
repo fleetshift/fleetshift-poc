@@ -3,12 +3,10 @@ import {
   useContext,
   useState,
   useEffect,
-  useCallback,
   ReactNode,
 } from "react";
 import type { AppsConfig } from "@scalprum/core";
 import type { PluginEntry } from "./PluginRegistryContext";
-import { useAuth } from "./AuthContext";
 
 export interface PluginPage {
   id: string;
@@ -44,12 +42,9 @@ interface AppConfigContextValue {
 const AppConfigContext = createContext<AppConfigContextValue | null>(null);
 
 export function AppConfigProvider({ children }: { children: ReactNode }) {
-  const { user } = useAuth();
   const [config, setConfig] = useState<AppConfigContextValue | null>(null);
 
-  const loadConfig = useCallback(() => {
-    if (!user) return;
-
+  useEffect(() => {
     fetch("/api/ui/user-config")
       .then((res) => {
         if (!res.ok) throw new Error(`${res.status}`);
@@ -67,11 +62,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       .catch((err) => {
         console.error("Failed to load app config:", err);
       });
-  }, [user]);
-
-  useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
+  }, []);
 
   if (!config) return null;
 

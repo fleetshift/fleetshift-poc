@@ -100,6 +100,16 @@ Plugins are Module Federation remotes loaded via Scalprum. Each plugin is a `Dyn
 |--------|-----|---------|
 | management-plugin | management | Targets, Orchestration, Signing Keys |
 | routing-plugin | routing | Shared routing utilities (PluginLink, usePluginNavigate) |
+| day-one-plugin | day-one | Day One setup wizard, initial OIDC auth configuration |
+| core-plugin | core | Cluster list and detail pages |
 
 Plugin pages and nav layout are computed by the Go backend from `plugin-registry.json`. The GUI fetches this from `GET /api/ui/user-config`.
+
+## Day One Setup
+
+The `/setup` route renders the Day One plugin's `InitialSetupForm` module via Scalprum, outside the auth gate. This allows first-time users to configure OIDC authentication before any identity provider is available.
+
+A single `ScalprumProvider` serves both the setup route and authenticated routes — plugin config is fetched unauthenticated from `/api/ui/user-config`, so Scalprum can load the Day One plugin without a valid token.
+
+The setup form configures OIDC auth via the backend API and receives real-time provisioning status via WebSocket. Once setup completes, the user is redirected to the login page to authenticate with the newly configured provider.
 

@@ -119,6 +119,7 @@ const DayOnePlugin = new DynamicRemotePlugin({
     version: "1.0.0",
     exposedModules: {
       DayOnePage: p("./src/plugins/day-one-plugin/DayOnePage.tsx"),
+      InitialSetupForm: p("./src/plugins/day-one-plugin/InitialSetupForm.tsx"),
     },
   },
 });
