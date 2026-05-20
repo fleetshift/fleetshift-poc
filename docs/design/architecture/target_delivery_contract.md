@@ -54,7 +54,11 @@ When an addon starts up, it should:
 
 #### Generation ordering and stale delivery prevention
 
-Every delivery carries the fulfillment's generation. The addon must never apply a delivery whose generation is older than one it has already acked. This is a safety property, not just a consistency mechanism: a stale delivery can visibly regress a customer's environment (e.g. reverting a cluster upgrade).
+Generation is a **first-class delivery protocol field** — every `DeliveryRequest` carries it unconditionally, independent of attestation. This is the single source of truth for fencing: the addon uses this field to detect stale deliveries regardless of whether attestation is present.
+
+When attestation *is* present, the platform's verification step asserts that the delivery-level generation matches the signed `expected_generation` in the attestation. This is a consistency gate: attestation does not introduce a second generation value; it validates the one carried by the protocol. The addon never chooses between two values — attestation either passes or rejects the whole delivery.
+
+The addon must never apply a delivery whose generation is older than one it has already acked. This is a safety property, not just a consistency mechanism: a stale delivery can visibly regress a customer's environment (e.g. reverting a cluster upgrade).
 
 The platform enforces a concurrency limit of one in-flight delivery per fulfillment. Under normal operation, the addon never sees two deliveries for the same fulfillment at once. However, there is an edge case: a platform process may lose its orchestration lock (crash, partition, workflow task timeout) without knowing it. A second process acquires the lock and dispatches a newer generation. The stale process's delivery may still arrive at the addon after the newer one.
 

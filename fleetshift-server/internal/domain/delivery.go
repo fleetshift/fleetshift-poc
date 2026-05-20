@@ -74,6 +74,7 @@ type Delivery struct {
 	FulfillmentID FulfillmentID
 	TargetID      TargetID
 	Manifests     []Manifest
+	Generation    Generation // fulfillment generation at dispatch; used for stale-delivery fencing
 	State         DeliveryState
 	CreatedAt     time.Time
 	UpdatedAt     time.Time

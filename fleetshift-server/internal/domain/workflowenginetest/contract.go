@@ -999,7 +999,7 @@ type outputAgent struct {
 	reporter domain.DeliveryReporter
 }
 
-func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	var spec struct{ Name string }
 	if err := json.Unmarshal(manifests[0].Raw, &spec); err != nil {
 		return err
@@ -1028,7 +1028,7 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -1042,7 +1042,7 @@ type authFailThenSucceedAgent struct {
 	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
@@ -1063,7 +1063,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 	return nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -1093,7 +1093,7 @@ type transientFailAgent struct {
 	failsRemaining int
 }
 
-func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
 	if a.failsRemaining > 0 {
 		a.failsRemaining--
@@ -1107,7 +1107,7 @@ func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, del
 	return nil
 }
 
-func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -1124,14 +1124,14 @@ func (a *terminalFailAgent) Calls() int {
 	return a.calls
 }
 
-func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
 	a.calls++
 	a.mu.Unlock()
 	return domain.TerminalError(errors.New("permanently broken"))
 }
 
-func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -1143,14 +1143,14 @@ type transientRemoveAgent struct {
 	failsRemaining int
 }
 
-func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
 
-func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	if a.failsRemaining > 0 {

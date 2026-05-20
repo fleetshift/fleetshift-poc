@@ -98,7 +98,7 @@ func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 // When an attestation is provided and the agent has a verification
 // config, the attestation is verified before apply. Verification
 // failure is reported as [domain.DeliveryStateAuthFailed].
-func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
+func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	if _, ok := target.Properties["api_server"]; !ok {
 		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
 	}
@@ -112,7 +112,7 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryI
 			})
 			return nil
 		}
-		if err := v.Verify(ctx, att); err != nil {
+		if err := v.Verify(ctx, att, generation); err != nil {
 			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("attestation verification failed: %v", err),
@@ -267,13 +267,13 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // Deliver) and uses platform credentials. Otherwise falls back to
 // token passthrough (auth.Token).
 // Resources that are already gone (404) are silently skipped.
-func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {
 			return fmt.Errorf("build verifier for target %q: %w", target.ID, err)
 		}
-		if err := v.Verify(ctx, att); err != nil {
+		if err := v.Verify(ctx, att, generation); err != nil {
 			return fmt.Errorf("attestation verification failed: %w", err)
 		}
 		cfg, err := a.buildPlatformRESTConfig(ctx, target)

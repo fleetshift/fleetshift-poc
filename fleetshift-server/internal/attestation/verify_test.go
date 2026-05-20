@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -144,7 +145,7 @@ func TestVerifyAttestation_HappyPath(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err != nil {
 		t.Fatalf("expected verification to pass, got: %v", err)
 	}
@@ -155,7 +156,7 @@ func TestVerifyAttestation_BadSignature(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Provenance.Sig.SignatureBytes = []byte("tampered-sig")
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail with bad signature")
 	}
@@ -177,7 +178,7 @@ func TestVerifyAttestation_Expired(t *testing.T) {
 		}),
 	)
 
-	err := expiredVerifier.Verify(context.Background(), att)
+	err := expiredVerifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for expired attestation")
 	}
@@ -196,7 +197,7 @@ func TestVerifyAttestation_ExpiredIdentityToken_StillPasses(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Signer.IdentityToken = domain.RawToken(expiredToken)
 
-	if err := h.verifier.Verify(context.Background(), att); err != nil {
+	if err := h.verifier.Verify(context.Background(), att, 1); err != nil {
 		t.Fatalf("expected expired identity token to be accepted (only signature matters), got: %v", err)
 	}
 }
@@ -213,7 +214,7 @@ func TestVerifyAttestation_WrongAudience_Rejected(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Signer.IdentityToken = domain.RawToken(wrongAudToken)
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for wrong audience")
 	}
@@ -224,7 +225,7 @@ func TestVerifyAttestation_SignerSubjectMismatch(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Provenance.Sig.Signer.Subject = "wrong-signer"
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for signer mismatch")
 	}
@@ -235,7 +236,7 @@ func TestVerifyAttestation_RegistrySubjectMismatch(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Signer.RegistrySubject = "wrong-registry-subject"
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for registry subject mismatch")
 	}
@@ -256,7 +257,7 @@ func TestVerifyAttestation_ManifestJSONNormalized(t *testing.T) {
 		}},
 	}
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err != nil {
 		t.Fatalf("semantically identical manifest (JSONB-normalized) should pass verification, got: %v", err)
 	}
@@ -272,7 +273,7 @@ func TestVerifyAttestation_ManifestContentMismatch(t *testing.T) {
 		}},
 	}
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for manifest mismatch")
 	}
@@ -285,7 +286,7 @@ func TestVerifyAttestation_RemoveDeploymentIDMismatch(t *testing.T) {
 		DeploymentID: "wrong-dep",
 	}
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for remove deployment ID mismatch")
 	}
@@ -298,7 +299,7 @@ func TestVerifyAttestation_RemoveDeploymentIDMatch(t *testing.T) {
 		DeploymentID: "dep-1",
 	}
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err != nil {
 		t.Fatalf("expected verification to pass for matching remove deployment ID, got: %v", err)
 	}
@@ -309,7 +310,7 @@ func TestVerifyAttestation_UntrustedIssuer(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Provenance.Sig.Signer.Issuer = "https://evil.example.com"
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for untrusted issuer")
 	}
@@ -326,7 +327,7 @@ func TestVerifyAttestation_IdentityTokenSubjectMismatch(t *testing.T) {
 	})
 	att.Input.Signer.IdentityToken = domain.RawToken(wrongToken)
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for identity token subject mismatch")
 	}
@@ -337,7 +338,7 @@ func TestVerifyAttestation_ContentHashMismatch(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Provenance.Sig.ContentHash = []byte("wrong-hash")
 
-	err := h.verifier.Verify(context.Background(), att)
+	err := h.verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail for content hash mismatch")
 	}
@@ -361,9 +362,45 @@ func TestVerifyAttestation_NoKeyResolver(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Input.Provenance.Sig.Signer.Issuer = issuer
 
-	err := verifier.Verify(context.Background(), att)
+	err := verifier.Verify(context.Background(), att, 1)
 	if err == nil {
 		t.Fatal("expected verification to fail without key resolver")
+	}
+}
+
+func TestVerifyAttestation_GenerationMismatch(t *testing.T) {
+	h := setupHarness(t)
+	att := h.buildValidAttestation(t)
+
+	err := h.verifier.Verify(context.Background(), att, 99)
+	if err == nil {
+		t.Fatal("expected verification to fail for generation mismatch")
+	}
+	if !strings.Contains(err.Error(), "generation mismatch") {
+		t.Errorf("error = %q, want it to mention generation mismatch", err)
+	}
+}
+
+func TestVerifyAttestation_GenerationZero_SkipsCheck(t *testing.T) {
+	h := setupHarness(t)
+	att := h.buildValidAttestation(t)
+	att.Input.Provenance.ExpectedGeneration = 0
+
+	// Re-sign with zero generation so the envelope still matches.
+	ms := att.Input.Provenance.Content.(domain.DeploymentContent).ManifestStrategy
+	ps := att.Input.Provenance.Content.(domain.DeploymentContent).PlacementStrategy
+	validUntil := att.Input.Provenance.ValidUntil
+	envelope, err := domain.BuildSignedInputEnvelope("dep-1", ms, ps, validUntil, nil, 0)
+	if err != nil {
+		t.Fatalf("build envelope: %v", err)
+	}
+	envelopeHash := domain.HashIntent(envelope)
+	att.Input.Provenance.Sig.ContentHash = envelopeHash
+	att.Input.Provenance.Sig.SignatureBytes = signEnvelope(t, h.privKey, envelope)
+
+	// Any delivery generation should be accepted when signed generation is 0.
+	if err := h.verifier.Verify(context.Background(), att, 42); err != nil {
+		t.Fatalf("expected verification to pass when signed generation is zero, got: %v", err)
 	}
 }
 

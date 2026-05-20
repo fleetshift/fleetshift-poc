@@ -26,4 +26,10 @@ message DeliveryRequest {
   // Self-contained verification bundle for delivery agent.
   // Present when the deployment was created with a user signature.
   Attestation attestation = 6;
+
+  // Fulfillment generation at time of dispatch. Always present regardless
+  // of attestation. Used by the delivery agent for stale-delivery fencing.
+  // When attestation is present, verification asserts this matches the
+  // signed expected_generation.
+  int64 generation = 7 [(google.api.field_behavior) = REQUIRED];
 }

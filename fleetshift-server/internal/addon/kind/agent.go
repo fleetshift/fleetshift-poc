@@ -163,7 +163,7 @@ func (a *Agent) agentObserver() AgentObserver {
 // are stored in memory synchronously. Cluster manifests follow the
 // existing async flow. All delivery outcomes are reported through the
 // [domain.DeliveryReporter].
-func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	var clusterManifests []domain.Manifest
 	for _, m := range manifests {
 		switch m.ResourceType {
@@ -250,7 +250,7 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
 		return fmt.Errorf("validate manifests: %w", err)

@@ -23,15 +23,16 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO delivery_records (id, fulfillment_id, target_id, manifests, state, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO delivery_records (id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT (fulfillment_id, target_id) DO UPDATE SET
 		   id = excluded.id,
 		   manifests = excluded.manifests,
+		   generation = excluded.generation,
 		   state = excluded.state,
 		   updated_at = excluded.updated_at`,
 		string(d.ID), string(d.FulfillmentID), string(d.TargetID),
-		string(manifests), string(d.State),
+		string(manifests), int64(d.Generation), string(d.State),
 		d.CreatedAt.UTC().Format(time.RFC3339),
 		d.UpdatedAt.UTC().Format(time.RFC3339),
 	)
@@ -43,7 +44,7 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 
 func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
 		 FROM delivery_records WHERE id = ?`,
 		string(id),
 	)
@@ -52,7 +53,7 @@ func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.De
 
 func (r *DeliveryRepo) GetByFulfillmentTarget(ctx context.Context, fID domain.FulfillmentID, tgtID domain.TargetID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
 		 FROM delivery_records WHERE fulfillment_id = ? AND target_id = ?`,
 		string(fID), string(tgtID),
 	)
@@ -61,7 +62,7 @@ func (r *DeliveryRepo) GetByFulfillmentTarget(ctx context.Context, fID domain.Fu
 
 func (r *DeliveryRepo) ListByFulfillment(ctx context.Context, fID domain.FulfillmentID) ([]domain.Delivery, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
 		 FROM delivery_records WHERE fulfillment_id = ?`,
 		string(fID),
 	)
@@ -88,7 +89,7 @@ func (r *DeliveryRepo) ListActive(ctx context.Context, targetIDs []domain.Target
 		string(domain.DeliveryStateProgressing),
 	}
 
-	q := `SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+	q := `SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
 	      FROM delivery_records WHERE state IN (?, ?, ?)`
 	if len(targetIDs) > 0 {
 		q += ` AND target_id IN (`
@@ -133,7 +134,8 @@ func (r *DeliveryRepo) DeleteByFulfillment(ctx context.Context, fID domain.Fulfi
 func scanDelivery(s scanner) (domain.Delivery, error) {
 	var d domain.Delivery
 	var id, fID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
-	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
+	var generation int64
+	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &generation, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return d, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -142,6 +144,7 @@ func scanDelivery(s scanner) (domain.Delivery, error) {
 	d.ID = domain.DeliveryID(id)
 	d.FulfillmentID = domain.FulfillmentID(fID)
 	d.TargetID = domain.TargetID(tgtID)
+	d.Generation = domain.Generation(generation)
 	d.State = domain.DeliveryState(stateStr)
 	if err := json.Unmarshal([]byte(manifestsJSON), &d.Manifests); err != nil {
 		return d, fmt.Errorf("unmarshal manifests: %w", err)

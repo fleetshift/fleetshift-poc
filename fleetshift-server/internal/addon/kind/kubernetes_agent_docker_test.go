@@ -65,7 +65,7 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 		Raw:          json.RawMessage(`{"name":"` + clusterName + `"}`),
 	}}
 
-	err := kindAgent.Deliver(ctx, target, "setup", manifests, domain.DeliveryAuth{}, nil)
+	err := kindAgent.Deliver(ctx, target, "setup", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("kind Deliver: %v", err)
 	}
@@ -173,7 +173,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		err := agent.Deliver(ctx, k8sTarget, "tp-1", manifests, auth, nil)
+		err := agent.Deliver(ctx, k8sTarget, "tp-1", manifests, auth, nil, 1)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
@@ -207,7 +207,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		defer cancel()
 
 		for i := range 2 {
-			err := agent.Deliver(ctx, k8sTarget, domain.DeliveryID("idem-"+string(rune('0'+i))), manifests, auth, nil)
+			err := agent.Deliver(ctx, k8sTarget, domain.DeliveryID("idem-"+string(rune('0'+i))), manifests, auth, nil, 1)
 			if err != nil {
 				t.Fatalf("Deliver[%d]: %v", i, err)
 			}
@@ -235,7 +235,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		err := agent.Deliver(ctx, k8sTarget, "multi-1", manifests, auth, nil)
+		err := agent.Deliver(ctx, k8sTarget, "multi-1", manifests, auth, nil, 1)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
@@ -280,7 +280,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
 		targetWithTrust.Properties["trust_bundle"] = att.trustBundleJSON
 
-		err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation)
+		err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation, 1)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
@@ -324,7 +324,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 			},
 		}
 
-		err := agent.Deliver(context.Background(), targetWithTrust, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt)
+		err := agent.Deliver(context.Background(), targetWithTrust, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt, 1)
 		if err != nil {
 			t.Fatalf("Deliver should not return error: %v", err)
 		}

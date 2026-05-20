@@ -638,7 +638,7 @@ type authFailThenSucceedAgent struct {
 	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
@@ -659,7 +659,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 	return nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 

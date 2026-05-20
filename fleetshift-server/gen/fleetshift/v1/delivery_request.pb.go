@@ -34,7 +34,12 @@ type DeliveryRequest struct {
 	Auth *DeliveryAuth `protobuf:"bytes,5,opt,name=auth,proto3" json:"auth,omitempty"`
 	// Self-contained verification bundle for delivery agent.
 	// Present when the deployment was created with a user signature.
-	Attestation   *Attestation `protobuf:"bytes,6,opt,name=attestation,proto3" json:"attestation,omitempty"`
+	Attestation *Attestation `protobuf:"bytes,6,opt,name=attestation,proto3" json:"attestation,omitempty"`
+	// Fulfillment generation at time of dispatch. Always present regardless
+	// of attestation. Used by the delivery agent for stale-delivery fencing.
+	// When attestation is present, verification asserts this matches the
+	// signed expected_generation.
+	Generation    int64 `protobuf:"varint,7,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -111,11 +116,18 @@ func (x *DeliveryRequest) GetAttestation() *Attestation {
 	return nil
 }
 
+func (x *DeliveryRequest) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
 var File_fleetshift_v1_delivery_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_delivery_request_proto_rawDesc = "" +
 	"\n" +
-	"$fleetshift/v1/delivery_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1ffleetshift/v1/attestation.proto\x1a\x1cfleetshift/v1/manifest.proto\x1a!fleetshift/v1/delivery_auth.proto\"\xae\x02\n" +
+	"$fleetshift/v1/delivery_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1ffleetshift/v1/attestation.proto\x1a\x1cfleetshift/v1/manifest.proto\x1a!fleetshift/v1/delivery_auth.proto\"\xd3\x02\n" +
 	"\x0fDeliveryRequest\x12$\n" +
 	"\vdelivery_id\x18\x01 \x01(\tB\x03\xe0A\x02R\n" +
 	"deliveryId\x12(\n" +
@@ -123,7 +135,10 @@ const file_fleetshift_v1_delivery_request_proto_rawDesc = "" +
 	"\ttarget_id\x18\x03 \x01(\tB\x03\xe0A\x02R\btargetId\x12:\n" +
 	"\tmanifests\x18\x04 \x03(\v2\x17.fleetshift.v1.ManifestB\x03\xe0A\x02R\tmanifests\x12/\n" +
 	"\x04auth\x18\x05 \x01(\v2\x1b.fleetshift.v1.DeliveryAuthR\x04auth\x12<\n" +
-	"\vattestation\x18\x06 \x01(\v2\x1a.fleetshift.v1.AttestationR\vattestationBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\vattestation\x18\x06 \x01(\v2\x1a.fleetshift.v1.AttestationR\vattestation\x12#\n" +
+	"\n" +
+	"generation\x18\a \x01(\x03B\x03\xe0A\x02R\n" +
+	"generationBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_delivery_request_proto_rawDescOnce sync.Once

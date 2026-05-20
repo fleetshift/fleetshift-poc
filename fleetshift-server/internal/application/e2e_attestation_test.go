@@ -147,7 +147,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		attestation.WithKeyResolver(verifierKeyResolver),
 	)
 
-	if err := verifier.Verify(ctx, att); err != nil {
+	if err := verifier.Verify(ctx, att, 1); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
 }
@@ -160,15 +160,15 @@ type capturingDeliveryAgent struct {
 	att   *domain.Attestation
 }
 
-func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
+func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	a.att = att
 	a.mu.Unlock()
-	return a.inner.Deliver(ctx, target, id, manifests, auth, att)
+	return a.inner.Deliver(ctx, target, id, manifests, auth, att, generation)
 }
 
-func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
-	return a.inner.Remove(ctx, target, id, manifests, auth, att)
+func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+	return a.inner.Remove(ctx, target, id, manifests, auth, att, generation)
 }
 
 func (a *capturingDeliveryAgent) capturedAttestation() *domain.Attestation {

@@ -75,7 +75,7 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
-	err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil, 1)
 	if err == nil {
 		t.Fatal("expected error for missing api_server")
 	}
@@ -96,7 +96,7 @@ func TestAgent_Deliver_MissingToken(t *testing.T) {
 		},
 	}
 
-	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil, 1)
 	if err == nil {
 		t.Fatal("expected error for missing token")
 	}
@@ -124,7 +124,7 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -145,7 +145,7 @@ func TestAgent_Remove_MissingAPIServer(t *testing.T) {
 		Properties: map[string]string{},
 	}
 
-	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil)
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
 	if err == nil {
 		t.Fatal("expected error for missing api_server")
 	}
@@ -163,7 +163,7 @@ func TestAgent_Remove_EmptyManifests(t *testing.T) {
 		},
 	}
 
-	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil); err != nil {
+	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1); err != nil {
 		t.Fatalf("Remove with empty manifests: %v", err)
 	}
 }
@@ -195,7 +195,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -233,7 +233,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -271,7 +271,7 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 		},
 	}
 
-	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 		},
 	}
 
-	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -343,13 +343,13 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	_ = agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	_ = agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	result1 := <-reporter.done
 	if result1.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("first: State = %q, want AuthFailed", result1.State)
 	}
 
-	_ = agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att)
+	_ = agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att, 1)
 	result2 := <-reporter.done
 	if result2.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("second: State = %q, want AuthFailed", result2.State)
@@ -383,7 +383,7 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 		},
 	}
 
-	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
@@ -419,7 +419,7 @@ func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
 		},
 	}
 
-	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	if err == nil {
 		t.Fatal("expected attestation verification error, got nil")
 	}
@@ -452,7 +452,7 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReturnsError(t *testing.T) {
 		},
 	}
 
-	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	if err == nil {
 		t.Fatal("expected error for missing trust_bundle, got nil")
 	}

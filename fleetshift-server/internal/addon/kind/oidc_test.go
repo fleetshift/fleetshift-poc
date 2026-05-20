@@ -118,7 +118,7 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 		Raw:          json.RawMessage(specBytes),
 	}}
 
-	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "empty-aud"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}

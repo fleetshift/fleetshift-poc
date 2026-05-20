@@ -83,14 +83,32 @@ func (v *Verifier) TrustedIssuers() map[domain.IssuerURL]TrustedIssuer {
 	return v.trustedIssuers
 }
 
-// Verify verifies the full attestation bundle: signed input followed
-// by output verification.
-func (v *Verifier) Verify(ctx context.Context, att *domain.Attestation) error {
+// Verify verifies the full attestation bundle: signed input, output
+// verification, and generation consistency. The deliveryGen parameter
+// is the generation carried by the delivery protocol — Verify asserts
+// it matches the signed expected_generation when the latter is non-zero.
+func (v *Verifier) Verify(ctx context.Context, att *domain.Attestation, deliveryGen domain.Generation) error {
 	if err := v.verifySignedInput(ctx, &att.Input); err != nil {
 		return fmt.Errorf("signed input verification: %w", err)
 	}
 	if err := verifyOutput(&att.Input, att.Output); err != nil {
 		return fmt.Errorf("output verification: %w", err)
+	}
+	if err := verifyGenerationConsistency(att.Input.Provenance.ExpectedGeneration, deliveryGen); err != nil {
+		return err
+	}
+	return nil
+}
+
+// verifyGenerationConsistency asserts that the delivery-level generation
+// matches the signed expected_generation. Skipped when the signed value
+// is zero (unsigned / no replay protection).
+func verifyGenerationConsistency(signed domain.Generation, delivery domain.Generation) error {
+	if signed == 0 {
+		return nil
+	}
+	if signed != delivery {
+		return fmt.Errorf("generation mismatch: attestation expected %d, delivery carries %d", signed, delivery)
 	}
 	return nil
 }

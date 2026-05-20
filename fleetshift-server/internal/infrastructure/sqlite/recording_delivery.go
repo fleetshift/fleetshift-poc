@@ -22,13 +22,14 @@ type RecordingDeliveryService struct {
 	Now      func() time.Time
 }
 
-func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	now := s.now()
 	d := domain.Delivery{
 		ID:            deliveryID,
 		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
 		TargetID:      target.ID,
 		Manifests:     manifests,
+		Generation:    generation,
 		State:         domain.DeliveryStatePending,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -56,7 +57,7 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 	return nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

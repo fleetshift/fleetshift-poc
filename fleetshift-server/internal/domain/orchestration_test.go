@@ -386,7 +386,7 @@ type noopDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -398,7 +398,7 @@ func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -410,7 +410,7 @@ type asyncDelivery struct {
 	done   chan struct{}
 }
 
-func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -425,7 +425,7 @@ func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, delivery
 	return nil
 }
 
-func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -437,7 +437,7 @@ type emittingAsyncDelivery struct {
 	done   chan struct{}
 }
 
-func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -452,7 +452,7 @@ func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -462,7 +462,7 @@ type outputProducingDelivery struct {
 	secrets []domain.ProducedSecret
 }
 
-func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	result := domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
 		ProvisionedTargets: d.targets,
@@ -479,7 +479,7 @@ func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo
 	return nil
 }
 
-func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -488,7 +488,7 @@ type failingRemoveDelivery struct {
 	err    error
 }
 
-func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		f.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -500,7 +500,7 @@ func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return f.err
 }
 
@@ -508,7 +508,7 @@ type authFailingDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -523,7 +523,7 @@ func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, del
 	return nil
 }
 
-func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -534,7 +534,7 @@ type recordingDelivery struct {
 	delivered []domain.TargetID
 }
 
-func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	d.mu.Lock()
 	d.delivered = append(d.delivered, target.ID)
 	d.mu.Unlock()
@@ -549,7 +549,7 @@ func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo,
 	return nil
 }
 
-func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 
@@ -1409,7 +1409,7 @@ type authFailingNoSignalDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
@@ -1424,7 +1424,7 @@ func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetI
 	return nil
 }
 
-func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	return nil
 }
 

@@ -68,6 +68,7 @@ type DeliverInput struct {
 	Manifests     []Manifest
 	Auth          DeliveryAuth
 	Attestation   *Attestation // nil for token-passthrough deliveries
+	Generation    Generation   // fulfillment generation at dispatch; used for stale-delivery fencing
 }
 
 // RemoveInput is the input to the remove-from-target activity.
@@ -78,6 +79,7 @@ type RemoveInput struct {
 	Manifests     []Manifest
 	Auth          DeliveryAuth
 	Attestation   *Attestation // nil for token-passthrough deliveries
+	Generation    Generation   // fulfillment generation at dispatch; used for stale-delivery fencing
 }
 
 // ResolvePlacementInput is the input to the resolve-placement activity.
@@ -260,6 +262,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 			FulfillmentID: in.FulfillmentID,
 			TargetID:      in.Target.ID,
 			Manifests:     in.Manifests,
+			Generation:    in.Generation,
 			State:         DeliveryStatePending,
 			CreatedAt:     now,
 			UpdatedAt:     now,
@@ -270,7 +273,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 			return struct{}{}, fmt.Errorf("commit: %w", err)
 		}
 
-		if err := s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation); err != nil {
+		if err := s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
 			return struct{}{}, fmt.Errorf("dispatch delivery %s: %w", in.DeliveryID, err)
 		}
 		return struct{}{}, nil
@@ -299,7 +302,7 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, str
 			return struct{}{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
 		}
 
-		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation)
+		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation)
 	})
 }
 
@@ -669,6 +672,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 			DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
 			FulfillmentID: fulfillmentID,
 			Auth:          f.Auth,
+			Generation:    f.Generation,
 		}
 		if evidence != nil {
 			in.Attestation = assembleRemoveAttestation(f, evidence)
@@ -707,6 +711,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
 					FulfillmentID: fulfillmentID,
 					Auth:          f.Auth,
+					Generation:    startGen,
 				}
 				if evidence != nil {
 					in.Attestation = assembleRemoveAttestation(f, evidence)
@@ -742,6 +747,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					FulfillmentID: fulfillmentID,
 					Manifests:     manifests,
 					Auth:          f.Auth,
+					Generation:    startGen,
 				}
 				if evidence != nil {
 					in.Attestation = assembleDeliverAttestation(f, manifests, evidence)

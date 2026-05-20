@@ -129,6 +129,7 @@ func (a *Agent) Deliver(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
+	_ domain.Generation,
 ) error {
 	// 1. Parse ClusterSpec from manifests
 	spec, err := ParseClusterSpec(manifests)
@@ -467,6 +468,7 @@ func (a *Agent) Remove(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
+	_ domain.Generation,
 ) error {
 	// Try to get cluster name from manifests for work dir lookup
 	spec, specErr := ParseClusterSpec(manifests)

@@ -45,21 +45,21 @@ func (r *RoutingDeliveryService) Deregister(targetType domain.TargetType) {
 }
 
 // Deliver routes to the agent registered for target.Type.
-func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation) error {
+func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation, generation domain.Generation) error {
 	agent, err := r.agentFor(target.Type)
 	if err != nil {
 		return err
 	}
-	return agent.Deliver(ctx, target, deliveryID, manifests, auth, attestation)
+	return agent.Deliver(ctx, target, deliveryID, manifests, auth, attestation, generation)
 }
 
 // Remove routes to the agent registered for target.Type.
-func (r *RoutingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation) error {
+func (r *RoutingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation, generation domain.Generation) error {
 	agent, err := r.agentFor(target.Type)
 	if err != nil {
 		return err
 	}
-	return agent.Remove(ctx, target, deliveryID, manifests, auth, attestation)
+	return agent.Remove(ctx, target, deliveryID, manifests, auth, attestation, generation)
 }
 
 func (r *RoutingDeliveryService) agentFor(tt domain.TargetType) (domain.DeliveryAgent, error) {
