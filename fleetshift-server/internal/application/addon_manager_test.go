@@ -115,7 +115,7 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 	reg := &memworkflow.Registry{}
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
-		Strategies: domain.StrategyFactory{Store: store}, Registry: reg,
+		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -718,11 +718,11 @@ func TestAddonManager_DuplicateEnableReturnsError(t *testing.T) {
 // domain.DeliveryAgent interface without performing real delivery.
 type stubDeliveryAgent struct{}
 
-func (s *stubDeliveryAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	return domain.DeliveryResult{}, nil
+func (s *stubDeliveryAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+	return nil
 }
 
-func (s *stubDeliveryAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (s *stubDeliveryAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 

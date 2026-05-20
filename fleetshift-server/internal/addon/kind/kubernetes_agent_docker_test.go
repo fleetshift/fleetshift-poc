@@ -51,12 +51,10 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 	t.Cleanup(func() { _ = checker.Delete(clusterName, "") })
 	_ = checker.Delete(clusterName, "")
 
-	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
+	kindReporter := newChannelReporter()
+	kindAgent := kindaddon.NewAgent(kindReporter, func(logger log.Logger) kindaddon.ClusterProvider {
 		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
 	})
-
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -67,17 +65,14 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 		Raw:          json.RawMessage(`{"name":"` + clusterName + `"}`),
 	}}
 
-	result, err := kindAgent.Deliver(ctx, target, "setup", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := kindAgent.Deliver(ctx, target, "setup", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("kind Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("kind Deliver state = %q, want Accepted", result.State)
 	}
 
 	var done domain.DeliveryResult
 	select {
-	case done = <-obs.done:
+	case done = <-kindReporter.done:
 		if done.State != domain.DeliveryStateDelivered {
 			t.Fatalf("kind delivery state = %q, want Delivered (message: %s)", done.State, done.Message)
 		}
@@ -166,9 +161,8 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 	saToken := string(saTokenBytes)
 
 	t.Run("TokenPassthrough", func(t *testing.T) {
-		agent := kubeaddon.NewAgent()
-		obs := newChannelDeliveryObserver()
-		signaler := newChannelSignaler(obs)
+		reporter := newChannelReporter()
+		agent := kubeaddon.NewAgent(reporter)
 
 		manifests := []domain.Manifest{{
 			ResourceType: kubeaddon.ManifestResourceType,
@@ -179,16 +173,13 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		result, err := agent.Deliver(ctx, k8sTarget, "tp-1", manifests, auth, nil, signaler)
+		err := agent.Deliver(ctx, k8sTarget, "tp-1", manifests, auth, nil)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
-		if result.State != domain.DeliveryStateAccepted {
-			t.Fatalf("State = %q, want Accepted", result.State)
-		}
 
 		select {
-		case done := <-obs.done:
+		case done := <-reporter.done:
 			if done.State != domain.DeliveryStateDelivered {
 				t.Fatalf("async State = %q, want Delivered (message: %s)", done.State, done.Message)
 			}
@@ -206,7 +197,8 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 	})
 
 	t.Run("Idempotent", func(t *testing.T) {
-		agent := kubeaddon.NewAgent()
+		reporter := newChannelReporter()
+		agent := kubeaddon.NewAgent(reporter)
 		auth := domain.DeliveryAuth{Token: domain.RawToken(saToken)}
 		manifest := json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"idempotent-test","namespace":"default"},"data":{"v":"1"}}`)
 		manifests := []domain.Manifest{{ResourceType: kubeaddon.ManifestResourceType, Raw: manifest}}
@@ -215,17 +207,12 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		defer cancel()
 
 		for i := range 2 {
-			obs := newChannelDeliveryObserver()
-			signaler := newChannelSignaler(obs)
-			result, err := agent.Deliver(ctx, k8sTarget, domain.DeliveryID("idem-"+string(rune('0'+i))), manifests, auth, nil, signaler)
+			err := agent.Deliver(ctx, k8sTarget, domain.DeliveryID("idem-"+string(rune('0'+i))), manifests, auth, nil)
 			if err != nil {
 				t.Fatalf("Deliver[%d]: %v", i, err)
 			}
-			if result.State != domain.DeliveryStateAccepted {
-				t.Fatalf("Deliver[%d] State = %q, want Accepted", i, result.State)
-			}
 			select {
-			case done := <-obs.done:
+			case done := <-reporter.done:
 				if done.State != domain.DeliveryStateDelivered {
 					t.Fatalf("Deliver[%d] async = %q (message: %s)", i, done.State, done.Message)
 				}
@@ -236,9 +223,8 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 	})
 
 	t.Run("MultipleManifests", func(t *testing.T) {
-		agent := kubeaddon.NewAgent()
-		obs := newChannelDeliveryObserver()
-		signaler := newChannelSignaler(obs)
+		reporter := newChannelReporter()
+		agent := kubeaddon.NewAgent(reporter)
 		auth := domain.DeliveryAuth{Token: domain.RawToken(saToken)}
 
 		manifests := []domain.Manifest{
@@ -249,16 +235,13 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		result, err := agent.Deliver(ctx, k8sTarget, "multi-1", manifests, auth, nil, signaler)
+		err := agent.Deliver(ctx, k8sTarget, "multi-1", manifests, auth, nil)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
-		if result.State != domain.DeliveryStateAccepted {
-			t.Fatalf("State = %q, want Accepted", result.State)
-		}
 
 		select {
-		case done := <-obs.done:
+		case done := <-reporter.done:
 			if done.State != domain.DeliveryStateDelivered {
 				t.Fatalf("async State = %q (message: %s)", done.State, done.Message)
 			}
@@ -283,13 +266,12 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 		att := buildTestAttestation(t, "attested-dep", manifests)
 
-		agent := kubeaddon.NewAgent(
+		reporter := newChannelReporter()
+		agent := kubeaddon.NewAgent(reporter,
 			kubeaddon.WithKeyResolver(att.keyResolver),
 			kubeaddon.WithHTTPClient(att.httpClient),
 			kubeaddon.WithVault(vault),
 		)
-		obs := newChannelDeliveryObserver()
-		signaler := newChannelSignaler(obs)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -298,16 +280,13 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
 		targetWithTrust.Properties["trust_bundle"] = att.trustBundleJSON
 
-		result, err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation, signaler)
+		err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation)
 		if err != nil {
 			t.Fatalf("Deliver: %v", err)
 		}
-		if result.State != domain.DeliveryStateAccepted {
-			t.Fatalf("State = %q, want Accepted", result.State)
-		}
 
 		select {
-		case done := <-obs.done:
+		case done := <-reporter.done:
 			if done.State != domain.DeliveryStateDelivered {
 				t.Fatalf("async State = %q (message: %s)", done.State, done.Message)
 			}
@@ -325,7 +304,8 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 	})
 
 	t.Run("AttestedDelivery_VerificationFailure", func(t *testing.T) {
-		agent := kubeaddon.NewAgent()
+		reporter := newChannelReporter()
+		agent := kubeaddon.NewAgent(reporter)
 
 		trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 		targetWithTrust := k8sTarget
@@ -344,12 +324,13 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 			},
 		}
 
-		result, err := agent.Deliver(context.Background(), targetWithTrust, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt, &domain.DeliverySignaler{})
+		err := agent.Deliver(context.Background(), targetWithTrust, "att-bad", nil, domain.DeliveryAuth{}, bogusAtt)
 		if err != nil {
 			t.Fatalf("Deliver should not return error: %v", err)
 		}
-		if result.State != domain.DeliveryStateAuthFailed {
-			t.Errorf("State = %q, want AuthFailed", result.State)
+		badResult := <-reporter.done
+		if badResult.State != domain.DeliveryStateAuthFailed {
+			t.Errorf("State = %q, want AuthFailed", badResult.State)
 		}
 	})
 }

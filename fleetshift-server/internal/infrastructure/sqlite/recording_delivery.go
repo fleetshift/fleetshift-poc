@@ -14,45 +14,49 @@ import (
 // development, testing, or target types that have no real delivery
 // agent registered yet.
 //
-// Deliver returns [domain.DeliveryStateAccepted] immediately and
-// completes the delivery asynchronously via [domain.DeliverySignaler.Done],
-// conforming to the async delivery contract.
+// Deliver records the delivery and reports completion asynchronously
+// via [domain.DeliveryReporter.ReportResult].
 type RecordingDeliveryService struct {
-	Store domain.Store
-	Now   func() time.Time
+	Store    domain.Store
+	Reporter domain.DeliveryReporter
+	Now      func() time.Time
 }
 
-func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	now := s.now()
 	d := domain.Delivery{
 		ID:            deliveryID,
 		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
 		TargetID:      target.ID,
 		Manifests:     manifests,
-		State:         domain.DeliveryStateDelivered,
+		State:         domain.DeliveryStatePending,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
 
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: err.Error()}, fmt.Errorf("begin tx: %w", err)
+		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	if err := tx.Deliveries().Put(ctx, d); err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: err.Error()}, err
+		return err
 	}
 	if err := tx.Commit(); err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: err.Error()}, fmt.Errorf("commit: %w", err)
+		return fmt.Errorf("commit: %w", err)
 	}
 
-	go signaler.Done(context.Background(), domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	if s.Reporter != nil {
+		go func() {
+			_ = s.Reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
+	}
 
-	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	return nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)

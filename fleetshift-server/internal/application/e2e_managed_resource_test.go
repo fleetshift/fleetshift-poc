@@ -41,6 +41,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	router.Register("addon", agent)
 
 	reg := &memworkflow.Registry{}
+	inner.Reporter = application.NewDeliveryReportService(store, reg)
 	fakeReg := keyregistry.NewFake()
 	keyResolver := &application.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
@@ -51,11 +52,11 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
-		Now:        func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
+		Now:             func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -284,17 +285,17 @@ type mrCapturingDeliveryAgent struct {
 	auth      domain.DeliveryAuth
 }
 
-func (a *mrCapturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *mrCapturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	a.mu.Lock()
 	a.att = att
 	a.manifests = manifests
 	a.auth = auth
 	a.mu.Unlock()
-	return a.inner.Deliver(ctx, target, id, manifests, auth, att, signaler)
+	return a.inner.Deliver(ctx, target, id, manifests, auth, att)
 }
 
-func (a *mrCapturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) error {
-	return a.inner.Remove(ctx, target, id, manifests, auth, att, signaler)
+func (a *mrCapturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
+	return a.inner.Remove(ctx, target, id, manifests, auth, att)
 }
 
 func (a *mrCapturingDeliveryAgent) capturedAttestation() *domain.Attestation {

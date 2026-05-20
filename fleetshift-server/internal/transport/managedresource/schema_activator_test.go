@@ -375,9 +375,10 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	router.Register(widgetTargetType, recordingAgent)
 
 	reg := &memworkflow.Registry{}
+	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
 	orchWf, err := reg.RegisterOrchestration(&domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
-		Strategies: domain.StrategyFactory{Store: store}, Registry: reg,
+		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
 	})
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)

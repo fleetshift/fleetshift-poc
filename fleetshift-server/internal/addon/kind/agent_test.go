@@ -96,45 +96,48 @@ func fakeFactory(p *fakeProvider) kind.ClusterProviderFactory {
 	}
 }
 
-// channelDeliveryObserver collects events and completion results on
-// channels, enabling deterministic waits in tests with async delivery.
-// It implements [domain.DeliveryObserver].
-type channelDeliveryObserver struct {
+// channelReporter implements [domain.DeliveryReporter] for tests,
+// routing events and results to channels for deterministic waits.
+type channelReporter struct {
 	mu     sync.Mutex
 	events []domain.DeliveryEvent
 	ch     chan domain.DeliveryEvent
 	done   chan domain.DeliveryResult
 }
 
-func newChannelDeliveryObserver() *channelDeliveryObserver {
-	return &channelDeliveryObserver{
+func newChannelReporter() *channelReporter {
+	return &channelReporter{
 		ch:   make(chan domain.DeliveryEvent, 100),
 		done: make(chan domain.DeliveryResult, 1),
 	}
 }
 
-func (o *channelDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, e domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
-	o.mu.Lock()
-	o.events = append(o.events, e)
-	o.mu.Unlock()
-	o.ch <- e
-	return ctx, domain.NoOpEventEmittedProbe{}
+func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+	r.mu.Lock()
+	r.events = append(r.events, event)
+	r.mu.Unlock()
+	r.ch <- event
+	return nil
 }
 
-func (o *channelDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
-	o.done <- result
-	return ctx, domain.NoOpCompletedProbe{}
+func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, result domain.DeliveryResult) error {
+	r.done <- result
+	return nil
 }
 
-func newChannelSignaler(obs *channelDeliveryObserver) *domain.DeliverySignaler {
-	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
+func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.TargetID) ([]domain.Delivery, error) {
+	return nil, nil
 }
 
-var nop = &domain.DeliverySignaler{}
+type nopReporter struct{}
+
+func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
+func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) { return nil, nil }
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -142,12 +145,9 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -159,7 +159,7 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["dev-cluster"] = nil
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -167,12 +167,9 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -181,9 +178,10 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
+func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -191,13 +189,11 @@ func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
 		Raw:          json.RawMessage(`{}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop)
-	if err == nil {
-		t.Fatal("expected error for missing cluster name")
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	if err != nil {
+		t.Fatalf("Deliver should not return dispatch error: %v", err)
 	}
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("expected ErrInvalidArgument, got: %v", err)
-	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
@@ -206,9 +202,8 @@ func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
 func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	provider := newFakeProvider()
 	provider.createErr = errors.New("docker not available")
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-	agent := kind.NewAgent(fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -216,22 +211,19 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
 	// The fake provider emits a V(0) log line in Create (via observer
 	// logger) before returning the error. Then deliverAsync emits an
 	// error event.
-	progress := <-obs.ch
+	progress := <-reporter.ch
 	if progress.Kind != domain.DeliveryEventProgress {
 		t.Errorf("first event kind = %q, want %q", progress.Kind, domain.DeliveryEventProgress)
 	}
-	errEvent := <-obs.ch
+	errEvent := <-reporter.ch
 	if errEvent.Kind != domain.DeliveryEventError {
 		t.Errorf("second event kind = %q, want %q", errEvent.Kind, domain.DeliveryEventError)
 	}
@@ -240,13 +232,13 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["my-cluster"] = nil
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
 	manifests := []domain.Manifest{{
 		Raw: json.RawMessage(`{"name":"my-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -259,13 +251,13 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 	provider := newFakeProvider()
 	// cluster doesn't exist
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
 	manifests := []domain.Manifest{{
 		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, &domain.DeliverySignaler{})
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
 	}
@@ -277,7 +269,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 
 func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{
@@ -285,12 +277,9 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, nop)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -302,9 +291,8 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 
 func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-	agent := kind.NewAgent(fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -312,17 +300,14 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
-	}
 
 	// The fake provider calls logger.V(0).Infof inside Create, which
-	// flows through the observer logger to the signaler as a progress event.
-	event := <-obs.ch
+	// flows through the observer logger to the reporter as a progress event.
+	event := <-reporter.ch
 	if event.Kind != domain.DeliveryEventProgress {
 		t.Errorf("event kind = %q, want %q", event.Kind, domain.DeliveryEventProgress)
 	}
@@ -330,9 +315,8 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 
 func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-	agent := kind.NewAgent(fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -340,12 +324,12 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	result := <-obs.done
+	result := <-reporter.done
 
 	if result.State != domain.DeliveryStateDelivered {
 		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateDelivered)
@@ -375,9 +359,8 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 
 func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-	agent := kind.NewAgent(fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{
@@ -385,12 +368,12 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
-	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	result := <-obs.done
+	result := <-reporter.done
 
 	if len(result.ProvisionedTargets) != 2 {
 		t.Errorf("ProvisionedTargets count = %d, want 2", len(result.ProvisionedTargets))
@@ -400,26 +383,23 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	}
 }
 
-// recordingSignaler creates a *DeliverySignaler that appends emitted
-// events to the provided slice. Used by observer_logger tests.
-func recordingSignaler(events *[]domain.DeliveryEvent) *domain.DeliverySignaler {
-	obs := &recordingDeliveryObserver{events: events}
-	return domain.NewDeliverySignaler("", "", domain.TargetInfo{}, nil, nil, obs)
-}
-
-// recordingDeliveryObserver implements [domain.DeliveryObserver] by
-// appending events to a slice. Used by observer_logger tests.
-type recordingDeliveryObserver struct {
+// recordingReporter implements [domain.DeliveryReporter] by appending
+// events to a slice. Used by observer_logger tests.
+type recordingReporter struct {
 	events *[]domain.DeliveryEvent
 }
 
-func (o *recordingDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, e domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
-	*o.events = append(*o.events, e)
-	return ctx, domain.NoOpEventEmittedProbe{}
+func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+	*r.events = append(*r.events, event)
+	return nil
 }
 
-func (o *recordingDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, _ domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
-	return ctx, domain.NoOpCompletedProbe{}
+func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error {
+	return nil
+}
+
+func (r *recordingReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) {
+	return nil, nil
 }
 
 // recordingAgentObserver captures [kind.ClusterDeliverProbe] events.
@@ -465,22 +445,21 @@ func (p *recordingClusterProbe) End()            { p.ended = true }
 
 func TestAgent_Observer_DefaultConfig(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "default-cfg"}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-obs.done
+	<-reporter.done
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -502,22 +481,21 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 
 func TestAgent_Observer_CustomConfig(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "custom-cfg", "nodes": [{"role": "control-plane"}, {"role": "worker"}]}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-obs.done
+	<-reporter.done
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -549,8 +527,7 @@ func (v *fakeTokenVerifier) Verify(_ context.Context, _ domain.OIDCConfig, _ str
 
 func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	verifier := &fakeTokenVerifier{}
 	cfg := domain.OIDCConfig{
@@ -558,7 +535,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "valid-token",
@@ -569,15 +546,12 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "verified-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, signaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
-	}
 
-	doneResult := <-obs.done
+	doneResult := <-reporter.done
 	if doneResult.State != domain.DeliveryStateDelivered {
 		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
 	}
@@ -585,6 +559,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 
 func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	provider := newFakeProvider()
+	reporter := newChannelReporter()
 
 	verifier := &fakeTokenVerifier{err: errors.New("token expired")}
 	cfg := domain.OIDCConfig{
@@ -592,7 +567,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "expired-token",
@@ -610,10 +585,11 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "rejected-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, nop)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return an error (auth failure is a result, not an error): %v", err)
+		t.Fatalf("Deliver should not return a dispatch error: %v", err)
 	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -628,8 +604,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 
 func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	verifier := &fakeTokenVerifier{err: errors.New("should not be called")}
 	cfg := domain.OIDCConfig{
@@ -637,22 +612,19 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
 
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "no-token-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
-	}
 
-	doneResult := <-obs.done
+	doneResult := <-reporter.done
 	if doneResult.State != domain.DeliveryStateDelivered {
 		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
 	}
@@ -660,22 +632,21 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 
 func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "a"}`)},
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "b"}`)},
 	}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-obs.done
+	<-reporter.done
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -693,7 +664,8 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 
 func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	fp := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(fp))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(fp))
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -714,18 +686,12 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 		Raw:          raw,
 	}}
 
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil, signaler)
+	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want Accepted", result.State)
-	}
 
-	done := <-obs.done
+	done := <-reporter.done
 	if done.State != domain.DeliveryStateDelivered {
 		t.Fatalf("async State = %q, want Delivered", done.State)
 	}
@@ -744,7 +710,8 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 
 func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 	fp := newFakeProvider()
-	agent := kind.NewAgent(fakeFactory(fp))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(fp))
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -758,29 +725,23 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		ResourceType: domain.TrustBundleResourceType,
 		Raw:          trustRaw,
 	}}
-	trustObs := newChannelDeliveryObserver()
-	trustSignaler := newChannelSignaler(trustObs)
-	_, _ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil, trustSignaler)
-	<-trustObs.done
+	_ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil)
+	<-reporter.done
 
-	// Now deliver a cluster spec.
+	// Now deliver a cluster spec. The same agent retains the trust
+	// bundle in memory, and the done channel has been drained.
 	spec := kind.ClusterSpec{Name: "trust-test"}
 	specRaw, _ := json.Marshal(spec)
 	clusterManifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          specRaw,
 	}}
-	clusterObs := newChannelDeliveryObserver()
-	clusterSignaler := newChannelSignaler(clusterObs)
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil, clusterSignaler)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want Accepted", result.State)
-	}
 
-	done := <-clusterObs.done
+	done := <-reporter.done
 	if done.State != domain.DeliveryStateDelivered {
 		t.Fatalf("async State = %q (message: %s)", done.State, done.Message)
 	}

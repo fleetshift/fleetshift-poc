@@ -91,9 +91,10 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 	router.Register(clusterTargetType, recordingAgent)
 
 	reg := &memworkflow.Registry{}
+	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
-		Strategies: domain.StrategyFactory{Store: store}, Registry: reg,
+		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

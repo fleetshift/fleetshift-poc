@@ -13,7 +13,7 @@ import (
 )
 
 func TestServer_StartAndShutdown(t *testing.T) {
-	agent := NewAgent(
+	agent := NewAgent(nopReporter{},
 		WithTokenSigner(mustNewSigner(t)),
 	)
 
@@ -40,7 +40,7 @@ func TestServer_StartAndShutdown(t *testing.T) {
 
 func TestServer_AuthenticatedCallback(t *testing.T) {
 	signer := mustNewSigner(t)
-	agent := NewAgent(WithTokenSigner(signer))
+	agent := NewAgent(nopReporter{}, WithTokenSigner(signer))
 
 	if err := agent.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -83,7 +83,7 @@ func TestServer_AuthenticatedCallback(t *testing.T) {
 
 func TestServer_RejectsUnauthenticatedCallback(t *testing.T) {
 	signer := mustNewSigner(t)
-	agent := NewAgent(WithTokenSigner(signer))
+	agent := NewAgent(nopReporter{}, WithTokenSigner(signer))
 
 	if err := agent.Start("127.0.0.1:0"); err != nil {
 		t.Fatalf("Start: %v", err)

@@ -158,6 +158,35 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	enabledAddons := parseAddons(f.addons)
 	logger.Info("enabled addons", "addons", slices.Sorted(maps.Keys(enabledAddons)))
 
+	var wfBackend wfbackend.Backend
+	if f.databaseURL != "" {
+		pgHost, pgPort, pgUser, pgPass, pgDB, err := parseDatabaseURL(f.databaseURL)
+		if err != nil {
+			return fmt.Errorf("parse database URL for workflows backend: %w", err)
+		}
+		wfBackend = wfpostgres.NewPostgresBackend(pgHost, pgPort, pgUser, pgPass, pgDB,
+			wfpostgres.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
+		)
+	} else {
+		wfBackend = wfsqlite.NewSqliteBackend(f.dbPath,
+			wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
+		)
+	}
+	wfWorker := worker.New(wfBackend, nil)
+	wfClient := client.New(wfBackend)
+
+	reg := &goworkflows.Registry{
+		Worker:  wfWorker,
+		Client:  wfClient,
+		Timeout: 30 * time.Second,
+	}
+
+	deliveryReporter := application.NewDeliveryReportService(
+		store,
+		reg,
+		application.WithDeliveryObserver(observability.NewDeliveryObserver(logger)),
+	)
+
 	// --- construct addon agents ---
 	//
 	// Agent construction stays here because agents have external
@@ -186,6 +215,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
 		}
 		kindAgent = kindaddon.NewAgent(
+			deliveryReporter,
 			func(logger kindlog.Logger) kindaddon.ClusterProvider {
 				var opts []cluster.ProviderOption
 				if logger != nil {
@@ -200,6 +230,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	var ocpAgent *ocpaddon.Agent
 	if enabledAddons["ocp"] {
 		ocpAgent = ocpaddon.NewAgent(
+			deliveryReporter,
 			ocpaddon.WithVault(vault),
 			ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
 		)
@@ -210,37 +241,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
 	}
 
-	var wfBackend wfbackend.Backend
-	if f.databaseURL != "" {
-		pgHost, pgPort, pgUser, pgPass, pgDB, err := parseDatabaseURL(f.databaseURL)
-		if err != nil {
-			return fmt.Errorf("parse database URL for workflows backend: %w", err)
-		}
-		wfBackend = wfpostgres.NewPostgresBackend(pgHost, pgPort, pgUser, pgPass, pgDB,
-			wfpostgres.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
-		)
-	} else {
-		wfBackend = wfsqlite.NewSqliteBackend(f.dbPath,
-			wfsqlite.WithBackendOptions(wfbackend.WithLogger(logger.With("component", "workflows"))),
-		)
-	}
-	wfWorker := worker.New(wfBackend, nil)
-	wfClient := client.New(wfBackend)
-
-	reg := &goworkflows.Registry{
-		Worker:  wfWorker,
-		Client:  wfClient,
-		Timeout: 30 * time.Second,
-	}
-
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		Registry:         reg,
-		Observer:         observability.NewFulfillmentObserver(logger),
-		DeliveryObserver: observability.NewDeliveryObserver(logger),
-		Vault:            vault,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
+		Observer:        observability.NewFulfillmentObserver(logger),
+		Vault:           vault,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -428,7 +435,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		if oidcHTTPClient != nil {
 			kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
 		}
-		kubeAgent = kubernetesaddon.NewAgent(kubeAgentOpts...)
+		kubeAgent = kubernetesaddon.NewAgent(deliveryReporter, kubeAgentOpts...)
 	}
 
 	// --- dynamic service infrastructure ---

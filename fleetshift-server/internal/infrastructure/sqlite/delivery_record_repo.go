@@ -81,6 +81,44 @@ func (r *DeliveryRepo) ListByFulfillment(ctx context.Context, fID domain.Fulfill
 	return deliveries, rows.Err()
 }
 
+func (r *DeliveryRepo) ListActive(ctx context.Context, targetIDs []domain.TargetID) ([]domain.Delivery, error) {
+	args := []any{
+		string(domain.DeliveryStatePending),
+		string(domain.DeliveryStateAccepted),
+		string(domain.DeliveryStateProgressing),
+	}
+
+	q := `SELECT id, fulfillment_id, target_id, manifests, state, created_at, updated_at
+	      FROM delivery_records WHERE state IN (?, ?, ?)`
+	if len(targetIDs) > 0 {
+		q += ` AND target_id IN (`
+		for i, tid := range targetIDs {
+			if i > 0 {
+				q += `, `
+			}
+			q += `?`
+			args = append(args, string(tid))
+		}
+		q += `)`
+	}
+
+	rows, err := r.DB.QueryContext(ctx, q, args...)
+	if err != nil {
+		return nil, fmt.Errorf("list active deliveries: %w", err)
+	}
+	defer rows.Close()
+
+	var deliveries []domain.Delivery
+	for rows.Next() {
+		d, err := scanDelivery(rows)
+		if err != nil {
+			return nil, err
+		}
+		deliveries = append(deliveries, d)
+	}
+	return deliveries, rows.Err()
+}
+
 func (r *DeliveryRepo) DeleteByFulfillment(ctx context.Context, fID domain.FulfillmentID) error {
 	_, err := r.DB.ExecContext(ctx,
 		`DELETE FROM delivery_records WHERE fulfillment_id = ?`,

@@ -48,6 +48,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	}
 	agent := &capturingDeliveryAgent{inner: inner}
 	h := setupWithStoreAndAgent(t, store, agent)
+	inner.Reporter = h.reporter
 
 	h.fakeReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
 
@@ -159,15 +160,15 @@ type capturingDeliveryAgent struct {
 	att   *domain.Attestation
 }
 
-func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	a.mu.Lock()
 	a.att = att
 	a.mu.Unlock()
-	return a.inner.Deliver(ctx, target, id, manifests, auth, att, signaler)
+	return a.inner.Deliver(ctx, target, id, manifests, auth, att)
 }
 
-func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) error {
-	return a.inner.Remove(ctx, target, id, manifests, auth, att, signaler)
+func (a *capturingDeliveryAgent) Remove(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
+	return a.inner.Remove(ctx, target, id, manifests, auth, att)
 }
 
 func (a *capturingDeliveryAgent) capturedAttestation() *domain.Attestation {

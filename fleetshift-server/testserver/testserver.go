@@ -59,12 +59,13 @@ func Start(t *testing.T) string {
 	router.Register("test", recording)
 
 	reg := &memworkflow.Registry{}
+	recording.Reporter = application.NewDeliveryReportService(store, reg)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

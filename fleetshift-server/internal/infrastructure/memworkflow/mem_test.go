@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/workflowenginetest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -23,9 +24,14 @@ func memInfra(t *testing.T) workflowenginetest.Infra {
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(workflowenginetest.TestTargetType, recordingAgent)
 	return workflowenginetest.Infra{
-		Store:          store,
-		Delivery:       router,
-		Vault:          vault,
+		Store:    store,
+		Delivery: router,
+		Vault:    vault,
+		DeliveryReporterFactory: func(reg domain.Registry) domain.DeliveryReporter {
+			reporter := application.NewDeliveryReportService(store, reg)
+			recordingAgent.Reporter = reporter
+			return reporter
+		},
 		AgentRegistrar: router,
 	}
 }

@@ -20,6 +20,7 @@ type testHarness struct {
 	targets     *application.TargetService
 	deployments *application.DeploymentService
 	store       domain.Store
+	reporter    *application.DeliveryReportService
 	fakeReg     *keyregistry.Fake
 }
 
@@ -37,12 +38,13 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	router.Register(testTargetType, agent)
 
 	reg := &memworkflow.Registry{}
+	reporter := application.NewDeliveryReportService(store, reg)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -105,8 +107,9 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 			ResumeWF:          resumeWf,
 			ProvenanceBuilder: provenanceBuilder,
 		},
-		store:   store,
-		fakeReg: fakeReg,
+		store:    store,
+		reporter: reporter,
+		fakeReg:  fakeReg,
 	}
 }
 
@@ -117,7 +120,9 @@ func setup(t *testing.T) testHarness {
 		Store: store,
 		Now:   func() time.Time { return time.Date(2026, 2, 27, 12, 0, 0, 0, time.UTC) },
 	}
-	return setupWithStoreAndAgent(t, store, agent)
+	h := setupWithStoreAndAgent(t, store, agent)
+	agent.Reporter = h.reporter
+	return h
 }
 
 func awaitDeploymentState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.FulfillmentState) domain.DeploymentView {
@@ -626,37 +631,43 @@ func TestResumeDeployment_NoAuth(t *testing.T) {
 
 // authFailThenSucceedAgent fails the first delivery with
 // DeliveryStateAuthFailed, then succeeds on all subsequent attempts.
+// Results are reported asynchronously through the reporter.
 type authFailThenSucceedAgent struct {
-	mu      sync.Mutex
-	attempt int
+	reporter domain.DeliveryReporter
+	mu       sync.Mutex
+	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
 	a.mu.Unlock()
 
 	if n == 1 {
-		result := domain.DeliveryResult{
-			State:   domain.DeliveryStateAuthFailed,
-			Message: "401 Unauthorized",
-		}
-		signaler.Done(context.Background(), result)
-		return result, nil
+		go func() {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: "401 Unauthorized",
+			})
+		}()
+		return nil
 	}
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(context.Background(), result)
-	return result, nil
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
 func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 	store := newStore(t)
-	h := setupWithStoreAndAgent(t, store, &authFailThenSucceedAgent{})
+	agent := &authFailThenSucceedAgent{}
+	h := setupWithStoreAndAgent(t, store, agent)
+	agent.reporter = h.reporter
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

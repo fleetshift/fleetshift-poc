@@ -38,12 +38,13 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 	router.Register(testTargetType, recordingAgent)
 
 	reg := &memworkflow.Registry{}
+	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
