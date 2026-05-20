@@ -62,10 +62,9 @@ type workflows struct {
 }
 
 // Run exercises the [domain.Registry] contract. It uses infraFactory
-// to get repos and delivery, builds [OrchestrationWorkflowSpec] and
-// [CreateDeploymentWorkflowSpec], calls registry.RegisterOrchestration
-// and registry.RegisterCreateDeployment, then runs the same scenarios
-// against the returned workflow interfaces and infra.
+// to get repos, delivery, and the registry under test; builds the
+// domain workflow specs; then runs the same scenarios against the
+// returned workflow interfaces.
 func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactory) {
 	t.Helper()
 
@@ -664,7 +663,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		infra := infraFactory(t)
 		agent := &terminalFailAgent{}
 		if infra.AgentRegistrar != nil {
-			infra.AgentRegistrar.Register(TerminalFailTargetType, agent)  // no reporter needed; never completes asynchronously
+			infra.AgentRegistrar.Register(TerminalFailTargetType, agent) // no reporter needed; never completes asynchronously
 		}
 		wfs := registerWorkflowsWithAgents(t, infra, registryFactory)
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -766,91 +765,17 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 }
 
-// registerWorkflows builds workflow specs from infra, calls
-// registry.RegisterOrchestration and registry.RegisterCreateDeployment,
-// returns the registered workflow interfaces.
+// registerWorkflows builds workflow specs from infra, registers the
+// default test agents ([outputAgent] and [authFailThenSucceedAgent]),
+// and returns the registered workflow interfaces.
 func registerWorkflows(t *testing.T, infra Infra, registryFactory RegistryFactory) workflows {
 	t.Helper()
-	reg := registryFactory(t)
-
-	if infra.AgentRegistrar != nil {
-		var reporter domain.DeliveryReporter
-		if infra.DeliveryReporterFactory != nil {
-			reporter = infra.DeliveryReporterFactory(reg)
+	return registerWorkflowsWithAgents(t, infra, registryFactory, func(reporter domain.DeliveryReporter) {
+		if infra.AgentRegistrar != nil {
+			infra.AgentRegistrar.Register(OutputTargetType, &outputAgent{reporter: reporter})
+			infra.AgentRegistrar.Register(AuthFailTargetType, &authFailThenSucceedAgent{reporter: reporter})
 		}
-		infra.AgentRegistrar.Register(OutputTargetType, &outputAgent{reporter: reporter})
-		infra.AgentRegistrar.Register(AuthFailTargetType, &authFailThenSucceedAgent{reporter: reporter})
-	}
-
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           infra.Store,
-		Delivery:        infra.Delivery,
-		Strategies:      domain.StrategyFactory{Store: infra.Store},
-		CleanupSignaler: reg,
-		Vault:           infra.Vault,
-	}
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
-	}
-
-	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
-		Store:         infra.Store,
-		Orchestration: orchWf,
-	}
-	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateDeployment: %v", err)
-	}
-
-	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{
-		Store: infra.Store,
-	}
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
-	}
-
-	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
-		Store:         infra.Store,
-		Orchestration: orchWf,
-		Cleanup:       cleanupWf,
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeployment: %v", err)
-	}
-
-	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:         infra.Store,
-		Orchestration: orchWf,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeDeployment: %v", err)
-	}
-
-	provSpec := &domain.ProvisionIdPWorkflowSpec{
-		AuthMethods:      stubAuthMethodRepo{},
-		Discovery:        stubDiscovery{},
-		CreateDeployment: createWf,
-		TrustBundlePlacement: domain.PlacementStrategySpec{
-			Type:    domain.PlacementStrategyStatic,
-			Targets: []domain.TargetID{"kind-local"},
-		},
-	}
-	provWf, err := reg.RegisterProvisionIdP(provSpec)
-	if err != nil {
-		t.Fatalf("RegisterProvisionIdP: %v", err)
-	}
-
-	return workflows{
-		Orchestration:    orchWf,
-		CreateDeployment: createWf,
-		DeleteDeployment: deleteWf,
-		ResumeDeployment: resumeWf,
-		ProvisionIdP:     provWf,
-	}
+	})
 }
 
 func runCreateDeployment(ctx context.Context, t *testing.T, wfs workflows, in domain.CreateDeploymentInput) (domain.DeploymentView, error) {
@@ -1129,7 +1054,9 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 			Message: "401 Unauthorized",
 		}, nil
 	}
-	go func() { _ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
@@ -1171,7 +1098,9 @@ func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, del
 		return domain.DeliveryResult{}, errors.New("transient failure")
 	}
 	a.mu.Unlock()
-	go func() { _ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
@@ -1212,7 +1141,9 @@ type transientRemoveAgent struct {
 }
 
 func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
-	go func() { _ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
