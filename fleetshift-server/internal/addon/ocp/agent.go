@@ -14,24 +14,25 @@ import (
 
 	"google.golang.org/grpc"
 
-	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	ocpv1 "github.com/fleetshift/fleetshift-poc/gen/ocp/v1"
 )
 
 // Agent implements [domain.DeliveryAgent] for OCP clusters. It shells
 // out to ocp-engine for provisioning, receives completion callbacks via
 // gRPC, and bootstraps platform credentials on the new cluster.
 type Agent struct {
-	engineBinary     string
-	callbackAddr     string
-	vault            domain.Vault
-	credentials      CredentialProvider
-	observer         AgentObserver
-	tokenSigner      *CallbackTokenSigner
+	reporter            domain.DeliveryReporter
+	engineBinary        string
+	callbackAddr        string
+	vault               domain.Vault
+	credentials         CredentialProvider
+	observer            AgentObserver
+	tokenSigner         *CallbackTokenSigner
 	provisionTimeout    time.Duration
-	consoleClientSecret string // OIDC client secret for OCP web console
+	consoleClientSecret string   // OIDC client secret for OCP web console
 	provisions          sync.Map // clusterID → *provisionState
-	grpcServer       *grpc.Server
+	grpcServer          *grpc.Server
 }
 
 // AgentOption configures an [Agent].
@@ -59,7 +60,6 @@ func WithTokenSigner(s *CallbackTokenSigner) AgentOption {
 	return func(a *Agent) { a.tokenSigner = s }
 }
 
-
 // NewAgent returns an Agent configured with the given options.
 //
 // Defaults read from environment (overridable via options):
@@ -70,12 +70,13 @@ func WithTokenSigner(s *CallbackTokenSigner) AgentOption {
 //
 // The callback token signer is created automatically if not provided
 // via WithTokenSigner.
-func NewAgent(opts ...AgentOption) *Agent {
+func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 	engineBinary := os.Getenv("OCP_ENGINE_BINARY")
 	if engineBinary == "" {
 		engineBinary = "ocp-engine"
 	}
 	a := &Agent{
+		reporter:            reporter,
 		engineBinary:        engineBinary,
 		consoleClientSecret: os.Getenv("OCP_CONSOLE_CLIENT_SECRET"),
 		observer:            NoOpAgentObserver{},
@@ -116,19 +117,18 @@ func NewAgent(opts ...AgentOption) *Agent {
 	return a
 }
 
-
 // Deliver implements [domain.DeliveryAgent.Deliver]. It parses the
 // cluster spec from manifests, resolves credentials, writes cluster.yaml,
 // and launches ocp-engine as a subprocess. The actual result is delivered
-// asynchronously via the callback server and [domain.DeliverySignaler].
+// asynchronously via the callback server and
+// [domain.DeliveryReporter.ReportResult].
 func (a *Agent) Deliver(
 	ctx context.Context,
 	target domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	signaler *domain.DeliverySignaler,
 ) (domain.DeliveryResult, error) {
 	// 1. Parse ClusterSpec from manifests
 	spec, err := ParseClusterSpec(manifests)
@@ -221,7 +221,7 @@ func (a *Agent) Deliver(
 		releaseImage:  spec.ReleaseImage,
 		ccostsMode:    true, // always STS mode for OCP agent
 	}
-	go a.deliverAsync(ctx, req, signaler, state)
+	go a.deliverAsync(ctx, req, deliveryID, state)
 
 	// 10. Return accepted
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
@@ -264,7 +264,7 @@ func (a *Agent) retainOrCleanup(state *provisionState, clusterID, workDir string
 func (a *Agent) deliverAsync(
 	ctx context.Context,
 	req provisionRequest,
-	signaler *domain.DeliverySignaler,
+	deliveryID domain.DeliveryID,
 	state *provisionState,
 ) {
 	// Generate callback JWT
@@ -272,7 +272,7 @@ func (a *Agent) deliverAsync(
 	token, err := a.tokenSigner.Sign(req.clusterID, provTimeout)
 	if err != nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("generate callback token: %v", err),
 		})
@@ -297,7 +297,7 @@ func (a *Agent) deliverAsync(
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("start ocp-engine: %v", err),
 		})
@@ -326,7 +326,7 @@ func (a *Agent) deliverAsync(
 				msg = fmt.Sprintf("ocp-engine exited with error: %v", err)
 			}
 			a.retainOrCleanup(state, req.clusterID, req.workDir)
-			signaler.Done(ctx, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: msg,
 			})
@@ -334,7 +334,7 @@ func (a *Agent) deliverAsync(
 		}
 	case <-ctx.Done():
 		a.retainOrCleanup(state, req.clusterID, req.workDir)
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("context cancelled: %v", ctx.Err()),
 		})
@@ -356,7 +356,7 @@ func (a *Agent) deliverAsync(
 		} else {
 			a.cleanupProvision(req.clusterID, req.workDir)
 		}
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("ocp-engine failed in phase %s: %s", failure.GetPhase(), failure.GetFailureMessage()),
 		})
@@ -365,7 +365,7 @@ func (a *Agent) deliverAsync(
 
 	if completion == nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: "callback received but no completion data",
 		})
@@ -378,7 +378,7 @@ func (a *Agent) deliverAsync(
 		state.mu.Lock()
 		state.workDir = req.workDir
 		state.mu.Unlock()
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("post-provision bootstrap failed: %v", err),
 		})
@@ -393,7 +393,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	a.cleanupProvision(req.clusterID, req.workDir)
-	signaler.Done(ctx, result)
+	_ = a.reporter.ReportResult(ctx, deliveryID, result)
 }
 
 // handleCompletion performs post-provision bootstrap and builds the
@@ -461,7 +461,6 @@ func (a *Agent) Remove(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	_ *domain.DeliverySignaler,
 ) error {
 	// Try to get cluster name from manifests for work dir lookup
 	spec, specErr := ParseClusterSpec(manifests)

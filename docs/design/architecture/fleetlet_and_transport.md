@@ -201,6 +201,14 @@ Some strategies require helper infrastructure on targets. That is not a special 
 
 For example, a scored placement strategy may require scoring agents on each Kubernetes target. Those agents can be deployed using a simpler placement strategy first, after which later deployments can depend on the richer placement logic.
 
+### Fleetlet trust boundary
+
+The fleetlet itself is more sensitive than ordinary helper infrastructure. It terminates the platform transport, carries target-local trust configuration, and can expose privileged capabilities such as delivery and protocol proxying. Its image, startup configuration, and trust roots are therefore part of the target's trusted computing base.
+
+Deploying or updating the fleetlet must be authorized at the target boundary. In the simplest case, the target sees the user's own credential and admits the change directly. Otherwise, the target must be able to independently verify that the requested fleetlet image and configuration are authorized, using the same delivery-authorization model described in [core_model.md](core_model.md) and [../authentication.md](../authentication.md): target-side credential validation, provenance verification, or both.
+
+A compromised platform must not be able to silently replace the fleetlet with a different image, rewrite its trust configuration, or expand its channel profile without passing that target-side check. On Kubernetes, this points toward digest-pinned images plus admission-time verification of fleetlet image provenance and sensitive configuration, rather than treating the platform's request as sufficient authority on its own. The bootstrap path that creates the target can install the initial fleetlet, but once the target is running, fleetlet rollout should be treated as a privileged authorization event rather than an ordinary helper deployment.
+
 ## Proxy delivery
 
 > NOTE: This was originally conceived for initial bootstrapping only, when the new managed cluster cannot realistically dial back to your laptop. Whether this or any additional scope works is TBD.

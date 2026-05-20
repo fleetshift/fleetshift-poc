@@ -78,9 +78,11 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 
 	auth.Caller.Issuer = dockerIssuer
 
-	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
-		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
-	},
+	reporter := newChannelReporter()
+	kindAgent := kindaddon.NewAgent(reporter,
+		func(logger log.Logger) kindaddon.ClusterProvider {
+			return cluster.NewProvider(cluster.ProviderWithLogger(logger))
+		},
 		kindaddon.WithTempDir(t.TempDir()),
 		kindaddon.WithOIDCCABundle(idp.CACertPEM()),
 	)
@@ -93,9 +95,6 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 		t.Fatalf("marshal spec: %v", err)
 	}
 
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-
 	target := domain.TargetInfo{ID: "oidc-kind", Type: kindaddon.TargetType, Name: "OIDC Kind"}
 	manifests := []domain.Manifest{{
 		ResourceType: kindaddon.ClusterResourceType,
@@ -105,7 +104,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	result, err := kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, nil, signaler)
+	result, err := kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -114,7 +113,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	}
 
 	select {
-	case doneResult := <-obs.done:
+	case doneResult := <-reporter.done:
 		if doneResult.State != domain.DeliveryStateDelivered {
 			t.Fatalf("delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateDelivered, doneResult.Message)
 		}
@@ -308,7 +307,8 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		Raw:          configMapManifest,
 	}}
 
-	kubeAgent := kubeaddon.NewAgent()
+	kubeReporter := newChannelReporter()
+	kubeAgent := kubeaddon.NewAgent(kubeReporter)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -326,10 +326,7 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		Token:    domain.RawToken(aliceToken),
 	}
 
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
-
-	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, signaler)
+	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil)
 	if err != nil {
 		t.Fatalf("Deliver (alice): %v", err)
 	}
@@ -338,7 +335,7 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	}
 
 	select {
-	case doneResult := <-obs.done:
+	case doneResult := <-kubeReporter.done:
 		if doneResult.State != domain.DeliveryStateDelivered {
 			t.Fatalf("alice delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateDelivered, doneResult.Message)
 		}
@@ -369,9 +366,6 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		Token:    domain.RawToken(bobToken),
 	}
 
-	bobObs := newChannelDeliveryObserver()
-	bobSignaler := newChannelSignaler(bobObs)
-
 	bobManifest := json.RawMessage(`{
 		"apiVersion": "v1",
 		"kind": "ConfigMap",
@@ -387,13 +381,13 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 	result, err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
 		ResourceType: kubeaddon.ManifestResourceType,
 		Raw:          bobManifest,
-	}}, bobAuth, nil, bobSignaler)
+	}}, bobAuth, nil)
 	if err != nil {
 		t.Fatalf("Deliver (bob): %v", err)
 	}
 
 	select {
-	case doneResult := <-bobObs.done:
+	case doneResult := <-kubeReporter.done:
 		if doneResult.State != domain.DeliveryStateAuthFailed {
 			t.Fatalf("bob delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateAuthFailed, doneResult.Message)
 		}
@@ -442,26 +436,28 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	dockerIssuer := domain.IssuerURL(fmt.Sprintf("https://%s:%s", hostAddr, idp.Port()))
 	idp.SetIssuerURL(dockerIssuer)
 
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	reg := &memworkflow.Registry{}
+	mrReporter := buildReporter(store, reg)
+
 	// --- Wire agent with OIDC CA trust ---
-	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
-		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
-	},
+	kindAgent := kindaddon.NewAgent(mrReporter,
+		func(logger log.Logger) kindaddon.ClusterProvider {
+			return cluster.NewProvider(cluster.ProviderWithLogger(logger))
+		},
 		kindaddon.WithTempDir(t.TempDir()),
 		kindaddon.WithOIDCCABundle(idp.CACertPEM()),
 	)
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
-
-	reg := &memworkflow.Registry{}
-
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

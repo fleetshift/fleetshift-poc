@@ -1,6 +1,7 @@
 package ocp
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -10,6 +11,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"gopkg.in/yaml.v3"
 )
+
+type nopReporter struct{}
+
+func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
+func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) { return nil, nil }
 
 func TestPrepareWorkDir(t *testing.T) {
 	spec := &ClusterSpec{
@@ -61,7 +68,7 @@ func TestNewAgent_DefaultCredentials(t *testing.T) {
 	t.Setenv("AWS_SECRET_ACCESS_KEY", "test-secret")
 	t.Setenv("OCP_PULL_SECRET_FILE", "/nonexistent/pull-secret.json")
 
-	a := NewAgent()
+	a := NewAgent(nopReporter{})
 
 	// Agent should still be created despite bad pull secret path
 	if a.credentials == nil {
@@ -73,7 +80,7 @@ func TestNewAgent_DefaultCredentials(t *testing.T) {
 }
 
 func TestEffectiveProvisionTimeout(t *testing.T) {
-	a := NewAgent()
+	a := NewAgent(nopReporter{})
 	got := a.effectiveProvisionTimeout()
 	if got != defaultProvisionSTSDuration {
 		t.Errorf("got %v, want %v", got, defaultProvisionSTSDuration)

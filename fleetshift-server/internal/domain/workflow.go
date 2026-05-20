@@ -140,10 +140,26 @@ type Execution[T any] interface {
 	AwaitResult(ctx context.Context) (T, error)
 }
 
+// FulfillmentSignaler sends signals to running fulfillment workflows.
+// [Registry] implements this interface. Application-layer services
+// that need to signal workflows accept this narrow interface rather
+// than the full [Registry].
+type FulfillmentSignaler interface {
+	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
+}
+
+// DeleteCleanupSignaler sends a completion signal to a running
+// delete-cleanup workflow. [Registry] implements this interface.
+type DeleteCleanupSignaler interface {
+	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
+}
+
 // Registry registers workflow specs and provides cross-workflow
 // signaling. Workflow specs receive it at construction so engine
 // capabilities are available without lazy field assignment.
 type Registry interface {
+	FulfillmentSignaler
+	DeleteCleanupSignaler
 	RegisterOrchestration(spec *OrchestrationWorkflowSpec) (OrchestrationWorkflow, error)
 	RegisterCreateDeployment(spec *CreateDeploymentWorkflowSpec) (CreateDeploymentWorkflow, error)
 	RegisterDeleteDeployment(spec *DeleteDeploymentWorkflowSpec) (DeleteDeploymentWorkflow, error)
@@ -153,8 +169,6 @@ type Registry interface {
 	RegisterCreateManagedResource(spec *CreateManagedResourceWorkflowSpec) (CreateManagedResourceWorkflow, error)
 	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
 	RegisterDeleteManagedResourceCleanup(spec *DeleteManagedResourceCleanupWorkflowSpec) (DeleteManagedResourceCleanupWorkflow, error)
-	SignalFulfillmentEvent(ctx context.Context, fulfillmentID FulfillmentID, event FulfillmentEvent) error
-	SignalDeleteCleanupComplete(ctx context.Context, fulfillmentID FulfillmentID, event DeleteCleanupCompleteEvent) error
 }
 
 // OrchestrationWorkflow is a registered orchestration workflow that

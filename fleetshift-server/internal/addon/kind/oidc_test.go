@@ -98,11 +98,10 @@ func callerAuth() domain.DeliveryAuth {
 
 func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	spec := kind.ClusterSpec{
 		Name: "multi-oidc",
@@ -119,11 +118,11 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 		Raw:          json.RawMessage(specBytes),
 	}}
 
-	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil, signaler)
+	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, callerAuth(), nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-obs.done
+	<-reporter.done
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -141,10 +140,9 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 
 func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 	provider := newFakeProvider()
-	obs := newChannelDeliveryObserver()
-	signaler := newChannelSignaler(obs)
+	reporter := newChannelReporter()
 
-	agent := kind.NewAgent(fakeFactory(provider))
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	auth := domain.DeliveryAuth{
 		Caller: &domain.SubjectClaims{
@@ -161,12 +159,12 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "empty-aud"}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, signaler)
+	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	result := <-obs.done
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}

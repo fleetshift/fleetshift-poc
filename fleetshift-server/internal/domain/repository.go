@@ -50,6 +50,7 @@ type DeliveryRepository interface {
 	Get(ctx context.Context, id DeliveryID) (Delivery, error)
 	GetByFulfillmentTarget(ctx context.Context, fID FulfillmentID, tID TargetID) (Delivery, error)
 	ListByFulfillment(ctx context.Context, fID FulfillmentID) ([]Delivery, error)
+	ListActive(ctx context.Context, targetIDs []TargetID) ([]Delivery, error)
 	DeleteByFulfillment(ctx context.Context, fID FulfillmentID) error
 }
 

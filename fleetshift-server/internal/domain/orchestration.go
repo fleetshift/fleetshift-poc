@@ -121,15 +121,14 @@ type PersistAndCompleteInput struct {
 // Pass this spec to [Registry.RegisterOrchestration] to obtain an
 // [OrchestrationWorkflow] that can start instances.
 type OrchestrationWorkflowSpec struct {
-	Store            Store
-	Delivery         DeliveryService
-	Strategies       StrategyFactory
-	Attestation      AttestationAssembler
-	Registry         Registry
-	Observer         FulfillmentObserver
-	DeliveryObserver DeliveryObserver
-	Vault            Vault
-	Now              func() time.Time
+	Store           Store
+	Delivery        DeliveryService
+	Strategies      StrategyFactory
+	Attestation     AttestationAssembler
+	CleanupSignaler DeleteCleanupSignaler
+	Observer        FulfillmentObserver
+	Vault           Vault
+	Now             func() time.Time
 }
 
 func (s *OrchestrationWorkflowSpec) now() time.Time {
@@ -229,9 +228,9 @@ func (s *OrchestrationWorkflowSpec) GenerateManifests() Activity[GenerateManifes
 }
 
 // DeliverToTarget delivers manifests to a target. It persists a
-// [Delivery] record in [DeliveryStatePending], creates a
-// [DeliverySignaler] for lifecycle state transitions and workflow
-// signaling, then dispatches to the [DeliveryService].
+// [Delivery] record in [DeliveryStatePending], then dispatches to
+// the [DeliveryService]. The agent reports progress and results
+// back via its injected [DeliveryReporter].
 //
 // The delivery receives [context.Background] rather than the activity
 // context. Delivery agents may run asynchronously (returning
@@ -265,13 +264,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, Del
 			return DeliveryResult{}, fmt.Errorf("commit: %w", err)
 		}
 
-		signaler := NewDeliverySignaler(
-			in.FulfillmentID, in.DeliveryID, in.Target,
-			s.Store, s.Registry.SignalFulfillmentEvent,
-			s.DeliveryObserver,
-		)
-
-		return s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation, signaler)
+		return s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation)
 	})
 }
 
@@ -297,7 +290,7 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, str
 			return struct{}{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
 		}
 
-		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, &DeliverySignaler{})
+		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation)
 	})
 }
 
@@ -390,7 +383,7 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 		}
 
 		if in.Result.State == FulfillmentStateDeleting {
-			if err := s.Registry.SignalDeleteCleanupComplete(ctx, in.Result.FulfillmentID, DeleteCleanupCompleteEvent{
+			if err := s.CleanupSignaler.SignalDeleteCleanupComplete(ctx, in.Result.FulfillmentID, DeleteCleanupCompleteEvent{
 				FulfillmentID: in.Result.FulfillmentID,
 			}); err != nil {
 				return false, fmt.Errorf("signal delete cleanup: %w", err)
@@ -699,16 +692,16 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	for i, step := range plan.Steps {
 		if step.Remove != nil {
 			for _, target := range step.Remove.Targets {
-			// TODO: need to call the manifest generator on remove hook
-			in := RemoveInput{
-				Target:        target,
-				DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
-				FulfillmentID: fulfillmentID,
-				Auth:          f.Auth,
-			}
-			if evidence != nil {
-				in.Attestation = assembleRemoveAttestation(f, evidence)
-			}
+				// TODO: need to call the manifest generator on remove hook
+				in := RemoveInput{
+					Target:        target,
+					DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
+					FulfillmentID: fulfillmentID,
+					Auth:          f.Auth,
+				}
+				if evidence != nil {
+					in.Attestation = assembleRemoveAttestation(f, evidence)
+				}
 				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
 					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
 				}

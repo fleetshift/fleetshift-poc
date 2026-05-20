@@ -25,15 +25,16 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 	reg := &memworkflow.Registry{}
 
 	agent := &sqlite.RecordingDeliveryService{
-		Store: store,
-		Now:   func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
+		Store:    store,
+		Reporter: application.NewDeliveryReportService(store, reg),
+		Now:      func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
 	}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   agent,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        agent,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

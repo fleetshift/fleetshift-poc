@@ -27,12 +27,12 @@ There are two triggers for fulfillment reconciliation. For each, we have to look
 
 Detecting drift can have some overlap with reporting inventory. They both involve scanning resources.
 
-The targets interact with the platform by receiving and sending (likely streaming) RPCs, such as:
+The targets interact with the platform through two directional interfaces:
 
-- Receiving `Deliver` or `Remove` RPCs
-- Sending `GetTargets` and `GetFulfillments` RPCs
+- **Platform → Addon (DeliveryService / DeliveryAgent):** The platform pushes delivery instructions — `Deliver` to apply manifests and `Remove` to tear them down. These are dispatched by the orchestration workflow through a routing service that delegates to the appropriate addon agent.
+- **Addon → Platform (DeliveryReporter):** The addon pushes delivery lifecycle updates back to the platform: `ReportEvent` for non-terminal progress events, `ReportResult` for terminal outcomes, and `ListActiveDeliveries` to recover in-progress work after a restart.
 
-> NOTE: These are suggestive and will likely change. See protocol description below.
+In-process addons receive the application-layer `DeliveryReportService` directly as their `DeliveryReporter`. Remote addons (via fleetlet) will receive a gRPC client stub implementing the same interface, backed by a bidirectional stream. This layering decouples addon code from platform internals: the addon interacts with client-style interfaces regardless of transport.
 
 ### Guarantees
 
@@ -46,7 +46,7 @@ When an addon starts up, it should:
 
 1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
 2. Wait, asynchronously, for delivery requests and ONLY "ack" once enough there is just enough state, and no more, to guarantee progress (see next steps). The quicker the ack the more responsive progression will be. Acks should generally be quick (i.e. within a typical response time of a single synchronous RPC).
-3. Ask for what fulfillments are in progress (creating or deleting)
+3. Ask for what fulfillments are in progress ("deliveries" not yet terminal)
   - Based on 2, whatever is received here should be enough to finish
   - Due to the platforms guarantees, an addon will never receive a follow-up delivery for a fulfillment that is still in progress. So races between 3 and 2 should never happen.
 
@@ -110,6 +110,8 @@ Spec shrink refers to the need to act on now-missing information. There are two 
 It is possible the platform could eliminate the need for addon journaling due to spec shrink if delivery includes the previously ack'd manifests for that target. Then, a target can detect the absence in both cases.
 
 > TODO: Revisit the journal contract – something has to write to it BEFORE doing work as if it waits until after, it can crash before writing. It is essentially just saga / durable worfklow / event sourcing over again.
+
+**IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
 ## Reporting: drift, state, and conditions
 

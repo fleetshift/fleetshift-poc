@@ -41,22 +41,23 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	// Pre-clean in case a previous run left a stale cluster.
 	_ = checker.Delete(clusterName, "")
 
-	kindAgent := kindaddon.NewAgent(func(logger log.Logger) kindaddon.ClusterProvider {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	reg := &memworkflow.Registry{}
+	reporter := buildReporter(store, reg)
+
+	kindAgent := kindaddon.NewAgent(reporter, func(logger log.Logger) kindaddon.ClusterProvider {
 		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
 	})
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
-
-	reg := &memworkflow.Registry{}
-
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

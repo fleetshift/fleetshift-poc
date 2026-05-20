@@ -15,8 +15,8 @@ func fixedNow() time.Time {
 
 func TestObserverLogger_V0_EmitsProgress(t *testing.T) {
 	var events []domain.DeliveryEvent
-	signaler := recordingSignaler(&events)
-	logger := kindaddon.NewObserverLogger(context.Background(), signaler, fixedNow)
+	reporter := &recordingReporter{events: &events}
+	logger := kindaddon.NewObserverLogger(context.Background(), reporter, "d1", fixedNow)
 
 	logger.V(0).Info("Ensuring node image")
 	logger.V(0).Infof("Preparing nodes %d", 3)
@@ -42,8 +42,8 @@ func TestObserverLogger_V0_EmitsProgress(t *testing.T) {
 
 func TestObserverLogger_V1Plus_Discarded(t *testing.T) {
 	var events []domain.DeliveryEvent
-	signaler := recordingSignaler(&events)
-	logger := kindaddon.NewObserverLogger(context.Background(), signaler, fixedNow)
+	reporter := &recordingReporter{events: &events}
+	logger := kindaddon.NewObserverLogger(context.Background(), reporter, "d1", fixedNow)
 
 	logger.V(1).Info("debug message")
 	logger.V(2).Infof("trace %s", "detail")
@@ -55,8 +55,8 @@ func TestObserverLogger_V1Plus_Discarded(t *testing.T) {
 
 func TestObserverLogger_WarnAndError(t *testing.T) {
 	var events []domain.DeliveryEvent
-	signaler := recordingSignaler(&events)
-	logger := kindaddon.NewObserverLogger(context.Background(), signaler, fixedNow)
+	reporter := &recordingReporter{events: &events}
+	logger := kindaddon.NewObserverLogger(context.Background(), reporter, "d1", fixedNow)
 
 	logger.Warn("something wrong")
 	logger.Warnf("bad %s", "thing")
@@ -81,8 +81,8 @@ func TestObserverLogger_WarnAndError(t *testing.T) {
 }
 
 func TestObserverLogger_V0_Enabled(t *testing.T) {
-	signaler := recordingSignaler(&[]domain.DeliveryEvent{})
-	logger := kindaddon.NewObserverLogger(context.Background(), signaler, fixedNow)
+	reporter := &recordingReporter{events: &[]domain.DeliveryEvent{}}
+	logger := kindaddon.NewObserverLogger(context.Background(), reporter, "d1", fixedNow)
 
 	if !logger.V(0).Enabled() {
 		t.Error("V(0) should be enabled")

@@ -14,6 +14,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
+// buildReporter constructs a [application.DeliveryReportService] wired
+// to a [memworkflow.Registry] for integration tests.
+func buildReporter(store domain.Store, reg *memworkflow.Registry) *application.DeliveryReportService {
+	return application.NewDeliveryReportService(store, reg)
+}
+
 // TestKindAddon_EndToEnd exercises the full addon lifecycle:
 //
 //  1. Register a kind delivery agent with the routing service.
@@ -25,18 +31,19 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 
+	reg := &memworkflow.Registry{}
+	reporter := buildReporter(store, reg)
+
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(fakeFactory(provider))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	reg := &memworkflow.Registry{}
-
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -156,18 +163,19 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 
+	reg := &memworkflow.Registry{}
+	reporter := buildReporter(store, reg)
+
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(fakeFactory(provider))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	reg := &memworkflow.Registry{}
-
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   router,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

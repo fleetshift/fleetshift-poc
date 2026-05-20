@@ -47,6 +47,7 @@ const fieldManager = "fleetshift"
 // don't re-initialize JWKS fetching. Falls back to token passthrough
 // when no attestation is present.
 type Agent struct {
+	reporter    domain.DeliveryReporter
 	keyResolver *application.KeyResolver
 	httpClient  *http.Client
 	vault       domain.Vault
@@ -77,9 +78,11 @@ func WithVault(v domain.Vault) AgentOption {
 	return func(a *Agent) { a.vault = v }
 }
 
-// NewAgent returns an Agent with optional configuration.
-func NewAgent(opts ...AgentOption) *Agent {
+// NewAgent returns an Agent. The reporter is the addon's client
+// interface for communicating delivery updates back to the platform.
+func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 	a := &Agent{
+		reporter:  reporter,
 		verifiers: make(map[string]*attestation.Verifier),
 	}
 	for _, o := range opts {
@@ -91,12 +94,12 @@ func NewAgent(opts ...AgentOption) *Agent {
 // Deliver validates the target and auth synchronously and returns
 // [domain.DeliveryStateAccepted] immediately. The actual SSA apply
 // runs in a background goroutine; on completion the goroutine calls
-// [domain.DeliverySignaler.Done].
+// [domain.DeliveryReporter.ReportResult].
 //
 // When an attestation is provided and the agent has a verification
 // config, the attestation is verified before apply. Verification
 // failure returns [domain.DeliveryStateAuthFailed] immediately.
-func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) (domain.DeliveryResult, error) {
 	if _, ok := target.Properties["api_server"]; !ok {
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
 			fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
@@ -116,7 +119,7 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.
 				Message: fmt.Sprintf("attestation verification failed: %v", err),
 			}, nil
 		}
-		go a.deliverAsyncPlatform(ctx, target, manifests, signaler)
+		go a.deliverAsyncPlatform(ctx, target, deliveryID, manifests)
 		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 	}
 
@@ -124,7 +127,7 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.
 		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
 			fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
 	}
-	go a.deliverAsync(ctx, target, manifests, auth, signaler)
+	go a.deliverAsync(ctx, target, deliveryID, manifests, auth)
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
@@ -153,10 +156,10 @@ func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifi
 	issuers := make(map[domain.IssuerURL]attestation.TrustedIssuer, len(entries))
 	for _, e := range entries {
 		issuers[e.IssuerURL] = attestation.TrustedIssuer{
-			JWKSURI:                e.JWKSURI,
-			Audience:               e.EnrollmentAudience,
+			JWKSURI:                  e.JWKSURI,
+			Audience:                 e.EnrollmentAudience,
 			PublicKeyClaimExpression: e.PublicKeyClaimExpression,
-			RegistrySubjectMapping: e.RegistrySubjectMapping,
+			RegistrySubjectMapping:   e.RegistrySubjectMapping,
 		}
 	}
 
@@ -181,34 +184,34 @@ func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifi
 // The platform token is resolved from the target's properties: first
 // a direct service_account_token, then a service_account_token_ref
 // that is looked up in the agent's [domain.Vault].
-func (a *Agent) deliverAsyncPlatform(ctx context.Context, target domain.TargetInfo, manifests []domain.Manifest, signaler *domain.DeliverySignaler) {
+func (a *Agent) deliverAsyncPlatform(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest) {
 	cfg, err := a.buildPlatformRESTConfig(ctx, target)
 	if err != nil {
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("build platform kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
 	}
-	a.applyManifests(ctx, target, cfg, manifests, signaler)
+	a.applyManifests(ctx, target, deliveryID, cfg, manifests)
 }
 
-func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, manifests []domain.Manifest, auth domain.DeliveryAuth, signaler *domain.DeliverySignaler) {
+func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth) {
 	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
 	}
-	a.applyManifests(ctx, target, cfg, manifests, signaler)
+	a.applyManifests(ctx, target, deliveryID, cfg, manifests)
 }
 
-func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, cfg *rest.Config, manifests []domain.Manifest, signaler *domain.DeliverySignaler) {
+func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, cfg *rest.Config, manifests []domain.Manifest) {
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
-		signaler.Done(ctx, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   deliveryStateForError(err),
 			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
@@ -216,13 +219,13 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, cf
 	}
 
 	for i, m := range manifests {
-		signaler.Emit(ctx, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
 			Message: fmt.Sprintf("Applying manifest %d/%d", i+1, len(manifests)),
 		})
 
 		if err := ap.apply(ctx, m.Raw); err != nil {
-			signaler.Done(ctx, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 				State:   deliveryStateForError(err),
 				Message: fmt.Sprintf("apply manifest %d: %v", i+1, err),
 			})
@@ -230,7 +233,7 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, cf
 		}
 	}
 
-	signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
 // deleteManifests deletes Kubernetes resources described by manifests.
@@ -265,7 +268,7 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // Deliver) and uses platform credentials. Otherwise falls back to
 // token passthrough (auth.Token).
 // Resources that are already gone (404) are silently skipped.
-func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {

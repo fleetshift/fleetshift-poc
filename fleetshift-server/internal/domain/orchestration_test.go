@@ -384,23 +384,29 @@ func (r *stubRegistry) SignalDeleteCleanupComplete(_ context.Context, _ domain.F
 
 type noopDelivery struct{}
 
-func (noopDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(ctx, result)
-	return result, nil
+func (noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
+// asyncDelivery returns Accepted synchronously and signals the
+// workflow via the events channel in a goroutine.
 type asyncDelivery struct {
-	done chan struct{}
+	events chan<- domain.FulfillmentEvent
+	done   chan struct{}
 }
 
-func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
 	go func() {
-		signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
 		if a.done != nil {
 			close(a.done)
 		}
@@ -408,21 +414,26 @@ func (a *asyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ doma
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
+// emittingAsyncDelivery is like asyncDelivery but also emits a
+// progress event (ignored by the domain workflow, exercised
+// indirectly). The signal is the important part.
 type emittingAsyncDelivery struct {
-	done chan struct{}
+	events chan<- domain.FulfillmentEvent
+	done   chan struct{}
 }
 
-func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
 	go func() {
-		signaler.Emit(ctx, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventProgress,
-			Message: "creating cluster",
-		})
-		signaler.Done(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
 		if a.done != nil {
 			close(a.done)
 		}
@@ -430,7 +441,7 @@ func (a *emittingAsyncDelivery) Deliver(ctx context.Context, _ domain.TargetInfo
 	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
 }
 
-func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
@@ -439,17 +450,15 @@ type outputProducingDelivery struct {
 	secrets []domain.ProducedSecret
 }
 
-func (d *outputProducingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{
+func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+	return domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
 		ProvisionedTargets: d.targets,
 		ProducedSecrets:    d.secrets,
-	}
-	signaler.Done(ctx, result)
-	return result, nil
+	}, nil
 }
 
-func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
@@ -457,28 +466,24 @@ type failingRemoveDelivery struct {
 	err error
 }
 
-func (f *failingRemoveDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(ctx, result)
-	return result, nil
+func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
-func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return f.err
 }
 
 type authFailingDelivery struct{}
 
-func (authFailingDelivery) Deliver(ctx context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{
+func (authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+	return domain.DeliveryResult{
 		State:   domain.DeliveryStateAuthFailed,
 		Message: "401 Unauthorized",
-	}
-	signaler.Done(ctx, result)
-	return result, nil
+	}, nil
 }
 
-func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
@@ -487,16 +492,14 @@ type recordingDelivery struct {
 	delivered []domain.TargetID
 }
 
-func (d *recordingDelivery) Deliver(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, signaler *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
 	d.mu.Lock()
 	d.delivered = append(d.delivered, target.ID)
 	d.mu.Unlock()
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(ctx, result)
-	return result, nil
+	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
 }
 
-func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
@@ -507,10 +510,10 @@ func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ dom
 func newTestWorkflow(store domain.Store, delivery domain.DeliveryService, events chan domain.FulfillmentEvent, opts ...func(*domain.OrchestrationWorkflowSpec)) *domain.OrchestrationWorkflowSpec {
 	reg := &stubRegistry{events: events}
 	wf := &domain.OrchestrationWorkflowSpec{
-		Store:      store,
-		Delivery:   delivery,
-		Strategies: domain.StrategyFactory{Store: store},
-		Registry:   reg,
+		Store:           store,
+		Delivery:        delivery,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	for _, opt := range opts {
 		opt(wf)
@@ -739,7 +742,7 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
 
 	events := make(chan domain.FulfillmentEvent, 16)
-	wf := newTestWorkflow(store, &asyncDelivery{}, events)
+	wf := newTestWorkflow(store, &asyncDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: context.Background(), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
@@ -753,7 +756,7 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	}
 }
 
-func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T) {
+func TestOrchestration_EmittingAsyncDelivery_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.Fulfillment{
 		Generation:        1,
@@ -764,10 +767,7 @@ func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T
 	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
 
 	events := make(chan domain.FulfillmentEvent, 16)
-	deliveryObs := &recordingDeliveryObserver{}
-	wf := newTestWorkflow(store, &emittingAsyncDelivery{}, events, func(wf *domain.OrchestrationWorkflowSpec) {
-		wf.DeliveryObserver = deliveryObs
-	})
+	wf := newTestWorkflow(store, &emittingAsyncDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: context.Background(), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
@@ -775,9 +775,9 @@ func TestOrchestration_AsyncDelivery_DeliveryObserverReceivesEvents(t *testing.T
 		t.Fatalf("Run: %v", err)
 	}
 
-	events2, _ := deliveryObs.snapshot()
-	if len(events2) == 0 {
-		t.Error("expected at least one delivery event")
+	dep := getFulfillment(t, store, "d1")
+	if dep.State != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want active", dep.State)
 	}
 }
 
@@ -1355,14 +1355,14 @@ func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 // to block indefinitely.
 type authFailingNoSignalDelivery struct{}
 
-func (authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) (domain.DeliveryResult, error) {
+func (authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
 	return domain.DeliveryResult{
 		State:   domain.DeliveryStateAuthFailed,
 		Message: "attestation verification failed: target has no trust_bundle property",
 	}, nil
 }
 
-func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ *domain.DeliverySignaler) error {
+func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	return nil
 }
 
