@@ -166,6 +166,19 @@ func Run(t *testing.T, factory Factory) {
 		if len(got) != 2 {
 			t.Fatalf("ListActive(nil): got %d, want 2", len(got))
 		}
+		byTarget := make(map[domain.TargetID]domain.DeliveryState, len(got))
+		for _, d := range got {
+			byTarget[d.TargetID] = d.State
+		}
+		if s, ok := byTarget["t1"]; !ok || s != domain.DeliveryStateProgressing {
+			t.Errorf("expected t1 progressing, got ok=%v state=%q", ok, s)
+		}
+		if s, ok := byTarget["t2"]; !ok || s != domain.DeliveryStateAccepted {
+			t.Errorf("expected t2 accepted, got ok=%v state=%q", ok, s)
+		}
+		if _, ok := byTarget["t3"]; ok {
+			t.Error("t3 (delivered/terminal) should not be in active list")
+		}
 	})
 
 	t.Run("ListActive_FilterByTargets", func(t *testing.T) {
@@ -191,6 +204,16 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if len(got) != 2 {
 			t.Fatalf("ListActive([t1,t3]): got %d, want 2", len(got))
+		}
+		byTarget := make(map[domain.TargetID]domain.DeliveryState, len(got))
+		for _, d := range got {
+			byTarget[d.TargetID] = d.State
+		}
+		if s, ok := byTarget["t1"]; !ok || s != domain.DeliveryStateProgressing {
+			t.Errorf("expected t1 progressing, got ok=%v state=%q", ok, s)
+		}
+		if s, ok := byTarget["t3"]; !ok || s != domain.DeliveryStatePending {
+			t.Errorf("expected t3 pending, got ok=%v state=%q", ok, s)
 		}
 
 		got, err = repo.ListActive(ctx, []domain.TargetID{"t2"})

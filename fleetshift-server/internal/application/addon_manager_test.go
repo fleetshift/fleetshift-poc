@@ -718,8 +718,8 @@ func TestAddonManager_DuplicateEnableReturnsError(t *testing.T) {
 // domain.DeliveryAgent interface without performing real delivery.
 type stubDeliveryAgent struct{}
 
-func (s *stubDeliveryAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
-	return domain.DeliveryResult{}, nil
+func (s *stubDeliveryAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
+	return nil
 }
 
 func (s *stubDeliveryAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {

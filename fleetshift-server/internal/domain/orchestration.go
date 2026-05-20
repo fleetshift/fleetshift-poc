@@ -240,11 +240,17 @@ func (s *OrchestrationWorkflowSpec) GenerateManifests() Activity[GenerateManifes
 // delivery runs on a remote fleetlet with its own context; trace
 // propagation across the boundary is done explicitly, not via Go
 // context inheritance.
-func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, DeliveryResult] {
-	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (DeliveryResult, error) {
+//
+// Deliver returns only an error for dispatch failures; all delivery
+// outcomes (accepted, rejected, failed, delivered) flow through
+// [DeliveryReporter.ReportResult]. This eliminates the dual-path
+// problem where synchronous returns could bypass the reporter and
+// leave delivery records in a stale state.
+func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, struct{}] {
+	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (struct{}, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return DeliveryResult{}, fmt.Errorf("begin tx: %w", err)
+			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
@@ -258,13 +264,16 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, Del
 			CreatedAt:     now,
 			UpdatedAt:     now,
 		}); err != nil {
-			return DeliveryResult{}, fmt.Errorf("create delivery record: %w", err)
+			return struct{}{}, fmt.Errorf("create delivery record: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return DeliveryResult{}, fmt.Errorf("commit: %w", err)
+			return struct{}{}, fmt.Errorf("commit: %w", err)
 		}
 
-		return s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation)
+		if err := s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation); err != nil {
+			return struct{}{}, fmt.Errorf("dispatch delivery %s: %w", in.DeliveryID, err)
+		}
+		return struct{}{}, nil
 	})
 }
 
@@ -709,7 +718,6 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 		}
 		if step.Deliver != nil {
 			var pending []DeliveryID
-			var syncResults []DeliveryResult
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
 					Spec:   f.ManifestStrategy,
@@ -738,28 +746,15 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				if evidence != nil {
 					in.Attestation = assembleDeliverAttestation(f, manifests, evidence)
 				}
-				result, err := RunActivity(record, s.DeliverToTarget(), in)
-				if err != nil {
-					return fmt.Errorf("deliver to target %s: %w", target.ID, err)
+				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
+					return fmt.Errorf("dispatch delivery to target %s: %w", target.ID, err)
 				}
-				switch result.State {
-				case DeliveryStateAccepted:
-					pending = append(pending, did)
-				case DeliveryStateAuthFailed:
-					return fmt.Errorf("%w: delivery %s: %s",
-						errAuthPaused, did, result.Message)
-				case DeliveryStateFailed:
-					return fmt.Errorf("delivery %s failed: %s",
-						did, result.Message)
-				default:
-					syncResults = append(syncResults, result)
-				}
+				pending = append(pending, did)
 			}
 			results, err := s.awaitDeliveries(record, pending)
 			if err != nil {
 				return err
 			}
-			results = append(results, syncResults...)
 			for _, result := range results {
 				if len(result.ProvisionedTargets) > 0 || len(result.ProducedSecrets) > 0 {
 					if _, err := RunActivity(record, s.ProcessDeliveryOutputs(), result); err != nil {

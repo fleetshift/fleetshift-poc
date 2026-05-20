@@ -4,7 +4,13 @@ import "context"
 
 // DeliveryReporter is the addon's client interface for communicating
 // delivery lifecycle updates back to the platform. It models the
-// addon-to-platform direction of the delivery protocol.
+// addon-to-platform direction of the delivery protocol and is the
+// single channel for all delivery state transitions.
+//
+// All delivery outcomes — including the initial acceptance or
+// immediate rejection — flow through this interface. This unifies the
+// state machine: the platform never infers delivery state from the
+// return value of [DeliveryAgent.Deliver].
 //
 // In-process addons receive the application layer's implementation
 // directly. Remote addons (via fleetlet) would receive a gRPC client
@@ -15,9 +21,9 @@ type DeliveryReporter interface {
 	// transitions the delivery to [DeliveryStateProgressing].
 	ReportEvent(ctx context.Context, deliveryID DeliveryID, event DeliveryEvent) error
 
-	// ReportResult records the terminal outcome of a delivery,
-	// updates the delivery's state, and signals the fulfillment
-	// workflow so orchestration can proceed.
+	// ReportResult records a delivery state transition and, for
+	// terminal states, signals the fulfillment workflow so
+	// orchestration can proceed.
 	ReportResult(ctx context.Context, deliveryID DeliveryID, result DeliveryResult) error
 
 	// ListActiveDeliveries returns deliveries that have been started

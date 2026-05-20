@@ -91,44 +91,43 @@ func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 	return a
 }
 
-// Deliver validates the target and auth synchronously and returns
-// [domain.DeliveryStateAccepted] immediately. The actual SSA apply
-// runs in a background goroutine; on completion the goroutine calls
-// [domain.DeliveryReporter.ReportResult].
+// Deliver validates the target and auth synchronously then dispatches
+// the actual SSA apply in a background goroutine. All delivery
+// outcomes are reported through the [domain.DeliveryReporter].
 //
 // When an attestation is provided and the agent has a verification
 // config, the attestation is verified before apply. Verification
-// failure returns [domain.DeliveryStateAuthFailed] immediately.
-func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) (domain.DeliveryResult, error) {
+// failure is reported as [domain.DeliveryStateAuthFailed].
+func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	if _, ok := target.Properties["api_server"]; !ok {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-			fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
 	}
 
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {
-			return domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
-			}, nil
+			})
+			return nil
 		}
 		if err := v.Verify(ctx, att); err != nil {
-			return domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("attestation verification failed: %v", err),
-			}, nil
+			})
+			return nil
 		}
-		go a.deliverAsyncPlatform(ctx, target, deliveryID, manifests)
-		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+		go a.deliverAsyncPlatform(context.WithoutCancel(ctx), target, deliveryID, manifests)
+		return nil
 	}
 
 	if auth.Token == "" {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed},
-			fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
+		return fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
 	}
-	go a.deliverAsync(ctx, target, deliveryID, manifests, auth)
-	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	go a.deliverAsync(context.WithoutCancel(ctx), target, deliveryID, manifests, auth)
+	return nil
 }
 
 // verifierForTarget builds or retrieves a cached [attestation.Verifier]

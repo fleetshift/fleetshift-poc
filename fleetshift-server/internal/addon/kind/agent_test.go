@@ -145,12 +145,9 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -170,12 +167,9 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -184,9 +178,10 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
+func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
 	manifests := []domain.Manifest{{
@@ -194,13 +189,11 @@ func TestAgent_Deliver_MissingNameReturnsError(t *testing.T) {
 		Raw:          json.RawMessage(`{}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
-	if err == nil {
-		t.Fatal("expected error for missing cluster name")
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	if err != nil {
+		t.Fatalf("Deliver should not return dispatch error: %v", err)
 	}
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("expected ErrInvalidArgument, got: %v", err)
-	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
@@ -218,12 +211,9 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
 	// The fake provider emits a V(0) log line in Create (via observer
@@ -287,12 +277,9 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	<-provider.created
@@ -313,12 +300,9 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	// The fake provider calls logger.V(0).Infof inside Create, which
@@ -340,7 +324,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -384,7 +368,7 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
-	_, err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -471,7 +455,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "default-cfg"}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -507,7 +491,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "custom-cfg", "nodes": [{"role": "control-plane"}, {"role": "worker"}]}`),
 	}}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -562,12 +546,9 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "verified-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	doneResult := <-reporter.done
@@ -578,6 +559,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 
 func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	provider := newFakeProvider()
+	reporter := newChannelReporter()
 
 	verifier := &fakeTokenVerifier{err: errors.New("token expired")}
 	cfg := domain.OIDCConfig{
@@ -585,7 +567,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "expired-token",
@@ -603,10 +585,11 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "rejected-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return an error (auth failure is a result, not an error): %v", err)
+		t.Fatalf("Deliver should not return a dispatch error: %v", err)
 	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -636,12 +619,9 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		Raw:          json.RawMessage(`{"name": "no-token-cluster"}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	doneResult := <-reporter.done
@@ -662,7 +642,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "b"}`)},
 	}
 
-	_, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -706,12 +686,9 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 		Raw:          raw,
 	}}
 
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil)
+	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want Accepted", result.State)
 	}
 
 	done := <-reporter.done
@@ -748,7 +725,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		ResourceType: domain.TrustBundleResourceType,
 		Raw:          trustRaw,
 	}}
-	_, _ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil)
+	_ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil)
 	<-reporter.done
 
 	// Now deliver a cluster spec. The same agent retains the trust
@@ -759,12 +736,9 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		ResourceType: kind.ClusterResourceType,
 		Raw:          specRaw,
 	}}
-	result, err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want Accepted", result.State)
 	}
 
 	done := <-reporter.done

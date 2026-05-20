@@ -285,7 +285,7 @@ type mrCapturingDeliveryAgent struct {
 	auth      domain.DeliveryAuth
 }
 
-func (a *mrCapturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) (domain.DeliveryResult, error) {
+func (a *mrCapturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	a.mu.Lock()
 	a.att = att
 	a.manifests = manifests

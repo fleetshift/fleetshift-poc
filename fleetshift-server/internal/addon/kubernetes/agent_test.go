@@ -75,15 +75,12 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	}
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil)
 	if err == nil {
 		t.Fatal("expected error for missing api_server")
 	}
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("expected ErrInvalidArgument, got: %v", err)
-	}
-	if result.State != domain.DeliveryStateFailed {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
 }
 
@@ -99,15 +96,12 @@ func TestAgent_Deliver_MissingToken(t *testing.T) {
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil)
 	if err == nil {
 		t.Fatal("expected error for missing token")
 	}
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("expected ErrInvalidArgument, got: %v", err)
-	}
-	if result.State != domain.DeliveryStateFailed {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
 }
 
@@ -130,12 +124,9 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
 	asyncResult := <-reporter.done
@@ -204,12 +195,9 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
 	asyncResult := <-reporter.done
@@ -245,12 +233,9 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
+	err := agent.Deliver(context.Background(), target, "d1", manifests, auth, nil)
 	if err != nil {
-		t.Fatalf("Deliver should not return error after ack: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
+		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
 	asyncResult := <-reporter.done
@@ -260,7 +245,8 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 }
 
 func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
@@ -285,17 +271,19 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateAuthFailed, result.Message)
 	}
 }
 
 func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
@@ -318,18 +306,17 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
 }
 
 func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
-
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
@@ -353,19 +340,26 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 		},
 	}
 
-	result1, _ := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	reporter1 := newChannelReporter()
+	agent1 := kubernetes.NewAgent(reporter1)
+	_ = agent1.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	result1 := <-reporter1.done
 	if result1.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("first: State = %q, want AuthFailed", result1.State)
 	}
 
-	result2, _ := agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att)
+	reporter2 := newChannelReporter()
+	agent2 := kubernetes.NewAgent(reporter2)
+	_ = agent2.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att)
+	result2 := <-reporter2.done
 	if result2.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("second: State = %q, want AuthFailed", result2.State)
 	}
 }
 
 func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
@@ -390,10 +384,11 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 		},
 	}
 
-	result, err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
+	result := <-reporter.done
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}

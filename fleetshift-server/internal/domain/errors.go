@@ -28,6 +28,11 @@ var (
 	// observed generation. The caller should retry or let the
 	// in-progress mutation converge.
 	ErrConcurrentUpdate = errors.New("concurrent update")
+
+	// ErrIllegalStateTransition indicates that a requested state
+	// transition violates the entity's lifecycle rules (e.g.
+	// transitioning a terminal delivery back to progressing).
+	ErrIllegalStateTransition = errors.New("illegal state transition")
 )
 
 // terminalPrefix is the marker prepended to terminal errors.

@@ -631,24 +631,32 @@ func TestResumeDeployment_NoAuth(t *testing.T) {
 
 // authFailThenSucceedAgent fails the first delivery with
 // DeliveryStateAuthFailed, then succeeds on all subsequent attempts.
+// Results are reported asynchronously through the reporter.
 type authFailThenSucceedAgent struct {
-	mu      sync.Mutex
-	attempt int
+	reporter domain.DeliveryReporter
+	mu       sync.Mutex
+	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
 	a.mu.Unlock()
 
 	if n == 1 {
-		return domain.DeliveryResult{
-			State:   domain.DeliveryStateAuthFailed,
-			Message: "401 Unauthorized",
-		}, nil
+		go func() {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: "401 Unauthorized",
+			})
+		}()
+		return nil
 	}
-	return domain.DeliveryResult{State: domain.DeliveryStateDelivered}, nil
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
 }
 
 func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation) error {
@@ -657,7 +665,9 @@ func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo
 
 func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 	store := newStore(t)
-	h := setupWithStoreAndAgent(t, store, &authFailThenSucceedAgent{})
+	agent := &authFailThenSucceedAgent{}
+	h := setupWithStoreAndAgent(t, store, agent)
+	agent.reporter = h.reporter
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

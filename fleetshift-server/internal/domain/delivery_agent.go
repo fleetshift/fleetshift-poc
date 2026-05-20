@@ -8,9 +8,12 @@ import "context"
 // [TargetInfo.Type]. In-process addons implement this interface
 // directly; remote addons implement it via a fleetlet channel adapter.
 //
-// Agents report delivery progress and results back to the platform
-// via a [DeliveryReporter] injected at construction, not per-call.
+// Deliver dispatches delivery to the agent. The method returns an
+// error only for infrastructure/dispatch failures (e.g. unreachable
+// agent, invalid routing). All delivery outcomes — including immediate
+// rejections — are reported asynchronously via the agent's injected
+// [DeliveryReporter].
 type DeliveryAgent interface {
-	Deliver(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, auth DeliveryAuth, attestation *Attestation) (DeliveryResult, error)
+	Deliver(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, auth DeliveryAuth, attestation *Attestation) error
 	Remove(ctx context.Context, target TargetInfo, deliveryID DeliveryID, manifests []Manifest, auth DeliveryAuth, attestation *Attestation) error
 }

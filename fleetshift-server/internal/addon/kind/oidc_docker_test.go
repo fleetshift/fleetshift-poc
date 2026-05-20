@@ -104,12 +104,9 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	result, err := kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, nil)
+	err = kindAgent.Deliver(ctx, target, "d1:oidc-kind", manifests, auth, nil)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	select {
@@ -326,12 +323,9 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		Token:    domain.RawToken(aliceToken),
 	}
 
-	result, err := kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil)
+	err = kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil)
 	if err != nil {
 		t.Fatalf("Deliver (alice): %v", err)
-	}
-	if result.State != domain.DeliveryStateAccepted {
-		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateAccepted)
 	}
 
 	select {
@@ -378,7 +372,7 @@ func TestKindAddon_TokenPassthrough(t *testing.T) {
 		}
 	}`)
 
-	result, err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
+	err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
 		ResourceType: kubeaddon.ManifestResourceType,
 		Raw:          bobManifest,
 	}}, bobAuth, nil)

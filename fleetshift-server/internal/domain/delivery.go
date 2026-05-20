@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -33,6 +34,27 @@ const (
 	DeliveryStateAuthFailed  DeliveryState = "auth_failed"
 )
 
+// IsTerminal reports whether the state represents a completed delivery
+// that should not transition further.
+func (s DeliveryState) IsTerminal() bool {
+	switch s {
+	case DeliveryStateDelivered, DeliveryStateFailed,
+		DeliveryStatePartial, DeliveryStateAuthFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// deliveryStateOrder defines the forward-only ordering of non-terminal
+// delivery states. Terminal states are not ordered relative to each
+// other; they are reachable from any non-terminal state.
+var deliveryStateOrder = map[DeliveryState]int{
+	DeliveryStatePending:     0,
+	DeliveryStateAccepted:    1,
+	DeliveryStateProgressing: 2,
+}
+
 // Delivery is a first-class entity capturing a single
 // fulfillment-to-target delivery and its lifecycle.
 type Delivery struct {
@@ -43,6 +65,34 @@ type Delivery struct {
 	State         DeliveryState
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+}
+
+// TransitionTo moves the delivery to the given state if the transition
+// is legal. It returns [ErrIllegalStateTransition] if the current state
+// does not permit the requested transition (e.g. from a terminal
+// state, or backward along the lifecycle). A same-state transition is
+// a no-op (no error, no timestamp update).
+func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
+	if d.State == state {
+		return nil
+	}
+	if d.State.IsTerminal() {
+		return fmt.Errorf(
+			"%w: delivery %s is in terminal state %q, cannot transition to %q",
+			ErrIllegalStateTransition, d.ID, d.State, state)
+	}
+	if !state.IsTerminal() {
+		fromOrd, fromOk := deliveryStateOrder[d.State]
+		toOrd, toOk := deliveryStateOrder[state]
+		if fromOk && toOk && toOrd <= fromOrd {
+			return fmt.Errorf(
+				"%w: delivery %s cannot move backward from %q to %q",
+				ErrIllegalStateTransition, d.ID, d.State, state)
+		}
+	}
+	d.State = state
+	d.UpdatedAt = now
+	return nil
 }
 
 // DeliveryResult is the outcome of a single delivery attempt.

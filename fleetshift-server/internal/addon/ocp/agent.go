@@ -129,14 +129,15 @@ func (a *Agent) Deliver(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-) (domain.DeliveryResult, error) {
+) error {
 	// 1. Parse ClusterSpec from manifests
 	spec, err := ParseClusterSpec(manifests)
 	if err != nil {
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("parse cluster spec: %v", err),
-		}, nil
+		})
+		return nil
 	}
 
 	clusterID := spec.Name
@@ -157,20 +158,22 @@ func (a *Agent) Deliver(
 	})
 	if err != nil {
 		probe.Error(err)
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("resolve AWS credentials: %v", err),
-		}, nil
+		})
+		return nil
 	}
 	probe.CredentialsResolved("aws")
 
 	// Validate credential/mode coupling
 	if err := validateCredentialModeCoupling(awsCreds, spec.EffectiveCCOSTSMode()); err != nil {
 		probe.Error(err)
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: err.Error(),
-		}, nil
+		})
+		return nil
 	}
 
 	// 5. Resolve pull secret
@@ -179,37 +182,41 @@ func (a *Agent) Deliver(
 	})
 	if err != nil {
 		probe.Error(err)
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("resolve pull secret: %v", err),
-		}, nil
+		})
+		return nil
 	}
 
 	// 6. Generate SSH key
 	sshPublicKey, sshPrivateKey, err := GenerateSSHKey()
 	if err != nil {
 		probe.Error(err)
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("generate SSH key: %v", err),
-		}, nil
+		})
+		return nil
 	}
 
 	// 7. Prepare work directory with pull secret and cluster.yaml
 	configPath, workDir, err := prepareWorkDir(clusterID, spec, region, pullSecret, sshPublicKey, auth, a.consoleClientSecret)
 	if err != nil {
 		probe.Error(err)
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: err.Error(),
-		}, nil
+		})
+		return nil
 	}
 
 	// 8. Register provisionState
 	state := &provisionState{done: make(chan struct{})}
 	a.provisions.Store(clusterID, state)
 
-	// 9. Launch background goroutine
+	// 9. Launch background goroutine with detached context so the
+	// long-running provision isn't cancelled when the activity returns.
 	req := provisionRequest{
 		clusterID:     clusterID,
 		configPath:    configPath,
@@ -221,10 +228,9 @@ func (a *Agent) Deliver(
 		releaseImage:  spec.ReleaseImage,
 		ccostsMode:    true, // always STS mode for OCP agent
 	}
-	go a.deliverAsync(ctx, req, deliveryID, state)
+	go a.deliverAsync(context.WithoutCancel(ctx), req, deliveryID, state)
 
-	// 10. Return accepted
-	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	return nil
 }
 
 // provisionRequest bundles the parameters for an async provision.

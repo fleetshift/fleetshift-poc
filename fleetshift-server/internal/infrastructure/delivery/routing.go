@@ -45,10 +45,10 @@ func (r *RoutingDeliveryService) Deregister(targetType domain.TargetType) {
 }
 
 // Deliver routes to the agent registered for target.Type.
-func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation) (domain.DeliveryResult, error) {
+func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation) error {
 	agent, err := r.agentFor(target.Type)
 	if err != nil {
-		return domain.DeliveryResult{}, err
+		return err
 	}
 	return agent.Deliver(ctx, target, deliveryID, manifests, auth, attestation)
 }

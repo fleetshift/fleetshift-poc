@@ -2,7 +2,9 @@ package application
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -51,6 +53,8 @@ func NewDeliveryReportService(
 
 // ReportEvent records a non-terminal delivery event. If the delivery
 // is not yet in [domain.DeliveryStateProgressing], it transitions it.
+// Events for deliveries already in a terminal state are silently
+// ignored (the state machine rejects the transition).
 func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, event domain.DeliveryEvent) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
@@ -63,12 +67,14 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
-	needsTransition := d.State != domain.DeliveryStateProgressing
-	if needsTransition {
-		d.State = domain.DeliveryStateProgressing
-		if err := tx.Deliveries().Put(ctx, d); err != nil {
-			return fmt.Errorf("update delivery state: %w", err)
+	if err := d.TransitionTo(domain.DeliveryStateProgressing, time.Now()); err != nil {
+		if errors.Is(err, domain.ErrIllegalStateTransition) {
+			return nil
 		}
+		return fmt.Errorf("transition delivery state: %w", err)
+	}
+	if err := tx.Deliveries().Put(ctx, d); err != nil {
+		return fmt.Errorf("update delivery state: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -83,8 +89,10 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 	return nil
 }
 
-// ReportResult records the terminal outcome of a delivery, updates
-// the delivery's state, and signals the fulfillment workflow.
+// ReportResult records a delivery state transition and, for terminal
+// states, signals the fulfillment workflow. Returns nil without
+// persisting if the state machine rejects the transition (e.g. the
+// delivery is already terminal).
 // TODO: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, result domain.DeliveryResult) error {
 	tx, err := s.store.Begin(ctx)
@@ -98,7 +106,12 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
-	d.State = result.State
+	if err := d.TransitionTo(result.State, time.Now()); err != nil {
+		if errors.Is(err, domain.ErrIllegalStateTransition) {
+			return nil
+		}
+		return fmt.Errorf("transition delivery state: %w", err)
+	}
 	if err := tx.Deliveries().Put(ctx, d); err != nil {
 		return fmt.Errorf("update delivery state: %w", err)
 	}
@@ -112,7 +125,7 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		probe.End()
 	}
 
-	if s.signaler != nil {
+	if s.signaler != nil && result.State.IsTerminal() {
 		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,

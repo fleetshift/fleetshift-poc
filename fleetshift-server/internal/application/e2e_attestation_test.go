@@ -160,7 +160,7 @@ type capturingDeliveryAgent struct {
 	att   *domain.Attestation
 }
 
-func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) (domain.DeliveryResult, error) {
+func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation) error {
 	a.mu.Lock()
 	a.att = att
 	a.mu.Unlock()

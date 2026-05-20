@@ -161,17 +161,19 @@ func (a *Agent) agentObserver() AgentObserver {
 
 // Deliver dispatches on manifest resource type. Trust-bundle manifests
 // are stored in memory synchronously. Cluster manifests follow the
-// existing async flow.
-func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation) (domain.DeliveryResult, error) {
+// existing async flow. All delivery outcomes are reported through the
+// [domain.DeliveryReporter].
+func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation) error {
 	var clusterManifests []domain.Manifest
 	for _, m := range manifests {
 		switch m.ResourceType {
 		case domain.TrustBundleResourceType:
 			if err := a.storeTrustBundle(m); err != nil {
-				return domain.DeliveryResult{
+				_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 					State:   domain.DeliveryStateFailed,
 					Message: fmt.Sprintf("store trust bundle: %v", err),
-				}, nil
+				})
+				return nil
 			}
 		default:
 			clusterManifests = append(clusterManifests, m)
@@ -180,26 +182,31 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 
 	if len(clusterManifests) == 0 {
 		go func() { _ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
-		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+		return nil
 	}
 
 	specs, err := a.validateManifests(clusterManifests)
 	if err != nil {
-		return domain.DeliveryResult{State: domain.DeliveryStateFailed}, err
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("invalid manifests: %v", err),
+		})
+		return nil
 	}
 
 	if err := a.verifyToken(ctx, auth); err != nil {
-		return domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
 			State:   domain.DeliveryStateAuthFailed,
 			Message: fmt.Sprintf("token verification failed: %v", err),
-		}, nil
+		})
+		return nil
 	}
 
 	provider := a.providerFactory(NewObserverLogger(ctx, a.reporter, deliveryID, time.Now))
 
 	go a.deliverAsync(ctx, provider, specs, auth, deliveryID)
 
-	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	return nil
 }
 
 // storeTrustBundle unmarshals and stores a trust bundle entry.

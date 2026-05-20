@@ -1,6 +1,6 @@
 # Target delivery contract
 
-A fleetshift *Target* is a logical "location" that can *either* fulfill manifest delivery and/or report inventory. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
+A fleetshift *Target* is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
 
