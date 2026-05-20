@@ -103,6 +103,16 @@ func (r *ManagedResourceRepo) GetIntent(ctx context.Context, rt domain.ResourceT
 	return ri, nil
 }
 
+func (r *ManagedResourceRepo) DeleteIntents(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) error {
+	_, err := r.DB.ExecContext(ctx,
+		`DELETE FROM resource_intents WHERE resource_type = ? AND name = ?`,
+		rt, name)
+	if err != nil {
+		return fmt.Errorf("delete intents for managed resource %s/%s: %w", rt, name, err)
+	}
+	return nil
+}
+
 func (r *ManagedResourceRepo) CreateInstance(ctx context.Context, mr *domain.ManagedResource) error {
 	pending := mr.DrainPendingIntents()
 	for _, intent := range pending {

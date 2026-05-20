@@ -216,6 +216,44 @@ func runIntentTests(t *testing.T, factory Factory) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
 	})
+
+	t.Run("DeleteIntents", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ManagedResources()
+
+		fID := domain.FulfillmentID("f-intent-delete")
+		seedFulfillment(t, tx, fID, fixedTime)
+
+		mr := domain.ManagedResource{
+			ResourceType:  "clusters",
+			Name:          "prod-delete",
+			UID:           "uid-intent-delete",
+			FulfillmentID: fID,
+			CreatedAt:     fixedTime,
+			UpdatedAt:     fixedTime,
+		}
+		mr.RecordIntent(json.RawMessage(`{"provider":"rosa"}`), fixedTime)
+
+		if err := repo.CreateInstance(ctx, &mr); err != nil {
+			t.Fatalf("CreateInstance: %v", err)
+		}
+		if err := repo.DeleteInstance(ctx, "clusters", "prod-delete"); err != nil {
+			t.Fatalf("DeleteInstance: %v", err)
+		}
+		if err := repo.DeleteIntents(ctx, "clusters", "prod-delete"); err != nil {
+			t.Fatalf("DeleteIntents: %v", err)
+		}
+
+		_, err := repo.GetIntent(ctx, "clusters", "prod-delete", 1)
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("GetIntent after DeleteIntents: got %v, want ErrNotFound", err)
+		}
+
+		if err := repo.DeleteIntents(ctx, "clusters", "prod-delete"); err != nil {
+			t.Fatalf("DeleteIntents second call: %v", err)
+		}
+	})
 }
 
 func runInstanceTests(t *testing.T, factory Factory) {
@@ -390,4 +428,3 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		}
 	})
 }
-

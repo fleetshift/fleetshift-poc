@@ -22,10 +22,11 @@ func (s *DeleteManagedResourceCleanupWorkflowSpec) Name() string {
 	return "delete-managed-resource-cleanup"
 }
 
-// DeleteManagedResourceAndFulfillment removes the managed resource row
-// and fulfillment row in a single transaction after orchestration has
-// finished delivery-side cleanup. Both deletes tolerate [ErrNotFound]
-// so the activity is idempotent on replay.
+// DeleteManagedResourceAndFulfillment removes the managed resource row,
+// all versioned resource intents for that resource, and the fulfillment
+// row in a single transaction after orchestration has finished
+// delivery-side cleanup. The managed-resource and fulfillment deletes
+// tolerate [ErrNotFound] so the activity is idempotent on replay.
 func (s *DeleteManagedResourceCleanupWorkflowSpec) DeleteManagedResourceAndFulfillment() Activity[DeleteManagedResourceCleanupInput, struct{}] {
 	return NewActivity("delete-managed-resource-and-fulfillment", func(ctx context.Context, input DeleteManagedResourceCleanupInput) (struct{}, error) {
 		tx, err := s.Store.Begin(ctx)
@@ -36,6 +37,9 @@ func (s *DeleteManagedResourceCleanupWorkflowSpec) DeleteManagedResourceAndFulfi
 
 		if err := tx.ManagedResources().DeleteInstance(ctx, input.ResourceType, input.Name); err != nil && !errors.Is(err, ErrNotFound) {
 			return struct{}{}, fmt.Errorf("delete managed resource row: %w", err)
+		}
+		if err := tx.ManagedResources().DeleteIntents(ctx, input.ResourceType, input.Name); err != nil {
+			return struct{}{}, fmt.Errorf("delete managed resource intents: %w", err)
 		}
 		if err := tx.Fulfillments().Delete(ctx, input.FulfillmentID); err != nil && !errors.Is(err, ErrNotFound) {
 			return struct{}{}, fmt.Errorf("delete fulfillment row: %w", err)

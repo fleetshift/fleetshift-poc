@@ -70,6 +70,9 @@ type ManagedResourceRepository interface {
 
 	// Versioned intent (read-only; writes go through the aggregate drain)
 	GetIntent(ctx context.Context, rt ResourceType, name ResourceName, version IntentVersion) (ResourceIntent, error)
+	// Hard-delete all intent versions for a managed resource instance.
+	// Used by managed-resource cleanup after delivery-side deletion completes.
+	DeleteIntents(ctx context.Context, rt ResourceType, name ResourceName) error
 
 	// Instance aggregate (Create drains pending intents)
 	CreateInstance(ctx context.Context, mr *ManagedResource) error

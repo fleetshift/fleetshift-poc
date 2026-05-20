@@ -333,6 +333,69 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
 }
 
+func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	h := setupManagedResources(t)
+
+	{
+		tx, _ := h.store.Begin(ctx)
+		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+			ID:   "addon-cluster-mgmt",
+			Name: "Cluster Addon",
+			Type: "test",
+			Properties: map[string]string{
+				"foo": "bar",
+			},
+			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+		})
+		_ = tx.Commit()
+	}
+
+	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: "clusters",
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
+			ContentHash:    []byte("hash"),
+			SignatureBytes: []byte("sig"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterType: %v", err)
+	}
+
+	first, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+	})
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	awaitFulfillmentState(ctx, t, h.store, first.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+
+	recreated, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.17.0"}`),
+	})
+	if err != nil {
+		t.Fatalf("recreate after delete: %v", err)
+	}
+	if recreated.ManagedResource.CurrentVersion != 1 {
+		t.Fatalf("recreated CurrentVersion = %d, want 1", recreated.ManagedResource.CurrentVersion)
+	}
+}
+
 func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	ctx := context.Background()
 	h := setupManagedResources(t)
