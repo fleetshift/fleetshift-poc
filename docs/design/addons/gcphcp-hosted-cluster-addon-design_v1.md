@@ -320,6 +320,13 @@ A good package split would be:
     - readiness polling
     - optional guest bootstrap
   - should own the translation between addon-internal failures and FleetShift delivery results
+  - should own addon-level trust-bundle input state because `idp-trust-bundle` manifests arrive at
+    the delivery boundary, not as part of any single cluster reconcile
+  - current implementation stores the current trust-bundle set in agent-owned memory, keyed by
+    issuer URL:
+    - a same-issuer delivery replaces the prior entry rather than accumulating append-only history
+    - `Remove(...)` prunes stored trust-bundle entries when those manifests are removed
+    - the reconciler consumes a snapshot of that agent-owned state when building guest-target output
 - `descriptor.go`
   - addon declaration and managed-resource registration surface
   - should define:
@@ -382,6 +389,8 @@ A good package split would be:
   - should consume `client.go` and `infra.go` as dependencies, not replace them
   - is the right place to hold the long-term "reconcile, do not recreate" behavior even though the
     PoC demonstrates a clean-slate create/delete flow
+  - should consume the agent's current trust-bundle snapshot when assembling outputs rather than
+    owning addon-global trust-bundle cache itself
 - `infra.go`
   - tenant-project infrastructure boundary, separate from the CLS backend client
   - owns IAM and network preparation needed before cluster create
@@ -1085,9 +1094,22 @@ methods. In concrete terms:
 2. those entries are distributed through the existing `idp-trust-bundle` resource type
 3. the seeded `gcphcp` target should receive those trust-bundle manifests as part of its normal
    addon input
-4. `gcphcp` should retain the current trust-bundle set needed during provisioning
+4. `gcphcp` should retain the current trust-bundle set needed during provisioning, with one active
+   entry per issuer URL
 5. when `gcphcp` emits a guest `kubernetes` target, it should serialize that trust set into the
-   target's `trust_bundle` property
+   target's `trust_bundle` property in deterministic issuer-sorted order
+
+Current implementation detail:
+
+- trust-bundle state is process-local addon state owned by `agent.go`, not `reconcile.go`
+- the agent stores trust-bundle entries as the current per-issuer set, keyed by `issuer_url`
+- a delivery for an issuer replaces any prior entry for that same issuer rather than appending a
+  duplicate historical entry
+- `Remove()` also prunes a stored issuer when the corresponding `idp-trust-bundle` manifest is
+  removed
+- when the addon emits a guest target, it serializes the current set as a JSON array sorted by
+  issuer URL, so repeated same-issuer deliveries and different arrival orders converge to the same
+  `trust_bundle` bytes within a running addon process
 
 This is intentionally the same trust source as the current FleetShift attestation model. The guest
 cluster does **not** need to trust FleetShift's OIDC issuer for this to work. Attestation
@@ -1117,8 +1139,8 @@ supported cleanly (see section 14.9).
 > the guest API endpoint is resolvable, guest bootstrap succeeds, and every desired nodepool
 > reports `Ready`. Use the broker ID token for initial bootstrap access, create a
 > ServiceAccount credential inside the guest cluster, and emit a guest target that includes
-> `api_server`, `service_account_token_ref`, and `trust_bundle` so platform delivery and attested
-> follow-on delivery work in v1.
+> `api_server`, `service_account_token_ref`, and `trust_bundle` (serialized from the agent's
+> current per-issuer trust set) so platform delivery and attested follow-on delivery work in v1.
 
 ---
 
@@ -1486,19 +1508,32 @@ self-signed trust material.
 That likely depends on `cls-backend` changes, because the current status payloads surface the guest
 API endpoint and kubeconfig secret name but do not provide the CA bundle itself.
 
-### 14.10 Durable and deterministic trust-bundle reconstruction
+### 14.10 Durable trust-bundle reconstruction across addon restart
 
-V1 treats `idp-trust-bundle` input as process-local addon state: trust-bundle entries delivered to
-the seeded `gcphcp` target are retained in memory and copied into the emitted guest target's
-`trust_bundle` property during provisioning/reconcile.
+V1 now treats `idp-trust-bundle` input as process-local addon state owned by `agent.go`, not as a
+reconciler-owned append-only history. Within a running addon process, trust-bundle handling is
+canonicalized as the current set keyed by issuer URL:
 
-That means the trust set is not rebuilt from durable platform state on reconcile:
+- repeated deliveries for the same issuer replace the previous entry
+- `Remove()` prunes a stored issuer when the corresponding trust-bundle manifest is removed
+- guest-target emission sorts the current set by issuer URL before serializing `trust_bundle`
+
+That gives deterministic in-process behavior:
+
+- duplicate same-issuer deliveries do not accumulate duplicate emitted entries
+- two reconciles for the same current issuer set emit the same `trust_bundle` bytes even if the
+  manifests arrived in different orders
+- one active entry per issuer matches the current downstream Kubernetes verifier semantics, which
+  already keys trusted issuers by issuer URL
+
+The remaining gap is durability, not in-process duplicate handling:
 
 - addon restart loses the in-memory set until trust-bundle deliveries happen again
-- duplicate deliveries can accumulate duplicate entries
-- two reconciles for the same desired cluster can emit different `trust_bundle` values depending on
-  prior process history
+- reconcile after restart does not rebuild `trust_bundle` from durable platform state
+- convergence for removed issuers still depends on the platform delivering corresponding
+  `idp-trust-bundle` removals to the addon
 
-Future work should make `trust_bundle` output durable and strictly idempotent by reconstructing the
-current trust set deterministically from durable source of truth before emitting guest targets.
+Future work should make `trust_bundle` output durable by reconstructing the current trust set from a
+durable source of truth before emitting guest targets, especially across addon restart or missed
+trust-bundle deliveries.
 

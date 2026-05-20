@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -37,10 +36,8 @@ type reconcileInfra interface {
 // It sequences auth, infra, client, status, and bootstrap modules to manage
 // the lifecycle of GCP HCP clusters.
 type Reconciler struct {
-	gateway      GatewayConfig
-	infra        reconcileInfra
-	trustMu      sync.RWMutex
-	trustBundles []domain.TrustBundleEntry
+	gateway GatewayConfig
+	infra   reconcileInfra
 }
 
 // NewReconciler creates a new Reconciler with the given gateway config and infra runner.
@@ -49,24 +46,6 @@ func NewReconciler(gateway GatewayConfig, infra *InfraRunner) *Reconciler {
 		gateway: gateway,
 		infra:   infra,
 	}
-}
-
-// StoreTrustBundle appends a trust bundle entry to the reconciler's in-memory store.
-// Thread-safe for concurrent access.
-func (r *Reconciler) StoreTrustBundle(entry domain.TrustBundleEntry) {
-	r.trustMu.Lock()
-	defer r.trustMu.Unlock()
-	r.trustBundles = append(r.trustBundles, entry)
-}
-
-// TrustBundles returns a copy of the current trust bundles.
-// Thread-safe for concurrent access.
-func (r *Reconciler) TrustBundles() []domain.TrustBundleEntry {
-	r.trustMu.RLock()
-	defer r.trustMu.RUnlock()
-	result := make([]domain.TrustBundleEntry, len(r.trustBundles))
-	copy(result, r.trustBundles)
-	return result
 }
 
 func completeGuestRegistration(
@@ -464,15 +443,15 @@ func (r *Reconciler) Reconcile(
 		Message:   "Desired nodepools are healthy; building cluster output",
 	})
 
-	// Build ClusterOutput with trust bundles
+	// Build ClusterOutput. The agent attaches trust bundles from its
+	// current addon input state before registering the emitted target.
 	output := &ClusterOutput{
-		TargetID:     guestTargetID,
-		Name:         spec.Name,
-		APIServer:    guestEndpoint,
-		CACert:       bootstrapResult.CACert,
-		SATokenRef:   bootstrapResult.SATokenRef,
-		SAToken:      bootstrapResult.SAToken,
-		TrustBundles: r.TrustBundles(),
+		TargetID:   guestTargetID,
+		Name:       spec.Name,
+		APIServer:  guestEndpoint,
+		CACert:     bootstrapResult.CACert,
+		SATokenRef: bootstrapResult.SATokenRef,
+		SAToken:    bootstrapResult.SAToken,
 	}
 
 	signaler.Emit(ctx, domain.DeliveryEvent{

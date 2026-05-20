@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -25,6 +27,8 @@ type AgentDeps struct {
 type Agent struct {
 	reconciler *Reconciler
 	observer   AgentObserver
+	trustMu    sync.RWMutex
+	trustMap   map[domain.IssuerURL]domain.TrustBundleEntry
 }
 
 // NewAgent creates a new Agent with the given dependencies.
@@ -46,13 +50,23 @@ func NewAgent(deps AgentDeps) *Agent {
 	return &Agent{
 		reconciler: reconciler,
 		observer:   observer,
+		trustMap:   make(map[domain.IssuerURL]domain.TrustBundleEntry),
 	}
 }
 
 // TrustBundles returns the current trust bundles stored in the agent.
-// This delegates to the reconciler's trust bundle storage.
 func (a *Agent) TrustBundles() []domain.TrustBundleEntry {
-	return a.reconciler.TrustBundles()
+	a.trustMu.RLock()
+	defer a.trustMu.RUnlock()
+
+	bundles := make([]domain.TrustBundleEntry, 0, len(a.trustMap))
+	for _, entry := range a.trustMap {
+		bundles = append(bundles, entry)
+	}
+	sort.Slice(bundles, func(i, j int) bool {
+		return bundles[i].IssuerURL < bundles[j].IssuerURL
+	})
+	return bundles
 }
 
 // Deliver implements domain.DeliveryAgent.Deliver.
@@ -85,15 +99,14 @@ func (a *Agent) Deliver(
 
 	// Process trust bundles
 	for _, tb := range trustBundles {
-		var entry domain.TrustBundleEntry
-		if err := json.Unmarshal(tb.Raw, &entry); err != nil {
+		entry, err := a.storeTrustBundle(tb)
+		if err != nil {
 			a.observer.Error("failed to unmarshal trust bundle", "error", err)
 			return domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: fmt.Sprintf("failed to unmarshal trust bundle: %v", err),
 			}, nil
 		}
-		a.reconciler.StoreTrustBundle(entry)
 		a.observer.Info("stored trust bundle", "issuer", entry.IssuerURL)
 	}
 
@@ -174,6 +187,7 @@ func (a *Agent) deliverAsync(
 		signaler.Done(ctx, deliveryResultForReconcileError(err))
 		return
 	}
+	output.TrustBundles = a.TrustBundles()
 
 	// Build delivery result from cluster output
 	result := domain.DeliveryResult{
@@ -202,6 +216,15 @@ func (a *Agent) Remove(
 
 	// Process each cluster manifest
 	for _, m := range manifests {
+		if m.ResourceType == domain.TrustBundleResourceType {
+			entry, err := a.removeTrustBundle(m)
+			if err != nil {
+				a.observer.Error("failed to remove trust bundle", "error", err)
+				return fmt.Errorf("failed to remove trust bundle: %w", err)
+			}
+			a.observer.Info("removed trust bundle", "issuer", entry.IssuerURL)
+			continue
+		}
 		if m.ResourceType != ClusterResourceType {
 			continue
 		}
@@ -225,6 +248,41 @@ func (a *Agent) Remove(
 	}
 
 	return nil
+}
+
+func (a *Agent) storeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, error) {
+	entry, err := parseTrustBundleManifest(m)
+	if err != nil {
+		return domain.TrustBundleEntry{}, err
+	}
+
+	a.trustMu.Lock()
+	defer a.trustMu.Unlock()
+	if a.trustMap == nil {
+		a.trustMap = make(map[domain.IssuerURL]domain.TrustBundleEntry)
+	}
+	a.trustMap[entry.IssuerURL] = entry
+	return entry, nil
+}
+
+func (a *Agent) removeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, error) {
+	entry, err := parseTrustBundleManifest(m)
+	if err != nil {
+		return domain.TrustBundleEntry{}, err
+	}
+
+	a.trustMu.Lock()
+	defer a.trustMu.Unlock()
+	delete(a.trustMap, entry.IssuerURL)
+	return entry, nil
+}
+
+func parseTrustBundleManifest(m domain.Manifest) (domain.TrustBundleEntry, error) {
+	var entry domain.TrustBundleEntry
+	if err := json.Unmarshal(m.Raw, &entry); err != nil {
+		return domain.TrustBundleEntry{}, err
+	}
+	return entry, nil
 }
 
 // targetConfigFromProperties maps domain.TargetInfo.Properties to TargetConfig.

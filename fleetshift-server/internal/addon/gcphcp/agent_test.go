@@ -188,3 +188,150 @@ func TestAgent_Deliver_TrustBundleOnly_CompletesEvenIfRequestContextCanceled(t *
 		t.Fatal("timeout waiting for completion signal")
 	}
 }
+
+func TestAgent_Deliver_TrustBundleOnly_ReplacesExistingIssuerEntry(t *testing.T) {
+	agent := gcphcp.NewAgent(gcphcp.AgentDeps{
+		Gateway: gcphcp.GatewayConfig{
+			URL:      "https://test-gateway",
+			Audience: "test-audience",
+		},
+	})
+
+	deliverTrustBundle(t, agent, domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks-1",
+		EnrollmentAudience: "audience-1",
+	})
+	deliverTrustBundle(t, agent, domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks-2",
+		EnrollmentAudience: "audience-2",
+	})
+
+	bundles := agent.TrustBundles()
+	if len(bundles) != 1 {
+		t.Fatalf("expected 1 trust bundle after replacement, got %d", len(bundles))
+	}
+	if bundles[0].JWKSURI != "https://issuer.example.com/jwks-2" {
+		t.Fatalf("JWKSURI = %q, want replacement value", bundles[0].JWKSURI)
+	}
+	if bundles[0].EnrollmentAudience != "audience-2" {
+		t.Fatalf("EnrollmentAudience = %q, want replacement value", bundles[0].EnrollmentAudience)
+	}
+}
+
+func TestAgent_TrustBundles_ReturnsEntriesSortedByIssuer(t *testing.T) {
+	agent := gcphcp.NewAgent(gcphcp.AgentDeps{
+		Gateway: gcphcp.GatewayConfig{
+			URL:      "https://test-gateway",
+			Audience: "test-audience",
+		},
+	})
+
+	deliverTrustBundle(t, agent, domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer-b.example.com",
+		JWKSURI:            "https://issuer-b.example.com/jwks",
+		EnrollmentAudience: "audience-b",
+	})
+	deliverTrustBundle(t, agent, domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer-a.example.com",
+		JWKSURI:            "https://issuer-a.example.com/jwks",
+		EnrollmentAudience: "audience-a",
+	})
+
+	bundles := agent.TrustBundles()
+	if len(bundles) != 2 {
+		t.Fatalf("expected 2 trust bundles, got %d", len(bundles))
+	}
+	if bundles[0].IssuerURL != "https://issuer-a.example.com" {
+		t.Fatalf("bundles[0].IssuerURL = %q, want issuer-a first", bundles[0].IssuerURL)
+	}
+	if bundles[1].IssuerURL != "https://issuer-b.example.com" {
+		t.Fatalf("bundles[1].IssuerURL = %q, want issuer-b second", bundles[1].IssuerURL)
+	}
+}
+
+func TestAgent_Remove_TrustBundle_RemovesStoredIssuerEntry(t *testing.T) {
+	agent := gcphcp.NewAgent(gcphcp.AgentDeps{
+		Gateway: gcphcp.GatewayConfig{
+			URL:      "https://test-gateway",
+			Audience: "test-audience",
+		},
+	})
+
+	entry := domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks",
+		EnrollmentAudience: "audience-1",
+	}
+	deliverTrustBundle(t, agent, entry)
+
+	err := agent.Remove(
+		context.Background(),
+		domain.TargetInfo{},
+		domain.DeliveryID("test-delivery"),
+		[]domain.Manifest{trustBundleManifest(t, entry)},
+		domain.DeliveryAuth{},
+		nil,
+		&domain.DeliverySignaler{},
+	)
+	if err != nil {
+		t.Fatalf("Remove() error = %v", err)
+	}
+
+	if bundles := agent.TrustBundles(); len(bundles) != 0 {
+		t.Fatalf("expected trust bundle removal, got %#v", bundles)
+	}
+}
+
+func deliverTrustBundle(t *testing.T, agent *gcphcp.Agent, entry domain.TrustBundleEntry) {
+	t.Helper()
+
+	done := make(chan domain.DeliveryResult, 1)
+	signaler := &domain.DeliverySignaler{
+		Signal: func(_ context.Context, _ domain.FulfillmentID, event domain.FulfillmentEvent) error {
+			if event.DeliveryCompleted != nil {
+				done <- event.DeliveryCompleted.Result
+			}
+			return nil
+		},
+	}
+
+	result, err := agent.Deliver(
+		context.Background(),
+		domain.TargetInfo{},
+		domain.DeliveryID("trust-delivery"),
+		[]domain.Manifest{trustBundleManifest(t, entry)},
+		domain.DeliveryAuth{},
+		nil,
+		signaler,
+	)
+	if err != nil {
+		t.Fatalf("Deliver() error = %v", err)
+	}
+	if result.State != domain.DeliveryStateAccepted {
+		t.Fatalf("Deliver() state = %q, want %q", result.State, domain.DeliveryStateAccepted)
+	}
+
+	select {
+	case finalResult := <-done:
+		if finalResult.State != domain.DeliveryStateDelivered {
+			t.Fatalf("async state = %q, want %q", finalResult.State, domain.DeliveryStateDelivered)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for trust bundle delivery completion")
+	}
+}
+
+func trustBundleManifest(t *testing.T, entry domain.TrustBundleEntry) domain.Manifest {
+	t.Helper()
+
+	raw, err := json.Marshal(entry)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	return domain.Manifest{
+		ResourceType: domain.TrustBundleResourceType,
+		Raw:          json.RawMessage(raw),
+	}
+}
