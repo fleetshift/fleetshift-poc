@@ -154,7 +154,7 @@ Important facts:
   is the raw caller token
 - bootstrap must not fall back to ambient ADC from the workstation, pod, or node environment
 - the managed-resource spec can carry one or more desired nodepools, and the reconciler updates the
-  backend set by nodepool name
+  backend set by derived nodepool name (`{clusterName}-{nodepoolID}`)
 - create success is gated on cluster phase, guest bootstrap/registration, and explicit desired
   nodepool readiness
 
@@ -360,10 +360,11 @@ A good package split would be:
   - should define the user-facing `api.gcphcp.cluster` spec shape, not merely mirror the raw CLS
     request body
   - should normalize and validate:
-    - cluster name / identity rules
     - endpoint access
-    - desired nodepool set
+    - desired nodepool set (including nodepool ID uniqueness)
     - release / networking / capacity intent
+  - cluster name validation is separate (`ValidateClusterName`) because the name is derived from
+    the managed resource ID, not from the user-provided spec
   - should clearly separate user intent from derived implementation fields such as:
     - `infraID`
     - service-account-signing-key material
@@ -514,11 +515,15 @@ The addon does not apply any default values. Every field in the cluster spec mus
 provided by the user at creation time. This makes the contract explicit — what you send is what
 you get.
 
+The cluster name is not part of the user-facing spec. It is derived from the managed resource ID
+(`--id` in fleetctl). The addon receives the resource name through the delivery manifest and uses
+it as the CLS cluster name. The resource ID must conform to CLS naming constraints (max 15 chars,
+lowercase alphanumeric + hyphens, must start with a letter).
+
 **Cluster-level required fields:**
 
 | Field | Description |
 |-------|-------------|
-| `name` | Cluster name (max 15 chars, lowercase alphanumeric + hyphens) |
 | `endpointAccess` | Control plane access mode (e.g. `"PublicAndPrivate"`, `"Private"`) |
 | `releaseVersion` | OCP release version (e.g. `"4.22.0"`) |
 | `channelGroup` | Release channel (e.g. `"stable"`, `"fast"`, `"candidate"`) |
@@ -528,7 +533,7 @@ you get.
 
 | Field | Description |
 |-------|-------------|
-| `name` | Nodepool name |
+| `id` | Short nodepool identifier (max 10 chars, lowercase alphanumeric + hyphens). The full CLS nodepool name is derived as `{clusterName}-{id}`. |
 | `replicas` | Replica count (must be > 0) |
 | `instanceType` | GCP machine type (e.g. `"n1-standard-4"`) |
 | `rootVolumeSize` | Root disk size in GB (must be > 0) |
@@ -536,8 +541,11 @@ you get.
 | `autoRepair` | Whether to enable node auto-repair (`true` or `false`) |
 | `upgradeType` | Node upgrade strategy (e.g. `"Replace"`, `"InPlace"`) |
 
+Nodepool IDs must be unique within a cluster spec. Duplicate IDs are rejected at validation time.
+
 Validation is enforced at two layers: proto annotations (`buf.validate`) on the managed resource
-API surface, and Go validation in `ParseClusterSpec` for the internal delivery path.
+API surface, and Go validation in `ParseClusterSpec` for the internal delivery path. Cluster name
+validation is performed by the addon when it reads the resource name from the delivery manifest.
 
 **Example: creating a cluster via fleetctl**
 
@@ -546,17 +554,17 @@ Current `fleetctl` uses the generic managed-resource surface:
 - list available reflected resource collections with `fleetctl resource types`
 - create a cluster with `fleetctl resource create <plural> --id <id> --spec-file <path-or->`
 - for `gcphcp`, the current reflected plural is `GCPHCPClusters`
+- the `--id` becomes the CLS cluster name
 
 ```bash
 fleetctl resource create GCPHCPClusters --id my-cluster --spec-file - <<'EOF'
 {
-  "name": "my-cluster",
   "endpointAccess": "PublicAndPrivate",
   "releaseVersion": "4.22.0",
   "channelGroup": "stable",
   "nodepools": [
     {
-      "name": "my-cluster-nodepool-1",
+      "id": "np1",
       "replicas": 2,
       "instanceType": "n1-standard-4",
       "rootVolumeSize": 128,
@@ -568,6 +576,9 @@ fleetctl resource create GCPHCPClusters --id my-cluster --spec-file - <<'EOF'
 }
 EOF
 ```
+
+This produces: cluster name `my-cluster`, nodepool name `my-cluster-np1`, guest target ID
+`k8s-my-cluster`.
 
 ### 6.4 Startup sequence
 
@@ -613,8 +624,14 @@ are deferred (see section 14.5).
 
 ### 6.8 Cluster naming and idempotency
 
-Cluster names are user-specified in the managed resource spec. The addon uses the name as the
-infrastructure identity.
+Cluster names are derived from the managed resource ID. The resource ID is passed to the addon
+through the delivery manifest's `Name` field, and the addon uses it as both the CLS cluster name
+and the infrastructure identity (`infraID`). This makes the resource self-identifying: given a
+cluster in the CLS backend, you can immediately determine which FleetShift managed resource owns it.
+
+Nodepool names are derived deterministically from the cluster name and a short user-provided
+identifier (`id`): `{clusterName}-{id}`. The identifier is stable across reconcile passes,
+so reordering nodepools in the spec does not cause unintended deletes or recreates.
 
 Idempotency comes from the reconciler checking whether a cluster with that name already exists
 before creating. An existing cluster is updated rather than failing on create. This aligns with the
@@ -1307,8 +1324,9 @@ If the next step is implementation planning, the v1 direction is:
 4. structure addon code for N targets from day one, even though v1 uses one
 5. expose one managed resource type: `api.gcphcp.cluster`
 6. keep nodepools nested in that cluster resource for v1
-7. require all cluster shape fields explicitly in the managed resource spec — no addon-side
-   defaults (see section 6.3)
+7. derive cluster name from the managed resource ID and nodepool names from cluster name + user-provided
+   slug; require all other cluster shape fields explicitly in the spec — no addon-side defaults (see
+   section 6.3)
 8. reconcile all spec fields authoritatively — no blocked-field classification (see section 14.5)
 9. trigger reconciliation only from FleetShift-side spec changes; no addon-driven requeue
 10. register a `kubernetes` target only after cluster phase is `Ready`, the guest API is reachable

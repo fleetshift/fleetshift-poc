@@ -226,14 +226,14 @@ func (f *fakeNodepoolClient) DeleteNodepool(_ context.Context, nodepoolID string
 func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 	client := &fakeNodepoolClient{
 		listedNodepools: []map[string]any{
-			{"id": "np-existing", "name": "worker-a"},
-			{"id": "np-removed", "name": "worker-old"},
+			{"id": "np-existing", "name": "test-cluster-workers"},
+			{"id": "np-removed", "name": "test-cluster-old"},
 		},
 	}
 
 	desired := []NodepoolSpec{
 		{
-			Name:           "worker-a",
+			ID:             "workers",
 			Replicas:       3,
 			InstanceType:   "n1-standard-8",
 			RootVolumeSize: 256,
@@ -242,7 +242,7 @@ func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 			UpgradeType:    "Replace",
 		},
 		{
-			Name:           "worker-b",
+			ID:             "np1",
 			Replicas:       2,
 			InstanceType:   "n1-standard-4",
 			RootVolumeSize: 128,
@@ -252,7 +252,7 @@ func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 		},
 	}
 
-	err := reconcileNodepools(context.Background(), client, "cluster-123", desired, &domain.DeliverySignaler{})
+	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, &domain.DeliverySignaler{})
 	if err != nil {
 		t.Fatalf("reconcileNodepools failed: %v", err)
 	}
@@ -260,16 +260,16 @@ func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 	if len(client.createdSpecs) != 1 {
 		t.Fatalf("created count = %d, want 1", len(client.createdSpecs))
 	}
-	if name := client.createdSpecs[0]["name"]; name != "worker-b" {
-		t.Errorf("created nodepool name = %v, want worker-b", name)
+	if name := client.createdSpecs[0]["name"]; name != "test-cluster-np1" {
+		t.Errorf("created nodepool name = %v, want test-cluster-np1", name)
 	}
 
 	updated, ok := client.updatedSpecs["np-existing"]
 	if !ok {
 		t.Fatal("expected existing nodepool to be updated")
 	}
-	if name := updated["name"]; name != "worker-a" {
-		t.Errorf("updated nodepool name = %v, want worker-a", name)
+	if name := updated["name"]; name != "test-cluster-workers" {
+		t.Errorf("updated nodepool name = %v, want test-cluster-workers", name)
 	}
 	specMap, ok := updated["spec"].(map[string]any)
 	if !ok {
@@ -290,15 +290,15 @@ func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 func TestReconcileNodepools_DuplicateDesiredNames(t *testing.T) {
 	client := &fakeNodepoolClient{}
 	desired := []NodepoolSpec{
-		{Name: "worker-a", Replicas: 2},
-		{Name: "worker-a", Replicas: 3},
+		{ID: "workers", Replicas: 2},
+		{ID: "workers", Replicas: 3},
 	}
 
-	err := reconcileNodepools(context.Background(), client, "cluster-123", desired, &domain.DeliverySignaler{})
+	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, &domain.DeliverySignaler{})
 	if err == nil {
 		t.Fatal("expected duplicate desired name error")
 	}
-	if !strings.Contains(err.Error(), "duplicate desired nodepool name") {
+	if !strings.Contains(err.Error(), "duplicate desired nodepool id") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -1004,7 +1004,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 		}, nil
 	}
 
-	reconcileNodepoolsFn = func(_ context.Context, _ nodepoolReconcileClient, _ string, _ []NodepoolSpec, _ *domain.DeliverySignaler) error {
+	reconcileNodepoolsFn = func(_ context.Context, _ nodepoolReconcileClient, _ string, _ string, _ []NodepoolSpec, _ *domain.DeliverySignaler) error {
 		if _, err := os.Stat(workspaceDir); err == nil {
 			t.Fatal("expected hypershift workspace to be cleaned before nodepool reconcile")
 		}
@@ -1017,7 +1017,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 			SAToken:    []byte("sa-token"),
 		}, nil
 	}
-	pollDesiredNodepoolsHealthyFn = func(context.Context, nodepoolStatusClient, string, []NodepoolSpec, *domain.DeliverySignaler) error {
+	pollDesiredNodepoolsHealthyFn = func(context.Context, nodepoolStatusClient, string, string, []NodepoolSpec, *domain.DeliverySignaler) error {
 		return nil
 	}
 
@@ -1052,7 +1052,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",
 			Nodepools: []NodepoolSpec{{
-				Name:           "worker-a",
+				ID:             "workers",
 				Replicas:       2,
 				InstanceType:   "n1-standard-4",
 				RootVolumeSize: 128,

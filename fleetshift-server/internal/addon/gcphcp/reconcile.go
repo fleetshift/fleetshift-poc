@@ -418,7 +418,7 @@ func (r *Reconciler) Reconcile(
 		return nil, fmt.Errorf("resolve cluster ID: %w", err)
 	}
 
-	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.Nodepools, signaler); err != nil {
+	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, signaler); err != nil {
 		return nil, err
 	}
 
@@ -454,7 +454,7 @@ func (r *Reconciler) Reconcile(
 		Message:   "Waiting for desired nodepools to become healthy",
 	})
 
-	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.Nodepools, signaler); err != nil {
+	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, signaler); err != nil {
 		return nil, fmt.Errorf("wait for desired nodepools healthy: %w", err)
 	}
 
@@ -666,9 +666,9 @@ func BuildCLSClusterSpec(
 
 // BuildCLSNodepoolSpec builds the CLS API nodepool creation request body.
 // It converts a NodepoolSpec into the format expected by the CLS /api/v1/nodepools endpoint.
-func BuildCLSNodepoolSpec(np NodepoolSpec, clusterID string) map[string]any {
+func BuildCLSNodepoolSpec(np NodepoolSpec, clusterName, clusterID string) map[string]any {
 	return map[string]any{
-		"name":       np.Name,
+		"name":       NodepoolName(clusterName, np.ID),
 		"cluster_id": clusterID,
 		"spec": map[string]any{
 			"replicas": np.Replicas,

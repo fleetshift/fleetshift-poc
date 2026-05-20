@@ -226,7 +226,7 @@ func TestBuildCLSClusterUpdateSpec(t *testing.T) {
 
 func TestBuildCLSNodepoolSpec(t *testing.T) {
 	np := gcphcp.NodepoolSpec{
-		Name:           "test-nodepool",
+		ID:             "workers",
 		Replicas:       3,
 		InstanceType:   "n1-standard-8",
 		RootVolumeSize: 256,
@@ -237,11 +237,11 @@ func TestBuildCLSNodepoolSpec(t *testing.T) {
 
 	clusterID := "cluster-abc-123"
 
-	result := gcphcp.BuildCLSNodepoolSpec(np, clusterID)
+	result := gcphcp.BuildCLSNodepoolSpec(np, "test-cluster", clusterID)
 
 	// Verify top-level fields
-	if name := result["name"]; name != "test-nodepool" {
-		t.Errorf("expected name=test-nodepool, got %v", name)
+	if name := result["name"]; name != "test-cluster-workers" {
+		t.Errorf("expected name=test-cluster-workers, got %v", name)
 	}
 
 	if cID := result["cluster_id"]; cID != clusterID {

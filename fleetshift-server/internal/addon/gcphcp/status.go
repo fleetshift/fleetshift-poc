@@ -382,6 +382,7 @@ func PollDesiredNodepoolsHealthy(
 	ctx context.Context,
 	client nodepoolStatusClient,
 	clusterID string,
+	clusterName string,
 	desired []NodepoolSpec,
 	signaler *domain.DeliverySignaler,
 ) error {
@@ -395,7 +396,7 @@ func PollDesiredNodepoolsHealthy(
 	timeout := time.After(nodepoolPollTimeout)
 
 	for {
-		allReady, err := checkDesiredNodepoolsHealthy(ctx, client, clusterID, desired, signaler)
+		allReady, err := checkDesiredNodepoolsHealthy(ctx, client, clusterID, clusterName, desired, signaler)
 		if err != nil {
 			return err
 		}
@@ -525,6 +526,7 @@ func checkDesiredNodepoolsHealthy(
 	ctx context.Context,
 	client nodepoolStatusClient,
 	clusterID string,
+	clusterName string,
 	desired []NodepoolSpec,
 	signaler *domain.DeliverySignaler,
 ) (bool, error) {
@@ -545,7 +547,7 @@ func checkDesiredNodepoolsHealthy(
 
 	desiredNames := make([]string, 0, len(desired))
 	for _, np := range desired {
-		desiredNames = append(desiredNames, np.Name)
+		desiredNames = append(desiredNames, NodepoolName(clusterName, np.ID))
 	}
 	sort.Strings(desiredNames)
 

@@ -114,13 +114,22 @@ func (a *Agent) Deliver(
 		}, nil
 	}
 
-	// Parse cluster spec
-	spec, err := ParseClusterSpec(clusterManifests[0].Raw)
+	// Parse cluster spec and derive cluster name from managed resource ID
+	clusterManifest := clusterManifests[0]
+	spec, err := ParseClusterSpec(clusterManifest.Raw)
 	if err != nil {
 		a.observer.Error("failed to parse cluster spec", "error", err)
 		return domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("failed to parse cluster spec: %v", err),
+		}, nil
+	}
+	spec.Name = string(clusterManifest.Name)
+	if err := ValidateClusterName(spec.Name); err != nil {
+		a.observer.Error("invalid cluster name from resource ID", "error", err)
+		return domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("invalid cluster name: %v", err),
 		}, nil
 	}
 
@@ -197,12 +206,13 @@ func (a *Agent) Remove(
 			continue
 		}
 
-		// Parse cluster spec
+		// Parse cluster spec and derive cluster name from managed resource ID
 		spec, err := ParseClusterSpec(m.Raw)
 		if err != nil {
 			a.observer.Error("failed to parse cluster spec for removal", "error", err)
 			return fmt.Errorf("failed to parse cluster spec: %w", err)
 		}
+		spec.Name = string(m.Name)
 
 		// Delete the cluster
 		a.observer.Info("deleting cluster", "cluster", spec.Name)

@@ -9,7 +9,7 @@ import (
 )
 
 // ClusterSpec defines the declarative specification for a GCP HCP cluster.
-// All fields are required.
+// Name is derived from the managed resource ID and set by the addon.
 type ClusterSpec struct {
 	Name           string         `json:"name"`
 	EndpointAccess string         `json:"endpointAccess"`
@@ -21,13 +21,20 @@ type ClusterSpec struct {
 // NodepoolSpec defines the specification for a GCP HCP cluster nodepool.
 // All fields are required.
 type NodepoolSpec struct {
-	Name           string `json:"name"`
+	ID             string `json:"id"`
 	Replicas       int    `json:"replicas"`
 	InstanceType   string `json:"instanceType"`
 	RootVolumeSize int    `json:"rootVolumeSize"`
 	RootVolumeType string `json:"rootVolumeType"`
 	AutoRepair     *bool  `json:"autoRepair"`
 	UpgradeType    string `json:"upgradeType"`
+}
+
+var nodepoolIDPattern = regexp.MustCompile(`^[a-z][-a-z0-9]*$`)
+
+// NodepoolName derives the full CLS nodepool name from the cluster name and nodepool id.
+func NodepoolName(clusterName, poolID string) string {
+	return clusterName + "-" + poolID
 }
 
 var clusterNamePattern = regexp.MustCompile(`^[a-z][-a-z0-9]*$`)
@@ -46,21 +53,24 @@ func ParseClusterSpec(raw json.RawMessage) (ClusterSpec, error) {
 	return spec, nil
 }
 
-func validateClusterSpec(spec *ClusterSpec) error {
-	if spec.Name == "" {
+// ValidateClusterName checks that a cluster name (derived from the managed
+// resource ID) meets CLS backend constraints.
+func ValidateClusterName(name string) error {
+	if name == "" {
 		return fmt.Errorf("%w: cluster name is required", domain.ErrInvalidArgument)
 	}
-
-	if len(spec.Name) > 15 {
+	if len(name) > 15 {
 		return fmt.Errorf("%w: cluster name must be 15 characters or less (got %d)",
-			domain.ErrInvalidArgument, len(spec.Name))
+			domain.ErrInvalidArgument, len(name))
 	}
-
-	if !clusterNamePattern.MatchString(spec.Name) {
+	if !clusterNamePattern.MatchString(name) {
 		return fmt.Errorf("%w: cluster name must match pattern ^[a-z][-a-z0-9]*$ (got %q)",
-			domain.ErrInvalidArgument, spec.Name)
+			domain.ErrInvalidArgument, name)
 	}
+	return nil
+}
 
+func validateClusterSpec(spec *ClusterSpec) error {
 	if spec.EndpointAccess == "" {
 		return fmt.Errorf("%w: endpointAccess is required", domain.ErrInvalidArgument)
 	}
@@ -75,11 +85,25 @@ func validateClusterSpec(spec *ClusterSpec) error {
 		return fmt.Errorf("%w: at least one nodepool is required", domain.ErrInvalidArgument)
 	}
 
+	seenIDs := make(map[string]struct{}, len(spec.Nodepools))
 	for i, np := range spec.Nodepools {
-		if np.Name == "" {
-			return fmt.Errorf("%w: nodepools[%d].name is required",
+		if np.ID == "" {
+			return fmt.Errorf("%w: nodepools[%d].id is required",
 				domain.ErrInvalidArgument, i)
 		}
+		if len(np.ID) > 10 {
+			return fmt.Errorf("%w: nodepools[%d].id must be 10 characters or less (got %d)",
+				domain.ErrInvalidArgument, i, len(np.ID))
+		}
+		if !nodepoolIDPattern.MatchString(np.ID) {
+			return fmt.Errorf("%w: nodepools[%d].id must match pattern ^[a-z][-a-z0-9]*$ (got %q)",
+				domain.ErrInvalidArgument, i, np.ID)
+		}
+		if _, exists := seenIDs[np.ID]; exists {
+			return fmt.Errorf("%w: duplicate nodepool id %q",
+				domain.ErrInvalidArgument, np.ID)
+		}
+		seenIDs[np.ID] = struct{}{}
 		if np.Replicas <= 0 {
 			return fmt.Errorf("%w: nodepools[%d].replicas must be > 0 (got %d)",
 				domain.ErrInvalidArgument, i, np.Replicas)

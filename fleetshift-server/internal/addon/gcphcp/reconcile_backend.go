@@ -106,6 +106,7 @@ func reconcileNodepools(
 	ctx context.Context,
 	client nodepoolReconcileClient,
 	clusterID string,
+	clusterName string,
 	desired []NodepoolSpec,
 	signaler *domain.DeliverySignaler,
 ) error {
@@ -130,36 +131,40 @@ func reconcileNodepools(
 		observedByName[name] = id
 	}
 
-	seenDesired := make(map[string]struct{}, len(desired))
+	seenIDs := make(map[string]struct{}, len(desired))
 	for _, np := range desired {
-		if _, exists := seenDesired[np.Name]; exists {
-			return fmt.Errorf("duplicate desired nodepool name %q", np.Name)
+		if _, exists := seenIDs[np.ID]; exists {
+			return fmt.Errorf("duplicate desired nodepool id %q", np.ID)
 		}
-		seenDesired[np.Name] = struct{}{}
+		seenIDs[np.ID] = struct{}{}
 	}
 
+	derivedNames := make(map[string]struct{}, len(desired))
 	for _, np := range desired {
-		if _, seen := observedByName[np.Name]; !seen {
-			emitProgress(signaler, ctx, fmt.Sprintf("Creating nodepool: %s", np.Name))
-			if _, err := client.CreateNodepool(ctx, BuildCLSNodepoolSpec(np, clusterID)); err != nil {
-				return fmt.Errorf("create nodepool %s: %w", np.Name, err)
+		derivedName := NodepoolName(clusterName, np.ID)
+		derivedNames[derivedName] = struct{}{}
+		if _, seen := observedByName[derivedName]; !seen {
+			emitProgress(signaler, ctx, fmt.Sprintf("Creating nodepool: %s", derivedName))
+			if _, err := client.CreateNodepool(ctx, BuildCLSNodepoolSpec(np, clusterName, clusterID)); err != nil {
+				return fmt.Errorf("create nodepool %s: %w", derivedName, err)
 			}
 			continue
 		}
 	}
 
 	for _, np := range desired {
-		if nodepoolID, ok := observedByName[np.Name]; ok {
-			emitProgress(signaler, ctx, fmt.Sprintf("Updating nodepool: %s", np.Name))
-			if _, err := client.UpdateNodepool(ctx, nodepoolID, BuildCLSNodepoolSpec(np, clusterID)); err != nil {
-				return fmt.Errorf("update nodepool %s: %w", np.Name, err)
+		derivedName := NodepoolName(clusterName, np.ID)
+		if nodepoolID, ok := observedByName[derivedName]; ok {
+			emitProgress(signaler, ctx, fmt.Sprintf("Updating nodepool: %s", derivedName))
+			if _, err := client.UpdateNodepool(ctx, nodepoolID, BuildCLSNodepoolSpec(np, clusterName, clusterID)); err != nil {
+				return fmt.Errorf("update nodepool %s: %w", derivedName, err)
 			}
 		}
 	}
 
 	var removed []string
 	for name := range observedByName {
-		if _, ok := seenDesired[name]; !ok {
+		if _, ok := derivedNames[name]; !ok {
 			removed = append(removed, name)
 		}
 	}

@@ -92,8 +92,8 @@ func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
 	obs := &recordingDeliveryObserver{}
 	client := &fakeNodepoolStatusClient{
 		listSeq: [][]map[string]any{{
-			{"id": "np-1", "name": "worker-a"},
-			{"id": "np-2", "name": "worker-b"},
+			{"id": "np-1", "name": "test-wa"},
+			{"id": "np-2", "name": "test-wb"},
 		}},
 		statusByID: map[string][]map[string]any{
 			"np-1": {{
@@ -113,9 +113,9 @@ func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
 		},
 	}
 
-	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", []NodepoolSpec{
-		{Name: "worker-a"},
-		{Name: "worker-b"},
+	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
+		{ID: "wa"},
+		{ID: "wb"},
 	}, newRecordingSignaler(obs))
 	if err != nil {
 		t.Fatalf("PollDesiredNodepoolsHealthy() error = %v", err)
@@ -125,11 +125,11 @@ func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
 	if len(events) != 2 {
 		t.Fatalf("expected 2 status events, got %d", len(events))
 	}
-	want := `Nodepool worker-a status: phase=Ready reason=AllControllersReady message="NodePool is ready with 1 controllers operational"`
+	want := `Nodepool test-wa status: phase=Ready reason=AllControllersReady message="NodePool is ready with 1 controllers operational"`
 	if events[0].Message != want {
 		t.Fatalf("first message = %q, want %q", events[0].Message, want)
 	}
-	want = `Nodepool worker-b status: phase=Ready reason=AllControllersReady message="NodePool is ready with 1 controllers operational"`
+	want = `Nodepool test-wb status: phase=Ready reason=AllControllersReady message="NodePool is ready with 1 controllers operational"`
 	if events[1].Message != want {
 		t.Fatalf("second message = %q, want %q", events[1].Message, want)
 	}
@@ -138,7 +138,7 @@ func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
 func TestPollDesiredNodepoolsHealthy_FailedNodepool(t *testing.T) {
 	client := &fakeNodepoolStatusClient{
 		listSeq: [][]map[string]any{{
-			{"id": "np-1", "name": "worker-a"},
+			{"id": "np-1", "name": "test-wa"},
 		}},
 		statusByID: map[string][]map[string]any{
 			"np-1": {{
@@ -150,13 +150,13 @@ func TestPollDesiredNodepoolsHealthy_FailedNodepool(t *testing.T) {
 		},
 	}
 
-	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", []NodepoolSpec{
-		{Name: "worker-a"},
+	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
+		{ID: "wa"},
 	}, &domain.DeliverySignaler{})
 	if err == nil {
 		t.Fatal("expected failed nodepool error")
 	}
-	if !strings.Contains(err.Error(), "worker-a") || !strings.Contains(err.Error(), "quota exceeded") {
+	if !strings.Contains(err.Error(), "test-wa") || !strings.Contains(err.Error(), "quota exceeded") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -174,7 +174,7 @@ func TestPollDesiredNodepoolsHealthy_WaitsUntilReady(t *testing.T) {
 	client := &fakeNodepoolStatusClient{
 		listSeq: [][]map[string]any{
 			{},
-			{{"id": "np-1", "name": "worker-a"}},
+			{{"id": "np-1", "name": "test-wa"}},
 		},
 		statusByID: map[string][]map[string]any{
 			"np-1": {
@@ -184,8 +184,8 @@ func TestPollDesiredNodepoolsHealthy_WaitsUntilReady(t *testing.T) {
 		},
 	}
 
-	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", []NodepoolSpec{
-		{Name: "worker-a"},
+	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
+		{ID: "wa"},
 	}, &domain.DeliverySignaler{})
 	if err != nil {
 		t.Fatalf("PollDesiredNodepoolsHealthy() error = %v", err)

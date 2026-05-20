@@ -12,6 +12,7 @@ type ResourceType string
 // "api.kind.cluster"); Raw holds the actual content as opaque JSON.
 type Manifest struct {
 	ResourceType ResourceType
+	Name         ResourceName
 	Raw          json.RawMessage
 }
 

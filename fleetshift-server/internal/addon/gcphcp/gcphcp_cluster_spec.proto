@@ -9,26 +9,23 @@ option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/inte
 // GCPHCPClusterSpec defines the desired state of a GCP Hosted Control Plane cluster.
 // This is the canonical spec used by both the managed resource API and the delivery agent.
 message GCPHCPClusterSpec {
-  // Name of the GCP HCP cluster.
-  string name = 1 [(buf.validate.field).required = true];
-
   // Endpoint access configuration for the cluster API server.
-  string endpoint_access = 2 [(buf.validate.field).string.min_len = 1];
+  string endpoint_access = 1 [(buf.validate.field).string.min_len = 1];
 
   // Release version of the cluster (e.g., "4.18.0").
-  string release_version = 3 [(buf.validate.field).string.min_len = 1];
+  string release_version = 2 [(buf.validate.field).string.min_len = 1];
 
   // Channel group for the cluster (e.g., "stable", "fast", "candidate").
-  string channel_group = 4 [(buf.validate.field).string.min_len = 1];
+  string channel_group = 3 [(buf.validate.field).string.min_len = 1];
 
   // Nodepools to provision for the cluster.
-  repeated Nodepool nodepools = 5 [(buf.validate.field).repeated.min_items = 1];
+  repeated Nodepool nodepools = 4 [(buf.validate.field).repeated.min_items = 1];
 }
 
 // Nodepool describes a node pool in the GCP HCP cluster.
 message Nodepool {
-  // Name of the nodepool.
-  string name = 1 [(buf.validate.field).string.min_len = 1];
+  // Short identifier for the nodepool.
+  string id = 1 [(buf.validate.field).string = {min_len: 1, max_len: 10, pattern: "^[a-z][-a-z0-9]*$"}];
 
   // Number of replicas (nodes) in the pool.
   int32 replicas = 2 [(buf.validate.field).int32.gt = 0];
