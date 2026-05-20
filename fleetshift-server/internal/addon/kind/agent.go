@@ -181,7 +181,8 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 	}
 
 	if len(clusterManifests) == 0 {
-		go func() { _ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
+		asyncCtx := context.WithoutCancel(ctx)
+		go func() { _ = a.reporter.ReportResult(asyncCtx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
 		return nil
 	}
 
@@ -202,9 +203,10 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 		return nil
 	}
 
-	provider := a.providerFactory(NewObserverLogger(ctx, a.reporter, deliveryID, time.Now))
+	asyncCtx := context.WithoutCancel(ctx)
+	provider := a.providerFactory(NewObserverLogger(asyncCtx, a.reporter, deliveryID, time.Now))
 
-	go a.deliverAsync(ctx, provider, specs, auth, deliveryID)
+	go a.deliverAsync(asyncCtx, provider, specs, auth, deliveryID)
 
 	return nil
 }

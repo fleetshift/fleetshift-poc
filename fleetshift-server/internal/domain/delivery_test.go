@@ -109,6 +109,26 @@ func TestDelivery_TransitionTo_NoOp(t *testing.T) {
 	}
 }
 
+func TestDelivery_TransitionTo_UnknownState_Fails(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Minute)
+
+	d := Delivery{State: DeliveryStatePending, CreatedAt: now, UpdatedAt: now}
+	err := d.TransitionTo(DeliveryState("bogus"), later)
+	if err == nil {
+		t.Fatal("expected error for unknown target state")
+	}
+	if !errors.Is(err, ErrIllegalStateTransition) {
+		t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+	}
+	if d.State != DeliveryStatePending {
+		t.Errorf("State changed to %q, want %q (unchanged)", d.State, DeliveryStatePending)
+	}
+	if d.UpdatedAt != now {
+		t.Error("UpdatedAt changed on failed transition")
+	}
+}
+
 func TestDelivery_TransitionTo_Backward_Fails(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	later := now.Add(time.Minute)

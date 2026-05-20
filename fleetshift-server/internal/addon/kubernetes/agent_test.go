@@ -340,18 +340,17 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 		},
 	}
 
-	reporter1 := newChannelReporter()
-	agent1 := kubernetes.NewAgent(reporter1)
-	_ = agent1.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
-	result1 := <-reporter1.done
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+
+	_ = agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att)
+	result1 := <-reporter.done
 	if result1.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("first: State = %q, want AuthFailed", result1.State)
 	}
 
-	reporter2 := newChannelReporter()
-	agent2 := kubernetes.NewAgent(reporter2)
-	_ = agent2.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att)
-	result2 := <-reporter2.done
+	_ = agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att)
+	result2 := <-reporter.done
 	if result2.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("second: State = %q, want AuthFailed", result2.State)
 	}

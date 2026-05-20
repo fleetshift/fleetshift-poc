@@ -55,6 +55,18 @@ var deliveryStateOrder = map[DeliveryState]int{
 	DeliveryStateProgressing: 2,
 }
 
+// knownDeliveryStates is the complete set of valid delivery states.
+// Used by [Delivery.TransitionTo] to reject unknown values.
+var knownDeliveryStates = map[DeliveryState]struct{}{
+	DeliveryStatePending:     {},
+	DeliveryStateAccepted:    {},
+	DeliveryStateProgressing: {},
+	DeliveryStateDelivered:   {},
+	DeliveryStateFailed:      {},
+	DeliveryStatePartial:     {},
+	DeliveryStateAuthFailed:  {},
+}
+
 // Delivery is a first-class entity capturing a single
 // fulfillment-to-target delivery and its lifecycle.
 type Delivery struct {
@@ -73,6 +85,9 @@ type Delivery struct {
 // state, or backward along the lifecycle). A same-state transition is
 // a no-op (no error, no timestamp update).
 func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
+	if _, ok := knownDeliveryStates[state]; !ok {
+		return fmt.Errorf("%w: unknown delivery state %q", ErrIllegalStateTransition, state)
+	}
 	if d.State == state {
 		return nil
 	}
