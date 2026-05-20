@@ -57,7 +57,7 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 	return nil
 }
 
-func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -72,6 +72,7 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 		ID:            deliveryID,
 		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
 		TargetID:      target.ID,
+		Generation:    generation,
 		State:         domain.DeliveryStatePending,
 		CreatedAt:     s.now(),
 		UpdatedAt:     s.now(),

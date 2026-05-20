@@ -66,12 +66,18 @@ func TestRoutingDeliveryService_RoutesToCorrectAgent(t *testing.T) {
 	if kindAgent.delivered[0].DeliveryID != "d1:k1" {
 		t.Errorf("kindAgent: DeliveryID = %q, want %q", kindAgent.delivered[0].DeliveryID, "d1:k1")
 	}
+	if kindAgent.delivered[0].Generation != 1 {
+		t.Errorf("kindAgent: Generation = %d, want 1", kindAgent.delivered[0].Generation)
+	}
 
 	if len(k8sAgent.delivered) != 1 {
 		t.Fatalf("k8sAgent: got %d deliveries, want 1", len(k8sAgent.delivered))
 	}
 	if k8sAgent.delivered[0].DeliveryID != "d2:c1" {
 		t.Errorf("k8sAgent: DeliveryID = %q, want %q", k8sAgent.delivered[0].DeliveryID, "d2:c1")
+	}
+	if k8sAgent.delivered[0].Generation != 1 {
+		t.Errorf("k8sAgent: Generation = %d, want 1", k8sAgent.delivered[0].Generation)
 	}
 }
 
@@ -93,6 +99,9 @@ func TestRoutingDeliveryService_RemoveRoutesToCorrectAgent(t *testing.T) {
 	}
 	if agent.removed[0].DeliveryID != "d1:k1" {
 		t.Errorf("DeliveryID = %q, want %q", agent.removed[0].DeliveryID, "d1:k1")
+	}
+	if agent.removed[0].Generation != 1 {
+		t.Errorf("Generation = %d, want 1", agent.removed[0].Generation)
 	}
 }
 
@@ -140,5 +149,7 @@ func TestRoutingDeliveryService_RegisterReplacesPrevious(t *testing.T) {
 	}
 	if len(second.delivered) != 1 {
 		t.Errorf("second agent received %d deliveries, want 1", len(second.delivered))
+	} else if second.delivered[0].Generation != 1 {
+		t.Errorf("second agent: Generation = %d, want 1", second.delivered[0].Generation)
 	}
 }

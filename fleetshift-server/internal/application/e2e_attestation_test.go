@@ -150,19 +150,25 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	if err := verifier.Verify(ctx, att, 1); err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
+
+	if gen := agent.capturedGeneration(); gen != 3 {
+		t.Errorf("Generation = %d, want 3", gen)
+	}
 }
 
 // capturingDeliveryAgent wraps another [domain.DeliveryAgent] and records
 // the last [domain.Attestation] passed to Deliver.
 type capturingDeliveryAgent struct {
-	inner domain.DeliveryAgent
-	mu    sync.Mutex
-	att   *domain.Attestation
+	inner      domain.DeliveryAgent
+	mu         sync.Mutex
+	att        *domain.Attestation
+	generation domain.Generation
 }
 
 func (a *capturingDeliveryAgent) Deliver(ctx context.Context, target domain.TargetInfo, id domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	a.att = att
+	a.generation = generation
 	a.mu.Unlock()
 	return a.inner.Deliver(ctx, target, id, manifests, auth, att, generation)
 }
@@ -175,6 +181,12 @@ func (a *capturingDeliveryAgent) capturedAttestation() *domain.Attestation {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	return a.att
+}
+
+func (a *capturingDeliveryAgent) capturedGeneration() domain.Generation {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.generation
 }
 
 func enrollSignerDirect(t *testing.T, store domain.Store, enrollment domain.SignerEnrollment) {
