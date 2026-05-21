@@ -77,12 +77,15 @@ func (a *Agent) TrustBundles() []domain.TrustBundleEntry {
 }
 
 // acceptGeneration atomically checks and updates the per-cluster
-// generation high-water mark. Returns false if gen is stale (older or
-// equal to the highest generation already accepted for that cluster).
+// generation high-water mark. Returns false if gen is strictly older
+// than the highest generation already accepted for that cluster.
+// Same-generation retries are allowed because the orchestration
+// retries with an unchanged generation after transient failures;
+// the per-cluster mutex prevents concurrent duplicates.
 func (a *Agent) acceptGeneration(clusterName string, gen domain.Generation) bool {
 	a.clusterMu.Lock()
 	defer a.clusterMu.Unlock()
-	if current, ok := a.clusterGen[clusterName]; ok && gen <= current {
+	if current, ok := a.clusterGen[clusterName]; ok && gen < current {
 		return false
 	}
 	a.clusterGen[clusterName] = gen

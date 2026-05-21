@@ -445,14 +445,14 @@ func TestDeleteClusterIfPresent_SkipsMissingCluster(t *testing.T) {
 	}
 }
 
-func TestEnsureIAMWithRecovery_RetriesAmbiguousFailure(t *testing.T) {
-	origInterval := ambiguousPrereqRetryInterval
-	origAttempts := ambiguousPrereqMaxAttempts
-	ambiguousPrereqRetryInterval = 0
-	ambiguousPrereqMaxAttempts = 2
+func TestEnsureIAMWithRecovery_RetriesUnconfirmedFailure(t *testing.T) {
+	origInterval := unconfirmedPrereqRetryInterval
+	origAttempts := unconfirmedPrereqMaxAttempts
+	unconfirmedPrereqRetryInterval = 0
+	unconfirmedPrereqMaxAttempts = 2
 	defer func() {
-		ambiguousPrereqRetryInterval = origInterval
-		ambiguousPrereqMaxAttempts = origAttempts
+		unconfirmedPrereqRetryInterval = origInterval
+		unconfirmedPrereqMaxAttempts = origAttempts
 	}()
 
 	infra := &fakeCleanupInfra{
@@ -495,14 +495,14 @@ func TestEnsureIAMWithRecovery_RetriesAmbiguousFailure(t *testing.T) {
 	}
 }
 
-func TestEnsureInfraWithRecovery_ReturnsErrorAfterAmbiguousRetries(t *testing.T) {
-	origInterval := ambiguousPrereqRetryInterval
-	origAttempts := ambiguousPrereqMaxAttempts
-	ambiguousPrereqRetryInterval = 0
-	ambiguousPrereqMaxAttempts = 3
+func TestEnsureInfraWithRecovery_ReturnsErrorAfterUnconfirmedRetries(t *testing.T) {
+	origInterval := unconfirmedPrereqRetryInterval
+	origAttempts := unconfirmedPrereqMaxAttempts
+	unconfirmedPrereqRetryInterval = 0
+	unconfirmedPrereqMaxAttempts = 3
 	defer func() {
-		ambiguousPrereqRetryInterval = origInterval
-		ambiguousPrereqMaxAttempts = origAttempts
+		unconfirmedPrereqRetryInterval = origInterval
+		unconfirmedPrereqMaxAttempts = origAttempts
 	}()
 
 	infra := &fakeCleanupInfra{
@@ -520,7 +520,7 @@ func TestEnsureInfraWithRecovery_ReturnsErrorAfterAmbiguousRetries(t *testing.T)
 		noopProgress(),
 	)
 	if err == nil {
-		t.Fatal("expected ambiguous infra error after retries")
+		t.Fatal("expected unconfirmed infra error after retries")
 	}
 	if infraConfig != nil {
 		t.Fatalf("expected nil infra config, got %#v", infraConfig)
@@ -531,19 +531,19 @@ func TestEnsureInfraWithRecovery_ReturnsErrorAfterAmbiguousRetries(t *testing.T)
 	if strings.Contains(strings.Join(infra.ops, ","), "iam:test-cluster") {
 		t.Fatalf("expected no cleanup operations during infra retry path, got %v", infra.ops)
 	}
-	if !strings.Contains(err.Error(), "infrastructure creation remained ambiguous after 3 attempts") {
-		t.Fatalf("expected ambiguous retry error, got %v", err)
+	if !strings.Contains(err.Error(), "infrastructure creation remained unconfirmed after 3 attempts") {
+		t.Fatalf("expected unconfirmed retry error, got %v", err)
 	}
 }
 
-func TestRecoverFromAmbiguousCreateFailure_AdoptsClusterWhenItAppears(t *testing.T) {
-	origInterval := ambiguousCreateProbeInterval
-	origTimeout := ambiguousCreateProbeTimeout
-	ambiguousCreateProbeInterval = 5 * time.Millisecond
-	ambiguousCreateProbeTimeout = 25 * time.Millisecond
+func TestRecoverFromUnconfirmedCreate_AdoptsClusterWhenItAppears(t *testing.T) {
+	origInterval := unconfirmedCreateProbeInterval
+	origTimeout := unconfirmedCreateProbeTimeout
+	unconfirmedCreateProbeInterval = 5 * time.Millisecond
+	unconfirmedCreateProbeTimeout = 25 * time.Millisecond
 	defer func() {
-		ambiguousCreateProbeInterval = origInterval
-		ambiguousCreateProbeTimeout = origTimeout
+		unconfirmedCreateProbeInterval = origInterval
+		unconfirmedCreateProbeTimeout = origTimeout
 	}()
 
 	client := &fakeClusterResolveClient{
@@ -572,7 +572,7 @@ func TestRecoverFromAmbiguousCreateFailure_AdoptsClusterWhenItAppears(t *testing
 	}
 	infra := &fakeCleanupInfra{}
 
-	clusterID, err := recoverFromAmbiguousCreateFailure(
+	clusterID, err := recoverFromUnconfirmedCreate(
 		context.Background(),
 		client,
 		infra,
@@ -586,7 +586,7 @@ func TestRecoverFromAmbiguousCreateFailure_AdoptsClusterWhenItAppears(t *testing
 		noopProgress(),
 	)
 	if err != nil {
-		t.Fatalf("recoverFromAmbiguousCreateFailure() error = %v", err)
+		t.Fatalf("recoverFromUnconfirmedCreate error = %v", err)
 	}
 	if clusterID != "cluster-123" {
 		t.Fatalf("expected adopted cluster ID cluster-123, got %q", clusterID)
@@ -617,20 +617,20 @@ func TestRecoverFromAmbiguousCreateFailure_AdoptsClusterWhenItAppears(t *testing
 	}
 }
 
-func TestRecoverFromAmbiguousCreateFailure_ReturnsErrorWithoutCleanupWhenReensureFails(t *testing.T) {
-	origInterval := ambiguousCreateProbeInterval
-	origTimeout := ambiguousCreateProbeTimeout
-	origPrereqInterval := ambiguousPrereqRetryInterval
-	origPrereqAttempts := ambiguousPrereqMaxAttempts
-	ambiguousCreateProbeInterval = 5 * time.Millisecond
-	ambiguousCreateProbeTimeout = 20 * time.Millisecond
-	ambiguousPrereqRetryInterval = 0
-	ambiguousPrereqMaxAttempts = 2
+func TestRecoverFromUnconfirmedCreate_ReturnsErrorWithoutCleanupWhenReensureFails(t *testing.T) {
+	origInterval := unconfirmedCreateProbeInterval
+	origTimeout := unconfirmedCreateProbeTimeout
+	origPrereqInterval := unconfirmedPrereqRetryInterval
+	origPrereqAttempts := unconfirmedPrereqMaxAttempts
+	unconfirmedCreateProbeInterval = 5 * time.Millisecond
+	unconfirmedCreateProbeTimeout = 20 * time.Millisecond
+	unconfirmedPrereqRetryInterval = 0
+	unconfirmedPrereqMaxAttempts = 2
 	defer func() {
-		ambiguousCreateProbeInterval = origInterval
-		ambiguousCreateProbeTimeout = origTimeout
-		ambiguousPrereqRetryInterval = origPrereqInterval
-		ambiguousPrereqMaxAttempts = origPrereqAttempts
+		unconfirmedCreateProbeInterval = origInterval
+		unconfirmedCreateProbeTimeout = origTimeout
+		unconfirmedPrereqRetryInterval = origPrereqInterval
+		unconfirmedPrereqMaxAttempts = origPrereqAttempts
 	}()
 
 	client := &fakeClusterResolveClient{
@@ -642,7 +642,7 @@ func TestRecoverFromAmbiguousCreateFailure_ReturnsErrorWithoutCleanupWhenReensur
 		createInfraErr: errors.New("infra rerun failed"),
 	}
 
-	clusterID, err := recoverFromAmbiguousCreateFailure(
+	clusterID, err := recoverFromUnconfirmedCreate(
 		context.Background(),
 		client,
 		infra,
@@ -672,14 +672,14 @@ func TestRecoverFromAmbiguousCreateFailure_ReturnsErrorWithoutCleanupWhenReensur
 	}
 }
 
-func TestRecoverFromAmbiguousCreateFailure_CleansUpAfterTimeout(t *testing.T) {
-	origInterval := ambiguousCreateProbeInterval
-	origTimeout := ambiguousCreateProbeTimeout
-	ambiguousCreateProbeInterval = 5 * time.Millisecond
-	ambiguousCreateProbeTimeout = 20 * time.Millisecond
+func TestRecoverFromUnconfirmedCreate_CleansUpAfterTimeout(t *testing.T) {
+	origInterval := unconfirmedCreateProbeInterval
+	origTimeout := unconfirmedCreateProbeTimeout
+	unconfirmedCreateProbeInterval = 5 * time.Millisecond
+	unconfirmedCreateProbeTimeout = 20 * time.Millisecond
 	defer func() {
-		ambiguousCreateProbeInterval = origInterval
-		ambiguousCreateProbeTimeout = origTimeout
+		unconfirmedCreateProbeInterval = origInterval
+		unconfirmedCreateProbeTimeout = origTimeout
 	}()
 
 	client := &fakeClusterResolveClient{
@@ -689,7 +689,7 @@ func TestRecoverFromAmbiguousCreateFailure_CleansUpAfterTimeout(t *testing.T) {
 	}
 	infra := &fakeCleanupInfra{}
 
-	clusterID, err := recoverFromAmbiguousCreateFailure(
+	clusterID, err := recoverFromUnconfirmedCreate(
 		context.Background(),
 		client,
 		infra,
@@ -716,14 +716,14 @@ func TestRecoverFromAmbiguousCreateFailure_CleansUpAfterTimeout(t *testing.T) {
 	}
 }
 
-func TestRecoverFromAmbiguousCreateFailure_SkipsCleanupWhenProbeFails(t *testing.T) {
-	origInterval := ambiguousCreateProbeInterval
-	origTimeout := ambiguousCreateProbeTimeout
-	ambiguousCreateProbeInterval = 5 * time.Millisecond
-	ambiguousCreateProbeTimeout = 20 * time.Millisecond
+func TestRecoverFromUnconfirmedCreate_SkipsCleanupWhenProbeFails(t *testing.T) {
+	origInterval := unconfirmedCreateProbeInterval
+	origTimeout := unconfirmedCreateProbeTimeout
+	unconfirmedCreateProbeInterval = 5 * time.Millisecond
+	unconfirmedCreateProbeTimeout = 20 * time.Millisecond
 	defer func() {
-		ambiguousCreateProbeInterval = origInterval
-		ambiguousCreateProbeTimeout = origTimeout
+		unconfirmedCreateProbeInterval = origInterval
+		unconfirmedCreateProbeTimeout = origTimeout
 	}()
 
 	client := &fakeClusterResolveClient{
@@ -733,7 +733,7 @@ func TestRecoverFromAmbiguousCreateFailure_SkipsCleanupWhenProbeFails(t *testing
 	}
 	infra := &fakeCleanupInfra{}
 
-	clusterID, err := recoverFromAmbiguousCreateFailure(
+	clusterID, err := recoverFromUnconfirmedCreate(
 		context.Background(),
 		client,
 		infra,
@@ -755,7 +755,7 @@ func TestRecoverFromAmbiguousCreateFailure_SkipsCleanupWhenProbeFails(t *testing
 	if len(infra.ops) != 0 {
 		t.Fatalf("expected no cleanup when probe is inconclusive, got %v", infra.ops)
 	}
-	if !strings.Contains(err.Error(), "request timeout") || !strings.Contains(err.Error(), "probe for cluster after ambiguous create") {
+	if !strings.Contains(err.Error(), "request timeout") || !strings.Contains(err.Error(), "probe for cluster after unconfirmed create") {
 		t.Fatalf("expected combined create/probe error, got %v", err)
 	}
 }

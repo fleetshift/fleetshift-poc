@@ -72,12 +72,12 @@ func TestAcceptGeneration_RejectsStaleGeneration(t *testing.T) {
 	}
 }
 
-func TestAcceptGeneration_RejectsDuplicateGeneration(t *testing.T) {
+func TestAcceptGeneration_AcceptsSameGenerationRetry(t *testing.T) {
 	agent := &Agent{clusterGen: make(map[string]domain.Generation)}
 
 	agent.acceptGeneration("cluster-a", 10)
-	if agent.acceptGeneration("cluster-a", 10) {
-		t.Fatal("duplicate generation should be rejected")
+	if !agent.acceptGeneration("cluster-a", 10) {
+		t.Fatal("same-generation retry should be accepted")
 	}
 }
 

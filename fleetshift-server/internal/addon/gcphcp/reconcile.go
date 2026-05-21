@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -28,7 +29,7 @@ type brokerAuthExchanger interface {
 }
 
 type reconcileInfra interface {
-	ambiguousCreateRecoveryInfra
+	unconfirmedCreateRecoveryInfra
 	deleteCleanupInfra
 }
 
@@ -347,7 +348,12 @@ func (r *Reconciler) Reconcile(
 
 			clusterData, err := clsClient.CreateCluster(ctx, clsClusterSpec)
 			if err != nil {
-				clusterID, err = recoverFromAmbiguousCreateFailure(
+				if isCLSHTTPStatus(err, http.StatusBadRequest) ||
+					isCLSHTTPStatus(err, http.StatusUnauthorized) ||
+					isCLSHTTPStatus(err, http.StatusForbidden) {
+					return cleanupCreateFailure(fmt.Errorf("create cluster: %w", err))
+				}
+				clusterID, err = recoverFromUnconfirmedCreate(
 					ctx,
 					clsClient,
 					r.infra,
@@ -366,7 +372,7 @@ func (r *Reconciler) Reconcile(
 			var ok bool
 			clusterID, ok = clusterData["id"].(string)
 			if !ok || clusterID == "" {
-				clusterID, err = recoverFromAmbiguousCreateFailure(
+				clusterID, err = recoverFromUnconfirmedCreate(
 					ctx,
 					clsClient,
 					r.infra,

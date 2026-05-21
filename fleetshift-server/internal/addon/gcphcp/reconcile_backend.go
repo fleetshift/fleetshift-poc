@@ -46,22 +46,22 @@ type prereqRecoveryInfra interface {
 	CreateInfra(ctx context.Context, infraID, projectID, region string, env []string) (map[string]any, error)
 }
 
-type ambiguousCreateRecoveryClient interface {
+type unconfirmedCreateRecoveryClient interface {
 	clusterResolveClient
 	GetCluster(ctx context.Context, clusterID string) (map[string]any, error)
 	UpdateCluster(ctx context.Context, clusterID string, spec map[string]any) (map[string]any, error)
 }
 
-type ambiguousCreateRecoveryInfra interface {
+type unconfirmedCreateRecoveryInfra interface {
 	prereqRecoveryInfra
 	createCleanupInfra
 }
 
 var (
-	ambiguousCreateProbeInterval = 2 * time.Second
-	ambiguousCreateProbeTimeout  = 30 * time.Second
-	ambiguousPrereqRetryInterval = 2 * time.Second
-	ambiguousPrereqMaxAttempts   = 3
+	unconfirmedCreateProbeInterval = 2 * time.Second
+	unconfirmedCreateProbeTimeout  = 30 * time.Second
+	unconfirmedPrereqRetryInterval = 2 * time.Second
+	unconfirmedPrereqMaxAttempts   = 3
 )
 
 // BuildCLSClusterUpdateSpec preserves observed bootstrap/infra fields while
@@ -259,7 +259,7 @@ func ensureIAMWithRecovery(
 	hypershiftEnv []string,
 	progress *deliveryProgress,
 ) (map[string]any, error) {
-	return retryAmbiguousPrereqCreate(ctx, progress, "IAM resource creation", func() (map[string]any, error) {
+	return retryUnconfirmedPrereqCreate(ctx, progress, "IAM resource creation", func() (map[string]any, error) {
 		return infra.CreateIAM(ctx, spec.Name, target.GCPProject, jwksPath, hypershiftEnv)
 	})
 }
@@ -272,21 +272,18 @@ func ensureInfraWithRecovery(
 	hypershiftEnv []string,
 	progress *deliveryProgress,
 ) (map[string]any, error) {
-	return retryAmbiguousPrereqCreate(ctx, progress, "infrastructure creation", func() (map[string]any, error) {
+	return retryUnconfirmedPrereqCreate(ctx, progress, "infrastructure creation", func() (map[string]any, error) {
 		return infra.CreateInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
 	})
 }
 
-func retryAmbiguousPrereqCreate(
+func retryUnconfirmedPrereqCreate(
 	ctx context.Context,
 	progress *deliveryProgress,
 	resourceName string,
 	create func() (map[string]any, error),
 ) (map[string]any, error) {
-	totalAttempts := ambiguousPrereqMaxAttempts
-	if totalAttempts < 1 {
-		totalAttempts = 1
-	}
+	totalAttempts := max(unconfirmedPrereqMaxAttempts, 1)
 
 	attemptErrs := make([]error, 0, totalAttempts)
 	for attempt := 1; attempt <= totalAttempts; attempt++ {
@@ -304,16 +301,16 @@ func retryAmbiguousPrereqCreate(
 
 		attemptErrs = append(attemptErrs, fmt.Errorf("attempt %d: %w", attempt, err))
 		if attempt == totalAttempts {
-			attemptErrs = append(attemptErrs, fmt.Errorf("%s remained ambiguous after %d attempts", resourceName, totalAttempts))
+			attemptErrs = append(attemptErrs, fmt.Errorf("%s remained unconfirmed after %d attempts", resourceName, totalAttempts))
 			return nil, errors.Join(attemptErrs...)
 		}
 
 		emitProgress(progress, ctx, fmt.Sprintf("%s may have partially succeeded; retrying (%d/%d)", resourceName, attempt+1, totalAttempts))
-		if ambiguousPrereqRetryInterval <= 0 {
+		if unconfirmedPrereqRetryInterval <= 0 {
 			continue
 		}
 
-		timer := time.NewTimer(ambiguousPrereqRetryInterval)
+		timer := time.NewTimer(unconfirmedPrereqRetryInterval)
 		select {
 		case <-ctx.Done():
 			if !timer.Stop() {
@@ -324,13 +321,13 @@ func retryAmbiguousPrereqCreate(
 		}
 	}
 
-	return nil, fmt.Errorf("unreachable prereq recovery state")
+	return nil, fmt.Errorf("unreachable unconfirmed prereq recovery state")
 }
 
-func recoverFromAmbiguousCreateFailure(
+func recoverFromUnconfirmedCreate(
 	ctx context.Context,
-	client ambiguousCreateRecoveryClient,
-	infra ambiguousCreateRecoveryInfra,
+	client unconfirmedCreateRecoveryClient,
+	infra unconfirmedCreateRecoveryInfra,
 	spec ClusterSpec,
 	target TargetConfig,
 	jwksPath string,
@@ -340,12 +337,12 @@ func recoverFromAmbiguousCreateFailure(
 	createErr error,
 	progress *deliveryProgress,
 ) (string, error) {
-	clusterID, adopted, probeErr := resolveClusterAfterAmbiguousCreate(ctx, client, spec.Name, progress)
+	clusterID, adopted, probeErr := resolveClusterAfterUnconfirmedCreate(ctx, client, spec.Name, progress)
 	switch {
 	case probeErr != nil:
 		return "", errors.Join(createErr, probeErr)
 	case adopted:
-		if err := repairAdoptedClusterAfterAmbiguousCreate(
+		if err := repairAdoptedClusterAfterUnconfirmedCreate(
 			ctx,
 			client,
 			infra,
@@ -360,7 +357,7 @@ func recoverFromAmbiguousCreateFailure(
 		}
 		return clusterID, nil
 	default:
-		emitProgress(progress, ctx, "Ambiguous create did not surface a cluster; cleaning up partial IAM/infra resources")
+		emitProgress(progress, ctx, "Unconfirmed create did not surface a cluster; cleaning up partial IAM/infra resources")
 		cleanupErr := cleanupCreateResources(ctx, infra, spec, target, hypershiftEnv, createdInfra, createdIAM)
 		if cleanupErr != nil {
 			return "", errors.Join(createErr, cleanupErr)
@@ -369,10 +366,10 @@ func recoverFromAmbiguousCreateFailure(
 	}
 }
 
-func repairAdoptedClusterAfterAmbiguousCreate(
+func repairAdoptedClusterAfterUnconfirmedCreate(
 	ctx context.Context,
-	client ambiguousCreateRecoveryClient,
-	infra ambiguousCreateRecoveryInfra,
+	client unconfirmedCreateRecoveryClient,
+	infra unconfirmedCreateRecoveryInfra,
 	clusterID string,
 	spec ClusterSpec,
 	target TargetConfig,
@@ -409,27 +406,27 @@ func repairAdoptedClusterAfterAmbiguousCreate(
 	return nil
 }
 
-func resolveClusterAfterAmbiguousCreate(
+func resolveClusterAfterUnconfirmedCreate(
 	ctx context.Context,
 	client clusterResolveClient,
 	clusterName string,
 	progress *deliveryProgress,
 ) (string, bool, error) {
-	emitProgress(progress, ctx, fmt.Sprintf("Create result for cluster %s was ambiguous; probing for adoption", clusterName))
+	emitProgress(progress, ctx, fmt.Sprintf("Create result for cluster %s was unconfirmed; probing for adoption", clusterName))
 
-	ticker := time.NewTicker(ambiguousCreateProbeInterval)
+	ticker := time.NewTicker(unconfirmedCreateProbeInterval)
 	defer ticker.Stop()
 
-	timeout := time.After(ambiguousCreateProbeTimeout)
+	timeout := time.After(unconfirmedCreateProbeTimeout)
 
 	for {
 		clusterID, err := client.ResolveClusterID(ctx, clusterName)
 		switch {
 		case err == nil:
-			emitProgress(progress, ctx, fmt.Sprintf("Adopted cluster %s after ambiguous create result", clusterID))
+			emitProgress(progress, ctx, fmt.Sprintf("Adopted cluster %s after unconfirmed create", clusterID))
 			return clusterID, true, nil
 		case !errors.Is(err, ErrClusterNotFound):
-			return "", false, fmt.Errorf("probe for cluster after ambiguous create: %w", err)
+			return "", false, fmt.Errorf("probe for cluster after unconfirmed create: %w", err)
 		}
 
 		select {
