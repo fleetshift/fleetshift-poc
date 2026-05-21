@@ -125,7 +125,7 @@ func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, r
 	return nil
 }
 
-func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.TargetID) ([]domain.Delivery, error) {
+func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.TargetID) ([]domain.ActiveDelivery, error) {
 	return nil, nil
 }
 
@@ -133,7 +133,7 @@ type nopReporter struct{}
 
 func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
 func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
-func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) { return nil, nil }
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) { return nil, nil }
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
@@ -398,7 +398,7 @@ func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, dom
 	return nil
 }
 
-func (r *recordingReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) {
+func (r *recordingReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
 	return nil, nil
 }
 

@@ -47,8 +47,9 @@ When an addon starts up, it should:
 1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
 2. Wait, asynchronously, for delivery requests and ONLY "ack" once enough there is just enough state, and no more, to guarantee progress (see next steps). The quicker the ack the more responsive progression will be. Acks should generally be quick (i.e. within a typical response time of a single synchronous RPC).
 3. Ask for what fulfillments are in progress ("deliveries" not yet terminal)
-  - Based on 2, whatever is received here should be enough to finish
-  - Due to the platforms guarantees, an addon will never receive a follow-up delivery for a fulfillment that is still in progress. So races between 3 and 2 should never happen.
+  - The platform returns `ActiveDelivery` values: the delivery record enriched with full `TargetInfo`, caller `DeliveryAuth`, and (when signed) a re-assembled `Attestation`. This gives the addon everything `Deliver` would have provided.
+  - Stale deliveries — where the fulfillment's generation has advanced past the delivery's — are excluded from the response. Their auth and attestation cannot be correctly reconstructed. The orchestration will re-dispatch with the current generation.
+  - Due to the platform's guarantees, an addon will never receive a follow-up delivery for a fulfillment that is still in progress. So races between 3 and 2 should never happen. However, a `Pending` delivery may appear in both the list response (step 3) and arrive via `Deliver` (step 2) if the addon starts while a `DeliverToTarget` activity is in flight. Addons must deduplicate by `DeliveryID` across both paths.
 
 > NOTE: Somewhere the addon needs to discover new targets that come over time. Does this just come as part of deliveries from step 2?
 

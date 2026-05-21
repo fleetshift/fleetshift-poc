@@ -750,7 +750,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					Generation:    startGen,
 				}
 				if evidence != nil {
-					in.Attestation = assembleDeliverAttestation(f, manifests, evidence)
+					in.Attestation = AssembleDeliverAttestation(f, manifests, evidence)
 				}
 				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
 					return fmt.Errorf("dispatch delivery to target %s: %w", target.ID, err)
@@ -883,7 +883,10 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 	return delta
 }
 
-func assembleDeliverAttestation(f Fulfillment, manifests []Manifest, ev *ResolvedEvidence) *Attestation {
+// AssembleDeliverAttestation builds an [Attestation] for a delivery
+// from the fulfillment's provenance, resolved signer evidence, and
+// the manifests being delivered.
+func AssembleDeliverAttestation(f Fulfillment, manifests []Manifest, ev *ResolvedEvidence) *Attestation {
 	return &Attestation{
 		Input: SignedInput{
 			Provenance: *f.Provenance,

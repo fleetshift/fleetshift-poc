@@ -26,12 +26,15 @@ type DeliveryReporter interface {
 	// orchestration can proceed.
 	ReportResult(ctx context.Context, deliveryID DeliveryID, result DeliveryResult) error
 
-	// ListActiveDeliveries returns deliveries that have been started
-	// but are not yet in a terminal state. Addons call this at
-	// startup to recover in-progress work after a restart.
+	// ListActiveDeliveries returns non-terminal deliveries enriched
+	// with target info, caller auth, and (when signed) attestation.
+	// Addons call this at startup to recover in-progress work after a
+	// restart. Stale deliveries whose fulfillment generation has
+	// advanced are excluded because their auth and attestation cannot
+	// be correctly reconstructed.
 	//
 	// If targetIDs is non-empty, only deliveries destined for those
 	// targets are returned; otherwise all active deliveries are
 	// returned.
-	ListActiveDeliveries(ctx context.Context, targetIDs []TargetID) ([]Delivery, error)
+	ListActiveDeliveries(ctx context.Context, targetIDs []TargetID) ([]ActiveDelivery, error)
 }

@@ -111,6 +111,28 @@ func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
 	return nil
 }
 
+// ActiveDelivery is the enriched view of a [Delivery] returned by
+// [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery
+// record with the full context an addon needs to resume work after a
+// restart: target connection info, caller auth, and (when the
+// fulfillment was signed) the re-assembled attestation.
+//
+// Stale deliveries — where the fulfillment's generation has advanced
+// past the delivery's — are excluded because their auth and
+// attestation cannot be correctly reconstructed from the current
+// fulfillment state.
+//
+// TODO: A Pending delivery returned here may also arrive via
+// [DeliveryAgent.Deliver] if the addon starts up while a
+// DeliverToTarget activity is in flight. Addons must deduplicate
+// by DeliveryID across both paths. See OME-77.
+type ActiveDelivery struct {
+	Delivery    Delivery
+	Target      TargetInfo
+	Auth        DeliveryAuth
+	Attestation *Attestation // nil for unsigned (token-passthrough) fulfillments
+}
+
 // DeliveryResult is the outcome of a single delivery attempt.
 // Agents may include structured outputs (provisioned targets, produced
 // secrets) that the platform processes after delivery completion.

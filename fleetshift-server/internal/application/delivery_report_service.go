@@ -19,9 +19,10 @@ import (
 //
 // TODO: Naming may change
 type DeliveryReportService struct {
-	store    domain.Store
-	signaler domain.FulfillmentSignaler
-	observer domain.DeliveryObserver
+	store       domain.Store
+	signaler    domain.FulfillmentSignaler
+	attestation domain.AttestationAssembler
+	observer    domain.DeliveryObserver
 }
 
 // DeliveryReportServiceOption configures a [DeliveryReportService].
@@ -30,6 +31,12 @@ type DeliveryReportServiceOption func(*DeliveryReportService)
 // WithDeliveryObserver sets the observer for delivery lifecycle events.
 func WithDeliveryObserver(o domain.DeliveryObserver) DeliveryReportServiceOption {
 	return func(s *DeliveryReportService) { s.observer = o }
+}
+
+// WithAttestationAssembler sets the assembler used to reconstruct
+// attestation bundles in [DeliveryReportService.ListActiveDeliveries].
+func WithAttestationAssembler(a domain.AttestationAssembler) DeliveryReportServiceOption {
+	return func(s *DeliveryReportService) { s.attestation = a }
 }
 
 // NewDeliveryReportService creates a service with the given
@@ -138,10 +145,17 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 	return nil
 }
 
-// ListActiveDeliveries returns deliveries in non-terminal states.
-// If targetIDs is non-empty, only deliveries for those targets are
-// returned.
-func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, targetIDs []domain.TargetID) ([]domain.Delivery, error) {
+// ListActiveDeliveries returns non-terminal deliveries enriched with
+// target info, caller auth, and (when signed) re-assembled
+// attestation. Deliveries whose fulfillment has advanced past the
+// delivery's generation are filtered out because their auth and
+// attestation cannot be correctly reconstructed.
+//
+// TODO: A Pending delivery returned here may also arrive via
+// DeliveryAgent.Deliver if the addon starts up while a
+// DeliverToTarget activity is in flight. Addons must deduplicate
+// by DeliveryID across both paths.
+func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, targetIDs []domain.TargetID) ([]domain.ActiveDelivery, error) {
 	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -152,7 +166,80 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 	if err != nil {
 		return nil, fmt.Errorf("list active deliveries: %w", err)
 	}
-	return deliveries, nil
+	if len(deliveries) == 0 {
+		return nil, nil
+	}
+
+	fulfillments := make(map[domain.FulfillmentID]*domain.Fulfillment, len(deliveries))
+	targets := make(map[domain.TargetID]domain.TargetInfo, len(deliveries))
+	for _, d := range deliveries {
+		fulfillments[d.FulfillmentID] = nil
+		targets[d.TargetID] = domain.TargetInfo{}
+	}
+
+	for fID := range fulfillments {
+		f, err := tx.Fulfillments().Get(ctx, fID)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get fulfillment %s: %w", fID, err)
+		}
+		fulfillments[fID] = f
+	}
+
+	for tID := range targets {
+		t, err := tx.Targets().Get(ctx, tID)
+		if errors.Is(err, domain.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get target %s: %w", tID, err)
+		}
+		targets[tID] = t
+	}
+
+	// Pre-resolve attestation evidence per fulfillment. Fulfillments
+	// without provenance (unsigned / token-passthrough) get nil.
+	evidence := make(map[domain.FulfillmentID]*domain.ResolvedEvidence, len(fulfillments))
+	for fID, f := range fulfillments {
+		if f == nil || f.Provenance == nil {
+			continue
+		}
+		ev, err := s.attestation.Resolve(ctx, tx, f)
+		if err != nil {
+			// TODO: revisit this / need to add observers
+			continue // best-effort: skip attestation if evidence resolution fails
+		}
+		evidence[fID] = ev
+	}
+
+	var result []domain.ActiveDelivery
+	for _, d := range deliveries {
+		f := fulfillments[d.FulfillmentID]
+		if f == nil {
+			continue // fulfillment deleted
+		}
+		if d.Generation < f.Generation {
+			continue // stale: fulfillment has advanced
+		}
+
+		t, ok := targets[d.TargetID]
+		if !ok || t.ID == "" {
+			continue // target deleted
+		}
+
+		ad := domain.ActiveDelivery{
+			Delivery: d,
+			Target:   t,
+			Auth:     f.Auth,
+		}
+		if ev := evidence[d.FulfillmentID]; ev != nil {
+			ad.Attestation = domain.AssembleDeliverAttestation(*f, d.Manifests, ev)
+		}
+		result = append(result, ad)
+	}
+	return result, nil
 }
 
 // lookupTarget is a best-effort read of the target for observer

@@ -282,24 +282,70 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 // ListActiveDeliveries tests
 // ---------------------------------------------------------------------------
 
+func seedFulfillment(t *testing.T, store domain.Store, f *domain.Fulfillment) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if err := tx.Fulfillments().Create(ctx, f); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func newFulfillment(id domain.FulfillmentID, gen domain.Generation, auth domain.DeliveryAuth, now time.Time) *domain.Fulfillment {
+	f := &domain.Fulfillment{
+		ID:        id,
+		Auth:      auth,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+		Type: domain.ManifestStrategyInline,
+	}, now)
+	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+		Type: domain.PlacementStrategyStatic,
+	}, now)
+	f.AdvanceRolloutStrategy(nil, now)
+	// AdvanceManifestStrategy + AdvancePlacementStrategy + AdvanceRolloutStrategy
+	// each call BumpGeneration, so generation is 3 after construction.
+	// Adjust to the desired generation.
+	for f.Generation < gen {
+		f.BumpGeneration()
+	}
+	return f
+}
+
 func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 	svc, store, _, _ := setupDeliveryReportService(t)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
+	auth1 := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://idp.test"}},
+	}
+	auth2 := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-2", Issuer: "https://idp.test"}},
+	}
+
 	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test", Name: "target-1"})
 	seedTarget(t, store, domain.TargetInfo{ID: "t2", Type: "test", Name: "target-2"})
+	seedFulfillment(t, store, newFulfillment("f1", 3, auth1, now))
+	seedFulfillment(t, store, newFulfillment("f2", 3, auth2, now))
 	seedDeliveryRecord(t, store, domain.Delivery{
 		ID: "del-active-1", FulfillmentID: "f1", TargetID: "t1",
-		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
+		Generation: 3,
+		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
 	})
 	seedDeliveryRecord(t, store, domain.Delivery{
 		ID: "del-active-2", FulfillmentID: "f2", TargetID: "t2",
-		State: domain.DeliveryStateAccepted, CreatedAt: now, UpdatedAt: now,
-	})
-	seedDeliveryRecord(t, store, domain.Delivery{
-		ID: "del-done", FulfillmentID: "f3", TargetID: "t1",
-		State: domain.DeliveryStateDelivered, CreatedAt: now, UpdatedAt: now,
+		Generation: 3,
+		State:      domain.DeliveryStateAccepted, CreatedAt: now, UpdatedAt: now,
 	})
 
 	t.Run("nil targets returns all active", func(t *testing.T) {
@@ -320,8 +366,8 @@ func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 		if len(active) != 1 {
 			t.Fatalf("expected 1 active delivery, got %d", len(active))
 		}
-		if active[0].ID != "del-active-1" {
-			t.Errorf("ID = %q, want %q", active[0].ID, "del-active-1")
+		if active[0].Delivery.ID != "del-active-1" {
+			t.Errorf("ID = %q, want %q", active[0].Delivery.ID, "del-active-1")
 		}
 	})
 
@@ -344,6 +390,29 @@ func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 			t.Errorf("expected 0 active deliveries, got %d", len(active))
 		}
 	})
+
+	t.Run("enriches target and auth", func(t *testing.T) {
+		active, err := svc.ListActiveDeliveries(ctx, []domain.TargetID{"t1"})
+		if err != nil {
+			t.Fatalf("ListActiveDeliveries: %v", err)
+		}
+		if len(active) != 1 {
+			t.Fatalf("expected 1, got %d", len(active))
+		}
+		ad := active[0]
+		if ad.Target.ID != "t1" {
+			t.Errorf("Target.ID = %q, want %q", ad.Target.ID, "t1")
+		}
+		if ad.Target.Name != "target-1" {
+			t.Errorf("Target.Name = %q, want %q", ad.Target.Name, "target-1")
+		}
+		if ad.Auth.Caller == nil || ad.Auth.Caller.Subject != "user-1" {
+			t.Errorf("Auth.Caller.Subject = %v, want user-1", ad.Auth.Caller)
+		}
+		if ad.Attestation != nil {
+			t.Errorf("expected nil Attestation for unsigned fulfillment, got %v", ad.Attestation)
+		}
+	})
 }
 
 func TestDeliveryReportService_ListActiveDeliveries_Empty(t *testing.T) {
@@ -356,6 +425,76 @@ func TestDeliveryReportService_ListActiveDeliveries_Empty(t *testing.T) {
 	}
 	if len(active) != 0 {
 		t.Errorf("expected 0 active deliveries, got %d", len(active))
+	}
+}
+
+func TestDeliveryReportService_ListActiveDeliveries_SkipsStale(t *testing.T) {
+	svc, store, _, _ := setupDeliveryReportService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-a", Issuer: "https://idp.test"}},
+	}
+
+	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test", Name: "target-1"})
+	seedFulfillment(t, store, newFulfillment("f-stale", 5, auth, now))
+	seedDeliveryRecord(t, store, domain.Delivery{
+		ID: "del-stale", FulfillmentID: "f-stale", TargetID: "t1",
+		Generation: 3, // older than fulfillment gen 5
+		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
+	})
+
+	active, err := svc.ListActiveDeliveries(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListActiveDeliveries: %v", err)
+	}
+	if len(active) != 0 {
+		t.Errorf("expected stale delivery to be filtered, got %d", len(active))
+	}
+}
+
+func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingFulfillment(t *testing.T) {
+	svc, store, _, _ := setupDeliveryReportService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
+	seedDeliveryRecord(t, store, domain.Delivery{
+		ID: "del-orphan", FulfillmentID: "f-missing", TargetID: "t1",
+		Generation: 1,
+		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
+	})
+
+	active, err := svc.ListActiveDeliveries(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListActiveDeliveries: %v", err)
+	}
+	if len(active) != 0 {
+		t.Errorf("expected delivery with missing fulfillment to be filtered, got %d", len(active))
+	}
+}
+
+func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingTarget(t *testing.T) {
+	svc, store, _, _ := setupDeliveryReportService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+	auth := domain.DeliveryAuth{
+		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-a", Issuer: "https://idp.test"}},
+	}
+
+	seedFulfillment(t, store, newFulfillment("f1", 3, auth, now))
+	seedDeliveryRecord(t, store, domain.Delivery{
+		ID: "del-no-target", FulfillmentID: "f1", TargetID: "t-gone",
+		Generation: 3,
+		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
+	})
+
+	active, err := svc.ListActiveDeliveries(ctx, nil)
+	if err != nil {
+		t.Fatalf("ListActiveDeliveries: %v", err)
+	}
+	if len(active) != 0 {
+		t.Errorf("expected delivery with missing target to be filtered, got %d", len(active))
 	}
 }
 

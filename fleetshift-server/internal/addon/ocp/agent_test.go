@@ -16,7 +16,7 @@ type nopReporter struct{}
 
 func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
 func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
-func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.Delivery, error) { return nil, nil }
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) { return nil, nil }
 
 func TestPrepareWorkDir(t *testing.T) {
 	spec := &ClusterSpec{
