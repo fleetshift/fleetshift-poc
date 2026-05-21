@@ -5,8 +5,6 @@ import {
   MastheadContent,
   MastheadLogo,
   MastheadMain,
-  Page,
-  PageSection,
   Toolbar,
   ToolbarContent,
   ToolbarGroup,
@@ -60,10 +58,9 @@ const SetupMasthead = () => (
 
 export const SetupLayout = () => (
   <div className="ome-setup-layout">
-    <Page masthead={<SetupMasthead />}>
-      <PageSection isFilled={false} hasOverflowScroll>
-        <Outlet />
-      </PageSection>
-    </Page>
+    <SetupMasthead />
+    <div className="ome-setup-layout__content">
+      <Outlet />
+    </div>
   </div>
 );

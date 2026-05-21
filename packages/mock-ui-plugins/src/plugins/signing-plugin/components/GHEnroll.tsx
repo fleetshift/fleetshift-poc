@@ -14,9 +14,14 @@ import MotionPollingAnimation from "./MotionPollingAnimation";
 export type GHEnrollProps = {
   githubUsername?: string | null;
   setGhPollEnabled: (enabled: boolean) => void;
+  simulateSuccess?: () => void;
 };
 
-const GHEnroll = ({ githubUsername, setGhPollEnabled }: GHEnrollProps) => {
+const GHEnroll = ({
+  githubUsername,
+  setGhPollEnabled,
+  simulateSuccess,
+}: GHEnrollProps) => {
   return (
     <Card isCompact className="pf-v6-u-mt-lg">
       <CardHeader>
@@ -49,9 +54,20 @@ const GHEnroll = ({ githubUsername, setGhPollEnabled }: GHEnrollProps) => {
           Open GitHub SSH keys
         </Button>
         {githubUsername ? (
-          <MotionPollingAnimation>
-            Waiting for key to appear on GitHub&hellip;
-          </MotionPollingAnimation>
+          <>
+            <MotionPollingAnimation>
+              Waiting for key to appear on GitHub&hellip;
+            </MotionPollingAnimation>
+            {simulateSuccess && (
+              <Button
+                variant="link"
+                onClick={simulateSuccess}
+                className="pf-v6-u-mt-sm"
+              >
+                Simulate success
+              </Button>
+            )}
+          </>
         ) : (
           <Alert
             variant="warning"

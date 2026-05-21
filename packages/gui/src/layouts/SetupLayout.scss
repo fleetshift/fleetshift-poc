@@ -1,5 +1,26 @@
-.ome-setup-layout .pf-v6-c-page__main-container {
-  max-width: 900px;
-  margin: auto !important;
-  min-height: 0;
+.ome-setup-layout {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--pf-t--global--background--color--secondary--default);
+
+  &__content {
+    max-width: 900px;
+    width: 100%;
+    align-self: center;
+    margin-block: var(--pf-t--global--spacer--lg);
+    padding: var(--pf-t--global--spacer--xl);
+    background-color: var(
+      --pf-t--global--background--color--glass--primary--default,
+      var(--pf-t--global--background--color--primary--default)
+    );
+    backdrop-filter: var(
+      --pf-t--global--background--filter--glass--blur--primary
+    );
+    border-radius: var(--pf-t--global--border--radius--medium);
+    border: var(--pf-t--global--border--width--main--default) solid
+      var(--pf-t--global--border--color--main--default);
+    box-shadow: var(--pf-t--global--box-shadow--glass--default, none);
+    overflow: hidden;
+  }
 }

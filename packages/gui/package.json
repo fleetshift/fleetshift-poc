@@ -10,6 +10,7 @@
     "@dnd-kit/react": "^0.3.2",
     "@fleetshift/common": "*",
     "@module-federation/enhanced": "^2.0.1",
+    "motion": "^12.0.0",
     "@openshift/dynamic-plugin-sdk": "^8.0.0",
     "@patternfly/patternfly": "^6.5.0",
     "@patternfly/react-charts": "^8.5.0",
