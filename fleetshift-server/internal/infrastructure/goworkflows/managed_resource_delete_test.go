@@ -21,6 +21,7 @@ import (
 
 type deleteCapturingDelivery struct {
 	mu           sync.Mutex
+	reporter     domain.DeliveryReporter
 	removeAuth   domain.DeliveryAuth
 	removeEvents []domain.DeliveryEvent
 	removeDone   chan struct{}
@@ -37,15 +38,16 @@ func newDeleteCapturingDelivery() *deleteCapturingDelivery {
 func (d *deleteCapturingDelivery) Deliver(
 	ctx context.Context,
 	_ domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	_ []domain.Manifest,
 	_ domain.DeliveryAuth,
 	_ *domain.Attestation,
-	signaler *domain.DeliverySignaler,
-) (domain.DeliveryResult, error) {
-	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
-	signaler.Done(ctx, result)
-	return result, nil
+	_ domain.Generation,
+) error {
+	if d.reporter != nil {
+		_ = d.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}
+	return nil
 }
 
 func (d *deleteCapturingDelivery) Remove(
@@ -55,14 +57,13 @@ func (d *deleteCapturingDelivery) Remove(
 	_ []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	signaler *domain.DeliverySignaler,
+	_ domain.Generation,
 ) error {
 	event := domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "removing managed resource",
 	}
-	signaler.Emit(ctx, event)
 
 	d.mu.Lock()
 	d.removeAuth = auth
@@ -88,32 +89,6 @@ func (d *deleteCapturingDelivery) snapshot() (domain.DeliveryAuth, []domain.Deli
 	events := make([]domain.DeliveryEvent, len(d.removeEvents))
 	copy(events, d.removeEvents)
 	return d.removeAuth, events
-}
-
-type recordingDeleteObserver struct {
-	domain.NoOpDeliveryObserver
-	mu     sync.Mutex
-	events []domain.DeliveryEvent
-}
-
-func (o *recordingDeleteObserver) EventEmitted(
-	ctx context.Context,
-	_ domain.DeliveryID,
-	_ domain.TargetInfo,
-	event domain.DeliveryEvent,
-) (context.Context, domain.EventEmittedProbe) {
-	o.mu.Lock()
-	o.events = append(o.events, event)
-	o.mu.Unlock()
-	return ctx, domain.NoOpEventEmittedProbe{}
-}
-
-func (o *recordingDeleteObserver) snapshot() []domain.DeliveryEvent {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	events := make([]domain.DeliveryEvent, len(o.events))
-	copy(events, o.events)
-	return events
 }
 
 func awaitGoFulfillmentState(
@@ -194,13 +169,13 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		},
 	}
 
-	deliveryObserver := &recordingDeleteObserver{}
+	deliveryReporter := application.NewDeliveryReportService(store, reg)
+	deliveryAgent.reporter = deliveryReporter
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		Registry:         reg,
-		DeliveryObserver: deliveryObserver,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -315,11 +290,6 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 	}
 	if len(gotRemoveEvents) == 0 {
 		t.Fatal("expected remove path to emit at least one event")
-	}
-
-	observedEvents := deliveryObserver.snapshot()
-	if len(observedEvents) == 0 {
-		t.Fatal("expected delivery observer to receive remove events")
 	}
 
 	viewDuringDelete, err := resourceSvc.Get(ctx, "clusters", "prod-us-east-1")

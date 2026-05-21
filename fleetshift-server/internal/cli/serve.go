@@ -260,6 +260,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			gcphcpAgent = gcphcpaddon.NewAgent(gcphcpaddon.AgentDeps{
 				Gateway:  gcphcpCfg.Gateway,
 				Observer: gcphcpaddon.NewSlogAgentObserver(logger),
+				Reporter: deliveryReporter,
 			})
 		} else {
 			logger.Warn("gcphcp addon enabled but no config provided, skipping")

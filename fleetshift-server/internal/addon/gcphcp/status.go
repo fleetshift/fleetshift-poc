@@ -115,25 +115,19 @@ func formatResourceStatusMessage(resource string, resourceData map[string]any) s
 
 func emitResourceStatusProgress(
 	ctx context.Context,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 	resource string,
 	resourceData map[string]any,
 ) {
-	if signaler == nil {
-		return
-	}
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   formatResourceStatusMessage(resource, resourceData),
 	})
 }
 
-func emitClusterReadyTransition(ctx context.Context, signaler *domain.DeliverySignaler) {
-	if signaler == nil {
-		return
-	}
-	signaler.Emit(ctx, domain.DeliveryEvent{
+func emitClusterReadyTransition(ctx context.Context, progress *deliveryProgress) {
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Cluster readiness satisfied; proceeding with guest bootstrap and desired nodepool health checks",
@@ -145,9 +139,9 @@ func emitFailureStatusSnapshot(
 	client *CLSClient,
 	clusterID string,
 	clusterName string,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) error {
-	if signaler == nil {
+	if progress == nil {
 		return nil
 	}
 
@@ -161,7 +155,7 @@ func emitFailureStatusSnapshot(
 		return fmt.Errorf("marshal failure snapshot: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventWarning,
 		Message:   "Redacted failure snapshot: " + string(detail),
@@ -384,7 +378,7 @@ func PollDesiredNodepoolsHealthy(
 	clusterID string,
 	clusterName string,
 	desired []NodepoolSpec,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) error {
 	if len(desired) == 0 {
 		return nil
@@ -396,7 +390,7 @@ func PollDesiredNodepoolsHealthy(
 	timeout := time.After(nodepoolPollTimeout)
 
 	for {
-		allReady, err := checkDesiredNodepoolsHealthy(ctx, client, clusterID, clusterName, desired, signaler)
+		allReady, err := checkDesiredNodepoolsHealthy(ctx, client, clusterID, clusterName, desired, progress)
 		if err != nil {
 			return err
 		}
@@ -417,7 +411,7 @@ func PollDesiredNodepoolsHealthy(
 // PollClusterReady polls the cluster status until it reaches "Ready" phase or fails.
 // It polls every 15 seconds for up to 20 minutes.
 // Returns nil when phase="Ready", error when phase="Failed", or error on timeout.
-func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, signaler *domain.DeliverySignaler) error {
+func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, progress *deliveryProgress) error {
 	ticker := time.NewTicker(clusterPollInterval)
 	defer ticker.Stop()
 
@@ -430,7 +424,7 @@ func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, 
 	}
 
 	clusterStatus := parseResourceStatusSummary(clusterData)
-	emitResourceStatusProgress(ctx, signaler, "Cluster", clusterData)
+	emitResourceStatusProgress(ctx, progress, "Cluster", clusterData)
 
 	if clusterStatus.Phase == "Ready" {
 		return nil
@@ -452,7 +446,7 @@ func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, 
 			}
 
 			clusterStatus = parseResourceStatusSummary(clusterData)
-			emitResourceStatusProgress(ctx, signaler, "Cluster", clusterData)
+			emitResourceStatusProgress(ctx, progress, "Cluster", clusterData)
 
 			if clusterStatus.Phase == "Ready" {
 				return nil
@@ -467,7 +461,7 @@ func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, 
 // PollClusterDeleted polls until the cluster is deleted (404 response).
 // It polls every 15 seconds for up to 20 minutes.
 // Returns nil when cluster returns 404, error on timeout.
-func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string, signaler *domain.DeliverySignaler) error {
+func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string, progress *deliveryProgress) error {
 	ticker := time.NewTicker(clusterPollInterval)
 	defer ticker.Stop()
 
@@ -477,7 +471,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 	_, err := client.GetCluster(ctx, clusterID)
 	if err != nil {
 		if isCLSHTTPStatus(err, http.StatusNotFound) {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Cluster deleted",
@@ -487,7 +481,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 		return fmt.Errorf("get cluster: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Waiting for cluster deletion",
@@ -503,7 +497,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 			_, err := client.GetCluster(ctx, clusterID)
 			if err != nil {
 				if isCLSHTTPStatus(err, http.StatusNotFound) {
-					signaler.Emit(ctx, domain.DeliveryEvent{
+					progress.Event(ctx, domain.DeliveryEvent{
 						Timestamp: time.Now(),
 						Kind:      domain.DeliveryEventProgress,
 						Message:   "Cluster deleted",
@@ -513,7 +507,7 @@ func PollClusterDeleted(ctx context.Context, client *CLSClient, clusterID string
 				return fmt.Errorf("get cluster: %w", err)
 			}
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Waiting for cluster deletion",
@@ -528,7 +522,7 @@ func checkDesiredNodepoolsHealthy(
 	clusterID string,
 	clusterName string,
 	desired []NodepoolSpec,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) (bool, error) {
 	observed, err := client.ListNodepools(ctx, clusterID)
 	if err != nil {
@@ -555,7 +549,7 @@ func checkDesiredNodepoolsHealthy(
 	for _, name := range desiredNames {
 		nodepoolID, ok := observedByName[name]
 		if !ok {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   fmt.Sprintf("Nodepool %s not yet visible", name),
@@ -570,7 +564,7 @@ func checkDesiredNodepoolsHealthy(
 		}
 
 		nodepoolStatus := parseResourceStatusSummary(statusData)
-		emitResourceStatusProgress(ctx, signaler, fmt.Sprintf("Nodepool %s", name), statusData)
+		emitResourceStatusProgress(ctx, progress, fmt.Sprintf("Nodepool %s", name), statusData)
 
 		if nodepoolStatus.Phase == "Failed" {
 			statusMsg := nodepoolStatus.Message

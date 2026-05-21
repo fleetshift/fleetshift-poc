@@ -20,6 +20,7 @@ type AgentDeps struct {
 	Gateway  GatewayConfig
 	Infra    *InfraRunner
 	Observer AgentObserver
+	Reporter domain.DeliveryReporter
 }
 
 // Agent implements the domain.DeliveryAgent interface for the GCP HCP addon.
@@ -27,6 +28,7 @@ type AgentDeps struct {
 type Agent struct {
 	reconciler *Reconciler
 	observer   AgentObserver
+	reporter   domain.DeliveryReporter
 	trustMu    sync.RWMutex
 	trustMap   map[domain.IssuerURL]domain.TrustBundleEntry
 }
@@ -50,6 +52,7 @@ func NewAgent(deps AgentDeps) *Agent {
 	return &Agent{
 		reconciler: reconciler,
 		observer:   observer,
+		reporter:   deps.Reporter,
 		trustMap:   make(map[domain.IssuerURL]domain.TrustBundleEntry),
 	}
 }
@@ -74,17 +77,18 @@ func (a *Agent) TrustBundles() []domain.TrustBundleEntry {
 // 1. Trust bundle manifests - stored immediately
 // 2. Cluster manifests - provisioned asynchronously
 //
-// For trust-bundle-only deliveries, it signals completion immediately.
-// For cluster deliveries, it returns Accepted and provisions asynchronously.
+// All delivery outcomes are reported through the DeliveryReporter.
 func (a *Agent) Deliver(
 	ctx context.Context,
 	target domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	signaler *domain.DeliverySignaler,
-) (domain.DeliveryResult, error) {
+	_ domain.Generation,
+) error {
+	progress := newDeliveryProgress(a.reporter, deliveryID)
+
 	// Separate trust bundles from cluster manifests
 	var trustBundles []domain.Manifest
 	var clusterManifests []domain.Manifest
@@ -102,29 +106,39 @@ func (a *Agent) Deliver(
 		entry, err := a.storeTrustBundle(tb)
 		if err != nil {
 			a.observer.Error("failed to unmarshal trust bundle", "error", err)
-			return domain.DeliveryResult{
+			if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: fmt.Sprintf("failed to unmarshal trust bundle: %v", err),
-			}, nil
+			}); reportErr != nil {
+				a.observer.Error("failed to report delivery failure", "error", reportErr)
+			}
+			return nil
 		}
 		a.observer.Info("stored trust bundle", "issuer", entry.IssuerURL)
 	}
 
-	// If only trust bundles (no cluster manifests), signal done and return accepted
+	// If only trust bundles (no cluster manifests), signal done
 	if len(clusterManifests) == 0 {
 		asyncCtx := context.WithoutCancel(ctx)
-		go signaler.Done(asyncCtx, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
-		return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+		go func() {
+			if err := progress.Complete(asyncCtx, domain.DeliveryResult{State: domain.DeliveryStateDelivered}); err != nil {
+				a.observer.Error("failed to report trust bundle delivery", "error", err)
+			}
+		}()
+		return nil
 	}
 
 	// Expect exactly 1 cluster manifest
 	if len(clusterManifests) != 1 {
 		msg := fmt.Sprintf("expected exactly 1 cluster manifest, got %d", len(clusterManifests))
 		a.observer.Error(msg)
-		return domain.DeliveryResult{
+		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: msg,
-		}, nil
+		}); reportErr != nil {
+			a.observer.Error("failed to report delivery failure", "error", reportErr)
+		}
+		return nil
 	}
 
 	// Parse cluster spec and derive cluster name from managed resource ID
@@ -132,27 +146,36 @@ func (a *Agent) Deliver(
 	spec, err := ParseClusterSpec(clusterManifest.Raw)
 	if err != nil {
 		a.observer.Error("failed to parse cluster spec", "error", err)
-		return domain.DeliveryResult{
+		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("failed to parse cluster spec: %v", err),
-		}, nil
+		}); reportErr != nil {
+			a.observer.Error("failed to report delivery failure", "error", reportErr)
+		}
+		return nil
 	}
 	spec.Name = string(clusterManifest.Name)
 	if err := ValidateClusterName(spec.Name); err != nil {
 		a.observer.Error("invalid cluster name from resource ID", "error", err)
-		return domain.DeliveryResult{
+		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("invalid cluster name: %v", err),
-		}, nil
+		}); reportErr != nil {
+			a.observer.Error("failed to report delivery failure", "error", reportErr)
+		}
+		return nil
 	}
 
 	// Check auth token is non-empty
 	if auth.Token == "" {
 		a.observer.Error("missing auth token")
-		return domain.DeliveryResult{
+		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateAuthFailed,
 			Message: "auth token is required",
-		}, nil
+		}); reportErr != nil {
+			a.observer.Error("failed to report delivery failure", "error", reportErr)
+		}
+		return nil
 	}
 
 	// Extract target config from properties
@@ -160,9 +183,9 @@ func (a *Agent) Deliver(
 
 	// Launch async provisioning
 	asyncCtx := context.WithoutCancel(ctx)
-	go a.deliverAsync(asyncCtx, spec, targetCfg, string(auth.Token), signaler)
+	go a.deliverAsync(asyncCtx, spec, targetCfg, string(auth.Token), progress)
 
-	return domain.DeliveryResult{State: domain.DeliveryStateAccepted}, nil
+	return nil
 }
 
 func newReconcileContext(parent context.Context) (context.Context, context.CancelFunc) {
@@ -170,21 +193,23 @@ func newReconcileContext(parent context.Context) (context.Context, context.Cance
 }
 
 // deliverAsync performs the asynchronous cluster provisioning.
-// It calls the reconciler and signals completion through the signaler.
+// It calls the reconciler and reports completion through the reporter.
 func (a *Agent) deliverAsync(
 	ctx context.Context,
 	spec ClusterSpec,
 	target TargetConfig,
 	callerToken string,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) {
 	runCtx, cancel := newReconcileContext(ctx)
 	defer cancel()
 
-	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, signaler)
+	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, progress)
 	if err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
-		signaler.Done(ctx, deliveryResultForReconcileError(err))
+		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
+			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.Name)
+		}
 		return
 	}
 	output.TrustBundles = a.TrustBundles()
@@ -197,7 +222,9 @@ func (a *Agent) deliverAsync(
 	}
 
 	a.observer.Info("cluster provisioned successfully", "cluster", spec.Name, "target_id", output.TargetID)
-	signaler.Done(ctx, result)
+	if reportErr := progress.Complete(ctx, result); reportErr != nil {
+		a.observer.Error("failed to report delivery result", "error", reportErr, "cluster", spec.Name)
+	}
 }
 
 // Remove implements domain.DeliveryAgent.Remove.
@@ -205,12 +232,14 @@ func (a *Agent) deliverAsync(
 func (a *Agent) Remove(
 	ctx context.Context,
 	target domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	signaler *domain.DeliverySignaler,
+	_ domain.Generation,
 ) error {
+	progress := newDeliveryProgress(a.reporter, deliveryID)
+
 	// Extract target config from properties
 	targetCfg := targetConfigFromProperties(target.Properties)
 
@@ -239,7 +268,7 @@ func (a *Agent) Remove(
 
 		// Delete the cluster
 		a.observer.Info("deleting cluster", "cluster", spec.Name)
-		if err := a.reconciler.Delete(ctx, spec, targetCfg, string(auth.Token), signaler); err != nil {
+		if err := a.reconciler.Delete(ctx, spec, targetCfg, string(auth.Token), progress); err != nil {
 			a.observer.Error("failed to delete cluster", "error", err, "cluster", spec.Name)
 			return fmt.Errorf("failed to delete cluster %s: %w", spec.Name, err)
 		}

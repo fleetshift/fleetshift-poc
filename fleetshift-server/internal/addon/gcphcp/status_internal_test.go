@@ -20,41 +20,40 @@ type fakeNodepoolStatusClient struct {
 	statusCall map[string]int
 }
 
-type recordingDeliveryObserver struct {
-	domain.NoOpDeliveryObserver
+type testEventRecorder struct {
 	mu     sync.Mutex
 	events []domain.DeliveryEvent
 }
 
-func (o *recordingDeliveryObserver) EventEmitted(
-	ctx context.Context,
-	_ domain.DeliveryID,
-	_ domain.TargetInfo,
-	event domain.DeliveryEvent,
-) (context.Context, domain.EventEmittedProbe) {
-	o.mu.Lock()
-	o.events = append(o.events, event)
-	o.mu.Unlock()
-	return ctx, domain.NoOpEventEmittedProbe{}
+func (r *testEventRecorder) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+	r.mu.Lock()
+	r.events = append(r.events, event)
+	r.mu.Unlock()
+	return nil
 }
 
-func (o *recordingDeliveryObserver) snapshot() []domain.DeliveryEvent {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	events := make([]domain.DeliveryEvent, len(o.events))
-	copy(events, o.events)
+func (r *testEventRecorder) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.DeliveryResult) error {
+	return nil
+}
+
+func (r *testEventRecorder) ListActiveDeliveries(_ context.Context, _ []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return nil, nil
+}
+
+func (r *testEventRecorder) snapshot() []domain.DeliveryEvent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	events := make([]domain.DeliveryEvent, len(r.events))
+	copy(events, r.events)
 	return events
 }
 
-func newRecordingSignaler(obs *recordingDeliveryObserver) *domain.DeliverySignaler {
-	return domain.NewDeliverySignaler(
-		"ful-1",
-		"del-1",
-		domain.TargetInfo{ID: "gcphcp-test", Type: "gcphcp"},
-		nil,
-		nil,
-		obs,
-	)
+func newTestProgress(rec *testEventRecorder) *deliveryProgress {
+	return newDeliveryProgress(rec, "del-1")
+}
+
+func noopProgress() *deliveryProgress {
+	return &deliveryProgress{}
 }
 
 func (f *fakeNodepoolStatusClient) ListNodepools(_ context.Context, _ string) ([]map[string]any, error) {
@@ -89,7 +88,7 @@ func TestParseNodepoolPhase(t *testing.T) {
 }
 
 func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 	client := &fakeNodepoolStatusClient{
 		listSeq: [][]map[string]any{{
 			{"id": "np-1", "name": "test-wa"},
@@ -116,7 +115,7 @@ func TestPollDesiredNodepoolsHealthy_ReadyOnFirstCheck(t *testing.T) {
 	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
 		{ID: "wa"},
 		{ID: "wb"},
-	}, newRecordingSignaler(obs))
+	}, newTestProgress(obs))
 	if err != nil {
 		t.Fatalf("PollDesiredNodepoolsHealthy() error = %v", err)
 	}
@@ -152,7 +151,7 @@ func TestPollDesiredNodepoolsHealthy_FailedNodepool(t *testing.T) {
 
 	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
 		{ID: "wa"},
-	}, &domain.DeliverySignaler{})
+	}, noopProgress())
 	if err == nil {
 		t.Fatal("expected failed nodepool error")
 	}
@@ -186,7 +185,7 @@ func TestPollDesiredNodepoolsHealthy_WaitsUntilReady(t *testing.T) {
 
 	err := PollDesiredNodepoolsHealthy(context.Background(), client, "cluster-123", "test", []NodepoolSpec{
 		{ID: "wa"},
-	}, &domain.DeliverySignaler{})
+	}, noopProgress())
 	if err != nil {
 		t.Fatalf("PollDesiredNodepoolsHealthy() error = %v", err)
 	}
@@ -221,9 +220,9 @@ func TestPollClusterReady_UsesConfigurableTimeout(t *testing.T) {
 	}))
 	defer server.Close()
 
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
-	err := PollClusterReady(context.Background(), client, "c-123", newRecordingSignaler(obs))
+	err := PollClusterReady(context.Background(), client, "c-123", newTestProgress(obs))
 	if err == nil {
 		t.Fatal("expected timeout error")
 	}
@@ -242,9 +241,9 @@ func TestPollClusterReady_UsesConfigurableTimeout(t *testing.T) {
 }
 
 func TestEmitClusterReadyTransition_EmitsProgressEvent(t *testing.T) {
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 
-	emitClusterReadyTransition(context.Background(), newRecordingSignaler(obs))
+	emitClusterReadyTransition(context.Background(), newTestProgress(obs))
 
 	events := obs.snapshot()
 	if len(events) != 1 {
@@ -275,7 +274,7 @@ func TestPollClusterDeleted_ReturnsNon404Errors(t *testing.T) {
 	defer server.Close()
 
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
-	err := PollClusterDeleted(context.Background(), client, "c-123", &domain.DeliverySignaler{})
+	err := PollClusterDeleted(context.Background(), client, "c-123", noopProgress())
 	if err == nil {
 		t.Fatal("expected get cluster error")
 	}
@@ -303,7 +302,7 @@ func TestPollClusterDeleted_SucceedsOnHTTP404(t *testing.T) {
 	defer server.Close()
 
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
-	if err := PollClusterDeleted(context.Background(), client, "c-123", &domain.DeliverySignaler{}); err != nil {
+	if err := PollClusterDeleted(context.Background(), client, "c-123", noopProgress()); err != nil {
 		t.Fatalf("expected HTTP 404 to count as deleted, got %v", err)
 	}
 }
@@ -327,7 +326,7 @@ func TestPollClusterDeleted_DoesNotTreat404TextInBodyAsDeletion(t *testing.T) {
 	defer server.Close()
 
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
-	err := PollClusterDeleted(context.Background(), client, "c-123", &domain.DeliverySignaler{})
+	err := PollClusterDeleted(context.Background(), client, "c-123", noopProgress())
 	if err == nil {
 		t.Fatal("expected non-404 status with 404 text in body to remain an error")
 	}
@@ -457,7 +456,7 @@ func TestEmitFailureStatusSnapshot_EmitsCuratedRedactedDetail(t *testing.T) {
 	}))
 	defer server.Close()
 
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
 
 	if err := emitFailureStatusSnapshot(
@@ -465,7 +464,7 @@ func TestEmitFailureStatusSnapshot_EmitsCuratedRedactedDetail(t *testing.T) {
 		client,
 		"c-123",
 		"test-cluster",
-		newRecordingSignaler(obs),
+		newTestProgress(obs),
 	); err != nil {
 		t.Fatalf("emitFailureStatusSnapshot() error = %v", err)
 	}
@@ -628,7 +627,7 @@ func TestEmitFailureStatusSnapshot_RedactsSensitiveFields(t *testing.T) {
 	}))
 	defer server.Close()
 
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
 
 	if err := emitFailureStatusSnapshot(
@@ -636,7 +635,7 @@ func TestEmitFailureStatusSnapshot_RedactsSensitiveFields(t *testing.T) {
 		client,
 		"c-123",
 		"test-cluster",
-		newRecordingSignaler(obs),
+		newTestProgress(obs),
 	); err != nil {
 		t.Fatalf("emitFailureStatusSnapshot() error = %v", err)
 	}

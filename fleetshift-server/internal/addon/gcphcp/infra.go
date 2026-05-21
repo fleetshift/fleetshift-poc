@@ -20,8 +20,6 @@ import (
 	"regexp"
 	"strings"
 	"time"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 const (
@@ -272,7 +270,7 @@ func (r *InfraRunner) DestroyInfra(
 func (r *InfraRunner) WaitForPSCCleanup(
 	ctx context.Context,
 	clusterID, projectID, region, workforceToken string,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) error {
 	lookup, err := newPSCResourceLookup(ctx, workforceToken)
 	if err != nil {
@@ -309,7 +307,7 @@ func (r *InfraRunner) WaitForPSCCleanup(
 		return nil
 	}
 
-	emitProgress(signaler, ctx, "Waiting for PSC endpoint cleanup")
+	emitProgress(progress, ctx, "Waiting for PSC endpoint cleanup")
 
 	for {
 		select {
@@ -330,7 +328,7 @@ func (r *InfraRunner) WaitForPSCCleanup(
 				return nil
 			}
 
-			emitProgress(signaler, ctx, "Waiting for PSC endpoint cleanup")
+			emitProgress(progress, ctx, "Waiting for PSC endpoint cleanup")
 		}
 	}
 }

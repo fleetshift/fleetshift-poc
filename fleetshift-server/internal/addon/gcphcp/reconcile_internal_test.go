@@ -138,7 +138,7 @@ func (f *fakeCleanupInfra) DestroyIAM(
 func (f *fakeCleanupInfra) WaitForPSCCleanup(
 	_ context.Context,
 	clusterID, projectID, region, workforceToken string,
-	_ *domain.DeliverySignaler,
+	_ *deliveryProgress,
 ) error {
 	f.ops = append(f.ops, "psc:"+clusterID+":"+projectID+":"+region)
 	f.waitPSCCalls++
@@ -252,7 +252,7 @@ func TestReconcileNodepools_CreatesUpdatesAndDeletesByName(t *testing.T) {
 		},
 	}
 
-	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, &domain.DeliverySignaler{})
+	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, noopProgress())
 	if err != nil {
 		t.Fatalf("reconcileNodepools failed: %v", err)
 	}
@@ -294,7 +294,7 @@ func TestReconcileNodepools_DuplicateDesiredNames(t *testing.T) {
 		{ID: "workers", Replicas: 3},
 	}
 
-	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, &domain.DeliverySignaler{})
+	err := reconcileNodepools(context.Background(), client, "cluster-123", "test-cluster", desired, noopProgress())
 	if err == nil {
 		t.Fatal("expected duplicate desired name error")
 	}
@@ -335,7 +335,7 @@ func TestWaitForDeleteCleanupPrereqs_WaitsForPSC(t *testing.T) {
 		"cluster-123",
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		"workforce-token",
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("waitForDeleteCleanupPrereqs() error = %v", err)
@@ -357,7 +357,7 @@ func TestCleanupDeleteResources_DestroysInfraAndIAM(t *testing.T) {
 		ClusterSpec{Name: "test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("cleanupDeleteResources() error = %v", err)
@@ -378,7 +378,7 @@ func TestCleanupDeleteResources_ReturnsIAMFailureWithDeleteSuccessContext(t *tes
 		ClusterSpec{Name: "test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected IAM destroy failure")
@@ -404,7 +404,7 @@ func TestCleanupDeleteResources_ReturnsInfraFailureWithoutRetry(t *testing.T) {
 		ClusterSpec{Name: "test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected infra destroy failure")
@@ -429,7 +429,7 @@ func TestDeleteClusterIfPresent_SkipsMissingCluster(t *testing.T) {
 		context.Background(),
 		client,
 		"test-cluster",
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("deleteClusterIfPresent() error = %v", err)
@@ -475,7 +475,7 @@ func TestEnsureIAMWithRecovery_RetriesAmbiguousFailure(t *testing.T) {
 		TargetConfig{GCPProject: "project-123"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("ensureIAMWithRecovery() error = %v", err)
@@ -517,7 +517,7 @@ func TestEnsureInfraWithRecovery_ReturnsErrorAfterAmbiguousRetries(t *testing.T)
 		ClusterSpec{Name: "test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected ambiguous infra error after retries")
@@ -583,7 +583,7 @@ func TestRecoverFromAmbiguousCreateFailure_AdoptsClusterWhenItAppears(t *testing
 		true,
 		true,
 		fmt.Errorf("create cluster: request timeout"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("recoverFromAmbiguousCreateFailure() error = %v", err)
@@ -653,7 +653,7 @@ func TestRecoverFromAmbiguousCreateFailure_ReturnsErrorWithoutCleanupWhenReensur
 		true,
 		true,
 		fmt.Errorf("create cluster: request timeout"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected re-ensure failure")
@@ -700,7 +700,7 @@ func TestRecoverFromAmbiguousCreateFailure_CleansUpAfterTimeout(t *testing.T) {
 		true,
 		true,
 		fmt.Errorf("cluster creation response missing id field"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected create failure after timeout")
@@ -744,7 +744,7 @@ func TestRecoverFromAmbiguousCreateFailure_SkipsCleanupWhenProbeFails(t *testing
 		true,
 		true,
 		fmt.Errorf("create cluster: request timeout"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected combined probe error")
@@ -794,7 +794,7 @@ func TestCompleteGuestRegistration_ReturnsPostProvisionRegistrationErrorAfterBoo
 		"c-123",
 		"broker-token",
 		domain.TargetID("guest-target"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected guest registration error")
@@ -853,7 +853,7 @@ func TestCompleteGuestRegistration_RetriesUntilGuestAPIEndpointAppears(t *testin
 		"c-123",
 		"broker-token",
 		domain.TargetID("guest-target"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("completeGuestRegistration() error = %v", err)
@@ -908,7 +908,7 @@ func TestCompleteGuestRegistration_ReturnsRetryExhaustedWhenGuestAPIEndpointNeve
 		"c-123",
 		"broker-token",
 		domain.TargetID("guest-target"),
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err == nil {
 		t.Fatal("expected guest registration error")
@@ -1004,20 +1004,20 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 		}, nil
 	}
 
-	reconcileNodepoolsFn = func(_ context.Context, _ nodepoolReconcileClient, _ string, _ string, _ []NodepoolSpec, _ *domain.DeliverySignaler) error {
+	reconcileNodepoolsFn = func(_ context.Context, _ nodepoolReconcileClient, _ string, _ string, _ []NodepoolSpec, _ *deliveryProgress) error {
 		if _, err := os.Stat(workspaceDir); err == nil {
 			t.Fatal("expected hypershift workspace to be cleaned before nodepool reconcile")
 		}
 		return nil
 	}
-	pollClusterReadyFn = func(context.Context, *CLSClient, string, *domain.DeliverySignaler) error { return nil }
-	completeGuestRegistrationFn = func(context.Context, *CLSClient, string, string, domain.TargetID, *domain.DeliverySignaler) (string, BootstrapResult, error) {
+	pollClusterReadyFn = func(context.Context, *CLSClient, string, *deliveryProgress) error { return nil }
+	completeGuestRegistrationFn = func(context.Context, *CLSClient, string, string, domain.TargetID, *deliveryProgress) (string, BootstrapResult, error) {
 		return "https://guest.example:6443", BootstrapResult{
 			SATokenRef: "sa-token-ref",
 			SAToken:    []byte("sa-token"),
 		}, nil
 	}
-	pollDesiredNodepoolsHealthyFn = func(context.Context, nodepoolStatusClient, string, string, []NodepoolSpec, *domain.DeliverySignaler) error {
+	pollDesiredNodepoolsHealthyFn = func(context.Context, nodepoolStatusClient, string, string, []NodepoolSpec, *deliveryProgress) error {
 		return nil
 	}
 
@@ -1069,7 +1069,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 			BrokerSAEmail:     "broker@example.com",
 		},
 		"caller-token",
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("Reconcile() error = %v", err)
@@ -1158,7 +1158,7 @@ func TestReconcilerDelete_WaitsForPSCCleanupBeforeBuildingHypershiftWorkspace(t 
 			BrokerSAEmail:     "broker@example.com",
 		},
 		"caller-token",
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("Delete() error = %v", err)
@@ -1243,7 +1243,7 @@ func TestReconcilerDelete_UsesCallerTokenForHypershiftEnvAndWorkforceTokenForPSC
 			BrokerSAEmail:     "broker@example.com",
 		},
 		"caller-token",
-		&domain.DeliverySignaler{},
+		noopProgress(),
 	)
 	if err != nil {
 		t.Fatalf("Delete() error = %v", err)

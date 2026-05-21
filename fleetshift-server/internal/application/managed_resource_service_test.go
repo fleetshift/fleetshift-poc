@@ -24,9 +24,10 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 }
 
 type blockingRemoveDeliveryService struct {
-	inner   *sqlite.RecordingDeliveryService
-	started chan struct{}
-	release chan struct{}
+	inner    *sqlite.RecordingDeliveryService
+	reporter domain.DeliveryReporter
+	started  chan struct{}
+	release  chan struct{}
 }
 
 func newBlockingRemoveDeliveryService(store domain.Store) *blockingRemoveDeliveryService {
@@ -47,9 +48,17 @@ func (s *blockingRemoveDeliveryService) Deliver(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	att *domain.Attestation,
-	signaler *domain.DeliverySignaler,
-) (domain.DeliveryResult, error) {
-	return s.inner.Deliver(ctx, target, deliveryID, manifests, auth, att, signaler)
+	generation domain.Generation,
+) error {
+	if err := s.inner.Deliver(ctx, target, deliveryID, manifests, auth, att, generation); err != nil {
+		return err
+	}
+	if s.reporter != nil {
+		go func() {
+			_ = s.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
+	}
+	return nil
 }
 
 func (s *blockingRemoveDeliveryService) Remove(
@@ -59,9 +68,9 @@ func (s *blockingRemoveDeliveryService) Remove(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	att *domain.Attestation,
-	signaler *domain.DeliverySignaler,
+	generation domain.Generation,
 ) error {
-	if err := s.inner.Remove(ctx, target, deliveryID, manifests, auth, att, signaler); err != nil {
+	if err := s.inner.Remove(ctx, target, deliveryID, manifests, auth, att, generation); err != nil {
 		return err
 	}
 	select {
@@ -79,19 +88,20 @@ func (s *blockingRemoveDeliveryService) Remove(
 
 func setupManagedResourcesWithDelivery(
 	t *testing.T,
-	buildDelivery func(store domain.Store) domain.DeliveryService,
+	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService,
 ) mrTestHarness {
 	t.Helper()
 	store := newStore(t)
 	reg := &memworkflow.Registry{}
 
+	reporter := application.NewDeliveryReportService(store, reg)
 	agent := domain.DeliveryService(&sqlite.RecordingDeliveryService{
 		Store:    store,
-		Reporter: application.NewDeliveryReportService(store, reg),
+		Reporter: reporter,
 		Now:      func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
 	})
 	if buildDelivery != nil {
-		agent = buildDelivery(store)
+		agent = buildDelivery(store, reporter)
 	}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
@@ -253,8 +263,9 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 	defer cancel()
 
 	var blocker *blockingRemoveDeliveryService
-	h := setupManagedResourcesWithDelivery(t, func(store domain.Store) domain.DeliveryService {
+	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService {
 		blocker = newBlockingRemoveDeliveryService(store)
+		blocker.reporter = reporter
 		return blocker
 	})
 

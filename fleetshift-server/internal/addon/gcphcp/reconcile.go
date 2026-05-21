@@ -54,9 +54,9 @@ func completeGuestRegistration(
 	clusterID string,
 	brokerToken string,
 	guestTargetID domain.TargetID,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) (string, BootstrapResult, error) {
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Resolving guest API endpoint",
@@ -77,7 +77,7 @@ func completeGuestRegistration(
 		guestEndpoint, err = ResolveGuestAPIEndpoint(statusData)
 		if err != nil {
 			if attempt < guestBootstrapMaxAttempts {
-				signaler.Emit(ctx, domain.DeliveryEvent{
+				progress.Event(ctx, domain.DeliveryEvent{
 					Timestamp: time.Now(),
 					Kind:      domain.DeliveryEventWarning,
 					Message:   fmt.Sprintf("Guest API endpoint not yet available, retrying in %v: %v", guestBootstrapRetryDelay, err),
@@ -90,7 +90,7 @@ func completeGuestRegistration(
 				continue
 			}
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventWarning,
 				Message:   fmt.Sprintf("Hosted cluster is ready, but guest target registration did not complete: %v", err),
@@ -102,7 +102,7 @@ func completeGuestRegistration(
 		}
 
 		if !endpointAnnounced {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   fmt.Sprintf("Guest API endpoint: %s", guestEndpoint),
@@ -110,7 +110,7 @@ func completeGuestRegistration(
 			endpointAnnounced = true
 		}
 
-		signaler.Emit(ctx, domain.DeliveryEvent{
+		progress.Event(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
 			Message:   fmt.Sprintf("Bootstrapping guest cluster (attempt %d/%d)", attempt, guestBootstrapMaxAttempts),
@@ -123,7 +123,7 @@ func completeGuestRegistration(
 			guestTargetID,
 		)
 		if bootstrapErr == nil {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Bootstrap successful",
@@ -132,7 +132,7 @@ func completeGuestRegistration(
 		}
 
 		if attempt < guestBootstrapMaxAttempts {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventWarning,
 				Message:   fmt.Sprintf("Bootstrap failed, retrying in %v: %v", guestBootstrapRetryDelay, bootstrapErr),
@@ -145,7 +145,7 @@ func completeGuestRegistration(
 		}
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventWarning,
 		Message:   fmt.Sprintf("Hosted cluster is ready, but guest target registration did not complete: %v", bootstrapErr),
@@ -162,9 +162,9 @@ func (r *Reconciler) Reconcile(
 	spec ClusterSpec,
 	target TargetConfig,
 	callerToken string,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) (_ *ClusterOutput, retErr error) {
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Exchanging caller token for broker credentials",
@@ -184,7 +184,7 @@ func (r *Reconciler) Reconcile(
 		return nil, fmt.Errorf("broker auth exchange: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Creating CLS client",
@@ -208,18 +208,18 @@ func (r *Reconciler) Reconcile(
 			case err == nil:
 				snapshotClusterID = resolvedID
 			case !errors.Is(err, ErrClusterNotFound):
-				emitProgress(signaler, snapshotCtx, fmt.Sprintf("Unable to resolve cluster for failure snapshot: %v", err))
+				emitProgress(progress, snapshotCtx, fmt.Sprintf("Unable to resolve cluster for failure snapshot: %v", err))
 			}
 		}
 		if snapshotClusterID == "" {
 			return
 		}
-		if err := emitFailureStatusSnapshot(snapshotCtx, clsClient, snapshotClusterID, spec.Name, signaler); err != nil {
-			emitProgress(signaler, snapshotCtx, fmt.Sprintf("Unable to emit failure snapshot: %v", err))
+		if err := emitFailureStatusSnapshot(snapshotCtx, clsClient, snapshotClusterID, spec.Name, progress); err != nil {
+			emitProgress(progress, snapshotCtx, fmt.Sprintf("Unable to emit failure snapshot: %v", err))
 		}
 	}()
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Reconciling cluster via CLS API",
@@ -242,14 +242,14 @@ func (r *Reconciler) Reconcile(
 			return nil, fmt.Errorf("update cluster %s: %w", spec.Name, err)
 		}
 
-		signaler.Emit(ctx, domain.DeliveryEvent{
+		progress.Event(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
 			Message:   fmt.Sprintf("Cluster updated with ID: %s", clusterID),
 		})
 
 	case errors.Is(err, ErrClusterNotFound):
-		signaler.Emit(ctx, domain.DeliveryEvent{
+		progress.Event(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
 			Message:   "Generating cluster keypair",
@@ -262,7 +262,7 @@ func (r *Reconciler) Reconcile(
 		}
 
 		if err := func() (retErr error) {
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Preparing hypershift workspace",
@@ -288,7 +288,7 @@ func (r *Reconciler) Reconcile(
 				if !createdIAM && !createdInfra {
 					return createErr
 				}
-				emitProgress(signaler, ctx, "Create flow failed; cleaning up partial IAM/infra resources")
+				emitProgress(progress, ctx, "Create flow failed; cleaning up partial IAM/infra resources")
 				cleanupErr := cleanupCreateResources(ctx, r.infra, spec, target, workspace.Env, createdInfra, createdIAM)
 				if cleanupErr != nil {
 					return errors.Join(createErr, cleanupErr)
@@ -296,7 +296,7 @@ func (r *Reconciler) Reconcile(
 				return createErr
 			}
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Creating IAM resources",
@@ -309,26 +309,26 @@ func (r *Reconciler) Reconcile(
 				target,
 				workspace.JWKSPath,
 				workspace.Env,
-				signaler,
+				progress,
 			)
 			if err != nil {
 				return fmt.Errorf("create IAM: %w", err)
 			}
 			createdIAM = true
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Creating infrastructure",
 			})
 
-			infraConfig, err := ensureInfraWithRecovery(ctx, r.infra, spec, target, workspace.Env, signaler)
+			infraConfig, err := ensureInfraWithRecovery(ctx, r.infra, spec, target, workspace.Env, progress)
 			if err != nil {
 				return fmt.Errorf("create infra: %w", err)
 			}
 			createdInfra = true
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Building CLS cluster spec",
@@ -339,7 +339,7 @@ func (r *Reconciler) Reconcile(
 				return cleanupCreateFailure(fmt.Errorf("build CLS cluster spec: %w", err))
 			}
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   "Creating cluster via CLS API",
@@ -358,7 +358,7 @@ func (r *Reconciler) Reconcile(
 					createdInfra,
 					createdIAM,
 					fmt.Errorf("create cluster: %w", err),
-					signaler,
+					progress,
 				)
 				return err
 			}
@@ -377,12 +377,12 @@ func (r *Reconciler) Reconcile(
 					createdInfra,
 					createdIAM,
 					fmt.Errorf("cluster creation response missing id field"),
-					signaler,
+					progress,
 				)
 				return err
 			}
 
-			signaler.Emit(ctx, domain.DeliveryEvent{
+			progress.Event(ctx, domain.DeliveryEvent{
 				Timestamp: time.Now(),
 				Kind:      domain.DeliveryEventProgress,
 				Message:   fmt.Sprintf("Cluster created with ID: %s", clusterID),
@@ -397,22 +397,22 @@ func (r *Reconciler) Reconcile(
 		return nil, fmt.Errorf("resolve cluster ID: %w", err)
 	}
 
-	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, signaler); err != nil {
+	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, progress); err != nil {
 		return nil, err
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Polling for cluster ready state",
 	})
 
 	// Poll until cluster is ready
-	if err := pollClusterReadyFn(ctx, clsClient, clusterID, signaler); err != nil {
+	if err := pollClusterReadyFn(ctx, clsClient, clusterID, progress); err != nil {
 		return nil, fmt.Errorf("poll cluster ready: %w", err)
 	}
 
-	emitClusterReadyTransition(ctx, signaler)
+	emitClusterReadyTransition(ctx, progress)
 
 	guestTargetID := GuestTargetID(spec.Name)
 	guestEndpoint, bootstrapResult, err := completeGuestRegistrationFn(
@@ -421,23 +421,23 @@ func (r *Reconciler) Reconcile(
 		clusterID,
 		authResult.BrokerToken,
 		guestTargetID,
-		signaler,
+		progress,
 	)
 	if err != nil {
 		return nil, err
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Waiting for desired nodepools to become healthy",
 	})
 
-	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, signaler); err != nil {
+	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, progress); err != nil {
 		return nil, fmt.Errorf("wait for desired nodepools healthy: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Desired nodepools are healthy; building cluster output",
@@ -454,7 +454,7 @@ func (r *Reconciler) Reconcile(
 		SAToken:    bootstrapResult.SAToken,
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Cluster provisioning complete",
@@ -476,9 +476,9 @@ func (r *Reconciler) Delete(
 	spec ClusterSpec,
 	target TargetConfig,
 	callerToken string,
-	signaler *domain.DeliverySignaler,
+	progress *deliveryProgress,
 ) error {
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Exchanging caller token for broker credentials",
@@ -498,7 +498,7 @@ func (r *Reconciler) Delete(
 		return fmt.Errorf("broker auth exchange: %w", err)
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Creating CLS client",
@@ -507,32 +507,32 @@ func (r *Reconciler) Delete(
 	// Create CLS client
 	clsClient := NewCLSClient(r.gateway.URL, authResult.BrokerToken, authResult.BrokerEmail, nil)
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Resolving cluster ID",
 	})
 
 	// Resolve cluster ID by name
-	clusterID, deletedCluster, err := deleteClusterIfPresent(ctx, clsClient, spec.Name, signaler)
+	clusterID, deletedCluster, err := deleteClusterIfPresent(ctx, clsClient, spec.Name, progress)
 	if err != nil {
 		return err
 	}
 
 	if deletedCluster {
-		signaler.Emit(ctx, domain.DeliveryEvent{
+		progress.Event(ctx, domain.DeliveryEvent{
 			Timestamp: time.Now(),
 			Kind:      domain.DeliveryEventProgress,
 			Message:   "Polling for cluster deletion",
 		})
 
 		// Poll until deleted
-		if err := PollClusterDeleted(ctx, clsClient, clusterID, signaler); err != nil {
+		if err := PollClusterDeleted(ctx, clsClient, clusterID, progress); err != nil {
 			return fmt.Errorf("poll cluster deleted: %w", err)
 		}
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Preparing to destroy infrastructure",
@@ -544,7 +544,7 @@ func (r *Reconciler) Delete(
 		clusterID,
 		target,
 		authResult.WorkforceToken,
-		signaler,
+		progress,
 	); err != nil {
 		return err
 	}
@@ -570,13 +570,13 @@ func (r *Reconciler) Delete(
 			spec,
 			target,
 			workspace.Env,
-			signaler,
+			progress,
 		)
 	}(); err != nil {
 		return err
 	}
 
-	signaler.Emit(ctx, domain.DeliveryEvent{
+	progress.Event(ctx, domain.DeliveryEvent{
 		Timestamp: time.Now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   "Cluster deletion complete",

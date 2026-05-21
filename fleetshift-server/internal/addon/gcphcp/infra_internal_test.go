@@ -134,7 +134,7 @@ func TestWaitForPSCCleanup_EmitsProgressWhileArtifactsRemain(t *testing.T) {
 		}, nil
 	}
 
-	obs := &recordingDeliveryObserver{}
+	obs := &testEventRecorder{}
 	runner := &InfraRunner{HypershiftBinary: "hypershift"}
 	if err := runner.WaitForPSCCleanup(
 		context.Background(),
@@ -142,7 +142,7 @@ func TestWaitForPSCCleanup_EmitsProgressWhileArtifactsRemain(t *testing.T) {
 		"project-123",
 		"us-central1",
 		"workforce-token",
-		newRecordingSignaler(obs),
+		newTestProgress(obs),
 	); err != nil {
 		t.Fatalf("WaitForPSCCleanup() error = %v", err)
 	}
