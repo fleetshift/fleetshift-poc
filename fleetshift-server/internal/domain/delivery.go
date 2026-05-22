@@ -148,6 +148,23 @@ func (d *Delivery) Withdraw(now time.Time) error {
 	return nil
 }
 
+// Retry prepares the delivery for a same-generation re-dispatch. It
+// returns true if a re-dispatch is needed (i.e. the delivery is still
+// [DeliveryStatePending] at the expected generation because the
+// previous dispatch failed before the addon received it). Returns
+// false if the delivery has already progressed past Pending, or the
+// generation doesn't match (stale activity invocation).
+func (d *Delivery) Retry(generation Generation, now time.Time) bool {
+	if d.Generation != generation {
+		return false
+	}
+	if d.State != DeliveryStatePending {
+		return false
+	}
+	d.UpdatedAt = now
+	return true
+}
+
 // ActiveDelivery is the enriched view of a [Delivery] returned by
 // [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery
 // record with the full context an addon needs to resume work after a

@@ -286,12 +286,10 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 				if err := d.Redispatch(in.Manifests, in.Generation, now); err != nil {
 					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID, err)
 				}
-			} else {
-				// Same generation retry (e.g. ContinueAsNew / activity replay):
-				// reset to Pending so the addon re-processes.
-				d.Manifests = in.Manifests
-				d.State = DeliveryStatePending
-				d.UpdatedAt = now
+			} else if !d.Retry(in.Generation, now) {
+				// Delivery already progressed past Pending (addon received
+				// and acked). The ack signal is queued; no re-dispatch needed.
+				return struct{}{}, nil
 			}
 		}
 
