@@ -300,7 +300,6 @@ func (a *Agent) Remove(
 		a.clusterMu.Unlock()
 
 		lock.Unlock()
-		a.deliveryLocks.Delete(spec.Name)
 		a.observer.Info("cluster deleted successfully", "cluster", spec.Name)
 	}
 
