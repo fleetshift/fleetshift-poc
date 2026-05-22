@@ -250,22 +250,31 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+// Like Deliver, the work runs asynchronously and reports via
+// [domain.DeliveryReporter.ReportResult].
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
 		return fmt.Errorf("validate manifests: %w", err)
 	}
 
-	provider := a.providerFactory(nil)
-
-	for _, spec := range specs {
-		if !a.clusterExists(provider, spec.Name) {
-			continue
+	go func() {
+		provider := a.providerFactory(nil)
+		for _, spec := range specs {
+			if !a.clusterExists(provider, spec.Name) {
+				continue
+			}
+			if err := provider.Delete(spec.Name, ""); err != nil {
+				_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: err.Error(),
+				})
+				return
+			}
 		}
-		if err := provider.Delete(spec.Name, ""); err != nil {
-			return fmt.Errorf("delete kind cluster %q: %w", spec.Name, err)
-		}
-	}
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			State: domain.DeliveryStateDelivered,
+		})
+	}()
 	return nil
 }
 

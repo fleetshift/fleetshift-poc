@@ -461,14 +461,39 @@ func (a *Agent) handleCompletion(
 // (provisions map) or on disk (deterministic work dir). If found, it
 // destroys using that work directory directly. Otherwise it falls through
 // to the normal target-property-based destroy path.
+//
+// Like Deliver, the work runs asynchronously and reports via
+// [domain.DeliveryReporter.ReportResult].
 func (a *Agent) Remove(
 	ctx context.Context,
 	target domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
 	_ domain.Generation,
+) error {
+	go func() {
+		err := a.doRemove(context.Background(), target, manifests, auth)
+		if err != nil {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+				State: domain.DeliveryStateFailed, Message: err.Error(),
+			})
+			return
+		}
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			State: domain.DeliveryStateDelivered,
+		})
+	}()
+	return nil
+}
+
+// doRemove performs the actual cluster destruction synchronously.
+func (a *Agent) doRemove(
+	ctx context.Context,
+	target domain.TargetInfo,
+	manifests []domain.Manifest,
+	auth domain.DeliveryAuth,
 ) error {
 	// Try to get cluster name from manifests for work dir lookup
 	spec, specErr := ParseClusterSpec(manifests)

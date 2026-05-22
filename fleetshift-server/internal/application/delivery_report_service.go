@@ -60,6 +60,9 @@ func NewDeliveryReportService(
 
 // ReportEvent records a non-terminal delivery event. If the delivery
 // is not yet in [domain.DeliveryStateProgressing], it transitions it.
+// When this is the first transition out of [domain.DeliveryStatePending],
+// a [domain.DeliveryAckedEvent] signal is sent to the fulfillment
+// workflow so it knows the addon received the work.
 // Events for deliveries already in a terminal state are silently
 // ignored (the state machine rejects the transition).
 func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, event domain.DeliveryEvent) error {
@@ -73,6 +76,8 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 	if err != nil {
 		return fmt.Errorf("get delivery: %w", err)
 	}
+
+	wasPending := d.State == domain.DeliveryStatePending
 
 	if err := d.TransitionTo(domain.DeliveryStateProgressing, time.Now()); err != nil {
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
@@ -93,13 +98,26 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 		_, probe := s.observer.EventEmitted(ctx, deliveryID, target, event)
 		probe.End()
 	}
+
+	if wasPending && s.signaler != nil {
+		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+			DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID},
+		}); err != nil {
+			return fmt.Errorf("signal ack: %w", err)
+		}
+	}
 	return nil
 }
 
-// ReportResult records a delivery state transition and, for terminal
-// states, signals the fulfillment workflow. Returns nil without
-// persisting if the state machine rejects the transition (e.g. the
-// delivery is already terminal).
+// ReportResult records a delivery state transition and signals the
+// fulfillment workflow on two occasions:
+//   - When the delivery first transitions out of [domain.DeliveryStatePending]
+//     (ack signal), telling the workflow the addon received the work.
+//   - When a terminal state is reached (completion signal), telling
+//     the workflow the work is done.
+//
+// Returns nil without persisting if the state machine rejects the
+// transition (e.g. the delivery is already terminal).
 // TODO: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, result domain.DeliveryResult) error {
 	tx, err := s.store.Begin(ctx)
@@ -112,6 +130,8 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 	if err != nil {
 		return fmt.Errorf("get delivery: %w", err)
 	}
+
+	wasPending := d.State == domain.DeliveryStatePending
 
 	if err := d.TransitionTo(result.State, time.Now()); err != nil {
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
@@ -132,14 +152,24 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		probe.End()
 	}
 
-	if s.signaler != nil && result.State.IsTerminal() {
-		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
-			DeliveryCompleted: &domain.DeliveryCompletionEvent{
-				DeliveryID: deliveryID,
-				Result:     result,
-			},
-		}); err != nil {
-			return fmt.Errorf("signal workflow: %w", err)
+	if s.signaler != nil {
+		// TODO: maybe result should not accept non terminal states? not sure it makes sense otherwise
+		if wasPending && !result.State.IsTerminal() {
+			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+				DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID},
+			}); err != nil {
+				return fmt.Errorf("signal ack: %w", err)
+			}
+		}
+		if result.State.IsTerminal() {
+			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+				DeliveryCompleted: &domain.DeliveryCompletionEvent{
+					DeliveryID: deliveryID,
+					Result:     result,
+				},
+			}); err != nil {
+				return fmt.Errorf("signal workflow: %w", err)
+			}
 		}
 	}
 	return nil

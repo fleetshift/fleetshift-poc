@@ -111,6 +111,43 @@ func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
 	return nil
 }
 
+// Redispatch resets the delivery for a new put cycle at an advanced
+// generation. The manifests are replaced and the lifecycle restarts
+// from [DeliveryStatePending]. This is the only legal way to move a
+// delivery backward in its state machine for a put operation.
+//
+// Returns [ErrIllegalStateTransition] if generation does not advance
+// past the delivery's current generation.
+func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now time.Time) error {
+	if generation <= d.Generation {
+		return fmt.Errorf("%w: cannot redispatch at generation %d (current %d)",
+			ErrIllegalStateTransition, generation, d.Generation)
+	}
+	d.Manifests = manifests
+	d.Generation = generation
+	d.State = DeliveryStatePending
+	d.UpdatedAt = now
+	return nil
+}
+
+// Withdraw resets the delivery for a removal cycle. The generation
+// and manifests are preserved -- the withdrawal targets whatever was
+// actually delivered to the target, regardless of whether the
+// fulfillment has since advanced. A target is withdrawn when it leaves
+// placement (e.g. label change, pool mutation, fulfillment deletion).
+//
+// Returns [ErrIllegalStateTransition] if the delivery is not in a
+// terminal state.
+func (d *Delivery) Withdraw(now time.Time) error {
+	if !d.State.IsTerminal() {
+		return fmt.Errorf("%w: cannot withdraw from non-terminal state %q",
+			ErrIllegalStateTransition, d.State)
+	}
+	d.State = DeliveryStatePending
+	d.UpdatedAt = now
+	return nil
+}
+
 // ActiveDelivery is the enriched view of a [Delivery] returned by
 // [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery
 // record with the full context an addon needs to resume work after a

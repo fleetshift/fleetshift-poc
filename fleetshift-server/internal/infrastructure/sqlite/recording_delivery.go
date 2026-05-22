@@ -8,11 +8,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// RecordingDeliveryService implements [domain.DeliveryAgent] (and
-// [domain.DeliveryService]) by writing delivery records to SQLite
-// without performing real delivery. Useful as a stub agent for
-// development, testing, or target types that have no real delivery
-// agent registered yet.
+// RecordingDeliveryService implements [domain.DeliveryAgent] by writing
+// delivery records to SQLite without performing real delivery. Useful
+// as a stub agent for development, testing, or target types that have
+// no real delivery agent registered yet.
 //
 // Deliver records the delivery and reports completion asynchronously
 // via [domain.DeliveryReporter.ReportResult].
@@ -79,7 +78,17 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 	}); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit: %w", err)
+	}
+
+	if s.Reporter != nil {
+		go func() {
+			_ = s.Reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
+	}
+
+	return nil
 }
 
 func (s *RecordingDeliveryService) now() time.Time {

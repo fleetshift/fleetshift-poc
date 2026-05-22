@@ -21,6 +21,9 @@ func (r *stubRecord) Run(activity domain.Activity[any, any], in any) (any, error
 func (r *stubRecord) Await(_ string) (any, error) {
 	return nil, nil
 }
+func (r *stubRecord) AwaitWithTimeout(_ string, _ time.Duration) (any, error) {
+	return nil, domain.ErrSignalTimeout
+}
 func (r *stubRecord) Sleep(_ time.Duration) error {
 	return nil
 }

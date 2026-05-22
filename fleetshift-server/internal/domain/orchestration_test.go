@@ -293,6 +293,9 @@ func (r *recordingRecord) Run(activity domain.Activity[any, any], in any) (any, 
 func (r *recordingRecord) Await(signalName string) (any, error) {
 	return r.delegate.Await(signalName)
 }
+func (r *recordingRecord) AwaitWithTimeout(signalName string, timeout time.Duration) (any, error) {
+	return r.delegate.AwaitWithTimeout(signalName, timeout)
+}
 func (r *recordingRecord) Sleep(d time.Duration) error {
 	return r.delegate.Sleep(d)
 }
@@ -320,6 +323,26 @@ func (r *simpleRecord) Run(activity domain.Activity[any, any], in any) (any, err
 func (r *simpleRecord) Await(_ string) (any, error) {
 	e := <-r.events
 	return e, nil
+}
+func (r *simpleRecord) AwaitWithTimeout(_ string, timeout time.Duration) (any, error) {
+	if timeout == 0 {
+		select {
+		case e := <-r.events:
+			return e, nil
+		default:
+			return nil, domain.ErrSignalTimeout
+		}
+	}
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case e := <-r.events:
+		return e, nil
+	case <-timer.C:
+		return nil, domain.ErrSignalTimeout
+	case <-r.ctx.Done():
+		return nil, r.ctx.Err()
+	}
 }
 func (r *simpleRecord) Sleep(_ time.Duration) error {
 	return nil
@@ -398,7 +421,15 @@ func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -425,7 +456,15 @@ func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, delivery
 	return nil
 }
 
-func (asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -452,7 +491,15 @@ func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -479,7 +526,15 @@ func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo
 	return nil
 }
 
-func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -500,8 +555,16 @@ func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
-	return f.err
+func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		f.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: f.err.Error()},
+			},
+		}
+	}()
+	return nil
 }
 
 type authFailingDelivery struct {
@@ -523,7 +586,15 @@ func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, del
 	return nil
 }
 
-func (authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -549,7 +620,15 @@ func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo,
 	return nil
 }
 
-func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -557,7 +636,7 @@ func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ dom
 // Helper to build a standard workflow spec for tests
 // ---------------------------------------------------------------------------
 
-func newTestWorkflow(store domain.Store, delivery domain.DeliveryService, events chan domain.FulfillmentEvent, opts ...func(*domain.OrchestrationWorkflowSpec)) *domain.OrchestrationWorkflowSpec {
+func newTestWorkflow(store domain.Store, delivery domain.DeliveryAgent, events chan domain.FulfillmentEvent, opts ...func(*domain.OrchestrationWorkflowSpec)) *domain.OrchestrationWorkflowSpec {
 	reg := &stubRegistry{events: events}
 	wf := &domain.OrchestrationWorkflowSpec{
 		Store:           store,
@@ -1130,7 +1209,10 @@ type afterLoadBumpGenRecord struct {
 func (r *afterLoadBumpGenRecord) ID() string                    { return r.delegate.ID() }
 func (r *afterLoadBumpGenRecord) Context() context.Context      { return r.delegate.Context() }
 func (r *afterLoadBumpGenRecord) Await(sig string) (any, error) { return r.delegate.Await(sig) }
-func (r *afterLoadBumpGenRecord) Sleep(d time.Duration) error   { return r.delegate.Sleep(d) }
+func (r *afterLoadBumpGenRecord) AwaitWithTimeout(sig string, timeout time.Duration) (any, error) {
+	return r.delegate.AwaitWithTimeout(sig, timeout)
+}
+func (r *afterLoadBumpGenRecord) Sleep(d time.Duration) error { return r.delegate.Sleep(d) }
 
 func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any) (any, error) {
 	out, err := r.delegate.Run(activity, in)
@@ -1230,6 +1312,9 @@ func (r *attestationCapturingRecord) ID() string               { return r.delega
 func (r *attestationCapturingRecord) Context() context.Context { return r.delegate.Context() }
 func (r *attestationCapturingRecord) Await(sig string) (any, error) {
 	return r.delegate.Await(sig)
+}
+func (r *attestationCapturingRecord) AwaitWithTimeout(sig string, timeout time.Duration) (any, error) {
+	return r.delegate.AwaitWithTimeout(sig, timeout)
 }
 func (r *attestationCapturingRecord) Sleep(d time.Duration) error {
 	return r.delegate.Sleep(d)
@@ -1401,7 +1486,7 @@ func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 
 // authFailingNoSignalDelivery signals [domain.DeliveryStateAuthFailed]
 // through the events channel. This verifies that auth failures flowing
-// through the async path (awaitDeliveries) correctly pause the
+// through the async path (dispatchAndAwait) correctly pause the
 // fulfillment. In the previous architecture this fake returned auth
 // failure synchronously without signaling; the async delivery model
 // eliminated that dual-path.
@@ -1424,7 +1509,15 @@ func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetI
 	return nil
 }
 
-func (authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -1459,7 +1552,7 @@ func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 			t.Errorf("State = %q, want paused_auth", dep.State)
 		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("orchestration hung: deliver-to-target returned auth_failed without signaling Done, awaitDeliveries blocked forever")
+		t.Fatal("orchestration hung: deliver-to-target returned auth_failed without signaling Done, dispatchAndAwait blocked forever")
 	}
 }
 

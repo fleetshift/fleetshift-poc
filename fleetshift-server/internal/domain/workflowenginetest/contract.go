@@ -36,7 +36,7 @@ type DeliveryReporterFactory func(reg domain.Registry) domain.DeliveryReporter
 // for all engines; implementations do not provide it.
 type Infra struct {
 	Store                   domain.Store
-	Delivery                domain.DeliveryService
+	Delivery                domain.DeliveryAgent
 	DeliveryReporterFactory DeliveryReporterFactory
 	Vault                   domain.Vault
 	AgentRegistrar          AgentRegistrar
@@ -1028,7 +1028,10 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return nil
 }
 
@@ -1063,7 +1066,10 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 	return nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return nil
 }
 
@@ -1107,15 +1113,19 @@ func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, del
 	return nil
 }
 
-func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return nil
 }
 
 // terminalFailAgent always returns a terminal error from Deliver.
 // It counts invocations so tests can verify the engine did not retry.
 type terminalFailAgent struct {
-	mu    sync.Mutex
-	calls int
+	reporter domain.DeliveryReporter
+	mu       sync.Mutex
+	calls    int
 }
 
 func (a *terminalFailAgent) Calls() int {
@@ -1131,7 +1141,12 @@ func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ do
 	return domain.TerminalError(errors.New("permanently broken"))
 }
 
-func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+	if a.reporter != nil {
+		go func() {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
+	}
 	return nil
 }
 
@@ -1150,13 +1165,17 @@ func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, d
 	return nil
 }
 
-func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
 	a.mu.Lock()
-	defer a.mu.Unlock()
 	if a.failsRemaining > 0 {
 		a.failsRemaining--
+		a.mu.Unlock()
 		return errors.New("transient remove failure")
 	}
+	a.mu.Unlock()
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return nil
 }
 

@@ -96,6 +96,7 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 
 	wfFunc := func(ctx workflow.Context, fulfillmentID domain.FulfillmentID) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.FulfillmentEvent](ctx, domain.FulfillmentEventSignal.Name)
+		port := newSignalPort(ch)
 		record := &baseRecord{
 			wfCtx:    ctx,
 			invokers: invokers,
@@ -107,6 +108,9 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 					}
 					return val, nil
 				},
+			},
+			signalPorts: map[string]*signalPort{
+				domain.FulfillmentEventSignal.Name: port,
 			},
 		}
 		val, err := spec.Run(record, fulfillmentID)
@@ -191,6 +195,7 @@ func (r *Registry) RegisterDeleteDeploymentCleanup(spec *domain.DeleteDeployment
 
 	wfFunc := func(ctx workflow.Context, input domain.DeleteDeploymentCleanupInput) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
+		port := newSignalPort(ch)
 		record := &baseRecord{
 			wfCtx:    ctx,
 			invokers: invokers,
@@ -202,6 +207,9 @@ func (r *Registry) RegisterDeleteDeploymentCleanup(spec *domain.DeleteDeployment
 					}
 					return val, nil
 				},
+			},
+			signalPorts: map[string]*signalPort{
+				domain.DeleteCleanupCompleteSignal.Name: port,
 			},
 		}
 		return spec.Run(record, input)
@@ -228,6 +236,7 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 
 	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceCleanupInput) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
+		port := newSignalPort(ch)
 		record := &baseRecord{
 			wfCtx:    ctx,
 			invokers: invokers,
@@ -239,6 +248,9 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 					}
 					return val, nil
 				},
+			},
+			signalPorts: map[string]*signalPort{
+				domain.DeleteCleanupCompleteSignal.Name: port,
 			},
 		}
 		return spec.Run(record, input)
@@ -396,10 +408,19 @@ func registerActivity[I, O any](
 
 // --- shared base Record ---
 
+// signalPort provides timeout-aware signal reception for a typed
+// go-workflows channel. Closures capture the concrete channel type.
+type signalPort struct {
+	receive            func(workflow.Context) (any, bool)
+	receiveNonBlocking func() (any, bool)
+	addToSelect        func(workflow.Context, *[]workflow.SelectCase, *any)
+}
+
 type baseRecord struct {
-	wfCtx    workflow.Context
-	invokers map[string]activityInvoker
-	signals  map[string]func() (any, error)
+	wfCtx       workflow.Context
+	invokers    map[string]activityInvoker
+	signals     map[string]func() (any, error)
+	signalPorts map[string]*signalPort
 }
 
 func (r *baseRecord) ID() string {
@@ -430,8 +451,56 @@ func (r *baseRecord) Await(signalName string) (any, error) {
 	return recv()
 }
 
+func (r *baseRecord) AwaitWithTimeout(signalName string, timeout time.Duration) (any, error) {
+	port, ok := r.signalPorts[signalName]
+	if !ok {
+		return nil, fmt.Errorf("signal %q not registered", signalName)
+	}
+
+	if timeout == 0 {
+		val, ok := port.receiveNonBlocking()
+		if !ok {
+			return nil, domain.ErrSignalTimeout
+		}
+		return val, nil
+	}
+
+	var result any
+	var timedOut bool
+	tctx, cancel := workflow.WithCancel(r.wfCtx)
+	var cases []workflow.SelectCase
+	port.addToSelect(r.wfCtx, &cases, &result)
+	cases = append(cases, workflow.Await(workflow.ScheduleTimer(tctx, timeout), func(_ workflow.Context, _ workflow.Future[any]) {
+		timedOut = true
+	}))
+	workflow.Select(r.wfCtx, cases...)
+	cancel()
+	if timedOut {
+		return nil, domain.ErrSignalTimeout
+	}
+	return result, nil
+}
+
 func (r *baseRecord) Sleep(d time.Duration) error {
 	return workflow.Sleep(r.wfCtx, d)
+}
+
+// newSignalPort creates a [signalPort] from a typed go-workflows channel.
+func newSignalPort[T any](ch workflow.Channel[T]) *signalPort {
+	return &signalPort{
+		receive: func(ctx workflow.Context) (any, bool) {
+			val, ok := ch.Receive(ctx)
+			return val, ok
+		},
+		receiveNonBlocking: func() (any, bool) {
+			return ch.ReceiveNonBlocking()
+		},
+		addToSelect: func(ctx workflow.Context, cases *[]workflow.SelectCase, result *any) {
+			*cases = append(*cases, workflow.Receive(ch, func(_ workflow.Context, v T, _ bool) {
+				*result = v
+			}))
+		},
+	}
 }
 
 // --- OrchestrationWorkflow ---

@@ -267,7 +267,11 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // Deliver) and uses platform credentials. Otherwise falls back to
 // token passthrough (auth.Token).
 // Resources that are already gone (404) are silently skipped.
-func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+//
+// Like Deliver, the work runs asynchronously. The method validates
+// inputs synchronously and returns nil, then reports the outcome via
+// [domain.DeliveryReporter.ReportResult].
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {
@@ -280,14 +284,38 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.D
 		if err != nil {
 			return fmt.Errorf("build platform REST config: %w", err)
 		}
-		return a.deleteManifests(ctx, cfg, manifests)
+		go func() {
+			err := a.deleteManifests(context.Background(), cfg, manifests)
+			if err != nil {
+				_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+					State: deliveryStateForError(err), Message: err.Error(),
+				})
+				return
+			}
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+				State: domain.DeliveryStateDelivered,
+			})
+		}()
+		return nil
 	}
 
 	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
 		return fmt.Errorf("build REST config: %w", err)
 	}
-	return a.deleteManifests(ctx, cfg, manifests)
+	go func() {
+		err := a.deleteManifests(context.Background(), cfg, manifests)
+		if err != nil {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+				State: deliveryStateForError(err), Message: err.Error(),
+			})
+			return
+		}
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			State: domain.DeliveryStateDelivered,
+		})
+	}()
+	return nil
 }
 
 // buildPlatformRESTConfig builds a REST config from target properties

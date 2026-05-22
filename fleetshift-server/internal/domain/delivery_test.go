@@ -142,3 +142,127 @@ func TestDelivery_TransitionTo_Backward_Fails(t *testing.T) {
 		t.Errorf("error = %v, want ErrIllegalStateTransition", err)
 	}
 }
+
+func TestDelivery_Redispatch(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Hour)
+
+	t.Run("advances generation and resets state", func(t *testing.T) {
+		d := Delivery{
+			ID:         "d1",
+			State:      DeliveryStateDelivered,
+			Manifests:  []Manifest{{Raw: []byte("old")}},
+			Generation: 1,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		newManifests := []Manifest{{Raw: []byte("new")}}
+		if err := d.Redispatch(newManifests, 2, later); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+		if d.Generation != 2 {
+			t.Errorf("Generation = %d, want 2", d.Generation)
+		}
+		if len(d.Manifests) != 1 || string(d.Manifests[0].Raw) != "new" {
+			t.Errorf("Manifests not replaced")
+		}
+		if d.UpdatedAt != later {
+			t.Errorf("UpdatedAt = %v, want %v", d.UpdatedAt, later)
+		}
+	})
+
+	t.Run("same generation fails", func(t *testing.T) {
+		d := Delivery{State: DeliveryStateDelivered, Generation: 3, UpdatedAt: now}
+		err := d.Redispatch(nil, 3, later)
+		if err == nil {
+			t.Fatal("expected error for same generation")
+		}
+		if !errors.Is(err, ErrIllegalStateTransition) {
+			t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+		}
+		if d.State != DeliveryStateDelivered {
+			t.Errorf("State changed on failed redispatch")
+		}
+	})
+
+	t.Run("lower generation fails", func(t *testing.T) {
+		d := Delivery{State: DeliveryStateProgressing, Generation: 5, UpdatedAt: now}
+		err := d.Redispatch(nil, 3, later)
+		if err == nil {
+			t.Fatal("expected error for lower generation")
+		}
+		if !errors.Is(err, ErrIllegalStateTransition) {
+			t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+		}
+	})
+
+	t.Run("works from non-terminal state", func(t *testing.T) {
+		d := Delivery{State: DeliveryStateProgressing, Generation: 1, UpdatedAt: now}
+		newManifests := []Manifest{{Raw: []byte("v2")}}
+		if err := d.Redispatch(newManifests, 2, later); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+	})
+}
+
+func TestDelivery_Withdraw(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Hour)
+
+	t.Run("resets terminal delivery to pending", func(t *testing.T) {
+		d := Delivery{
+			ID:         "d1",
+			State:      DeliveryStateDelivered,
+			Manifests:  []Manifest{{Raw: []byte("keep")}},
+			Generation: 5,
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+		if err := d.Withdraw(later); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+		if d.Generation != 5 {
+			t.Errorf("Generation changed to %d, want 5", d.Generation)
+		}
+		if len(d.Manifests) != 1 || string(d.Manifests[0].Raw) != "keep" {
+			t.Error("Manifests changed during withdraw")
+		}
+		if d.UpdatedAt != later {
+			t.Errorf("UpdatedAt = %v, want %v", d.UpdatedAt, later)
+		}
+	})
+
+	t.Run("fails from non-terminal state", func(t *testing.T) {
+		for _, state := range []DeliveryState{
+			DeliveryStatePending,
+			DeliveryStateAccepted,
+			DeliveryStateProgressing,
+		} {
+			t.Run(string(state), func(t *testing.T) {
+				d := Delivery{State: state, UpdatedAt: now}
+				err := d.Withdraw(later)
+				if err == nil {
+					t.Fatal("expected error for non-terminal state")
+				}
+				if !errors.Is(err, ErrIllegalStateTransition) {
+					t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+				}
+				if d.State != state {
+					t.Errorf("State changed on failed withdraw")
+				}
+				if d.UpdatedAt != now {
+					t.Error("UpdatedAt changed on failed withdraw")
+				}
+			})
+		}
+	})
+}

@@ -209,6 +209,9 @@ func (r *provisionSyncRecord) Run(activity domain.Activity[any, any], in any) (a
 func (r *provisionSyncRecord) Await(_ string) (any, error) {
 	return nil, fmt.Errorf("provisionSyncRecord: Await not supported")
 }
+func (r *provisionSyncRecord) AwaitWithTimeout(_ string, _ time.Duration) (any, error) {
+	return nil, domain.ErrSignalTimeout
+}
 func (r *provisionSyncRecord) Sleep(_ time.Duration) error {
 	return nil
 }
