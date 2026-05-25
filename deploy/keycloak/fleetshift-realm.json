@@ -252,6 +252,9 @@
       { "client": "fleetshift-ui", "roles": ["fleetshift-user"] },
       { "client": "fleetshift-cli", "roles": ["fleetshift-user"] },
       { "client": "fleetshift-signing", "roles": ["fleetshift-user"] }
+    ],
+    "account": [
+      { "client": "fleetshift-ui", "roles": ["manage-account", "view-profile"] }
     ]
   },
   "users": [

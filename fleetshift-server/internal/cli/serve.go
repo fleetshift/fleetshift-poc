@@ -486,6 +486,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
+	topMux.HandleFunc("GET /api/ui/github-signing-keys/{username}", transporthttp.HandleGitHubSigningKeys)
+	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
+		AuthMethods: authMethodSvc,
+		Verifier:    tokenVerifier,
+		Store:       store,
+		Provenance:  provenanceBuilder,
+	})
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 
 	if f.webDir != "" {

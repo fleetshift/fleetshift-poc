@@ -193,6 +193,29 @@ func (b *KeyResolverProvenanceBuilder) resolveSigningKeys(ctx context.Context, e
 	return b.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
 }
 
+// VerifySignature checks whether sig is a valid ECDSA signature over
+// doc for the given caller's enrolled signing key. Used for test-sign
+// verification after enrollment.
+func (b *KeyResolverProvenanceBuilder) VerifySignature(
+	ctx context.Context,
+	enrollments domain.SignerEnrollmentRepository,
+	caller *domain.SubjectClaims,
+	doc, sig []byte,
+) error {
+	enrollment, err := b.loadEnrollment(ctx, enrollments, caller)
+	if err != nil {
+		return err
+	}
+	keys, err := b.resolveSigningKeys(ctx, enrollment)
+	if err != nil {
+		return fmt.Errorf("resolve signing keys: %w", err)
+	}
+	if err := verifySignatureAgainstKeySet(doc, sig, keys); err != nil {
+		return fmt.Errorf("%w: signature verification failed", domain.ErrInvalidArgument)
+	}
+	return nil
+}
+
 func (b *KeyResolverProvenanceBuilder) loadOIDCConfig(ctx context.Context) (domain.OIDCConfig, error) {
 	methods, err := b.AuthMethods.List(ctx)
 	if err != nil {

@@ -53,7 +53,8 @@ func (r *SignerEnrollmentRepo) ListBySubject(ctx context.Context, identity domai
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT id, subject_id, issuer, identity_token, registry_subject, registry_id,
 		        created_at, expires_at
-		 FROM signer_enrollments WHERE subject_id = $1 AND issuer = $2`,
+		 FROM signer_enrollments WHERE subject_id = $1 AND issuer = $2
+		 ORDER BY created_at DESC`, // newest first so callers that pick [0] get the latest key (re-enrollment)
 		identity.Subject, identity.Issuer,
 	)
 	if err != nil {

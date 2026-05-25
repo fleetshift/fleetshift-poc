@@ -204,6 +204,10 @@ type SignerEnrollment struct {
 }
 
 // SignerEnrollmentRepository persists signer enrollments.
+//
+// TODO: add Delete(ctx, id) to support clean re-enrollment from the UI.
+// Currently re-enrollment creates a new row; ListBySubject returns newest
+// first so callers pick the right key, but old rows accumulate.
 type SignerEnrollmentRepository interface {
 	Create(ctx context.Context, enrollment SignerEnrollment) error
 	Get(ctx context.Context, id SignerEnrollmentID) (SignerEnrollment, error)
