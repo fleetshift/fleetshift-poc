@@ -1,5 +1,5 @@
 import { spawn } from "child_process";
-import { watch } from "fs";
+import { watch, mkdirSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { execSync } from "child_process";
@@ -15,11 +15,14 @@ function merge() {
   clearTimeout(mergeTimer);
   mergeTimer = setTimeout(() => {
     try {
-      execSync("node scripts/merge-web.mjs", { cwd: root, stdio: "inherit" });
+      execSync("node scripts/merge-web.mjs --incremental", {
+        cwd: root,
+        stdio: "inherit",
+      });
     } catch {
       console.error("merge-web.mjs failed");
     }
-  }, 500);
+  }, 1500);
 }
 
 if (!watchOnly) {
@@ -28,6 +31,10 @@ if (!watchOnly) {
 
   console.log("Running initial build...");
   execSync("npm run build -w packages/mock-ui-plugins", {
+    cwd: root,
+    stdio: "inherit",
+  });
+  execSync("node scripts/generate-plugin-registry.mjs", {
     cwd: root,
     stdio: "inherit",
   });
@@ -57,6 +64,8 @@ const guiWatch = spawn(
   },
 );
 
+mkdirSync(guiDist, { recursive: true });
+mkdirSync(pluginsDist, { recursive: true });
 watch(guiDist, { recursive: true }, merge);
 watch(pluginsDist, { recursive: true }, merge);
 

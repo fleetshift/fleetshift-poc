@@ -4,13 +4,6 @@ import {
   signDeployment as signDeploy,
 } from "./signingKeyApi";
 
-/**
- * Lightweight hook for components that just need to know whether a
- * signing key exists and to sign payloads (e.g. DeploymentsPage).
- *
- * For the full enrollment wizard, use `useSigningKeyStore` from
- * `signingKeyStore.ts` instead.
- */
 export function useSigningKey() {
   const [enrolled, setEnrolled] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -28,10 +21,10 @@ export function useSigningKey() {
     };
   }, []);
 
-  const sign = useCallback(
+  const signDeployment = useCallback(
     (envelopeBytes: Uint8Array): Promise<string> => signDeploy(envelopeBytes),
     [],
   );
 
-  return { loaded, enrolled, signDeployment: sign };
+  return { loaded, enrolled, signDeployment };
 }

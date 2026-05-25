@@ -27,8 +27,7 @@ const components: ComponentCard[] = [
   {
     title: "Clusters",
     slug: "clusters",
-    description:
-      "Manage and monitor your kind clusters across the fleet.",
+    description: "Manage and monitor your kind clusters across the fleet.",
     status: "in-progress",
     element: (
       <Suspense>
@@ -89,6 +88,7 @@ function ComponentGallery() {
             style={{ cursor: "pointer" }}
           >
             <CardHeader
+              selectableActions={{ selectableActionAriaLabel: "actions" }}
               actions={{
                 actions: (
                   <Label color={statusColor[c.status]}>{c.status}</Label>

@@ -135,7 +135,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   if (error) {
-    return <div style={{ padding: "2rem", color: "red" }}>Failed to load OIDC config: {error}</div>;
+    return (
+      <div style={{ padding: "2rem", color: "red" }}>
+        Failed to load OIDC config: {error}
+      </div>
+    );
   }
 
   if (!oidcProps) return null;

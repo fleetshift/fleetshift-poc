@@ -1,0 +1,30 @@
+.ome-setup-layout {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background-color: var(--pf-t--global--background--color--secondary--default);
+
+  &__scroll {
+    flex: 1;
+    overflow-y: auto;
+  }
+
+  &__content {
+    max-width: 900px;
+    width: 100%;
+    margin: var(--pf-t--global--spacer--lg) auto;
+    padding: var(--pf-t--global--spacer--xl);
+    background-color: var(
+      --pf-t--global--background--color--glass--primary--default,
+      var(--pf-t--global--background--color--primary--default)
+    );
+    backdrop-filter: var(
+      --pf-t--global--background--filter--glass--blur--primary
+    );
+    border-radius: var(--pf-t--global--border--radius--medium);
+    border: var(--pf-t--global--border--width--main--default) solid
+      var(--pf-t--global--border--color--main--default);
+    box-shadow: var(--pf-t--global--box-shadow--glass--default, none);
+  }
+}

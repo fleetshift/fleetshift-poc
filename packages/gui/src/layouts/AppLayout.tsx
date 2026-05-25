@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from "react";
+import { useMemo } from "react";
 import { Outlet, Link, useLocation } from "react-router-dom";
 import {
   Masthead,
@@ -26,12 +26,14 @@ import {
   BugIcon,
   MoonIcon,
   SunIcon,
+  WineGlassIcon,
 } from "@patternfly/react-icons";
 import { useAuth } from "../contexts/AuthContext";
 import { useAppConfig } from "../contexts/AppConfigContext";
 import type { PluginPage } from "../contexts/AppConfigContext";
 import logo from "../assets/masthead.png";
 import "./AppLayout.scss";
+import ThemeToggle, { ThemeToggleType } from "../components/Themes/ThemeToggle";
 
 const UserSwitcher = () => {
   const { user, logout } = useAuth();
@@ -45,37 +47,6 @@ const UserSwitcher = () => {
         </Button>
       </ToolbarItem>
     </ToolbarGroup>
-  );
-};
-
-const DARK_MODE_KEY = "fleetshift_dark_mode";
-const DARK_CLASS = "pf-v6-theme-dark";
-
-function initDarkMode(): boolean {
-  const stored = localStorage.getItem(DARK_MODE_KEY);
-  const isDark = stored === "true";
-  if (isDark) {
-    document.documentElement.classList.add(DARK_CLASS);
-  }
-  return isDark;
-}
-
-const DarkModeToggle = () => {
-  const [dark, setDark] = useState(initDarkMode);
-
-  const toggle = useCallback(() => {
-    setDark((prev) => {
-      const next = !prev;
-      document.documentElement.classList.toggle(DARK_CLASS, next);
-      localStorage.setItem(DARK_MODE_KEY, String(next));
-      return next;
-    });
-  }, []);
-
-  return (
-    <Button variant="plain" aria-label="Toggle dark mode" onClick={toggle}>
-      {dark ? <SunIcon /> : <MoonIcon />}
-    </Button>
   );
 };
 
@@ -115,7 +86,18 @@ const AppMasthead = () => (
               </Button>
             </ToolbarItem>
             <ToolbarItem>
-              <DarkModeToggle />
+              <ThemeToggle
+                theme={ThemeToggleType.Glass}
+                OnIcon={WineGlassIcon}
+                OffIcon={WineGlassIcon}
+              />
+            </ToolbarItem>
+            <ToolbarItem>
+              <ThemeToggle
+                theme={ThemeToggleType.Dark}
+                OnIcon={MoonIcon}
+                OffIcon={SunIcon}
+              />
             </ToolbarItem>
           </ToolbarGroup>
         </ToolbarContent>

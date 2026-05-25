@@ -16,6 +16,11 @@ export async function mgmtFetch<T>(
   return res.json();
 }
 
+export interface RegistrySubjectMapping {
+  registryId: string;
+  expression: string;
+}
+
 export interface OIDCConfig {
   issuerUrl: string;
   audience: string;
@@ -23,6 +28,7 @@ export interface OIDCConfig {
   authorizationEndpoint?: string;
   tokenEndpoint?: string;
   jwksUri?: string;
+  registrySubjectMapping?: RegistrySubjectMapping;
 }
 
 export interface AuthMethod {

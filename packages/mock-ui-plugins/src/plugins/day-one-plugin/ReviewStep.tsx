@@ -39,9 +39,7 @@ export default function ReviewStep({ formData }: ReviewStepProps) {
           <DescriptionListGroup>
             <DescriptionListTerm>API server port</DescriptionListTerm>
             <DescriptionListDescription>
-              {formData.apiServerPort > 0
-                ? formData.apiServerPort
-                : "Auto"}
+              {formData.apiServerPort > 0 ? formData.apiServerPort : "Auto"}
             </DescriptionListDescription>
           </DescriptionListGroup>
 

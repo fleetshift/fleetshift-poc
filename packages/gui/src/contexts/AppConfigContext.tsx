@@ -41,6 +41,14 @@ interface AppConfigContextValue {
 
 const AppConfigContext = createContext<AppConfigContextValue | null>(null);
 
+const FALLBACK_CONFIG: AppConfigContextValue = {
+  scalprumConfig: {},
+  pluginPages: [],
+  navLayout: [],
+  pluginEntries: [],
+  assetsHost: "",
+};
+
 export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfigContextValue | null>(null);
 
@@ -61,6 +69,7 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
       })
       .catch((err) => {
         console.error("Failed to load app config:", err);
+        setConfig(FALLBACK_CONFIG);
       });
   }, []);
 

@@ -7,7 +7,6 @@ import {
 import { DynamicRemotePlugin } from "@openshift/dynamic-plugin-sdk-webpack";
 import { getDynamicModules, createTsLoaderRule } from "@fleetshift/build-utils";
 import type { Configuration } from "webpack";
-import { PluginRegistryPlugin } from "./src/PluginRegistryPlugin";
 
 const monorepoRoot = path.resolve(__dirname, "../..");
 const nodeModulesRoot = path.resolve(monorepoRoot, "node_modules");
@@ -32,6 +31,9 @@ const sharedModules = {
     version: "*",
   },
   "react-router-dom": { singleton: true, requiredVersion: "*" },
+  "react/jsx-runtime": { singleton: true, requiredVersion: "^18" },
+  "oidc-client-ts": { singleton: true, requiredVersion: "*" },
+  "react-oidc-context": { singleton: true, requiredVersion: "*" },
   ...pfSharedModules,
 };
 
@@ -69,13 +71,6 @@ const ManagementPlugin = new DynamicRemotePlugin({
         component: { $codeRef: "DeploymentsPage.default" },
       },
     },
-    {
-      type: "fleetshift.module",
-      properties: {
-        label: "Signing Keys",
-        component: { $codeRef: "SigningKeyPage.default" },
-      },
-    },
   ],
   sharedModules,
   entryScriptFilename: "plugins/management/management-plugin.[contenthash].js",
@@ -90,10 +85,6 @@ const ManagementPlugin = new DynamicRemotePlugin({
       DeploymentsPage: p("./src/plugins/management-plugin/DeploymentsPage.tsx"),
       DeploymentDetailPage: p(
         "./src/plugins/management-plugin/DeploymentDetailPage.tsx",
-      ),
-      SigningKeyPage: p("./src/plugins/management-plugin/SigningKeyPage.tsx"),
-      useSigningKeyStore: p(
-        "./src/plugins/management-plugin/signingKeyStore.ts",
       ),
     },
   },
@@ -120,6 +111,9 @@ const DayOnePlugin = new DynamicRemotePlugin({
     exposedModules: {
       DayOnePage: p("./src/plugins/day-one-plugin/DayOnePage.tsx"),
       InitialSetupForm: p("./src/plugins/day-one-plugin/InitialSetupForm.tsx"),
+      CreateClusterWizard: p(
+        "./src/plugins/day-one-plugin/CreateClusterWizard.tsx",
+      ),
     },
   },
 });
@@ -148,6 +142,34 @@ const CorePlugin = new DynamicRemotePlugin({
   },
 });
 
+const SigningPlugin = new DynamicRemotePlugin({
+  extensions: [
+    {
+      type: "fleetshift.module",
+      properties: {
+        label: "Signing Keys",
+        component: { $codeRef: "SigningKeyEnrollment.default" },
+      },
+    },
+  ],
+  sharedModules,
+  entryScriptFilename: "plugins/signing/signing-plugin.[contenthash].js",
+  pluginManifestFilename: "plugins/signing/signing-plugin-manifest.json",
+  // @ts-ignore
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "signing-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      SigningKeyEnrollment: p(
+        "./src/plugins/signing-plugin/SigningKeyEnrollment.tsx",
+      ),
+      useSigningKey: p("./src/plugins/signing-plugin/useSigningKey.ts"),
+      signingKeyApi: p("./src/plugins/signing-plugin/signingKeyApi.ts"),
+    },
+  },
+});
+
 const RoutingPlugin = new DynamicRemotePlugin({
   extensions: [],
   sharedModules,
@@ -168,53 +190,30 @@ const RoutingPlugin = new DynamicRemotePlugin({
   },
 });
 
-const config: Configuration = {
+const pluginConfigs = [
+  { plugin: ManagementPlugin, key: "management" },
+  { plugin: DayOnePlugin, key: "day-one" },
+  { plugin: CorePlugin, key: "core" },
+  { plugin: SigningPlugin, key: "signing" },
+  { plugin: RoutingPlugin, key: "routing" },
+] as const;
+
+const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
+  name: key,
   entry: {
     mock: path.resolve(__dirname, "./src/index.ts"),
   },
   output: {
     publicPath: "auto",
-    chunkFilename: "plugins/[name].js",
+    chunkFilename: `plugins/${key}/[name].js`,
+    uniqueName: key,
   },
   mode: "development",
   cache: {
     type: "filesystem",
+    name: key,
   },
-  plugins: [
-    ManagementPlugin,
-    DayOnePlugin,
-    CorePlugin,
-    RoutingPlugin,
-    new PluginRegistryPlugin({
-      assetsHost: "",
-      plugins: [
-        {
-          name: "management-plugin",
-          key: "management",
-          label: "Management",
-          persona: "ops",
-        },
-        {
-          name: "day-one-plugin",
-          key: "day-one",
-          label: "Day One",
-          persona: "ops",
-        },
-        {
-          name: "core-plugin",
-          key: "core",
-          label: "Core Plugin",
-          persona: "ops",
-        },
-        {
-          name: "routing-plugin",
-          key: "routing",
-          label: "Routing",
-          persona: "ops",
-        },
-      ],
-    }),
-  ],
+  plugins: [plugin],
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
   },
@@ -235,6 +234,6 @@ const config: Configuration = {
       },
     ],
   },
-};
+}));
 
-export default config;
+export default configs;

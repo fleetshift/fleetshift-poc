@@ -25,7 +25,8 @@ import {
   Title,
 } from "@patternfly/react-core";
 import { CheckCircleIcon } from "@patternfly/react-icons";
-import "./SetupPage.scss";
+import { Link } from "react-router-dom";
+import "../signing-plugin/SetupPage.scss";
 
 type BackingStore = "sqlite" | "postgres";
 type KeyRegistry = "oidc" | "github";
@@ -61,15 +62,25 @@ async function fetchAuthMethod(): Promise<AuthMethod | null> {
   return res.json();
 }
 
+async function getOidcClientId(): Promise<string> {
+  const res = await fetch("/api/ui/config");
+  if (!res.ok) {
+    throw new Error(`Failed to fetch UI config (${res.status})`);
+  }
+  const config = await res.json();
+  return config.oidc?.clientId ?? "fleetshift-ui";
+}
+
 async function triggerAuthSetup(
   issuerUrl: string,
   audience: string,
   keyRegistry: KeyRegistry,
 ): Promise<void> {
+  const enrollmentAudience = await getOidcClientId();
   const oidcConfig: Record<string, unknown> = {
     issuer_url: issuerUrl.replace(/\/+$/, ""),
     audience,
-    key_enrollment_audience: audience,
+    key_enrollment_audience: enrollmentAudience,
   };
 
   if (keyRegistry === "github") {
@@ -81,11 +92,15 @@ async function triggerAuthSetup(
     oidcConfig.public_key_claim_expression = "claims.signing_public_key";
   }
 
-  await fetch("/v1/authMethods?auth_method_id=default", {
+  const res = await fetch("/v1/authMethods?auth_method_id=default", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type: "TYPE_OIDC", oidc_config: oidcConfig }),
   });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Auth setup failed (${res.status}): ${text}`);
+  }
 }
 
 interface SetupWsCallbacks {
@@ -188,7 +203,13 @@ const SetupPage = () => {
 
   const handleConfigure = useCallback(() => {
     setAuthState({ status: "submitting" });
-    triggerAuthSetup(issuerUrl, audience, keyRegistry);
+    triggerAuthSetup(issuerUrl, audience, keyRegistry).catch((err) => {
+      console.error("[handleConfigure] triggerAuthSetup error:", err);
+      setAuthState({
+        status: "error",
+        message: err instanceof Error ? err.message : String(err),
+      });
+    });
   }, [issuerUrl, audience, keyRegistry]);
 
   if (pageLoading) {
@@ -354,13 +375,19 @@ const SetupPage = () => {
         <ActionGroup>
           <Button
             variant="primary"
-            size={authConfigured ? "lg" : undefined}
             isDisabled={!authConfigured}
-            component="a"
-            href="/"
+            component={(props) => <Link {...props} to="/setup/enroll" />}
           >
-            Continue to console
+            Sign in &amp; enroll signing key
           </Button>
+          {authConfigured && (
+            <Button
+              variant="link"
+              component={(props) => <Link {...props} to="/" />}
+            >
+              Skip to console
+            </Button>
+          )}
         </ActionGroup>
       </Form>
     </div>

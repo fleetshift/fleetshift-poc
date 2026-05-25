@@ -50,8 +50,7 @@ export default function CompletionModal({
             <Stack hasGutter>
               <StackItem>
                 <Content component="h2">
-                  You successfully created{" "}
-                  <strong>your first cluster</strong>
+                  You successfully created <strong>your first cluster</strong>
                 </Content>
               </StackItem>
               <StackItem>

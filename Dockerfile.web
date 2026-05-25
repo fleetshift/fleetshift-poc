@@ -24,6 +24,7 @@ COPY packages/build-utils/ packages/build-utils/
 COPY packages/gui/ packages/gui/
 COPY packages/mock-ui-plugins/ packages/mock-ui-plugins/
 COPY scripts/merge-web.mjs scripts/merge-web.mjs
+COPY scripts/generate-plugin-registry.mjs scripts/generate-plugin-registry.mjs
 
 # Install + build in one RUN so node_modules cache mount is available throughout
 RUN --mount=type=cache,target=/root/.npm \
@@ -35,6 +36,7 @@ RUN --mount=type=cache,target=/root/.npm \
     -w packages/mock-ui-plugins \
     && npm run build -w packages/common \
     && npm run build -w packages/mock-ui-plugins \
+    && node scripts/generate-plugin-registry.mjs \
     && npm run build -w packages/gui \
     && node scripts/merge-web.mjs \
     && cp -a web/. /srv/web/

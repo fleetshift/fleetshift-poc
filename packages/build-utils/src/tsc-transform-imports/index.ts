@@ -251,11 +251,11 @@ export function createTransformer(
     node.importClause?.namedBindings?.forEachChild((child) => {
       if (child.getChildCount() > 1) {
         importNames.push([
-          child.getChildAt(0).getFullText().trim(),
-          child.getFullText().trim(),
+          child.getChildAt(0).getText().trim(),
+          child.getText().trim(),
         ]);
       } else {
-        importNames.push(child.getFullText().trim());
+        importNames.push(child.getText().trim());
       }
     });
 
@@ -327,7 +327,7 @@ export function createTransformer(
         if (node.moduleSpecifier.getText().includes("react-icons")) {
           const importNames: string[] = [];
           node.importClause?.namedBindings?.forEachChild((child) => {
-            importNames.push(child.getFullText().trim());
+            importNames.push(child.getText().trim());
           });
           return createIconDynamicImports(factory, importNames);
         }

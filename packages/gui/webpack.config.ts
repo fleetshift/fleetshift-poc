@@ -59,12 +59,15 @@ const config: Configuration = {
       remotes: {},
       shared: {
         react: { singleton: true, requiredVersion: "^18" },
+        "react/jsx-runtime": { singleton: true, requiredVersion: "^18" },
         "react-dom": { singleton: true, requiredVersion: "^18" },
         "react-router-dom": { singleton: true, requiredVersion: "^6" },
         "@scalprum/core": { singleton: true },
         "@scalprum/react-core": { singleton: true },
         "@openshift/dynamic-plugin-sdk": { singleton: true },
         "@fleetshift/common": { requiredVersion: "*", version: "*" },
+        "oidc-client-ts": { singleton: true, requiredVersion: "*" },
+        "react-oidc-context": { singleton: true, requiredVersion: "*" },
         ...pfSharedModules,
       },
     }),
@@ -72,6 +75,11 @@ const config: Configuration = {
     new HtmlWebpackPlugin({
       template: "./src/index.html",
       favicon: "./src/assets/masthead.ico",
+    }),
+    new HtmlWebpackPlugin({
+      template: "./src/silent-renew.html",
+      filename: "silent-renew.html",
+      inject: false,
     }),
   ],
 };

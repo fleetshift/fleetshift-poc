@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Link } from "react-router-dom";
 import {
   Alert,
@@ -49,7 +49,7 @@ import {
   deleteDeployment,
   resumeDeployment,
 } from "./api";
-import { useSigningKey } from "./useSigningKey";
+import { getModule } from "@scalprum/core";
 import { buildSignedInputEnvelope } from "@fleetshift/common";
 import type { MgmtDeployment, DeploymentState } from "./api";
 
@@ -87,9 +87,22 @@ export default function DeploymentsPage() {
   const [nameFilter, setNameFilter] = useState("");
   const [page, setPage] = useState(1);
 
-  // Signing key
-  const { enrolled: hasSigningKey, signDeployment: signWithKey } =
-    useSigningKey();
+  const [hasSigningKey, setHasSigningKey] = useState(false);
+  const signWithKeyRef = useRef<(bytes: Uint8Array) => Promise<string>>();
+  useEffect(() => {
+    Promise.all([
+      getModule("signing-plugin", "signingKeyApi", "getSigningKeyStatus"),
+      getModule("signing-plugin", "signingKeyApi", "signDeployment"),
+    ]).then(
+      ([getStatus, signFn]: [
+        () => Promise<{ enrolled: boolean }>,
+        (bytes: Uint8Array) => Promise<string>,
+      ]) => {
+        signWithKeyRef.current = signFn;
+        getStatus().then((s) => setHasSigningKey(s.enrolled));
+      },
+    );
+  }, []);
 
   // Create modal
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -248,7 +261,9 @@ export default function DeploymentsPage() {
 
         // Web Crypto hashes internally — pass raw envelope bytes
         const envelopeBytes = new TextEncoder().encode(envelope);
-        userSignature = await signWithKey(envelopeBytes);
+        if (!signWithKeyRef.current)
+          throw new Error("Signing module not loaded");
+        userSignature = await signWithKeyRef.current(envelopeBytes);
       }
 
       await createDeployment({
@@ -292,7 +307,6 @@ export default function DeploymentsPage() {
     placementType,
     targetIds,
     signDeploymentEnabled,
-    signWithKey,
     resetForm,
     fetchDeployments,
   ]);
