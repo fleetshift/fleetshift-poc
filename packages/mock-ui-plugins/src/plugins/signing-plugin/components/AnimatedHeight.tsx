@@ -4,13 +4,7 @@ import {
   useSpring,
   type SpringOptions,
 } from "motion/react";
-import {
-  useRef,
-  useEffect,
-  useState,
-  type ReactNode,
-  useCallback,
-} from "react";
+import { useRef, useEffect, type ReactNode } from "react";
 
 const springConfig: SpringOptions = {
   stiffness: 200,
@@ -25,32 +19,31 @@ type AnimatedHeightProps = {
 
 const AnimatedHeight = ({ children, className }: AnimatedHeightProps) => {
   const contentRef = useRef<HTMLDivElement>(null);
-  const [initial, setInitial] = useState(true);
   const rawHeight = useMotionValue(0);
   const height = useSpring(rawHeight, springConfig);
-
-  const measure = useCallback(() => {
-    if (!contentRef.current) return;
-    const h = contentRef.current.scrollHeight;
-    if (initial) {
-      rawHeight.jump(h);
-      setInitial(false);
-    } else {
-      rawHeight.set(h);
-    }
-  }, [initial, rawHeight]);
+  const initialRef = useRef(true);
 
   useEffect(() => {
     const el = contentRef.current;
     if (!el) return;
-    const observer = new ResizeObserver(measure);
+    const observer = new ResizeObserver(() => {
+      const h = el.scrollHeight;
+      if (initialRef.current) {
+        rawHeight.jump(h);
+        initialRef.current = false;
+      } else {
+        rawHeight.set(h);
+      }
+    });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [measure]);
+  }, [rawHeight]);
 
   return (
     <motion.div style={{ height, overflow: "hidden" }} className={className}>
-      <div ref={contentRef}>{children}</div>
+      <div ref={contentRef} style={{ display: "flow-root" }}>
+        {children}
+      </div>
     </motion.div>
   );
 };
