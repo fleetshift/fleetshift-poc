@@ -163,11 +163,11 @@ func newAgentTestReporter() *agentTestReporter {
 	}
 }
 
-func (r *agentTestReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.DeliveryEvent) error {
+func (r *agentTestReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, _ domain.DeliveryEvent) error {
 	return nil
 }
 
-func (r *agentTestReporter) ReportResult(_ context.Context, id domain.DeliveryID, result domain.DeliveryResult) error {
+func (r *agentTestReporter) ReportResult(_ context.Context, id domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.results[id] = result

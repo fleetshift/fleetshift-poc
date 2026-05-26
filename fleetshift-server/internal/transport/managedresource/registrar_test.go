@@ -98,7 +98,7 @@ func (d *blockingRemoveDynamicDelivery) Deliver(
 	}
 	if d.reporter != nil {
 		go func() {
-			_ = d.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			_ = d.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		}()
 	}
 	return nil
@@ -131,7 +131,7 @@ func (d *blockingRemoveDynamicDelivery) Remove(
 
 func setupWithDelivery(
 	t *testing.T,
-	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService,
+	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent,
 ) *testEnv {
 	t.Helper()
 
@@ -140,7 +140,7 @@ func setupWithDelivery(
 
 	reg := &memworkflow.Registry{}
 	reporter := application.NewDeliveryReportService(store, reg)
-	recordingAgent := domain.DeliveryService(&sqlite.RecordingDeliveryService{
+	recordingAgent := domain.DeliveryAgent(&sqlite.RecordingDeliveryService{
 		Store:    store,
 		Reporter: reporter,
 		Now:      func() time.Time { return time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC) },
@@ -409,7 +409,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 	defer cancel()
 
 	var blocker *blockingRemoveDynamicDelivery
-	env := setupWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService {
+	env := setupWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent {
 		blocker = newBlockingRemoveDynamicDelivery(store)
 		blocker.reporter = reporter
 		return blocker

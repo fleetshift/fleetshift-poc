@@ -26,14 +26,14 @@ type testEventRecorder struct {
 	events []domain.DeliveryEvent
 }
 
-func (r *testEventRecorder) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *testEventRecorder) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	r.mu.Lock()
 	r.events = append(r.events, event)
 	r.mu.Unlock()
 	return nil
 }
 
-func (r *testEventRecorder) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.DeliveryResult) error {
+func (r *testEventRecorder) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.Generation, _ domain.DeliveryResult) error {
 	return nil
 }
 
@@ -50,7 +50,7 @@ func (r *testEventRecorder) snapshot() []domain.DeliveryEvent {
 }
 
 func newTestProgress(rec *testEventRecorder) *deliveryProgress {
-	return newDeliveryProgress(rec, "del-1")
+	return newDeliveryProgress(rec, "del-1", 1)
 }
 
 func noopProgress() *deliveryProgress {

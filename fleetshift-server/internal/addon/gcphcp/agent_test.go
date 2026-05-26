@@ -25,11 +25,11 @@ func newRecordingReporter() *recordingReporter {
 	}
 }
 
-func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.DeliveryEvent) error {
+func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, _ domain.DeliveryEvent) error {
 	return nil
 }
 
-func (r *recordingReporter) ReportResult(_ context.Context, id domain.DeliveryID, result domain.DeliveryResult) error {
+func (r *recordingReporter) ReportResult(_ context.Context, id domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.results[id] = result

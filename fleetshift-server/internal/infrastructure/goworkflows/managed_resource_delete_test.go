@@ -42,10 +42,10 @@ func (d *deleteCapturingDelivery) Deliver(
 	_ []domain.Manifest,
 	_ domain.DeliveryAuth,
 	_ *domain.Attestation,
-	_ domain.Generation,
+	gen domain.Generation,
 ) error {
 	if d.reporter != nil {
-		_ = d.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = d.reporter.ReportResult(ctx, deliveryID, gen, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}
 	return nil
 }

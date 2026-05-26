@@ -13,10 +13,11 @@ import (
 type deliveryProgress struct {
 	reporter   domain.DeliveryReporter
 	deliveryID domain.DeliveryID
+	generation domain.Generation
 }
 
-func newDeliveryProgress(reporter domain.DeliveryReporter, id domain.DeliveryID) *deliveryProgress {
-	return &deliveryProgress{reporter: reporter, deliveryID: id}
+func newDeliveryProgress(reporter domain.DeliveryReporter, id domain.DeliveryID, gen domain.Generation) *deliveryProgress {
+	return &deliveryProgress{reporter: reporter, deliveryID: id, generation: gen}
 }
 
 // Event reports a non-terminal delivery event (progress, warning, error).
@@ -26,7 +27,7 @@ func (p *deliveryProgress) Event(ctx context.Context, event domain.DeliveryEvent
 	if p == nil || p.reporter == nil {
 		return
 	}
-	_ = p.reporter.ReportEvent(ctx, p.deliveryID, event)
+	_ = p.reporter.ReportEvent(ctx, p.deliveryID, p.generation, event)
 }
 
 // Info emits an informational progress event.
@@ -54,5 +55,5 @@ func (p *deliveryProgress) Complete(ctx context.Context, result domain.DeliveryR
 	if p == nil || p.reporter == nil {
 		return nil
 	}
-	return p.reporter.ReportResult(ctx, p.deliveryID, result)
+	return p.reporter.ReportResult(ctx, p.deliveryID, p.generation, result)
 }

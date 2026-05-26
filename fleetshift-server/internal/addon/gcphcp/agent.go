@@ -112,7 +112,7 @@ func (a *Agent) Deliver(
 	_ *domain.Attestation,
 	generation domain.Generation,
 ) error {
-	progress := newDeliveryProgress(a.reporter, deliveryID)
+	progress := newDeliveryProgress(a.reporter, deliveryID, generation)
 
 	// Separate trust bundles from cluster manifests
 	var trustBundles []domain.Manifest
@@ -251,7 +251,7 @@ func (a *Agent) Remove(
 	_ *domain.Attestation,
 	generation domain.Generation,
 ) error {
-	progress := newDeliveryProgress(a.reporter, deliveryID)
+	progress := newDeliveryProgress(a.reporter, deliveryID, generation)
 
 	// Extract target config from properties
 	targetCfg := TargetConfigFromProperties(target.Properties)

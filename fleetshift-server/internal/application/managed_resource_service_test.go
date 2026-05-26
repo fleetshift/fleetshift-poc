@@ -55,7 +55,7 @@ func (s *blockingRemoveDeliveryService) Deliver(
 	}
 	if s.reporter != nil {
 		go func() {
-			_ = s.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			_ = s.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		}()
 	}
 	return nil
@@ -88,14 +88,14 @@ func (s *blockingRemoveDeliveryService) Remove(
 
 func setupManagedResourcesWithDelivery(
 	t *testing.T,
-	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService,
+	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent,
 ) mrTestHarness {
 	t.Helper()
 	store := newStore(t)
 	reg := &memworkflow.Registry{}
 
 	reporter := application.NewDeliveryReportService(store, reg)
-	agent := domain.DeliveryService(&sqlite.RecordingDeliveryService{
+	agent := domain.DeliveryAgent(&sqlite.RecordingDeliveryService{
 		Store:    store,
 		Reporter: reporter,
 		Now:      func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
@@ -263,7 +263,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 	defer cancel()
 
 	var blocker *blockingRemoveDeliveryService
-	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryService {
+	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent {
 		blocker = newBlockingRemoveDeliveryService(store)
 		blocker.reporter = reporter
 		return blocker
