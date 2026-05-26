@@ -1,6 +1,6 @@
 // Package observability provides slog-based implementations of the
-// domain observer interfaces for structured logging of deployment and
-// delivery lifecycle events.
+// domain observer interfaces for structured logging of fulfillment
+// orchestration and delivery lifecycle events.
 package observability
 
 import (
@@ -20,7 +20,7 @@ type FulfillmentObserver struct {
 
 // NewFulfillmentObserver returns a FulfillmentObserver that logs to logger.
 func NewFulfillmentObserver(logger *slog.Logger) *FulfillmentObserver {
-	return &FulfillmentObserver{logger: logger.With("component", "deployment")}
+	return &FulfillmentObserver{logger: logger.With("component", "fulfillment")}
 }
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,7 @@ func NewFulfillmentObserver(logger *slog.Logger) *FulfillmentObserver {
 func (o *FulfillmentObserver) RunStarted(ctx context.Context, fulfillmentID domain.FulfillmentID) (context.Context, domain.FulfillmentRunProbe) {
 	logger := o.logger.With(slog.String("fulfillment_id", string(fulfillmentID)))
 	if logger.Enabled(ctx, slog.LevelInfo) {
-		logger.LogAttrs(ctx, slog.LevelInfo, "deployment run started")
+		logger.LogAttrs(ctx, slog.LevelInfo, "fulfillment run started")
 	}
 	return ctx, &fulfillmentRunProbe{
 		logger:        logger,
@@ -68,7 +68,7 @@ func (p *fulfillmentRunProbe) StateChanged(state domain.FulfillmentState) {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "deployment state changed",
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "fulfillment state changed",
 		slog.String("state", string(state)),
 	)
 }
@@ -150,7 +150,7 @@ func (p *fulfillmentRunProbe) Error(err error) {
 func (p *fulfillmentRunProbe) End() {
 	duration := time.Since(p.startTime)
 	if p.err != nil {
-		p.logger.LogAttrs(p.ctx, slog.LevelError, "deployment run failed",
+		p.logger.LogAttrs(p.ctx, slog.LevelError, "fulfillment run failed",
 			slog.Duration("duration", duration),
 			slog.String("error", p.err.Error()),
 		)
@@ -159,7 +159,7 @@ func (p *fulfillmentRunProbe) End() {
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "deployment run completed",
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "fulfillment run completed",
 		slog.Duration("duration", duration),
 	)
 }

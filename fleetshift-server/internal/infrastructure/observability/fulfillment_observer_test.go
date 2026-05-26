@@ -24,8 +24,8 @@ func TestFulfillmentObserver_RunStarted_LogsAndReturnsProbe(t *testing.T) {
 	if len(records) != 1 {
 		t.Fatalf("expected 1 log record from RunStarted, got %d", len(records))
 	}
-	if records[0].Message != "deployment run started" {
-		t.Errorf("message = %q, want %q", records[0].Message, "deployment run started")
+	if records[0].Message != "fulfillment run started" {
+		t.Errorf("message = %q, want %q", records[0].Message, "fulfillment run started")
 	}
 
 	probe.End()
@@ -49,9 +49,9 @@ func TestFulfillmentRunProbe_FullLifecycle(t *testing.T) {
 	}
 
 	want := []string{
-		"deployment run started",
-		"deployment state changed",
-		"deployment run completed",
+		"fulfillment run started",
+		"fulfillment state changed",
+		"fulfillment run completed",
 	}
 	if len(messages) != len(want) {
 		t.Fatalf("got %d records %v, want %d %v", len(messages), messages, len(want), want)
@@ -131,7 +131,7 @@ func TestFulfillmentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	records := handler.Records()
 	var endRecord *slog.Record
 	for i := range records {
-		if records[i].Message == "deployment run failed" {
+		if records[i].Message == "fulfillment run failed" {
 			endRecord = &records[i]
 			break
 		}
