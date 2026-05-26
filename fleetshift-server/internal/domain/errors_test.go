@@ -86,3 +86,46 @@ func TestTerminalError(t *testing.T) {
 		}
 	})
 }
+
+func TestIsAuthExpired(t *testing.T) {
+	t.Run("direct ErrAuthExpired", func(t *testing.T) {
+		if !domain.IsAuthExpired(domain.ErrAuthExpired) {
+			t.Fatal("should detect ErrAuthExpired directly")
+		}
+	})
+
+	t.Run("wrapped ErrAuthExpired", func(t *testing.T) {
+		wrapped := fmt.Errorf("broker auth exchange: %w", domain.ErrAuthExpired)
+		if !domain.IsAuthExpired(wrapped) {
+			t.Fatal("should detect ErrAuthExpired through wrapping")
+		}
+	})
+
+	t.Run("nil is not auth expired", func(t *testing.T) {
+		if domain.IsAuthExpired(nil) {
+			t.Fatal("nil should not be auth expired")
+		}
+	})
+
+	t.Run("plain error is not auth expired", func(t *testing.T) {
+		if domain.IsAuthExpired(errors.New("something else")) {
+			t.Fatal("unrelated error should not be auth expired")
+		}
+	})
+
+	t.Run("detectable after serialization", func(t *testing.T) {
+		original := fmt.Errorf("%w: caller token is empty", domain.ErrAuthExpired)
+		serialized := errors.New(original.Error())
+		if !domain.IsAuthExpired(serialized) {
+			t.Fatal("should detect auth expired marker in serialized error string")
+		}
+	})
+
+	t.Run("detectable after serialization with wrapping", func(t *testing.T) {
+		original := fmt.Errorf("%w: caller token is empty", domain.ErrAuthExpired)
+		serialized := fmt.Errorf("activity failed: %s", original.Error())
+		if !domain.IsAuthExpired(serialized) {
+			t.Fatal("should detect auth expired marker in wrapped serialized error string")
+		}
+	})
+}

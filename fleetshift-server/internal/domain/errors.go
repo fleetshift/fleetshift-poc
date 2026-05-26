@@ -74,3 +74,15 @@ func IsTerminal(err error) bool {
 	}
 	return err != nil && strings.Contains(err.Error(), terminalPrefix)
 }
+
+// IsAuthExpired reports whether err indicates expired or missing
+// delivery credentials. Like [IsTerminal], it checks the Go error
+// chain first, then falls back to string matching so the
+// classification survives serialization across workflow engine
+// boundaries.
+func IsAuthExpired(err error) bool {
+	if errors.Is(err, ErrAuthExpired) {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), ErrAuthExpired.Error())
+}
