@@ -1,24 +1,37 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
+  Button,
   Card,
   CardBody,
   Content,
+  EmptyState,
+  EmptyStateActions,
+  EmptyStateBody,
+  EmptyStateFooter,
   Grid,
   GridItem,
   Label,
   Pagination,
-  Spinner,
   Stack,
   StackItem,
   Title,
 } from "@patternfly/react-core";
-import { ActionsColumn } from "@patternfly/react-table";
+import { ActionsColumn, Tbody, Td, Tr } from "@patternfly/react-table";
+import { CubesIcon } from "@patternfly/react-icons";
+import {
+  SkeletonTableHead,
+  SkeletonTableBody,
+} from "@patternfly/react-component-groups";
+import "./ClustersPage.css";
 import {
   useDataViewFilters,
   useDataViewPagination,
 } from "@patternfly/react-data-view/dist/dynamic/Hooks";
-import { DataView } from "@patternfly/react-data-view/dist/dynamic/DataView";
+import {
+  DataView,
+  DataViewState,
+} from "@patternfly/react-data-view/dist/dynamic/DataView";
 import {
   DataViewTable,
   type DataViewTr,
@@ -127,6 +140,7 @@ export default function ClustersPage() {
   const { page, perPage } = pagination;
 
   const fetchClusters = useCallback(async () => {
+    setLoading(true);
     try {
       const resp = await listDeployments();
       const clusterDeps = (resp.deployments ?? []).filter((d) =>
@@ -230,9 +244,68 @@ export default function ClustersPage() {
     }
   };
 
-  if (loading) {
-    return <Spinner aria-label="Loading clusters" />;
-  }
+  const activeState = loading
+    ? DataViewState.loading
+    : error
+      ? "error"
+      : filtered.length === 0
+        ? "empty"
+        : undefined;
+
+  const emptyBody = (
+    <Tbody>
+      <Tr>
+        <Td colSpan={columns.length}>
+          <EmptyState
+            headingLevel="h2"
+            icon={CubesIcon}
+            titleText="No clusters found"
+          >
+            <EmptyStateBody>
+              {rows.length === 0
+                ? "Get started by creating your first cluster."
+                : "No clusters match the current filter criteria."}
+            </EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                {rows.length === 0 ? (
+                  <Button
+                    variant="primary"
+                    component={(props) => <Link {...props} to="create" />}
+                  >
+                    Create cluster
+                  </Button>
+                ) : (
+                  <Button variant="link" onClick={clearAllFilters}>
+                    Clear filters
+                  </Button>
+                )}
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
+        </Td>
+      </Tr>
+    </Tbody>
+  );
+
+  const errorBody = (
+    <Tbody>
+      <Tr>
+        <Td colSpan={columns.length}>
+          <EmptyState headingLevel="h2" titleText="Unable to load clusters">
+            <EmptyStateBody>{error}</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                <Button variant="primary" onClick={fetchClusters}>
+                  Try again
+                </Button>
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
+        </Td>
+      </Tr>
+    </Tbody>
+  );
 
   return (
     <Stack hasGutter>
@@ -244,19 +317,6 @@ export default function ClustersPage() {
           </Content>
         </div>
       </StackItem>
-
-      {error && (
-        <StackItem>
-          <Content
-            component="p"
-            style={{
-              color: "var(--pf-t--global--color--status--danger--default)",
-            }}
-          >
-            {error}
-          </Content>
-        </StackItem>
-      )}
 
       <StackItem>
         <Grid hasGutter>
@@ -320,9 +380,18 @@ export default function ClustersPage() {
       </StackItem>
 
       <StackItem>
-        <DataView>
+        <DataView activeState={activeState}>
           <DataViewToolbar
             clearAllFilters={clearAllFilters}
+            className="clusters-toolbar"
+            actions={
+              <Button
+                variant="primary"
+                component={(props) => <Link {...props} to="create" />}
+              >
+                Create cluster
+              </Button>
+            }
             pagination={
               <Pagination
                 perPageOptions={PER_PAGE_OPTIONS}
@@ -347,6 +416,19 @@ export default function ClustersPage() {
             aria-label="Clusters table"
             columns={columns}
             rows={pageRows}
+            headStates={{
+              loading: <SkeletonTableHead columns={columns} />,
+            }}
+            bodyStates={{
+              loading: (
+                <SkeletonTableBody
+                  rowsCount={5}
+                  columnsCount={columns.length}
+                />
+              ),
+              empty: emptyBody,
+              error: errorBody,
+            }}
           />
           <DataViewToolbar
             pagination={

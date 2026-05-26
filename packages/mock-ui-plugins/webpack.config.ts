@@ -145,8 +145,8 @@ const CorePlugin = new DynamicRemotePlugin({
     {
       type: "fleetshift.module",
       properties: {
-        label: "Core Plugin",
-        component: { $codeRef: "CorePluginPage.default" },
+        label: "Clusters",
+        component: { $codeRef: "ClustersModule.default" },
       },
     },
   ],
@@ -159,7 +159,7 @@ const CorePlugin = new DynamicRemotePlugin({
     name: "core-plugin",
     version: "1.0.0",
     exposedModules: {
-      CorePluginPage: p("./src/plugins/core-plugin/CorePluginPage.tsx"),
+      ClustersModule: p("./src/plugins/core-plugin/ClustersModule.tsx"),
     },
   },
 });

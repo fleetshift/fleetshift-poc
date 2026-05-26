@@ -126,7 +126,7 @@ const AppNav = () => {
         if (page) items.push(page);
       }
     }
-    return items;
+    return items.sort((a, b) => a.title.localeCompare(b.title));
   }, [navLayout, pageMap]);
 
   return (
