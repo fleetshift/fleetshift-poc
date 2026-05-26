@@ -39,9 +39,6 @@ func TestFulfillmentRunProbe_FullLifecycle(t *testing.T) {
 	obs := observability.NewFulfillmentObserver(logger)
 	_, probe := obs.RunStarted(context.Background(), "ful-2")
 
-	probe.EventReceived(domain.FulfillmentEvent{
-		DeliveryCompleted: &domain.DeliveryCompletionEvent{DeliveryID: "d1:t1"},
-	})
 	probe.StateChanged(domain.FulfillmentStateActive)
 	probe.End()
 
@@ -53,7 +50,6 @@ func TestFulfillmentRunProbe_FullLifecycle(t *testing.T) {
 
 	want := []string{
 		"deployment run started",
-		"deployment event received",
 		"deployment state changed",
 		"deployment run completed",
 	}
@@ -148,31 +144,225 @@ func TestFulfillmentRunProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	}
 }
 
-func TestFulfillmentRunProbe_DeliveryOutputsProcessed_LogsTargets(t *testing.T) {
+func TestFulfillmentRunProbe_DispatchCycle_FullLifecycle(t *testing.T) {
 	h := &slog.HandlerOptions{Level: slog.LevelDebug}
 	handler := newRecordingHandler(h)
 	logger := slog.New(handler)
 
 	obs := observability.NewFulfillmentObserver(logger)
-	_, probe := obs.RunStarted(context.Background(), "ful-outputs")
+	_, probe := obs.RunStarted(context.Background(), "ful-dispatch")
 
-	probe.DeliveryOutputsProcessed([]domain.ProvisionedTarget{
-		{ID: "k8s-cluster1", Type: "kubernetes", Name: "cluster1"},
-	}, 1)
+	dprobe := probe.DispatchCycleStarted(2, 1)
+	dprobe.Dispatched("d1:t1", false)
+	dprobe.AckReceived("d1:t1")
+	dprobe.Completed("d1:t1", domain.DeliveryStateDelivered)
+	dprobe.End()
 	probe.End()
 
 	records := handler.Records()
-	var outputRecord *slog.Record
+	messages := make([]string, len(records))
+	for i, r := range records {
+		messages[i] = r.Message
+	}
+
+	wantContains := []string{
+		"dispatch cycle started",
+		"delivery dispatched",
+		"delivery ack received",
+		"delivery completed",
+		"dispatch cycle completed",
+	}
+	for _, want := range wantContains {
+		found := false
+		for _, msg := range messages {
+			if msg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected log message %q, got messages: %v", want, messages)
+		}
+	}
+}
+
+func TestFulfillmentRunProbe_DispatchCycle_AckTimeout(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RunStarted(context.Background(), "ful-timeout")
+
+	dprobe := probe.DispatchCycleStarted(1, 1)
+	dprobe.Dispatched("d1:t1", false)
+	dprobe.AckTimeout(1)
+	dprobe.End()
+	probe.End()
+
+	records := handler.Records()
+	var timeoutRecord *slog.Record
 	for i := range records {
-		if records[i].Message == "delivery outputs processed" {
-			outputRecord = &records[i]
+		if records[i].Message == "delivery ack timeout" {
+			timeoutRecord = &records[i]
 			break
 		}
 	}
-	if outputRecord == nil {
-		t.Fatal("expected 'delivery outputs processed' log record")
+	if timeoutRecord == nil {
+		t.Fatal("expected 'delivery ack timeout' log record")
 	}
-	if outputRecord.Level != slog.LevelInfo {
-		t.Errorf("level = %v, want %v", outputRecord.Level, slog.LevelInfo)
+	if timeoutRecord.Level != slog.LevelWarn {
+		t.Errorf("level = %v, want %v", timeoutRecord.Level, slog.LevelWarn)
+	}
+}
+
+func TestAcquireLockProbe_FullLifecycle(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.AcquireLockStarted(context.Background(), "ful-lock")
+
+	probe.LockAcquired(false)
+	probe.PoolLoaded(3)
+	probe.EvidenceResolved(true)
+	probe.End()
+
+	records := handler.Records()
+	messages := make([]string, len(records))
+	for i, r := range records {
+		messages[i] = r.Message
+	}
+
+	wantContains := []string{
+		"acquire lock started",
+		"orchestration lock acquired",
+		"target pool loaded",
+		"attestation evidence resolved",
+		"acquire lock completed",
+	}
+	for _, want := range wantContains {
+		found := false
+		for _, msg := range messages {
+			if msg == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected log message %q, got messages: %v", want, messages)
+		}
+	}
+}
+
+func TestDeliverProbe_NewDelivery(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.DeliverStarted(context.Background(), domain.DeliverInput{
+		FulfillmentID: "ful-1",
+		DeliveryID:    "d1:t1",
+		Target:        domain.TargetInfo{ID: "t1"},
+	})
+
+	probe.NewDelivery()
+	probe.End()
+
+	records := handler.Records()
+	found := false
+	for _, r := range records {
+		if r.Message == "new delivery created" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'new delivery created' log record")
+	}
+}
+
+func TestRemoveProbe_Withdrawn(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.RemoveStarted(context.Background(), domain.RemoveInput{
+		FulfillmentID: "ful-1",
+		DeliveryID:    "d1:t1",
+		Target:        domain.TargetInfo{ID: "t1"},
+	})
+
+	probe.Withdrawn()
+	probe.End()
+
+	records := handler.Records()
+	found := false
+	for _, r := range records {
+		if r.Message == "delivery withdrawn" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'delivery withdrawn' log record")
+	}
+}
+
+func TestPersistReconciliationProbe_FullLifecycle(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.PersistReconciliationStarted(context.Background(), "ful-persist")
+
+	probe.Persisted(domain.FulfillmentStateActive, false)
+	probe.End()
+
+	records := handler.Records()
+	found := false
+	for _, r := range records {
+		if r.Message == "reconciliation persisted" {
+			found = true
+			if r.Level != slog.LevelInfo {
+				t.Errorf("level = %v, want %v", r.Level, slog.LevelInfo)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'reconciliation persisted' log record")
+	}
+}
+
+func TestProcessOutputsProbe_TargetsRegistered(t *testing.T) {
+	h := &slog.HandlerOptions{Level: slog.LevelDebug}
+	handler := newRecordingHandler(h)
+	logger := slog.New(handler)
+
+	obs := observability.NewFulfillmentObserver(logger)
+	_, probe := obs.ProcessOutputsStarted(context.Background())
+
+	probe.SecretsStored(1)
+	probe.TargetsRegistered(2)
+	probe.End()
+
+	records := handler.Records()
+	found := false
+	for _, r := range records {
+		if r.Message == "delivery outputs processed" {
+			found = true
+			if r.Level != slog.LevelInfo {
+				t.Errorf("level = %v, want %v", r.Level, slog.LevelInfo)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Error("expected 'delivery outputs processed' log record")
 	}
 }

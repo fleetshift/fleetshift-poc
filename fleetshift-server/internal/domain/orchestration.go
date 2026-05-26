@@ -163,33 +163,46 @@ func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-fulfillm
 // activities to eliminate a redundant fulfillment read.
 func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID, ReconciliationSnapshot] {
 	return NewActivity("acquire-lock-and-load", func(ctx context.Context, id FulfillmentID) (ReconciliationSnapshot, error) {
+		ctx, probe := s.observer().AcquireLockStarted(ctx, id)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return ReconciliationSnapshot{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		f, err := tx.Fulfillments().Get(ctx, id)
 		if err != nil {
+			probe.Error(err)
 			return ReconciliationSnapshot{}, err
 		}
-		if f.AcquireOrchestrationLock() {
+		acquired := f.AcquireOrchestrationLock()
+		probe.LockAcquired(acquired)
+		if acquired {
 			if err := tx.Fulfillments().Update(ctx, f); err != nil {
+				probe.Error(err)
 				return ReconciliationSnapshot{}, err
 			}
 		}
 
 		pool, err := tx.Targets().List(ctx)
 		if err != nil {
+			probe.Error(err)
 			return ReconciliationSnapshot{}, err
 		}
+		probe.PoolLoaded(len(pool))
 
 		evidence, err := s.Attestation.Resolve(ctx, tx, f)
 		if err != nil {
+			probe.Error(err)
 			return ReconciliationSnapshot{}, err
 		}
+		probe.EvidenceResolved(evidence != nil)
 
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return ReconciliationSnapshot{}, fmt.Errorf("commit: %w", err)
 		}
 		return ReconciliationSnapshot{
@@ -258,8 +271,12 @@ func (s *OrchestrationWorkflowSpec) GenerateManifests() Activity[GenerateManifes
 // leave delivery records in a stale state.
 func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, struct{}] {
 	return NewActivity("deliver-to-target", func(ctx context.Context, in DeliverInput) (struct{}, error) {
+		ctx, probe := s.observer().DeliverStarted(ctx, in)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
@@ -267,11 +284,13 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 		now := s.now()
 		existing, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
 		if err != nil && !errors.Is(err, ErrNotFound) {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("load delivery record: %w", err)
 		}
 
 		var d Delivery
 		if errors.Is(err, ErrNotFound) {
+			probe.NewDelivery()
 			d = Delivery{
 				ID:            in.DeliveryID,
 				FulfillmentID: in.FulfillmentID,
@@ -285,24 +304,32 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 		} else {
 			d = existing
 			if in.Generation > d.Generation {
+				probe.Redispatched(d.Generation)
 				if err := d.Redispatch(in.Manifests, in.Generation, now); err != nil {
+					probe.Error(err)
 					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID, err)
 				}
 			} else if !d.Retry(in.Generation, now) {
 				// Delivery already progressed past Pending (addon received
 				// and acked). The ack signal is queued; no re-dispatch needed.
+				probe.SkippedAlreadyAcked()
 				return struct{}{}, nil
+			} else {
+				probe.Retried()
 			}
 		}
 
 		if err := tx.Deliveries().Put(ctx, d); err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("persist delivery record: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("commit: %w", err)
 		}
 
 		if err := s.Delivery.Deliver(context.Background(), in.Target, in.DeliveryID, in.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("dispatch delivery %s: %w", in.DeliveryID, err)
 		}
 		return struct{}{}, nil
@@ -324,40 +351,52 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 // persisting), the target is skipped.
 func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, RemoveOutput] {
 	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (RemoveOutput, error) {
+		ctx, probe := s.observer().RemoveStarted(ctx, in)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		delivery, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
 		if errors.Is(err, ErrNotFound) {
+			probe.TargetNotFound()
 			return RemoveOutput{Dispatched: false}, nil
 		}
 		if err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
 		}
 
 		modified, err := delivery.Withdraw(in.Generation, s.now())
 		if err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
 		}
 		if !modified {
 			if !delivery.Retry(in.Generation, s.now()) {
 				// Already progressed past Pending (addon acked the removal).
 				// Signal is queued; no re-dispatch needed.
+				probe.AlreadyPending()
 				return RemoveOutput{Dispatched: false}, nil
 			}
 		}
+		probe.Withdrawn()
 
 		if err := tx.Deliveries().Put(ctx, delivery); err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("persist delivery: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("commit: %w", err)
 		}
 
 		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
+			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("dispatch removal %s: %w", in.DeliveryID, err)
 		}
 		return RemoveOutput{Dispatched: true}, nil
@@ -430,14 +469,19 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 // separate activities.
 func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[PersistAndCompleteInput, bool] {
 	return NewActivity("persist-and-complete-reconciliation", func(ctx context.Context, in PersistAndCompleteInput) (bool, error) {
+		ctx, probe := s.observer().PersistReconciliationStarted(ctx, in.Result.FulfillmentID)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return false, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		fresh, err := tx.Fulfillments().Get(ctx, in.Result.FulfillmentID)
 		if err != nil {
+			probe.Error(err)
 			return false, fmt.Errorf("get fulfillment: %w", err)
 		}
 
@@ -446,18 +490,23 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 		fresh.UpdatedAt = s.now()
 
 		if err := tx.Fulfillments().Update(ctx, fresh); err != nil {
+			probe.Error(err)
 			return false, err
 		}
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return false, err
 		}
+		probe.Persisted(in.Result.State, needsRestart)
 
 		if in.Result.State == FulfillmentStateDeleting {
 			if err := s.CleanupSignaler.SignalDeleteCleanupComplete(ctx, in.Result.FulfillmentID, DeleteCleanupCompleteEvent{
 				FulfillmentID: in.Result.FulfillmentID,
 			}); err != nil {
+				probe.Error(err)
 				return false, fmt.Errorf("signal delete cleanup: %w", err)
 			}
+			probe.DeleteCleanupSignaled()
 		}
 
 		return needsRestart, nil
@@ -474,20 +523,27 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 // produce the same outputs on each attempt.
 func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryResult, struct{}] {
 	return NewActivity("process-delivery-outputs", func(ctx context.Context, result DeliveryResult) (struct{}, error) {
+		ctx, probe := s.observer().ProcessOutputsStarted(ctx)
+		defer probe.End()
+
 		if len(result.ProducedSecrets) == 0 && len(result.ProvisionedTargets) == 0 {
+			probe.Skipped()
 			return struct{}{}, nil
 		}
 
 		if s.Vault != nil {
 			for _, secret := range result.ProducedSecrets {
 				if err := s.Vault.Put(ctx, secret.Ref, secret.Value); err != nil {
+					probe.Error(err)
 					return struct{}{}, fmt.Errorf("store secret %q: %w", secret.Ref, err)
 				}
 			}
 		}
+		probe.SecretsStored(len(result.ProducedSecrets))
 
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
@@ -507,6 +563,7 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 				CreatedAt:  now,
 				UpdatedAt:  now,
 			}); err != nil {
+				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert inventory item for target %q: %w", pt.ID, err)
 			}
 
@@ -519,9 +576,11 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 				AcceptedResourceTypes: pt.AcceptedResourceTypes,
 				InventoryItemID:       invID,
 			}); err != nil {
+				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
 			}
 		}
+		probe.TargetsRegistered(len(result.ProvisionedTargets))
 		return struct{}{}, tx.Commit()
 	})
 }
@@ -602,7 +661,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 
 		switch f.State {
 		case FulfillmentStateDeleting:
-			if err := s.executeDelete(record, f, pool, fulfillmentID, loaded.Evidence); err != nil {
+			if err := s.executeDelete(record, f, pool, fulfillmentID, probe, loaded.Evidence); err != nil {
 				probe.Error(err)
 				if !IsTerminal(err) {
 					return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
@@ -649,6 +708,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 		if !needsRestart {
 			return struct{}{}, nil
 		}
+		probe.ReconciliationRestarting(startGen)
 	}
 }
 
@@ -662,6 +722,7 @@ func (s *OrchestrationWorkflowSpec) releaseLockAndContinue(
 	if _, err := RunActivity(record, s.ReleaseLock(), fulfillmentID); err != nil {
 		probe.Error(err)
 	}
+	probe.ContinueAsNewTriggered()
 	return ContinueAsNew(fulfillmentID)
 }
 
@@ -721,9 +782,11 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	f Fulfillment,
 	pool []TargetInfo,
 	fulfillmentID FulfillmentID,
+	probe FulfillmentRunProbe,
 	evidence *ResolvedEvidence,
 ) error {
 	targets := targetInfosByID(f.ResolvedTargets, pool)
+	probe.DeleteStarted(len(targets))
 
 	inputs := make(map[DeliveryID]RemoveInput, len(targets))
 	ids := make([]DeliveryID, 0, len(targets))
@@ -748,7 +811,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 			return false, fmt.Errorf("remove delivery for target %s: %w", inputs[id].Target.ID, err)
 		}
 		return out.Dispatched, nil
-	}, ids, f.Generation)
+	}, ids, f.Generation, probe)
 	return err
 }
 
@@ -770,6 +833,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	policy := f.RolloutStrategy.EffectiveVersionConflictPolicy()
 
 	for i, step := range plan.Steps {
+		probe.RolloutStepStarted(i, len(plan.Steps), step.Deliver != nil)
+
 		if step.Remove != nil {
 			removeInputs := make(map[DeliveryID]RemoveInput)
 			removeIDs := make([]DeliveryID, 0, len(step.Remove.Targets))
@@ -795,7 +860,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					return false, fmt.Errorf("remove delivery for target %s: %w", removeInputs[id].Target.ID, err)
 				}
 				return out.Dispatched, nil
-			}, removeIDs, startGen); err != nil {
+			}, removeIDs, startGen, probe); err != nil {
 				return err
 			}
 		}
@@ -842,7 +907,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 			results, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
 				_, err := RunActivity(record, s.DeliverToTarget(), inputs[id])
 				return err == nil, err
-			}, ids, startGen)
+			}, ids, startGen, probe)
 			if err != nil {
 				return err
 			}
@@ -851,7 +916,6 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					if _, err := RunActivity(record, s.ProcessDeliveryOutputs(), result); err != nil {
 						return fmt.Errorf("process delivery outputs: %w", err)
 					}
-					probe.DeliveryOutputsProcessed(result.ProvisionedTargets, len(result.ProducedSecrets))
 				}
 			}
 		}
@@ -862,6 +926,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				return fmt.Errorf("check generation: %w", err)
 			}
 			if currentGen > startGen {
+				probe.GenerationAdvancedMidRollout(startGen, currentGen)
 				return nil
 			}
 		}
@@ -891,10 +956,14 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 	dispatch func(DeliveryID) (bool, error),
 	ids []DeliveryID,
 	expectedGen Generation,
+	runProbe FulfillmentRunProbe,
 ) ([]DeliveryResult, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
+
+	probe := runProbe.DispatchCycleStarted(len(ids), expectedGen)
+	defer probe.End()
 
 	unacked := make(map[DeliveryID]struct{}, len(ids))
 	remaining := make(map[DeliveryID]struct{}, len(ids))
@@ -904,15 +973,20 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 	}
 	var results []DeliveryResult
 
+	iteration := 0
 	for len(remaining) > 0 {
 		for id := range unacked {
 			dispatched, err := dispatch(id)
 			if err != nil {
+				probe.Error(err)
 				return nil, err
 			}
 			if !dispatched {
+				probe.Skipped(id)
 				delete(unacked, id)
 				delete(remaining, id)
+			} else {
+				probe.Dispatched(id, iteration > 0)
 			}
 		}
 		if len(remaining) == 0 {
@@ -925,18 +999,21 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 			if len(unacked) > 0 {
 				event, err = AwaitSignalWithTimeout(record, FulfillmentEventSignal, ackRetryInterval)
 				if errors.Is(err, ErrSignalTimeout) {
+					probe.AckTimeout(len(unacked))
 					break // back to outer loop to re-dispatch unacked
 				}
 			} else {
 				event, err = AwaitSignal(record, FulfillmentEventSignal)
 			}
 			if err != nil {
+				probe.Error(err)
 				return nil, fmt.Errorf("await delivery signal: %w", err)
 			}
-			if err := s.processDeliveryEvent(event, expectedGen, unacked, remaining, &results); err != nil {
+			if err := s.processDeliveryEvent(event, expectedGen, unacked, remaining, &results, probe); err != nil {
 				return nil, err
 			}
 		}
+		iteration++
 	}
 	return results, nil
 }
@@ -952,17 +1029,21 @@ func (s *OrchestrationWorkflowSpec) processDeliveryEvent(
 	unacked map[DeliveryID]struct{},
 	remaining map[DeliveryID]struct{},
 	results *[]DeliveryResult,
+	probe DispatchCycleProbe,
 ) error {
 	if event.DeliveryAcked != nil {
 		if event.DeliveryAcked.Generation != expectedGen {
+			probe.StaleEventDiscarded(event, expectedGen)
 			return nil
 		}
 		if _, ok := remaining[event.DeliveryAcked.DeliveryID]; ok {
 			delete(unacked, event.DeliveryAcked.DeliveryID)
+			probe.AckReceived(event.DeliveryAcked.DeliveryID)
 		}
 	}
 	if event.DeliveryCompleted != nil {
 		if event.DeliveryCompleted.Generation != expectedGen {
+			probe.StaleEventDiscarded(event, expectedGen)
 			return nil
 		}
 		did := event.DeliveryCompleted.DeliveryID
@@ -971,6 +1052,7 @@ func (s *OrchestrationWorkflowSpec) processDeliveryEvent(
 		}
 		delete(unacked, did)
 		delete(remaining, did)
+		probe.Completed(did, event.DeliveryCompleted.Result.State)
 		switch event.DeliveryCompleted.Result.State {
 		case DeliveryStateFailed:
 			return fmt.Errorf("delivery %s failed: %s",

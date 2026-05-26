@@ -231,6 +231,10 @@ func (o *recordingObserver) RunStarted(ctx context.Context, _ domain.Fulfillment
 	return ctx, &recordingProbe{observer: o}
 }
 
+func (o *recordingObserver) ProcessOutputsStarted(ctx context.Context) (context.Context, domain.ProcessOutputsProbe) {
+	return ctx, &recordingOutputsProbe{observer: o}
+}
+
 type recordingProbe struct {
 	domain.NoOpFulfillmentRunProbe
 	observer *recordingObserver
@@ -242,21 +246,6 @@ func (p *recordingProbe) StateChanged(state domain.FulfillmentState) {
 	p.observer.states = append(p.observer.states, state)
 }
 
-type outputsEvent struct {
-	TargetIDs []domain.TargetID
-	Secrets   int
-}
-
-func (p *recordingProbe) DeliveryOutputsProcessed(targets []domain.ProvisionedTarget, secrets int) {
-	p.observer.mu.Lock()
-	defer p.observer.mu.Unlock()
-	ids := make([]domain.TargetID, len(targets))
-	for i, t := range targets {
-		ids[i] = t.ID
-	}
-	p.observer.outputs = append(p.observer.outputs, outputsEvent{TargetIDs: ids, Secrets: secrets})
-}
-
 func (p *recordingProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
 	p.observer.mu.Lock()
 	defer p.observer.mu.Unlock()
@@ -264,6 +253,37 @@ func (p *recordingProbe) ManifestsFiltered(target domain.TargetInfo, total, acce
 		TargetID: target.ID,
 		Total:    total,
 		Accepted: accepted,
+	})
+}
+
+type outputsEvent struct {
+	TargetIDs []domain.TargetID
+	Secrets   int
+}
+
+type recordingOutputsProbe struct {
+	domain.NoOpProcessOutputsProbe
+	observer *recordingObserver
+	targets  int
+	secrets  int
+}
+
+func (p *recordingOutputsProbe) SecretsStored(count int) {
+	p.secrets = count
+}
+
+func (p *recordingOutputsProbe) TargetsRegistered(count int) {
+	p.targets = count
+}
+
+func (p *recordingOutputsProbe) End() {
+	if p.targets == 0 && p.secrets == 0 {
+		return
+	}
+	p.observer.mu.Lock()
+	defer p.observer.mu.Unlock()
+	p.observer.outputs = append(p.observer.outputs, outputsEvent{
+		Secrets: p.secrets,
 	})
 }
 
@@ -1874,17 +1894,24 @@ type faultArmingObserver struct {
 	store *commitFaultStore
 }
 
-func (o *faultArmingObserver) RunStarted(ctx context.Context, _ domain.FulfillmentID) (context.Context, domain.FulfillmentRunProbe) {
-	return ctx, &faultArmingProbe{store: o.store}
+func (o *faultArmingObserver) ProcessOutputsStarted(ctx context.Context) (context.Context, domain.ProcessOutputsProbe) {
+	return ctx, &faultArmingOutputsProbe{store: o.store}
 }
 
-type faultArmingProbe struct {
-	domain.NoOpFulfillmentRunProbe
-	store *commitFaultStore
+type faultArmingOutputsProbe struct {
+	domain.NoOpProcessOutputsProbe
+	store      *commitFaultStore
+	hadOutputs bool
 }
 
-func (p *faultArmingProbe) DeliveryOutputsProcessed(_ []domain.ProvisionedTarget, _ int) {
-	p.store.Arm()
+func (p *faultArmingOutputsProbe) TargetsRegistered(_ int) {
+	p.hadOutputs = true
+}
+
+func (p *faultArmingOutputsProbe) End() {
+	if p.hadOutputs {
+		p.store.Arm()
+	}
 }
 
 // ---------------------------------------------------------------------------

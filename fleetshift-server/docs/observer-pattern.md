@@ -127,6 +127,17 @@ func (s *Service) DoOperation(ctx context.Context, ...) error {
 - Include `request_id` from context in logs
 - Check log level before constructing log messages
 
+## Multi-Layer Probes (Durable Workflows)
+
+When observing durable workflows with activities, probes **cannot cross the workflow/activity serialization boundary** because they hold non-serializable state (contexts, loggers, timing). This produces a two-layer architecture:
+
+- **Workflow-level probes** are created in the deterministic workflow body and observe control flow (signal arrivals, retries, state transitions, phase progression).
+- **Activity-level probes** are created fresh inside each activity closure from the same observer. They observe I/O-bearing work (transaction branches, dispatch decisions, data mutations).
+
+A single observer can return both layers. A workflow-level probe may also spawn **hierarchical sub-probes** for long-running phases (e.g. a dispatch-and-await cycle). Sub-probes follow the same `Started → ... → End()` pattern but may omit the context return when the parent already holds the relevant context.
+
+See `FulfillmentObserver` in `domain/fulfillment_observer.go` for the canonical example.
+
 ## Method Parameters
 
 - **Cheap to obtain**: Parameters should already be available at the call site. Avoid requiring expensive computation, allocations, or I/O just to call an observer method.
