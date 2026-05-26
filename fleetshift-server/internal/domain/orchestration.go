@@ -538,8 +538,8 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 					return struct{}{}, fmt.Errorf("store secret %q: %w", secret.Ref, err)
 				}
 			}
+			probe.SecretsStored(len(result.ProducedSecrets))
 		}
-		probe.SecretsStored(len(result.ProducedSecrets))
 
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
@@ -581,7 +581,11 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryRe
 			}
 		}
 		probe.TargetsRegistered(len(result.ProvisionedTargets))
-		return struct{}{}, tx.Commit()
+		if err := tx.Commit(); err != nil {
+			probe.Error(err)
+			return struct{}{}, err
+		}
+		return struct{}{}, nil
 	})
 }
 

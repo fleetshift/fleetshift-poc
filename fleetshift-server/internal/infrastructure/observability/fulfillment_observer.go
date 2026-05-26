@@ -569,7 +569,7 @@ func (p *processOutputsProbe) SecretsStored(count int) {
 }
 
 func (p *processOutputsProbe) TargetsRegistered(count int) {
-	if count == 0 || !p.logger.Enabled(p.ctx, slog.LevelDebug) {
+	if count == 0 || !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
 	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery outputs processed",
