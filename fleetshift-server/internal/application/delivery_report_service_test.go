@@ -147,7 +147,7 @@ func TestDeliveryReportService_ReportEvent_TransitionsToProgressing(t *testing.T
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
 	})
 
-	err := svc.ReportEvent(ctx, "del-1", domain.DeliveryEvent{
+	err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "step 1",
 	})
 	if err != nil {
@@ -171,7 +171,7 @@ func TestDeliveryReportService_ReportEvent_AlreadyProgressing_NoStateChange(t *t
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
 	})
 
-	err := svc.ReportEvent(ctx, "del-1", domain.DeliveryEvent{
+	err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "step 2",
 	})
 	if err != nil {
@@ -195,7 +195,7 @@ func TestDeliveryReportService_ReportEvent_CallsObserver(t *testing.T) {
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
 	})
 
-	_ = svc.ReportEvent(ctx, "del-1", domain.DeliveryEvent{
+	_ = svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "applying",
 	})
 
@@ -223,7 +223,7 @@ func TestDeliveryReportService_ReportResult_UpdatesStateAndSignals(t *testing.T)
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
 	})
 
-	err := svc.ReportResult(ctx, "del-1", domain.DeliveryResult{
+	err := svc.ReportResult(ctx, "del-1", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
 	})
 	if err != nil {
@@ -265,7 +265,7 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
 	})
 
-	_ = svc.ReportResult(ctx, "del-1", domain.DeliveryResult{
+	_ = svc.ReportResult(ctx, "del-1", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateFailed, Message: "connection refused",
 	})
 
@@ -275,6 +275,62 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 	}
 	if results[0].State != domain.DeliveryStateFailed {
 		t.Errorf("state = %q, want %q", results[0].State, domain.DeliveryStateFailed)
+	}
+}
+
+func TestDeliveryReportService_ReportResult_StaleGeneration_Discarded(t *testing.T) {
+	svc, store, sig, _ := setupDeliveryReportService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
+	seedDeliveryRecord(t, store, domain.Delivery{
+		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
+		Generation: 5,
+		State:      domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.ReportResult(ctx, "del-1", 3, domain.DeliveryResult{
+		State: domain.DeliveryStateDelivered,
+	})
+	if err != nil {
+		t.Fatalf("ReportResult: %v", err)
+	}
+
+	state := getDeliveryState(t, store, "del-1")
+	if state != domain.DeliveryStatePending {
+		t.Errorf("state = %q, want %q (stale report should be discarded)", state, domain.DeliveryStatePending)
+	}
+	if len(sig.snapshot()) != 0 {
+		t.Error("expected no signals for stale report")
+	}
+}
+
+func TestDeliveryReportService_ReportEvent_StaleGeneration_Discarded(t *testing.T) {
+	svc, store, sig, _ := setupDeliveryReportService(t)
+	ctx := context.Background()
+	now := time.Now().UTC().Truncate(time.Second)
+
+	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
+	seedDeliveryRecord(t, store, domain.Delivery{
+		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
+		Generation: 5,
+		State:      domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
+	})
+
+	err := svc.ReportEvent(ctx, "del-1", 3, domain.DeliveryEvent{
+		Kind: domain.DeliveryEventProgress, Message: "stale event",
+	})
+	if err != nil {
+		t.Fatalf("ReportEvent: %v", err)
+	}
+
+	state := getDeliveryState(t, store, "del-1")
+	if state != domain.DeliveryStatePending {
+		t.Errorf("state = %q, want %q (stale event should be discarded)", state, domain.DeliveryStatePending)
+	}
+	if len(sig.snapshot()) != 0 {
+		t.Error("expected no signals for stale event")
 	}
 }
 
@@ -517,13 +573,13 @@ func TestDeliveryReportService_NilObserver_DoesNotPanic(t *testing.T) {
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
 	})
 
-	if err := svc.ReportEvent(ctx, "del-1", domain.DeliveryEvent{
+	if err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "ok",
 	}); err != nil {
 		t.Fatalf("ReportEvent: %v", err)
 	}
 
-	if err := svc.ReportResult(ctx, "del-1", domain.DeliveryResult{
+	if err := svc.ReportResult(ctx, "del-1", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
 	}); err != nil {
 		t.Fatalf("ReportResult: %v", err)

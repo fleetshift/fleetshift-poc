@@ -224,14 +224,14 @@ func TestDelivery_Withdraw(t *testing.T) {
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
-		if err := d.Withdraw(later); err != nil {
+		if err := d.Withdraw(7, later); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 		if d.State != DeliveryStatePending {
 			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
 		}
-		if d.Generation != 5 {
-			t.Errorf("Generation changed to %d, want 5", d.Generation)
+		if d.Generation != 7 {
+			t.Errorf("Generation = %d, want 7", d.Generation)
 		}
 		if len(d.Manifests) != 1 || string(d.Manifests[0].Raw) != "keep" {
 			t.Error("Manifests changed during withdraw")
@@ -249,7 +249,7 @@ func TestDelivery_Withdraw(t *testing.T) {
 		} {
 			t.Run(string(state), func(t *testing.T) {
 				d := Delivery{State: state, UpdatedAt: now}
-				err := d.Withdraw(later)
+				err := d.Withdraw(1, later)
 				if err == nil {
 					t.Fatal("expected error for non-terminal state")
 				}

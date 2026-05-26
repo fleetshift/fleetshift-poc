@@ -332,7 +332,7 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 
 		if delivery.State != DeliveryStatePending {
 			// First attempt: transition from terminal to Pending.
-			if err := delivery.Withdraw(s.now()); err != nil {
+			if err := delivery.Withdraw(in.Generation, s.now()); err != nil {
 				return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
 			}
 			if err := tx.Deliveries().Put(ctx, delivery); err != nil {
@@ -347,7 +347,7 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 			tx.Rollback()
 		}
 
-		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, delivery.Generation); err != nil {
+		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
 			return RemoveOutput{}, fmt.Errorf("dispatch removal %s: %w", in.DeliveryID, err)
 		}
 		return RemoveOutput{Dispatched: true}, nil
@@ -738,7 +738,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 			return false, fmt.Errorf("remove delivery for target %s: %w", inputs[id].Target.ID, err)
 		}
 		return out.Dispatched, nil
-	}, ids)
+	}, ids, f.Generation)
 	return err
 }
 
@@ -785,7 +785,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 					return false, fmt.Errorf("remove delivery for target %s: %w", removeInputs[id].Target.ID, err)
 				}
 				return out.Dispatched, nil
-			}, removeIDs); err != nil {
+			}, removeIDs, startGen); err != nil {
 				return err
 			}
 		}
@@ -832,7 +832,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 			results, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
 				_, err := RunActivity(record, s.DeliverToTarget(), inputs[id])
 				return err == nil, err
-			}, ids)
+			}, ids, startGen)
 			if err != nil {
 				return err
 			}
@@ -871,10 +871,16 @@ const ackRetryInterval = 30 * time.Second
 // exists). Skipped targets are removed from tracking immediately.
 // Returns accumulated results once every tracked delivery has reached
 // a terminal state.
+//
+// The expectedGen parameter identifies the generation this dispatch
+// cycle is operating on. Events whose generation does not match are
+// silently discarded to prevent stale signals (from a prior generation
+// whose delivery ID is the same) from affecting the current cycle.
 func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 	record Record,
 	dispatch func(DeliveryID) (bool, error),
 	ids []DeliveryID,
+	expectedGen Generation,
 ) ([]DeliveryResult, error) {
 	if len(ids) == 0 {
 		return nil, nil
@@ -917,7 +923,7 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 			if err != nil {
 				return nil, fmt.Errorf("await delivery signal: %w", err)
 			}
-			if err := s.processDeliveryEvent(event, unacked, remaining, &results); err != nil {
+			if err := s.processDeliveryEvent(event, expectedGen, unacked, remaining, &results); err != nil {
 				return nil, err
 			}
 		}
@@ -926,18 +932,33 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 }
 
 // processDeliveryEvent handles a single FulfillmentEvent, updating the
-// unacked/remaining tracking maps and accumulating results.
+// unacked/remaining tracking maps and accumulating results. Events for
+// deliveries not in the current batch or whose generation does not
+// match expectedGen are silently ignored to prevent stale or unrelated
+// signals from affecting this dispatch cycle.
 func (s *OrchestrationWorkflowSpec) processDeliveryEvent(
 	event FulfillmentEvent,
+	expectedGen Generation,
 	unacked map[DeliveryID]struct{},
 	remaining map[DeliveryID]struct{},
 	results *[]DeliveryResult,
 ) error {
 	if event.DeliveryAcked != nil {
-		delete(unacked, event.DeliveryAcked.DeliveryID)
+		if event.DeliveryAcked.Generation != expectedGen {
+			return nil
+		}
+		if _, ok := remaining[event.DeliveryAcked.DeliveryID]; ok {
+			delete(unacked, event.DeliveryAcked.DeliveryID)
+		}
 	}
 	if event.DeliveryCompleted != nil {
+		if event.DeliveryCompleted.Generation != expectedGen {
+			return nil
+		}
 		did := event.DeliveryCompleted.DeliveryID
+		if _, ok := remaining[did]; !ok {
+			return nil
+		}
 		delete(unacked, did)
 		delete(remaining, did)
 		switch event.DeliveryCompleted.Result.State {

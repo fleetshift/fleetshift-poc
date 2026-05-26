@@ -638,7 +638,7 @@ type authFailThenSucceedAgent struct {
 	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
@@ -646,7 +646,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 
 	if n == 1 {
 		go func() {
-			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: "401 Unauthorized",
 			})
@@ -654,7 +654,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 		return nil
 	}
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }

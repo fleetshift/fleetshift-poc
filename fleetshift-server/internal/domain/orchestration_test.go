@@ -23,6 +23,18 @@ func setupStore(t *testing.T) (domain.Store, domain.Vault) {
 	return &sqlite.Store{DB: db}, &sqlite.VaultStore{DB: db}
 }
 
+// testContext returns a context with a 5-second deadline for
+// orchestration tests. These tests run against in-memory stores and
+// synchronous records, so they complete in milliseconds under normal
+// conditions. A short deadline ensures quick failure (rather than
+// hanging for the global go test timeout) when a signal is lost.
+func testContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	return ctx
+}
+
 func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID, f domain.Fulfillment) {
 	t.Helper()
 	defaultTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -321,8 +333,12 @@ func (r *simpleRecord) Run(activity domain.Activity[any, any], in any) (any, err
 	return activity.Run(r.ctx, in)
 }
 func (r *simpleRecord) Await(_ string) (any, error) {
-	e := <-r.events
-	return e, nil
+	select {
+	case e := <-r.events:
+		return e, nil
+	case <-r.ctx.Done():
+		return nil, r.ctx.Err()
+	}
 }
 func (r *simpleRecord) AwaitWithTimeout(_ string, timeout time.Duration) (any, error) {
 	if timeout == 0 {
@@ -409,11 +425,12 @@ type noopDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -421,11 +438,12 @@ func (d noopDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (d noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d noopDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -441,11 +459,12 @@ type asyncDelivery struct {
 	done   chan struct{}
 }
 
-func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -456,11 +475,12 @@ func (a *asyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, delivery
 	return nil
 }
 
-func (a *asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *asyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -476,11 +496,12 @@ type emittingAsyncDelivery struct {
 	done   chan struct{}
 }
 
-func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -491,11 +512,12 @@ func (a *emittingAsyncDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (a *emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *emittingAsyncDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		a.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -509,7 +531,7 @@ type outputProducingDelivery struct {
 	secrets []domain.ProducedSecret
 }
 
-func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	result := domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
 		ProvisionedTargets: d.targets,
@@ -519,6 +541,7 @@ func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     result,
 			},
 		}
@@ -526,11 +549,12 @@ func (d *outputProducingDelivery) Deliver(_ context.Context, _ domain.TargetInfo
 	return nil
 }
 
-func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *outputProducingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -543,11 +567,12 @@ type failingRemoveDelivery struct {
 	err    error
 }
 
-func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		f.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -555,11 +580,12 @@ func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 	return nil
 }
 
-func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		f.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: f.err.Error()},
 			},
 		}
@@ -571,11 +597,12 @@ type authFailingDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result: domain.DeliveryResult{
 					State:   domain.DeliveryStateAuthFailed,
 					Message: "401 Unauthorized",
@@ -586,11 +613,12 @@ func (d authFailingDelivery) Deliver(_ context.Context, _ domain.TargetInfo, del
 	return nil
 }
 
-func (d authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -605,7 +633,7 @@ type recordingDelivery struct {
 	delivered []domain.TargetID
 }
 
-func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	d.mu.Lock()
 	d.delivered = append(d.delivered, target.ID)
 	d.mu.Unlock()
@@ -613,6 +641,7 @@ func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo,
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -620,11 +649,12 @@ func (d *recordingDelivery) Deliver(_ context.Context, target domain.TargetInfo,
 	return nil
 }
 
-func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -667,7 +697,7 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -711,7 +741,7 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
 	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
@@ -757,7 +787,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
 	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
@@ -787,7 +817,7 @@ func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -832,7 +862,7 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 		wf.Vault = vault
 	})
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	obs := &recordingObserver{}
 	wf.Observer = obs
 
@@ -874,7 +904,7 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, &asyncDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -899,7 +929,7 @@ func TestOrchestration_EmittingAsyncDelivery_ReachesActive(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, &emittingAsyncDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -924,7 +954,7 @@ func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -963,7 +993,7 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
 	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
@@ -1023,7 +1053,7 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1063,7 +1093,7 @@ func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1105,7 +1135,7 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1147,7 +1177,7 @@ func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 	failingAgent := &failingRemoveDelivery{events: events, err: fmt.Errorf("network timeout")}
 	wf := newTestWorkflow(store, failingAgent, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err == nil {
 		t.Fatal("expected error from Remove failure")
@@ -1176,7 +1206,7 @@ func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T)
 	// simulating a concurrent external mutation. The workflow should
 	// loop: first iteration reconciles gen 1 and sees gen 3 has
 	// arrived, second iteration reconciles gen 3 and exits.
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	interceptor := &afterLoadBumpGenRecord{
 		delegate: rec,
 		store:    store,
@@ -1276,7 +1306,7 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 		wf.Observer = obs
 	})
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -1394,7 +1424,7 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	simple := &simpleRecord{ctx: context.Background(), events: events}
+	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
 	_, err := wf.Run(capRec, domain.FulfillmentID("attested-dep"))
@@ -1464,7 +1494,7 @@ func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	simple := &simpleRecord{ctx: context.Background(), events: events}
+	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
 	_, err := wf.Run(capRec, domain.FulfillmentID("no-prov-dep"))
@@ -1494,11 +1524,12 @@ type authFailingNoSignalDelivery struct {
 	events chan<- domain.FulfillmentEvent
 }
 
-func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result: domain.DeliveryResult{
 					State:   domain.DeliveryStateAuthFailed,
 					Message: "attestation verification failed: target has no trust_bundle property",
@@ -1509,11 +1540,12 @@ func (d authFailingNoSignalDelivery) Deliver(_ context.Context, _ domain.TargetI
 	return nil
 }
 
-func (d authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -1534,7 +1566,7 @@ func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, authFailingNoSignalDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 
 	done := make(chan error, 1)
 	go func() {
@@ -1588,7 +1620,7 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	simple := &simpleRecord{ctx: context.Background(), events: events}
+	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
 	_, err := wf.Run(capRec, domain.FulfillmentID("rm-attested"))
@@ -1666,7 +1698,7 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	simple := &simpleRecord{ctx: context.Background(), events: events}
+	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
 	_, err := wf.Run(capRec, domain.FulfillmentID("del-attested"))
@@ -1760,7 +1792,7 @@ func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
-	simple := &simpleRecord{ctx: context.Background(), events: events}
+	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
 	_, err := wf.Run(capRec, domain.FulfillmentID("del-no-prov"))
@@ -1902,7 +1934,7 @@ func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExi
 			wf.Vault = vault
 			wf.Observer = obs
 		})
-		rec := &simpleRecord{ctx: context.Background(), events: events}
+		rec := &simpleRecord{ctx: testContext(t), events: events}
 		_, lastErr = wf.Run(rec, domain.FulfillmentID("d1"))
 		if lastErr == nil {
 			break

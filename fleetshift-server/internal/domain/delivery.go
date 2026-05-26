@@ -130,20 +130,23 @@ func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now t
 	return nil
 }
 
-// Withdraw resets the delivery for a removal cycle. The generation
-// and manifests are preserved -- the withdrawal targets whatever was
-// actually delivered to the target, regardless of whether the
-// fulfillment has since advanced. A target is withdrawn when it leaves
-// placement (e.g. label change, pool mutation, fulfillment deletion).
+// Withdraw resets the delivery for a removal cycle. The manifests are
+// preserved -- the withdrawal targets whatever was actually delivered
+// to the target. The generation is advanced to the given value so that
+// the staleness fence used by [DeliveryReporter] and orchestration
+// signals correctly identifies this removal cycle. A target is
+// withdrawn when it leaves placement (e.g. label change, pool
+// mutation, fulfillment deletion).
 //
 // Returns [ErrIllegalStateTransition] if the delivery is not in a
 // terminal state.
-func (d *Delivery) Withdraw(now time.Time) error {
+func (d *Delivery) Withdraw(generation Generation, now time.Time) error {
 	if !d.State.IsTerminal() {
 		return fmt.Errorf("%w: cannot withdraw from non-terminal state %q",
 			ErrIllegalStateTransition, d.State)
 	}
 	d.State = DeliveryStatePending
+	d.Generation = generation
 	d.UpdatedAt = now
 	return nil
 }

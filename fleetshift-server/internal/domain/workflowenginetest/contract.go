@@ -999,7 +999,7 @@ type outputAgent struct {
 	reporter domain.DeliveryReporter
 }
 
-func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	var spec struct{ Name string }
 	if err := json.Unmarshal(manifests[0].Raw, &spec); err != nil {
 		return err
@@ -1008,7 +1008,7 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	secretRef := domain.SecretRef("targets/" + string(targetID) + "/kubeconfig")
 
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
 			State: domain.DeliveryStateDelivered,
 			ProvisionedTargets: []domain.ProvisionedTarget{{
 				ID:   targetID,
@@ -1028,9 +1028,9 @@ func (a *outputAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID
 	return nil
 }
 
-func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *outputAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
@@ -1045,7 +1045,7 @@ type authFailThenSucceedAgent struct {
 	attempt  int
 }
 
-func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	a.attempt++
 	n := a.attempt
@@ -1053,7 +1053,7 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 
 	if n == 1 {
 		go func() {
-			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: "401 Unauthorized",
 			})
@@ -1061,14 +1061,14 @@ func (a *authFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInf
 		return nil
 	}
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
 
-func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *authFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
@@ -1099,7 +1099,7 @@ type transientFailAgent struct {
 	failsRemaining int
 }
 
-func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	if a.failsRemaining > 0 {
 		a.failsRemaining--
@@ -1108,14 +1108,14 @@ func (a *transientFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, del
 	}
 	a.mu.Unlock()
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
 
-func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
@@ -1141,10 +1141,10 @@ func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ do
 	return domain.TerminalError(errors.New("permanently broken"))
 }
 
-func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	if a.reporter != nil {
 		go func() {
-			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		}()
 	}
 	return nil
@@ -1158,14 +1158,14 @@ type transientRemoveAgent struct {
 	failsRemaining int
 }
 
-func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientRemoveAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }
 
-func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	a.mu.Lock()
 	if a.failsRemaining > 0 {
 		a.failsRemaining--
@@ -1174,7 +1174,7 @@ func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, de
 	}
 	a.mu.Unlock()
 	go func() {
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()
 	return nil
 }

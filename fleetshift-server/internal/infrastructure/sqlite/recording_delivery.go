@@ -49,7 +49,7 @@ func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.Ta
 
 	if s.Reporter != nil {
 		go func() {
-			_ = s.Reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			_ = s.Reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		}()
 	}
 
@@ -84,7 +84,7 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 
 	if s.Reporter != nil {
 		go func() {
-			_ = s.Reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			_ = s.Reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 		}()
 	}
 

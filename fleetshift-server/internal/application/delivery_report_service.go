@@ -65,7 +65,10 @@ func NewDeliveryReportService(
 // workflow so it knows the addon received the work.
 // Events for deliveries already in a terminal state are silently
 // ignored (the state machine rejects the transition).
-func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, event domain.DeliveryEvent) error {
+// Reports whose generation does not match the delivery's current
+// generation are silently discarded (stale work).
+// FIXME: This is not atomic with fulfillment signal; requires own workflow
+func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -75,6 +78,11 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 	d, err := tx.Deliveries().Get(ctx, deliveryID)
 	if err != nil {
 		return fmt.Errorf("get delivery: %w", err)
+	}
+
+	if d.Generation != generation {
+		// TODO: need observer to log this
+		return nil
 	}
 
 	wasPending := d.State == domain.DeliveryStatePending
@@ -101,7 +109,7 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 
 	if wasPending && s.signaler != nil {
 		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
-			DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID},
+			DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID, Generation: generation},
 		}); err != nil {
 			return fmt.Errorf("signal ack: %w", err)
 		}
@@ -116,10 +124,13 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 //   - When a terminal state is reached (completion signal), telling
 //     the workflow the work is done.
 //
+// Reports whose generation does not match the delivery's current
+// generation are silently discarded (stale work).
+//
 // Returns nil without persisting if the state machine rejects the
 // transition (e.g. the delivery is already terminal).
-// TODO: This is not atomic with fulfillment signal; requires own workflow
-func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, result domain.DeliveryResult) error {
+// FIXME: This is not atomic with fulfillment signal; requires own workflow
+func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -129,6 +140,10 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 	d, err := tx.Deliveries().Get(ctx, deliveryID)
 	if err != nil {
 		return fmt.Errorf("get delivery: %w", err)
+	}
+
+	if d.Generation != generation {
+		return nil
 	}
 
 	wasPending := d.State == domain.DeliveryStatePending
@@ -156,7 +171,7 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		// TODO: maybe result should not accept non terminal states? not sure it makes sense otherwise
 		if wasPending && !result.State.IsTerminal() {
 			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
-				DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID},
+				DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID, Generation: generation},
 			}); err != nil {
 				return fmt.Errorf("signal ack: %w", err)
 			}
@@ -165,6 +180,7 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
 				DeliveryCompleted: &domain.DeliveryCompletionEvent{
 					DeliveryID: deliveryID,
+					Generation: generation,
 					Result:     result,
 				},
 			}); err != nil {

@@ -112,7 +112,7 @@ func newChannelReporter() *channelReporter {
 	}
 }
 
-func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	r.mu.Lock()
 	r.events = append(r.events, event)
 	r.mu.Unlock()
@@ -120,7 +120,7 @@ func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, ev
 	return nil
 }
 
-func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, result domain.DeliveryResult) error {
+func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) error {
 	r.done <- result
 	return nil
 }
@@ -131,9 +131,15 @@ func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.Tar
 
 type nopReporter struct{}
 
-func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
-func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
-func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) { return nil, nil }
+func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryEvent) error {
+	return nil
+}
+func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryResult) error {
+	return nil
+}
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return nil, nil
+}
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
@@ -401,12 +407,12 @@ type recordingReporter struct {
 	events *[]domain.DeliveryEvent
 }
 
-func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	*r.events = append(*r.events, event)
 	return nil
 }
 
-func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error {
+func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryResult) error {
 	return nil
 }
 

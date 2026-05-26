@@ -129,12 +129,12 @@ func (a *Agent) Deliver(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	_ domain.Generation,
+	generation domain.Generation,
 ) error {
 	// 1. Parse ClusterSpec from manifests
 	spec, err := ParseClusterSpec(manifests)
 	if err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("parse cluster spec: %v", err),
 		})
@@ -159,7 +159,7 @@ func (a *Agent) Deliver(
 	})
 	if err != nil {
 		probe.Error(err)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("resolve AWS credentials: %v", err),
 		})
@@ -170,7 +170,7 @@ func (a *Agent) Deliver(
 	// Validate credential/mode coupling
 	if err := validateCredentialModeCoupling(awsCreds, spec.EffectiveCCOSTSMode()); err != nil {
 		probe.Error(err)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: err.Error(),
 		})
@@ -183,7 +183,7 @@ func (a *Agent) Deliver(
 	})
 	if err != nil {
 		probe.Error(err)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("resolve pull secret: %v", err),
 		})
@@ -194,7 +194,7 @@ func (a *Agent) Deliver(
 	sshPublicKey, sshPrivateKey, err := GenerateSSHKey()
 	if err != nil {
 		probe.Error(err)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("generate SSH key: %v", err),
 		})
@@ -205,7 +205,7 @@ func (a *Agent) Deliver(
 	configPath, workDir, err := prepareWorkDir(clusterID, spec, region, pullSecret, sshPublicKey, auth, a.consoleClientSecret)
 	if err != nil {
 		probe.Error(err)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: err.Error(),
 		})
@@ -229,7 +229,7 @@ func (a *Agent) Deliver(
 		releaseImage:  spec.ReleaseImage,
 		ccostsMode:    true, // always STS mode for OCP agent
 	}
-	go a.deliverAsync(context.WithoutCancel(ctx), req, deliveryID, state)
+	go a.deliverAsync(context.WithoutCancel(ctx), req, deliveryID, generation, state)
 
 	return nil
 }
@@ -272,6 +272,7 @@ func (a *Agent) deliverAsync(
 	ctx context.Context,
 	req provisionRequest,
 	deliveryID domain.DeliveryID,
+	generation domain.Generation,
 	state *provisionState,
 ) {
 	// Generate callback JWT
@@ -279,7 +280,7 @@ func (a *Agent) deliverAsync(
 	token, err := a.tokenSigner.Sign(req.clusterID, provTimeout)
 	if err != nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("generate callback token: %v", err),
 		})
@@ -304,7 +305,7 @@ func (a *Agent) deliverAsync(
 	// Start the subprocess
 	if err := cmd.Start(); err != nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("start ocp-engine: %v", err),
 		})
@@ -333,7 +334,7 @@ func (a *Agent) deliverAsync(
 				msg = fmt.Sprintf("ocp-engine exited with error: %v", err)
 			}
 			a.retainOrCleanup(state, req.clusterID, req.workDir)
-			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateFailed,
 				Message: msg,
 			})
@@ -341,7 +342,7 @@ func (a *Agent) deliverAsync(
 		}
 	case <-ctx.Done():
 		a.retainOrCleanup(state, req.clusterID, req.workDir)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("context cancelled: %v", ctx.Err()),
 		})
@@ -363,7 +364,7 @@ func (a *Agent) deliverAsync(
 		} else {
 			a.cleanupProvision(req.clusterID, req.workDir)
 		}
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("ocp-engine failed in phase %s: %s", failure.GetPhase(), failure.GetFailureMessage()),
 		})
@@ -372,7 +373,7 @@ func (a *Agent) deliverAsync(
 
 	if completion == nil {
 		a.cleanupProvision(req.clusterID, req.workDir)
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: "callback received but no completion data",
 		})
@@ -385,7 +386,7 @@ func (a *Agent) deliverAsync(
 		state.mu.Lock()
 		state.workDir = req.workDir
 		state.mu.Unlock()
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("post-provision bootstrap failed: %v", err),
 		})
@@ -400,7 +401,7 @@ func (a *Agent) deliverAsync(
 	}
 
 	a.cleanupProvision(req.clusterID, req.workDir)
-	_ = a.reporter.ReportResult(ctx, deliveryID, result)
+	_ = a.reporter.ReportResult(ctx, deliveryID, generation, result)
 }
 
 // handleCompletion performs post-provision bootstrap and builds the
@@ -471,17 +472,18 @@ func (a *Agent) Remove(
 	manifests []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	_ domain.Generation,
+	generation domain.Generation,
 ) error {
+	asyncCtx := context.WithoutCancel(ctx)
 	go func() {
-		err := a.doRemove(context.Background(), target, manifests, auth)
+		err := a.doRemove(asyncCtx, target, manifests, auth)
 		if err != nil {
-			_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
 				State: domain.DeliveryStateFailed, Message: err.Error(),
 			})
 			return
 		}
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
 			State: domain.DeliveryStateDelivered,
 		})
 	}()

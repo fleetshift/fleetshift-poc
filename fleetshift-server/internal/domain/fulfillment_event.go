@@ -3,6 +3,7 @@ package domain
 // DeliveryCompletionEvent records the terminal outcome of a single delivery.
 type DeliveryCompletionEvent struct {
 	DeliveryID DeliveryID
+	Generation Generation
 	Result     DeliveryResult
 }
 
@@ -12,6 +13,7 @@ type DeliveryCompletionEvent struct {
 // work and can stop the ack retry loop for this delivery.
 type DeliveryAckedEvent struct {
 	DeliveryID DeliveryID
+	Generation Generation
 }
 
 // FulfillmentEvent is the signal delivered to a running reconciliation
