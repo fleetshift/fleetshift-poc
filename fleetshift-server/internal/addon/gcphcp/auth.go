@@ -81,6 +81,10 @@ func NewBrokerAuth(cfg BrokerAuthConfig) *BrokerAuth {
 // 1. Exchange the caller's OIDC token for a Workforce access token via STS.
 // 2. Use the Workforce token to mint a broker ID token via IAM generateIdToken.
 func (a *BrokerAuth) Exchange(ctx context.Context, callerToken string) (BrokerAuthResult, error) {
+	if callerToken == "" {
+		return BrokerAuthResult{}, newAuthExpiredError(fmt.Errorf("caller token is empty"))
+	}
+
 	// Step 1: STS token exchange
 	workforceToken, err := a.exchangeSTS(ctx, callerToken)
 	if err != nil {

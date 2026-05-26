@@ -282,6 +282,21 @@ func TestBrokerAuth_ErrorClassification(t *testing.T) {
 	}
 }
 
+func TestBrokerAuth_EmptyCallerToken_IsAuthExpired(t *testing.T) {
+	auth := gcphcp.NewBrokerAuth(defaultBrokerAuthConfig(
+		"http://should-not-be-called.invalid",
+		"http://should-not-be-called.invalid",
+	))
+
+	_, err := auth.Exchange(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected error for empty caller token, got nil")
+	}
+	if !gcphcp.IsAuthExpiredError(err) {
+		t.Fatalf("empty caller token should be auth-expired, got: %v", err)
+	}
+}
+
 func TestWorkforceCredentialConfig(t *testing.T) {
 	cfg := gcphcp.TargetConfig{
 		ID:                "test-target",
