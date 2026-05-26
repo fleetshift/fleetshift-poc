@@ -493,3 +493,65 @@ func TestAgent_Remove_ClearsGenerationSoRecreateIsAccepted(t *testing.T) {
 		t.Fatal("generation 0 should be accepted after delete cleared the high-water mark")
 	}
 }
+
+func TestAgent_Remove_AuthExpiredReportsAuthFailedViaProgress(t *testing.T) {
+	withAgentHooksStubbed(t)
+
+	// Override newBrokerAuth to return an auth expired error.
+	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
+		return &fakeBrokerAuth{
+			err: newAuthExpiredError(fmt.Errorf("STS returned status 400: invalid_grant: ID Token is stale")),
+		}
+	}
+
+	reporter := newAgentTestReporter()
+	agent := &Agent{
+		reconciler: &Reconciler{
+			gateway: GatewayConfig{URL: "https://unused", Audience: "test-audience"},
+			infra:   &fakeCleanupInfra{},
+		},
+		observer:   noopObserver{},
+		reporter:   reporter,
+		trustMap:   make(map[domain.IssuerURL]domain.TrustBundleEntry),
+		clusterGen: make(map[string]domain.Generation),
+	}
+
+	spec := json.RawMessage(`{
+		"endpointAccess":"PublicAndPrivate","releaseVersion":"4.22.0","channelGroup":"stable",
+		"nodepools":[{"id":"w","replicas":2,"instanceType":"n1-standard-4",
+		"rootVolumeSize":128,"rootVolumeType":"pd-standard","autoRepair":true,"upgradeType":"Replace"}]
+	}`)
+
+	err := agent.Remove(
+		context.Background(),
+		domain.TargetInfo{Properties: map[string]string{
+			"id": "target-1", "gcp_project": "proj", "region": "us-central1",
+			"workforce_pool": "pool", "workforce_provider": "prov",
+			"broker_sa_email": "broker@example.com",
+		}},
+		domain.DeliveryID("remove-auth-fail"),
+		[]domain.Manifest{{
+			ResourceType: ClusterResourceType,
+			Name:         "test-cls",
+			Raw:          spec,
+		}},
+		domain.DeliveryAuth{Token: "stale-token"},
+		nil,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("Remove() should return nil on auth error (reported via progress), got: %v", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		if result.State != domain.DeliveryStateAuthFailed {
+			t.Fatalf("state = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+		}
+		if !strings.Contains(result.Message, "credentials expired") {
+			t.Fatalf("message = %q, want 'credentials expired' context", result.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for auth failure delivery result")
+	}
+}
