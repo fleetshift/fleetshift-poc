@@ -39,7 +39,7 @@ func newChannelReporter() *channelReporter {
 	}
 }
 
-func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	r.mu.Lock()
 	r.events = append(r.events, event)
 	r.mu.Unlock()
@@ -47,7 +47,7 @@ func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, ev
 	return nil
 }
 
-func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, result domain.DeliveryResult) error {
+func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) error {
 	r.done <- result
 	return nil
 }
@@ -60,9 +60,15 @@ func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.Tar
 // observe async results.
 type nopReporter struct{}
 
-func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
-func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
-func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) { return nil, nil }
+func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryEvent) error {
+	return nil
+}
+func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryResult) error {
+	return nil
+}
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return nil, nil
+}
 
 func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
@@ -393,8 +399,9 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 	}
 }
 
-func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfo{
@@ -420,16 +427,21 @@ func TestAgent_Remove_AttestationFailure_ReturnsError(t *testing.T) {
 	}
 
 	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
-	if err == nil {
-		t.Fatal("expected attestation verification error, got nil")
+	if err != nil {
+		t.Fatalf("Remove should not return error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "attestation verification failed") {
-		t.Errorf("expected attestation verification error, got: %v", err)
+	result := <-reporter.done
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+	if !strings.Contains(result.Message, "attestation verification failed") {
+		t.Errorf("expected attestation verification error in message, got: %q", result.Message)
 	}
 }
 
-func TestAgent_Remove_WithAttestation_NoTrustBundle_ReturnsError(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+func TestAgent_Remove_WithAttestation_NoTrustBundle_ReportsAuthFailed(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
 
 	target := domain.TargetInfo{
 		ID:   "k8s-test",
@@ -453,10 +465,14 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReturnsError(t *testing.T) {
 	}
 
 	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
-	if err == nil {
-		t.Fatal("expected error for missing trust_bundle, got nil")
+	if err != nil {
+		t.Fatalf("Remove should not return error: %v", err)
 	}
-	if !strings.Contains(err.Error(), "trust_bundle") {
-		t.Errorf("expected trust_bundle error, got: %v", err)
+	result := <-reporter.done
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+	if !strings.Contains(result.Message, "trust_bundle") {
+		t.Errorf("expected trust_bundle error in message, got: %q", result.Message)
 	}
 }

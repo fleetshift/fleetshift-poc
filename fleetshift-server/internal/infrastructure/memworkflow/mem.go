@@ -210,6 +210,18 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 						}
 					},
 				},
+				signalChans: map[string]<-chan []byte{
+					domain.FulfillmentEventSignal.Name: eventsCh,
+				},
+				unmarshalers: map[string]func([]byte) (any, error){
+					domain.FulfillmentEventSignal.Name: func(data []byte) (any, error) {
+						var event domain.FulfillmentEvent
+						if err := json.Unmarshal(data, &event); err != nil {
+							return nil, fmt.Errorf("memworkflow: unmarshal signal: %w", err)
+						}
+						return event, nil
+					},
+				},
 			}
 			val, err := w.spec.Run(record, id)
 			var can *domain.ContinueAsNewError
@@ -414,6 +426,18 @@ func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domai
 					}
 				},
 			},
+			signalChans: map[string]<-chan []byte{
+				domain.DeleteCleanupCompleteSignal.Name: eventsCh,
+			},
+			unmarshalers: map[string]func([]byte) (any, error){
+				domain.DeleteCleanupCompleteSignal.Name: func(data []byte) (any, error) {
+					var event domain.DeleteCleanupCompleteEvent
+					if err := json.Unmarshal(data, &event); err != nil {
+						return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
+					}
+					return event, nil
+				},
+			},
 		}
 		val, err := w.spec.Run(record, input)
 		done <- orchResult{val: val, err: err}
@@ -477,6 +501,18 @@ func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input 
 					}
 				},
 			},
+			signalChans: map[string]<-chan []byte{
+				domain.DeleteCleanupCompleteSignal.Name: eventsCh,
+			},
+			unmarshalers: map[string]func([]byte) (any, error){
+				domain.DeleteCleanupCompleteSignal.Name: func(data []byte) (any, error) {
+					var event domain.DeleteCleanupCompleteEvent
+					if err := json.Unmarshal(data, &event); err != nil {
+						return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
+					}
+					return event, nil
+				},
+			},
 		}
 		val, err := w.spec.Run(record, input)
 		done <- orchResult{val: val, err: err}
@@ -488,13 +524,23 @@ func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input 
 // --- shared base Record ---
 
 type baseRecord struct {
-	id      string
-	ctx     context.Context
-	signals map[string]func() (any, error) // per-signal-name receivers
+	id          string
+	ctx         context.Context
+	signals     map[string]func() (any, error)         // per-signal-name blocking receivers
+	signalChans map[string]<-chan []byte                // raw channels for AwaitWithTimeout
+	unmarshalers map[string]func([]byte) (any, error)  // per-signal-name deserializers
 }
 
 func (r *baseRecord) ID() string               { return r.id }
 func (r *baseRecord) Context() context.Context { return r.ctx }
+
+func (r *baseRecord) unmarshalSignal(name string, data []byte) (any, error) {
+	unmarshal, ok := r.unmarshalers[name]
+	if !ok {
+		return nil, fmt.Errorf("memworkflow: no unmarshaler for signal %q", name)
+	}
+	return unmarshal(data)
+}
 
 // Run dispatches the activity to a goroutine with a fresh context and
 // JSON round-trips both input and output. The workflow goroutine blocks
@@ -575,6 +621,36 @@ func (r *baseRecord) Await(signalName string) (any, error) {
 		return nil, fmt.Errorf("memworkflow: no signal receiver registered for %q", signalName)
 	}
 	return recv()
+}
+
+// AwaitWithTimeout blocks until the named signal arrives or the timeout
+// expires. A zero timeout is non-blocking. Returns [domain.ErrSignalTimeout]
+// if no signal is received within the timeout.
+func (r *baseRecord) AwaitWithTimeout(signalName string, timeout time.Duration) (any, error) {
+	ch, ok := r.signalChans[signalName]
+	if !ok {
+		return nil, fmt.Errorf("memworkflow: no signal receiver registered for %q", signalName)
+	}
+
+	if timeout == 0 {
+		select {
+		case data := <-ch:
+			return r.unmarshalSignal(signalName, data)
+		default:
+			return nil, domain.ErrSignalTimeout
+		}
+	}
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	select {
+	case data := <-ch:
+		return r.unmarshalSignal(signalName, data)
+	case <-timer.C:
+		return nil, domain.ErrSignalTimeout
+	case <-r.ctx.Done():
+		return nil, r.ctx.Err()
+	}
 }
 
 // jsonRoundTrip marshals v to JSON and unmarshals into a new value of

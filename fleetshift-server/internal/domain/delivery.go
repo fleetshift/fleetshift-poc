@@ -111,6 +111,81 @@ func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
 	return nil
 }
 
+// Redispatch resets the delivery for a new put cycle at an advanced
+// generation. The manifests are replaced and the lifecycle restarts
+// from [DeliveryStatePending]. This is the only legal way to move a
+// delivery backward in its state machine for a put operation.
+//
+// Returns [ErrIllegalStateTransition] if generation does not advance
+// past the delivery's current generation.
+func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now time.Time) error {
+	if generation <= d.Generation {
+		return fmt.Errorf("%w: cannot redispatch at generation %d (current %d)",
+			ErrIllegalStateTransition, generation, d.Generation)
+	}
+	d.Manifests = manifests
+	d.Generation = generation
+	d.State = DeliveryStatePending
+	d.UpdatedAt = now
+	return nil
+}
+
+// Withdraw prepares the delivery for a removal cycle. The manifests
+// are preserved — the withdrawal targets whatever was actually
+// delivered to the target. The generation is advanced to the given
+// value so that the staleness fence used by [DeliveryReporter] and
+// orchestration signals correctly identifies this removal cycle. A
+// target is withdrawn when it leaves placement (e.g. label change,
+// pool mutation, fulfillment deletion).
+//
+// Returns (true, nil) when the delivery was modified (reset to
+// [DeliveryStatePending]) — either from a terminal state or by
+// advancing the generation past a non-terminal state. Returns
+// (false, nil) when no modification is needed: the delivery is
+// already non-terminal at the same generation, meaning it is either
+// pending (a retry, handled by [Delivery.Retry]) or already being
+// processed by the addon.
+//
+// Returns an error if the given generation would move backwards.
+//
+// TODO: we advance generation but don't update manifests; might want a specific state for this
+// In general the identity of Delivery seems possibly fragile; we might want something
+// to differentiate between all of the fulfillment, target, and generation.
+func (d *Delivery) Withdraw(generation Generation, now time.Time) (bool, error) {
+	if generation < d.Generation {
+		return false, fmt.Errorf("%w: withdraw generation %d is older than current %d",
+			ErrIllegalStateTransition, generation, d.Generation)
+	}
+
+	// Same generation and not terminal: either already Pending (retry case
+	// handled by Retry) or already in progress (acked, signal queued).
+	if generation == d.Generation && !d.State.IsTerminal() {
+		return false, nil
+	}
+
+	d.State = DeliveryStatePending
+	d.Generation = generation
+	d.UpdatedAt = now
+	return true, nil
+}
+
+// Retry prepares the delivery for a same-generation re-dispatch. It
+// returns true if a re-dispatch is needed (i.e. the delivery is still
+// [DeliveryStatePending] at the expected generation because the
+// previous dispatch failed before the addon received it). Returns
+// false if the delivery has already progressed past Pending, or the
+// generation doesn't match (stale activity invocation).
+func (d *Delivery) Retry(generation Generation, now time.Time) bool {
+	if d.Generation != generation {
+		return false
+	}
+	if d.State != DeliveryStatePending {
+		return false
+	}
+	d.UpdatedAt = now
+	return true
+}
+
 // ActiveDelivery is the enriched view of a [Delivery] returned by
 // [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery
 // record with the full context an addon needs to resume work after a

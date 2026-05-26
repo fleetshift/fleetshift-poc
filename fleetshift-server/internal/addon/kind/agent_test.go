@@ -112,7 +112,7 @@ func newChannelReporter() *channelReporter {
 	}
 }
 
-func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	r.mu.Lock()
 	r.events = append(r.events, event)
 	r.mu.Unlock()
@@ -120,7 +120,7 @@ func (r *channelReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, ev
 	return nil
 }
 
-func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, result domain.DeliveryResult) error {
+func (r *channelReporter) ReportResult(_ context.Context, _ domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) error {
 	r.done <- result
 	return nil
 }
@@ -131,9 +131,15 @@ func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.Tar
 
 type nopReporter struct{}
 
-func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.DeliveryEvent) error        { return nil }
-func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error       { return nil }
-func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) { return nil, nil }
+func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryEvent) error {
+	return nil
+}
+func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryResult) error {
+	return nil
+}
+func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return nil, nil
+}
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
@@ -232,7 +238,8 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["my-cluster"] = nil
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	manifests := []domain.Manifest{{
 		Raw: json.RawMessage(`{"name":"my-cluster"}`),
@@ -243,6 +250,11 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
+	result := <-reporter.done
+	if result.State != domain.DeliveryStateDelivered {
+		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
+	}
+
 	if len(provider.deleted) != 1 || provider.deleted[0] != "my-cluster" {
 		t.Errorf("deleted = %v, want [my-cluster]", provider.deleted)
 	}
@@ -251,7 +263,8 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 	provider := newFakeProvider()
 	// cluster doesn't exist
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	manifests := []domain.Manifest{{
 		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
@@ -260,6 +273,11 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
+	}
+
+	result := <-reporter.done
+	if result.State != domain.DeliveryStateDelivered {
+		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
 
 	if len(provider.deleted) != 0 {
@@ -389,12 +407,12 @@ type recordingReporter struct {
 	events *[]domain.DeliveryEvent
 }
 
-func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, event domain.DeliveryEvent) error {
+func (r *recordingReporter) ReportEvent(_ context.Context, _ domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) error {
 	*r.events = append(*r.events, event)
 	return nil
 }
 
-func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, domain.DeliveryResult) error {
+func (r *recordingReporter) ReportResult(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryResult) error {
 	return nil
 }
 

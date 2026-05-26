@@ -10,7 +10,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// errAuthPaused is a sentinel error returned by [awaitDeliveries] when
+// errAuthPaused is a sentinel error returned by [dispatchAndAwait] when
 // a delivery reports [DeliveryStateAuthFailed]. The orchestration
 // catches this to transition to [FulfillmentStatePausedAuth] and
 // complete the workflow.
@@ -82,6 +82,15 @@ type RemoveInput struct {
 	Generation    Generation   // fulfillment generation at dispatch; used for stale-delivery fencing
 }
 
+// RemoveOutput is the result of the remove-from-target activity.
+// Dispatched indicates whether a removal was actually dispatched (true)
+// or skipped (false). A skip occurs when no delivery record exists or
+// the delivery already progressed past Pending (addon already acked
+// the removal and a completion signal is queued).
+type RemoveOutput struct {
+	Dispatched bool
+}
+
 // ResolvePlacementInput is the input to the resolve-placement activity.
 // Pool is the placement view of targets only; see [PlacementTarget].
 type ResolvePlacementInput struct {
@@ -124,7 +133,7 @@ type PersistAndCompleteInput struct {
 // [OrchestrationWorkflow] that can start instances.
 type OrchestrationWorkflowSpec struct {
 	Store           Store
-	Delivery        DeliveryService
+	Delivery        DeliveryAgent
 	Strategies      StrategyFactory
 	Attestation     AttestationAssembler
 	CleanupSignaler DeleteCleanupSignaler
@@ -230,18 +239,17 @@ func (s *OrchestrationWorkflowSpec) GenerateManifests() Activity[GenerateManifes
 }
 
 // DeliverToTarget delivers manifests to a target. It persists a
-// [Delivery] record in [DeliveryStatePending], then dispatches to
-// the [DeliveryService]. The agent reports progress and results
-// back via its injected [DeliveryReporter].
+// [Delivery] record in [DeliveryStatePending] (creating a new record
+// or using [Delivery.Redispatch] if one exists), then dispatches to
+// the [DeliveryAgent]. The agent reports progress and results back
+// via its injected [DeliveryReporter].
 //
 // The delivery receives [context.Background] rather than the activity
-// context. Delivery agents may run asynchronously (returning
-// immediately and completing in a background goroutine), and the
-// activity context is canceled once go-workflows completes the
-// activity task. This matches the production architecture where
-// delivery runs on a remote fleetlet with its own context; trace
-// propagation across the boundary is done explicitly, not via Go
-// context inheritance.
+// context. Delivery agents run asynchronously (returning immediately
+// and completing in a background goroutine), and the activity context
+// is canceled once go-workflows completes the activity task. This
+// matches the production architecture where delivery runs on a remote
+// fleetlet with its own context.
 //
 // Deliver returns only an error for dispatch failures; all delivery
 // outcomes (accepted, rejected, failed, delivered) flow through
@@ -257,17 +265,38 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 		defer tx.Rollback()
 
 		now := s.now()
-		if err := tx.Deliveries().Put(ctx, Delivery{
-			ID:            in.DeliveryID,
-			FulfillmentID: in.FulfillmentID,
-			TargetID:      in.Target.ID,
-			Manifests:     in.Manifests,
-			Generation:    in.Generation,
-			State:         DeliveryStatePending,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}); err != nil {
-			return struct{}{}, fmt.Errorf("create delivery record: %w", err)
+		existing, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
+		if err != nil && !errors.Is(err, ErrNotFound) {
+			return struct{}{}, fmt.Errorf("load delivery record: %w", err)
+		}
+
+		var d Delivery
+		if errors.Is(err, ErrNotFound) {
+			d = Delivery{
+				ID:            in.DeliveryID,
+				FulfillmentID: in.FulfillmentID,
+				TargetID:      in.Target.ID,
+				Manifests:     in.Manifests,
+				Generation:    in.Generation,
+				State:         DeliveryStatePending,
+				CreatedAt:     now,
+				UpdatedAt:     now,
+			}
+		} else {
+			d = existing
+			if in.Generation > d.Generation {
+				if err := d.Redispatch(in.Manifests, in.Generation, now); err != nil {
+					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID, err)
+				}
+			} else if !d.Retry(in.Generation, now) {
+				// Delivery already progressed past Pending (addon received
+				// and acked). The ack signal is queued; no re-dispatch needed.
+				return struct{}{}, nil
+			}
+		}
+
+		if err := tx.Deliveries().Put(ctx, d); err != nil {
+			return struct{}{}, fmt.Errorf("persist delivery record: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
 			return struct{}{}, fmt.Errorf("commit: %w", err)
@@ -280,29 +309,58 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 	})
 }
 
-// RemoveFromTarget loads the delivery record for a target (to get
-// manifests) and calls the agent's Remove. If no delivery record
-// exists (e.g., delivery failed before persisting), the target is
-// skipped. The read transaction is closed before calling Remove so
-// that the delivery agent can open write transactions without
-// deadlocking on SQLite.
-func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, struct{}] {
-	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (struct{}, error) {
-		tx, err := s.Store.BeginReadOnly(ctx)
+// RemoveFromTarget prepares the delivery record for removal via
+// [Delivery.Withdraw], then dispatches to the [DeliveryAgent]. The
+// agent reports removal outcomes via [DeliveryReporter.ReportResult],
+// matching the async pattern of [DeliverToTarget].
+//
+// On retry, if the delivery is still Pending at the same generation
+// (previous dispatch failed), [Delivery.Retry] bumps the timestamp
+// and re-dispatches. If the addon already acked (delivery progressed
+// past Pending), the activity returns early — the completion signal
+// is already queued.
+//
+// If no delivery record exists (e.g., delivery failed before
+// persisting), the target is skipped.
+func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, RemoveOutput] {
+	return NewActivity("remove-from-target", func(ctx context.Context, in RemoveInput) (RemoveOutput, error) {
+		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return struct{}{}, fmt.Errorf("begin tx: %w", err)
+			return RemoveOutput{}, fmt.Errorf("begin tx: %w", err)
 		}
+		defer tx.Rollback()
 
 		delivery, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
-		tx.Rollback() // close before calling Remove
 		if errors.Is(err, ErrNotFound) {
-			return struct{}{}, nil
+			return RemoveOutput{Dispatched: false}, nil
 		}
 		if err != nil {
-			return struct{}{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
+			return RemoveOutput{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
 		}
 
-		return struct{}{}, s.Delivery.Remove(ctx, in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation)
+		modified, err := delivery.Withdraw(in.Generation, s.now())
+		if err != nil {
+			return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
+		}
+		if !modified {
+			if !delivery.Retry(in.Generation, s.now()) {
+				// Already progressed past Pending (addon acked the removal).
+				// Signal is queued; no re-dispatch needed.
+				return RemoveOutput{Dispatched: false}, nil
+			}
+		}
+
+		if err := tx.Deliveries().Put(ctx, delivery); err != nil {
+			return RemoveOutput{}, fmt.Errorf("persist delivery: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return RemoveOutput{}, fmt.Errorf("commit: %w", err)
+		}
+
+		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
+			return RemoveOutput{}, fmt.Errorf("dispatch removal %s: %w", in.DeliveryID, err)
+		}
+		return RemoveOutput{Dispatched: true}, nil
 	})
 }
 
@@ -666,6 +724,9 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	evidence *ResolvedEvidence,
 ) error {
 	targets := targetInfosByID(f.ResolvedTargets, pool)
+
+	inputs := make(map[DeliveryID]RemoveInput, len(targets))
+	ids := make([]DeliveryID, 0, len(targets))
 	for _, target := range targets {
 		in := RemoveInput{
 			Target:        target,
@@ -677,12 +738,18 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 		if evidence != nil {
 			in.Attestation = assembleRemoveAttestation(f, evidence)
 		}
-		if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
-			return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
-		}
+		inputs[in.DeliveryID] = in
+		ids = append(ids, in.DeliveryID)
 	}
 
-	return nil
+	_, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
+		out, err := RunActivity(record, s.RemoveFromTarget(), inputs[id])
+		if err != nil {
+			return false, fmt.Errorf("remove delivery for target %s: %w", inputs[id].Target.ID, err)
+		}
+		return out.Dispatched, nil
+	}, ids, f.Generation)
+	return err
 }
 
 // executeRolloutPlan runs each step in a [RolloutPlan]. For deliver
@@ -704,6 +771,8 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 
 	for i, step := range plan.Steps {
 		if step.Remove != nil {
+			removeInputs := make(map[DeliveryID]RemoveInput)
+			removeIDs := make([]DeliveryID, 0, len(step.Remove.Targets))
 			for _, target := range step.Remove.Targets {
 				// TODO: need to call the manifest generator on remove hook
 				in := RemoveInput{
@@ -716,13 +785,23 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				if evidence != nil {
 					in.Attestation = assembleRemoveAttestation(f, evidence)
 				}
-				if _, err := RunActivity(record, s.RemoveFromTarget(), in); err != nil {
-					return fmt.Errorf("remove delivery for target %s: %w", target.ID, err)
+				removeInputs[in.DeliveryID] = in
+				removeIDs = append(removeIDs, in.DeliveryID)
+			}
+
+			if _, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
+				out, err := RunActivity(record, s.RemoveFromTarget(), removeInputs[id])
+				if err != nil {
+					return false, fmt.Errorf("remove delivery for target %s: %w", removeInputs[id].Target.ID, err)
 				}
+				return out.Dispatched, nil
+			}, removeIDs, startGen); err != nil {
+				return err
 			}
 		}
 		if step.Deliver != nil {
-			var pending []DeliveryID
+			// Phase 1: build inputs — generate manifests and assemble DeliverInput per target.
+			inputs := make(map[DeliveryID]DeliverInput)
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
 					Spec:   f.ManifestStrategy,
@@ -752,12 +831,18 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				if evidence != nil {
 					in.Attestation = AssembleDeliverAttestation(f, manifests, evidence)
 				}
-				if _, err := RunActivity(record, s.DeliverToTarget(), in); err != nil {
-					return fmt.Errorf("dispatch delivery to target %s: %w", target.ID, err)
-				}
-				pending = append(pending, did)
+				inputs[did] = in
 			}
-			results, err := s.awaitDeliveries(record, pending)
+
+			// Phase 2: dispatch + ack + complete loop.
+			ids := make([]DeliveryID, 0, len(inputs))
+			for id := range inputs {
+				ids = append(ids, id)
+			}
+			results, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
+				_, err := RunActivity(record, s.DeliverToTarget(), inputs[id])
+				return err == nil, err
+			}, ids, startGen)
 			if err != nil {
 				return err
 			}
@@ -784,40 +869,119 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	return nil
 }
 
-// awaitDeliveries blocks until every delivery in pending has completed
-// and returns the completed results.
-func (s *OrchestrationWorkflowSpec) awaitDeliveries(
+// ackRetryInterval is the duration the workflow waits for an ack
+// signal before redispatching unacknowledged deliveries.
+const ackRetryInterval = 30 * time.Second
+
+// dispatchAndAwait dispatches all targets, waits for acks (with retry
+// on timeout), then waits for all completions. The dispatch closure is
+// called for each unacknowledged delivery ID on every retry. It returns
+// (true, nil) when the target was dispatched, or (false, nil) to
+// indicate the target should be skipped (e.g. no delivery record
+// exists). Skipped targets are removed from tracking immediately.
+// Returns accumulated results once every tracked delivery has reached
+// a terminal state.
+//
+// The expectedGen parameter identifies the generation this dispatch
+// cycle is operating on. Events whose generation does not match are
+// silently discarded to prevent stale signals (from a prior generation
+// whose delivery ID is the same) from affecting the current cycle.
+func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 	record Record,
-	pending []DeliveryID,
-) (results []DeliveryResult, err error) {
-	remaining := make(map[DeliveryID]struct{}, len(pending))
-	for _, id := range pending {
-		remaining[id] = struct{}{}
+	dispatch func(DeliveryID) (bool, error),
+	ids []DeliveryID,
+	expectedGen Generation,
+) ([]DeliveryResult, error) {
+	if len(ids) == 0 {
+		return nil, nil
 	}
 
+	unacked := make(map[DeliveryID]struct{}, len(ids))
+	remaining := make(map[DeliveryID]struct{}, len(ids))
+	for _, id := range ids {
+		unacked[id] = struct{}{}
+		remaining[id] = struct{}{}
+	}
+	var results []DeliveryResult
+
 	for len(remaining) > 0 {
-		event, err := AwaitSignal(record, FulfillmentEventSignal)
-		if err != nil {
-			return nil, fmt.Errorf("await delivery completion: %w", err)
+		for id := range unacked {
+			dispatched, err := dispatch(id)
+			if err != nil {
+				return nil, err
+			}
+			if !dispatched {
+				delete(unacked, id)
+				delete(remaining, id)
+			}
 		}
-		if event.DeliveryCompleted == nil {
-			continue
+		if len(remaining) == 0 {
+			break
 		}
-		delete(remaining, event.DeliveryCompleted.DeliveryID)
-		switch event.DeliveryCompleted.Result.State {
-		case DeliveryStateFailed:
-			return nil, fmt.Errorf("delivery %s failed: %s",
-				event.DeliveryCompleted.DeliveryID,
-				event.DeliveryCompleted.Result.Message)
-		case DeliveryStateAuthFailed:
-			return nil, fmt.Errorf("%w: delivery %s: %s",
-				errAuthPaused,
-				event.DeliveryCompleted.DeliveryID,
-				event.DeliveryCompleted.Result.Message)
+
+		for len(remaining) > 0 {
+			var event FulfillmentEvent
+			var err error
+			if len(unacked) > 0 {
+				event, err = AwaitSignalWithTimeout(record, FulfillmentEventSignal, ackRetryInterval)
+				if errors.Is(err, ErrSignalTimeout) {
+					break // back to outer loop to re-dispatch unacked
+				}
+			} else {
+				event, err = AwaitSignal(record, FulfillmentEventSignal)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("await delivery signal: %w", err)
+			}
+			if err := s.processDeliveryEvent(event, expectedGen, unacked, remaining, &results); err != nil {
+				return nil, err
+			}
 		}
-		results = append(results, event.DeliveryCompleted.Result)
 	}
 	return results, nil
+}
+
+// processDeliveryEvent handles a single FulfillmentEvent, updating the
+// unacked/remaining tracking maps and accumulating results. Events for
+// deliveries not in the current batch or whose generation does not
+// match expectedGen are silently ignored to prevent stale or unrelated
+// signals from affecting this dispatch cycle.
+func (s *OrchestrationWorkflowSpec) processDeliveryEvent(
+	event FulfillmentEvent,
+	expectedGen Generation,
+	unacked map[DeliveryID]struct{},
+	remaining map[DeliveryID]struct{},
+	results *[]DeliveryResult,
+) error {
+	if event.DeliveryAcked != nil {
+		if event.DeliveryAcked.Generation != expectedGen {
+			return nil
+		}
+		if _, ok := remaining[event.DeliveryAcked.DeliveryID]; ok {
+			delete(unacked, event.DeliveryAcked.DeliveryID)
+		}
+	}
+	if event.DeliveryCompleted != nil {
+		if event.DeliveryCompleted.Generation != expectedGen {
+			return nil
+		}
+		did := event.DeliveryCompleted.DeliveryID
+		if _, ok := remaining[did]; !ok {
+			return nil
+		}
+		delete(unacked, did)
+		delete(remaining, did)
+		switch event.DeliveryCompleted.Result.State {
+		case DeliveryStateFailed:
+			return fmt.Errorf("delivery %s failed: %s",
+				did, event.DeliveryCompleted.Result.Message)
+		case DeliveryStateAuthFailed:
+			return fmt.Errorf("%w: delivery %s: %s",
+				errAuthPaused, did, event.DeliveryCompleted.Result.Message)
+		}
+		*results = append(*results, event.DeliveryCompleted.Result)
+	}
+	return nil
 }
 
 // deliveryIDFor produces a deterministic [DeliveryID] for a

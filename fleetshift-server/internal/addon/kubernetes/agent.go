@@ -106,27 +106,27 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryI
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {
-			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
 			})
 			return nil
 		}
 		if err := v.Verify(ctx, att, generation); err != nil {
-			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
 				Message: fmt.Sprintf("attestation verification failed: %v", err),
 			})
 			return nil
 		}
-		go a.deliverAsyncPlatform(context.WithoutCancel(ctx), target, deliveryID, manifests)
+		go a.deliverAsyncPlatform(context.WithoutCancel(ctx), target, deliveryID, generation, manifests)
 		return nil
 	}
 
 	if auth.Token == "" {
 		return fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
 	}
-	go a.deliverAsync(context.WithoutCancel(ctx), target, deliveryID, manifests, auth)
+	go a.deliverAsync(context.WithoutCancel(ctx), target, deliveryID, generation, manifests, auth)
 	return nil
 }
 
@@ -183,34 +183,34 @@ func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifi
 // The platform token is resolved from the target's properties: first
 // a direct service_account_token, then a service_account_token_ref
 // that is looked up in the agent's [domain.Vault].
-func (a *Agent) deliverAsyncPlatform(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest) {
+func (a *Agent) deliverAsyncPlatform(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest) {
 	cfg, err := a.buildPlatformRESTConfig(ctx, target)
 	if err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("build platform kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
 	}
-	a.applyManifests(ctx, target, deliveryID, cfg, manifests)
+	a.applyManifests(ctx, target, deliveryID, generation, cfg, manifests)
 }
 
-func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth) {
+func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest, auth domain.DeliveryAuth) {
 	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
 		return
 	}
-	a.applyManifests(ctx, target, deliveryID, cfg, manifests)
+	a.applyManifests(ctx, target, deliveryID, generation, cfg, manifests)
 }
 
-func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, cfg *rest.Config, manifests []domain.Manifest) {
+func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, generation domain.Generation, cfg *rest.Config, manifests []domain.Manifest) {
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   deliveryStateForError(err),
 			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
 		})
@@ -218,13 +218,13 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, de
 	}
 
 	for i, m := range manifests {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
 			Message: fmt.Sprintf("Applying manifest %d/%d", i+1, len(manifests)),
 		})
 
 		if err := ap.apply(ctx, m.Raw); err != nil {
-			_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   deliveryStateForError(err),
 				Message: fmt.Sprintf("apply manifest %d: %v", i+1, err),
 			})
@@ -232,7 +232,7 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, de
 		}
 	}
 
-	_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 }
 
 // deleteManifests deletes Kubernetes resources described by manifests.
@@ -267,27 +267,80 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // Deliver) and uses platform credentials. Otherwise falls back to
 // token passthrough (auth.Token).
 // Resources that are already gone (404) are silently skipped.
-func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+//
+// Like Deliver, the work runs asynchronously. The method validates
+// inputs synchronously and returns nil, then reports the outcome via
+// [domain.DeliveryReporter.ReportResult].
+func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+	if _, ok := target.Properties["api_server"]; !ok {
+		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+	}
+
+	asyncCtx := context.WithoutCancel(ctx)
 	if att != nil {
 		v, err := a.verifierForTarget(target)
 		if err != nil {
-			return fmt.Errorf("build verifier for target %q: %w", target.ID, err)
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
+			})
+			return nil
 		}
 		if err := v.Verify(ctx, att, generation); err != nil {
-			return fmt.Errorf("attestation verification failed: %w", err)
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: fmt.Sprintf("attestation verification failed: %v", err),
+			})
+			return nil
 		}
 		cfg, err := a.buildPlatformRESTConfig(ctx, target)
 		if err != nil {
-			return fmt.Errorf("build platform REST config: %w", err)
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateFailed,
+				Message: fmt.Sprintf("build platform REST config: %v", err),
+			})
+			return nil
 		}
-		return a.deleteManifests(ctx, cfg, manifests)
+		go func() {
+			err := a.deleteManifests(asyncCtx, cfg, manifests)
+			if err != nil {
+				_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
+					State: deliveryStateForError(err), Message: err.Error(),
+				})
+				return
+			}
+			_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
+				State: domain.DeliveryStateDelivered,
+			})
+		}()
+		return nil
+	}
+
+	if auth.Token == "" {
+		return fmt.Errorf("%w: removal from target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
 	}
 
 	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
-		return fmt.Errorf("build REST config: %w", err)
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("build REST config: %v", err),
+		})
+		return nil
 	}
-	return a.deleteManifests(ctx, cfg, manifests)
+	go func() {
+		err := a.deleteManifests(asyncCtx, cfg, manifests)
+		if err != nil {
+			_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
+				State: deliveryStateForError(err), Message: err.Error(),
+			})
+			return
+		}
+		_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{
+			State: domain.DeliveryStateDelivered,
+		})
+	}()
+	return nil
 }
 
 // buildPlatformRESTConfig builds a REST config from target properties

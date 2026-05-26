@@ -1,5 +1,5 @@
 // Package delivery provides the [RoutingDeliveryService] that
-// implements [domain.DeliveryService] by dispatching to per-target-type
+// implements [domain.DeliveryAgent] by dispatching to per-target-type
 // [domain.DeliveryAgent] implementations.
 package delivery
 
@@ -11,7 +11,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// RoutingDeliveryService implements [domain.DeliveryService] by routing
+// RoutingDeliveryService implements [domain.DeliveryAgent] by routing
 // each delivery to the [domain.DeliveryAgent] registered for the
 // target's [domain.TargetType]. Registration is thread-safe to support
 // dynamic addon connect/disconnect.
@@ -71,3 +71,5 @@ func (r *RoutingDeliveryService) agentFor(tt domain.TargetType) (domain.Delivery
 	}
 	return agent, nil
 }
+
+var _ domain.DeliveryAgent = (*RoutingDeliveryService)(nil)

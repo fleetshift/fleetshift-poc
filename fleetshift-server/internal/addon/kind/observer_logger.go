@@ -21,21 +21,22 @@ type observerLogger struct {
 	ctx        context.Context
 	reporter   domain.DeliveryReporter
 	deliveryID domain.DeliveryID
+	generation domain.Generation
 	now        func() time.Time
 }
 
 // NewObserverLogger creates a kind [log.Logger] that forwards messages
 // to the given [domain.DeliveryReporter]. The provided ctx is used for
 // all reporter calls since the kind logger interface has no context.
-func NewObserverLogger(ctx context.Context, reporter domain.DeliveryReporter, deliveryID domain.DeliveryID, now func() time.Time) log.Logger {
+func NewObserverLogger(ctx context.Context, reporter domain.DeliveryReporter, deliveryID domain.DeliveryID, generation domain.Generation, now func() time.Time) log.Logger {
 	if now == nil {
 		now = time.Now
 	}
-	return &observerLogger{ctx: ctx, reporter: reporter, deliveryID: deliveryID, now: now}
+	return &observerLogger{ctx: ctx, reporter: reporter, deliveryID: deliveryID, generation: generation, now: now}
 }
 
 func (l *observerLogger) Warn(message string) {
-	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, domain.DeliveryEvent{
+	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, l.generation, domain.DeliveryEvent{
 		Timestamp: l.now(),
 		Kind:      domain.DeliveryEventWarning,
 		Message:   message,
@@ -47,7 +48,7 @@ func (l *observerLogger) Warnf(format string, args ...interface{}) {
 }
 
 func (l *observerLogger) Error(message string) {
-	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, domain.DeliveryEvent{
+	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, l.generation, domain.DeliveryEvent{
 		Timestamp: l.now(),
 		Kind:      domain.DeliveryEventError,
 		Message:   message,
@@ -62,7 +63,7 @@ func (l *observerLogger) V(level log.Level) log.InfoLogger {
 	if level > 0 {
 		return log.NoopInfoLogger{}
 	}
-	return &observerInfoLogger{ctx: l.ctx, reporter: l.reporter, deliveryID: l.deliveryID, now: l.now}
+	return &observerInfoLogger{ctx: l.ctx, reporter: l.reporter, deliveryID: l.deliveryID, generation: l.generation, now: l.now}
 }
 
 // observerInfoLogger emits progress events for V(0) messages.
@@ -70,11 +71,12 @@ type observerInfoLogger struct {
 	ctx        context.Context
 	reporter   domain.DeliveryReporter
 	deliveryID domain.DeliveryID
+	generation domain.Generation
 	now        func() time.Time
 }
 
 func (l *observerInfoLogger) Info(message string) {
-	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, domain.DeliveryEvent{
+	_ = l.reporter.ReportEvent(l.ctx, l.deliveryID, l.generation, domain.DeliveryEvent{
 		Timestamp: l.now(),
 		Kind:      domain.DeliveryEventProgress,
 		Message:   message,

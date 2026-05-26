@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -47,10 +48,20 @@ type Record interface {
 	// engine controls the lifecycle, not the caller.
 	Await(signalName string) (any, error)
 
+	// AwaitWithTimeout blocks until the named signal arrives or the
+	// timeout expires. Returns [ErrSignalTimeout] if the timeout fires
+	// before a signal is received. A zero timeout is non-blocking: if
+	// no signal is buffered, it returns [ErrSignalTimeout] immediately.
+	AwaitWithTimeout(signalName string, timeout time.Duration) (any, error)
+
 	// Sleep durably pauses the workflow for at least the given duration.
 	// After replay the engine fast-forwards past completed sleeps.
 	Sleep(d time.Duration) error
 }
+
+// ErrSignalTimeout is returned by [Record.AwaitWithTimeout] when the
+// timeout expires before a signal arrives.
+var ErrSignalTimeout = errors.New("signal timeout")
 
 // Signal is a named, typed channel for cross-workflow communication.
 // Created once as a package-level variable and shared between send
@@ -127,6 +138,18 @@ func RunActivity[I any, O any](record Record, activity Activity[I, O], in I) (O,
 // mirroring how [RunActivity] wraps [Record.Run].
 func AwaitSignal[T any](record Record, sig Signal[T]) (T, error) {
 	val, err := record.Await(sig.Name)
+	if err != nil {
+		var zero T
+		return zero, err
+	}
+	return val.(T), nil
+}
+
+// AwaitSignalWithTimeout provides type-safe signal reception with a
+// timeout. Returns [ErrSignalTimeout] if the timeout expires before a
+// signal arrives. A zero timeout is non-blocking.
+func AwaitSignalWithTimeout[T any](record Record, sig Signal[T], timeout time.Duration) (T, error) {
+	val, err := record.AwaitWithTimeout(sig.Name, timeout)
 	if err != nil {
 		var zero T
 		return zero, err

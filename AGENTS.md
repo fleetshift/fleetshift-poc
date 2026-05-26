@@ -40,5 +40,6 @@ For how to...
 - write tests, see fleetshift-server/docs/testing.md
 - write durable workflows and integrate with durable computing libraries, see fleetshift-server/docs/durable-workflows.md
 - write or modify constructors, see fleetshift-server/docs/constructors.md
+- write domain objects, see fleetshift-server/docs/domain.md
 
 When running tests, iterate using `-short` tests, but always do at least one final check with the full suite even if some tests require containers.

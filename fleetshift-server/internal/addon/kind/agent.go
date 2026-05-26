@@ -5,6 +5,7 @@
 package kind
 
 import (
+	"slices"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -163,13 +164,13 @@ func (a *Agent) agentObserver() AgentObserver {
 // are stored in memory synchronously. Cluster manifests follow the
 // existing async flow. All delivery outcomes are reported through the
 // [domain.DeliveryReporter].
-func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	var clusterManifests []domain.Manifest
 	for _, m := range manifests {
 		switch m.ResourceType {
 		case domain.TrustBundleResourceType:
 			if err := a.storeTrustBundle(m); err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 					State:   domain.DeliveryStateFailed,
 					Message: fmt.Sprintf("store trust bundle: %v", err),
 				})
@@ -182,13 +183,15 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 
 	if len(clusterManifests) == 0 {
 		asyncCtx := context.WithoutCancel(ctx)
-		go func() { _ = a.reporter.ReportResult(asyncCtx, deliveryID, domain.DeliveryResult{State: domain.DeliveryStateDelivered}) }()
+		go func() {
+			_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
 		return nil
 	}
 
 	specs, err := a.validateManifests(clusterManifests)
 	if err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("invalid manifests: %v", err),
 		})
@@ -196,7 +199,7 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 	}
 
 	if err := a.verifyToken(ctx, auth); err != nil {
-		_ = a.reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateAuthFailed,
 			Message: fmt.Sprintf("token verification failed: %v", err),
 		})
@@ -204,9 +207,9 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 	}
 
 	asyncCtx := context.WithoutCancel(ctx)
-	provider := a.providerFactory(NewObserverLogger(asyncCtx, a.reporter, deliveryID, time.Now))
+	provider := a.providerFactory(NewObserverLogger(asyncCtx, a.reporter, deliveryID, generation, time.Now))
 
-	go a.deliverAsync(asyncCtx, provider, specs, auth, deliveryID)
+	go a.deliverAsync(asyncCtx, provider, specs, auth, deliveryID, generation)
 
 	return nil
 }
@@ -250,22 +253,38 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
-func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, _ domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+// Like Deliver, the work runs asynchronously and reports via
+// [domain.DeliveryReporter.ReportResult].
+func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
 		return fmt.Errorf("validate manifests: %w", err)
 	}
 
-	provider := a.providerFactory(nil)
-
-	for _, spec := range specs {
-		if !a.clusterExists(provider, spec.Name) {
-			continue
+	go func() {
+		provider := a.providerFactory(nil)
+		for _, spec := range specs {
+			exists, err := a.clusterExistsErr(provider, spec.Name)
+			if err != nil {
+				_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("check cluster %q existence: %v", spec.Name, err),
+				})
+				return
+			}
+			if !exists {
+				continue
+			}
+			if err := provider.Delete(spec.Name, ""); err != nil {
+				_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: err.Error(),
+				})
+				return
+			}
 		}
-		if err := provider.Delete(spec.Name, ""); err != nil {
-			return fmt.Errorf("delete kind cluster %q: %w", spec.Name, err)
-		}
-	}
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+			State: domain.DeliveryStateDelivered,
+		})
+	}()
 	return nil
 }
 
@@ -281,11 +300,11 @@ func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, e
 	return specs, nil
 }
 
-func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, specs []ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID) {
+func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, specs []ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) {
 	var outputs []ClusterOutput
 
 	for _, spec := range specs {
-		out, ok := a.deliverCluster(ctx, provider, spec, auth, deliveryID)
+		out, ok := a.deliverCluster(ctx, provider, spec, auth, deliveryID, generation)
 		if !ok {
 			return
 		}
@@ -299,24 +318,24 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 		result.ProvisionedTargets = append(result.ProvisionedTargets, out.Target())
 		result.ProducedSecrets = append(result.ProducedSecrets, out.Secrets()...)
 	}
-	_ = a.reporter.ReportResult(ctx, deliveryID, result)
+	_ = a.reporter.ReportResult(ctx, deliveryID, generation, result)
 }
 
 // deliverCluster handles a single cluster spec. Returns the output on
 // success and true to continue, or nil and false if the delivery failed
 // (reporter.ReportResult already called).
-func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID) (*ClusterOutput, bool) {
+func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) (*ClusterOutput, bool) {
 	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, spec.Name)
 	defer probe.End()
 
 	if a.clusterExists(provider, spec.Name) {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
 			Message: fmt.Sprintf("Deleting existing cluster %q for recreate", spec.Name),
 		})
 		if err := provider.Delete(spec.Name, ""); err != nil {
 			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, "delete existing kind cluster %q for recreate: %v", spec.Name, err)
+			failDelivery(ctx, a.reporter, deliveryID, generation, "delete existing kind cluster %q for recreate: %v", spec.Name, err)
 			return nil, false
 		}
 	}
@@ -324,7 +343,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	rawConfig, source, err := a.resolveConfig(spec, auth)
 	if err != nil {
 		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, "resolve config for kind cluster %q: %v", spec.Name, err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "resolve config for kind cluster %q: %v", spec.Name, err)
 		return nil, false
 	}
 
@@ -343,7 +362,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 
 	if err := provider.Create(spec.Name, opts...); err != nil {
 		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, "create kind cluster %q: %v", spec.Name, err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "create kind cluster %q: %v", spec.Name, err)
 		return nil, false
 	}
 
@@ -355,7 +374,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
 	kc, err := provider.KubeConfig(spec.Name, useInternal)
 	if err != nil {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventWarning,
 			Message: fmt.Sprintf("get kubeconfig for %q: %v", spec.Name, err),
 		})
@@ -363,14 +382,14 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	}
 
 	if auth.Caller != nil {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
 			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.Subject, spec.Name),
 		})
 		username := string(auth.Caller.Issuer) + "#" + string(auth.Caller.Subject)
 		if err := bootstrapRBAC(ctx, []byte(kc), auth.Caller.Issuer, auth.Caller); err != nil {
 			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, "bootstrap RBAC on %q: %v", spec.Name, err)
+			failDelivery(ctx, a.reporter, deliveryID, generation, "bootstrap RBAC on %q: %v", spec.Name, err)
 			return nil, false
 		}
 		probe.RBACBootstrapped(auth.Caller.Subject, username)
@@ -379,7 +398,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	apiServer, caCert, err := ExtractClusterConnInfo([]byte(kc))
 	if err != nil {
 		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, "extract connection info for %q: %v", spec.Name, err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "extract connection info for %q: %v", spec.Name, err)
 		return nil, false
 	}
 
@@ -392,13 +411,13 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 		TrustBundles: a.TrustBundles(),
 	}
 
-	_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+	_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
 		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", spec.Name),
 	})
 	ref, token, saErr := bootstrapPlatformSA(ctx, []byte(kc), targetID)
 	if saErr != nil {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventWarning,
 			Message: fmt.Sprintf("platform SA bootstrap on %q: %v (attested delivery will not work)", spec.Name, saErr),
 		})
@@ -410,13 +429,13 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	return &out, true
 }
 
-func failDelivery(ctx context.Context, reporter domain.DeliveryReporter, deliveryID domain.DeliveryID, format string, args ...any) {
+func failDelivery(ctx context.Context, reporter domain.DeliveryReporter, deliveryID domain.DeliveryID, generation domain.Generation, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
-	_ = reporter.ReportEvent(ctx, deliveryID, domain.DeliveryEvent{
+	_ = reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventError,
 		Message: msg,
 	})
-	_ = reporter.ReportResult(ctx, deliveryID, domain.DeliveryResult{
+	_ = reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 		State:   domain.DeliveryStateFailed,
 		Message: msg,
 	})
@@ -523,4 +542,17 @@ func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {
 		}
 	}
 	return false
+}
+
+// clusterExistsErr returns whether the named cluster exists,
+// surfacing any discovery error rather than swallowing it.
+func (a *Agent) clusterExistsErr(provider ClusterProvider, name string) (bool, error) {
+	clusters, err := provider.List()
+	if err != nil {
+		return false, err
+	}
+	if slices.Contains(clusters, name) {
+		return true, nil
+	}
+	return false, nil
 }

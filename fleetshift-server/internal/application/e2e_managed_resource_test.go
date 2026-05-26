@@ -279,10 +279,10 @@ func awaitFulfillmentState(ctx context.Context, t *testing.T, store domain.Store
 	}
 }
 
-// mrCapturingDeliveryAgent wraps another delivery service and captures
+// mrCapturingDeliveryAgent wraps another delivery agent and captures
 // the last attestation, manifests, and auth delivered.
 type mrCapturingDeliveryAgent struct {
-	inner      domain.DeliveryService
+	inner      domain.DeliveryAgent
 	mu         sync.Mutex
 	att        *domain.Attestation
 	manifests  []domain.Manifest

@@ -15,16 +15,21 @@ import "context"
 // In-process addons receive the application layer's implementation
 // directly. Remote addons (via fleetlet) would receive a gRPC client
 // stub implementing this same interface.
+//
+// Each report carries the [Generation] the addon was working against.
+// The platform uses this to detect stale reports: if the delivery has
+// since advanced to a newer generation, the report is silently
+// discarded.
 type DeliveryReporter interface {
 	// ReportEvent records a non-terminal delivery event (progress,
 	// warning, error). On the first call for a delivery, the platform
 	// transitions the delivery to [DeliveryStateProgressing].
-	ReportEvent(ctx context.Context, deliveryID DeliveryID, event DeliveryEvent) error
+	ReportEvent(ctx context.Context, deliveryID DeliveryID, generation Generation, event DeliveryEvent) error
 
 	// ReportResult records a delivery state transition and, for
 	// terminal states, signals the fulfillment workflow so
 	// orchestration can proceed.
-	ReportResult(ctx context.Context, deliveryID DeliveryID, result DeliveryResult) error
+	ReportResult(ctx context.Context, deliveryID DeliveryID, generation Generation, result DeliveryResult) error
 
 	// ListActiveDeliveries returns non-terminal deliveries enriched
 	// with target info, caller auth, and (when signed) attestation.
