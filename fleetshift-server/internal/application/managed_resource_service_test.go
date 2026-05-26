@@ -80,6 +80,11 @@ func (s *blockingRemoveDeliveryService) Remove(
 	}
 	select {
 	case <-s.release:
+		if s.reporter != nil {
+			go func() {
+				_ = s.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			}()
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

@@ -53,11 +53,11 @@ func (d *deleteCapturingDelivery) Deliver(
 func (d *deleteCapturingDelivery) Remove(
 	ctx context.Context,
 	_ domain.TargetInfo,
-	_ domain.DeliveryID,
+	deliveryID domain.DeliveryID,
 	_ []domain.Manifest,
 	auth domain.DeliveryAuth,
 	_ *domain.Attestation,
-	_ domain.Generation,
+	gen domain.Generation,
 ) error {
 	event := domain.DeliveryEvent{
 		Timestamp: time.Now(),
@@ -77,6 +77,9 @@ func (d *deleteCapturingDelivery) Remove(
 	}
 	select {
 	case <-d.allowRemove:
+		if d.reporter != nil {
+			_ = d.reporter.ReportResult(ctx, deliveryID, gen, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()

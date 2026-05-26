@@ -615,12 +615,16 @@ func (f *failingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, 
 }
 
 func (f *failingRemoveDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	state := domain.DeliveryStateFailed
+	if domain.IsAuthExpired(f.err) {
+		state = domain.DeliveryStateAuthFailed
+	}
 	go func() {
 		f.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
 				Generation: generation,
-				Result:     domain.DeliveryResult{State: domain.DeliveryStateFailed, Message: f.err.Error()},
+				Result:     domain.DeliveryResult{State: state, Message: f.err.Error()},
 			},
 		}
 	}()
@@ -1123,11 +1127,12 @@ type deliveryStateChecker struct {
 	onRemove func(deliveryID domain.DeliveryID)
 }
 
-func (d *deliveryStateChecker) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *deliveryStateChecker) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -1135,10 +1140,19 @@ func (d *deliveryStateChecker) Deliver(_ context.Context, _ domain.TargetInfo, d
 	return nil
 }
 
-func (d *deliveryStateChecker) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *deliveryStateChecker) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	if d.onRemove != nil {
 		d.onRemove(deliveryID)
 	}
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Generation: generation,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 
@@ -1301,7 +1315,7 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 	}
 
 	events := make(chan domain.FulfillmentEvent, 16)
-	wf := newTestWorkflow(store, noopDelivery{}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
 	})
 
@@ -2294,11 +2308,12 @@ type recordingRemoveDelivery struct {
 	removed []domain.TargetID
 }
 
-func (d *recordingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *recordingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		d.events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
 				DeliveryID: deliveryID,
+				Generation: generation,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
 		}
@@ -2306,10 +2321,19 @@ func (d *recordingRemoveDelivery) Deliver(_ context.Context, _ domain.TargetInfo
 	return nil
 }
 
-func (d *recordingRemoveDelivery) Remove(_ context.Context, target domain.TargetInfo, _ domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, _ domain.Generation) error {
+func (d *recordingRemoveDelivery) Remove(_ context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	d.mu.Lock()
 	d.removed = append(d.removed, target.ID)
 	d.mu.Unlock()
+	go func() {
+		d.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Generation: generation,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
 	return nil
 }
 

@@ -123,6 +123,11 @@ func (d *blockingRemoveDynamicDelivery) Remove(
 	}
 	select {
 	case <-d.release:
+		if d.reporter != nil {
+			go func() {
+				_ = d.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			}()
+		}
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
