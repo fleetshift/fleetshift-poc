@@ -84,7 +84,9 @@ type RemoveInput struct {
 
 // RemoveOutput is the result of the remove-from-target activity.
 // Dispatched indicates whether a removal was actually dispatched (true)
-// or the target was skipped because no delivery record exists (false).
+// or skipped (false). A skip occurs when no delivery record exists or
+// the delivery already progressed past Pending (addon already acked
+// the removal and a completion signal is queued).
 type RemoveOutput struct {
 	Dispatched bool
 }
@@ -307,10 +309,16 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 	})
 }
 
-// RemoveFromTarget resets the delivery record for removal via
+// RemoveFromTarget prepares the delivery record for removal via
 // [Delivery.Withdraw], then dispatches to the [DeliveryAgent]. The
 // agent reports removal outcomes via [DeliveryReporter.ReportResult],
 // matching the async pattern of [DeliverToTarget].
+//
+// On retry, if the delivery is still Pending at the same generation
+// (previous dispatch failed), [Delivery.Retry] bumps the timestamp
+// and re-dispatches. If the addon already acked (delivery progressed
+// past Pending), the activity returns early — the completion signal
+// is already queued.
 //
 // If no delivery record exists (e.g., delivery failed before
 // persisting), the target is skipped.
@@ -330,21 +338,23 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 			return RemoveOutput{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
 		}
 
-		if delivery.State != DeliveryStatePending {
-			// First attempt: transition from terminal to Pending.
-			if err := delivery.Withdraw(in.Generation, s.now()); err != nil {
-				return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
+		modified, err := delivery.Withdraw(in.Generation, s.now())
+		if err != nil {
+			return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
+		}
+		if !modified {
+			if !delivery.Retry(in.Generation, s.now()) {
+				// Already progressed past Pending (addon acked the removal).
+				// Signal is queued; no re-dispatch needed.
+				return RemoveOutput{Dispatched: false}, nil
 			}
-			if err := tx.Deliveries().Put(ctx, delivery); err != nil {
-				return RemoveOutput{}, fmt.Errorf("persist withdrawn delivery: %w", err)
-			}
-			if err := tx.Commit(); err != nil {
-				return RemoveOutput{}, fmt.Errorf("commit: %w", err)
-			}
-		} else {
-			// Already Pending (retry after previous dispatch failed):
-			// no state change needed, just re-dispatch.
-			tx.Rollback()
+		}
+
+		if err := tx.Deliveries().Put(ctx, delivery); err != nil {
+			return RemoveOutput{}, fmt.Errorf("persist delivery: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return RemoveOutput{}, fmt.Errorf("commit: %w", err)
 		}
 
 		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {

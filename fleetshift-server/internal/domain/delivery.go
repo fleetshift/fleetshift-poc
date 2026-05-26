@@ -130,29 +130,43 @@ func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now t
 	return nil
 }
 
-// Withdraw resets the delivery for a removal cycle. The manifests are
-// preserved -- the withdrawal targets whatever was actually delivered
-// to the target. The generation is advanced to the given value so that
-// the staleness fence used by [DeliveryReporter] and orchestration
-// signals correctly identifies this removal cycle. A target is
-// withdrawn when it leaves placement (e.g. label change, pool
-// mutation, fulfillment deletion).
+// Withdraw prepares the delivery for a removal cycle. The manifests
+// are preserved — the withdrawal targets whatever was actually
+// delivered to the target. The generation is advanced to the given
+// value so that the staleness fence used by [DeliveryReporter] and
+// orchestration signals correctly identifies this removal cycle. A
+// target is withdrawn when it leaves placement (e.g. label change,
+// pool mutation, fulfillment deletion).
 //
-// Returns [ErrIllegalStateTransition] if the delivery is not in a
-// terminal state or if the given generation would move backwards.
-func (d *Delivery) Withdraw(generation Generation, now time.Time) error {
-	if !d.State.IsTerminal() {
-		return fmt.Errorf("%w: cannot withdraw from non-terminal state %q",
-			ErrIllegalStateTransition, d.State)
-	}
+// Returns (true, nil) when the delivery was modified (reset to
+// [DeliveryStatePending]) — either from a terminal state or by
+// advancing the generation past a non-terminal state. Returns
+// (false, nil) when no modification is needed: the delivery is
+// already non-terminal at the same generation, meaning it is either
+// pending (a retry, handled by [Delivery.Retry]) or already being
+// processed by the addon.
+//
+// Returns an error if the given generation would move backwards.
+//
+// TODO: we advance generation but don't update manifests; might want a specific state for this
+// In general the identity of Delivery seems possibly fragile; we might want something
+// to differentiate between all of the fulfillment, target, and generation.
+func (d *Delivery) Withdraw(generation Generation, now time.Time) (bool, error) {
 	if generation < d.Generation {
-		return fmt.Errorf("%w: withdraw generation %d is older than current %d",
+		return false, fmt.Errorf("%w: withdraw generation %d is older than current %d",
 			ErrIllegalStateTransition, generation, d.Generation)
 	}
+
+	// Same generation and not terminal: either already Pending (retry case
+	// handled by Retry) or already in progress (acked, signal queued).
+	if generation == d.Generation && !d.State.IsTerminal() {
+		return false, nil
+	}
+
 	d.State = DeliveryStatePending
 	d.Generation = generation
 	d.UpdatedAt = now
-	return nil
+	return true, nil
 }
 
 // Retry prepares the delivery for a same-generation re-dispatch. It

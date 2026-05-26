@@ -1142,11 +1142,12 @@ func (a *terminalFailAgent) Deliver(_ context.Context, _ domain.TargetInfo, _ do
 }
 
 func (a *terminalFailAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
-	if a.reporter != nil {
-		go func() {
-			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
-		}()
+	if a.reporter == nil {
+		return errors.New("terminalFailAgent: reporter is nil")
 	}
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
 	return nil
 }
 

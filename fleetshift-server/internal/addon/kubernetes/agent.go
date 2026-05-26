@@ -316,6 +316,10 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID
 		return nil
 	}
 
+	if auth.Token == "" {
+		return fmt.Errorf("%w: removal from target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
+	}
+
 	cfg, err := buildRESTConfig(target, auth.Token)
 	if err != nil {
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{

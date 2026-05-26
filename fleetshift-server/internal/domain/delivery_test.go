@@ -224,8 +224,12 @@ func TestDelivery_Withdraw(t *testing.T) {
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
-		if err := d.Withdraw(7, later); err != nil {
+		modified, err := d.Withdraw(7, later)
+		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
+		}
+		if !modified {
+			t.Fatal("expected modified = true")
 		}
 		if d.State != DeliveryStatePending {
 			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
@@ -241,28 +245,114 @@ func TestDelivery_Withdraw(t *testing.T) {
 		}
 	})
 
-	t.Run("fails from non-terminal state", func(t *testing.T) {
+	t.Run("terminal same generation resets to pending", func(t *testing.T) {
+		d := Delivery{
+			State:      DeliveryStateDelivered,
+			Generation: 5,
+			UpdatedAt:  now,
+		}
+		modified, err := d.Withdraw(5, later)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !modified {
+			t.Fatal("expected modified = true for same-gen terminal withdraw")
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+		if d.Generation != 5 {
+			t.Errorf("Generation = %d, want 5", d.Generation)
+		}
+	})
+
+	t.Run("pending same generation returns unmodified", func(t *testing.T) {
+		d := Delivery{
+			State:      DeliveryStatePending,
+			Generation: 5,
+			UpdatedAt:  now,
+		}
+		modified, err := d.Withdraw(5, later)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if modified {
+			t.Fatal("expected modified = false for same-gen pending")
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State changed unexpectedly to %q", d.State)
+		}
+		if d.UpdatedAt != now {
+			t.Error("UpdatedAt changed on unmodified withdraw")
+		}
+	})
+
+	t.Run("pending higher generation bumps generation", func(t *testing.T) {
+		d := Delivery{
+			State:      DeliveryStatePending,
+			Generation: 3,
+			UpdatedAt:  now,
+		}
+		modified, err := d.Withdraw(5, later)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !modified {
+			t.Fatal("expected modified = true for higher-gen pending")
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+		if d.Generation != 5 {
+			t.Errorf("Generation = %d, want 5", d.Generation)
+		}
+		if d.UpdatedAt != later {
+			t.Errorf("UpdatedAt = %v, want %v", d.UpdatedAt, later)
+		}
+	})
+
+	t.Run("in-progress same generation returns unmodified", func(t *testing.T) {
 		for _, state := range []DeliveryState{
-			DeliveryStatePending,
 			DeliveryStateAccepted,
 			DeliveryStateProgressing,
 		} {
 			t.Run(string(state), func(t *testing.T) {
-				d := Delivery{State: state, UpdatedAt: now}
-				err := d.Withdraw(1, later)
-				if err == nil {
-					t.Fatal("expected error for non-terminal state")
+				d := Delivery{State: state, Generation: 5, UpdatedAt: now}
+				modified, err := d.Withdraw(5, later)
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
 				}
-				if !errors.Is(err, ErrIllegalStateTransition) {
-					t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+				if modified {
+					t.Fatal("expected modified = false for same-gen in-progress")
 				}
 				if d.State != state {
-					t.Errorf("State changed on failed withdraw")
+					t.Errorf("State changed to %q", d.State)
 				}
 				if d.UpdatedAt != now {
-					t.Error("UpdatedAt changed on failed withdraw")
+					t.Error("UpdatedAt changed on unmodified withdraw")
 				}
 			})
+		}
+	})
+
+	t.Run("in-progress higher generation resets to pending", func(t *testing.T) {
+		d := Delivery{
+			State:      DeliveryStateAccepted,
+			Generation: 3,
+			UpdatedAt:  now,
+		}
+		modified, err := d.Withdraw(5, later)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !modified {
+			t.Fatal("expected modified = true for higher-gen in-progress")
+		}
+		if d.State != DeliveryStatePending {
+			t.Errorf("State = %q, want %q", d.State, DeliveryStatePending)
+		}
+		if d.Generation != 5 {
+			t.Errorf("Generation = %d, want 5", d.Generation)
 		}
 	})
 
@@ -272,9 +362,12 @@ func TestDelivery_Withdraw(t *testing.T) {
 			Generation: 5,
 			UpdatedAt:  now,
 		}
-		err := d.Withdraw(3, later)
+		modified, err := d.Withdraw(3, later)
 		if err == nil {
 			t.Fatal("expected error for backwards generation")
+		}
+		if modified {
+			t.Fatal("expected modified = false on error")
 		}
 		if !errors.Is(err, ErrIllegalStateTransition) {
 			t.Errorf("error = %v, want ErrIllegalStateTransition", err)
