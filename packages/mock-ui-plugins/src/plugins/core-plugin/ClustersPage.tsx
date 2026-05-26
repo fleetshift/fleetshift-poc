@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { Link } from "react-router-dom";
 import {
-  Button,
   Card,
   CardBody,
   Content,
@@ -15,9 +14,16 @@ import {
   Title,
 } from "@patternfly/react-core";
 import { ActionsColumn } from "@patternfly/react-table";
-import { useDataViewFilters, useDataViewPagination } from "@patternfly/react-data-view/dist/dynamic/Hooks";
+import {
+  useDataViewFilters,
+  useDataViewPagination,
+} from "@patternfly/react-data-view/dist/dynamic/Hooks";
 import { DataView } from "@patternfly/react-data-view/dist/dynamic/DataView";
-import { DataViewTable, type DataViewTr, type DataViewTh } from "@patternfly/react-data-view/dist/dynamic/DataViewTable";
+import {
+  DataViewTable,
+  type DataViewTr,
+  type DataViewTh,
+} from "@patternfly/react-data-view/dist/dynamic/DataViewTable";
 import { DataViewToolbar } from "@patternfly/react-data-view/dist/dynamic/DataViewToolbar";
 import { DataViewFilters } from "@patternfly/react-data-view/dist/dynamic/DataViewFilters";
 import { DataViewTextFilter } from "@patternfly/react-data-view/dist/dynamic/DataViewTextFilter";
@@ -162,7 +168,13 @@ export default function ClustersPage() {
           const isDeleting = deleting === depName;
 
           return [
-            { cell: <Link to={depName}><strong>{r.clusterName}</strong></Link> },
+            {
+              cell: (
+                <Link to={depName}>
+                  <strong>{r.clusterName}</strong>
+                </Link>
+              ),
+            },
             {
               cell: (
                 <Label color="blue" isCompact>

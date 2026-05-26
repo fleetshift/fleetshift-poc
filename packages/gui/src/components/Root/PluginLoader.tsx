@@ -18,7 +18,9 @@ const PluginLoader = ({ children }: PropsWithChildren) => {
       setInitialLoad(false);
       return;
     }
-    Promise.all(loads).then(() => setInitialLoad(false));
+    Promise.all(loads)
+      .catch(() => {})
+      .finally(() => setInitialLoad(false));
   }, [config, pluginStore]);
 
   if (initialLoad) return null;

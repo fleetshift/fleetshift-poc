@@ -41,7 +41,11 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
   return (
     <Form>
       {formData.nodes.map((node, i) => (
-        <div key={i} className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end" style={{ gap: "var(--pf-t--global--spacer--md)" }}>
+        <div
+          key={i}
+          className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end"
+          style={{ gap: "var(--pf-t--global--spacer--md)" }}
+        >
           <FormGroup
             label={i === 0 ? "Role" : undefined}
             fieldId={`node-role-${i}`}
@@ -56,10 +60,7 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
                 })
               }
             >
-              <FormSelectOption
-                value="control-plane"
-                label="Control Plane"
-              />
+              <FormSelectOption value="control-plane" label="Control Plane" />
               <FormSelectOption value="worker" label="Worker" />
             </FormSelect>
           </FormGroup>

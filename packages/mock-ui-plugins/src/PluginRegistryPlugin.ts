@@ -14,7 +14,10 @@ interface PluginRegistryPluginOptions {
   plugins: PluginMeta[];
 }
 
-function findManifests(dir: string, base: string): { path: string; rel: string }[] {
+function findManifests(
+  dir: string,
+  base: string,
+): { path: string; rel: string }[] {
   const results: { path: string; rel: string }[] = [];
   let entries: fs.Dirent[];
   try {

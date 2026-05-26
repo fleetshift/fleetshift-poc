@@ -89,7 +89,14 @@ export function resolveSetupExtensions(
 ): ResolvedSetup[] {
   const allMap: ExtMap = {};
   for (const ext of allExtensions) {
-    allMap[ext.properties.id] = ext;
+    const id = ext.properties.id;
+    if (allMap[id]) {
+      console.warn(
+        `Duplicate setup extension id "${id}" detected; ignoring later definition`,
+      );
+      continue;
+    }
+    allMap[id] = ext;
   }
 
   const valid = filterValid(extensionsSet, allMap);

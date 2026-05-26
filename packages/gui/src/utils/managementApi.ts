@@ -14,10 +14,7 @@ import type {
 
 const BASE = "/api/v1/management";
 
-async function mgmtFetch<T>(
-  path: string,
-  init?: RequestInit,
-): Promise<T> {
+async function mgmtFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, init);
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));

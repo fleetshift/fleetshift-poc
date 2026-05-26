@@ -13,9 +13,7 @@ test.describe("App smoke tests", () => {
     await expect(
       nav.getByRole("link", { name: "Orchestration" }),
     ).toBeVisible();
-    await expect(
-      nav.getByRole("link", { name: "Signing Keys" }),
-    ).toBeVisible();
+    await expect(nav.getByRole("link", { name: "Signing Keys" })).toBeVisible();
   });
 
   test("navigating to Targets loads plugin module", async ({ page }) => {

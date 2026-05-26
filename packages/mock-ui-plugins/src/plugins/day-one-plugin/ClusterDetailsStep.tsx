@@ -1,9 +1,4 @@
-import {
-  Alert,
-  Form,
-  FormGroup,
-  TextInput,
-} from "@patternfly/react-core";
+import { Alert, Form, FormGroup, TextInput } from "@patternfly/react-core";
 import type { ClusterFormData } from "./CreateClusterWizard";
 
 interface ClusterDetailsStepProps {
@@ -25,11 +20,7 @@ export default function ClusterDetailsStep({
         plane settings.
       </Alert>
 
-      <FormGroup
-        label="Cluster name"
-        isRequired
-        fieldId="cluster-name"
-      >
+      <FormGroup label="Cluster name" isRequired fieldId="cluster-name">
         <TextInput
           id="cluster-name"
           isRequired
@@ -40,10 +31,7 @@ export default function ClusterDetailsStep({
         />
       </FormGroup>
 
-      <FormGroup
-        label="Node image"
-        fieldId="node-image"
-      >
+      <FormGroup label="Node image" fieldId="node-image">
         <TextInput
           id="node-image"
           value={formData.nodeImage}

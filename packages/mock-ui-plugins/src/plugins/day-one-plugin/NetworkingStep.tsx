@@ -15,10 +15,7 @@ export default function NetworkingStep({
 }: NetworkingStepProps) {
   return (
     <Form>
-      <FormGroup
-        label="API server port"
-        fieldId="api-server-port"
-      >
+      <FormGroup label="API server port" fieldId="api-server-port">
         <TextInput
           id="api-server-port"
           type="number"
@@ -28,10 +25,7 @@ export default function NetworkingStep({
         />
       </FormGroup>
 
-      <FormGroup
-        label="Pod subnet"
-        fieldId="pod-subnet"
-      >
+      <FormGroup label="Pod subnet" fieldId="pod-subnet">
         <TextInput
           id="pod-subnet"
           value={formData.podSubnet}
@@ -40,10 +34,7 @@ export default function NetworkingStep({
         />
       </FormGroup>
 
-      <FormGroup
-        label="Service subnet"
-        fieldId="service-subnet"
-      >
+      <FormGroup label="Service subnet" fieldId="service-subnet">
         <TextInput
           id="service-subnet"
           value={formData.serviceSubnet}

@@ -199,4 +199,33 @@ describe("resolveSetupExtensions", () => {
 
     warnSpy.mockRestore();
   });
+
+  it("excludes cyclic dependencies", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const a = makeExt("a", "A", ["b"]);
+    const b = makeExt("b", "B", ["a"]);
+
+    const result = resolveSetupExtensions([a, b], [a, b]);
+    expect(result).toEqual([]);
+    expect(warnSpy).toHaveBeenCalled();
+
+    warnSpy.mockRestore();
+  });
+
+  it("warns on duplicate extension ids and keeps the first", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const first = makeExt("auth", "Auth First");
+    const duplicate = makeExt("auth", "Auth Duplicate");
+
+    const result = resolveSetupExtensions([first], [first, duplicate]);
+    expect(result.map((e) => e.properties.id)).toEqual(["auth"]);
+    expect(result[0].properties.label).toBe("Auth First");
+    expect(warnSpy).toHaveBeenCalledWith(
+      'Duplicate setup extension id "auth" detected; ignoring later definition',
+    );
+
+    warnSpy.mockRestore();
+  });
 });

@@ -32,9 +32,7 @@ export default function WelcomeFooter() {
       </StackItem>
       <StackItem>
         <Bullseye>
-          <Content component="small">
-            Not ready to create add clusters?
-          </Content>
+          <Content component="small">Not ready to create add clusters?</Content>
         </Bullseye>
       </StackItem>
       <StackItem>

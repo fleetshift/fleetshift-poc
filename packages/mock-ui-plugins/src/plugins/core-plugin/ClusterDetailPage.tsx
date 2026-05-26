@@ -100,7 +100,13 @@ function OverviewTab({
   }, [spec]);
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--pf-t--global--spacer--lg)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--pf-t--global--spacer--lg)",
+      }}
+    >
       <Grid hasGutter>
         <GridItem span={3}>
           <Card isCompact isFullHeight>
@@ -109,10 +115,18 @@ function OverviewTab({
               <div style={{ marginTop: "var(--pf-t--global--spacer--sm)" }}>
                 <Label
                   color={
-                    (STATE_LABELS[deployment.state] ?? STATE_LABELS.STATE_UNSPECIFIED).color
+                    (
+                      STATE_LABELS[deployment.state] ??
+                      STATE_LABELS.STATE_UNSPECIFIED
+                    ).color
                   }
                 >
-                  {(STATE_LABELS[deployment.state] ?? STATE_LABELS.STATE_UNSPECIFIED).text}
+                  {
+                    (
+                      STATE_LABELS[deployment.state] ??
+                      STATE_LABELS.STATE_UNSPECIFIED
+                    ).text
+                  }
                   {deployment.reconciling ? " (reconciling)" : ""}
                 </Label>
               </div>
@@ -153,7 +167,11 @@ function OverviewTab({
 
       <Card>
         <CardBody>
-          <Title headingLevel="h2" size="lg" style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}>
+          <Title
+            headingLevel="h2"
+            size="lg"
+            style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}
+          >
             Cluster Information
           </Title>
           <Grid hasGutter>
@@ -179,12 +197,15 @@ function OverviewTab({
                 </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>Node Roles</DescriptionListTerm>
-                  <DescriptionListDescription>{roles}</DescriptionListDescription>
+                  <DescriptionListDescription>
+                    {roles}
+                  </DescriptionListDescription>
                 </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>Placement</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {deployment.placementStrategy?.type?.replace("TYPE_", "") ?? "—"}
+                    {deployment.placementStrategy?.type?.replace("TYPE_", "") ??
+                      "—"}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               </DescriptionList>
@@ -240,11 +261,15 @@ function OverviewTab({
 
 function LogsTab() {
   return (
-    <EmptyState icon={CubesIcon} titleText="Logs not available" headingLevel="h2">
+    <EmptyState
+      icon={CubesIcon}
+      titleText="Logs not available"
+      headingLevel="h2"
+    >
       <EmptyStateBody>
-        A logs and audit trail API is not yet available on the backend.
-        This tab will show cluster provisioning and lifecycle events once the
-        API is implemented.
+        A logs and audit trail API is not yet available on the backend. This tab
+        will show cluster provisioning and lifecycle events once the API is
+        implemented.
       </EmptyStateBody>
       <EmptyStateFooter />
     </EmptyState>
@@ -322,13 +347,23 @@ export default function ClusterDetailPage() {
     STATE_LABELS[deployment.state] ?? STATE_LABELS.STATE_UNSPECIFIED;
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "var(--pf-t--global--spacer--md)" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        gap: "var(--pf-t--global--spacer--md)",
+      }}
+    >
       <PageHeader
         title={clusterName}
         subtitle={`Created ${formatTime(deployment.createTime)}`}
         label={
           <>
-            <Label color={stateLabel.color} isCompact style={{ marginRight: "var(--pf-t--global--spacer--sm)" }}>
+            <Label
+              color={stateLabel.color}
+              isCompact
+              style={{ marginRight: "var(--pf-t--global--spacer--sm)" }}
+            >
               {stateLabel.text}
             </Label>
             <Label color="blue" isCompact>
@@ -361,11 +396,7 @@ export default function ClusterDetailPage() {
             popperProps={{ position: "end" }}
           >
             <DropdownList>
-              <DropdownItem
-                key="delete"
-                isDanger
-                onClick={handleDelete}
-              >
+              <DropdownItem key="delete" isDanger onClick={handleDelete}>
                 Delete cluster
               </DropdownItem>
             </DropdownList>
@@ -373,10 +404,7 @@ export default function ClusterDetailPage() {
         }
       />
 
-      <Tabs
-        activeKey={activeTab}
-        onSelect={(_e, key) => setActiveTab(key)}
-      >
+      <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key)}>
         <Tab eventKey="overview" title={<TabTitleText>Overview</TabTitleText>}>
           <div style={{ paddingTop: "var(--pf-t--global--spacer--md)" }}>
             <OverviewTab deployment={deployment} spec={spec} />

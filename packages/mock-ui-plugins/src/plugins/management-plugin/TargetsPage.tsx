@@ -72,9 +72,7 @@ export default function TargetsPage() {
         })),
       );
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to fetch targets",
-      );
+      setError(err instanceof Error ? err.message : "Failed to fetch targets");
     } finally {
       setLoading(false);
     }
@@ -149,141 +147,145 @@ export default function TargetsPage() {
         </EmptyState>
       ) : (
         <>
-        <Toolbar clearAllFilters={() => setNameFilter("")}>
-          <ToolbarContent>
-            <ToolbarItem>
-              <SearchInput
-                placeholder="Filter by target ID"
-                value={nameFilter}
-                onChange={(_event, value) => setNameFilter(value)}
-                onClear={() => setNameFilter("")}
-              />
-            </ToolbarItem>
-            <ToolbarItem>
-              <Tooltip content="Refresh targets">
-                <Button
-                  variant="plain"
-                  aria-label="Refresh targets"
-                  onClick={fetchTargets}
-                >
-                  <SyncAltIcon />
-                </Button>
-              </Tooltip>
-            </ToolbarItem>
-          </ToolbarContent>
-        </Toolbar>
-
-        {filtered.length === 0 ? (
-          <EmptyState titleText="No matching targets" headingLevel="h2">
-            <EmptyStateBody>
-              No targets match the current filter. Try adjusting or clearing
-              the filter.
-            </EmptyStateBody>
-            <Button variant="link" onClick={() => setNameFilter("")}>
-              Clear filter
-            </Button>
-          </EmptyState>
-        ) : (
-        <Table aria-label="Registered targets" variant="compact" hasAnimations>
-          <Thead>
-            <Tr>
-              <Th screenReaderText="Row expansion" />
-              <Th>Target ID</Th>
-              <Th>Type</Th>
-              <Th>Deployments</Th>
-            </Tr>
-          </Thead>
-          {filtered.map((t, rowIndex) => (
-            <Tbody key={t.id} isExpanded={expandedId === t.id}>
-              <Tr>
-                <Td
-                  expand={{
-                    rowIndex,
-                    isExpanded: expandedId === t.id,
-                    onToggle: () => toggleExpand(t.id),
-                  }}
+          <Toolbar clearAllFilters={() => setNameFilter("")}>
+            <ToolbarContent>
+              <ToolbarItem>
+                <SearchInput
+                  placeholder="Filter by target ID"
+                  value={nameFilter}
+                  onChange={(_event, value) => setNameFilter(value)}
+                  onClear={() => setNameFilter("")}
                 />
-                <Td dataLabel="Target ID">
-                  <span
-                    style={{
-                      fontWeight:
-                        "var(--pf-t--global--font--weight--heading--default)",
-                    }}
+              </ToolbarItem>
+              <ToolbarItem>
+                <Tooltip content="Refresh targets">
+                  <Button
+                    variant="plain"
+                    aria-label="Refresh targets"
+                    onClick={fetchTargets}
                   >
-                    {t.id}
-                  </span>
-                </Td>
-                <Td dataLabel="Type">
-                  <Label color="blue" isCompact>
-                    {t.type}
-                  </Label>
-                </Td>
-                <Td dataLabel="Deployments">
-                  {t.deployments.length > 0 ? (
-                    <LabelGroup>
-                      {t.deployments.map((d) => (
-                        <Label key={d} color="green" isCompact>
-                          {d.replace("deployments/", "")}
-                        </Label>
-                      ))}
-                    </LabelGroup>
-                  ) : (
-                    <span
-                      style={{
-                        color: "var(--pf-t--global--text--color--subtle)",
+                    <SyncAltIcon />
+                  </Button>
+                </Tooltip>
+              </ToolbarItem>
+            </ToolbarContent>
+          </Toolbar>
+
+          {filtered.length === 0 ? (
+            <EmptyState titleText="No matching targets" headingLevel="h2">
+              <EmptyStateBody>
+                No targets match the current filter. Try adjusting or clearing
+                the filter.
+              </EmptyStateBody>
+              <Button variant="link" onClick={() => setNameFilter("")}>
+                Clear filter
+              </Button>
+            </EmptyState>
+          ) : (
+            <Table
+              aria-label="Registered targets"
+              variant="compact"
+              hasAnimations
+            >
+              <Thead>
+                <Tr>
+                  <Th screenReaderText="Row expansion" />
+                  <Th>Target ID</Th>
+                  <Th>Type</Th>
+                  <Th>Deployments</Th>
+                </Tr>
+              </Thead>
+              {filtered.map((t, rowIndex) => (
+                <Tbody key={t.id} isExpanded={expandedId === t.id}>
+                  <Tr>
+                    <Td
+                      expand={{
+                        rowIndex,
+                        isExpanded: expandedId === t.id,
+                        onToggle: () => toggleExpand(t.id),
                       }}
-                    >
-                      None
-                    </span>
-                  )}
-                </Td>
-              </Tr>
-              <Tr isExpanded={expandedId === t.id}>
-                <Td />
-                <Td colSpan={3}>
-                  <ExpandableRowContent>
-                    <DescriptionList isHorizontal isCompact>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>Target ID</DescriptionListTerm>
-                        <DescriptionListDescription>
-                          <span
-                            style={{
-                              fontFamily:
-                                "var(--pf-t--global--font--family--mono)",
-                            }}
-                          >
-                            {t.id}
-                          </span>
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>
-                          Accepted Resource Types
-                        </DescriptionListTerm>
-                        <DescriptionListDescription>
-                          <Label color="grey" isCompact>
-                            {t.id === "kind-local"
-                              ? "api.kind.cluster"
-                              : "kubernetes/*"}
-                          </Label>
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                      <DescriptionListGroup>
-                        <DescriptionListTerm>
-                          Active Deployments
-                        </DescriptionListTerm>
-                        <DescriptionListDescription>
-                          {t.deployments.length}
-                        </DescriptionListDescription>
-                      </DescriptionListGroup>
-                    </DescriptionList>
-                  </ExpandableRowContent>
-                </Td>
-              </Tr>
-            </Tbody>
-          ))}
-        </Table>
-        )}
+                    />
+                    <Td dataLabel="Target ID">
+                      <span
+                        style={{
+                          fontWeight:
+                            "var(--pf-t--global--font--weight--heading--default)",
+                        }}
+                      >
+                        {t.id}
+                      </span>
+                    </Td>
+                    <Td dataLabel="Type">
+                      <Label color="blue" isCompact>
+                        {t.type}
+                      </Label>
+                    </Td>
+                    <Td dataLabel="Deployments">
+                      {t.deployments.length > 0 ? (
+                        <LabelGroup>
+                          {t.deployments.map((d) => (
+                            <Label key={d} color="green" isCompact>
+                              {d.replace("deployments/", "")}
+                            </Label>
+                          ))}
+                        </LabelGroup>
+                      ) : (
+                        <span
+                          style={{
+                            color: "var(--pf-t--global--text--color--subtle)",
+                          }}
+                        >
+                          None
+                        </span>
+                      )}
+                    </Td>
+                  </Tr>
+                  <Tr isExpanded={expandedId === t.id}>
+                    <Td />
+                    <Td colSpan={3}>
+                      <ExpandableRowContent>
+                        <DescriptionList isHorizontal isCompact>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>Target ID</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <span
+                                style={{
+                                  fontFamily:
+                                    "var(--pf-t--global--font--family--mono)",
+                                }}
+                              >
+                                {t.id}
+                              </span>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              Accepted Resource Types
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              <Label color="grey" isCompact>
+                                {t.id === "kind-local"
+                                  ? "api.kind.cluster"
+                                  : "kubernetes/*"}
+                              </Label>
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>
+                              Active Deployments
+                            </DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {t.deployments.length}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </ExpandableRowContent>
+                    </Td>
+                  </Tr>
+                </Tbody>
+              ))}
+            </Table>
+          )}
         </>
       )}
     </div>

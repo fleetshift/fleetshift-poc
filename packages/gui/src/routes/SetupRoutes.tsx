@@ -16,15 +16,17 @@ const SetupRoutes = () => {
     );
   }
 
-  if (nonAuthRoutes.length === 0 || authRoutes.length === 0) {
+  if (nonAuthRoutes.length === 0 && authRoutes.length === 0) {
     return (
       <div>
-        No setup extensions found. Please install at least one extension that
-        requires auth and one that does not require auth to use the setup
-        console.
+        No setup extensions found. Please install at least one setup extension
+        to use the setup console.
       </div>
     );
   }
+
+  const defaultSetupPath =
+    nonAuthRoutes[0]?.properties.path ?? authRoutes[0]?.properties.path ?? "/";
 
   return (
     <Routes>
@@ -53,12 +55,7 @@ const SetupRoutes = () => {
             />
           ))}
         </Route>
-        <Route
-          path="*"
-          element={
-            <Navigate to={nonAuthRoutes[0]?.properties.path || "/"} replace />
-          }
-        />
+        <Route path="*" element={<Navigate to={defaultSetupPath} replace />} />
       </Route>
     </Routes>
   );
