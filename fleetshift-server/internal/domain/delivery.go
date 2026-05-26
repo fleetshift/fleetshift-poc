@@ -139,11 +139,15 @@ func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now t
 // mutation, fulfillment deletion).
 //
 // Returns [ErrIllegalStateTransition] if the delivery is not in a
-// terminal state.
+// terminal state or if the given generation would move backwards.
 func (d *Delivery) Withdraw(generation Generation, now time.Time) error {
 	if !d.State.IsTerminal() {
 		return fmt.Errorf("%w: cannot withdraw from non-terminal state %q",
 			ErrIllegalStateTransition, d.State)
+	}
+	if generation < d.Generation {
+		return fmt.Errorf("%w: withdraw generation %d is older than current %d",
+			ErrIllegalStateTransition, generation, d.Generation)
 	}
 	d.State = DeliveryStatePending
 	d.Generation = generation

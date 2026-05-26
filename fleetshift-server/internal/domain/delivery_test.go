@@ -265,4 +265,25 @@ func TestDelivery_Withdraw(t *testing.T) {
 			})
 		}
 	})
+
+	t.Run("fails if generation moves backwards", func(t *testing.T) {
+		d := Delivery{
+			State:      DeliveryStateDelivered,
+			Generation: 5,
+			UpdatedAt:  now,
+		}
+		err := d.Withdraw(3, later)
+		if err == nil {
+			t.Fatal("expected error for backwards generation")
+		}
+		if !errors.Is(err, ErrIllegalStateTransition) {
+			t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+		}
+		if d.Generation != 5 {
+			t.Errorf("Generation changed to %d on failed withdraw", d.Generation)
+		}
+		if d.State != DeliveryStateDelivered {
+			t.Errorf("State changed on failed withdraw")
+		}
+	})
 }
