@@ -9,9 +9,10 @@ import (
 
 // HypershiftWorkspace holds the tempdir-backed assets required by a hypershift subprocess.
 type HypershiftWorkspace struct {
-	Env      []string
-	JWKSPath string
-	tempDir  string
+	Env              []string
+	JWKSPath         string
+	tempDir          string
+	cleanupCallbacks []func() error
 }
 
 // CleanupOnReturn returns a defer-friendly function that joins any cleanup
@@ -28,14 +29,31 @@ func (w *HypershiftWorkspace) CleanupOnReturn(retErr *error) {
 
 // Cleanup removes the temporary workspace directory and every credential file in it.
 func (w *HypershiftWorkspace) Cleanup() error {
-	if w == nil || w.tempDir == "" {
+	if w == nil {
 		return nil
 	}
 	tempDir := w.tempDir
+	cleanupCallbacks := w.cleanupCallbacks
 	w.tempDir = ""
 	w.Env = nil
 	w.JWKSPath = ""
-	return os.RemoveAll(tempDir)
+	w.cleanupCallbacks = nil
+
+	var cleanupErr error
+	for _, callback := range cleanupCallbacks {
+		if callback == nil {
+			continue
+		}
+		if err := callback(); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	if tempDir != "" {
+		if err := os.RemoveAll(tempDir); err != nil {
+			cleanupErr = errors.Join(cleanupErr, err)
+		}
+	}
+	return cleanupErr
 }
 
 // PrepareCreateHypershiftWorkspace builds a tempdir-backed workspace for the
@@ -45,7 +63,7 @@ func PrepareCreateHypershiftWorkspace(
 	target TargetConfig,
 	jwksJSON []byte,
 ) (_ *HypershiftWorkspace, retErr error) {
-	return prepareHypershiftWorkspace(callerToken, target, jwksJSON)
+	return prepareHypershiftWorkspace(callerToken, target, jwksJSON, "", nil)
 }
 
 // PrepareDestroyHypershiftWorkspace builds a tempdir-backed workspace for the
@@ -54,20 +72,38 @@ func PrepareDestroyHypershiftWorkspace(
 	callerToken string,
 	target TargetConfig,
 ) (_ *HypershiftWorkspace, retErr error) {
-	return prepareHypershiftWorkspace(callerToken, target, nil)
+	return prepareHypershiftWorkspace(callerToken, target, nil, "", nil)
 }
 
+// PrepareDestroyHypershiftWorkspaceWithTokenURL builds a tempdir-backed workspace for the
+// destroy-path hypershift calls, overriding token_url for ADC STS exchanges.
+func PrepareDestroyHypershiftWorkspaceWithTokenURL(
+	callerToken string,
+	target TargetConfig,
+	tokenURL string,
+	cleanupCallbacks ...func() error,
+) (_ *HypershiftWorkspace, retErr error) {
+	return prepareHypershiftWorkspace(callerToken, target, nil, tokenURL, cleanupCallbacks)
+}
+
+// prepareHypershiftWorkspace materializes the tempdir-backed ADC files and home
+// directories that a hypershift subprocess expects.
 func prepareHypershiftWorkspace(
 	callerToken string,
 	target TargetConfig,
 	jwksJSON []byte,
+	tokenURL string,
+	cleanupCallbacks []func() error,
 ) (_ *HypershiftWorkspace, retErr error) {
 	tempDir, err := os.MkdirTemp("", "gcphcp-hypershift-*")
 	if err != nil {
 		return nil, fmt.Errorf("create temp dir: %w", err)
 	}
 
-	workspace := &HypershiftWorkspace{tempDir: tempDir}
+	workspace := &HypershiftWorkspace{
+		tempDir:          tempDir,
+		cleanupCallbacks: cleanupCallbacks,
+	}
 	defer func() {
 		if retErr == nil {
 			return
@@ -82,7 +118,7 @@ func prepareHypershiftWorkspace(
 		return nil, fmt.Errorf("write subject token: %w", err)
 	}
 
-	credConfigJSON, err := buildWorkforceCredentialConfig(target, subjectTokenPath)
+	credConfigJSON, err := buildWorkforceCredentialConfigWithTokenURL(target, subjectTokenPath, tokenURL)
 	if err != nil {
 		return nil, fmt.Errorf("build credential config: %w", err)
 	}
@@ -115,10 +151,14 @@ func prepareHypershiftWorkspace(
 	return workspace, nil
 }
 
-func buildWorkforceCredentialConfig(target TargetConfig, subjectTokenPath string) ([]byte, error) {
-	return buildCredentialConfig(target, subjectTokenPath, false, true)
+// buildWorkforceCredentialConfigWithTokenURL builds the workforce
+// external_account ADC config and overrides token_url when requested.
+func buildWorkforceCredentialConfigWithTokenURL(target TargetConfig, subjectTokenPath, tokenURL string) ([]byte, error) {
+	return buildCredentialConfig(target, subjectTokenPath, tokenURL, false, true)
 }
 
+// buildHypershiftEnvironment constructs the minimal environment hypershift
+// needs to resolve the tempdir-backed ADC and config directories.
 func buildHypershiftEnvironment(
 	credentialConfigPath, homeDir, cloudSDKDir, xdgConfigDir string,
 ) []string {

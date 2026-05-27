@@ -54,6 +54,9 @@ type BrokerAuthResult struct {
 
 	// WorkforceToken is the Workforce access token (for hypershift credential files).
 	WorkforceToken string
+
+	// WorkforceTokenExpiry is when the Workforce access token expires.
+	WorkforceTokenExpiry time.Time
 }
 
 // BrokerAuth performs workforce identity federation and broker token generation.
@@ -86,7 +89,7 @@ func (a *BrokerAuth) Exchange(ctx context.Context, callerToken string) (BrokerAu
 	}
 
 	// Step 1: STS token exchange
-	workforceToken, err := a.exchangeSTS(ctx, callerToken)
+	workforceToken, workforceTokenExpiry, err := a.exchangeSTS(ctx, callerToken)
 	if err != nil {
 		return BrokerAuthResult{}, fmt.Errorf("STS token exchange failed: %w", err)
 	}
@@ -98,9 +101,10 @@ func (a *BrokerAuth) Exchange(ctx context.Context, callerToken string) (BrokerAu
 	}
 
 	return BrokerAuthResult{
-		BrokerToken:    brokerToken,
-		BrokerEmail:    a.cfg.BrokerSAEmail,
-		WorkforceToken: workforceToken,
+		BrokerToken:          brokerToken,
+		BrokerEmail:          a.cfg.BrokerSAEmail,
+		WorkforceToken:       workforceToken,
+		WorkforceTokenExpiry: workforceTokenExpiry,
 	}, nil
 }
 
@@ -109,7 +113,7 @@ func workforceAudience(pool, provider string) string {
 }
 
 // exchangeSTS exchanges the caller's OIDC token for a Workforce access token.
-func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (string, error) {
+func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (string, time.Time, error) {
 	audience := workforceAudience(a.cfg.WorkforcePool, a.cfg.WorkforceProvider)
 
 	formData := url.Values{
@@ -123,19 +127,19 @@ func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (strin
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.cfg.STSEndpoint, bytes.NewBufferString(formData.Encode()))
 	if err != nil {
-		return "", fmt.Errorf("failed to create STS request: %w", err)
+		return "", time.Time{}, fmt.Errorf("failed to create STS request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := a.cfg.HTTPClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("STS request failed: %w", err)
+		return "", time.Time{}, fmt.Errorf("STS request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", fmt.Errorf("failed to read STS response: %w", err)
+		return "", time.Time{}, fmt.Errorf("failed to read STS response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
@@ -145,23 +149,27 @@ func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (strin
 		_ = json.Unmarshal(body, &oauthErr)
 		baseErr := fmt.Errorf("STS returned status %d: %s", resp.StatusCode, string(body))
 		if resp.StatusCode == http.StatusUnauthorized || oauthErr.Error == "invalid_grant" {
-			return "", newAuthExpiredError(baseErr)
+			return "", time.Time{}, newAuthExpiredError(baseErr)
 		}
-		return "", baseErr
+		return "", time.Time{}, baseErr
 	}
 
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", fmt.Errorf("failed to parse STS response: %w", err)
+		return "", time.Time{}, fmt.Errorf("failed to parse STS response: %w", err)
 	}
 
 	if tokenResp.AccessToken == "" {
-		return "", fmt.Errorf("STS response missing access_token")
+		return "", time.Time{}, fmt.Errorf("STS response missing access_token")
+	}
+	if tokenResp.ExpiresIn <= 0 {
+		return "", time.Time{}, fmt.Errorf("STS response missing expires_in")
 	}
 
-	return tokenResp.AccessToken, nil
+	return tokenResp.AccessToken, time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second), nil
 }
 
 // generateIDToken uses the Workforce token to generate a broker ID token.
@@ -223,18 +231,21 @@ func (a *BrokerAuth) generateIDToken(ctx context.Context, workforceToken string)
 // for use by hypershift. This configuration enables workload identity federation
 // with the broker service account.
 func WorkforceCredentialConfig(cfg TargetConfig, subjectTokenFile string) []byte {
-	jsonData, _ := buildCredentialConfig(cfg, subjectTokenFile, true, false)
+	jsonData, _ := buildCredentialConfig(cfg, subjectTokenFile, "", true, false)
 	return jsonData
 }
 
 // buildCredentialConfig builds an external_account credential JSON.
 // impersonate adds service_account_impersonation_url; userProject adds workforce_pool_user_project.
-func buildCredentialConfig(cfg TargetConfig, subjectTokenFile string, impersonate, userProject bool) ([]byte, error) {
+func buildCredentialConfig(cfg TargetConfig, subjectTokenFile, tokenURL string, impersonate, userProject bool) ([]byte, error) {
+	if tokenURL == "" {
+		tokenURL = "https://sts.googleapis.com/v1/token"
+	}
 	credConfig := map[string]any{
 		"type":               "external_account",
 		"audience":           workforceAudience(cfg.WorkforcePool, cfg.WorkforceProvider),
 		"subject_token_type": "urn:ietf:params:oauth:token-type:jwt",
-		"token_url":          "https://sts.googleapis.com/v1/token",
+		"token_url":          tokenURL,
 		"credential_source": map[string]any{
 			"file": subjectTokenFile,
 		},

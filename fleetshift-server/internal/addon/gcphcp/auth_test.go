@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 )
@@ -166,6 +167,9 @@ func TestBrokerAuth_ExchangeAndMint(t *testing.T) {
 	}
 	if result.WorkforceToken != "fake-workforce-access-token" {
 		t.Errorf("Expected WorkforceToken fake-workforce-access-token, got %s", result.WorkforceToken)
+	}
+	if remaining := time.Until(result.WorkforceTokenExpiry); remaining < 59*time.Minute || remaining > 61*time.Minute {
+		t.Errorf("WorkforceTokenExpiry remaining lifetime = %v, want about 1h", remaining)
 	}
 }
 

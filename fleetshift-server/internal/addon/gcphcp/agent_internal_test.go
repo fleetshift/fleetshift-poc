@@ -135,7 +135,7 @@ func TestDeliveryResultForReconcileError_SubprocessInvalidGrantReturnsAuthFailed
 	// Simulates hypershift binary returning invalid_grant in stderr,
 	// which is NOT wrapped with newAuthExpiredError because the error
 	// comes from subprocess output, not from a parsed Go error chain.
-	err := fmt.Errorf("create infra: hypershift create infra failed: exit status 1 "+
+	err := fmt.Errorf("create infra: hypershift create infra failed: exit status 1 " +
 		`(stderr: {"error":"invalid_grant","error_description":"ID Token issued at 1779857657 is stale to sign-in."})`)
 	result := deliveryResultForReconcileError(err)
 
@@ -149,7 +149,7 @@ func TestDeliveryResultForReconcileError_SubprocessInvalidGrantReturnsAuthFailed
 }
 
 func TestDeliveryResultForReconcileError_WrappedSubprocessInvalidGrantReturnsAuthFailed(t *testing.T) {
-	inner := fmt.Errorf("hypershift create infra failed: exit status 1 "+
+	inner := fmt.Errorf("hypershift create infra failed: exit status 1 " +
 		`(stderr: credentials: status code 400: {"error":"invalid_grant","error_description":"ID Token is stale"})`)
 	err := fmt.Errorf("create infra: attempt 1: %w\nattempt 2: %w", inner, inner)
 	result := deliveryResultForReconcileError(err)
@@ -211,7 +211,7 @@ func withAgentHooksStubbed(t *testing.T) {
 	t.Helper()
 	origNewBrokerAuth := newBrokerAuth
 	origBuildCreateWorkspace := buildCreateHypershiftWorkspace
-	origBuildDestroyWorkspace := buildDestroyHypershiftWorkspace
+	origBuildDestroyWorkspace := buildDestroyWorkspaceWithTokenURL
 	origReconcileNodepools := reconcileNodepoolsFn
 	origPollClusterReady := pollClusterReadyFn
 	origCompleteGuestRegistration := completeGuestRegistrationFn
@@ -219,7 +219,7 @@ func withAgentHooksStubbed(t *testing.T) {
 	t.Cleanup(func() {
 		newBrokerAuth = origNewBrokerAuth
 		buildCreateHypershiftWorkspace = origBuildCreateWorkspace
-		buildDestroyHypershiftWorkspace = origBuildDestroyWorkspace
+		buildDestroyWorkspaceWithTokenURL = origBuildDestroyWorkspace
 		reconcileNodepoolsFn = origReconcileNodepools
 		pollClusterReadyFn = origPollClusterReady
 		completeGuestRegistrationFn = origCompleteGuestRegistration
@@ -366,7 +366,7 @@ func TestAgent_Deliver_SuccessReportsProvisionedTargetAndSecrets(t *testing.T) {
 func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 	withAgentHooksStubbed(t)
 
-	buildDestroyHypershiftWorkspace = func(_ string, _ TargetConfig) (*HypershiftWorkspace, error) {
+	buildDestroyWorkspaceWithTokenURL = func(_ string, _ TargetConfig, _ string, _ ...func() error) (*HypershiftWorkspace, error) {
 		dir, err := os.MkdirTemp("", "agent-remove-test-*")
 		if err != nil {
 			return nil, err
@@ -455,7 +455,7 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 func TestAgent_Remove_ClearsGenerationSoRecreateIsAccepted(t *testing.T) {
 	withAgentHooksStubbed(t)
 
-	buildDestroyHypershiftWorkspace = func(_ string, _ TargetConfig) (*HypershiftWorkspace, error) {
+	buildDestroyWorkspaceWithTokenURL = func(_ string, _ TargetConfig, _ string, _ ...func() error) (*HypershiftWorkspace, error) {
 		dir, err := os.MkdirTemp("", "agent-recreate-test-*")
 		if err != nil {
 			return nil, err

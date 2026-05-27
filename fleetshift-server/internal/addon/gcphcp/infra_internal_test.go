@@ -410,3 +410,78 @@ func TestPrepareDestroyHypershiftWorkspace_CreatesWorkspaceWithoutJWKS(t *testin
 		t.Fatalf("credential config file missing: %v", err)
 	}
 }
+
+func TestPrepareDestroyHypershiftWorkspaceWithTokenURL_OverridesTokenURL(t *testing.T) {
+	workspace, err := PrepareDestroyHypershiftWorkspaceWithTokenURL(
+		"workspace-nonce",
+		TargetConfig{
+			GCPProject:        "project-123",
+			WorkforcePool:     "pool-123",
+			WorkforceProvider: "provider-123",
+		},
+		"http://127.0.0.1:12345/sts",
+	)
+	if err != nil {
+		t.Fatalf("PrepareDestroyHypershiftWorkspaceWithTokenURL() error = %v", err)
+	}
+	defer workspace.Cleanup()
+
+	adcPath := lookupHypershiftEnvVar(workspace.Env, "GOOGLE_APPLICATION_CREDENTIALS")
+	if adcPath == "" {
+		t.Fatal("missing GOOGLE_APPLICATION_CREDENTIALS")
+	}
+
+	credConfigData, err := os.ReadFile(adcPath)
+	if err != nil {
+		t.Fatalf("read credential config: %v", err)
+	}
+
+	var credConfig map[string]any
+	if err := json.Unmarshal(credConfigData, &credConfig); err != nil {
+		t.Fatalf("credential config JSON parse error = %v", err)
+	}
+	if got := credConfig["token_url"]; got != "http://127.0.0.1:12345/sts" {
+		t.Fatalf("token_url = %v, want custom token_url", got)
+	}
+
+	credSource, ok := credConfig["credential_source"].(map[string]any)
+	if !ok {
+		t.Fatalf("credential_source type = %T, want map[string]any", credConfig["credential_source"])
+	}
+	subjectTokenPath, ok := credSource["file"].(string)
+	if !ok || subjectTokenPath == "" {
+		t.Fatalf("credential_source.file = %v, want non-empty string", credSource["file"])
+	}
+	subjectTokenData, err := os.ReadFile(subjectTokenPath)
+	if err != nil {
+		t.Fatalf("read subject token: %v", err)
+	}
+	if got := string(subjectTokenData); got != "workspace-nonce" {
+		t.Fatalf("subject token content = %q, want workspace-nonce", got)
+	}
+}
+
+func TestHypershiftWorkspaceCleanup_RunsCleanupCallbacks(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "gcphcp-cleanup-callbacks-*")
+	if err != nil {
+		t.Fatalf("os.MkdirTemp() error = %v", err)
+	}
+
+	callbackCalls := 0
+	workspace := &HypershiftWorkspace{
+		tempDir: tempDir,
+		cleanupCallbacks: []func() error{
+			func() error {
+				callbackCalls++
+				return nil
+			},
+		},
+	}
+
+	if err := workspace.Cleanup(); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if callbackCalls != 1 {
+		t.Fatalf("cleanup callback calls = %d, want 1", callbackCalls)
+	}
+}

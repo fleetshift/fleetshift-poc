@@ -11,17 +11,19 @@ import (
 )
 
 var (
-	guestBootstrapMaxAttempts       = 10
-	guestBootstrapRetryDelay        = 15 * time.Second
-	bootstrapGuestCluster           = BootstrapGuestCluster
-	failureSnapshotTimeout          = 10 * time.Second
-	newBrokerAuth                   = func(cfg BrokerAuthConfig) brokerAuthExchanger { return NewBrokerAuth(cfg) }
-	buildCreateHypershiftWorkspace  = PrepareCreateHypershiftWorkspace
-	buildDestroyHypershiftWorkspace = PrepareDestroyHypershiftWorkspace
-	reconcileNodepoolsFn            = reconcileNodepools
-	pollClusterReadyFn              = PollClusterReady
-	completeGuestRegistrationFn     = completeGuestRegistration
-	pollDesiredNodepoolsHealthyFn   = PollDesiredNodepoolsHealthy
+	guestBootstrapMaxAttempts         = 10
+	guestBootstrapRetryDelay          = 15 * time.Second
+	bootstrapGuestCluster             = BootstrapGuestCluster
+	failureSnapshotTimeout            = 10 * time.Second
+	newBrokerAuth                     = func(cfg BrokerAuthConfig) brokerAuthExchanger { return NewBrokerAuth(cfg) }
+	buildCreateHypershiftWorkspace    = PrepareCreateHypershiftWorkspace
+	buildDestroyHypershiftWorkspace   = PrepareDestroyHypershiftWorkspace
+	buildDestroyWorkspaceWithTokenURL = PrepareDestroyHypershiftWorkspaceWithTokenURL
+	startLocalSTSForwarderFn          = startLocalSTSForwarder
+	reconcileNodepoolsFn              = reconcileNodepools
+	pollClusterReadyFn                = PollClusterReady
+	completeGuestRegistrationFn       = completeGuestRegistration
+	pollDesiredNodepoolsHealthyFn     = PollDesiredNodepoolsHealthy
 )
 
 type brokerAuthExchanger interface {
@@ -428,8 +430,29 @@ func (r *Reconciler) Delete(
 	}
 
 	if err := func() (retErr error) {
-		workspace, err := buildDestroyHypershiftWorkspace(callerToken, target)
+		subjectToken, err := randomHexString(16)
 		if err != nil {
+			return fmt.Errorf("generate local STS subject token: %w", err)
+		}
+
+		forwarder, err := startLocalSTSForwarderFn(
+			authResult.WorkforceToken,
+			authResult.WorkforceTokenExpiry,
+			subjectToken,
+			workforceAudience(target.WorkforcePool, target.WorkforceProvider),
+		)
+		if err != nil {
+			return fmt.Errorf("start local STS forwarder: %w", err)
+		}
+
+		workspace, err := buildDestroyWorkspaceWithTokenURL(
+			subjectToken,
+			target,
+			forwarder.URL(),
+			forwarder.Close,
+		)
+		if err != nil {
+			_ = forwarder.Close()
 			return fmt.Errorf("prepare hypershift workspace: %w", err)
 		}
 		defer workspace.CleanupOnReturn(&retErr)
