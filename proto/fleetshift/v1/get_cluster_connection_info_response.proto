@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+message GetClusterConnectionInfoResponse {
+  string endpoint = 1;
+  string ca_cert = 2;
+}

@@ -1,0 +1,26 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/annotations.proto";
+import "fleetshift/v1/get_cluster_connection_info_request.proto";
+import "fleetshift/v1/get_cluster_connection_info_response.proto";
+import "fleetshift/v1/get_cluster_credential_request.proto";
+import "fleetshift/v1/get_cluster_credential_response.proto";
+
+service ClusterService {
+  rpc GetClusterConnectionInfo(GetClusterConnectionInfoRequest) returns (GetClusterConnectionInfoResponse) {
+    option (google.api.http) = {
+      get: "/v1/clusters/{resource_id}/connectionInfo"
+    };
+  }
+
+  rpc GetClusterCredential(GetClusterCredentialRequest) returns (GetClusterCredentialResponse) {
+    option (google.api.http) = {
+      post: "/v1/clusters/{resource_id}/credential"
+      body: "*"
+    };
+  }
+}
