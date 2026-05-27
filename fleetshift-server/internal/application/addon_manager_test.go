@@ -831,3 +831,101 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		t.Errorf("type def resource type = %q, want clusters", typeDef.ResourceType)
 	}
 }
+
+// stubClusterAccessProv satisfies [domain.ClusterAccessProvider] for
+// addon manager lifecycle tests.
+type stubClusterAccessProv struct {
+	called bool
+}
+
+func (s *stubClusterAccessProv) MintCredential(_ context.Context, _ string, _ domain.TargetInfo) (*domain.ClusterCredential, error) {
+	s.called = true
+	return &domain.ClusterCredential{}, nil
+}
+
+func gcphcpDescriptor() domain.AddonDescriptor {
+	return domain.AddonDescriptor{
+		ID:   "gcphcp-test",
+		Name: "GCP HCP Test",
+		Capabilities: []domain.Capability{
+			domain.DeliveryCapability{TargetType: "gcphcp"},
+			domain.ClusterAccessCapability{TargetType: "gcphcp"},
+		},
+	}
+}
+
+func TestAddonManager_ConnectRegistersClusterAccessProvider(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	desc := gcphcpDescriptor()
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	provider := &stubClusterAccessProv{}
+	if err := env.mgr.Connect(ctx, "gcphcp-test", application.ConnectInput{
+		Agent:         &stubDeliveryAgent{},
+		ClusterAccess: provider,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	got := env.clusterAccess.ClusterAccessProvider("gcphcp")
+	if got == nil {
+		t.Fatal("expected cluster access provider to be registered after Connect")
+	}
+	if got != provider {
+		t.Errorf("registered provider = %v, want %v", got, provider)
+	}
+}
+
+func TestAddonManager_DisconnectDeregistersClusterAccessProvider(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	desc := gcphcpDescriptor()
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	provider := &stubClusterAccessProv{}
+	if err := env.mgr.Connect(ctx, "gcphcp-test", application.ConnectInput{
+		Agent:         &stubDeliveryAgent{},
+		ClusterAccess: provider,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if env.clusterAccess.ClusterAccessProvider("gcphcp") == nil {
+		t.Fatal("provider should be registered before Disconnect")
+	}
+
+	if err := env.mgr.Disconnect(ctx, "gcphcp-test"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	if got := env.clusterAccess.ClusterAccessProvider("gcphcp"); got != nil {
+		t.Errorf("expected provider to be deregistered after Disconnect, got %v", got)
+	}
+}
+
+func TestAddonManager_ConnectWithoutClusterAccessIsNoop(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	desc := gcphcpDescriptor()
+	if err := env.mgr.Enable(ctx, desc); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	if err := env.mgr.Connect(ctx, "gcphcp-test", application.ConnectInput{
+		Agent: &stubDeliveryAgent{},
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if got := env.clusterAccess.ClusterAccessProvider("gcphcp"); got != nil {
+		t.Errorf("expected nil provider when ClusterAccess not provided, got %v", got)
+	}
+}

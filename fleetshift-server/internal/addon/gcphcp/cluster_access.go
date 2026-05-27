@@ -10,11 +10,18 @@ import (
 
 // ClusterAccess implements domain.ClusterAccessProvider for gcphcp targets.
 type ClusterAccess struct {
-	gateway GatewayConfig
+	gateway     GatewayConfig
+	stsEndpoint string
+	iamEndpoint string
 }
 
 func NewClusterAccess(gateway GatewayConfig) *ClusterAccess {
 	return &ClusterAccess{gateway: gateway}
+}
+
+func (ca *ClusterAccess) SetTestEndpoints(sts, iam string) {
+	ca.stsEndpoint = sts
+	ca.iamEndpoint = iam
 }
 
 func (ca *ClusterAccess) MintCredential(ctx context.Context, callerToken string, target domain.TargetInfo) (*domain.ClusterCredential, error) {
@@ -26,6 +33,8 @@ func (ca *ClusterAccess) MintCredential(ctx context.Context, callerToken string,
 		GCPProject:        tc.GCPProject,
 		BrokerSAEmail:     tc.BrokerSAEmail,
 		GatewayAudience:   ca.gateway.Audience,
+		STSEndpoint:       ca.stsEndpoint,
+		IAMEndpoint:       ca.iamEndpoint,
 	})
 
 	result, err := auth.Exchange(ctx, callerToken)
