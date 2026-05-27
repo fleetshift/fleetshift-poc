@@ -326,10 +326,21 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID, err)
 				}
 			} else if !d.Retry(in.Generation, now) {
-				// Delivery already progressed past Pending (addon received
-				// and acked). The ack signal is queued; no re-dispatch needed.
-				probe.SkippedAlreadyAcked()
-				return struct{}{}, nil
+				if d.Generation == in.Generation && d.State.IsTerminal() {
+					// Delivery reached a terminal state during a previous
+					// workflow run. ContinueAsNew restarted the workflow;
+					// reset to Pending for retry — addons are idempotent
+					// and the platform provides at-least-once delivery.
+					// This mirrors Withdraw for the remove path.
+					probe.ResetForRetry(d.State)
+					d.State = DeliveryStatePending
+					d.UpdatedAt = now
+				} else {
+					// Delivery already progressed past Pending (addon received
+					// and acked). The ack signal is queued; no re-dispatch needed.
+					probe.SkippedAlreadyAcked()
+					return struct{}{}, nil
+				}
 			} else {
 				probe.Retried()
 			}

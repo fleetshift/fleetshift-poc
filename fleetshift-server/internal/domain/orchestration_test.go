@@ -2373,6 +2373,158 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// Async delivery failure → reset-to-Pending → retry
+// ---------------------------------------------------------------------------
+
+func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.Fulfillment{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+	seedDelivery(t, store, domain.Delivery{
+		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		Generation: 1,
+		State:      domain.DeliveryStateFailed,
+	})
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	dep := getFulfillment(t, store, "d1")
+	if dep.State != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want active (terminal delivery should be reset and re-dispatched)", dep.State)
+	}
+}
+
+func TestOrchestration_AsyncDeliveryFailure_ConvergesViaRetry(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.Fulfillment{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
+
+	agent := &asyncFailOnceThenSucceedAgent{store: store}
+
+	const maxAttempts = 3
+	var lastErr error
+	for attempt := range maxAttempts {
+		events := make(chan domain.FulfillmentEvent, 16)
+		agent.events = events
+		wf := newTestWorkflow(store, agent, events)
+		rec := &simpleRecord{ctx: testContext(t), events: events}
+		_, lastErr = wf.Run(rec, domain.FulfillmentID("d1"))
+		if lastErr == nil {
+			break
+		}
+		var canErr *domain.ContinueAsNewError
+		if !errors.As(lastErr, &canErr) {
+			t.Fatalf("attempt %d: unexpected non-ContinueAsNew error: %v", attempt+1, lastErr)
+		}
+	}
+	if lastErr != nil {
+		t.Fatalf("workflow did not converge after %d attempts: %v", maxAttempts, lastErr)
+	}
+
+	dep := getFulfillment(t, store, "d1")
+	if dep.State != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want active (async failure should be retried via reset-to-Pending)", dep.State)
+	}
+}
+
+// asyncFailOnceThenSucceedAgent simulates a delivery agent that fails
+// on the first attempt (transitioning the delivery to Failed in the DB
+// and signaling the workflow, like production's [DeliveryReportService])
+// then succeeds on subsequent attempts. This tests the full ContinueAsNew
+// recovery path: first run fails → ContinueAsNew → second run resets
+// the terminal delivery to Pending → re-dispatches → addon succeeds.
+type asyncFailOnceThenSucceedAgent struct {
+	store  domain.Store
+	events chan<- domain.FulfillmentEvent
+	mu     sync.Mutex
+	calls  int
+}
+
+func (a *asyncFailOnceThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	a.mu.Lock()
+	a.calls++
+	n := a.calls
+	a.mu.Unlock()
+
+	if n == 1 {
+		ctx := context.Background()
+		tx, err := a.store.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback()
+		d, err := tx.Deliveries().Get(ctx, deliveryID)
+		if err != nil {
+			return err
+		}
+		if err := d.TransitionTo(domain.DeliveryStateFailed, time.Now()); err != nil {
+			return err
+		}
+		if err := tx.Deliveries().Put(ctx, d); err != nil {
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return err
+		}
+		go func() {
+			a.events <- domain.FulfillmentEvent{
+				DeliveryCompleted: &domain.DeliveryCompletionEvent{
+					DeliveryID: deliveryID,
+					Generation: generation,
+					Result: domain.DeliveryResult{
+						State:   domain.DeliveryStateFailed,
+						Message: "async delivery failed",
+					},
+				},
+			}
+		}()
+		return nil
+	}
+
+	go func() {
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Generation: generation,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
+	return nil
+}
+
+func (a *asyncFailOnceThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	go func() {
+		a.events <- domain.FulfillmentEvent{
+			DeliveryCompleted: &domain.DeliveryCompletionEvent{
+				DeliveryID: deliveryID,
+				Generation: generation,
+				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
+			},
+		}
+	}()
+	return nil
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

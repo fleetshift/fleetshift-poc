@@ -763,6 +763,51 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 	})
 
+	t.Run("AsyncDeliveryFailure_RetriesAndConverges", func(t *testing.T) {
+		infra := infraFactory(t)
+		wfs := registerWorkflowsWithAgents(t, infra, registryFactory, func(reporter domain.DeliveryReporter) {
+			if infra.AgentRegistrar != nil {
+				infra.AgentRegistrar.Register(AsyncFailTargetType, &asyncFailThenSucceedAgent{reporter: reporter})
+			}
+		})
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		createTargets(ctx, t, infra,
+			domain.TargetInfo{ID: "af1", Type: AsyncFailTargetType, Name: "async-fail-1"},
+		)
+
+		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
+			ID: "d-async-fail",
+			ManifestStrategy: domain.ManifestStrategySpec{
+				Type:      domain.ManifestStrategyInline,
+				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+			},
+			PlacementStrategy: domain.PlacementStrategySpec{
+				Type:    domain.PlacementStrategyStatic,
+				Targets: []domain.TargetID{"af1"},
+			},
+		})
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		awaitObservedGeneration(ctx, t, infra, "d-async-fail", 1)
+
+		view, err := queryDeploymentView(ctx, t, infra, "d-async-fail")
+		if err != nil {
+			t.Fatalf("GetView: %v", err)
+		}
+		f := view.Fulfillment
+		if f.State != domain.FulfillmentStateActive {
+			t.Fatalf("State = %q, want %q (async failure should be retried)", f.State, domain.FulfillmentStateActive)
+		}
+		if f.ActiveWorkflowGen != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen)
+		}
+		assertResolvedTargets(t, f, "af1")
+	})
+
 }
 
 // registerWorkflows builds workflow specs from infra, registers the
@@ -1091,6 +1136,13 @@ const TerminalFailTargetType domain.TargetType = "terminal-fail-test"
 // transiently, used to verify delete retry via ContinueAsNew.
 const TransientRemoveTargetType domain.TargetType = "transient-remove-test"
 
+// AsyncFailTargetType is a target type whose delivery agent dispatches
+// successfully but reports an asynchronous failure via
+// [domain.DeliveryReporter.ReportResult]. Used to verify that async
+// delivery failures converge to [domain.FulfillmentStateFailed] through
+// the ContinueAsNew → terminal detection path.
+const AsyncFailTargetType domain.TargetType = "async-fail-test"
+
 // transientFailAgent fails the first N Deliver calls with a plain
 // (retryable) error, then succeeds. N is set by failsRemaining.
 type transientFailAgent struct {
@@ -1174,6 +1226,46 @@ func (a *transientRemoveAgent) Remove(_ context.Context, _ domain.TargetInfo, de
 		return errors.New("transient remove failure")
 	}
 	a.mu.Unlock()
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
+}
+
+// asyncFailThenSucceedAgent dispatches successfully but reports
+// [domain.DeliveryStateFailed] on the first attempt via the reporter,
+// then succeeds on subsequent attempts. This tests the platform's retry
+// behavior: the first async failure triggers ContinueAsNew, then
+// DeliverToTarget resets the terminal delivery to Pending and
+// re-dispatches, allowing the addon to succeed on retry.
+type asyncFailThenSucceedAgent struct {
+	reporter domain.DeliveryReporter
+	mu       sync.Mutex
+	attempt  int
+}
+
+func (a *asyncFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	a.mu.Lock()
+	a.attempt++
+	n := a.attempt
+	a.mu.Unlock()
+
+	if n == 1 {
+		go func() {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateFailed,
+				Message: "async delivery failed: cluster name conflict",
+			})
+		}()
+		return nil
+	}
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
+}
+
+func (a *asyncFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	go func() {
 		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
 	}()

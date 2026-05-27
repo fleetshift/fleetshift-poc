@@ -168,6 +168,10 @@ type DeliverProbe interface {
 	// retried (still Pending from a previous failed dispatch).
 	Retried()
 
+	// ResetForRetry is called when a terminal delivery at the same
+	// generation is reset to Pending for re-dispatch.
+	ResetForRetry(previousState DeliveryState)
+
 	// SkippedAlreadyAcked is called when the delivery has already
 	// progressed past Pending, so no re-dispatch is needed.
 	SkippedAlreadyAcked()
@@ -319,6 +323,7 @@ type NoOpDeliverProbe struct{}
 func (NoOpDeliverProbe) NewDelivery()                     {}
 func (NoOpDeliverProbe) Redispatched(Generation)          {}
 func (NoOpDeliverProbe) Retried()                         {}
+func (NoOpDeliverProbe) ResetForRetry(DeliveryState)      {}
 func (NoOpDeliverProbe) SkippedAlreadyAcked()             {}
 func (NoOpDeliverProbe) Error(error)                      {}
 func (NoOpDeliverProbe) End()                             {}
