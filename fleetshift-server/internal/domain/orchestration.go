@@ -192,6 +192,9 @@ func (s *OrchestrationWorkflowSpec) AcquireLockAndLoad() Activity[FulfillmentID,
 		f, err := tx.Fulfillments().Get(ctx, id)
 		if err != nil {
 			probe.Error(err)
+			if errors.Is(err, ErrNotFound) {
+				return ReconciliationSnapshot{}, TerminalError(err)
+			}
 			return ReconciliationSnapshot{}, err
 		}
 		acquired := f.AcquireOrchestrationLock()

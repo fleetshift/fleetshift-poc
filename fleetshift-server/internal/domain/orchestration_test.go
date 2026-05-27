@@ -2525,6 +2525,25 @@ func (a *asyncFailOnceThenSucceedAgent) Remove(_ context.Context, _ domain.Targe
 }
 
 // ---------------------------------------------------------------------------
+// Deleted fulfillment → workflow stops cleanly
+// ---------------------------------------------------------------------------
+
+func TestOrchestration_DeletedFulfillment_StopsCleanly(t *testing.T) {
+	store, _ := setupStore(t)
+	// No fulfillment seeded — simulates a hard-deleted record.
+	// The workflow should terminate cleanly, not loop via ContinueAsNew.
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("nonexistent"))
+	if err != nil {
+		t.Fatalf("Run should return nil for deleted fulfillment, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
