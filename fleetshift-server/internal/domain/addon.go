@@ -78,6 +78,15 @@ type DeliveryCapability struct {
 func (DeliveryCapability) addonCapability()        {}
 func (DeliveryCapability) CapabilityType() string { return "delivery" }
 
+// ClusterAccessCapability declares that the addon can mint credentials
+// for its provisioned kubernetes targets via a [ClusterAccessProvider].
+type ClusterAccessCapability struct {
+	TargetType TargetType
+}
+
+func (ClusterAccessCapability) addonCapability()        {}
+func (ClusterAccessCapability) CapabilityType() string { return "cluster_access" }
+
 // ManagedResourceSchema is provided by the workload at connect time.
 // It carries the full schema and fulfillment relation that the platform
 // validates against the declared [ManagedResourceCapability].
