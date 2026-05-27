@@ -32,6 +32,7 @@ func Descriptor() domain.AddonDescriptor {
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
 			domain.ManagedResourceCapability{ResourceType: ClusterResourceType},
+			domain.ClusterAccessCapability{TargetType: KubernetesTargetType},
 		},
 	}
 }
