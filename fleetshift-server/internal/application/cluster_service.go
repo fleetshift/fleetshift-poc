@@ -7,16 +7,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// ClusterAccessProviderRegistry resolves a ClusterAccessProvider by target type.
-type ClusterAccessProviderRegistry interface {
-	ClusterAccessProvider(targetType domain.TargetType) domain.ClusterAccessProvider
-}
-
 // ClusterService handles cluster connection info and credential minting
 // for provisioned guest clusters.
 type ClusterService struct {
 	Targets   *TargetService
-	Providers ClusterAccessProviderRegistry
+	Providers *ClusterAccessRegistry
 }
 
 func (s *ClusterService) resolveTarget(ctx context.Context, resourceID string) (domain.TargetInfo, error) {

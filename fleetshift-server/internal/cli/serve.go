@@ -556,10 +556,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			Validator: specValidator,
 		},
 	}
+	clusterAccessRegistry := application.NewClusterAccessRegistry()
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
+		Router:        router,
+		TypeSvc:       typeSvc,
+		Activator:     activator,
+		ClusterAccess: clusterAccessRegistry,
 	})
 
 	// Phase 2: enable addons — records capabilities, no API surface yet.
@@ -584,11 +586,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	// Register ClusterService now that addonMgr is available
 	targetSvc := &application.TargetService{Store: store}
 	clusterSvc := &application.ClusterService{
 		Targets:   targetSvc,
-		Providers: addonMgr,
+		Providers: clusterAccessRegistry,
 	}
 	pb.RegisterClusterServiceServer(grpcServer, &transportgrpc.ClusterServer{
 		Clusters: clusterSvc,

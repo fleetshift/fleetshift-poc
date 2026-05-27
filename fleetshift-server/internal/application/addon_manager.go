@@ -38,23 +38,25 @@ type DeliveryAgentRegistry interface {
 
 // AddonManagerDeps holds the injected dependencies for [AddonManager].
 type AddonManagerDeps struct {
-	Router    DeliveryAgentRegistry
-	TypeSvc   *ManagedResourceTypeService
-	Activator SchemaActivator
+	Router        DeliveryAgentRegistry
+	TypeSvc       *ManagedResourceTypeService
+	Activator     SchemaActivator
+	ClusterAccess *ClusterAccessRegistry
 }
 
 // AddonManager orchestrates the addon lifecycle: enable, connect,
 // disconnect, disable. It holds in-memory addon state and coordinates
 // schema activation (via [SchemaActivator]), delivery agent routing,
-// and managed resource type definitions.
+// cluster access provider registration, and managed resource type
+// definitions.
 type AddonManager struct {
 	mu     sync.RWMutex
 	addons map[domain.AddonID]*addonRecord
 
-	router                 DeliveryAgentRegistry
-	typeSvc                *ManagedResourceTypeService
-	activator              SchemaActivator
-	clusterAccessProviders map[domain.TargetType]domain.ClusterAccessProvider
+	router        DeliveryAgentRegistry
+	typeSvc       *ManagedResourceTypeService
+	activator     SchemaActivator
+	clusterAccess *ClusterAccessRegistry
 }
 
 // addonRecord is the in-memory state for an addon within the manager.
@@ -71,11 +73,11 @@ type addonRecord struct {
 // NewAddonManager creates a new manager with the given dependencies.
 func NewAddonManager(deps AddonManagerDeps) *AddonManager {
 	return &AddonManager{
-		addons:                 make(map[domain.AddonID]*addonRecord),
-		router:                 deps.Router,
-		typeSvc:                deps.TypeSvc,
-		activator:              deps.Activator,
-		clusterAccessProviders: make(map[domain.TargetType]domain.ClusterAccessProvider),
+		addons:        make(map[domain.AddonID]*addonRecord),
+		router:        deps.Router,
+		typeSvc:       deps.TypeSvc,
+		activator:     deps.Activator,
+		clusterAccess: deps.ClusterAccess,
 	}
 }
 
@@ -252,12 +254,12 @@ func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, tar
 }
 
 func (m *AddonManager) connectClusterAccess(rec *addonRecord, provider domain.ClusterAccessProvider) error {
-	if provider == nil {
+	if provider == nil || m.clusterAccess == nil {
 		return nil
 	}
 	for _, cap := range rec.addon.Capabilities {
 		if ca, ok := cap.(domain.ClusterAccessCapability); ok {
-			m.clusterAccessProviders[ca.TargetType] = provider
+			m.clusterAccess.Register(ca.TargetType, provider)
 		}
 	}
 	return nil
@@ -285,9 +287,11 @@ func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) err
 		rec.agent = nil
 	}
 
-	for _, cap := range rec.addon.Capabilities {
-		if ca, ok := cap.(domain.ClusterAccessCapability); ok {
-			delete(m.clusterAccessProviders, ca.TargetType)
+	if m.clusterAccess != nil {
+		for _, cap := range rec.addon.Capabilities {
+			if ca, ok := cap.(domain.ClusterAccessCapability); ok {
+				m.clusterAccess.Deregister(ca.TargetType)
+			}
 		}
 	}
 
@@ -337,14 +341,6 @@ func (m *AddonManager) Get(addonID domain.AddonID) (domain.Addon, error) {
 		return domain.Addon{}, fmt.Errorf("%w: addon %q not found", domain.ErrNotFound, addonID)
 	}
 	return rec.addon, nil
-}
-
-// ClusterAccessProvider returns the registered provider for a target type,
-// or nil if none is registered.
-func (m *AddonManager) ClusterAccessProvider(targetType domain.TargetType) domain.ClusterAccessProvider {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.clusterAccessProviders[targetType]
 }
 
 // validateSchemaCapability checks that the schema's ResourceType

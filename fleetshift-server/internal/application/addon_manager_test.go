@@ -97,11 +97,12 @@ func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
 }
 
 type addonManagerEnv struct {
-	mgr       *application.AddonManager
-	activator *recordingActivator
-	router    *delivery.RoutingDeliveryService
-	typeSvc   *application.ManagedResourceTypeService
-	targetSvc *application.TargetService
+	mgr             *application.AddonManager
+	activator       *recordingActivator
+	router          *delivery.RoutingDeliveryService
+	clusterAccess   *application.ClusterAccessRegistry
+	typeSvc         *application.ManagedResourceTypeService
+	targetSvc       *application.TargetService
 }
 
 func setupAddonManager(t *testing.T) *addonManagerEnv {
@@ -152,19 +153,22 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 	targetSvc := &application.TargetService{Store: store}
 
 	activator := &recordingActivator{}
+	clusterAccess := application.NewClusterAccessRegistry()
 
 	mgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
+		Router:        router,
+		TypeSvc:       typeSvc,
+		Activator:     activator,
+		ClusterAccess: clusterAccess,
 	})
 
 	return &addonManagerEnv{
-		mgr:       mgr,
-		activator: activator,
-		router:    router,
-		typeSvc:   typeSvc,
-		targetSvc: targetSvc,
+		mgr:           mgr,
+		activator:     activator,
+		router:        router,
+		clusterAccess: clusterAccess,
+		typeSvc:       typeSvc,
+		targetSvc:     targetSvc,
 	}
 }
 
@@ -769,18 +773,21 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		typeSvc := &application.ManagedResourceTypeService{Store: store}
 		targetSvc := &application.TargetService{Store: store}
 		activator := &recordingActivator{}
+		clusterAccess := application.NewClusterAccessRegistry()
 
 		mgr := application.NewAddonManager(application.AddonManagerDeps{
-			Router:    router,
-			TypeSvc:   typeSvc,
-			Activator: activator,
+			Router:        router,
+			TypeSvc:       typeSvc,
+			Activator:     activator,
+			ClusterAccess: clusterAccess,
 		})
 		return &addonManagerEnv{
-			mgr:       mgr,
-			activator: activator,
-			router:    router,
-			typeSvc:   typeSvc,
-			targetSvc: targetSvc,
+			mgr:           mgr,
+			activator:     activator,
+			router:        router,
+			clusterAccess: clusterAccess,
+			typeSvc:       typeSvc,
+			targetSvc:     targetSvc,
 		}
 	}
 
