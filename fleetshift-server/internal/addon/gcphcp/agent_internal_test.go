@@ -131,6 +131,34 @@ func TestDeliveryResultForReconcileError_WrappedAuthExpiredReturnsAuthFailed(t *
 	}
 }
 
+func TestDeliveryResultForReconcileError_SubprocessInvalidGrantReturnsAuthFailed(t *testing.T) {
+	// Simulates hypershift binary returning invalid_grant in stderr,
+	// which is NOT wrapped with newAuthExpiredError because the error
+	// comes from subprocess output, not from a parsed Go error chain.
+	err := fmt.Errorf("create infra: hypershift create infra failed: exit status 1 "+
+		`(stderr: {"error":"invalid_grant","error_description":"ID Token issued at 1779857657 is stale to sign-in."})`)
+	result := deliveryResultForReconcileError(err)
+
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Fatalf("state = %q, want %q — invalid_grant in subprocess stderr should be detected as auth failure",
+			result.State, domain.DeliveryStateAuthFailed)
+	}
+	if !strings.Contains(result.Message, "credentials expired") {
+		t.Fatalf("message = %q, want 'credentials expired' context", result.Message)
+	}
+}
+
+func TestDeliveryResultForReconcileError_WrappedSubprocessInvalidGrantReturnsAuthFailed(t *testing.T) {
+	inner := fmt.Errorf("hypershift create infra failed: exit status 1 "+
+		`(stderr: credentials: status code 400: {"error":"invalid_grant","error_description":"ID Token is stale"})`)
+	err := fmt.Errorf("create infra: attempt 1: %w\nattempt 2: %w", inner, inner)
+	result := deliveryResultForReconcileError(err)
+
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Fatalf("state = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
+	}
+}
+
 func TestDeliveryResultForReconcileError_PostProvisionRegistrationErrorUsesExplicitMessage(t *testing.T) {
 	result := deliveryResultForReconcileError(
 		newPostProvisionRegistrationError(fmt.Errorf("bootstrap guest cluster after 3 attempts: RBAC not ready")),
