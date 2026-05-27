@@ -375,6 +375,12 @@ func (p *deliverProbe) Retried() {
 	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery retried")
 }
 
+func (p *deliverProbe) ResetForRetry(previousState domain.DeliveryState) {
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery reset for retry",
+		slog.String("previous_state", string(previousState)),
+	)
+}
+
 func (p *deliverProbe) SkippedAlreadyAcked() {
 	if !p.logger.Enabled(p.ctx, slog.LevelDebug) {
 		return

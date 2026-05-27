@@ -230,7 +230,7 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 	invokers := make(map[string]activityInvoker)
 	opts := r.activityOptions()
 
-	if err := registerActivity(r.Worker, invokers, spec.DeleteFulfillment(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.DeleteManagedResourceAndFulfillment(), opts); err != nil {
 		return nil, err
 	}
 
@@ -355,6 +355,9 @@ func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResou
 	if err := registerActivity(r.Worker, invokers, spec.MutateToDeleting(), opts); err != nil {
 		return nil, err
 	}
+	if err := registerActivity(r.Worker, invokers, spec.StartCleanup(), opts); err != nil {
+		return nil, err
+	}
 	if err := registerActivity(r.Worker, invokers, spec.StartOrchestration(), opts); err != nil {
 		return nil, err
 	}
@@ -387,7 +390,7 @@ func registerActivity[I, O any](
 
 	activityFn := func(ctx context.Context, in I) (O, error) {
 		out, err := activity.Run(ctx, in)
-		if err != nil && domain.IsTerminal(err) {
+		if err != nil && (domain.IsTerminal(err) || domain.IsAuthExpired(err)) {
 			return out, workflow.NewPermanentError(err)
 		}
 		return out, err
@@ -438,6 +441,9 @@ func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error
 	}
 	out, err := invoke(r.wfCtx, in)
 	if err != nil && !workflow.CanRetry(err) {
+		if domain.IsAuthExpired(err) {
+			return out, fmt.Errorf("%w: %v", domain.ErrAuthExpired, err)
+		}
 		return out, domain.TerminalError(err)
 	}
 	return out, err

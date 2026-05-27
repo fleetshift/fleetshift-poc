@@ -20,14 +20,93 @@ type mrTestHarness struct {
 }
 
 func setupManagedResources(t *testing.T) mrTestHarness {
+	return setupManagedResourcesWithDelivery(t, nil)
+}
+
+type blockingRemoveDeliveryService struct {
+	inner    *sqlite.RecordingDeliveryService
+	reporter domain.DeliveryReporter
+	started  chan struct{}
+	release  chan struct{}
+}
+
+func newBlockingRemoveDeliveryService(store domain.Store) *blockingRemoveDeliveryService {
+	return &blockingRemoveDeliveryService{
+		inner: &sqlite.RecordingDeliveryService{
+			Store: store,
+			Now:   func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
+		},
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+}
+
+func (s *blockingRemoveDeliveryService) Deliver(
+	ctx context.Context,
+	target domain.TargetInfo,
+	deliveryID domain.DeliveryID,
+	manifests []domain.Manifest,
+	auth domain.DeliveryAuth,
+	att *domain.Attestation,
+	generation domain.Generation,
+) error {
+	if err := s.inner.Deliver(ctx, target, deliveryID, manifests, auth, att, generation); err != nil {
+		return err
+	}
+	if s.reporter != nil {
+		go func() {
+			_ = s.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+		}()
+	}
+	return nil
+}
+
+func (s *blockingRemoveDeliveryService) Remove(
+	ctx context.Context,
+	target domain.TargetInfo,
+	deliveryID domain.DeliveryID,
+	manifests []domain.Manifest,
+	auth domain.DeliveryAuth,
+	att *domain.Attestation,
+	generation domain.Generation,
+) error {
+	if err := s.inner.Remove(ctx, target, deliveryID, manifests, auth, att, generation); err != nil {
+		return err
+	}
+	select {
+	case <-s.started:
+	default:
+		close(s.started)
+	}
+	select {
+	case <-s.release:
+		if s.reporter != nil {
+			go func() {
+				_ = s.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+			}()
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func setupManagedResourcesWithDelivery(
+	t *testing.T,
+	buildDelivery func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent,
+) mrTestHarness {
 	t.Helper()
 	store := newStore(t)
 	reg := &memworkflow.Registry{}
 
-	agent := &sqlite.RecordingDeliveryService{
+	reporter := application.NewDeliveryReportService(store, reg)
+	agent := domain.DeliveryAgent(&sqlite.RecordingDeliveryService{
 		Store:    store,
-		Reporter: application.NewDeliveryReportService(store, reg),
+		Reporter: reporter,
 		Now:      func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
+	})
+	if buildDelivery != nil {
+		agent = buildDelivery(store, reporter)
 	}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
@@ -171,16 +250,181 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
+	if deleted.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State)
+	}
 
-	// Verify gone.
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+
+	// Verify gone after cleanup completes.
 	_, err = h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 	}
+}
 
+func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var blocker *blockingRemoveDeliveryService
+	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent {
+		blocker = newBlockingRemoveDeliveryService(store)
+		blocker.reporter = reporter
+		return blocker
+	})
+
+	{
+		tx, err := h.store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if err := tx.Targets().Create(ctx, domain.TargetInfo{
+			ID:   "addon-cluster-mgmt",
+			Name: "Cluster Addon",
+			Type: "test",
+			Properties: map[string]string{
+				"foo": "bar",
+			},
+			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+		}); err != nil {
+			t.Fatalf("Targets.Create: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+	}
+
+	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: "clusters",
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
+			ContentHash:    []byte("hash"),
+			SignatureBytes: []byte("sig"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterType: %v", err)
+	}
+
+	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+	if deleted.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State)
+	}
+
+	select {
+	case <-blocker.started:
+	case <-ctx.Done():
+		t.Fatal("timed out waiting for remove to start")
+	}
+
+	got, err := h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
+	if err != nil {
+		t.Fatalf("Get during delete: %v", err)
+	}
+	if got.Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("Get state during delete = %q, want deleting", got.Fulfillment.State)
+	}
+
+	views, err := h.resourceSvc.List(ctx, "clusters")
+	if err != nil {
+		t.Fatalf("List during delete: %v", err)
+	}
+	if len(views) != 1 {
+		t.Fatalf("List during delete len = %d, want 1", len(views))
+	}
+	if views[0].Fulfillment.State != domain.FulfillmentStateDeleting {
+		t.Fatalf("List state during delete = %q, want deleting", views[0].Fulfillment.State)
+	}
+
+	close(blocker.release)
 	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
 }
 
+func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	h := setupManagedResources(t)
+
+	{
+		tx, err := h.store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		if err := tx.Targets().Create(ctx, domain.TargetInfo{
+			ID:   "addon-cluster-mgmt",
+			Name: "Cluster Addon",
+			Type: "test",
+			Properties: map[string]string{
+				"foo": "bar",
+			},
+			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+		}); err != nil {
+			t.Fatalf("Targets.Create: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+	}
+
+	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: "clusters",
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
+			ContentHash:    []byte("hash"),
+			SignatureBytes: []byte("sig"),
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterType: %v", err)
+	}
+
+	first, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+	})
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	awaitFulfillmentState(ctx, t, h.store, first.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	if err != nil {
+		t.Fatalf("Delete: %v", err)
+	}
+
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+
+	recreated, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.17.0"}`),
+	})
+	if err != nil {
+		t.Fatalf("recreate after delete: %v", err)
+	}
+	if recreated.ManagedResource.CurrentVersion != 1 {
+		t.Fatalf("recreated CurrentVersion = %d, want 1", recreated.ManagedResource.CurrentVersion)
+	}
+}
 
 func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	ctx := context.Background()

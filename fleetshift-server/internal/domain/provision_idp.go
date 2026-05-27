@@ -29,12 +29,12 @@ type ProvisionIdPEventSink interface {
 // Pass this spec to [Registry.RegisterProvisionIdP] to obtain a
 // [ProvisionIdPWorkflow] that can start instances.
 type ProvisionIdPWorkflowSpec struct {
-	AuthMethods          AuthMethodRepository
-	Discovery            OIDCDiscoveryClient
-	CreateDeployment     CreateDeploymentWorkflow
-	TrustBundlePlacement PlacementStrategySpec
-	EventSink            ProvisionIdPEventSink
-	Now                  func() time.Time
+	AuthMethods            AuthMethodRepository
+	Discovery              OIDCDiscoveryClient
+	CreateDeployment       CreateDeploymentWorkflow
+	TrustBundlePlacement   PlacementStrategySpec
+	EventSink              ProvisionIdPEventSink
+	Now                    func() time.Time
 }
 
 func (s *ProvisionIdPWorkflowSpec) now() time.Time {
@@ -90,6 +90,9 @@ func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInpu
 func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, struct{}] {
 	return NewActivity("deploy-trust-bundle", func(ctx context.Context, method AuthMethod) (struct{}, error) {
 		if method.Type != AuthMethodTypeOIDC || method.OIDC == nil {
+			return struct{}{}, nil
+		}
+		if s.TrustBundlePlacement.Type == "" {
 			return struct{}{}, nil
 		}
 

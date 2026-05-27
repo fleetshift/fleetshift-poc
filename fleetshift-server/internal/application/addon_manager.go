@@ -341,7 +341,7 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 			ResourceType: schema.ResourceType,
 			Relation:     schema.Relation,
 			Signature:    domain.Signature{},
-		}); err != nil {
+		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 			return fmt.Errorf("create type def: %w", err)
 		}
 		if rec.registeredTypeDefs == nil {

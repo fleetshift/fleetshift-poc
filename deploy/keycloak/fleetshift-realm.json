@@ -36,7 +36,7 @@
         "composite": true,
         "composites": {
           "client": {
-            "fleetshift": ["fleetshift-user"],
+            "fleetshift": ["fleetshift-user", "gcphcp-provision-cluster"],
             "account": ["manage-account", "view-profile"]
           }
         }
@@ -47,6 +47,10 @@
         {
           "name": "fleetshift-user",
           "description": "Baseline role for all FleetShift users"
+        },
+        {
+          "name": "gcphcp-provision-cluster",
+          "description": "Allowed to provision GCP HCP clusters"
         }
       ]
     }
@@ -73,19 +77,6 @@
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
-        {
-          "name": "email",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
-          "config": {
-            "user.attribute": "email",
-            "claim.name": "email",
-            "jsonType.label": "String",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "true"
-          }
-        },
         {
           "name": "github-username",
           "protocol": "openid-connect",
@@ -134,19 +125,6 @@
         "pkce.code.challenge.method": "S256"
       },
       "protocolMappers": [
-        {
-          "name": "email",
-          "protocol": "openid-connect",
-          "protocolMapper": "oidc-usermodel-attribute-mapper",
-          "config": {
-            "user.attribute": "email",
-            "claim.name": "email",
-            "jsonType.label": "String",
-            "id.token.claim": "true",
-            "access.token.claim": "true",
-            "userinfo.token.claim": "true"
-          }
-        },
         {
           "name": "github-username",
           "protocol": "openid-connect",
@@ -250,7 +228,7 @@
   "clientScopeMappings": {
     "fleetshift": [
       { "client": "fleetshift-ui", "roles": ["fleetshift-user"] },
-      { "client": "fleetshift-cli", "roles": ["fleetshift-user"] },
+      { "client": "fleetshift-cli", "roles": ["fleetshift-user", "gcphcp-provision-cluster"] },
       { "client": "fleetshift-signing", "roles": ["fleetshift-user"] }
     ],
     "account": [

@@ -206,32 +206,3 @@ type ReconciliationResult struct {
 	Auth            DeliveryAuth
 }
 
-// NewActiveResult builds a result for a successful reconciliation.
-func NewActiveResult(id FulfillmentID, resolvedTargets []TargetID, auth DeliveryAuth) ReconciliationResult {
-	return ReconciliationResult{
-		FulfillmentID:   id,
-		State:           FulfillmentStateActive,
-		ResolvedTargets: resolvedTargets,
-		Auth:            auth,
-	}
-}
-
-// NewFailedResult builds a result for a failed reconciliation pipeline.
-func NewFailedResult(id FulfillmentID, auth DeliveryAuth, reason string) ReconciliationResult {
-	return ReconciliationResult{
-		FulfillmentID: id,
-		State:         FulfillmentStateFailed,
-		StatusReason:  reason,
-		Auth:          auth,
-	}
-}
-
-// NewPausedAuthResult builds a result when a delivery reports an
-// authentication failure and the fulfillment should pause.
-func NewPausedAuthResult(id FulfillmentID, auth DeliveryAuth) ReconciliationResult {
-	return ReconciliationResult{
-		FulfillmentID: id,
-		State:         FulfillmentStatePausedAuth,
-		Auth:          auth,
-	}
-}

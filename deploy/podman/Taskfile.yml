@@ -14,7 +14,15 @@ vars:
   LOCAL_WEB: '{{.LOCAL_WEB | default "false"}}'
   UI_SETUP: '{{.UI_SETUP | default "false"}}'
   BUILD: '{{.BUILD | default "false"}}'
+  RESOLVED_GCPHCP_ENABLED:
+    sh: |
+      case "{{.GCPHCP_ENABLED | default "false"}}" in
+        1|true|TRUE|yes|YES|on|ON) echo "true" ;;
+        *) echo "false" ;;
+      esac
+  RESOLVED_GCPHCP_CONFIG: '{{.ROOT_DIR}}/deploy/podman/.gcphcp.yaml'
   RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}http://{{.KC_HOSTNAME | default "localhost"}}:{{.KC_HTTP_PORT | default "8180"}}/auth/realms/fleetshift{{end}}'
+  RESOLVED_SERVER_ADDONS: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}kind,ocp,kubernetes,gcphcp{{else}}kind,ocp,kubernetes{{end}}'
   RESOLVED_DB_FLAG:
     sh: |
       if [ "{{.RESOLVED_DB}}" = "postgres" ]; then
@@ -22,11 +30,29 @@ vars:
       else
         echo "--db=/data/fleetshift.db"
       fi
-  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
+  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml -f overrides/gcphcp.yaml'
 
 tasks:
+  render-gcphcp-config:
+    internal: true
+    cmds:
+      - >-
+        env
+        GCPHCP_ENABLED="{{.RESOLVED_GCPHCP_ENABLED}}"
+        GCPHCP_GATEWAY_URL="{{.GCPHCP_GATEWAY_URL | default ""}}"
+        GCPHCP_GATEWAY_AUDIENCE="{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}"
+        GCPHCP_TARGET_ID="{{.GCPHCP_TARGET_ID | default ""}}"
+        GCPHCP_GCP_PROJECT="{{.GCPHCP_GCP_PROJECT | default ""}}"
+        GCPHCP_GCP_REGION="{{.GCPHCP_GCP_REGION | default ""}}"
+        GCPHCP_WORKFORCE_POOL="{{.GCPHCP_WORKFORCE_POOL | default ""}}"
+        GCPHCP_WORKFORCE_PROVIDER="{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}"
+        GCPHCP_BROKER_SA_EMAIL="{{.GCPHCP_BROKER_SA_EMAIL | default ""}}"
+        "{{.ROOT_DIR}}/deploy/render-gcphcp-config.sh"
+        --output "{{.RESOLVED_GCPHCP_CONFIG}}"
+
   up:
     desc: Start the FleetShift stack (set DEPLOY_MODE, DB, AUTH to customize)
+    deps: [render-gcphcp-config]
     env: &deploy_env
       DEPLOY_MODE: '{{.RESOLVED_DEPLOY_MODE}}'
       DB: '{{.RESOLVED_DB}}'
@@ -36,6 +62,8 @@ tasks:
       DEV: '{{.DEV}}'
       BUILD: '{{.BUILD}}'
       OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
+      GCPHCP_CONFIG: '{{.RESOLVED_GCPHCP_CONFIG}}'
+      FLEETSHIFT_SERVER_ADDONS: '{{.RESOLVED_SERVER_ADDONS}}'
     preconditions:
       - sh: test -f {{.ROOT_DIR}}/.env
         msg: "No .env found. Copy .env.template to .env first."

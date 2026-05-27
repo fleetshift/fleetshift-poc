@@ -191,6 +191,31 @@ if should_run 0; then
   OUTPUT=$(task pd:up --dry 2>&1)
   assert_output_contains "$OUTPUT" "AUTH=local" "default AUTH=local"
   assert_output_contains "$OUTPUT" "DB=sqlite" "default DB=sqlite"
+
+  echo ""
+  echo "0f. gcphcp renderer writes disabled placeholder"
+  TMP_GCPHCP=$(mktemp)
+  ./deploy/render-gcphcp-config.sh --output "$TMP_GCPHCP"
+  assert_file_contains "$TMP_GCPHCP" "gcphcp is disabled for this deployment" "disabled gcphcp placeholder rendered"
+  rm -f "$TMP_GCPHCP"
+
+  echo ""
+  echo "0g. gcphcp renderer writes enabled config"
+  TMP_GCPHCP=$(mktemp)
+  env \
+    GCPHCP_ENABLED=true \
+    GCPHCP_GATEWAY_URL="https://example.invalid" \
+    GCPHCP_GATEWAY_AUDIENCE="example-audience" \
+    GCPHCP_TARGET_ID="gcphcp-example" \
+    GCPHCP_GCP_PROJECT="example-project" \
+    GCPHCP_GCP_REGION="us-central1" \
+    GCPHCP_WORKFORCE_POOL="example-pool" \
+    GCPHCP_WORKFORCE_PROVIDER="example-provider" \
+    GCPHCP_BROKER_SA_EMAIL="broker@example-project.iam.gserviceaccount.com" \
+    ./deploy/render-gcphcp-config.sh --output "$TMP_GCPHCP"
+  assert_file_contains "$TMP_GCPHCP" '^gateway:$' "enabled gcphcp gateway section rendered"
+  assert_file_contains "$TMP_GCPHCP" 'gcp_project: "example-project"' "enabled gcphcp target rendered"
+  rm -f "$TMP_GCPHCP"
 fi
 
 # ──────────────────────────────────────────────────────────────

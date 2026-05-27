@@ -135,6 +135,51 @@ func TestProvisionIdPWorkflowSpec_Run_InvalidMethod(t *testing.T) {
 	}
 }
 
+func TestProvisionIdPWorkflowSpec_Run_SkipsTrustBundleDeploymentWhenPlacementUnset(t *testing.T) {
+	var savedMethod domain.AuthMethod
+	startCalled := false
+
+	spec := &domain.ProvisionIdPWorkflowSpec{
+		AuthMethods: &fakeAuthMethodRepo{saveFn: func(_ context.Context, m domain.AuthMethod) error {
+			savedMethod = m
+			return nil
+		}},
+		Discovery: fakeDiscovery{},
+		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, _ domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
+			startCalled = true
+			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{}}, nil
+		}},
+	}
+
+	input := domain.ProvisionIdPInput{
+		AuthMethodID: "test-idp",
+		AuthMethod: domain.AuthMethod{
+			Type: domain.AuthMethodTypeOIDC,
+			OIDC: &domain.OIDCConfig{
+				IssuerURL:             "https://issuer.example.com",
+				Audience:              "fleetshift",
+				KeyEnrollmentAudience: "fleetshift-enroll",
+			},
+		},
+	}
+
+	record := &provisionSyncRecord{}
+	result, err := spec.Run(record, input)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if result.ID != "test-idp" {
+		t.Errorf("result.ID = %q, want %q", result.ID, "test-idp")
+	}
+	if savedMethod.ID != "test-idp" {
+		t.Errorf("saved method ID = %q, want %q", savedMethod.ID, "test-idp")
+	}
+	if startCalled {
+		t.Fatal("expected trust-bundle deployment to be skipped when placement is unset")
+	}
+}
+
 // --- test doubles ---
 
 type fakeAuthMethodRepo struct {

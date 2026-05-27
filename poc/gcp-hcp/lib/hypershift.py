@@ -53,6 +53,7 @@ def create_iam_gcp(
     project_id: str,
     oidc_jwks_file: str,
     binary_path: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
 ) -> Dict[str, Any]:
     binary = get_hypershift_binary(binary_path)
     cmd = [
@@ -63,7 +64,7 @@ def create_iam_gcp(
     ]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
+        cmd, capture_output=True, text=True, timeout=300, env=env
     )
     if result.returncode != 0:
         raise HypershiftError(
@@ -87,6 +88,7 @@ def create_infra_gcp(
     project_id: str,
     region: str,
     binary_path: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
 ) -> Dict[str, Any]:
     binary = get_hypershift_binary(binary_path)
     cmd = [
@@ -97,7 +99,7 @@ def create_infra_gcp(
     ]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
+        cmd, capture_output=True, text=True, timeout=300, env=env
     )
     if result.returncode != 0:
         raise HypershiftError(
@@ -137,6 +139,7 @@ def destroy_iam_gcp(
     infra_id: str,
     project_id: str,
     binary_path: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
 ) -> None:
     binary = get_hypershift_binary(binary_path)
     cmd = [
@@ -146,7 +149,7 @@ def destroy_iam_gcp(
     ]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
+        cmd, capture_output=True, text=True, timeout=300, env=env
     )
     if result.returncode != 0:
         raise HypershiftError(
@@ -160,6 +163,7 @@ def destroy_infra_gcp(
     project_id: str,
     region: str,
     binary_path: Optional[str] = None,
+    env: Optional[dict[str, str]] = None,
 ) -> None:
     binary = get_hypershift_binary(binary_path)
     cmd = [
@@ -170,7 +174,7 @@ def destroy_infra_gcp(
     ]
     print(f"Running: {' '.join(cmd)}")
     result = subprocess.run(
-        cmd, capture_output=True, text=True, timeout=300
+        cmd, capture_output=True, text=True, timeout=300, env=env
     )
     if result.returncode != 0:
         raise HypershiftError(

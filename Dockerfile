@@ -1,4 +1,4 @@
-FROM golang:1.25 AS builder
+FROM golang:1.25 AS fleetshift-builder
 
 WORKDIR /src
 
@@ -20,14 +20,28 @@ COPY proto/ ./proto/
 RUN cd fleetshift-server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift
 RUN cd fleetshift-cli && CGO_ENABLED=0 go build -o /bin/fleetctl ./cmd/fleetctl
 
+FROM golang:1.25 AS hypershift-builder
+
+WORKDIR /src
+
+ARG HYPERSHIFT_REF=v0.1.76
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN git clone --branch "${HYPERSHIFT_REF}" --depth 1 https://github.com/openshift/hypershift.git /src/hypershift
+RUN cd /src/hypershift && CGO_ENABLED=0 go build -o /bin/hypershift .
+
 FROM debian:bookworm-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=builder /bin/fleetshift /usr/local/bin/fleetshift
-COPY --from=builder /bin/fleetctl /usr/local/bin/fleetctl
+COPY --from=fleetshift-builder /bin/fleetshift /usr/local/bin/fleetshift
+COPY --from=fleetshift-builder /bin/fleetctl /usr/local/bin/fleetctl
+COPY --from=hypershift-builder /bin/hypershift /usr/local/bin/hypershift
 
 EXPOSE 50051 8085
 

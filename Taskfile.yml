@@ -23,6 +23,7 @@ includes:
 
 vars:
   IMAGE_TAG: '{{.IMAGE_TAG | default "latest"}}'
+  DEV_REGISTRY: '{{.DEV_REGISTRY | default ""}}'
 
 tasks:
   default:
@@ -37,24 +38,18 @@ tasks:
   build:server:
     desc: Build the server binary
     dir: fleetshift-server
-    sources: ['**/*.go', go.mod, go.sum]
-    generates: ['../bin/fleetshift']
     cmds:
       - go build -o ../bin/fleetshift ./cmd/fleetshift
 
   build:cli:
     desc: Build the fleetctl CLI binary
     dir: fleetshift-cli
-    sources: ['**/*.go', go.mod, go.sum]
-    generates: ['../bin/fleetctl']
     cmds:
       - go build -o ../bin/fleetctl ./cmd/fleetctl
 
   build:ocp-engine:
     desc: Build the ocp-engine binary
     dir: ocp-engine
-    sources: ['**/*.go', go.mod, go.sum]
-    generates: ['../bin/ocp-engine']
     cmds:
       - go build -o ../bin/ocp-engine .
 
@@ -111,19 +106,25 @@ tasks:
       - buf generate --template buf.gen.ocp.yaml --path proto/ocp/v1
 
   image:build:
-    desc: Build fleetshift-server container images
-    preconditions:
-      - sh: test -n "{{.DEV_REGISTRY}}"
-        msg: "DEV_REGISTRY is not set. Set it in .env (e.g. DEV_REGISTRY=quay.io/yourusername)"
+    desc: Build fleetshift container images
     cmds:
-      - podman build -t fleetshift-server -t {{.DEV_REGISTRY}}/fleetshift-server:{{.IMAGE_TAG}} .
-      - podman build -f Dockerfile.local -t {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}} .
+      - >-
+        podman build
+        -t fleetshift-server:{{.IMAGE_TAG}}
+        -t quay.io/stolostron/fleetshift-server:{{.IMAGE_TAG}}
+        {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-server:{{.IMAGE_TAG}}{{end}}
+        .
+      - >-
+        podman build -f Dockerfile.local
+        -t quay.io/stolostron/fleetshift-server-local:{{.IMAGE_TAG}}
+        {{if .DEV_REGISTRY}}-t {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}{{end}}
+        .
 
   image:push:
-    desc: Push server images to DEV_REGISTRY
+    desc: Push images to DEV_REGISTRY (never pushes to stolostron)
     preconditions:
       - sh: test -n "{{.DEV_REGISTRY}}"
-        msg: "DEV_REGISTRY is not set. Set it in .env (e.g. DEV_REGISTRY=quay.io/yourusername)"
+        msg: "DEV_REGISTRY is not set. Push only targets your personal dev registry."
     cmds:
       - podman push {{.DEV_REGISTRY}}/fleetshift-server:{{.IMAGE_TAG}}
       - podman push {{.DEV_REGISTRY}}/fleetshift-server-local:{{.IMAGE_TAG}}

@@ -33,6 +33,12 @@ var (
 	// transition violates the entity's lifecycle rules (e.g.
 	// transitioning a terminal delivery back to progressing).
 	ErrIllegalStateTransition = errors.New("illegal state transition")
+
+	// ErrAuthExpired indicates that a delivery agent's credentials
+	// have expired or been invalidated. The orchestration layer
+	// translates this into FulfillmentStatePausedAuth so the
+	// fulfillment waits for fresh credentials.
+	ErrAuthExpired = errors.New("delivery auth expired")
 )
 
 // terminalPrefix is the marker prepended to terminal errors.
@@ -67,4 +73,16 @@ func IsTerminal(err error) bool {
 		return true
 	}
 	return err != nil && strings.Contains(err.Error(), terminalPrefix)
+}
+
+// IsAuthExpired reports whether err indicates expired or missing
+// delivery credentials. Like [IsTerminal], it checks the Go error
+// chain first, then falls back to string matching so the
+// classification survives serialization across workflow engine
+// boundaries.
+func IsAuthExpired(err error) bool {
+	if errors.Is(err, ErrAuthExpired) {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), ErrAuthExpired.Error())
 }

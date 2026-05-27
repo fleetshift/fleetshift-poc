@@ -102,10 +102,12 @@ func DeleteCleanupWorkflowID(fulfillmentID FulfillmentID) string {
 	return "cleanup-" + string(fulfillmentID)
 }
 
-// DeleteManagedResourceCleanupInput identifies the fulfillment row
-// that the [DeleteManagedResourceCleanupWorkflow] will hard-delete
-// after the managed resource HEAD record has already been removed.
+// DeleteManagedResourceCleanupInput identifies the managed resource and
+// fulfillment rows that the [DeleteManagedResourceCleanupWorkflow] will
+// hard-delete after orchestration confirms delivery-side cleanup.
 type DeleteManagedResourceCleanupInput struct {
+	ResourceType  ResourceType
+	Name          ResourceName
 	FulfillmentID FulfillmentID
 }
 

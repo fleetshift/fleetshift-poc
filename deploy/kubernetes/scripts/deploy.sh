@@ -29,6 +29,17 @@ K8S_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 ROOT_DIR="$(cd "${K8S_DIR}/../.." && pwd)"
 NAMESPACE="fleetshift"
 
+is_truthy() {
+  case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+    1|true|yes|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 echo "=== FleetShift Kubernetes Deployment ==="
 echo "Manifests: ${K8S_DIR}"
 echo ""
@@ -44,6 +55,15 @@ set -a
 source "${ROOT_DIR}/.env"
 set +a
 
+FLEETSHIFT_SERVER_ADDONS="ocp,kubernetes"
+GCPHCP_CONFIG_PATH=""
+if is_truthy "${GCPHCP_ENABLED:-false}"; then
+  FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS},gcphcp"
+  GCPHCP_CONFIG_PATH="/etc/fleetshift/gcphcp/gcphcp.yaml"
+fi
+
+"${ROOT_DIR}/deploy/render-gcphcp-config.sh" --output "${K8S_DIR}/gcphcp.yaml"
+
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}
 OIDC_UI_CLIENT_ID=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
@@ -52,14 +72,45 @@ OIDC_AUDIENCE=${OIDC_AUDIENCE}
 KEY_ENROLLMENT_CLIENT_ID=${KEY_ENROLLMENT_CLIENT_ID}
 KEY_REGISTRY_ID=${KEY_REGISTRY_ID}
 KEY_REGISTRY_SUBJECT_EXPR=${KEY_REGISTRY_SUBJECT_EXPR}
+FLEETSHIFT_LOG_LEVEL=${FLEETSHIFT_LOG_LEVEL:-info}
+FLEETSHIFT_SERVER_ADDONS=${FLEETSHIFT_SERVER_ADDONS}
+GCPHCP_CONFIG_PATH=${GCPHCP_CONFIG_PATH}
 EOF
+
+POSTGRES_PASSWORD_URLENC=$(printf '%s' "${POSTGRES_PASSWORD}" | python3 -c "import urllib.parse, sys; sys.stdout.write(urllib.parse.quote(sys.stdin.read(), safe=''))")
 
 cat > "${K8S_DIR}/secrets.env" <<EOF
 POSTGRES_USER=${POSTGRES_USER}
 POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 POSTGRES_DB=${POSTGRES_DB}
-DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+DATABASE_URL=postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD_URLENC}@postgres:5432/${POSTGRES_DB}?sslmode=disable
 EOF
+
+# --- Ensure namespace exists (needed for pull secret before full apply) ---
+oc apply -f "${K8S_DIR}/namespace.yaml"
+
+# Wait for default ServiceAccount (created asynchronously after namespace)
+for _ in $(seq 1 30); do
+  if oc get serviceaccount default -n "${NAMESPACE}" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+oc get serviceaccount default -n "${NAMESPACE}" >/dev/null
+
+# --- Quay pull secret (must exist before pods are created) ---
+if [ -n "${QUAY_PULL_USER:-}" ] && [ -n "${QUAY_PULL_TOKEN:-}" ]; then
+  echo "Setting up quay.io pull secret..."
+  oc delete secret quay-pull-secret -n "${NAMESPACE}" --ignore-not-found=true
+  oc create secret docker-registry quay-pull-secret \
+    --docker-server=quay.io \
+    --docker-username="${QUAY_PULL_USER}" \
+    --docker-password="${QUAY_PULL_TOKEN}" \
+    -n "${NAMESPACE}"
+  oc secrets link default quay-pull-secret --for=pull -n "${NAMESPACE}"
+else
+  echo "WARNING: QUAY_PULL_USER/QUAY_PULL_TOKEN not set — image imports may fail if repos are private."
+fi
 
 # --- Apply manifests ---
 echo "Applying Kustomize manifests..."

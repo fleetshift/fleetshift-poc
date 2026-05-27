@@ -727,3 +727,100 @@ func (s *stubDeliveryAgent) Remove(_ context.Context, _ domain.TargetInfo, _ dom
 }
 
 var _ domain.DeliveryAgent = (*stubDeliveryAgent)(nil)
+
+// TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent simulates a pod
+// restart: the first AddonManager creates the type def in the DB, then a
+// second AddonManager (empty in-memory state, same DB) connects the same
+// addon. Before the fix, the second Connect would fail with
+// "already exists: resource type ...".
+func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	buildManager := func() *addonManagerEnv {
+		router := delivery.NewRoutingDeliveryService()
+		reg := &memworkflow.Registry{}
+		orchSpec := &domain.OrchestrationWorkflowSpec{
+			Store: store, Delivery: router,
+			Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
+		}
+		orchWf, err := reg.RegisterOrchestration(orchSpec)
+		if err != nil {
+			t.Fatalf("RegisterOrchestration: %v", err)
+		}
+		createMRWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
+			Store: store, Orchestration: orchWf,
+		})
+		if err != nil {
+			t.Fatalf("RegisterCreateManagedResource: %v", err)
+		}
+		mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store})
+		if err != nil {
+			t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+		}
+		_, err = reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
+			Store: store, Orchestration: orchWf, Cleanup: mrCleanupWf,
+		})
+		if err != nil {
+			t.Fatalf("RegisterDeleteManagedResource: %v", err)
+		}
+		_ = createMRWf
+
+		typeSvc := &application.ManagedResourceTypeService{Store: store}
+		targetSvc := &application.TargetService{Store: store}
+		activator := &recordingActivator{}
+
+		mgr := application.NewAddonManager(application.AddonManagerDeps{
+			Router:    router,
+			TypeSvc:   typeSvc,
+			Activator: activator,
+		})
+		return &addonManagerEnv{
+			mgr:       mgr,
+			activator: activator,
+			router:    router,
+			typeSvc:   typeSvc,
+			targetSvc: targetSvc,
+		}
+	}
+
+	ctx := context.Background()
+	schema := clusterSchema()
+
+	// --- first "pod" ---
+	env1 := buildManager()
+	if err := env1.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 1): %v", err)
+	}
+	if err := env1.targetSvc.Register(ctx, domain.TargetInfo{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+	}); err != nil {
+		t.Fatalf("register target (pod 1): %v", err)
+	}
+	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect (pod 1): %v", err)
+	}
+
+	// --- second "pod" (fresh AddonManager, same DB) ---
+	env2 := buildManager()
+	if err := env2.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 2): %v", err)
+	}
+	if err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect (pod 2) should succeed when type def already exists: %v", err)
+	}
+
+	// Verify the type def is still intact in the DB.
+	typeDef, err := env2.typeSvc.Get(ctx, "clusters")
+	if err != nil {
+		t.Fatalf("Get type def: %v", err)
+	}
+	if typeDef.ResourceType != "clusters" {
+		t.Errorf("type def resource type = %q, want clusters", typeDef.ResourceType)
+	}
+}

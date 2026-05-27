@@ -85,10 +85,13 @@ func Start(t *testing.T) string {
 		AuthMethods:      &sqlite.AuthMethodRepo{DB: db},
 		Discovery:        stubDiscovery{},
 		CreateDeployment: createWf,
-		TrustBundlePlacement: domain.PlacementStrategySpec{
+	}
+	trustBundleTargets := []domain.TargetID{"kind-local"}
+	if len(trustBundleTargets) > 0 {
+		provSpec.TrustBundlePlacement = domain.PlacementStrategySpec{
 			Type:    domain.PlacementStrategyStatic,
-			Targets: []domain.TargetID{"kind-local"},
-		},
+			Targets: trustBundleTargets,
+		}
 	}
 	provWf, err := reg.RegisterProvisionIdP(provSpec)
 	if err != nil {

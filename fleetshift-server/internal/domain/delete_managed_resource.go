@@ -10,13 +10,16 @@ import (
 type DeleteManagedResourceInput struct {
 	ResourceType ResourceType
 	Name         ResourceName
+	// Auth is persisted so background remove/retry passes use delete-time
+	// auth rather than stale create-time auth.
+	Auth DeliveryAuth
 }
 
 // DeleteManagedResourceWorkflowSpec transitions the derived fulfillment
-// to [FulfillmentStateDeleting], deletes the managed resource instance
-// record, starts a background [DeleteManagedResourceCleanupWorkflow],
-// and starts orchestration to process the deletion on the delivery
-// side.
+// to [FulfillmentStateDeleting], starts a background
+// [DeleteManagedResourceCleanupWorkflow], and starts orchestration to
+// process the deletion on the delivery side. The managed resource row
+// remains visible in DELETING until cleanup completes.
 type DeleteManagedResourceWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
@@ -25,8 +28,10 @@ type DeleteManagedResourceWorkflowSpec struct {
 
 func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-managed-resource" }
 
-// MutateToDeleting transitions the fulfillment to deleting, bumps its
-// generation, and removes the managed resource instance HEAD record.
+// MutateToDeleting transitions the fulfillment to deleting, stores the
+// delete request auth for later background remove/retry passes, and
+// bumps its generation. The managed resource HEAD record remains until
+// cleanup completes.
 func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, ManagedResourceView] {
 	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (ManagedResourceView, error) {
 		tx, err := s.Store.Begin(ctx)
@@ -50,14 +55,12 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 			return ManagedResourceView{}, err
 		}
 
+		// Delete retries read auth from fulfillment state, not the RPC context.
+		f.Auth = in.Auth
 		f.State = FulfillmentStateDeleting
 		f.BumpGeneration()
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return ManagedResourceView{}, fmt.Errorf("update fulfillment: %w", err)
-		}
-
-		if err := tx.ManagedResources().DeleteInstance(ctx, in.ResourceType, in.Name); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("delete instance: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -86,8 +89,9 @@ func (s *DeleteManagedResourceWorkflowSpec) StartOrchestration() Activity[Fulfil
 
 // StartCleanup starts the background
 // [DeleteManagedResourceCleanupWorkflow]. Managed resources have no
-// peer deployment row, so the cleanup workflow only deletes the
-// fulfillment row after orchestration signals completion.
+// peer deployment row, so the cleanup workflow deletes the managed
+// resource row and fulfillment row after orchestration signals
+// completion.
 func (s *DeleteManagedResourceWorkflowSpec) StartCleanup() Activity[DeleteManagedResourceCleanupInput, struct{}] {
 	return NewActivity("mr-start-delete-cleanup", func(ctx context.Context, input DeleteManagedResourceCleanupInput) (struct{}, error) {
 		_, err := s.Cleanup.Start(ctx, input)
@@ -107,6 +111,8 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 	}
 
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteManagedResourceCleanupInput{
+		ResourceType:  input.ResourceType,
+		Name:          input.Name,
 		FulfillmentID: view.Fulfillment.ID,
 	}); err != nil {
 		return ManagedResourceView{}, fmt.Errorf("start cleanup: %w", err)
