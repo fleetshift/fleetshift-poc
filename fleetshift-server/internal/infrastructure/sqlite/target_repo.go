@@ -35,8 +35,8 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(t.ID), string(t.Type), t.Name, string(state), string(labels), string(props), string(t.InventoryItemID), art,
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types, provisioning_target_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		string(t.ID), string(t.Type), t.Name, string(state), string(labels), string(props), string(t.InventoryItemID), art, string(t.ProvisioningTargetID),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -67,8 +67,8 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types, provisioning_target_id)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   type = excluded.type,
 		   name = excluded.name,
@@ -76,8 +76,9 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 		   labels = excluded.labels,
 		   properties = excluded.properties,
 		   inventory_item_id = excluded.inventory_item_id,
-		   accepted_resource_types = excluded.accepted_resource_types`,
-		string(t.ID), string(t.Type), t.Name, string(state), string(labels), string(props), string(t.InventoryItemID), art,
+		   accepted_resource_types = excluded.accepted_resource_types,
+		   provisioning_target_id = excluded.provisioning_target_id`,
+		string(t.ID), string(t.Type), t.Name, string(state), string(labels), string(props), string(t.InventoryItemID), art, string(t.ProvisioningTargetID),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert target: %w", err)
@@ -87,14 +88,14 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 
 func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types FROM targets WHERE id = ?`,
+		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types, provisioning_target_id FROM targets WHERE id = ?`,
 		string(id),
 	)
 	return scanTarget(row)
 }
 
 func (r *TargetRepo) List(ctx context.Context) ([]domain.TargetInfo, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types FROM targets`)
+	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types, provisioning_target_id FROM targets`)
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
@@ -129,8 +130,8 @@ type scanner interface {
 
 func scanTarget(s scanner) (domain.TargetInfo, error) {
 	var t domain.TargetInfo
-	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID, artJSON string
-	if err := s.Scan(&id, &targetType, &t.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID, &artJSON); err != nil {
+	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID, artJSON, provisioningTargetID string
+	if err := s.Scan(&id, &targetType, &t.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID, &artJSON, &provisioningTargetID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return t, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -140,6 +141,7 @@ func scanTarget(s scanner) (domain.TargetInfo, error) {
 	t.Type = domain.TargetType(targetType)
 	t.State = domain.TargetState(stateStr)
 	t.InventoryItemID = domain.InventoryItemID(inventoryItemID)
+	t.ProvisioningTargetID = domain.TargetID(provisioningTargetID)
 	if err := json.Unmarshal([]byte(labelsJSON), &t.Labels); err != nil {
 		return t, fmt.Errorf("unmarshal labels: %w", err)
 	}

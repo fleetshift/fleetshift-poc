@@ -44,21 +44,28 @@ func (s *ClusterService) GetConnectionInfo(ctx context.Context, resourceID strin
 }
 
 // GetCredential mints a short-lived credential for accessing a cluster.
+// It follows the provenance chain from the emitted kubernetes target back
+// to the seeded target that provisioned it, then dispatches to the
+// credential provider registered for that seeded target's type.
 func (s *ClusterService) GetCredential(ctx context.Context, resourceID, callerToken string) (*domain.ClusterCredential, error) {
-	target, err := s.resolveTarget(ctx, resourceID)
+	emittedTarget, err := s.resolveTarget(ctx, resourceID)
 	if err != nil {
 		return nil, err
 	}
 
-	provider := s.Providers.ClusterAccessProvider(target.Type)
-	if provider == nil {
-		return nil, fmt.Errorf("cluster %q: no credential provider for target type %q", resourceID, target.Type)
+	if emittedTarget.ProvisioningTargetID == "" {
+		return nil, fmt.Errorf("cluster %q: no provisioning target linked", resourceID)
 	}
 
-	cred, err := provider.MintCredential(ctx, callerToken, target)
+	seededTarget, err := s.Targets.Get(ctx, emittedTarget.ProvisioningTargetID)
 	if err != nil {
-		return nil, fmt.Errorf("credential exchange failed: %w", err)
+		return nil, fmt.Errorf("cluster %q: provisioning target %q not found: %w", resourceID, emittedTarget.ProvisioningTargetID, err)
 	}
 
-	return cred, nil
+	provider := s.Providers.ClusterAccessProvider(seededTarget.Type)
+	if provider == nil {
+		return nil, fmt.Errorf("cluster %q: no credential provider for target type %q", resourceID, seededTarget.Type)
+	}
+
+	return provider.MintCredential(ctx, callerToken, seededTarget)
 }

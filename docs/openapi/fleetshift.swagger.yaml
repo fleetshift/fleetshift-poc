@@ -4,6 +4,7 @@ info:
   version: version not set
 tags:
   - name: AuthMethodService
+  - name: ClusterService
   - name: DeploymentService
   - name: FleetletService
   - name: SignerEnrollmentService
@@ -41,6 +42,49 @@ paths:
           type: string
       tags:
         - AuthMethodService
+  /v1/clusters/{resourceId}/connectionInfo:
+    get:
+      operationId: ClusterService_GetClusterConnectionInfo
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1GetClusterConnectionInfoResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          type: string
+      tags:
+        - ClusterService
+  /v1/clusters/{resourceId}/credential:
+    post:
+      operationId: ClusterService_GetClusterCredential
+      responses:
+        "200":
+          description: A successful response.
+          schema:
+            $ref: '#/definitions/v1GetClusterCredentialResponse'
+        default:
+          description: An unexpected error response.
+          schema:
+            $ref: '#/definitions/rpcStatus'
+      parameters:
+        - name: resourceId
+          in: path
+          required: true
+          type: string
+        - name: body
+          in: body
+          required: true
+          schema:
+            $ref: '#/definitions/ClusterServiceGetClusterCredentialBody'
+      tags:
+        - ClusterService
   /v1/deployments:
     get:
       summary: ListDeployments lists deployments.
@@ -262,6 +306,8 @@ paths:
       tags:
         - DeploymentService
 definitions:
+  ClusterServiceGetClusterCredentialBody:
+    type: object
   DeploymentServiceResumeDeploymentBody:
     type: object
     properties:
@@ -434,6 +480,21 @@ definitions:
     description: |-
       FederatedIdentity unambiguously identifies a subject by pairing
       the issuer-scoped subject ID with the issuer URL that vouches for it.
+  v1GetClusterConnectionInfoResponse:
+    type: object
+    properties:
+      endpoint:
+        type: string
+      caCert:
+        type: string
+  v1GetClusterCredentialResponse:
+    type: object
+    properties:
+      token:
+        type: string
+      expiration:
+        type: string
+        format: date-time
   v1ListDeploymentsResponse:
     type: object
     properties:

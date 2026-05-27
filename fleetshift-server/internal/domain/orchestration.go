@@ -624,6 +624,12 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 				return struct{}{}, fmt.Errorf("upsert inventory item for target %q: %w", pt.ID, err)
 			}
 
+			// Derive provisioning target ID from DeliveryID format "fulfillmentID:targetID"
+			var provTargetID TargetID
+			if parts := strings.SplitN(string(in.DeliveryID), ":", 2); len(parts) == 2 {
+				provTargetID = TargetID(parts[1])
+			}
+
 			if err := tx.Targets().CreateOrUpdate(ctx, TargetInfo{
 				ID:                    pt.ID,
 				Type:                  pt.Type,
@@ -632,6 +638,7 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 				Properties:            pt.Properties,
 				AcceptedResourceTypes: pt.AcceptedResourceTypes,
 				InventoryItemID:       invID,
+				ProvisioningTargetID:  provTargetID,
 			}); err != nil {
 				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)

@@ -25,6 +25,7 @@ type TargetInfo struct {
 	Labels                map[string]string
 	Properties            map[string]string
 	AcceptedResourceTypes []ResourceType
+	ProvisioningTargetID  TargetID // seeded target that provisioned this target (empty for seeded targets themselves)
 }
 
 // PlacementTarget is the subset of target state shared with placement
