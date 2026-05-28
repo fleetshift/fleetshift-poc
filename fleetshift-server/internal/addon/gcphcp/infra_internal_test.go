@@ -443,6 +443,9 @@ func TestPrepareDestroyHypershiftWorkspaceWithTokenURL_OverridesTokenURL(t *test
 	if got := credConfig["token_url"]; got != "http://127.0.0.1:12345/sts" {
 		t.Fatalf("token_url = %v, want custom token_url", got)
 	}
+	if got := credConfig["quota_project_id"]; got != "project-123" {
+		t.Fatalf("quota_project_id = %v, want project-123", got)
+	}
 
 	credSource, ok := credConfig["credential_source"].(map[string]any)
 	if !ok {

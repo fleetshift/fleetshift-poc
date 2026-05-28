@@ -210,7 +210,6 @@ func (r *agentTestReporter) ListActiveDeliveries(_ context.Context, _ []domain.T
 func withAgentHooksStubbed(t *testing.T) {
 	t.Helper()
 	origNewBrokerAuth := newBrokerAuth
-	origMintCleanupAccessToken := mintCleanupAccessTokenFn
 	origBuildCreateWorkspace := buildCreateHypershiftWorkspace
 	origBuildDestroyWorkspace := buildDestroyWorkspaceWithTokenURL
 	origReconcileNodepools := reconcileNodepoolsFn
@@ -219,7 +218,6 @@ func withAgentHooksStubbed(t *testing.T) {
 	origPollDesiredNodepoolsHealthy := pollDesiredNodepoolsHealthyFn
 	t.Cleanup(func() {
 		newBrokerAuth = origNewBrokerAuth
-		mintCleanupAccessTokenFn = origMintCleanupAccessToken
 		buildCreateHypershiftWorkspace = origBuildCreateWorkspace
 		buildDestroyWorkspaceWithTokenURL = origBuildDestroyWorkspace
 		reconcileNodepoolsFn = origReconcileNodepools
@@ -236,9 +234,6 @@ func withAgentHooksStubbed(t *testing.T) {
 				WorkforceToken: "workforce-token",
 			},
 		}
-	}
-	mintCleanupAccessTokenFn = func(context.Context, BrokerAuthConfig, string) (string, time.Time, error) {
-		return "cleanup-access-token", time.Now().Add(time.Hour), nil
 	}
 
 	reconcileNodepoolsFn = func(context.Context, nodepoolReconcileClient, string, string, []NodepoolSpec, *deliveryProgress) error {

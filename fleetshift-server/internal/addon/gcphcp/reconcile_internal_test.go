@@ -45,6 +45,8 @@ type fakeCleanupInfra struct {
 	destroyIAMToken          string
 	destroyInfraSubjectToken string
 	destroyIAMSubjectToken   string
+	destroyInfraQuotaProject string
+	destroyIAMQuotaProject   string
 	createIAMResults         []createAttemptResult
 	createInfraResults       []createAttemptResult
 	destroyInfraResults      []error
@@ -120,7 +122,7 @@ func (f *fakeCleanupInfra) DestroyInfra(
 	env []string,
 ) error {
 	f.ops = append(f.ops, "infra:"+infraID+":"+projectID+":"+region)
-	f.destroyInfraTokenURL, f.destroyInfraToken, f.destroyInfraSubjectToken = readDestroyTokenURLAndToken(env)
+	f.destroyInfraTokenURL, f.destroyInfraToken, f.destroyInfraSubjectToken, f.destroyInfraQuotaProject = readDestroyTokenURLAndToken(env)
 	attempt := f.destroyInfraCalls
 	f.destroyInfraCalls++
 	if len(f.destroyInfraResults) > 0 {
@@ -141,7 +143,7 @@ func (f *fakeCleanupInfra) DestroyIAM(
 	env []string,
 ) error {
 	f.ops = append(f.ops, "iam:"+infraID+":"+projectID)
-	f.destroyIAMTokenURL, f.destroyIAMToken, f.destroyIAMSubjectToken = readDestroyTokenURLAndToken(env)
+	f.destroyIAMTokenURL, f.destroyIAMToken, f.destroyIAMSubjectToken, f.destroyIAMQuotaProject = readDestroyTokenURLAndToken(env)
 	return f.destroyIAMErr
 }
 
@@ -156,28 +158,29 @@ func (f *fakeCleanupInfra) WaitForPSCCleanup(
 	return f.waitPSCErr
 }
 
-func readDestroyTokenURLAndToken(env []string) (string, string, string) {
+func readDestroyTokenURLAndToken(env []string) (string, string, string, string) {
 	adcPath := lookupHypershiftEnvVar(env, "GOOGLE_APPLICATION_CREDENTIALS")
 	if adcPath == "" {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	credConfigData, err := os.ReadFile(adcPath)
 	if err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	var credConfig map[string]any
 	if err := json.Unmarshal(credConfigData, &credConfig); err != nil {
-		return "", "", ""
+		return "", "", "", ""
 	}
 
 	tokenURL, _ := credConfig["token_url"].(string)
+	quotaProject, _ := credConfig["quota_project_id"].(string)
 	if tokenURL == "" {
-		return "", "", ""
+		return "", "", "", quotaProject
 	}
 	if !strings.HasPrefix(tokenURL, "http://127.0.0.1:") {
-		return tokenURL, "", ""
+		return tokenURL, "", "", quotaProject
 	}
 	audience, _ := credConfig["audience"].(string)
 
@@ -185,7 +188,7 @@ func readDestroyTokenURLAndToken(env []string) (string, string, string) {
 	subjectTokenPath, _ := credSource["file"].(string)
 	subjectTokenData, err := os.ReadFile(subjectTokenPath)
 	if err != nil {
-		return tokenURL, "", ""
+		return tokenURL, "", "", quotaProject
 	}
 	subjectToken := string(subjectTokenData)
 
@@ -193,21 +196,21 @@ func readDestroyTokenURLAndToken(env []string) (string, string, string) {
 		"grant_type=urn:ietf:params:oauth:grant-type:token-exchange&audience="+url.QueryEscape(audience)+"&requested_token_type=urn:ietf:params:oauth:token-type:access_token&subject_token_type=urn:ietf:params:oauth:token-type:jwt&subject_token="+url.QueryEscape(subjectToken)+"&scope="+url.QueryEscape("https://www.googleapis.com/auth/cloud-platform"),
 	))
 	if err != nil {
-		return tokenURL, "", subjectToken
+		return tokenURL, "", subjectToken, quotaProject
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return tokenURL, "", subjectToken
+		return tokenURL, "", subjectToken, quotaProject
 	}
 
 	var body struct {
 		AccessToken string `json:"access_token"`
 	}
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
-		return tokenURL, "", subjectToken
+		return tokenURL, "", subjectToken, quotaProject
 	}
-	return tokenURL, body.AccessToken, subjectToken
+	return tokenURL, body.AccessToken, subjectToken, quotaProject
 }
 
 type fakeClusterDeleteClient struct {
@@ -1137,11 +1140,9 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 
 func TestReconcilerDelete_WaitsForPSCCleanupBeforeBuildingHypershiftWorkspace(t *testing.T) {
 	origNewBrokerAuth := newBrokerAuth
-	origMintCleanupAccessToken := mintCleanupAccessTokenFn
 	origBuildDestroyWorkspace := buildDestroyWorkspaceWithTokenURL
 	defer func() {
 		newBrokerAuth = origNewBrokerAuth
-		mintCleanupAccessTokenFn = origMintCleanupAccessToken
 		buildDestroyWorkspaceWithTokenURL = origBuildDestroyWorkspace
 	}()
 
@@ -1155,9 +1156,6 @@ func TestReconcilerDelete_WaitsForPSCCleanupBeforeBuildingHypershiftWorkspace(t 
 	}
 	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
 		return fakeAuth
-	}
-	mintCleanupAccessTokenFn = func(context.Context, BrokerAuthConfig, string) (string, time.Time, error) {
-		return "cleanup-access-token", time.Now().Add(time.Hour), nil
 	}
 
 	infra := &fakeCleanupInfra{}
@@ -1233,11 +1231,9 @@ func TestReconcilerDelete_WaitsForPSCCleanupBeforeBuildingHypershiftWorkspace(t 
 
 func TestReconcilerDelete_UsesNonceForHypershiftEnvAndWorkforceTokenForPSCCleanup(t *testing.T) {
 	origNewBrokerAuth := newBrokerAuth
-	origMintCleanupAccessToken := mintCleanupAccessTokenFn
 	origBuildDestroyWorkspace := buildDestroyWorkspaceWithTokenURL
 	defer func() {
 		newBrokerAuth = origNewBrokerAuth
-		mintCleanupAccessTokenFn = origMintCleanupAccessToken
 		buildDestroyWorkspaceWithTokenURL = origBuildDestroyWorkspace
 	}()
 
@@ -1251,9 +1247,6 @@ func TestReconcilerDelete_UsesNonceForHypershiftEnvAndWorkforceTokenForPSCCleanu
 	}
 	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
 		return fakeAuth
-	}
-	mintCleanupAccessTokenFn = func(context.Context, BrokerAuthConfig, string) (string, time.Time, error) {
-		return "cleanup-access-token", time.Now().Add(time.Hour), nil
 	}
 
 	var gotHypershiftToken string
@@ -1337,10 +1330,8 @@ func TestReconcilerDelete_UsesNonceForHypershiftEnvAndWorkforceTokenForPSCCleanu
 
 func TestReconcilerDelete_UsesLocalSTSForwarderForHypershiftCleanup(t *testing.T) {
 	origNewBrokerAuth := newBrokerAuth
-	origMintCleanupAccessToken := mintCleanupAccessTokenFn
 	defer func() {
 		newBrokerAuth = origNewBrokerAuth
-		mintCleanupAccessTokenFn = origMintCleanupAccessToken
 	}()
 
 	fakeAuth := &fakeBrokerAuth{
@@ -1353,9 +1344,6 @@ func TestReconcilerDelete_UsesLocalSTSForwarderForHypershiftCleanup(t *testing.T
 	}
 	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
 		return fakeAuth
-	}
-	mintCleanupAccessTokenFn = func(context.Context, BrokerAuthConfig, string) (string, time.Time, error) {
-		return "cleanup-access-token", time.Now().Add(time.Hour), nil
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1403,11 +1391,11 @@ func TestReconcilerDelete_UsesLocalSTSForwarderForHypershiftCleanup(t *testing.T
 	if !strings.HasPrefix(infra.destroyInfraTokenURL, "http://127.0.0.1:") {
 		t.Fatalf("destroy infra token_url = %q, want localhost forwarder", infra.destroyInfraTokenURL)
 	}
-	if infra.destroyInfraToken != "cleanup-access-token" {
-		t.Fatalf("destroy infra forwarded token = %q, want cleanup-access-token", infra.destroyInfraToken)
+	if infra.destroyInfraToken != "workforce-token" {
+		t.Fatalf("destroy infra forwarded token = %q, want workforce-token", infra.destroyInfraToken)
 	}
-	if infra.destroyIAMToken != "cleanup-access-token" {
-		t.Fatalf("destroy IAM forwarded token = %q, want cleanup-access-token", infra.destroyIAMToken)
+	if infra.destroyIAMToken != "workforce-token" {
+		t.Fatalf("destroy IAM forwarded token = %q, want workforce-token", infra.destroyIAMToken)
 	}
 	if infra.destroyInfraSubjectToken == "caller-token" {
 		t.Fatalf("destroy infra subject token = %q, do not persist raw caller token in forwarder mode", infra.destroyInfraSubjectToken)
@@ -1415,14 +1403,18 @@ func TestReconcilerDelete_UsesLocalSTSForwarderForHypershiftCleanup(t *testing.T
 	if infra.destroyIAMSubjectToken == "caller-token" {
 		t.Fatalf("destroy IAM subject token = %q, do not persist raw caller token in forwarder mode", infra.destroyIAMSubjectToken)
 	}
+	if infra.destroyInfraQuotaProject != "test-project" {
+		t.Fatalf("destroy infra quota_project_id = %q, want test-project", infra.destroyInfraQuotaProject)
+	}
+	if infra.destroyIAMQuotaProject != "test-project" {
+		t.Fatalf("destroy IAM quota_project_id = %q, want test-project", infra.destroyIAMQuotaProject)
+	}
 }
 
-func TestReconcilerDelete_UsesLongLivedCleanupTokenAfterPSCCleanup(t *testing.T) {
+func TestReconcilerDelete_ContinuesCleanupAfterLongPSCCleanupWait(t *testing.T) {
 	origNewBrokerAuth := newBrokerAuth
-	origMintCleanupAccessToken := mintCleanupAccessTokenFn
 	defer func() {
 		newBrokerAuth = origNewBrokerAuth
-		mintCleanupAccessTokenFn = origMintCleanupAccessToken
 	}()
 
 	fakeAuth := &fakeBrokerAuth{
@@ -1435,12 +1427,6 @@ func TestReconcilerDelete_UsesLongLivedCleanupTokenAfterPSCCleanup(t *testing.T)
 	}
 	newBrokerAuth = func(BrokerAuthConfig) brokerAuthExchanger {
 		return fakeAuth
-	}
-
-	var mintWorkforceToken string
-	mintCleanupAccessTokenFn = func(_ context.Context, _ BrokerAuthConfig, workforceToken string) (string, time.Time, error) {
-		mintWorkforceToken = workforceToken
-		return "cleanup-access-token", time.Now().Add(time.Hour), nil
 	}
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -1485,17 +1471,20 @@ func TestReconcilerDelete_UsesLongLivedCleanupTokenAfterPSCCleanup(t *testing.T)
 		t.Fatalf("Delete() error = %v", err)
 	}
 
-	if mintWorkforceToken != "near-expiry-workforce-token" {
-		t.Fatalf("mint cleanup token workforce token = %q, want near-expiry-workforce-token", mintWorkforceToken)
-	}
 	if infra.waitPSCWorkforceToken != "near-expiry-workforce-token" {
 		t.Fatalf("PSC cleanup workforce token = %q, want near-expiry-workforce-token", infra.waitPSCWorkforceToken)
 	}
-	if infra.destroyInfraToken != "cleanup-access-token" {
-		t.Fatalf("destroy infra forwarded token = %q, want cleanup-access-token", infra.destroyInfraToken)
+	if infra.destroyInfraToken != "near-expiry-workforce-token" {
+		t.Fatalf("destroy infra forwarded token = %q, want near-expiry-workforce-token", infra.destroyInfraToken)
 	}
-	if infra.destroyIAMToken != "cleanup-access-token" {
-		t.Fatalf("destroy IAM forwarded token = %q, want cleanup-access-token", infra.destroyIAMToken)
+	if infra.destroyIAMToken != "near-expiry-workforce-token" {
+		t.Fatalf("destroy IAM forwarded token = %q, want near-expiry-workforce-token", infra.destroyIAMToken)
+	}
+	if infra.destroyInfraQuotaProject != "test-project" {
+		t.Fatalf("destroy infra quota_project_id = %q, want test-project", infra.destroyInfraQuotaProject)
+	}
+	if infra.destroyIAMQuotaProject != "test-project" {
+		t.Fatalf("destroy IAM quota_project_id = %q, want test-project", infra.destroyIAMQuotaProject)
 	}
 }
 

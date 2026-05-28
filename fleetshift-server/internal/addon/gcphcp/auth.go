@@ -112,16 +112,6 @@ func workforceAudience(pool, provider string) string {
 	return fmt.Sprintf("//iam.googleapis.com/locations/global/workforcePools/%s/providers/%s", pool, provider)
 }
 
-// mintCleanupAccessToken mints a broker service-account access token that can be
-// cached across long PSC cleanup waits before hypershift destroy begins.
-func mintCleanupAccessToken(
-	ctx context.Context,
-	cfg BrokerAuthConfig,
-	workforceToken string,
-) (string, time.Time, error) {
-	return NewBrokerAuth(cfg).generateAccessToken(ctx, workforceToken)
-}
-
 // exchangeSTS exchanges the caller's OIDC token for a Workforce access token.
 func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (string, time.Time, error) {
 	audience := workforceAudience(a.cfg.WorkforcePool, a.cfg.WorkforceProvider)
@@ -180,69 +170,6 @@ func (a *BrokerAuth) exchangeSTS(ctx context.Context, callerToken string) (strin
 	}
 
 	return tokenResp.AccessToken, time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second), nil
-}
-
-// generateAccessToken uses the Workforce token to mint a broker service-account
-// access token for hypershift cleanup calls into Google APIs.
-func (a *BrokerAuth) generateAccessToken(ctx context.Context, workforceToken string) (string, time.Time, error) {
-	endpoint := fmt.Sprintf("%s/v1/projects/-/serviceAccounts/%s:generateAccessToken",
-		a.cfg.IAMEndpoint, a.cfg.BrokerSAEmail)
-
-	requestBody := map[string]any{
-		"scope": []string{"https://www.googleapis.com/auth/cloud-platform"},
-	}
-	requestJSON, err := json.Marshal(requestBody)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to marshal access token request: %w", err)
-	}
-
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewBuffer(requestJSON))
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to create access token request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+workforceToken)
-	req.Header.Set("x-goog-user-project", a.cfg.GCPProject)
-
-	resp, err := a.cfg.HTTPClient.Do(req)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("access token request failed: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to read access token response: %w", err)
-	}
-
-	if resp.StatusCode != http.StatusOK {
-		baseErr := fmt.Errorf("access token request returned status %d: %s", resp.StatusCode, string(body))
-		if resp.StatusCode == http.StatusUnauthorized {
-			return "", time.Time{}, newAuthExpiredError(baseErr)
-		}
-		return "", time.Time{}, baseErr
-	}
-
-	var tokenResp struct {
-		AccessToken string `json:"accessToken"`
-		ExpireTime  string `json:"expireTime"`
-	}
-	if err := json.Unmarshal(body, &tokenResp); err != nil {
-		return "", time.Time{}, fmt.Errorf("failed to parse access token response: %w", err)
-	}
-	if tokenResp.AccessToken == "" {
-		return "", time.Time{}, fmt.Errorf("access token response missing accessToken")
-	}
-	if tokenResp.ExpireTime == "" {
-		return "", time.Time{}, fmt.Errorf("access token response missing expireTime")
-	}
-
-	expiry, err := time.Parse(time.RFC3339Nano, tokenResp.ExpireTime)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("parse access token expireTime: %w", err)
-	}
-
-	return tokenResp.AccessToken, expiry, nil
 }
 
 // generateIDToken uses the Workforce token to generate a broker ID token.
@@ -331,6 +258,7 @@ func buildCredentialConfig(cfg TargetConfig, subjectTokenFile, tokenURL string, 
 	}
 	if userProject {
 		credConfig["workforce_pool_user_project"] = cfg.GCPProject
+		credConfig["quota_project_id"] = cfg.GCPProject
 	}
 	return json.MarshalIndent(credConfig, "", "  ")
 }

@@ -16,7 +16,6 @@ var (
 	bootstrapGuestCluster             = BootstrapGuestCluster
 	failureSnapshotTimeout            = 10 * time.Second
 	newBrokerAuth                     = func(cfg BrokerAuthConfig) brokerAuthExchanger { return NewBrokerAuth(cfg) }
-	mintCleanupAccessTokenFn          = mintCleanupAccessToken
 	buildCreateHypershiftWorkspace    = PrepareCreateHypershiftWorkspace
 	buildDestroyHypershiftWorkspace   = PrepareDestroyHypershiftWorkspace
 	buildDestroyWorkspaceWithTokenURL = PrepareDestroyHypershiftWorkspaceWithTokenURL
@@ -419,17 +418,6 @@ func (r *Reconciler) Delete(
 
 	progress.Info(ctx, "Preparing to destroy infrastructure")
 
-	cleanupToken, cleanupTokenExpiry, err := mintCleanupAccessTokenFn(ctx, BrokerAuthConfig{
-		WorkforcePool:     target.WorkforcePool,
-		WorkforceProvider: target.WorkforceProvider,
-		GCPProject:        target.GCPProject,
-		BrokerSAEmail:     target.BrokerSAEmail,
-		GatewayAudience:   r.gateway.Audience,
-	}, authResult.WorkforceToken)
-	if err != nil {
-		return fmt.Errorf("mint cleanup access token: %w", err)
-	}
-
 	if err := waitForDeleteCleanupPrereqs(
 		ctx,
 		r.infra,
@@ -448,8 +436,8 @@ func (r *Reconciler) Delete(
 		}
 
 		forwarder, err := startLocalSTSForwarderFn(
-			cleanupToken,
-			cleanupTokenExpiry,
+			authResult.WorkforceToken,
+			authResult.WorkforceTokenExpiry,
 			subjectToken,
 			workforceAudience(target.WorkforcePool, target.WorkforceProvider),
 		)
