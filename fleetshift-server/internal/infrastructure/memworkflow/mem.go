@@ -161,16 +161,27 @@ type orchestrationWorkflow struct {
 	spec     *domain.OrchestrationWorkflowSpec
 	mu       sync.Mutex
 	running  map[domain.FulfillmentID]struct{}
+	finished map[domain.FulfillmentID]chan struct{}
 }
 
 func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.FulfillmentID) (domain.Execution[struct{}], error) {
 	w.mu.Lock()
 	if w.running == nil {
 		w.running = make(map[domain.FulfillmentID]struct{})
+		w.finished = make(map[domain.FulfillmentID]chan struct{})
 	}
 	if _, active := w.running[fulfillmentID]; active {
 		w.mu.Unlock()
 		return nil, domain.ErrAlreadyRunning
+	}
+	if prev, pending := w.finished[fulfillmentID]; pending {
+		w.mu.Unlock()
+		select {
+		case <-prev:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		return w.Start(ctx, fulfillmentID)
 	}
 	w.running[fulfillmentID] = struct{}{}
 	w.mu.Unlock()
@@ -183,11 +194,20 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 		cleanup := func() {
 			w.registry.removeInstance(fulfillmentID)
 			w.mu.Lock()
-			delete(w.running, fulfillmentID)
+			if ch, ok := w.finished[fulfillmentID]; ok {
+				delete(w.finished, fulfillmentID)
+				close(ch)
+			}
 			w.mu.Unlock()
 		}
 		defer func() {
 			if r := recover(); r != nil {
+				w.mu.Lock()
+				delete(w.running, fulfillmentID)
+				if _, ok := w.finished[fulfillmentID]; !ok {
+					w.finished[fulfillmentID] = make(chan struct{})
+				}
+				w.mu.Unlock()
 				cleanup()
 				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
 			}
@@ -232,6 +252,10 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 				id = can.Input.(domain.FulfillmentID)
 				continue
 			}
+			w.mu.Lock()
+			delete(w.running, fulfillmentID)
+			w.finished[fulfillmentID] = make(chan struct{})
+			w.mu.Unlock()
 			cleanup()
 			done <- orchResult{val: val, err: err}
 			return
