@@ -97,12 +97,12 @@ func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
 }
 
 type addonManagerEnv struct {
-	mgr             *application.AddonManager
-	activator       *recordingActivator
-	router          *delivery.RoutingDeliveryService
-	clusterAccess   *application.ClusterAccessRegistry
-	typeSvc         *application.ManagedResourceTypeService
-	targetSvc       *application.TargetService
+	mgr           *application.AddonManager
+	activator     *recordingActivator
+	router        *delivery.RoutingDeliveryService
+	clusterAccess *application.ClusterAccessRegistry
+	typeSvc       *application.ManagedResourceTypeService
+	targetSvc     *application.TargetService
 }
 
 func setupAddonManager(t *testing.T) *addonManagerEnv {
@@ -838,6 +838,27 @@ func (s *stubClusterAccessProv) MintCredential(_ context.Context, _ string, _ do
 	return &domain.ClusterCredential{}, nil
 }
 
+type recordingClusterAccessRegistrar struct {
+	registered   map[domain.TargetType]domain.ClusterAccessProvider
+	deregistered []domain.TargetType
+}
+
+func (r *recordingClusterAccessRegistrar) Register(targetType domain.TargetType, provider domain.ClusterAccessProvider) {
+	if r.registered == nil {
+		r.registered = make(map[domain.TargetType]domain.ClusterAccessProvider)
+	}
+	r.registered[targetType] = provider
+}
+
+func (r *recordingClusterAccessRegistrar) Deregister(targetType domain.TargetType) {
+	r.deregistered = append(r.deregistered, targetType)
+	delete(r.registered, targetType)
+}
+
+func (r *recordingClusterAccessRegistrar) provider(targetType domain.TargetType) domain.ClusterAccessProvider {
+	return r.registered[targetType]
+}
+
 func gcphcpDescriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
 		ID:   "gcphcp-test",
@@ -875,6 +896,33 @@ func TestAddonManager_ConnectRegistersClusterAccessProvider(t *testing.T) {
 	}
 }
 
+func TestAddonManager_UsesClusterAccessRegistrarPort(t *testing.T) {
+	ctx := context.Background()
+	env := setupAddonManager(t)
+	registrar := &recordingClusterAccessRegistrar{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:        env.router,
+		TypeSvc:       env.typeSvc,
+		Activator:     env.activator,
+		ClusterAccess: registrar,
+	})
+
+	if err := mgr.Enable(ctx, gcphcpDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	provider := &stubClusterAccessProv{}
+	if err := mgr.Connect(ctx, "gcphcp-test", application.ConnectInput{
+		ClusterAccess: provider,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if got := registrar.provider("gcphcp"); got != provider {
+		t.Fatalf("registered provider = %v, want %v", got, provider)
+	}
+}
+
 func TestAddonManager_DisconnectDeregistersClusterAccessProvider(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()
@@ -902,6 +950,35 @@ func TestAddonManager_DisconnectDeregistersClusterAccessProvider(t *testing.T) {
 
 	if got := env.clusterAccess.ClusterAccessProvider("gcphcp"); got != nil {
 		t.Errorf("expected provider to be deregistered after Disconnect, got %v", got)
+	}
+}
+
+func TestAddonManager_DisableDeregistersClusterAccessProvider(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, gcphcpDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	provider := &stubClusterAccessProv{}
+	if err := env.mgr.Connect(ctx, "gcphcp-test", application.ConnectInput{
+		Agent:         &stubDeliveryAgent{},
+		ClusterAccess: provider,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if got := env.clusterAccess.ClusterAccessProvider("gcphcp"); got == nil {
+		t.Fatal("provider should be registered before Disable")
+	}
+
+	if err := env.mgr.Disable(ctx, "gcphcp-test"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	if got := env.clusterAccess.ClusterAccessProvider("gcphcp"); got != nil {
+		t.Errorf("expected provider to be deregistered after Disable, got %v", got)
 	}
 }
 

@@ -36,12 +36,20 @@ type DeliveryAgentRegistry interface {
 	Deregister(targetType domain.TargetType)
 }
 
+// ClusterAccessRegistrar manages cluster-access provider lifecycle for
+// addon connect/disconnect without exposing how providers are resolved
+// at request time.
+type ClusterAccessRegistrar interface {
+	Register(targetType domain.TargetType, provider domain.ClusterAccessProvider)
+	Deregister(targetType domain.TargetType)
+}
+
 // AddonManagerDeps holds the injected dependencies for [AddonManager].
 type AddonManagerDeps struct {
 	Router        DeliveryAgentRegistry
 	TypeSvc       *ManagedResourceTypeService
 	Activator     SchemaActivator
-	ClusterAccess *ClusterAccessRegistry
+	ClusterAccess ClusterAccessRegistrar
 }
 
 // AddonManager orchestrates the addon lifecycle: enable, connect,
@@ -56,7 +64,7 @@ type AddonManager struct {
 	router        DeliveryAgentRegistry
 	typeSvc       *ManagedResourceTypeService
 	activator     SchemaActivator
-	clusterAccess *ClusterAccessRegistry
+	clusterAccess ClusterAccessRegistrar
 }
 
 // addonRecord is the in-memory state for an addon within the manager.

@@ -11,6 +11,28 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
+type recordingClusterAccessResolver struct {
+	providers map[domain.TargetType]domain.ClusterAccessProvider
+}
+
+func (r *recordingClusterAccessResolver) ClusterAccessProvider(targetType domain.TargetType) domain.ClusterAccessProvider {
+	return r.providers[targetType]
+}
+
+type recordingClusterAccessProvider struct {
+	callerToken string
+	target      domain.TargetInfo
+}
+
+func (p *recordingClusterAccessProvider) MintCredential(_ context.Context, callerToken string, target domain.TargetInfo) (*domain.ClusterCredential, error) {
+	p.callerToken = callerToken
+	p.target = target
+	return &domain.ClusterCredential{
+		Token:      "broker-token",
+		Expiration: time.Unix(1234, 0).UTC(),
+	}, nil
+}
+
 type stubClusterAccessProvider struct {
 	mintFunc func(ctx context.Context, callerToken string, target domain.TargetInfo) (*domain.ClusterCredential, error)
 }
@@ -54,6 +76,57 @@ func registerSeededTarget(t *testing.T, svc *application.TargetService, id domai
 		Properties: props,
 	}); err != nil {
 		t.Fatalf("register seeded target %q: %v", id, err)
+	}
+}
+
+func TestClusterService_UsesClusterAccessResolverPort(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+	targets := &application.TargetService{Store: store}
+	ctx := context.Background()
+
+	if err := targets.Register(ctx, domain.TargetInfo{
+		ID:   "seeded-target",
+		Type: "gcphcp",
+		Name: "Seeded Target",
+	}); err != nil {
+		t.Fatalf("register seeded target: %v", err)
+	}
+
+	if err := targets.Register(ctx, domain.TargetInfo{
+		ID:                   "k8s-my-cluster",
+		Type:                 "kubernetes",
+		Name:                 "My Cluster",
+		ProvisioningTargetID: "seeded-target",
+	}); err != nil {
+		t.Fatalf("register emitted target: %v", err)
+	}
+
+	provider := &recordingClusterAccessProvider{}
+	resolver := &recordingClusterAccessResolver{
+		providers: map[domain.TargetType]domain.ClusterAccessProvider{
+			"gcphcp": provider,
+		},
+	}
+
+	svc := &application.ClusterService{
+		Targets:   targets,
+		Providers: resolver,
+	}
+
+	cred, err := svc.GetCredential(ctx, "my-cluster", "caller-token")
+	if err != nil {
+		t.Fatalf("GetCredential: %v", err)
+	}
+
+	if cred.Token != "broker-token" {
+		t.Fatalf("token = %q, want broker-token", cred.Token)
+	}
+	if provider.callerToken != "caller-token" {
+		t.Fatalf("caller token = %q, want caller-token", provider.callerToken)
+	}
+	if provider.target.ID != "seeded-target" {
+		t.Fatalf("target ID = %q, want seeded-target", provider.target.ID)
 	}
 }
 

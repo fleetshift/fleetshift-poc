@@ -48,3 +48,8 @@ func (r *ClusterAccessRegistry) ClusterAccessProvider(targetType domain.TargetTy
 	defer r.mu.RUnlock()
 	return r.providers[targetType]
 }
+
+// Compile-time assertions that the concrete registry still satisfies the
+// separate write-side and read-side ports used by AddonManager and ClusterService.
+var _ ClusterAccessRegistrar = (*ClusterAccessRegistry)(nil)
+var _ ClusterAccessResolver = (*ClusterAccessRegistry)(nil)
