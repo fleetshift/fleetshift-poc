@@ -1,11 +1,93 @@
 package http
 
 import (
+	"encoding/json"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
+	"time"
 )
+
+type knownRoutes struct {
+	mu        sync.RWMutex
+	prefixes  []string
+	loadedAt  time.Time
+	webDir    string
+	cacheTTL  time.Duration
+}
+
+func newKnownRoutes(webDir string) *knownRoutes {
+	return &knownRoutes{
+		webDir:   webDir,
+		cacheTTL: 30 * time.Second,
+	}
+}
+
+func (kr *knownRoutes) isKnown(urlPath string) bool {
+	kr.mu.RLock()
+	stale := time.Since(kr.loadedAt) > kr.cacheTTL
+	prefixes := kr.prefixes
+	kr.mu.RUnlock()
+
+	if stale || prefixes == nil {
+		prefixes = kr.reload()
+	}
+
+	path := strings.TrimPrefix(urlPath, "/")
+	seg := strings.SplitN(path, "/", 2)[0]
+
+	for _, prefix := range prefixes {
+		if seg == prefix {
+			return true
+		}
+	}
+	return false
+}
+
+var staticKnownPrefixes = []string{"setup", "debug"}
+
+func (kr *knownRoutes) reload() []string {
+	data, err := os.ReadFile(filepath.Join(kr.webDir, "plugin-registry.json"))
+	if err != nil {
+		kr.mu.Lock()
+		kr.prefixes = staticKnownPrefixes
+		kr.loadedAt = time.Now()
+		kr.mu.Unlock()
+		return kr.prefixes
+	}
+
+	var registry pluginRegistry
+	if err := json.Unmarshal(data, &registry); err != nil {
+		kr.mu.Lock()
+		kr.prefixes = staticKnownPrefixes
+		kr.loadedAt = time.Now()
+		kr.mu.Unlock()
+		return kr.prefixes
+	}
+
+	pages := generatePluginPages(registry)
+	seen := make(map[string]bool)
+	for _, p := range staticKnownPrefixes {
+		seen[p] = true
+	}
+
+	prefixes := append([]string{}, staticKnownPrefixes...)
+	for _, page := range pages {
+		seg := strings.SplitN(page.Path, "/", 2)[0]
+		if !seen[seg] {
+			seen[seg] = true
+			prefixes = append(prefixes, seg)
+		}
+	}
+
+	kr.mu.Lock()
+	kr.prefixes = prefixes
+	kr.loadedAt = time.Now()
+	kr.mu.Unlock()
+	return prefixes
+}
 
 func NewStaticHandler(webDir string) http.Handler {
 	absWebDir, err := filepath.Abs(webDir)
@@ -15,6 +97,7 @@ func NewStaticHandler(webDir string) http.Handler {
 
 	fs := http.Dir(absWebDir)
 	fileServer := http.FileServer(fs)
+	routes := newKnownRoutes(absWebDir)
 
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		urlPath := filepath.Clean(r.URL.Path)
@@ -35,9 +118,12 @@ func NewStaticHandler(webDir string) http.Handler {
 			return
 		}
 
-		// File doesn't exist — SPA fallback for document requests
+		// SPA fallback for document requests
 		if acceptsHTML(r) {
 			w.Header().Set("Cache-Control", "no-cache")
+			if urlPath != "/" && !routes.isKnown(urlPath) {
+				w.WriteHeader(http.StatusNotFound)
+			}
 			http.ServeFile(w, r, filepath.Join(absWebDir, "index.html"))
 			return
 		}
