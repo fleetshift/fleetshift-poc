@@ -31,7 +31,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 RUN git clone --branch "${HYPERSHIFT_REF}" --depth 1 https://github.com/openshift/hypershift.git /src/hypershift
-RUN cd /src/hypershift && CGO_ENABLED=0 go build -o /bin/hypershift .
+RUN cd /src/hypershift && CGO_ENABLED=0 go build -p 2 -o /bin/hypershift .
 
 FROM debian:bookworm-slim
 
