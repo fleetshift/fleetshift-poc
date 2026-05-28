@@ -23,7 +23,7 @@ func TestClusterAccess_MintCredential_Success(t *testing.T) {
 			t.Errorf("subject_token = %q, want caller-jwt", got)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"access_token": "workforce-access-tok"})
+		json.NewEncoder(w).Encode(map[string]any{"access_token": "workforce-access-tok", "expires_in": 3600})
 	}))
 	defer sts.Close()
 
