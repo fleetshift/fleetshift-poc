@@ -10,7 +10,10 @@ import {
   Wizard,
   WizardStep,
 } from "@patternfly/react-core";
-import { buildSignedInputEnvelope } from "@fleetshift/common";
+import {
+  buildSignedInputEnvelope,
+  usePluginNavigate,
+} from "@fleetshift/common";
 import { getModule } from "@scalprum/core";
 import { createDeployment } from "../management-plugin/api";
 import ClusterDetailsStep from "./ClusterDetailsStep";
@@ -44,8 +47,17 @@ const initialFormData: ClusterFormData = {
   signDeployment: false,
 };
 
-export default function CreateClusterWizard() {
+interface CreateClusterWizardProps {
+  onSetupNext?: () => void;
+  onSetupSkip?: () => void;
+}
+
+export default function CreateClusterWizard({
+  onSetupNext,
+  onSetupSkip: _onSetupSkip,
+}: CreateClusterWizardProps) {
   const navigate = useNavigate();
+  const clusters = usePluginNavigate("core-plugin", "ClustersModule");
   const [signingLoaded, setSigningLoaded] = useState(false);
   const [enrolled, setEnrolled] = useState(false);
   const signDeploymentRef = useRef<(bytes: Uint8Array) => Promise<string>>();
@@ -77,11 +89,9 @@ export default function CreateClusterWizard() {
     [],
   );
 
-  const isSetupFlow = window.location.pathname.startsWith("/setup");
-
   const handleCancel = useCallback(() => {
-    navigate(isSetupFlow ? "/setup/enroll" : "/day-one/welcome");
-  }, [navigate, isSetupFlow]);
+    navigate(-1);
+  }, [navigate]);
 
   const handleSubmit = useCallback(async () => {
     if (!formData.name.trim()) {
@@ -172,13 +182,17 @@ export default function CreateClusterWizard() {
         expectedGeneration,
       });
 
-      navigate("/day-one/welcome");
+      if (onSetupNext) {
+        onSetupNext();
+      } else {
+        clusters.navigate(formData.name.trim());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setCreating(false);
     }
-  }, [formData, enrolled, navigate]);
+  }, [formData, enrolled, onSetupNext, clusters]);
 
   const isStep1Valid = formData.name.trim().length > 0;
 

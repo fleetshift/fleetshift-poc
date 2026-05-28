@@ -1,12 +1,67 @@
-import { Navigate, Outlet, Route, Routes } from "react-router-dom";
+import { useCallback, useEffect, useMemo } from "react";
+import { Navigate, Outlet, Route, Routes, useNavigate } from "react-router-dom";
+import { preloadModule } from "@scalprum/core";
 import { SetupLayout } from "../layouts/SetupLayout";
 import { AuthProvider } from "../contexts/AuthContext";
 import AuthGate from "../components/Auth/AuthGate";
-import { useSetupExtensions } from "../hooks/useSetupExtensions";
+import {
+  useSetupExtensions,
+  type PreloadTarget,
+} from "../hooks/useSetupExtensions";
+import type { ResolvedSetup } from "../utils/setupExtensions";
 import { Bullseye, Spinner } from "@patternfly/react-core";
 
+interface StepWrapperProps {
+  ext: ResolvedSetup;
+  onSetupNext: () => void;
+  onSetupSkip?: () => void;
+  preloadNext?: PreloadTarget;
+}
+
+const SetupStep = ({
+  ext,
+  onSetupNext,
+  onSetupSkip,
+  preloadNext,
+}: StepWrapperProps) => {
+  useEffect(() => {
+    if (!preloadNext) return;
+    preloadModule(preloadNext.scope, preloadNext.module).catch(() => {});
+  }, [preloadNext]);
+
+  const Component = ext.properties.component;
+  return <Component onSetupNext={onSetupNext} onSetupSkip={onSetupSkip} />;
+};
+
 const SetupRoutes = () => {
-  const { authRoutes, nonAuthRoutes, loaded } = useSetupExtensions();
+  const { authRoutes, nonAuthRoutes, loaded, preloadMap } =
+    useSetupExtensions();
+  const navigate = useNavigate();
+
+  const allSteps = useMemo(
+    () => [...nonAuthRoutes, ...authRoutes],
+    [nonAuthRoutes, authRoutes],
+  );
+
+  const nextPathFor = useCallback(
+    (stepId: string) => {
+      const idx = allSteps.findIndex((s) => s.properties.id === stepId);
+      const next = allSteps[idx + 1];
+      return next ? `/setup/${next.properties.path}` : "/";
+    },
+    [allSteps],
+  );
+
+  const preloadTargetFor = useCallback(
+    (stepId: string): PreloadTarget | undefined => {
+      const idx = allSteps.findIndex((s) => s.properties.id === stepId);
+      const next = allSteps[idx + 1];
+      return next ? preloadMap.get(next.properties.id) : undefined;
+    },
+    [allSteps, preloadMap],
+  );
+
+  const skipToConsole = useCallback(() => navigate("/"), [navigate]);
 
   if (!loaded) {
     return (
@@ -35,7 +90,13 @@ const SetupRoutes = () => {
           <Route
             key={ext.properties.id}
             path={ext.properties.path}
-            element={<ext.properties.component />}
+            element={
+              <SetupStep
+                ext={ext}
+                onSetupNext={() => navigate(nextPathFor(ext.properties.id))}
+                preloadNext={preloadTargetFor(ext.properties.id)}
+              />
+            }
           />
         ))}
         <Route
@@ -51,7 +112,14 @@ const SetupRoutes = () => {
             <Route
               key={ext.properties.id}
               path={ext.properties.path}
-              element={<ext.properties.component />}
+              element={
+                <SetupStep
+                  ext={ext}
+                  onSetupNext={() => navigate(nextPathFor(ext.properties.id))}
+                  onSetupSkip={skipToConsole}
+                  preloadNext={preloadTargetFor(ext.properties.id)}
+                />
+              }
             />
           ))}
         </Route>

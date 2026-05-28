@@ -274,8 +274,6 @@ export function useSigningKeyEnrollment() {
     }
   }, [state.sshPublicKey, initialize]);
 
-  const isSetupFlow = window.location.pathname.startsWith("/setup");
-
   useEffect(() => {
     if (
       keyFound &&
@@ -298,7 +296,6 @@ export function useSigningKeyEnrollment() {
     error: state.error,
     enrollmentName: state.enrollmentName,
     githubUsername,
-    isSetupFlow,
     ghPollEnabled: state.ghPollEnabled,
     ghKeyError,
     enrollOidc,

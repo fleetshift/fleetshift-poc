@@ -1,6 +1,6 @@
 import { BrowserRouter } from "react-router-dom";
 import { ScalprumProvider } from "@scalprum/react-core";
-import { PropsWithChildren, useMemo } from "react";
+import { PropsWithChildren, useMemo, useRef } from "react";
 import { AppConfigProvider, useAppConfig } from "./contexts/AppConfigContext";
 import { AnimationsProvider } from "@patternfly/react-core";
 import ScopeInitializer from "./components/Root/ScopeInitializer";
@@ -9,12 +9,21 @@ import { scopeListenersRef, scopeRef } from "./components/Root/ScopeBridge";
 import Routes from "./routes/Routes";
 
 const ScalprumShell = ({ children }: PropsWithChildren) => {
-  const { scalprumConfig, assetsHost } = useAppConfig();
+  const { scalprumConfig, assetsHost, pluginPages } = useAppConfig();
+
+  const pluginPagesRef = useRef(pluginPages);
+  pluginPagesRef.current = pluginPages;
 
   const api = useMemo(
     () => ({
       fleetshift: {
         apiBase: "/v1",
+        getPluginPagePath: (scope: string, module: string) => {
+          const page = pluginPagesRef.current.find(
+            (p) => p.scope === scope && p.module === module,
+          );
+          return page ? `/${page.path}` : undefined;
+        },
         getClusterIdsForPlugin: () => [] as string[],
         getClusterName: (clusterId: string) => clusterId,
         onClustersChange: () => () => {},

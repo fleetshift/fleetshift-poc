@@ -1,4 +1,4 @@
-import { useNavigate } from "react-router-dom";
+import { usePluginNavigate } from "@fleetshift/common";
 import {
   Bullseye,
   Icon,
@@ -52,7 +52,7 @@ const workloads: WorkloadOption[] = [
 ];
 
 export default function WelcomePage() {
-  const navigate = useNavigate();
+  const dayOne = usePluginNavigate("day-one-plugin", "DayOnePage");
 
   return (
     <Stack hasGutter className="day-one-welcome">
@@ -97,7 +97,7 @@ export default function WelcomePage() {
       </StackItem>
 
       <StackItem>
-        <ScalingCard onSetup={() => navigate("/day-one/create-cluster")} />
+        <ScalingCard onSetup={() => dayOne.navigate("create-cluster")} />
       </StackItem>
 
       <StackItem>

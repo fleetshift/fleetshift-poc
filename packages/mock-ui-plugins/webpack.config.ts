@@ -64,13 +64,6 @@ const ManagementPlugin = new DynamicRemotePlugin({
         component: { $codeRef: "TargetsPage.default" },
       },
     },
-    {
-      type: "fleetshift.module",
-      properties: {
-        label: "Orchestration",
-        component: { $codeRef: "DeploymentsPage.default" },
-      },
-    },
   ],
   sharedModules,
   entryScriptFilename: "plugins/management/management-plugin.[contenthash].js",
@@ -82,10 +75,6 @@ const ManagementPlugin = new DynamicRemotePlugin({
     version: "1.0.0",
     exposedModules: {
       TargetsPage: p("./src/plugins/management-plugin/TargetsPage.tsx"),
-      DeploymentsPage: p("./src/plugins/management-plugin/DeploymentsPage.tsx"),
-      DeploymentDetailPage: p(
-        "./src/plugins/management-plugin/DeploymentDetailPage.tsx",
-      ),
     },
   },
 });

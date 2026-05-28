@@ -25,8 +25,12 @@ import {
   Title,
 } from "@patternfly/react-core";
 import { CheckCircleIcon } from "@patternfly/react-icons";
-import { Link } from "react-router-dom";
 import "../signing-plugin/SetupPage.scss";
+
+interface SetupPageProps {
+  onSetupNext?: () => void;
+  onSetupSkip?: () => void;
+}
 
 type BackingStore = "sqlite" | "postgres";
 type KeyRegistry = "oidc" | "github";
@@ -175,7 +179,7 @@ const AuthConfiguredBanner = ({ authMethod }: { authMethod: AuthMethod }) => {
   );
 };
 
-const SetupPage = () => {
+const SetupPage = ({ onSetupNext, onSetupSkip }: SetupPageProps) => {
   const [pageLoading, setPageLoading] = useState(true);
   const [authState, setAuthState] = useState<AuthState>({ status: "idle" });
   const [backingStore, setBackingStore] = useState<BackingStore>("sqlite");
@@ -376,15 +380,12 @@ const SetupPage = () => {
           <Button
             variant="primary"
             isDisabled={!authConfigured}
-            component={(props) => <Link {...props} to="/setup/enroll" />}
+            onClick={onSetupNext}
           >
             Sign in &amp; enroll signing key
           </Button>
-          {authConfigured && (
-            <Button
-              variant="link"
-              component={(props) => <Link {...props} to="/" />}
-            >
+          {authConfigured && onSetupSkip && (
+            <Button variant="link" onClick={onSetupSkip}>
               Skip to console
             </Button>
           )}

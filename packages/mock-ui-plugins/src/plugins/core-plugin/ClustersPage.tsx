@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { Link } from "react-router-dom";
+import { PluginLink } from "@fleetshift/common";
 import {
   Button,
   Card,
@@ -184,9 +184,13 @@ export default function ClustersPage() {
           return [
             {
               cell: (
-                <Link to={depName}>
+                <PluginLink
+                  scope="core-plugin"
+                  module="ClustersModule"
+                  to={depName}
+                >
                   <strong>{r.clusterName}</strong>
-                </Link>
+                </PluginLink>
               ),
             },
             {
@@ -271,7 +275,14 @@ export default function ClustersPage() {
                 {rows.length === 0 ? (
                   <Button
                     variant="primary"
-                    component={(props) => <Link {...props} to="create" />}
+                    component={(props) => (
+                      <PluginLink
+                        {...props}
+                        scope="core-plugin"
+                        module="ClustersModule"
+                        to="create"
+                      />
+                    )}
                   >
                     Create cluster
                   </Button>
@@ -387,7 +398,14 @@ export default function ClustersPage() {
             actions={
               <Button
                 variant="primary"
-                component={(props) => <Link {...props} to="create" />}
+                component={(props) => (
+                  <PluginLink
+                    {...props}
+                    scope="core-plugin"
+                    module="ClustersModule"
+                    to="create"
+                  />
+                )}
               >
                 Create cluster
               </Button>

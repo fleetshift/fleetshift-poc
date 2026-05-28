@@ -1,5 +1,6 @@
 import { type ReactNode, lazy, Suspense, useState } from "react";
-import { Routes, Route, useNavigate, Link } from "react-router-dom";
+import { Routes, Route, useNavigate } from "react-router-dom";
+import { PluginLink } from "@fleetshift/common";
 import CompletionModal from "./CompletionModal";
 import {
   Breadcrumb,
@@ -74,9 +75,18 @@ function SubPage({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
       <Breadcrumb style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}>
-        <BreadcrumbItem>
-          <Link to="/day-one">Day One</Link>
-        </BreadcrumbItem>
+        <BreadcrumbItem
+          render={({ className, ariaCurrent }) => (
+            <PluginLink
+              scope="day-one-plugin"
+              module="DayOnePage"
+              className={className}
+              aria-current={ariaCurrent}
+            >
+              Day One
+            </PluginLink>
+          )}
+        />
         <BreadcrumbItem isActive>{title}</BreadcrumbItem>
       </Breadcrumb>
       {children}

@@ -15,5 +15,15 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json && echo '{\"type\":\"module\"}' > dist/esm/package.json"
+  },
+  "peerDependencies": {
+    "react": "^18",
+    "react-router-dom": "^6",
+    "@scalprum/react-core": "^0"
+  },
+  "peerDependenciesMeta": {
+    "react": { "optional": true },
+    "react-router-dom": { "optional": true },
+    "@scalprum/react-core": { "optional": true }
   }
 }

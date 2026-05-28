@@ -1,8 +1,10 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
+import { PluginLink, usePluginNavigate } from "@fleetshift/common";
 import {
   Breadcrumb,
   BreadcrumbItem,
+  Button,
   Card,
   CardBody,
   Content,
@@ -20,6 +22,10 @@ import {
   GridItem,
   Label,
   MenuToggle,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   Spinner,
   Tab,
   Tabs,
@@ -28,11 +34,11 @@ import {
 } from "@patternfly/react-core";
 import { CubesIcon } from "@patternfly/react-icons";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
-import { Link } from "react-router-dom";
 
 import {
   getDeployment,
   deleteDeployment,
+  resumeDeployment,
   type MgmtDeployment,
   type DeploymentState,
 } from "../management-plugin/api";
@@ -278,30 +284,45 @@ function LogsTab() {
 
 export default function ClusterDetailPage() {
   const { deploymentId } = useParams<{ deploymentId: string }>();
-  const navigate = useNavigate();
+  const clusters = usePluginNavigate("core-plugin", "ClustersModule");
   const [deployment, setDeployment] = useState<MgmtDeployment | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | number>("overview");
   const [actionsOpen, setActionsOpen] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [isResuming, setIsResuming] = useState(false);
 
-  const fetchDeployment = useCallback(async () => {
-    if (!deploymentId) return;
-    try {
-      const dep = await getDeployment(deploymentId);
-      setDeployment(dep);
-      setError(null);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load cluster");
-    } finally {
-      setLoading(false);
-    }
-  }, [deploymentId]);
+  const fetchDeployment = useCallback(
+    async (silent = false) => {
+      if (!deploymentId) return;
+      if (!silent) setError(null);
+      try {
+        const dep = await getDeployment(deploymentId);
+        setDeployment(dep);
+      } catch (e) {
+        if (!silent)
+          setError(e instanceof Error ? e.message : "Failed to load cluster");
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [deploymentId],
+  );
 
   useEffect(() => {
     fetchDeployment();
   }, [fetchDeployment]);
+
+  const isTransient =
+    deployment?.state === "STATE_CREATING" ||
+    deployment?.state === "STATE_DELETING";
+  useEffect(() => {
+    if (!isTransient) return;
+    const id = setInterval(() => fetchDeployment(true), 5000);
+    return () => clearInterval(id);
+  }, [isTransient, fetchDeployment]);
 
   const spec = useMemo(
     () => (deployment ? decodeSpec(deployment) : null),
@@ -313,16 +334,35 @@ export default function ClusterDetailPage() {
     return spec?.name ?? deployment.name.replace(/^deployments\//, "");
   }, [deployment, spec, deploymentId]);
 
+  const canResume =
+    deployment?.state === "STATE_PAUSED_AUTH" ||
+    deployment?.state === "STATE_FAILED";
+  const canDelete = deployment?.state !== "STATE_DELETING";
+
   const handleDelete = async () => {
     if (!deploymentId) return;
     setIsDeleting(true);
-    setActionsOpen(false);
+    setShowDeleteModal(false);
     try {
       await deleteDeployment(deploymentId);
-      navigate("..");
+      clusters.navigate();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
       setIsDeleting(false);
+    }
+  };
+
+  const handleResume = async () => {
+    if (!deploymentId) return;
+    setIsResuming(true);
+    setActionsOpen(false);
+    try {
+      await resumeDeployment({ name: deploymentId });
+      await fetchDeployment();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Resume failed");
+    } finally {
+      setIsResuming(false);
     }
   };
 
@@ -337,7 +377,9 @@ export default function ClusterDetailPage() {
           The requested cluster could not be loaded.
         </EmptyStateBody>
         <EmptyStateFooter>
-          <Link to="..">Back to Clusters</Link>
+          <PluginLink scope="core-plugin" module="ClustersModule">
+            Back to Clusters
+          </PluginLink>
         </EmptyStateFooter>
       </EmptyState>
     );
@@ -373,9 +415,18 @@ export default function ClusterDetailPage() {
         }
         breadcrumbs={
           <Breadcrumb>
-            <BreadcrumbItem>
-              <Link to="..">Clusters</Link>
-            </BreadcrumbItem>
+            <BreadcrumbItem
+              render={({ className, ariaCurrent }) => (
+                <PluginLink
+                  scope="core-plugin"
+                  module="ClustersModule"
+                  className={className}
+                  aria-current={ariaCurrent}
+                >
+                  Clusters
+                </PluginLink>
+              )}
+            />
             <BreadcrumbItem isActive>{clusterName}</BreadcrumbItem>
           </Breadcrumb>
         }
@@ -388,7 +439,7 @@ export default function ClusterDetailPage() {
                 ref={toggleRef}
                 onClick={() => setActionsOpen((prev) => !prev)}
                 variant="primary"
-                isDisabled={isDeleting}
+                isDisabled={isDeleting || isResuming}
               >
                 Actions
               </MenuToggle>
@@ -396,9 +447,27 @@ export default function ClusterDetailPage() {
             popperProps={{ position: "end" }}
           >
             <DropdownList>
-              <DropdownItem key="delete" isDanger onClick={handleDelete}>
-                Delete cluster
-              </DropdownItem>
+              {canResume && (
+                <DropdownItem
+                  key="resume"
+                  onClick={handleResume}
+                  isDisabled={isResuming}
+                >
+                  {isResuming ? "Resuming..." : "Resume cluster"}
+                </DropdownItem>
+              )}
+              {canDelete && (
+                <DropdownItem
+                  key="delete"
+                  isDanger
+                  onClick={() => {
+                    setActionsOpen(false);
+                    setShowDeleteModal(true);
+                  }}
+                >
+                  Delete cluster
+                </DropdownItem>
+              )}
             </DropdownList>
           </Dropdown>
         }
@@ -416,6 +485,35 @@ export default function ClusterDetailPage() {
           </div>
         </Tab>
       </Tabs>
+
+      <Modal
+        isOpen={showDeleteModal}
+        onClose={() => setShowDeleteModal(false)}
+        variant="small"
+      >
+        <ModalHeader
+          title="Delete cluster"
+          description={`Are you sure you want to delete "${clusterName}"? This will terminate the provisioned cluster.`}
+        />
+        <ModalBody />
+        <ModalFooter>
+          <Button
+            variant="danger"
+            onClick={handleDelete}
+            isLoading={isDeleting}
+            isDisabled={isDeleting}
+          >
+            Delete
+          </Button>
+          <Button
+            variant="link"
+            onClick={() => setShowDeleteModal(false)}
+            isDisabled={isDeleting}
+          >
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
     </div>
   );
 }

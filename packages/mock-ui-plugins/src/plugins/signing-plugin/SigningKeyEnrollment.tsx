@@ -12,7 +12,6 @@ import {
 } from "@patternfly/react-core";
 import { KeyIcon } from "@patternfly/react-icons";
 import { AnimatePresence, motion } from "motion/react";
-import { Link } from "react-router-dom";
 import { EnrollStep, useSigningKeyEnrollment } from "./useSigningKeyEnrollment";
 import "./SetupPage.scss";
 import AnimatedHeight from "./components/AnimatedHeight";
@@ -34,7 +33,15 @@ const transition = {
   filter: { ease: "easeInOut" as const },
 };
 
-const SigningKeyEnrollment = () => {
+interface SigningKeyEnrollmentProps {
+  onSetupNext?: () => void;
+  onSetupSkip?: () => void;
+}
+
+const SigningKeyEnrollment = ({
+  onSetupNext,
+  onSetupSkip,
+}: SigningKeyEnrollmentProps) => {
   const {
     step,
     sshPublicKey,
@@ -42,7 +49,6 @@ const SigningKeyEnrollment = () => {
     error,
     enrollmentName,
     githubUsername,
-    isSetupFlow,
     ghPollEnabled,
     ghKeyError,
     enrollOidc,
@@ -103,34 +109,25 @@ const SigningKeyEnrollment = () => {
               transition={{ ...transition, delay: 0.15 }}
               className="pf-v6-u-mt-xl"
             >
-              {isSetupFlow ? (
-                <>
-                  <Button
-                    variant="primary"
-                    component={(props) => (
-                      <Link {...props} to="/setup/deploy" />
-                    )}
-                    className="pf-v6-u-mr-md"
-                  >
-                    Deploy first cluster
-                  </Button>
-                  <Button
-                    variant="secondary"
-                    onClick={handleReenroll}
-                    className="pf-v6-u-mr-md"
-                  >
-                    Re-enroll
-                  </Button>
-                  <Button
-                    variant="link"
-                    component={(props) => <Link {...props} to="/" />}
-                  >
-                    Skip to console
-                  </Button>
-                </>
-              ) : (
-                <Button variant="secondary" onClick={handleReenroll}>
-                  Re-enroll
+              {onSetupNext && (
+                <Button
+                  variant="primary"
+                  onClick={onSetupNext}
+                  className="pf-v6-u-mr-md"
+                >
+                  Deploy first cluster
+                </Button>
+              )}
+              <Button
+                variant="secondary"
+                onClick={handleReenroll}
+                className="pf-v6-u-mr-md"
+              >
+                Re-enroll
+              </Button>
+              {onSetupSkip && (
+                <Button variant="link" onClick={onSetupSkip}>
+                  Skip to console
                 </Button>
               )}
             </motion.div>
@@ -178,13 +175,15 @@ const SigningKeyEnrollment = () => {
               <OIDCEnroll step={step} enrollOidc={enrollOidc} />
             )}
 
-            <Button
-              variant="link"
-              component={(props) => <Link {...props} to="/" />}
-              className="pf-v6-u-mt-xl"
-            >
-              Skip to console
-            </Button>
+            {onSetupSkip && (
+              <Button
+                variant="link"
+                onClick={onSetupSkip}
+                className="pf-v6-u-mt-xl"
+              >
+                Skip to console
+              </Button>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

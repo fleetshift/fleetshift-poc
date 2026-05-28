@@ -9,6 +9,10 @@ const guiDist = resolve(root, "packages/gui/dist");
 const pluginsDist = resolve(root, "packages/mock-ui-plugins/dist");
 const watchOnly = process.argv.includes("--watch");
 
+// Always rebuild common — it's fast (tsc only) and webpack depends on its dist
+console.log("Building @fleetshift/common...");
+execSync("npm run build -w packages/common", { cwd: root, stdio: "inherit" });
+
 let mergeTimer = null;
 
 function merge() {
@@ -26,9 +30,6 @@ function merge() {
 }
 
 if (!watchOnly) {
-  console.log("Building @fleetshift/common...");
-  execSync("npm run build -w packages/common", { cwd: root, stdio: "inherit" });
-
   console.log("Running initial build...");
   execSync("npm run build -w packages/mock-ui-plugins", {
     cwd: root,
