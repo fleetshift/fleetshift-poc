@@ -184,10 +184,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Timeout: 30 * time.Second,
 	}
 
+	eventHub := transporthttp.NewEventHub(logger)
+
 	deliveryReporter := application.NewDeliveryReportService(
 		store,
 		reg,
-		application.WithDeliveryObserver(observability.NewDeliveryObserver(logger)),
+		application.WithDeliveryObserver(observability.NewMultiDeliveryObserver(
+			observability.NewDeliveryObserver(logger),
+			eventHub,
+		)),
 	)
 
 	// --- construct addon agents ---
@@ -245,6 +250,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	var gcphcpAgent domain.DeliveryAgent
+	var gcphcpConcreteAgent *gcphcpaddon.Agent
 	var gcphcpCfg gcphcpaddon.Config
 	if enabledAddons["gcphcp"] {
 		configPath := f.gcphcpConfig
@@ -257,11 +263,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			if err != nil {
 				return fmt.Errorf("parse gcphcp config: %w", err)
 			}
-			gcphcpAgent = gcphcpaddon.NewAgent(gcphcpaddon.AgentDeps{
+			gcphcpConcreteAgent = gcphcpaddon.NewAgent(gcphcpaddon.AgentDeps{
 				Gateway:  gcphcpCfg.Gateway,
 				Observer: gcphcpaddon.NewSlogAgentObserver(logger),
 				Reporter: deliveryReporter,
 			})
+			gcphcpAgent = gcphcpConcreteAgent
 		} else {
 			logger.Warn("gcphcp addon enabled but no config provided, skipping")
 			delete(enabledAddons, "gcphcp")
@@ -525,6 +532,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
+	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
 	topMux.HandleFunc("GET /api/ui/github-signing-keys/{username}", transporthttp.HandleGitHubSigningKeys)
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
 		AuthMethods:   authMethodSvc,
@@ -663,6 +671,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
 		}); err != nil {
 			return fmt.Errorf("connect gcphcp addon: %w", err)
+		}
+		if gcphcpConcreteAgent != nil {
+			if err := gcphcpConcreteAgent.RecoverActiveDeliveries(ctx, []domain.TargetID{targetID}); err != nil {
+				logger.Error("gcphcp: failed to recover active deliveries", "error", err)
+			}
 		}
 	}
 
