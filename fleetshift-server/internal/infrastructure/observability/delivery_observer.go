@@ -108,6 +108,72 @@ func (p *completedProbe) End() {
 	)
 }
 
+// MultiDeliveryObserver chains multiple [domain.DeliveryObserver]
+// implementations, calling each in order.
+type MultiDeliveryObserver struct {
+	domain.NoOpDeliveryObserver
+	observers []domain.DeliveryObserver
+}
+
+// NewMultiDeliveryObserver returns an observer that delegates to all given observers.
+func NewMultiDeliveryObserver(observers ...domain.DeliveryObserver) *MultiDeliveryObserver {
+	return &MultiDeliveryObserver{observers: observers}
+}
+
+func (m *MultiDeliveryObserver) EventEmitted(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+	probes := make([]domain.EventEmittedProbe, 0, len(m.observers))
+	for _, o := range m.observers {
+		var p domain.EventEmittedProbe
+		ctx, p = o.EventEmitted(ctx, deliveryID, target, event)
+		probes = append(probes, p)
+	}
+	return ctx, &multiEventProbe{probes: probes}
+}
+
+func (m *MultiDeliveryObserver) Completed(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+	probes := make([]domain.CompletedProbe, 0, len(m.observers))
+	for _, o := range m.observers {
+		var p domain.CompletedProbe
+		ctx, p = o.Completed(ctx, deliveryID, target, result)
+		probes = append(probes, p)
+	}
+	return ctx, &multiCompletedProbe{probes: probes}
+}
+
+type multiEventProbe struct {
+	domain.NoOpEventEmittedProbe
+	probes []domain.EventEmittedProbe
+}
+
+func (m *multiEventProbe) Error(err error) {
+	for _, p := range m.probes {
+		p.Error(err)
+	}
+}
+
+func (m *multiEventProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type multiCompletedProbe struct {
+	domain.NoOpCompletedProbe
+	probes []domain.CompletedProbe
+}
+
+func (m *multiCompletedProbe) Error(err error) {
+	for _, p := range m.probes {
+		p.Error(err)
+	}
+}
+
+func (m *multiCompletedProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
 func deliveryEventLevel(kind domain.DeliveryEventKind) slog.Level {
 	switch kind {
 	case domain.DeliveryEventWarning:
