@@ -30,7 +30,7 @@ vars:
       else
         echo "--db=/data/fleetshift.db"
       fi
-  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml -f overrides/gcphcp.yaml'
+  RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
 
 tasks:
   render-gcphcp-config:
@@ -58,7 +58,7 @@ tasks:
       DB: '{{.RESOLVED_DB}}'
       AUTH: '{{.RESOLVED_AUTH}}'
       DB_FLAG: '{{.RESOLVED_DB_FLAG}}'
-      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .UI_SETUP "true"}} -f overrides/ui-setup.yaml{{end}}'
+      COMPOSE_FILES: '{{.RESOLVED_COMPOSE_FILES}}{{if eq .DEV "true"}} -f overrides/dev.yaml{{end}}{{if eq .LOCAL_WEB "true"}} -f overrides/local-web.yaml{{end}}{{if eq .UI_SETUP "true"}} -f overrides/ui-setup.yaml{{end}} -f overrides/gcphcp.yaml'
       DEV: '{{.DEV}}'
       BUILD: '{{.BUILD}}'
       OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
