@@ -32,6 +32,8 @@ e2e/.env
 .task/
 deploy/podman/.active-deploy
 deploy/podman/.gcphcp.yaml
+gcphcp.yaml
+deploy/podman/gcphcp.yaml
 deploy/kubernetes/config.env
 deploy/kubernetes/gcphcp.yaml
 deploy/kubernetes/secrets.env
