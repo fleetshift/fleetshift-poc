@@ -97,6 +97,68 @@ func (a *Agent) clusterLock(name string) *sync.Mutex {
 	return val.(*sync.Mutex)
 }
 
+// RecoverActiveDeliveries queries the reporter for non-terminal
+// deliveries targeting the given targets and re-launches the addon
+// goroutine for each one. Call this at startup to resume work that
+// was interrupted by a server restart.
+func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.TargetID) error {
+	active, err := a.reporter.ListActiveDeliveries(ctx, targetIDs)
+	if err != nil {
+		return fmt.Errorf("list active deliveries: %w", err)
+	}
+	if len(active) == 0 {
+		a.observer.Info("no active deliveries to recover")
+		return nil
+	}
+
+	for _, ad := range active {
+		var clusterManifest *domain.Manifest
+		for i, m := range ad.Delivery.Manifests {
+			if m.ResourceType == ClusterResourceType {
+				clusterManifest = &ad.Delivery.Manifests[i]
+				break
+			}
+		}
+		if clusterManifest == nil {
+			continue
+		}
+
+		spec, err := ParseClusterSpec(clusterManifest.Raw)
+		if err != nil {
+			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID, "error", err)
+			continue
+		}
+		spec.Name = string(clusterManifest.Name)
+
+		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation) {
+			continue
+		}
+
+		if ad.Auth.Token == "" {
+			a.observer.Error("recovery: auth token empty, skipping", "delivery", ad.Delivery.ID)
+			continue
+		}
+
+		a.observer.Info("recovering active delivery",
+			"delivery", ad.Delivery.ID,
+			"cluster", spec.Name,
+			"state", ad.Delivery.State,
+			"generation", ad.Delivery.Generation,
+		)
+
+		targetCfg := TargetConfigFromProperties(ad.Target.Properties)
+		progress := newDeliveryProgress(a.reporter, ad.Delivery.ID, ad.Delivery.Generation)
+
+		lock := a.clusterLock(spec.Name)
+		lock.Lock()
+		go func() {
+			defer lock.Unlock()
+			a.deliverAsync(ctx, spec, targetCfg, string(ad.Auth.Token), progress)
+		}()
+	}
+	return nil
+}
+
 // Deliver implements domain.DeliveryAgent.Deliver.
 // It processes manifests in two categories:
 // 1. Trust bundle manifests - stored immediately
