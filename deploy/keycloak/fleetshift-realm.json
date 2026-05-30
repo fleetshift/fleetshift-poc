@@ -227,7 +227,7 @@
   ],
   "clientScopeMappings": {
     "fleetshift": [
-      { "client": "fleetshift-ui", "roles": ["fleetshift-user"] },
+      { "client": "fleetshift-ui", "roles": ["fleetshift-user", "gcphcp-provision-cluster"] },
       { "client": "fleetshift-cli", "roles": ["fleetshift-user", "gcphcp-provision-cluster"] },
       { "client": "fleetshift-signing", "roles": ["fleetshift-user"] }
     ],
