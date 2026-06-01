@@ -14,13 +14,57 @@ import (
 )
 
 type mrTestHarness struct {
-	typeSvc     *application.ManagedResourceTypeService
 	resourceSvc *application.ManagedResourceService
 	store       domain.Store
 }
 
 func setupManagedResources(t *testing.T) mrTestHarness {
 	return setupManagedResourcesWithDelivery(t, nil)
+}
+
+// registerTestAddon seeds a delivery target and managed resource type
+// definition for the given resource type. This mirrors what
+// [AddonManager.Connect] does in production (target + type def) without
+// needing proto compilation or schema activation.
+func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.ResourceType) domain.TargetID {
+	t.Helper()
+	ctx := context.Background()
+
+	targetID := domain.TargetID("test-addon-" + string(resourceType))
+
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("registerTestAddon: begin tx: %v", err)
+	}
+	defer tx.Rollback()
+
+	if err := tx.Targets().Create(ctx, domain.TargetInfo{
+		ID:                    targetID,
+		Name:                  "Test Addon (" + string(resourceType) + ")",
+		Type:                  "test",
+		AcceptedResourceTypes: []domain.ResourceType{resourceType},
+	}); err != nil {
+		t.Fatalf("registerTestAddon: create target: %v", err)
+	}
+
+	if err := tx.ManagedResources().CreateType(ctx, domain.ManagedResourceTypeDef{
+		ResourceType: resourceType,
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: targetID},
+		Signature: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "test-addon-svc", Issuer: "https://test-addon.internal"},
+			ContentHash:    []byte("test-hash"),
+			SignatureBytes: []byte("test-sig"),
+		},
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatalf("registerTestAddon: create type def: %v", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("registerTestAddon: commit: %v", err)
+	}
+	return targetID
 }
 
 type blockingRemoveDeliveryService struct {
@@ -147,14 +191,22 @@ func setupManagedResourcesWithDelivery(
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
+	resumeWfSpec := &domain.ResumeManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+		ProvenanceSvc: &domain.ProvenanceService{},
+	}
+	resumeWf, err := reg.RegisterResumeManagedResource(resumeWfSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeManagedResource: %v", err)
+	}
+
 	return mrTestHarness{
-		typeSvc: &application.ManagedResourceTypeService{
-			Store: store,
-		},
 		resourceSvc: &application.ManagedResourceService{
 			Store:    store,
 			CreateWF: createWf,
 			DeleteWF: deleteWf,
+			ResumeWF: resumeWf,
 		},
 		store: store,
 	}
@@ -165,34 +217,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	// First register a target so placement can resolve.
-	{
-		tx, _ := h.store.Begin(ctx)
-		_ = tx.Targets().Create(ctx, domain.TargetInfo{
-			ID:   "addon-cluster-mgmt",
-			Name: "Cluster Addon",
-			Type: "test",
-			Properties: map[string]string{
-				"foo": "bar",
-			},
-			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-		})
-		_ = tx.Commit()
-	}
-
-	// Register a type.
-	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
-			ContentHash:    []byte("hash"),
-			SignatureBytes: []byte("sig"),
-		},
-	})
-	if err != nil {
-		t.Fatalf("RegisterType: %v", err)
-	}
+	targetID := registerTestAddon(t, h.store, "clusters")
 
 	// Create with valid spec.
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
@@ -221,8 +246,8 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
 		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
 	}
-	if view.Fulfillment.PlacementStrategy.Targets[0] != "addon-cluster-mgmt" {
-		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy.Targets[0], "addon-cluster-mgmt")
+	if view.Fulfillment.PlacementStrategy.Targets[0] != targetID {
+		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy.Targets[0], targetID)
 	}
 
 	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
@@ -274,39 +299,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 		return blocker
 	})
 
-	{
-		tx, err := h.store.Begin(ctx)
-		if err != nil {
-			t.Fatalf("Begin: %v", err)
-		}
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{
-			ID:   "addon-cluster-mgmt",
-			Name: "Cluster Addon",
-			Type: "test",
-			Properties: map[string]string{
-				"foo": "bar",
-			},
-			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-		}); err != nil {
-			t.Fatalf("Targets.Create: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("Commit: %v", err)
-		}
-	}
-
-	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
-			ContentHash:    []byte("hash"),
-			SignatureBytes: []byte("sig"),
-		},
-	})
-	if err != nil {
-		t.Fatalf("RegisterType: %v", err)
-	}
+	registerTestAddon(t, h.store, "clusters")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: "clusters",
@@ -361,39 +354,7 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	{
-		tx, err := h.store.Begin(ctx)
-		if err != nil {
-			t.Fatalf("Begin: %v", err)
-		}
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{
-			ID:   "addon-cluster-mgmt",
-			Name: "Cluster Addon",
-			Type: "test",
-			Properties: map[string]string{
-				"foo": "bar",
-			},
-			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-		}); err != nil {
-			t.Fatalf("Targets.Create: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("Commit: %v", err)
-		}
-	}
-
-	_, err := h.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
-			ContentHash:    []byte("hash"),
-			SignatureBytes: []byte("sig"),
-		},
-	})
-	if err != nil {
-		t.Fatalf("RegisterType: %v", err)
-	}
+	registerTestAddon(t, h.store, "clusters")
 
 	first, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: "clusters",
@@ -423,6 +384,160 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 	}
 	if recreated.ManagedResource.CurrentVersion != 1 {
 		t.Fatalf("recreated CurrentVersion = %d, want 1", recreated.ManagedResource.CurrentVersion)
+	}
+}
+
+func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	store := newStore(t)
+	reg := &memworkflow.Registry{}
+	reporter := application.NewDeliveryReportService(store, reg)
+
+	agent := &authFailThenSucceedAgent{reporter: reporter}
+
+	orchSpec := &domain.OrchestrationWorkflowSpec{
+		Store:           store,
+		Delivery:        agent,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
+	}
+	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+
+	createWfSpec := &domain.CreateManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	createWf, err := reg.RegisterCreateManagedResource(createWfSpec)
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+
+	resumeWfSpec := &domain.ResumeManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+		ProvenanceSvc: &domain.ProvenanceService{},
+	}
+	resumeWf, err := reg.RegisterResumeManagedResource(resumeWfSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeManagedResource: %v", err)
+	}
+
+	resourceSvc := &application.ManagedResourceService{
+		Store:    store,
+		CreateWF: createWf,
+		ResumeWF: resumeWf,
+	}
+
+	registerTestAddon(t, store, "clusters")
+
+	// Create a managed resource with auth context (delivery will fail with auth error).
+	createCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "expired-token",
+	})
+
+	view, err := resourceSvc.Create(createCtx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Wait for the fulfillment to pause due to auth failure.
+	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStatePausedAuth)
+
+	// Resume with fresh credentials.
+	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "fresh-token",
+	})
+
+	resumed, err := resourceSvc.Resume(resumeCtx, application.ResumeManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+	})
+	if err != nil {
+		t.Fatalf("Resume: %v", err)
+	}
+
+	// The returned view is a snapshot from mutation time (before
+	// orchestration converges), so verify auth was updated.
+	if resumed.Fulfillment.Auth.Token != "fresh-token" {
+		t.Errorf("Auth.Token = %q, want %q", resumed.Fulfillment.Auth.Token, "fresh-token")
+	}
+	if resumed.ManagedResource.Name != "prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", resumed.ManagedResource.Name, "prod-us-east-1")
+	}
+
+	// After the workflow completes (convergence loop returned), the
+	// fulfillment in the store should be active.
+	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+}
+
+func TestManagedResourceService_Resume_NotPaused(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	h := setupManagedResources(t)
+
+	registerTestAddon(t, h.store, "clusters")
+
+	// Create a resource that succeeds (becomes active, not paused).
+	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+
+	// Attempt to resume an active resource — should fail.
+	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "token",
+	})
+	_, err = h.resourceSvc.Resume(resumeCtx, application.ResumeManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for resume on active resource, got: %v", err)
+	}
+}
+
+func TestManagedResourceService_Resume_NoAuth(t *testing.T) {
+	h := setupManagedResources(t)
+
+	_, err := h.resourceSvc.Resume(context.Background(), application.ResumeManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-us-east-1",
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument for unauthenticated resume, got: %v", err)
+	}
+}
+
+func TestManagedResourceService_Resume_NotFound(t *testing.T) {
+	h := setupManagedResources(t)
+	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "token",
+	})
+
+	_, err := h.resourceSvc.Resume(ctx, application.ResumeManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "nonexistent",
+	})
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound for nonexistent resource, got: %v", err)
 	}
 }
 

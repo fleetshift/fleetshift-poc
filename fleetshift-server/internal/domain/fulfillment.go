@@ -71,6 +71,7 @@ func (f *Fulfillment) BumpGeneration() {
 // provenance but no replacement is supplied (re-signing is required).
 //
 // TODO: revisit the provenance requirement
+// TODO: also revisit state requirement – maybe it's fine to "resume" something that is still active with new auth
 func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
 	if f.State != FulfillmentStatePausedAuth {
 		return fmt.Errorf("%w: fulfillment is in state %q, not paused_auth",
@@ -235,4 +236,3 @@ type ReconciliationResult struct {
 	ResolvedTargets []TargetID
 	Auth            DeliveryAuth
 }
-
