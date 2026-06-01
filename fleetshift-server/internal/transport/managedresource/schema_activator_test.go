@@ -2,7 +2,6 @@ package managedresource_test
 
 import (
 	"context"
-	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -350,21 +349,7 @@ type activatorResourceEnv struct {
 func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	t.Helper()
 
-	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	db, err := sqlite.Open(dsn)
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	db.SetMaxOpenConns(2)
-	sentinel, err := db.Conn(context.Background())
-	if err != nil {
-		db.Close()
-		t.Fatalf("open sentinel: %v", err)
-	}
-	t.Cleanup(func() {
-		sentinel.Close()
-		db.Close()
-	})
+	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 
 	recordingAgent := &sqlite.RecordingDeliveryService{

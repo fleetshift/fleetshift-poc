@@ -68,20 +68,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 	t.Helper()
 
 	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", t.Name(), n)
-	db, err := sqlite.Open(dsn)
-	if err != nil {
-		t.Fatalf("open test db: %v", err)
-	}
-	db.SetMaxOpenConns(2)
-	sentinel, err := db.Conn(context.Background())
-	if err != nil {
-		db.Close()
-		t.Fatalf("open sentinel: %v", err)
-	}
-	t.Cleanup(func() {
-		sentinel.Close()
-		db.Close()
-	})
+	db := sqlite.OpenTestDSN(t, dsn)
 	store := &sqlite.Store{DB: db}
 
 	recordingAgent := &sqlite.RecordingDeliveryService{

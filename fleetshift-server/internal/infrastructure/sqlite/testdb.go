@@ -7,10 +7,16 @@ import (
 	"testing"
 )
 
-// OpenTestDB opens an in-memory SQLite database with all migrations applied.
-// The database is closed when the test finishes. Shared-cache mode is used
-// so that all connections from the pool share the same in-memory database,
-// which is necessary when the database is accessed from multiple goroutines.
+// OpenTestDB opens an in-memory SQLite database with the current schema
+// applied. The database is closed when the test finishes.
+//
+// Schema initialization is fast: migrations run once per process to build
+// a DDL snapshot, and each test database replays the snapshot directly,
+// bypassing goose version tracking and migration-file parsing.
+//
+// Shared-cache mode is used so that all connections from the pool share
+// the same in-memory database, which is necessary when the database is
+// accessed from multiple goroutines.
 //
 // A sentinel connection is held open for the lifetime of the test to prevent
 // the shared-cache database from being destroyed if the pool momentarily
@@ -26,7 +32,20 @@ import (
 func OpenTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	dsn := fmt.Sprintf("file:%s?mode=memory&cache=shared", t.Name())
-	db, err := Open(dsn)
+	return openTestDSN(t, dsn)
+}
+
+// OpenTestDSN is like [OpenTestDB] but accepts an explicit DSN. Use
+// this when a test needs multiple independent in-memory databases
+// (e.g. by appending a sequence suffix to the DSN).
+func OpenTestDSN(t *testing.T, dsn string) *sql.DB {
+	t.Helper()
+	return openTestDSN(t, dsn)
+}
+
+func openTestDSN(t *testing.T, dsn string) *sql.DB {
+	t.Helper()
+	db, err := openWithSchema(dsn)
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
