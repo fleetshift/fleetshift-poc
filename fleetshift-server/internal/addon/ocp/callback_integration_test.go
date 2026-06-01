@@ -186,4 +186,3 @@ func TestCallbackIntegration_FailureSignalsDone(t *testing.T) {
 		t.Error("RequiresDestroy = false, want true")
 	}
 }
-

@@ -11,11 +11,11 @@ import (
 )
 
 type knownRoutes struct {
-	mu        sync.RWMutex
-	prefixes  []string
-	loadedAt  time.Time
-	webDir    string
-	cacheTTL  time.Duration
+	mu       sync.RWMutex
+	prefixes []string
+	loadedAt time.Time
+	webDir   string
+	cacheTTL time.Duration
 }
 
 func newKnownRoutes(webDir string) *knownRoutes {

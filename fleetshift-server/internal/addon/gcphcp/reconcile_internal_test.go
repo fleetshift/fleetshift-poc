@@ -59,7 +59,7 @@ type fakeCleanupInfra struct {
 	createInfraResults       []createAttemptResult
 	destroyInfraResults      []error
 	createIAMDelay           time.Duration
-	waitPSCDelay            time.Duration
+	waitPSCDelay             time.Duration
 	createIAMCalls           int
 	createInfraCalls         int
 	waitPSCCalls             int

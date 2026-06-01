@@ -469,11 +469,11 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		t.Fatalf("CompileInline: %v", err)
 	}
 	descs, err := managedresource.BuildServiceDescriptors(&managedresource.ResourceTypeConfig{
-		ResourceType: schema.ResourceType,
-		Singular:     schema.Singular,
-		Plural:       schema.Plural,
-		ProtoPackage: "fleetshift.v1",
-		SpecMessage:  protoreflect.FullName(schema.SpecMessage),
+		ResourceType:   schema.ResourceType,
+		Singular:       schema.Singular,
+		Plural:         schema.Plural,
+		ProtoPackage:   "fleetshift.v1",
+		SpecMessage:    protoreflect.FullName(schema.SpecMessage),
 		SpecDescriptor: specDesc.Message,
 	}, specDesc.Message)
 	if err != nil {

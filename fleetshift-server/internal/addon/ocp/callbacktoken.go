@@ -86,4 +86,3 @@ func (s *CallbackTokenSigner) Verify(tokenString string) (string, error) {
 
 	return sub, nil
 }
-

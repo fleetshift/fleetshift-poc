@@ -21,10 +21,10 @@ import (
 
 // TrustedIssuer describes an OIDC issuer the delivery agent trusts.
 type TrustedIssuer struct {
-	JWKSURI                 domain.EndpointURL
-	Audience                domain.Audience // enrollment audience
+	JWKSURI                  domain.EndpointURL
+	Audience                 domain.Audience // enrollment audience
 	PublicKeyClaimExpression string
-	RegistrySubjectMapping  *domain.RegistrySubjectMapping
+	RegistrySubjectMapping   *domain.RegistrySubjectMapping
 }
 
 // Verifier verifies attestation bundles. It owns a JWKS cache for

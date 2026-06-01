@@ -159,8 +159,8 @@ func TestValidateClusterName(t *testing.T) {
 	})
 
 	invalidNames := []struct {
-		name    string
-		input   string
+		name  string
+		input string
 	}{
 		{"uppercase", "TestCluster"},
 		{"starts with number", "1cluster"},

@@ -286,71 +286,71 @@ type NoOpFulfillmentRunProbe struct{}
 func (NoOpFulfillmentRunProbe) DispatchCycleStarted(int, Generation) DispatchCycleProbe {
 	return NoOpDispatchCycleProbe{}
 }
-func (NoOpFulfillmentRunProbe) StateChanged(FulfillmentState)                     {}
-func (NoOpFulfillmentRunProbe) RolloutStepStarted(int, int, bool)                 {}
+func (NoOpFulfillmentRunProbe) StateChanged(FulfillmentState)                       {}
+func (NoOpFulfillmentRunProbe) RolloutStepStarted(int, int, bool)                   {}
 func (NoOpFulfillmentRunProbe) GenerationAdvancedMidRollout(Generation, Generation) {}
-func (NoOpFulfillmentRunProbe) ReconciliationRestarting(Generation)                {}
-func (NoOpFulfillmentRunProbe) ContinueAsNewTriggered()                           {}
-func (NoOpFulfillmentRunProbe) DeleteStarted(int)                                 {}
-func (NoOpFulfillmentRunProbe) ManifestsFiltered(TargetInfo, int, int)             {}
-func (NoOpFulfillmentRunProbe) Error(error)                                        {}
-func (NoOpFulfillmentRunProbe) End()                                               {}
+func (NoOpFulfillmentRunProbe) ReconciliationRestarting(Generation)                 {}
+func (NoOpFulfillmentRunProbe) ContinueAsNewTriggered()                             {}
+func (NoOpFulfillmentRunProbe) DeleteStarted(int)                                   {}
+func (NoOpFulfillmentRunProbe) ManifestsFiltered(TargetInfo, int, int)              {}
+func (NoOpFulfillmentRunProbe) Error(error)                                         {}
+func (NoOpFulfillmentRunProbe) End()                                                {}
 
 // NoOpDispatchCycleProbe is a [DispatchCycleProbe] that discards all events.
 type NoOpDispatchCycleProbe struct{}
 
-func (NoOpDispatchCycleProbe) Dispatched(DeliveryID, bool)                    {}
-func (NoOpDispatchCycleProbe) Skipped(DeliveryID)                             {}
-func (NoOpDispatchCycleProbe) AckReceived(DeliveryID)                         {}
-func (NoOpDispatchCycleProbe) AckTimeout(int)                                 {}
-func (NoOpDispatchCycleProbe) Completed(DeliveryID, DeliveryState)            {}
+func (NoOpDispatchCycleProbe) Dispatched(DeliveryID, bool)                      {}
+func (NoOpDispatchCycleProbe) Skipped(DeliveryID)                               {}
+func (NoOpDispatchCycleProbe) AckReceived(DeliveryID)                           {}
+func (NoOpDispatchCycleProbe) AckTimeout(int)                                   {}
+func (NoOpDispatchCycleProbe) Completed(DeliveryID, DeliveryState)              {}
 func (NoOpDispatchCycleProbe) StaleEventDiscarded(FulfillmentEvent, Generation) {}
-func (NoOpDispatchCycleProbe) Error(error)                                     {}
-func (NoOpDispatchCycleProbe) End()                                            {}
+func (NoOpDispatchCycleProbe) Error(error)                                      {}
+func (NoOpDispatchCycleProbe) End()                                             {}
 
 // NoOpAcquireLockProbe is an [AcquireLockProbe] that discards all events.
 type NoOpAcquireLockProbe struct{}
 
-func (NoOpAcquireLockProbe) LockAcquired(bool)      {}
-func (NoOpAcquireLockProbe) PoolLoaded(int)          {}
-func (NoOpAcquireLockProbe) EvidenceResolved(bool)   {}
-func (NoOpAcquireLockProbe) Error(error)             {}
-func (NoOpAcquireLockProbe) End()                    {}
+func (NoOpAcquireLockProbe) LockAcquired(bool)     {}
+func (NoOpAcquireLockProbe) PoolLoaded(int)        {}
+func (NoOpAcquireLockProbe) EvidenceResolved(bool) {}
+func (NoOpAcquireLockProbe) Error(error)           {}
+func (NoOpAcquireLockProbe) End()                  {}
 
 // NoOpDeliverProbe is a [DeliverProbe] that discards all events.
 type NoOpDeliverProbe struct{}
 
-func (NoOpDeliverProbe) NewDelivery()                     {}
-func (NoOpDeliverProbe) Redispatched(Generation)          {}
-func (NoOpDeliverProbe) Retried()                         {}
-func (NoOpDeliverProbe) ResetForRetry(DeliveryState)      {}
-func (NoOpDeliverProbe) SkippedAlreadyAcked()             {}
-func (NoOpDeliverProbe) Error(error)                      {}
-func (NoOpDeliverProbe) End()                             {}
+func (NoOpDeliverProbe) NewDelivery()                {}
+func (NoOpDeliverProbe) Redispatched(Generation)     {}
+func (NoOpDeliverProbe) Retried()                    {}
+func (NoOpDeliverProbe) ResetForRetry(DeliveryState) {}
+func (NoOpDeliverProbe) SkippedAlreadyAcked()        {}
+func (NoOpDeliverProbe) Error(error)                 {}
+func (NoOpDeliverProbe) End()                        {}
 
 // NoOpRemoveProbe is a [RemoveProbe] that discards all events.
 type NoOpRemoveProbe struct{}
 
-func (NoOpRemoveProbe) TargetNotFound()   {}
-func (NoOpRemoveProbe) Withdrawn()        {}
-func (NoOpRemoveProbe) AlreadyPending()   {}
-func (NoOpRemoveProbe) Error(error)       {}
-func (NoOpRemoveProbe) End()              {}
+func (NoOpRemoveProbe) TargetNotFound() {}
+func (NoOpRemoveProbe) Withdrawn()      {}
+func (NoOpRemoveProbe) AlreadyPending() {}
+func (NoOpRemoveProbe) Error(error)     {}
+func (NoOpRemoveProbe) End()            {}
 
 // NoOpPersistReconciliationProbe is a [PersistReconciliationProbe] that
 // discards all events.
 type NoOpPersistReconciliationProbe struct{}
 
 func (NoOpPersistReconciliationProbe) Persisted(FulfillmentState, bool) {}
-func (NoOpPersistReconciliationProbe) DeleteCleanupSignaled()          {}
-func (NoOpPersistReconciliationProbe) Error(error)                     {}
-func (NoOpPersistReconciliationProbe) End()                            {}
+func (NoOpPersistReconciliationProbe) DeleteCleanupSignaled()           {}
+func (NoOpPersistReconciliationProbe) Error(error)                      {}
+func (NoOpPersistReconciliationProbe) End()                             {}
 
 // NoOpProcessOutputsProbe is a [ProcessOutputsProbe] that discards
 // all events.
 type NoOpProcessOutputsProbe struct{}
 
-func (NoOpProcessOutputsProbe) SecretsStored(int)    {}
+func (NoOpProcessOutputsProbe) SecretsStored(int)     {}
 func (NoOpProcessOutputsProbe) TargetsRegistered(int) {}
 func (NoOpProcessOutputsProbe) Skipped()              {}
 func (NoOpProcessOutputsProbe) Error(error)           {}

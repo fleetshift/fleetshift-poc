@@ -8,17 +8,17 @@ import (
 
 func TestClusterOutput_Target(t *testing.T) {
 	output := ClusterOutput{
-		TargetID:      "target-123",
-		Name:          "test-cluster",
-		APIServer:     "https://api.test.example.com:6443",
-		CACert:        []byte("-----BEGIN CERTIFICATE-----\ntest-ca\n-----END CERTIFICATE-----"),
-		SATokenRef:    "vault/sa-token-ref",
-		InfraID:       "test-infra-id",
-		ClusterID:     "test-cluster-uuid",
-		Region:        "us-east-1",
-		RoleARN:       "arn:aws:iam::123456789012:role/test",
-		ReleaseImage:  "quay.io/openshift-release-dev/ocp-release:4.21.0-multi",
-		CCOSTSMode:    true,
+		TargetID:     "target-123",
+		Name:         "test-cluster",
+		APIServer:    "https://api.test.example.com:6443",
+		CACert:       []byte("-----BEGIN CERTIFICATE-----\ntest-ca\n-----END CERTIFICATE-----"),
+		SATokenRef:   "vault/sa-token-ref",
+		InfraID:      "test-infra-id",
+		ClusterID:    "test-cluster-uuid",
+		Region:       "us-east-1",
+		RoleARN:      "arn:aws:iam::123456789012:role/test",
+		ReleaseImage: "quay.io/openshift-release-dev/ocp-release:4.21.0-multi",
+		CCOSTSMode:   true,
 	}
 
 	target := output.Target()

@@ -423,8 +423,8 @@ func (r *recordingReporter) ListActiveDeliveries(context.Context, []domain.Targe
 // recordingAgentObserver captures [kind.ClusterDeliverProbe] events.
 type recordingAgentObserver struct {
 	kind.NoOpAgentObserver
-	mu      sync.Mutex
-	probes  []*recordingClusterProbe
+	mu     sync.Mutex
+	probes []*recordingClusterProbe
 }
 
 func (o *recordingAgentObserver) ClusterDeliverStarted(ctx context.Context, clusterName string) (context.Context, kind.ClusterDeliverProbe) {

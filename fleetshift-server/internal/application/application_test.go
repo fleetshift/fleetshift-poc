@@ -100,10 +100,10 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	return testHarness{
 		targets: &application.TargetService{Store: store},
 		deployments: &application.DeploymentService{
-			Store:      store,
-			CreateWF:   createWf,
-			DeleteWF:   deleteWf,
-			ResumeWF:   resumeWf,
+			Store:         store,
+			CreateWF:      createWf,
+			DeleteWF:      deleteWf,
+			ResumeWF:      resumeWf,
 			ProvenanceSvc: provenanceSvc,
 		},
 		store:    store,

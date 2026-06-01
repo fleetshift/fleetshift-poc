@@ -139,11 +139,11 @@ type: Opaque
 `
 
 type authCRData struct {
-	IssuerURL       string
-	Audiences       []string
-	HasCABundle     bool
-	HasCLIClient    bool
-	CLIClientID     string
+	IssuerURL        string
+	Audiences        []string
+	HasCABundle      bool
+	HasCLIClient     bool
+	CLIClientID      string
 	HasConsoleClient bool
 	ConsoleClientID  string
 }

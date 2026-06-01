@@ -339,9 +339,9 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type testAttestationBundle struct {
-	attestation    *domain.Attestation
-	keyResolver    *domain.KeyResolver
-	httpClient     *http.Client
+	attestation     *domain.Attestation
+	keyResolver     *domain.KeyResolver
+	httpClient      *http.Client
 	trustBundleJSON string
 }
 

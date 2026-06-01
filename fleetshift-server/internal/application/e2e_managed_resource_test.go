@@ -95,9 +95,9 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		Store: store,
 	}
 	resourceSvc := &application.ManagedResourceService{
-		Store:      store,
-		CreateWF:   createWf,
-		DeleteWF:   deleteWf,
+		Store:         store,
+		CreateWF:      createWf,
+		DeleteWF:      deleteWf,
 		ProvenanceSvc: provenanceSvc,
 	}
 

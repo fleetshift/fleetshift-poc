@@ -363,11 +363,11 @@ func TestParseClusterSpec_CCOSTSModeDefaultTrue(t *testing.T) {
 func TestBuildClusterYAML_STSMode(t *testing.T) {
 	stsTrue := true
 	spec := &ClusterSpec{
-		Name:        "test-cluster",
-		BaseDomain:  "example.com",
-		Region:      "us-east-1",
-		RoleARN:     "arn:aws:iam::123:role/r",
-		CCOSTSMode:  &stsTrue,
+		Name:       "test-cluster",
+		BaseDomain: "example.com",
+		Region:     "us-east-1",
+		RoleARN:    "arn:aws:iam::123:role/r",
+		CCOSTSMode: &stsTrue,
 	}
 
 	yamlBytes, err := BuildClusterYAML(spec, "us-east-1", "/path/to/pull-secret.json", "ssh-ed25519 AAAAC3...")
@@ -391,11 +391,11 @@ func TestBuildClusterYAML_STSMode(t *testing.T) {
 func TestBuildClusterYAML_MintMode(t *testing.T) {
 	stsFalse := false
 	spec := &ClusterSpec{
-		Name:        "test-cluster",
-		BaseDomain:  "example.com",
-		Region:      "us-east-1",
-		RoleARN:     "arn:aws:iam::123:role/r",
-		CCOSTSMode:  &stsFalse,
+		Name:       "test-cluster",
+		BaseDomain: "example.com",
+		Region:     "us-east-1",
+		RoleARN:    "arn:aws:iam::123:role/r",
+		CCOSTSMode: &stsFalse,
 	}
 
 	yamlBytes, err := BuildClusterYAML(spec, "us-east-1", "/path/to/pull-secret.json", "ssh-ed25519 AAAAC3...")
@@ -415,4 +415,3 @@ func TestBuildClusterYAML_MintMode(t *testing.T) {
 		t.Errorf("expected YAML to NOT contain 'credentialsMode', got:\n%s", yamlStr)
 	}
 }
-

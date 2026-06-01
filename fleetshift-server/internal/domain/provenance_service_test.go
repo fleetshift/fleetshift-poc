@@ -89,10 +89,10 @@ func TestProvenanceService_BuildDeploymentProvenance(t *testing.T) {
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-1",
+			ID:                "enroll-1",
 			FederatedIdentity: identity,
-			RegistrySubject: registrySubject,
-			RegistryID:      "github.com",
+			RegistrySubject:   registrySubject,
+			RegistryID:        "github.com",
 		}},
 	}
 
@@ -157,10 +157,10 @@ func TestProvenanceService_BuildDeploymentProvenance_BadSignature(t *testing.T) 
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-1",
+			ID:                "enroll-1",
 			FederatedIdentity: identity,
-			RegistrySubject: registrySubject,
-			RegistryID:      "github.com",
+			RegistrySubject:   registrySubject,
+			RegistryID:        "github.com",
 		}},
 	}
 
@@ -211,10 +211,10 @@ func TestProvenanceService_BuildManagedResourceProvenance(t *testing.T) {
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-1",
+			ID:                "enroll-1",
 			FederatedIdentity: identity,
-			RegistrySubject: registrySubject,
-			RegistryID:      "github.com",
+			RegistrySubject:   registrySubject,
+			RegistryID:        "github.com",
 		}},
 	}
 
@@ -282,10 +282,10 @@ func TestProvenanceService_VerifySignature(t *testing.T) {
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-1",
+			ID:                "enroll-1",
 			FederatedIdentity: identity,
-			RegistrySubject: registrySubject,
-			RegistryID:      "github.com",
+			RegistrySubject:   registrySubject,
+			RegistryID:        "github.com",
 		}},
 	}
 
@@ -331,10 +331,10 @@ func TestProvenanceService_VerifySignature_InvalidSig(t *testing.T) {
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-1",
+			ID:                "enroll-1",
 			FederatedIdentity: identity,
-			RegistrySubject: registrySubject,
-			RegistryID:      "github.com",
+			RegistrySubject:   registrySubject,
+			RegistryID:        "github.com",
 		}},
 	}
 
@@ -394,10 +394,10 @@ func TestProvenanceService_OIDC_KeyFromClaim(t *testing.T) {
 
 	enrollments := &fakeSignerEnrollmentRepo{
 		enrollments: []domain.SignerEnrollment{{
-			ID:              "enroll-oidc",
+			ID:                "enroll-oidc",
 			FederatedIdentity: identity,
-			RegistryID:      "oidc",
-			IdentityToken:   domain.RawToken(fakeJWT),
+			RegistryID:        "oidc",
+			IdentityToken:     domain.RawToken(fakeJWT),
 		}},
 	}
 

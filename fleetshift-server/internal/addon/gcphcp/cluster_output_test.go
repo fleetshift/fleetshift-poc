@@ -11,19 +11,19 @@ import (
 
 func TestClusterOutput_Target(t *testing.T) {
 	output := gcphcp.ClusterOutput{
-		TargetID:  "target-123",
-		Name:      "test-cluster",
-		APIServer: "https://1.2.3.4:6443",
-		CACert:    []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
+		TargetID:   "target-123",
+		Name:       "test-cluster",
+		APIServer:  "https://1.2.3.4:6443",
+		CACert:     []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
 		SATokenRef: "vault/secret/test-token",
 		SAToken:    []byte("sa-token-value"),
 		TrustBundles: []domain.TrustBundleEntry{
 			{
-				IssuerURL:                  "https://issuer.example.com",
-				JWKSURI:                    "https://issuer.example.com/.well-known/jwks.json",
-				EnrollmentAudience:         "fleetshift",
-				PublicKeyClaimExpression:   ".pub",
-				RegistrySubjectMapping:     &domain.RegistrySubjectMapping{
+				IssuerURL:                "https://issuer.example.com",
+				JWKSURI:                  "https://issuer.example.com/.well-known/jwks.json",
+				EnrollmentAudience:       "fleetshift",
+				PublicKeyClaimExpression: ".pub",
+				RegistrySubjectMapping: &domain.RegistrySubjectMapping{
 					RegistryID: "github.com",
 					Expression: "claims.sub",
 				},

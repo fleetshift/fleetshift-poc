@@ -202,4 +202,3 @@ func unmarshalJSON[T any](data string, dst *T, label string) error {
 	}
 	return nil
 }
-

@@ -91,12 +91,12 @@ func TestIAMConfigToWIFSpec(t *testing.T) {
 				"providerId": "test-provider",
 			},
 			"serviceAccounts": map[string]any{
-				"ctrlplane-op":      "ctrlplane@project.iam.gserviceaccount.com",
-				"nodepool-mgmt":     "nodepool@project.iam.gserviceaccount.com",
-				"cloud-controller":  "controller@project.iam.gserviceaccount.com",
-				"gcp-pd-csi":        "storage@project.iam.gserviceaccount.com",
-				"image-registry":    "registry@project.iam.gserviceaccount.com",
-				"cloud-network":     "network@project.iam.gserviceaccount.com",
+				"ctrlplane-op":     "ctrlplane@project.iam.gserviceaccount.com",
+				"nodepool-mgmt":    "nodepool@project.iam.gserviceaccount.com",
+				"cloud-controller": "controller@project.iam.gserviceaccount.com",
+				"gcp-pd-csi":       "storage@project.iam.gserviceaccount.com",
+				"image-registry":   "registry@project.iam.gserviceaccount.com",
+				"cloud-network":    "network@project.iam.gserviceaccount.com",
 			},
 			"projectNumber": "123456789012",
 		}
@@ -126,12 +126,12 @@ func TestIAMConfigToWIFSpec(t *testing.T) {
 		}
 
 		expectedMappings := map[string]string{
-			"controlPlaneEmail":   "ctrlplane@project.iam.gserviceaccount.com",
-			"nodePoolEmail":       "nodepool@project.iam.gserviceaccount.com",
+			"controlPlaneEmail":    "ctrlplane@project.iam.gserviceaccount.com",
+			"nodePoolEmail":        "nodepool@project.iam.gserviceaccount.com",
 			"cloudControllerEmail": "controller@project.iam.gserviceaccount.com",
-			"storageEmail":        "storage@project.iam.gserviceaccount.com",
-			"imageRegistryEmail":  "registry@project.iam.gserviceaccount.com",
-			"networkEmail":        "network@project.iam.gserviceaccount.com",
+			"storageEmail":         "storage@project.iam.gserviceaccount.com",
+			"imageRegistryEmail":   "registry@project.iam.gserviceaccount.com",
+			"networkEmail":         "network@project.iam.gserviceaccount.com",
 		}
 
 		for key, expected := range expectedMappings {
