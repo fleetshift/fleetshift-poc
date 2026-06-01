@@ -6,11 +6,20 @@ import (
 	"time"
 )
 
-// MutationResult is the outcome of a mutation activity: the
-// deployment view snapshot after mutation, the fulfillment ID, and
+// deploymentMutationResult is the outcome of a deployment mutation
+// activity: the view snapshot after mutation, the fulfillment ID, and
 // the generation it wrote.
-type MutationResult struct {
+type deploymentMutationResult struct {
 	View          DeploymentView
+	FulfillmentID FulfillmentID
+	MyGen         Generation
+}
+
+// managedResourceMutationResult is the outcome of a managed resource
+// mutation activity: the view snapshot after mutation, the fulfillment
+// ID, and the generation it wrote.
+type managedResourceMutationResult struct {
+	View          ManagedResourceView
 	FulfillmentID FulfillmentID
 	MyGen         Generation
 }

@@ -18,13 +18,6 @@ type ResumeManagedResourceInput struct {
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
 }
 
-// resumeManagedResourceMutationResult holds the activity output
-// consumed by the convergence loop and returned to the caller.
-type resumeManagedResourceMutationResult struct {
-	View          ManagedResourceView
-	FulfillmentID FulfillmentID
-	MyGen         Generation
-}
 
 // ResumeManagedResourceWorkflowSpec transitions a
 // [FulfillmentStatePausedAuth] managed resource fulfillment back to
@@ -45,27 +38,27 @@ func (s *ResumeManagedResourceWorkflowSpec) Name() string { return "resume-manag
 // and bumps its generation inside a serialized write transaction.
 // Provenance is built against the next generation using the current
 // intent spec.
-func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeManagedResourceInput, resumeManagedResourceMutationResult] {
-	return NewActivity("mr-mutate-to-resumed", func(ctx context.Context, in ResumeManagedResourceInput) (resumeManagedResourceMutationResult, error) {
+func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeManagedResourceInput, managedResourceMutationResult] {
+	return NewActivity("mr-mutate-to-resumed", func(ctx context.Context, in ResumeManagedResourceInput) (managedResourceMutationResult, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return resumeManagedResourceMutationResult{}, fmt.Errorf("begin tx: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
 		if err != nil {
-			return resumeManagedResourceMutationResult{}, err
+			return managedResourceMutationResult{}, err
 		}
 
 		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion)
 		if err != nil {
-			return resumeManagedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
 		if err != nil {
-			return resumeManagedResourceMutationResult{}, err
+			return managedResourceMutationResult{}, err
 		}
 
 		var prov *Provenance
@@ -77,22 +70,22 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 				nextGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {
-				return resumeManagedResourceMutationResult{}, fmt.Errorf("build provenance: %w", err)
+				return managedResourceMutationResult{}, fmt.Errorf("build provenance: %w", err)
 			}
 		}
 
 		if err := f.Resume(in.Auth, prov); err != nil {
-			return resumeManagedResourceMutationResult{}, err
+			return managedResourceMutationResult{}, err
 		}
 
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
-			return resumeManagedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return resumeManagedResourceMutationResult{}, fmt.Errorf("commit: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 
-		return resumeManagedResourceMutationResult{
+		return managedResourceMutationResult{
 			View: ManagedResourceView{
 				ManagedResource: *mr,
 				Intent:          intent,

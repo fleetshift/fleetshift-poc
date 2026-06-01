@@ -35,22 +35,22 @@ func (s *ResumeDeploymentWorkflowSpec) Name() string { return "resume-deployment
 // and bumps its generation inside a serialized write transaction.
 // The provenance is built against the actual next generation seen in
 // the write transaction, not a pre-read snapshot.
-func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeploymentInput, MutationResult] {
-	return NewActivity("mutate-to-resumed", func(ctx context.Context, in ResumeDeploymentInput) (MutationResult, error) {
+func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeploymentInput, deploymentMutationResult] {
+	return NewActivity("mutate-to-resumed", func(ctx context.Context, in ResumeDeploymentInput) (deploymentMutationResult, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return MutationResult{}, fmt.Errorf("begin tx: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		dep, err := tx.Deployments().Get(ctx, in.ID)
 		if err != nil {
-			return MutationResult{}, err
+			return deploymentMutationResult{}, err
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
 		if err != nil {
-			return MutationResult{}, err
+			return deploymentMutationResult{}, err
 		}
 
 		var prov *Provenance
@@ -62,21 +62,21 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 				nextGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {
-				return MutationResult{}, fmt.Errorf("build provenance: %w", err)
+				return deploymentMutationResult{}, fmt.Errorf("build provenance: %w", err)
 			}
 		}
 
 		if err := f.Resume(in.Auth, prov); err != nil {
-			return MutationResult{}, err
+			return deploymentMutationResult{}, err
 		}
 
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
-			return MutationResult{}, fmt.Errorf("update fulfillment: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return MutationResult{}, fmt.Errorf("commit: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
-		return MutationResult{
+		return deploymentMutationResult{
 			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
 			FulfillmentID: dep.FulfillmentID,
 			MyGen:         f.Generation,

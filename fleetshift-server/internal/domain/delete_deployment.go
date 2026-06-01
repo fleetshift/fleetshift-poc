@@ -29,33 +29,33 @@ func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment
 //
 // TODO: move delete transition rules onto Fulfillment so other mutations
 // cannot accidentally clear Deleting and effectively "undelete" later.
-func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID, MutationResult] {
-	return NewActivity("mutate-to-deleting", func(ctx context.Context, id DeploymentID) (MutationResult, error) {
+func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID, deploymentMutationResult] {
+	return NewActivity("mutate-to-deleting", func(ctx context.Context, id DeploymentID) (deploymentMutationResult, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return MutationResult{}, fmt.Errorf("begin tx: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		dep, err := tx.Deployments().Get(ctx, id)
 		if err != nil {
-			return MutationResult{}, err
+			return deploymentMutationResult{}, err
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
 		if err != nil {
-			return MutationResult{}, err
+			return deploymentMutationResult{}, err
 		}
 
 		f.State = FulfillmentStateDeleting
 		f.BumpGeneration()
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
-			return MutationResult{}, fmt.Errorf("update fulfillment: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
-			return MutationResult{}, fmt.Errorf("commit: %w", err)
+			return deploymentMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
-		return MutationResult{
+		return deploymentMutationResult{
 			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
 			FulfillmentID: dep.FulfillmentID,
 			MyGen:         f.Generation,
