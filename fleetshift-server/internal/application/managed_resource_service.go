@@ -17,7 +17,7 @@ type ManagedResourceService struct {
 	CreateWF   domain.CreateManagedResourceWorkflow
 	DeleteWF   domain.DeleteManagedResourceWorkflow
 	ResumeWF   domain.ResumeManagedResourceWorkflow
-	Provenance *domain.ProvenanceService
+	ProvenanceSvc *domain.ProvenanceService
 }
 
 // CreateManagedResourceInput carries the fields needed to create a
@@ -75,7 +75,7 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 				domain.ErrInvalidArgument,
 			)
 		}
-		prov, err = s.Provenance.BuildManagedResourceProvenance(
+		prov, err = s.ProvenanceSvc.BuildManagedResourceProvenance(
 			ctx,
 			tx.SignerEnrollments(),
 			ac.Subject,

@@ -14,7 +14,7 @@ type DeploymentService struct {
 	CreateWF   domain.CreateDeploymentWorkflow
 	DeleteWF   domain.DeleteDeploymentWorkflow
 	ResumeWF   domain.ResumeDeploymentWorkflow
-	Provenance *domain.ProvenanceService
+	ProvenanceSvc *domain.ProvenanceService
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -44,7 +44,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 			return domain.DeploymentView{}, fmt.Errorf("begin read tx: %w", err)
 		}
 		defer tx.Rollback()
-		prov, err := s.Provenance.BuildDeploymentProvenance(
+		prov, err := s.ProvenanceSvc.BuildDeploymentProvenance(
 			ctx, tx.SignerEnrollments(), ac.Subject,
 			in.ID, in.ManifestStrategy, in.PlacementStrategy,
 			in.ExpectedGeneration, in.UserSignature, in.ValidUntil,

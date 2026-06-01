@@ -26,7 +26,7 @@ type ResumeDeploymentInput struct {
 type ResumeDeploymentWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
-	Provenance    *ProvenanceService
+	ProvenanceSvc *ProvenanceService
 }
 
 func (s *ResumeDeploymentWorkflowSpec) Name() string { return "resume-deployment" }
@@ -56,7 +56,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
 			nextGen := f.Generation + 1
-			prov, err = s.Provenance.BuildDeploymentProvenance(
+			prov, err = s.ProvenanceSvc.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				dep.ID, f.ManifestStrategy, f.PlacementStrategy,
 				nextGen, in.UserSignature, in.ValidUntil,

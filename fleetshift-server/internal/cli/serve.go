@@ -424,7 +424,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		Provenance:    provenance,
+		ProvenanceSvc: provenance,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -434,7 +434,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		Provenance:    provenance,
+		ProvenanceSvc: provenance,
 	}
 	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
 	if err != nil {
@@ -446,7 +446,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateWF:   createWf,
 		DeleteWF:   deleteWf,
 		ResumeWF:   resumeWf,
-		Provenance: provenance,
+		ProvenanceSvc: provenance,
 	}
 
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
@@ -460,7 +460,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateWF:   createMRWf,
 		DeleteWF:   deleteMRWf,
 		ResumeWF:   resumeMRWf,
-		Provenance: provenance,
+		ProvenanceSvc: provenance,
 	}
 
 	// --- kubernetes delivery agent ---
@@ -530,7 +530,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodSvc,
 		Verifier:    tokenVerifier,
 		Store:       store,
-		Provenance:  provenance,
+		ProvenanceSvc: provenance,
 	})
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 

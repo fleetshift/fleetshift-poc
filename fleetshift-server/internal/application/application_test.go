@@ -90,7 +90,7 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		Provenance:    provenance,
+		ProvenanceSvc: provenance,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -104,7 +104,7 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 			CreateWF:   createWf,
 			DeleteWF:   deleteWf,
 			ResumeWF:   resumeWf,
-			Provenance: provenance,
+			ProvenanceSvc: provenance,
 		},
 		store:    store,
 		reporter: reporter,

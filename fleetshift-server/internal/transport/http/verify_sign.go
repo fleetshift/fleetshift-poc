@@ -16,7 +16,7 @@ type VerifySignHandler struct {
 	AuthMethods *application.AuthMethodService
 	Verifier    domain.OIDCTokenVerifier
 	Store       domain.Store
-	Provenance  *domain.ProvenanceService
+	ProvenanceSvc *domain.ProvenanceService
 }
 
 type verifySignRequest struct {
@@ -84,7 +84,7 @@ func (h *VerifySignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback()
 
-	err = h.Provenance.VerifySignature(
+	err = h.ProvenanceSvc.VerifySignature(
 		r.Context(),
 		tx.SignerEnrollments(),
 		caller,

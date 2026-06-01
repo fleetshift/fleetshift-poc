@@ -98,7 +98,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		Store:      store,
 		CreateWF:   createWf,
 		DeleteWF:   deleteWf,
-		Provenance: provenance,
+		ProvenanceSvc: provenance,
 	}
 
 	// --- Step 1: Register target (the addon) ---

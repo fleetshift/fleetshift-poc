@@ -36,7 +36,7 @@ type resumeManagedResourceMutationResult struct {
 type ResumeManagedResourceWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
-	Provenance    *ProvenanceService
+	ProvenanceSvc *ProvenanceService
 }
 
 func (s *ResumeManagedResourceWorkflowSpec) Name() string { return "resume-managed-resource" }
@@ -71,7 +71,7 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
 			nextGen := f.Generation + 1
-			prov, err = s.Provenance.BuildManagedResourceProvenance(
+			prov, err = s.ProvenanceSvc.BuildManagedResourceProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				in.ResourceType, in.Name, intent.Spec,
 				nextGen, in.UserSignature, in.ValidUntil,
