@@ -18,7 +18,6 @@ type ResumeManagedResourceInput struct {
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
 }
 
-
 // ResumeManagedResourceWorkflowSpec transitions a
 // [FulfillmentStatePausedAuth] managed resource fulfillment back to
 // active by updating auth/provenance, bumping its generation, and

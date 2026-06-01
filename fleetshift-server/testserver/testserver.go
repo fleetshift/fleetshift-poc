@@ -148,6 +148,15 @@ func Start(t *testing.T) string {
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
+	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeManagedResource: %v", err)
+	}
+
 	deploymentSvc := &application.DeploymentService{
 		Store:    store,
 		CreateWF: createWf,
@@ -159,6 +168,7 @@ func Start(t *testing.T) string {
 		Store:    store,
 		CreateWF: createMRWf,
 		DeleteWF: deleteMRWf,
+		ResumeWF: resumeMRWf,
 	}
 
 	specValidator, err := protovalidate.New()

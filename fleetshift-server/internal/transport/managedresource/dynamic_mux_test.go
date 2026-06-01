@@ -16,6 +16,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -116,9 +117,15 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 	if err != nil {
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
+	resumeMRWf, err := reg.RegisterResumeManagedResource(&domain.ResumeManagedResourceWorkflowSpec{
+		Store: store, Orchestration: orchWf,
+	})
+	if err != nil {
+		t.Fatalf("RegisterResumeManagedResource: %v", err)
+	}
 
 	managedResourceSvc := &application.ManagedResourceService{
-		Store: store, CreateWF: createMRWf, DeleteWF: deleteMRWf,
+		Store: store, CreateWF: createMRWf, DeleteWF: deleteMRWf, ResumeWF: resumeMRWf,
 	}
 
 	targetSvc := &application.TargetService{Store: store}
@@ -598,5 +605,146 @@ func TestDynamicHTTPMux_ReplaceAddsIfAbsent(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("POST status = %d, want 200", resp.StatusCode)
+	}
+}
+
+// serveGRPCOverTCPWithAuth starts a TCP gRPC server whose stream
+// interceptor authenticates when an "authorization" metadata value is
+// present. The dynamic mux dispatches through [grpc.UnknownServiceHandler]
+// which fires stream interceptors, matching production wiring.
+func serveGRPCOverTCPWithAuth(t *testing.T, svc *managedresource.RegisteredService) string {
+	t.Helper()
+	grpcMux := managedresource.NewDynamicServiceMux()
+	if err := grpcMux.Register(svc); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	authStreamInterceptor := func(srv any, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
+		md, _ := metadata.FromIncomingContext(ss.Context())
+		vals := md.Get("authorization")
+		if len(vals) > 0 && strings.HasPrefix(vals[0], "Bearer ") {
+			ctx := application.ContextWithAuth(ss.Context(), &application.AuthorizationContext{
+				Subject: &domain.SubjectClaims{
+					FederatedIdentity: domain.FederatedIdentity{Subject: "http-user", Issuer: "https://http-issuer.example.com"},
+				},
+				Token: domain.RawToken(strings.TrimPrefix(vals[0], "Bearer ")),
+			})
+			ss = &wrappedServerStream{ServerStream: ss, ctx: ctx}
+		}
+		return handler(srv, ss)
+	}
+
+	lis, err := net.Listen("tcp", "localhost:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	srv := grpc.NewServer(
+		grpc.ChainStreamInterceptor(authStreamInterceptor),
+		grpc.UnknownServiceHandler(grpcMux.Handle),
+	)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+	return lis.Addr().String()
+}
+
+type wrappedServerStream struct {
+	grpc.ServerStream
+	ctx context.Context
+}
+
+func (w *wrappedServerStream) Context() context.Context { return w.ctx }
+
+func TestDynamicHTTPMux_ResumeForwardsAuth(t *testing.T) {
+	svc := buildFullClusterService(t)
+	grpcAddr := serveGRPCOverTCPWithAuth(t, svc)
+
+	httpMux := managedresource.NewDynamicHTTPMux(nil)
+	if err := httpMux.Register(svc, grpcAddr); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ts := httptest.NewServer(httpMux.ServeMux())
+	defer ts.Close()
+
+	// Create a resource (no auth required for create in this harness).
+	resp := httpCreateCluster(t, ts.URL, "http-resume-test")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST create status = %d, want 200", resp.StatusCode)
+	}
+
+	// Use the gRPC path (with auth) to confirm the resource exists via HTTP GET.
+	getResp := httpGetCluster(t, ts.URL, "http-resume-test")
+	getResp.Body.Close()
+	if getResp.StatusCode != http.StatusOK {
+		t.Fatalf("GET status = %d, want 200", getResp.StatusCode)
+	}
+
+	// We can't easily transition to paused_auth via HTTP alone, so we
+	// verify the auth forwarding by calling resume on a non-paused
+	// resource WITH a bearer token. The expected error is
+	// "not paused_auth" (InvalidArgument/400), NOT "requires authenticated
+	// caller" — which would mean the token wasn't forwarded.
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/kindClusters/http-resume-test:resume", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer valid-test-token")
+
+	resumeResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST resume: %v", err)
+	}
+	defer resumeResp.Body.Close()
+	body, _ := io.ReadAll(resumeResp.Body)
+
+	// 400 (InvalidArgument) = auth succeeded, state check failed.
+	// If auth forwarding were broken, we'd get 400 with "requires
+	// authenticated caller" instead of "not paused_auth".
+	if resumeResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resume status = %d, want 400; body = %s", resumeResp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "not paused_auth") {
+		t.Errorf("expected 'not paused_auth' error, got: %s", body)
+	}
+}
+
+func TestDynamicHTTPMux_ResumeWithoutAuth_Rejected(t *testing.T) {
+	svc := buildFullClusterService(t)
+	grpcAddr := serveGRPCOverTCPWithAuth(t, svc)
+
+	httpMux := managedresource.NewDynamicHTTPMux(nil)
+	if err := httpMux.Register(svc, grpcAddr); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ts := httptest.NewServer(httpMux.ServeMux())
+	defer ts.Close()
+
+	// Create a resource.
+	resp := httpCreateCluster(t, ts.URL, "no-auth-resume")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST create status = %d, want 200", resp.StatusCode)
+	}
+
+	// Call resume WITHOUT Authorization header — should fail with auth error.
+	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/kindClusters/no-auth-resume:resume", nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+
+	resumeResp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("POST resume: %v", err)
+	}
+	defer resumeResp.Body.Close()
+	body, _ := io.ReadAll(resumeResp.Body)
+
+	if resumeResp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("resume status = %d, want 400; body = %s", resumeResp.StatusCode, body)
+	}
+	if !strings.Contains(string(body), "requires an authenticated caller") {
+		t.Errorf("expected 'requires an authenticated caller' error, got: %s", body)
 	}
 }
