@@ -194,6 +194,7 @@ type Registry interface {
 	RegisterCreateManagedResource(spec *CreateManagedResourceWorkflowSpec) (CreateManagedResourceWorkflow, error)
 	RegisterDeleteManagedResource(spec *DeleteManagedResourceWorkflowSpec) (DeleteManagedResourceWorkflow, error)
 	RegisterDeleteManagedResourceCleanup(spec *DeleteManagedResourceCleanupWorkflowSpec) (DeleteManagedResourceCleanupWorkflow, error)
+	RegisterResumeManagedResource(spec *ResumeManagedResourceWorkflowSpec) (ResumeManagedResourceWorkflow, error)
 }
 
 // OrchestrationWorkflow is a registered orchestration workflow that
@@ -265,6 +266,14 @@ type DeleteManagedResourceWorkflow interface {
 // instance ID is deterministic: cleanup-{fulfillmentID}.
 type DeleteManagedResourceCleanupWorkflow interface {
 	Start(ctx context.Context, input DeleteManagedResourceCleanupInput) (Execution[struct{}], error)
+}
+
+// ResumeManagedResourceWorkflow is a registered resume-managed-resource
+// workflow. Returned by [Registry.RegisterResumeManagedResource]. The
+// observedGen parameter derives a generation-qualified instance ID for
+// same-type dedup.
+type ResumeManagedResourceWorkflow interface {
+	Start(ctx context.Context, input ResumeManagedResourceInput, observedGen Generation) (Execution[ManagedResourceView], error)
 }
 
 // ContinueAsNewError is returned by a workflow body to request that

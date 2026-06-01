@@ -70,27 +70,15 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			return MutationResult{}, err
 		}
 
-		if f.State != FulfillmentStatePausedAuth {
-			return MutationResult{}, fmt.Errorf("%w: deployment %q is in state %q, not paused_auth",
-				ErrInvalidArgument, in.ID, f.State)
-		}
-
-		f.Auth = in.Auth
-
-		hadProvenance := f.Provenance != nil
-		if hadProvenance || len(in.UserSignature) > 0 {
-			if hadProvenance && len(in.UserSignature) == 0 {
-				return MutationResult{}, fmt.Errorf(
-					"%w: deployment %q has provenance; re-signing is required to resume",
-					ErrInvalidArgument, in.ID)
-			}
+		var prov *Provenance
+		if f.Provenance != nil || len(in.UserSignature) > 0 {
 			if s.ProvenanceBuilder == nil {
 				return MutationResult{}, fmt.Errorf(
 					"%w: signing not configured but deployment %q requires provenance",
 					ErrInvalidArgument, in.ID)
 			}
 			nextGen := f.Generation + 1
-			prov, err := s.ProvenanceBuilder.BuildProvenance(
+			prov, err = s.ProvenanceBuilder.BuildProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				dep.ID, f.ManifestStrategy, f.PlacementStrategy,
 				nextGen, in.UserSignature, in.ValidUntil,
@@ -98,10 +86,12 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			if err != nil {
 				return MutationResult{}, fmt.Errorf("build provenance: %w", err)
 			}
-			f.Provenance = prov
 		}
 
-		f.BumpGeneration()
+		if err := f.Resume(in.Auth, prov); err != nil {
+			return MutationResult{}, err
+		}
+
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return MutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}

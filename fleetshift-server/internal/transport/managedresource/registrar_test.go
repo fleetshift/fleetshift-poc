@@ -58,8 +58,9 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 }
 
 type testEnv struct {
-	conn *grpc.ClientConn
-	svc  *managedresource.RegisteredService
+	conn  *grpc.ClientConn
+	svc   *managedresource.RegisteredService
+	store domain.Store
 }
 
 func setup(t *testing.T) *testEnv {
@@ -192,10 +193,20 @@ func setupWithDelivery(
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
+	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
+		Store:         store,
+		Orchestration: orchWf,
+	}
+	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
+	if err != nil {
+		t.Fatalf("RegisterResumeManagedResource: %v", err)
+	}
+
 	managedResourceSvc := &application.ManagedResourceService{
 		Store:    store,
 		CreateWF: createMRWf,
 		DeleteWF: deleteMRWf,
+		ResumeWF: resumeMRWf,
 	}
 
 	targetSvc := &application.TargetService{Store: store}
@@ -227,7 +238,20 @@ func setupWithDelivery(
 	// --- Build and register dynamic service ---
 
 	lis := bufconn.Listen(1 << 20)
-	srv := grpc.NewServer()
+	// Interceptor injects a test auth context so Resume (and future
+	// auth-requiring RPCs) has a valid caller.
+	testAuthInterceptor := func(ctx context.Context, req any, _ *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (any, error) {
+		if application.AuthFromContext(ctx) == nil {
+			ctx = application.ContextWithAuth(ctx, &application.AuthorizationContext{
+				Subject: &domain.SubjectClaims{
+					FederatedIdentity: domain.FederatedIdentity{Subject: "test-user", Issuer: "https://test-issuer.example.com"},
+				},
+				Token: "test-token",
+			})
+		}
+		return handler(ctx, req)
+	}
+	srv := grpc.NewServer(grpc.UnaryInterceptor(testAuthInterceptor))
 
 	svc, err := managedresource.BuildAndRegister(srv, clusterConfig(t), managedresource.Deps{
 		Resources: managedResourceSvc,
@@ -251,7 +275,7 @@ func setupWithDelivery(
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	return &testEnv{conn: conn, svc: svc}
+	return &testEnv{conn: conn, svc: svc, store: store}
 }
 
 func TestDynamic_CreateThenGet(t *testing.T) {
@@ -552,8 +576,8 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	}
 
 	// Verify method count
-	if len(svc.Desc.Methods) != 4 {
-		t.Fatalf("method count = %d, want 4", len(svc.Desc.Methods))
+	if len(svc.Desc.Methods) != 5 {
+		t.Fatalf("method count = %d, want 5", len(svc.Desc.Methods))
 	}
 
 	// Verify method names
@@ -561,7 +585,7 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	for _, m := range svc.Desc.Methods {
 		methods[m.MethodName] = true
 	}
-	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster"} {
+	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster", "ResumeKindCluster"} {
 		if !methods[want] {
 			t.Errorf("missing method %q", want)
 		}
@@ -672,4 +696,200 @@ func TestDynamic_SpecDescriptorIdentity(t *testing.T) {
 		t.Fatal("expected validation error for empty spec, got nil")
 	}
 	t.Logf("validation error (expected): %v", err)
+}
+
+func TestDynamic_ProvenanceOnResponse(t *testing.T) {
+	env := setup(t)
+	ctx := context.Background()
+
+	// Create a resource.
+	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	idField := env.svc.Descriptors.CreateRequest.Fields().ByNumber(1)
+	createReq.Set(idField, protoreflect.ValueOfString("prov-cluster"))
+
+	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	specField := env.svc.Descriptors.Resource.Fields().ByName("spec")
+	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("prov-cluster"))
+	resource.Set(specField, protoreflect.ValueOfMessage(spec))
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
+
+	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/CreateKindCluster", createReq, createResp); err != nil {
+		t.Fatalf("CreateKindCluster: %v", err)
+	}
+
+	// Seed provenance on the fulfillment.
+	tx, err := env.store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "prov-cluster")
+	if err != nil {
+		t.Fatalf("get managed resource: %v", err)
+	}
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	if err != nil {
+		t.Fatalf("get fulfillment: %v", err)
+	}
+	f.Provenance = &domain.Provenance{
+		Sig: domain.Signature{
+			Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
+			ContentHash:    []byte("hash-bytes"),
+			SignatureBytes: []byte("sig-bytes"),
+		},
+		ValidUntil:         time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
+		ExpectedGeneration: 1,
+	}
+	if err := tx.Fulfillments().Update(ctx, f); err != nil {
+		t.Fatalf("update fulfillment: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Get the resource and verify provenance is populated.
+	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
+	getReq.Set(env.svc.Descriptors.GetRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("kindClusters/prov-cluster"))
+
+	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/GetKindCluster", getReq, getResp); err != nil {
+		t.Fatalf("GetKindCluster: %v", err)
+	}
+
+	provField := env.svc.Descriptors.Resource.Fields().ByName("provenance")
+	if !getResp.Has(provField) {
+		t.Fatal("provenance field not set on response")
+	}
+
+	provMsg := getResp.Get(provField).Message()
+	provJSON, _ := protojson.Marshal(provMsg.Interface())
+	t.Logf("provenance JSON: %s", provJSON)
+
+	// Verify signature.signer.subject
+	sigField := provMsg.Descriptor().Fields().ByName("signature")
+	if !provMsg.Has(sigField) {
+		t.Fatal("provenance.signature not set")
+	}
+	sigMsg := provMsg.Get(sigField).Message()
+	signerField := sigMsg.Descriptor().Fields().ByName("signer")
+	signerMsg := sigMsg.Get(signerField).Message()
+	subjectField := signerMsg.Descriptor().Fields().ByName("subject")
+	if got := signerMsg.Get(subjectField).String(); got != "user-1" {
+		t.Errorf("signer.subject = %q, want %q", got, "user-1")
+	}
+
+	// Verify expected_generation
+	genField := provMsg.Descriptor().Fields().ByName("expected_generation")
+	if got := provMsg.Get(genField).Int(); got != 1 {
+		t.Errorf("expected_generation = %d, want 1", got)
+	}
+}
+
+func TestDynamic_ResumeRPC(t *testing.T) {
+	env := setup(t)
+	ctx := context.Background()
+
+	// Create a resource.
+	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	idField := env.svc.Descriptors.CreateRequest.Fields().ByNumber(1)
+	createReq.Set(idField, protoreflect.ValueOfString("resume-cluster"))
+	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	specField := env.svc.Descriptors.Resource.Fields().ByName("spec")
+	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("resume-cluster"))
+	resource.Set(specField, protoreflect.ValueOfMessage(spec))
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
+
+	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/CreateKindCluster", createReq, createResp); err != nil {
+		t.Fatalf("CreateKindCluster: %v", err)
+	}
+
+	// Transition to paused_auth state.
+	tx, err := env.store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "resume-cluster")
+	if err != nil {
+		t.Fatalf("get managed resource: %v", err)
+	}
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	if err != nil {
+		t.Fatalf("get fulfillment: %v", err)
+	}
+	f.State = domain.FulfillmentStatePausedAuth
+	if err := tx.Fulfillments().Update(ctx, f); err != nil {
+		t.Fatalf("update fulfillment: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Call Resume RPC (server interceptor provides auth context).
+	resumeReq := dynamicpb.NewMessage(env.svc.Descriptors.ResumeRequest)
+	nameField := env.svc.Descriptors.ResumeRequest.Fields().ByName("name")
+	resumeReq.Set(nameField, protoreflect.ValueOfString("kindClusters/resume-cluster"))
+
+	resumeResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	err = env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/ResumeKindCluster", resumeReq, resumeResp)
+	if err != nil {
+		t.Fatalf("ResumeKindCluster: %v", err)
+	}
+
+	// Verify the response contains the resource name (valid response).
+	respNameField := env.svc.Descriptors.Resource.Fields().ByName("name")
+	gotName := resumeResp.Get(respNameField).String()
+	if gotName != "kindClusters/resume-cluster" {
+		t.Errorf("name = %q, want %q", gotName, "kindClusters/resume-cluster")
+	}
+
+	// The intent_version should be populated.
+	versionField := env.svc.Descriptors.Resource.Fields().ByName("intent_version")
+	if resumeResp.Get(versionField).Int() < 1 {
+		t.Error("intent_version < 1 in resume response")
+	}
+}
+
+func TestDynamic_ResumeRPC_NotPaused(t *testing.T) {
+	env := setup(t)
+	ctx := context.Background()
+
+	// Create a resource (starts in CREATING state).
+	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	idField := env.svc.Descriptors.CreateRequest.Fields().ByNumber(1)
+	createReq.Set(idField, protoreflect.ValueOfString("not-paused-cluster"))
+	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	specField := env.svc.Descriptors.Resource.Fields().ByName("spec")
+	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("not-paused"))
+	resource.Set(specField, protoreflect.ValueOfMessage(spec))
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
+
+	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/CreateKindCluster", createReq, createResp); err != nil {
+		t.Fatalf("CreateKindCluster: %v", err)
+	}
+
+	// Try to resume a resource that is not paused (server interceptor
+	// provides auth context).
+	resumeReq := dynamicpb.NewMessage(env.svc.Descriptors.ResumeRequest)
+	nameField := env.svc.Descriptors.ResumeRequest.Fields().ByName("name")
+	resumeReq.Set(nameField, protoreflect.ValueOfString("kindClusters/not-paused-cluster"))
+
+	resumeResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/ResumeKindCluster", resumeReq, resumeResp)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected gRPC status error, got: %v", err)
+	}
+	if st.Code() != codes.InvalidArgument {
+		t.Errorf("code = %v, want InvalidArgument", st.Code())
+	}
 }

@@ -431,6 +431,16 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register resume-deployment: %w", err)
 	}
 
+	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
+		Store:             store,
+		Orchestration:     orchWf,
+		ProvenanceBuilder: provenanceBuilder,
+	}
+	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
+	if err != nil {
+		return fmt.Errorf("register resume-managed-resource: %w", err)
+	}
+
 	deploymentSvc := &application.DeploymentService{
 		Store:             store,
 		CreateWF:          createWf,
@@ -449,6 +459,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Store:             store,
 		CreateWF:          createMRWf,
 		DeleteWF:          deleteMRWf,
+		ResumeWF:          resumeMRWf,
 		ProvenanceBuilder: provenanceBuilder,
 	}
 

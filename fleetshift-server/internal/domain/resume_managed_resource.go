@@ -1,0 +1,165 @@
+package domain
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+)
+
+// ResumeManagedResourceInput carries the minimal durable payload needed
+// to resume a paused managed resource. It intentionally excludes
+// transport-only state (full AuthorizationContext, request metadata).
+type ResumeManagedResourceInput struct {
+	ResourceType  ResourceType
+	Name          ResourceName
+	Auth          DeliveryAuth // fresh caller credentials for the resumed resource
+	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
+	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
+}
+
+// ManagedResourceProvenanceBuilder constructs [Provenance] for a
+// managed resource mutation that requires signing. Implementations
+// live in the application layer and wrap key resolution and signature
+// verification.
+type ManagedResourceProvenanceBuilder interface {
+	BuildManagedResourceProvenance(
+		ctx context.Context,
+		enrollments SignerEnrollmentRepository,
+		caller *SubjectClaims,
+		resourceType ResourceType,
+		resourceName ResourceName,
+		spec json.RawMessage,
+		generation Generation,
+		userSig []byte,
+		validUntil time.Time,
+	) (*Provenance, error)
+}
+
+// resumeManagedResourceMutationResult holds the activity output
+// consumed by the convergence loop and returned to the caller.
+type resumeManagedResourceMutationResult struct {
+	View          ManagedResourceView
+	FulfillmentID FulfillmentID
+	MyGen         Generation
+}
+
+// ResumeManagedResourceWorkflowSpec transitions a
+// [FulfillmentStatePausedAuth] managed resource fulfillment back to
+// active by updating auth/provenance, bumping its generation, and
+// running a convergence loop.
+//
+// Pass this spec to [Registry.RegisterResumeManagedResource] to obtain
+// a [ResumeManagedResourceWorkflow] that can start instances.
+type ResumeManagedResourceWorkflowSpec struct {
+	Store             Store
+	Orchestration     OrchestrationWorkflow
+	ProvenanceBuilder ManagedResourceProvenanceBuilder // nil when signing is not configured
+}
+
+func (s *ResumeManagedResourceWorkflowSpec) Name() string { return "resume-managed-resource" }
+
+// MutateToResumed updates the fulfillment with fresh auth/provenance
+// and bumps its generation inside a serialized write transaction.
+// Provenance is built against the next generation using the current
+// intent spec.
+func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeManagedResourceInput, resumeManagedResourceMutationResult] {
+	return NewActivity("mr-mutate-to-resumed", func(ctx context.Context, in ResumeManagedResourceInput) (resumeManagedResourceMutationResult, error) {
+		tx, err := s.Store.Begin(ctx)
+		if err != nil {
+			return resumeManagedResourceMutationResult{}, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
+		if err != nil {
+			return resumeManagedResourceMutationResult{}, err
+		}
+
+		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion)
+		if err != nil {
+			return resumeManagedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
+		}
+
+		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+		if err != nil {
+			return resumeManagedResourceMutationResult{}, err
+		}
+
+		var prov *Provenance
+		if f.Provenance != nil || len(in.UserSignature) > 0 {
+			if s.ProvenanceBuilder == nil {
+				return resumeManagedResourceMutationResult{}, fmt.Errorf(
+					"%w: signing not configured but managed resource %q requires provenance",
+					ErrInvalidArgument, in.Name)
+			}
+			nextGen := f.Generation + 1
+			prov, err = s.ProvenanceBuilder.BuildManagedResourceProvenance(
+				ctx, tx.SignerEnrollments(), in.Auth.Caller,
+				in.ResourceType, in.Name, intent.Spec,
+				nextGen, in.UserSignature, in.ValidUntil,
+			)
+			if err != nil {
+				return resumeManagedResourceMutationResult{}, fmt.Errorf("build provenance: %w", err)
+			}
+		}
+
+		if err := f.Resume(in.Auth, prov); err != nil {
+			return resumeManagedResourceMutationResult{}, err
+		}
+
+		if err := tx.Fulfillments().Update(ctx, f); err != nil {
+			return resumeManagedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return resumeManagedResourceMutationResult{}, fmt.Errorf("commit: %w", err)
+		}
+
+		return resumeManagedResourceMutationResult{
+			View: ManagedResourceView{
+				ManagedResource: *mr,
+				Intent:          intent,
+				Fulfillment:     *f,
+			},
+			FulfillmentID: mr.FulfillmentID,
+			MyGen:         f.Generation,
+		}, nil
+	})
+}
+
+// LoadFulfillment reads the current fulfillment state for convergence
+// checks.
+func (s *ResumeManagedResourceWorkflowSpec) LoadFulfillment() Activity[FulfillmentID, *Fulfillment] {
+	return NewActivity("mr-load-fulfillment-for-resume", func(ctx context.Context, id FulfillmentID) (*Fulfillment, error) {
+		tx, err := s.Store.BeginReadOnly(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
+		}
+		defer tx.Rollback()
+
+		f, err := tx.Fulfillments().Get(ctx, id)
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return f, tx.Commit()
+	})
+}
+
+// Run is the workflow body: mutate, then run the convergence-start
+// loop.
+func (s *ResumeManagedResourceWorkflowSpec) Run(record Record, input ResumeManagedResourceInput) (ManagedResourceView, error) {
+	mr, err := RunActivity(record, s.MutateToResumed(), input)
+	if err != nil {
+		return ManagedResourceView{}, fmt.Errorf("mutate to resumed: %w", err)
+	}
+
+	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, false); err != nil {
+		return ManagedResourceView{}, err
+	}
+
+	return mr.View, nil
+}

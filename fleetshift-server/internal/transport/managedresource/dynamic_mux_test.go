@@ -297,15 +297,15 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	if !ok {
 		t.Fatal("ServiceInfo missing fleetshift.v1.KindClusterService")
 	}
-	if len(si.Methods) != 4 {
-		t.Errorf("method count = %d, want 4", len(si.Methods))
+	if len(si.Methods) != 5 {
+		t.Errorf("method count = %d, want 5", len(si.Methods))
 	}
 
 	methodNames := make(map[string]bool)
 	for _, m := range si.Methods {
 		methodNames[m.Name] = true
 	}
-	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster"} {
+	for _, want := range []string{"CreateKindCluster", "GetKindCluster", "ListKindClusters", "DeleteKindCluster", "ResumeKindCluster"} {
 		if !methodNames[want] {
 			t.Errorf("missing method %q in ServiceInfo", want)
 		}

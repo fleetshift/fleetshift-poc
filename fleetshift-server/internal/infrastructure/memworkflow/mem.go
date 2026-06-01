@@ -154,6 +154,10 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 	return &deleteManagedResourceCleanupWorkflow{registry: r, spec: spec}, nil
 }
 
+func (r *Registry) RegisterResumeManagedResource(spec *domain.ResumeManagedResourceWorkflowSpec) (domain.ResumeManagedResourceWorkflow, error) {
+	return &resumeManagedResourceWorkflow{registry: r, spec: spec}, nil
+}
+
 // --- OrchestrationWorkflow ---
 
 type orchestrationWorkflow struct {
@@ -822,6 +826,52 @@ func (e *managedResourceExecution) AwaitResult(ctx context.Context) (domain.Mana
 	}
 }
 
+// --- ResumeManagedResourceWorkflow ---
+
+type resumeManagedResourceWorkflow struct {
+	registry *Registry
+	spec     *domain.ResumeManagedResourceWorkflowSpec
+	mu       sync.Mutex
+	running  map[string]struct{}
+}
+
+func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
+	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
+
+	w.mu.Lock()
+	if w.running == nil {
+		w.running = make(map[string]struct{})
+	}
+	if _, active := w.running[instanceID]; active {
+		w.mu.Unlock()
+		return nil, domain.ErrConcurrentUpdate
+	}
+	w.running[instanceID] = struct{}{}
+	w.mu.Unlock()
+
+	done := make(chan managedResourceResult, 1)
+
+	go func() {
+		defer func() {
+			w.mu.Lock()
+			delete(w.running, instanceID)
+			w.mu.Unlock()
+			if r := recover(); r != nil {
+				done <- managedResourceResult{err: fmt.Errorf("workflow panicked: %v", r)}
+			}
+		}()
+
+		record := &baseRecord{
+			id:  instanceID,
+			ctx: ctx,
+		}
+		val, err := w.spec.Run(record, input)
+		done <- managedResourceResult{val: val, err: err}
+	}()
+
+	return &managedResourceExecution{id: instanceID, done: done}, nil
+}
+
 // Compile-time interface checks.
 var (
 	_ domain.Registry                             = (*Registry)(nil)
@@ -834,4 +884,5 @@ var (
 	_ domain.CreateManagedResourceWorkflow        = (*createManagedResourceWorkflow)(nil)
 	_ domain.DeleteManagedResourceWorkflow        = (*deleteManagedResourceWorkflow)(nil)
 	_ domain.DeleteManagedResourceCleanupWorkflow = (*deleteManagedResourceCleanupWorkflow)(nil)
+	_ domain.ResumeManagedResourceWorkflow        = (*resumeManagedResourceWorkflow)(nil)
 )

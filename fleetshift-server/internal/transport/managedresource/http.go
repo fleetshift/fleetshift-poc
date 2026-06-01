@@ -70,6 +70,10 @@ func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (*httpHandlerEntr
 		switch {
 		case r.Method == http.MethodPost && (rest == "" || rest == "/"):
 			handleHTTPCreate(w, r, conn, svc)
+		case r.Method == http.MethodPost && strings.HasSuffix(rest, ":resume"):
+			id := strings.TrimPrefix(rest, "/")
+			id = strings.TrimSuffix(id, ":resume")
+			handleHTTPResume(w, r, conn, svc, id)
 		case r.Method == http.MethodGet && (rest == "" || rest == "/"):
 			handleHTTPList(w, r, conn, svc)
 		case r.Method == http.MethodGet && len(rest) > 1:
@@ -175,6 +179,36 @@ func handleHTTPDelete(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.ServiceName() + "/Delete" + svc.Config.Singular
 	if err := conn.Invoke(r.Context(), method, deleteReq, resp); err != nil {
+		grpcHTTPError(w, err)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
+func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService, id string) {
+	resumeReq := dynamicpb.NewMessage(svc.Descriptors.ResumeRequest)
+	nameField := svc.Descriptors.ResumeRequest.Fields().ByName("name")
+	resumeReq.Set(nameField, stringValue(svc.Config.Collection()+id))
+
+	// Parse optional request body for user_signature / valid_until.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
+		return
+	}
+	if len(body) > 0 {
+		if err := protojson.Unmarshal(body, resumeReq); err != nil {
+			httpError(w, codes.InvalidArgument, "parse body: "+err.Error())
+			return
+		}
+		// Re-set name since body unmarshal might have cleared it.
+		resumeReq.Set(nameField, stringValue(svc.Config.Collection()+id))
+	}
+
+	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
+	method := "/" + svc.Config.ServiceName() + "/Resume" + svc.Config.Singular
+	if err := conn.Invoke(r.Context(), method, resumeReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
 	}

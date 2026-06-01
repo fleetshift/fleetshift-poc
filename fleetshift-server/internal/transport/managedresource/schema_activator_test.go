@@ -117,8 +117,8 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	if !ok {
 		t.Fatal("expected KindClusterService in mux ServiceInfo after Activate")
 	}
-	if len(si.Methods) != 4 {
-		t.Errorf("method count = %d, want 4", len(si.Methods))
+	if len(si.Methods) != 5 {
+		t.Errorf("method count = %d, want 5", len(si.Methods))
 	}
 }
 

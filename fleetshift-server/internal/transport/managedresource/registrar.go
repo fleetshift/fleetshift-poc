@@ -18,6 +18,7 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
+	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -98,6 +99,10 @@ func Build(cfg *ResourceTypeConfig, deps Deps) (*RegisteredService, error) {
 			{
 				MethodName: "Delete" + cfg.Singular,
 				Handler:    handler.handleDelete,
+			},
+			{
+				MethodName: "Resume" + cfg.Singular,
+				Handler:    handler.handleResume,
 			},
 		},
 		Streams:  []grpc.StreamDesc{},
@@ -352,6 +357,72 @@ func (h *dynamicHandler) doDelete(ctx context.Context, req proto.Message) (proto
 	return h.viewToResource(view)
 }
 
+func (h *dynamicHandler) handleResume(
+	_ any,
+	ctx context.Context,
+	dec func(any) error,
+	interceptor grpc.UnaryServerInterceptor,
+) (any, error) {
+	req := dynamicpb.NewMessage(h.descs.ResumeRequest)
+	if err := dec(req); err != nil {
+		return nil, err
+	}
+
+	if interceptor != nil {
+		info := &grpc.UnaryServerInfo{
+			FullMethod: "/" + h.cfg.ServiceName() + "/Resume" + h.cfg.Singular,
+		}
+		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
+			return h.doResume(ctx, r.(proto.Message))
+		})
+	}
+	return h.doResume(ctx, req)
+}
+
+func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto.Message, error) {
+	reqMsg := req.ProtoReflect()
+
+	nameField := h.descs.ResumeRequest.Fields().ByName("name")
+	name := reqMsg.Get(nameField).String()
+	resourceName, err := h.parseName(name)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
+	}
+
+	in := application.ResumeManagedResourceInput{
+		ResourceType: h.cfg.ResourceType,
+		Name:         resourceName,
+	}
+
+	// Field 2: user_signature (optional)
+	sigField := h.descs.ResumeRequest.Fields().ByNumber(2)
+	if sigField != nil && reqMsg.Has(sigField) {
+		in.UserSignature = reqMsg.Get(sigField).Bytes()
+	}
+
+	// Field 3: valid_until (optional)
+	validUntilField := h.descs.ResumeRequest.Fields().ByNumber(3)
+	if validUntilField != nil && reqMsg.Has(validUntilField) {
+		tsMsg := reqMsg.Get(validUntilField).Message()
+		ts := &timestamppb.Timestamp{}
+		b, mErr := proto.Marshal(tsMsg.Interface())
+		if mErr != nil {
+			return nil, status.Errorf(codes.Internal, "marshal valid_until: %v", mErr)
+		}
+		if mErr := proto.Unmarshal(b, ts); mErr != nil {
+			return nil, status.Errorf(codes.Internal, "unmarshal valid_until: %v", mErr)
+		}
+		in.ValidUntil = ts.AsTime()
+	}
+
+	view, err := h.resources.Resume(ctx, in)
+	if err != nil {
+		return nil, toDomainError(err)
+	}
+
+	return h.viewToResource(view)
+}
+
 func (h *dynamicHandler) parseName(name string) (domain.ResourceName, error) {
 	id, ok := strings.CutPrefix(name, h.collection)
 	if !ok || id == "" {
@@ -434,6 +505,16 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	etagField := h.descs.Resource.Fields().ByName("etag")
 	resource.Set(etagField, protoreflect.ValueOfString(mr.UID))
 
+	// provenance
+	if f.Provenance != nil {
+		provField := h.descs.Resource.Fields().ByName("provenance")
+		if provVal, err := marshalProvenance(provField, f.Provenance); err != nil {
+			return nil, err
+		} else {
+			resource.Set(provField, provVal)
+		}
+	}
+
 	return resource, nil
 }
 
@@ -467,6 +548,41 @@ func marshalTimestamp(field protoreflect.FieldDescriptor, t time.Time) (protoref
 		return protoreflect.Value{}, fmt.Errorf("unmarshal %s: %w", field.Name(), err)
 	}
 	return protoreflect.ValueOfMessage(tsMsg), nil
+}
+
+// marshalProvenance converts a domain Provenance to a protoreflect.Value
+// suitable for setting on the dynamic resource message's provenance field.
+func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance) (protoreflect.Value, error) {
+	pb := &fleetshiftv1.Provenance{
+		Signature: &fleetshiftv1.Signature{
+			Signer: &fleetshiftv1.FederatedIdentity{
+				Subject: string(p.Sig.Signer.Subject),
+				Issuer:  string(p.Sig.Signer.Issuer),
+			},
+			ContentHash:    p.Sig.ContentHash,
+			SignatureBytes: p.Sig.SignatureBytes,
+		},
+		ExpectedGeneration: int64(p.ExpectedGeneration),
+	}
+	if !p.ValidUntil.IsZero() {
+		pb.ValidUntil = timestamppb.New(p.ValidUntil)
+	}
+	for _, oc := range p.OutputConstraints {
+		pb.OutputConstraints = append(pb.OutputConstraints, &fleetshiftv1.OutputConstraint{
+			Name:       oc.Name,
+			Expression: oc.Expression,
+		})
+	}
+
+	b, err := proto.Marshal(pb)
+	if err != nil {
+		return protoreflect.Value{}, fmt.Errorf("marshal provenance: %w", err)
+	}
+	dynMsg := dynamicpb.NewMessage(field.Message())
+	if err := proto.Unmarshal(b, dynMsg); err != nil {
+		return protoreflect.Value{}, fmt.Errorf("unmarshal provenance: %w", err)
+	}
+	return protoreflect.ValueOfMessage(dynMsg), nil
 }
 
 func toDomainError(err error) error {

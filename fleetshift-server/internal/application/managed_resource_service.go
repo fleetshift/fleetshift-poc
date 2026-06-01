@@ -16,24 +16,8 @@ type ManagedResourceService struct {
 	Store             domain.Store
 	CreateWF          domain.CreateManagedResourceWorkflow
 	DeleteWF          domain.DeleteManagedResourceWorkflow
-	ProvenanceBuilder ManagedResourceProvenanceBuilder // nil when signing is not configured
-}
-
-// ManagedResourceProvenanceBuilder constructs [domain.Provenance] for a
-// managed resource create request when the caller provides a detached
-// user signature.
-type ManagedResourceProvenanceBuilder interface {
-	BuildManagedResourceProvenance(
-		ctx context.Context,
-		enrollments domain.SignerEnrollmentRepository,
-		caller *domain.SubjectClaims,
-		resourceType domain.ResourceType,
-		resourceName domain.ResourceName,
-		spec json.RawMessage,
-		generation domain.Generation,
-		userSig []byte,
-		validUntil time.Time,
-	) (*domain.Provenance, error)
+	ResumeWF          domain.ResumeManagedResourceWorkflow
+	ProvenanceBuilder domain.ManagedResourceProvenanceBuilder // nil when signing is not configured
 }
 
 // CreateManagedResourceInput carries the fields needed to create a
@@ -194,4 +178,67 @@ func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceT
 	}
 
 	return exec.AwaitResult(ctx)
+}
+
+// ResumeManagedResourceInput carries the fields needed to resume a
+// paused managed resource.
+type ResumeManagedResourceInput struct {
+	ResourceType  domain.ResourceType
+	Name          domain.ResourceName
+	UserSignature []byte
+	ValidUntil    time.Time
+}
+
+// Resume resumes a managed resource that is paused for authentication
+// by starting a durable resume-managed-resource workflow. The workflow
+// updates auth/provenance, bumps the generation, and guarantees
+// orchestration converges the resumed state.
+func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedResourceInput) (domain.ManagedResourceView, error) {
+	ac := AuthFromContext(ctx)
+	if ac == nil || ac.Subject == nil {
+		return domain.ManagedResourceView{}, fmt.Errorf(
+			"%w: resuming a managed resource requires an authenticated caller",
+			domain.ErrInvalidArgument)
+	}
+
+	tx, err := s.Store.BeginReadOnly(ctx)
+	if err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
+	if err != nil {
+		return domain.ManagedResourceView{}, err
+	}
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	if err != nil {
+		return domain.ManagedResourceView{}, err
+	}
+	currentGen := f.Generation
+	if err := tx.Commit(); err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
+	}
+
+	exec, err := s.ResumeWF.Start(ctx, domain.ResumeManagedResourceInput{
+		ResourceType: in.ResourceType,
+		Name:         in.Name,
+		Auth: domain.DeliveryAuth{
+			Caller:   ac.Subject,
+			Audience: ac.Audience,
+			Token:    ac.Token,
+		},
+		UserSignature: in.UserSignature,
+		ValidUntil:    in.ValidUntil,
+	}, currentGen)
+	if err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("start resume-managed-resource workflow: %w", err)
+	}
+
+	result, err := exec.AwaitResult(ctx)
+	if err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("resume-managed-resource workflow: %w", err)
+	}
+
+	return result, nil
 }

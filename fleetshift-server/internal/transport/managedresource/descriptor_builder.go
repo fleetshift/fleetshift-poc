@@ -4,12 +4,16 @@ import (
 	"fmt"
 	"strings"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protodesc"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
 
-	"google.golang.org/protobuf/proto"
+	// Blank import ensures attestation.proto is registered in
+	// protoregistry.GlobalFiles so the dynamic descriptor builder
+	// can resolve the Provenance message type.
+	_ "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 )
 
 // ServiceDescriptors holds the compiled descriptors for a dynamically-built
@@ -39,6 +43,9 @@ type ServiceDescriptors struct {
 
 	// DeleteRequest is the delete request message descriptor.
 	DeleteRequest protoreflect.MessageDescriptor
+
+	// ResumeRequest is the resume request message descriptor.
+	ResumeRequest protoreflect.MessageDescriptor
 
 	// Spec is the addon spec message descriptor.
 	Spec protoreflect.MessageDescriptor
@@ -87,7 +94,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 		Name:       proto.String(fmt.Sprintf("dynamic/%s_service.proto", lower)),
 		Package:    proto.String(pkg),
 		Syntax:     proto.String("proto3"),
-		Dependency: []string{string(specFile.Path()), "google/protobuf/timestamp.proto"},
+		Dependency: []string{string(specFile.Path()), "google/protobuf/timestamp.proto", "fleetshift/v1/attestation.proto"},
 		MessageType: []*descriptorpb.DescriptorProto{
 			buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName),
 			buildCreateRequest(singular, lower, fqn(singular)),
@@ -95,6 +102,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 			buildListRequest(plural),
 			buildListResponse(singular, plural, collectionID, fqn(singular)),
 			buildDeleteRequest(singular),
+			buildResumeRequest(singular),
 		},
 		Service: []*descriptorpb.ServiceDescriptorProto{
 			buildService(singular, plural, pkg),
@@ -117,6 +125,15 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 		return nil, fmt.Errorf("register timestamp deps: %w", err)
 	}
 
+	// Register fleetshift/v1/attestation.proto for the Provenance field.
+	attestFile, err := protoregistry.GlobalFiles.FindFileByPath("fleetshift/v1/attestation.proto")
+	if err != nil {
+		return nil, fmt.Errorf("find attestation.proto: %w", err)
+	}
+	if err := registerFileAndDeps(files, attestFile); err != nil {
+		return nil, fmt.Errorf("register attestation deps: %w", err)
+	}
+
 	fd, err := protodesc.NewFile(fdp, files)
 	if err != nil {
 		return nil, fmt.Errorf("build file descriptor: %w", err)
@@ -136,6 +153,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 		ListRequest:   fd.Messages().ByName(protoreflect.Name("List" + plural + "Request")),
 		ListResponse:  fd.Messages().ByName(protoreflect.Name("List" + plural + "Response")),
 		DeleteRequest: fd.Messages().ByName(protoreflect.Name("Delete" + singular + "Request")),
+		ResumeRequest: fd.Messages().ByName(protoreflect.Name("Resume" + singular + "Request")),
 		Spec:          specDesc,
 	}, nil
 }
@@ -157,6 +175,7 @@ func buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName str
 			messageField("update_time", 8, "google.protobuf.Timestamp"),
 			messageField("delete_time", 9, "google.protobuf.Timestamp"),
 			stringField("etag", 10),
+			messageField("provenance", 11, "fleetshift.v1.Provenance"),
 		},
 	}
 }
@@ -212,6 +231,17 @@ func buildDeleteRequest(singular string) *descriptorpb.DescriptorProto {
 	}
 }
 
+func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
+	return &descriptorpb.DescriptorProto{
+		Name: proto.String("Resume" + singular + "Request"),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			stringField("name", 1),
+			bytesField("user_signature", 2),
+			messageField("valid_until", 3, "google.protobuf.Timestamp"),
+		},
+	}
+}
+
 func buildService(singular, plural, pkg string) *descriptorpb.ServiceDescriptorProto {
 	fqnPrefix := "." + pkg + "."
 	return &descriptorpb.ServiceDescriptorProto{
@@ -235,6 +265,11 @@ func buildService(singular, plural, pkg string) *descriptorpb.ServiceDescriptorP
 			{
 				Name:       proto.String("Delete" + singular),
 				InputType:  proto.String(fqnPrefix + "Delete" + singular + "Request"),
+				OutputType: proto.String(fqnPrefix + singular),
+			},
+			{
+				Name:       proto.String("Resume" + singular),
+				InputType:  proto.String(fqnPrefix + "Resume" + singular + "Request"),
 				OutputType: proto.String(fqnPrefix + singular),
 			},
 		},

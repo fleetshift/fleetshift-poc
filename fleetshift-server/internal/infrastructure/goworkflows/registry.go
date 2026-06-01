@@ -267,6 +267,33 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 	}, nil
 }
 
+func (r *Registry) RegisterResumeManagedResource(spec *domain.ResumeManagedResourceWorkflowSpec) (domain.ResumeManagedResourceWorkflow, error) {
+	invokers := make(map[string]activityInvoker)
+	opts := r.activityOptions()
+
+	if err := registerActivity(r.Worker, invokers, spec.MutateToResumed(), opts); err != nil {
+		return nil, err
+	}
+	if err := registerActivity(r.Worker, invokers, spec.LoadFulfillment(), opts); err != nil {
+		return nil, err
+	}
+
+	wfFunc := func(ctx workflow.Context, input domain.ResumeManagedResourceInput) (domain.ManagedResourceView, error) {
+		record := &baseRecord{wfCtx: ctx, invokers: invokers}
+		return spec.Run(record, input)
+	}
+
+	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
+		return nil, fmt.Errorf("register workflow %q: %w", spec.Name(), err)
+	}
+
+	return &resumeManagedResourceWorkflow{
+		client:  r.Client,
+		wfName:  spec.Name(),
+		timeout: r.timeout(),
+	}, nil
+}
+
 func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflowSpec) (domain.ResumeDeploymentWorkflow, error) {
 	invokers := make(map[string]activityInvoker)
 	opts := r.activityOptions()
@@ -753,6 +780,33 @@ func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.
 	}, nil
 }
 
+// --- ResumeManagedResourceWorkflow ---
+
+type resumeManagedResourceWorkflow struct {
+	client  *client.Client
+	wfName  string
+	timeout time.Duration
+}
+
+func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
+	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
+	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
+		InstanceID: instanceID,
+	}, w.wfName, input)
+	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
+		return nil, domain.ErrConcurrentUpdate
+	}
+	if err != nil {
+		return nil, fmt.Errorf("create workflow instance: %w", err)
+	}
+
+	return &execution[domain.ManagedResourceView]{
+		client:   w.client,
+		instance: instance,
+		timeout:  w.timeout,
+	}, nil
+}
+
 // Compile-time interface checks.
 var (
 	_ domain.Registry                             = (*Registry)(nil)
@@ -765,4 +819,5 @@ var (
 	_ domain.ProvisionIdPWorkflow                 = (*provisionIdPWorkflow)(nil)
 	_ domain.CreateManagedResourceWorkflow        = (*createManagedResourceWorkflow)(nil)
 	_ domain.DeleteManagedResourceWorkflow        = (*deleteManagedResourceWorkflow)(nil)
+	_ domain.ResumeManagedResourceWorkflow        = (*resumeManagedResourceWorkflow)(nil)
 )
