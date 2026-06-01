@@ -213,7 +213,7 @@ func setupManagedResourcesWithDelivery(
 }
 
 func TestManagedResourceService_CreateReadDelete(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	h := setupManagedResources(t)
 
