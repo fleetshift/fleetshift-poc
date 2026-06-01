@@ -16,7 +16,7 @@ type VerifySignHandler struct {
 	AuthMethods *application.AuthMethodService
 	Verifier    domain.OIDCTokenVerifier
 	Store       domain.Store
-	Provenance  *application.KeyResolverProvenanceBuilder
+	Provenance  *domain.ProvenanceService
 }
 
 type verifySignRequest struct {

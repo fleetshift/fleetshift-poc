@@ -76,7 +76,7 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 		registryID = "oidc"
 		registrySubject = domain.RegistrySubject(idTokenClaims.Subject)
 	case mapping != nil:
-		registrySubject, err = EvalClaimMapping(mapping, in.IdentityToken)
+		registrySubject, err = domain.EvalClaimMapping(mapping, in.IdentityToken)
 		if err != nil {
 			return domain.SignerEnrollment{}, fmt.Errorf(
 				"%w: claim mapping evaluation failed: %v",

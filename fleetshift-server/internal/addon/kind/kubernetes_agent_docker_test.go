@@ -19,7 +19,6 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubeaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
@@ -341,7 +340,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 type testAttestationBundle struct {
 	attestation    *domain.Attestation
-	keyResolver    *application.KeyResolver
+	keyResolver    *domain.KeyResolver
 	httpClient     *http.Client
 	trustBundleJSON string
 }
@@ -416,7 +415,7 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 		Output: &domain.PutManifests{Manifests: manifests},
 	}
 
-	keyResolver := &application.KeyResolver{
+	keyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: fakeReg,

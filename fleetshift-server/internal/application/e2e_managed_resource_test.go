@@ -43,13 +43,13 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	reg := &memworkflow.Registry{}
 	inner.Reporter = application.NewDeliveryReportService(store, reg)
 	fakeReg := keyregistry.NewFake()
-	keyResolver := &application.KeyResolver{
+	keyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: fakeReg,
 		},
 	}
-	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
+	provenance := &domain.ProvenanceService{KeyResolver: keyResolver}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:           store,
@@ -95,10 +95,10 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		Store: store,
 	}
 	resourceSvc := &application.ManagedResourceService{
-		Store:             store,
-		CreateWF:          createWf,
-		DeleteWF:          deleteWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:      store,
+		CreateWF:   createWf,
+		DeleteWF:   deleteWf,
+		Provenance: provenance,
 	}
 
 	// --- Step 1: Register target (the addon) ---

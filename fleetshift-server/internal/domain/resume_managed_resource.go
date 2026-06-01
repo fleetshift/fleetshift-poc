@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,24 +16,6 @@ type ResumeManagedResourceInput struct {
 	Auth          DeliveryAuth // fresh caller credentials for the resumed resource
 	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
-}
-
-// ManagedResourceProvenanceBuilder constructs [Provenance] for a
-// managed resource mutation that requires signing. Implementations
-// live in the application layer and wrap key resolution and signature
-// verification.
-type ManagedResourceProvenanceBuilder interface {
-	BuildManagedResourceProvenance(
-		ctx context.Context,
-		enrollments SignerEnrollmentRepository,
-		caller *SubjectClaims,
-		resourceType ResourceType,
-		resourceName ResourceName,
-		spec json.RawMessage,
-		generation Generation,
-		userSig []byte,
-		validUntil time.Time,
-	) (*Provenance, error)
 }
 
 // resumeManagedResourceMutationResult holds the activity output
@@ -53,9 +34,9 @@ type resumeManagedResourceMutationResult struct {
 // Pass this spec to [Registry.RegisterResumeManagedResource] to obtain
 // a [ResumeManagedResourceWorkflow] that can start instances.
 type ResumeManagedResourceWorkflowSpec struct {
-	Store             Store
-	Orchestration     OrchestrationWorkflow
-	ProvenanceBuilder ManagedResourceProvenanceBuilder // nil when signing is not configured
+	Store         Store
+	Orchestration OrchestrationWorkflow
+	Provenance    *ProvenanceService
 }
 
 func (s *ResumeManagedResourceWorkflowSpec) Name() string { return "resume-managed-resource" }
@@ -89,13 +70,8 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
-			if s.ProvenanceBuilder == nil {
-				return resumeManagedResourceMutationResult{}, fmt.Errorf(
-					"%w: signing not configured but managed resource %q requires provenance",
-					ErrInvalidArgument, in.Name)
-			}
 			nextGen := f.Generation + 1
-			prov, err = s.ProvenanceBuilder.BuildManagedResourceProvenance(
+			prov, err = s.Provenance.BuildManagedResourceProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				in.ResourceType, in.Name, intent.Spec,
 				nextGen, in.UserSignature, in.ValidUntil,

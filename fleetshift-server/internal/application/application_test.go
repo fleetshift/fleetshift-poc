@@ -61,12 +61,13 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	}
 
 	fakeReg := keyregistry.NewFake()
-	keyResolver := &application.KeyResolver{
+	keyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: fakeReg,
 		},
 	}
+	provenance := &domain.ProvenanceService{KeyResolver: keyResolver}
 
 	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{
 		Store: store,
@@ -86,12 +87,10 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 		t.Fatalf("RegisterDeleteDeployment: %v", err)
 	}
 
-	provenanceBuilder := &application.KeyResolverProvenanceBuilder{KeyResolver: keyResolver}
-
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:             store,
-		Orchestration:     orchWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:         store,
+		Orchestration: orchWf,
+		Provenance:    provenance,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -101,11 +100,11 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	return testHarness{
 		targets: &application.TargetService{Store: store},
 		deployments: &application.DeploymentService{
-			Store:             store,
-			CreateWF:          createWf,
-			DeleteWF:          deleteWf,
-			ResumeWF:          resumeWf,
-			ProvenanceBuilder: provenanceBuilder,
+			Store:      store,
+			CreateWF:   createWf,
+			DeleteWF:   deleteWf,
+			ResumeWF:   resumeWf,
+			Provenance: provenance,
 		},
 		store:    store,
 		reporter: reporter,

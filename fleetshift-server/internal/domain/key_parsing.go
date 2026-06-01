@@ -1,4 +1,4 @@
-package keyregistry
+package domain
 
 import (
 	"crypto"

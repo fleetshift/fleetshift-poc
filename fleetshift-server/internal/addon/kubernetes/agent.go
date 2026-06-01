@@ -25,7 +25,6 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -48,7 +47,7 @@ const fieldManager = "fleetshift"
 // when no attestation is present.
 type Agent struct {
 	reporter    domain.DeliveryReporter
-	keyResolver *application.KeyResolver
+	keyResolver *domain.KeyResolver
 	httpClient  *http.Client
 	vault       domain.Vault
 
@@ -61,7 +60,7 @@ type AgentOption func(*Agent)
 
 // WithKeyResolver sets the key resolver used for attestation
 // verification (resolving signing keys from external registries).
-func WithKeyResolver(r *application.KeyResolver) AgentOption {
+func WithKeyResolver(r *domain.KeyResolver) AgentOption {
 	return func(a *Agent) { a.keyResolver = r }
 }
 

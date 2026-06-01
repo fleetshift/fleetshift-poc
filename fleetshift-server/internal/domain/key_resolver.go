@@ -1,24 +1,22 @@
-package application
+package domain
 
 import (
 	"context"
 	"crypto"
 	"fmt"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // KeyResolver resolves a user's signing public keys from an external
 // registry. It loads the IdP configuration to find the registry
 // reference and CEL claim mapping, then delegates to the appropriate
-// [domain.RegistryClient].
+// [RegistryClient].
 type KeyResolver struct {
-	Registries map[domain.KeyRegistryID]domain.KeyRegistry
-	Clients    map[domain.KeyRegistryType]domain.RegistryClient
+	Registries map[KeyRegistryID]KeyRegistry
+	Clients    map[KeyRegistryType]RegistryClient
 }
 
 // Resolve fetches the public keys for a registry subject.
-func (r *KeyResolver) Resolve(ctx context.Context, registryID domain.KeyRegistryID, registrySubject domain.RegistrySubject) ([]crypto.PublicKey, error) {
+func (r *KeyResolver) Resolve(ctx context.Context, registryID KeyRegistryID, registrySubject RegistrySubject) ([]crypto.PublicKey, error) {
 	reg, ok := r.Registries[registryID]
 	if !ok {
 		return nil, fmt.Errorf("unknown key registry %q", registryID)

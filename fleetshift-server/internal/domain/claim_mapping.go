@@ -1,4 +1,4 @@
-package application
+package domain
 
 import (
 	"encoding/base64"
@@ -6,8 +6,6 @@ import (
 	"fmt"
 
 	"github.com/google/cel-go/cel"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // EvalCELClaim evaluates a CEL expression against the raw claims of a
@@ -51,9 +49,9 @@ func EvalCELClaim(expression string, rawToken string) (string, error) {
 	return s, nil
 }
 
-// EvalClaimMapping evaluates a [domain.RegistrySubjectMapping]'s CEL
+// EvalClaimMapping evaluates a [RegistrySubjectMapping]'s CEL
 // expression against the raw claims of a JWT.
-func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (domain.RegistrySubject, error) {
+func EvalClaimMapping(mapping *RegistrySubjectMapping, rawToken string) (RegistrySubject, error) {
 	if mapping == nil {
 		return "", fmt.Errorf("no registry subject mapping configured")
 	}
@@ -61,7 +59,7 @@ func EvalClaimMapping(mapping *domain.RegistrySubjectMapping, rawToken string) (
 	if err != nil {
 		return "", err
 	}
-	return domain.RegistrySubject(s), nil
+	return RegistrySubject(s), nil
 }
 
 // extractAllClaims parses the JWT payload without signature

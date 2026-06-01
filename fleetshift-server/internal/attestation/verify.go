@@ -15,9 +15,7 @@ import (
 	"reflect"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
 	fscrypto "github.com/fleetshift/fleetshift-poc/fleetshift-server/pkg/crypto"
 )
 
@@ -39,7 +37,7 @@ type Verifier struct {
 	trustedIssuers map[domain.IssuerURL]TrustedIssuer
 	now            func() time.Time
 	jwks           *jwksFetcher
-	keyResolver    *application.KeyResolver
+	keyResolver    *domain.KeyResolver
 }
 
 // VerifierOption configures a [Verifier].
@@ -59,7 +57,7 @@ func WithClock(now func() time.Time) VerifierOption {
 
 // WithKeyResolver sets the key resolver used to fetch signing keys
 // from external registries.
-func WithKeyResolver(r *application.KeyResolver) VerifierOption {
+func WithKeyResolver(r *domain.KeyResolver) VerifierOption {
 	return func(v *Verifier) { v.keyResolver = r }
 }
 
@@ -152,7 +150,7 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 	//    over the ID token claims and confirm the result matches the
 	//    assertion's registry subject.
 	if trusted.RegistrySubjectMapping != nil {
-		derived, err := application.EvalClaimMapping(trusted.RegistrySubjectMapping, string(sa.IdentityToken))
+		derived, err := domain.EvalClaimMapping(trusted.RegistrySubjectMapping, string(sa.IdentityToken))
 		if err != nil {
 			return fmt.Errorf("registry subject derivation: %w", err)
 		}
@@ -167,11 +165,11 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 	//    the KeyResolver.
 	var keys []crypto.PublicKey
 	if trusted.PublicKeyClaimExpression != "" {
-		base64Key, celErr := application.EvalCELClaim(trusted.PublicKeyClaimExpression, string(sa.IdentityToken))
+		base64Key, celErr := domain.EvalCELClaim(trusted.PublicKeyClaimExpression, string(sa.IdentityToken))
 		if celErr != nil {
 			return fmt.Errorf("extract public key claim from identity token: %w", celErr)
 		}
-		keys, err = keyregistry.ParsePublicKeyFromBase64(base64Key)
+		keys, err = domain.ParsePublicKeyFromBase64(base64Key)
 		if err != nil {
 			return fmt.Errorf("parse public key from identity token: %w", err)
 		}

@@ -17,23 +17,6 @@ type ResumeDeploymentInput struct {
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
 }
 
-// ProvenanceBuilder constructs [Provenance] for a mutation that
-// requires re-signing. Implementations live in the application layer
-// and wrap key resolution and signature verification.
-type ProvenanceBuilder interface {
-	BuildProvenance(
-		ctx context.Context,
-		enrollments SignerEnrollmentRepository,
-		caller *SubjectClaims,
-		id DeploymentID,
-		ms ManifestStrategySpec,
-		ps PlacementStrategySpec,
-		generation Generation,
-		userSig []byte,
-		validUntil time.Time,
-	) (*Provenance, error)
-}
-
 // ResumeDeploymentWorkflowSpec transitions a [FulfillmentStatePausedAuth]
 // fulfillment back to active by updating auth/provenance, bumping its
 // generation, and running a convergence loop.
@@ -41,9 +24,9 @@ type ProvenanceBuilder interface {
 // Pass this spec to [Registry.RegisterResumeDeployment] to obtain a
 // [ResumeDeploymentWorkflow] that can start instances.
 type ResumeDeploymentWorkflowSpec struct {
-	Store             Store
-	Orchestration     OrchestrationWorkflow
-	ProvenanceBuilder ProvenanceBuilder // nil when signing is not configured
+	Store         Store
+	Orchestration OrchestrationWorkflow
+	Provenance    *ProvenanceService
 }
 
 func (s *ResumeDeploymentWorkflowSpec) Name() string { return "resume-deployment" }
@@ -72,13 +55,8 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
-			if s.ProvenanceBuilder == nil {
-				return MutationResult{}, fmt.Errorf(
-					"%w: signing not configured but deployment %q requires provenance",
-					ErrInvalidArgument, in.ID)
-			}
 			nextGen := f.Generation + 1
-			prov, err = s.ProvenanceBuilder.BuildProvenance(
+			prov, err = s.Provenance.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				dep.ID, f.ManifestStrategy, f.PlacementStrategy,
 				nextGen, in.UserSignature, in.ValidUntil,

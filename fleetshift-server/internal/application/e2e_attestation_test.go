@@ -123,7 +123,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	// Build a verifier with the same fake registry for key resolution.
 	fakeVerifierReg := keyregistry.NewFake()
 	fakeVerifierReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
-	verifierKeyResolver := &application.KeyResolver{
+	verifierKeyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: fakeVerifierReg,

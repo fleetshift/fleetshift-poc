@@ -10,11 +10,11 @@ import (
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
-	Store             domain.Store
-	CreateWF          domain.CreateDeploymentWorkflow
-	DeleteWF          domain.DeleteDeploymentWorkflow
-	ResumeWF          domain.ResumeDeploymentWorkflow
-	ProvenanceBuilder domain.ProvenanceBuilder // nil when signing is not configured
+	Store      domain.Store
+	CreateWF   domain.CreateDeploymentWorkflow
+	DeleteWF   domain.DeleteDeploymentWorkflow
+	ResumeWF   domain.ResumeDeploymentWorkflow
+	Provenance *domain.ProvenanceService
 }
 
 // Create starts the durable create-deployment workflow, which persists
@@ -39,16 +39,12 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 				"%w: signing a deployment requires an authenticated caller",
 				domain.ErrInvalidArgument)
 		}
-		if s.ProvenanceBuilder == nil {
-			return domain.DeploymentView{}, fmt.Errorf(
-				"%w: signing not configured", domain.ErrInvalidArgument)
-		}
 		tx, err := s.Store.BeginReadOnly(ctx)
 		if err != nil {
 			return domain.DeploymentView{}, fmt.Errorf("begin read tx: %w", err)
 		}
 		defer tx.Rollback()
-		prov, err := s.ProvenanceBuilder.BuildProvenance(
+		prov, err := s.Provenance.BuildDeploymentProvenance(
 			ctx, tx.SignerEnrollments(), ac.Subject,
 			in.ID, in.ManifestStrategy, in.PlacementStrategy,
 			in.ExpectedGeneration, in.UserSignature, in.ValidUntil,

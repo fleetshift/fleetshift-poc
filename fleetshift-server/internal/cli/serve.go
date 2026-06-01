@@ -410,21 +410,21 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- application services ---
 
-	keyResolver := &application.KeyResolver{
+	keyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
 		},
 	}
-	provenanceBuilder := &application.KeyResolverProvenanceBuilder{
+	provenance := &domain.ProvenanceService{
 		KeyResolver: keyResolver,
 		AuthMethods: authMethodRepo,
 	}
 
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:             store,
-		Orchestration:     orchWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:         store,
+		Orchestration: orchWf,
+		Provenance:    provenance,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -432,9 +432,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
-		Store:             store,
-		Orchestration:     orchWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:         store,
+		Orchestration: orchWf,
+		Provenance:    provenance,
 	}
 	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
 	if err != nil {
@@ -442,11 +442,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	deploymentSvc := &application.DeploymentService{
-		Store:             store,
-		CreateWF:          createWf,
-		DeleteWF:          deleteWf,
-		ResumeWF:          resumeWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:      store,
+		CreateWF:   createWf,
+		DeleteWF:   deleteWf,
+		ResumeWF:   resumeWf,
+		Provenance: provenance,
 	}
 
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
@@ -456,11 +456,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	managedResourceSvc := &application.ManagedResourceService{
-		Store:             store,
-		CreateWF:          createMRWf,
-		DeleteWF:          deleteMRWf,
-		ResumeWF:          resumeMRWf,
-		ProvenanceBuilder: provenanceBuilder,
+		Store:      store,
+		CreateWF:   createMRWf,
+		DeleteWF:   deleteMRWf,
+		ResumeWF:   resumeMRWf,
+		Provenance: provenance,
 	}
 
 	// --- kubernetes delivery agent ---
@@ -530,7 +530,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodSvc,
 		Verifier:    tokenVerifier,
 		Store:       store,
-		Provenance:  provenanceBuilder,
+		Provenance:  provenance,
 	})
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 

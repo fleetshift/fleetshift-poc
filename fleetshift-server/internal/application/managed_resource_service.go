@@ -13,11 +13,11 @@ import (
 // instances: create, read, list, and delete. Spec validation is handled
 // at the transport layer via protovalidate before reaching this service.
 type ManagedResourceService struct {
-	Store             domain.Store
-	CreateWF          domain.CreateManagedResourceWorkflow
-	DeleteWF          domain.DeleteManagedResourceWorkflow
-	ResumeWF          domain.ResumeManagedResourceWorkflow
-	ProvenanceBuilder domain.ManagedResourceProvenanceBuilder // nil when signing is not configured
+	Store      domain.Store
+	CreateWF   domain.CreateManagedResourceWorkflow
+	DeleteWF   domain.DeleteManagedResourceWorkflow
+	ResumeWF   domain.ResumeManagedResourceWorkflow
+	Provenance *domain.ProvenanceService
 }
 
 // CreateManagedResourceInput carries the fields needed to create a
@@ -75,11 +75,7 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 				domain.ErrInvalidArgument,
 			)
 		}
-		if s.ProvenanceBuilder == nil {
-			return domain.ManagedResourceView{}, fmt.Errorf(
-				"%w: signing not configured", domain.ErrInvalidArgument)
-		}
-		prov, err = s.ProvenanceBuilder.BuildManagedResourceProvenance(
+		prov, err = s.Provenance.BuildManagedResourceProvenance(
 			ctx,
 			tx.SignerEnrollments(),
 			ac.Subject,

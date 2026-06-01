@@ -11,7 +11,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
@@ -52,7 +51,7 @@ func setupHarness(t *testing.T) *testHarness {
 	fakeReg := keyregistry.NewFake()
 	fakeReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
 
-	keyResolver := &application.KeyResolver{
+	keyResolver := &domain.KeyResolver{
 		Registries: domain.BuiltInKeyRegistries(),
 		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 			domain.KeyRegistryTypeGitHub: fakeReg,
@@ -170,7 +169,7 @@ func TestVerifyAttestation_Expired(t *testing.T) {
 		h.verifier.TrustedIssuers(),
 		attestation.WithHTTPClient(h.provider.HTTPClient()),
 		attestation.WithClock(func() time.Time { return time.Date(2028, 1, 1, 0, 0, 0, 0, time.UTC) }),
-		attestation.WithKeyResolver(&application.KeyResolver{
+		attestation.WithKeyResolver(&domain.KeyResolver{
 			Registries: domain.BuiltInKeyRegistries(),
 			Clients: map[domain.KeyRegistryType]domain.RegistryClient{
 				domain.KeyRegistryTypeGitHub: h.fakeReg,
