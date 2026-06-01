@@ -49,7 +49,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 			domain.KeyRegistryTypeGitHub: fakeReg,
 		},
 	}
-	provenance := &domain.ProvenanceService{KeyResolver: keyResolver}
+	provenanceSvc := &domain.ProvenanceService{KeyResolver: keyResolver}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store:           store,
@@ -98,7 +98,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		Store:      store,
 		CreateWF:   createWf,
 		DeleteWF:   deleteWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 
 	// --- Step 1: Register target (the addon) ---

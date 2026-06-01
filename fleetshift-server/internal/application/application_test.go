@@ -67,7 +67,7 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 			domain.KeyRegistryTypeGitHub: fakeReg,
 		},
 	}
-	provenance := &domain.ProvenanceService{KeyResolver: keyResolver}
+	provenanceSvc := &domain.ProvenanceService{KeyResolver: keyResolver}
 
 	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{
 		Store: store,
@@ -90,7 +90,7 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -104,7 +104,7 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 			CreateWF:   createWf,
 			DeleteWF:   deleteWf,
 			ResumeWF:   resumeWf,
-			ProvenanceSvc: provenance,
+			ProvenanceSvc: provenanceSvc,
 		},
 		store:    store,
 		reporter: reporter,

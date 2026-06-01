@@ -13,10 +13,10 @@ import (
 // instances: create, read, list, and delete. Spec validation is handled
 // at the transport layer via protovalidate before reaching this service.
 type ManagedResourceService struct {
-	Store      domain.Store
-	CreateWF   domain.CreateManagedResourceWorkflow
-	DeleteWF   domain.DeleteManagedResourceWorkflow
-	ResumeWF   domain.ResumeManagedResourceWorkflow
+	Store         domain.Store
+	CreateWF      domain.CreateManagedResourceWorkflow
+	DeleteWF      domain.DeleteManagedResourceWorkflow
+	ResumeWF      domain.ResumeManagedResourceWorkflow
 	ProvenanceSvc *domain.ProvenanceService
 }
 

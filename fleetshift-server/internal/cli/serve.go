@@ -416,7 +416,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
 		},
 	}
-	provenance := &domain.ProvenanceService{
+	provenanceSvc := &domain.ProvenanceService{
 		KeyResolver: keyResolver,
 		AuthMethods: authMethodRepo,
 	}
@@ -424,7 +424,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
 	if err != nil {
@@ -434,7 +434,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
 		Store:         store,
 		Orchestration: orchWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
 	if err != nil {
@@ -446,7 +446,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateWF:   createWf,
 		DeleteWF:   deleteWf,
 		ResumeWF:   resumeWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 
 	signerEnrollmentSvc := &application.SignerEnrollmentService{
@@ -460,7 +460,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateWF:   createMRWf,
 		DeleteWF:   deleteMRWf,
 		ResumeWF:   resumeMRWf,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	}
 
 	// --- kubernetes delivery agent ---
@@ -530,7 +530,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodSvc,
 		Verifier:    tokenVerifier,
 		Store:       store,
-		ProvenanceSvc: provenance,
+		ProvenanceSvc: provenanceSvc,
 	})
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
 

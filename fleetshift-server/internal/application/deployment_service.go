@@ -10,10 +10,10 @@ import (
 
 // DeploymentService manages deployment lifecycle and triggers orchestration.
 type DeploymentService struct {
-	Store      domain.Store
-	CreateWF   domain.CreateDeploymentWorkflow
-	DeleteWF   domain.DeleteDeploymentWorkflow
-	ResumeWF   domain.ResumeDeploymentWorkflow
+	Store         domain.Store
+	CreateWF      domain.CreateDeploymentWorkflow
+	DeleteWF      domain.DeleteDeploymentWorkflow
+	ResumeWF      domain.ResumeDeploymentWorkflow
 	ProvenanceSvc *domain.ProvenanceService
 }
 
