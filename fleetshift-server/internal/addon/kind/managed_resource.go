@@ -95,7 +95,8 @@ apiServer:
     oidc-issuer-url: %q
     oidc-client-id: %q
     oidc-username-claim: %q
-    oidc-groups-claim: %q`, issuerURL, audience, oidcSpec.usernameClaim(), oidcSpec.groupsClaim())
+    oidc-groups-claim: %q
+    oidc-signing-algs: "RS256,ES256"`, issuerURL, audience, oidcSpec.usernameClaim(), oidcSpec.groupsClaim())
 
 	if caCertHostPath != "" {
 		patch += fmt.Sprintf("\n    oidc-ca-file: %q", oidcCACertContainerPath)
