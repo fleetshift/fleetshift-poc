@@ -50,3 +50,37 @@ Stubs or dummies can be used judiciously when the interaction is completely triv
 ## Hermetic
 
 When external dependencies are needed, leverage testcontainers to download and run them locally. This should only be for when this is essential. For example, we can't test a PostgresStore without a Postgres. Writing a "fake" postgres is absurd 🙂. But, if you need to test business logic that involves a repository, using a real postgres is overkill. Just use the in memory fake (e.g. a custom in memory implementation, or sqlite with an in memory database, etc.).
+
+## Integration tests (Docker-heavy)
+
+Tests that spin up heavyweight Docker infrastructure (Kind clusters, multi-container test environments, etc.) are gated behind a build tag:
+
+```go
+//go:build integration
+```
+
+This means these files are **excluded from compilation** by default. They only compile and run when you explicitly pass `-tags integration`.
+
+### Convention
+
+- File naming: `*_docker_test.go` signals that the file requires the integration tag.
+- The build tag is the first line of the file, followed by a blank line before the package clause.
+- Do not combine `testing.Short()` guards with the build tag; the tag is the gate.
+
+### Running locally
+
+The default test suite excludes integration tests automatically:
+
+    go test ./...
+
+To run integration tests explicitly (requires Docker or Podman):
+
+    go test -tags integration ./internal/addon/kind/
+
+### CI behavior
+
+CI runs the default suite (`go test ./...`) first. A separate step runs the integration tests with `-tags integration` for the `fleetshift-server` module. This avoids Docker resource contention between the two sets.
+
+### Why build tags instead of `-short`?
+
+Build tags are compiler-enforced. If a developer writes a new Docker-heavy test and forgets the tag, it compiles into the default suite and fails loudly from resource contention -- rather than being silently skipped forever (which is the `-short` failure mode).

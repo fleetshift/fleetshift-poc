@@ -1,3 +1,5 @@
+//go:build integration
+
 package kind_test
 
 import (
@@ -158,12 +160,9 @@ func oidcK8sClient(t *testing.T, kubeconfig, token string) *kubernetes.Clientset
 // and token-passthrough delivery against it. Sharing one cluster avoids
 // paying the ~20s cluster creation cost three times.
 //
-// Requires Docker or Podman (skipped when unavailable or -short).
+// Requires Docker or Podman (skipped when unavailable).
+// Requires -tags integration.
 func TestKindAddon_OIDCIntegration(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
 	auth := domain.DeliveryAuth{
 		Caller: &domain.SubjectClaims{
 			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
@@ -366,12 +365,8 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 //
 // This test catches regressions where DeliveryAuth is not threaded
 // through the managed resource path. Skipped when Docker is not
-// available or when running with -short.
+// available. Requires -tags integration.
 func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
 	checker := cluster.NewProvider()
 
 	if _, err := checker.List(); err != nil {

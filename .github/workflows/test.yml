@@ -33,8 +33,14 @@ jobs:
           cache-dependency-path: "**/go.sum"
 
       - name: Detect Docker host address for kind OIDC tests
+        if: matrix.module == 'fleetshift-server'
         run: echo "KIND_HOST_ADDR=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" >> "$GITHUB_ENV"
 
       - name: Run tests
         working-directory: ${{ matrix.module }}
         run: go test -count=1 -timeout 15m ./...
+
+      - name: Run Docker integration tests
+        if: matrix.module == 'fleetshift-server'
+        working-directory: ${{ matrix.module }}
+        run: go test -tags integration -count=1 -timeout 15m ./internal/addon/kind/

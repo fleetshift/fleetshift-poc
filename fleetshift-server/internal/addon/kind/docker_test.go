@@ -1,3 +1,5 @@
+//go:build integration
+
 package kind_test
 
 import (
@@ -20,13 +22,9 @@ import (
 
 // TestKindAddon_RealDocker exercises the full addon lifecycle against
 // a real Docker daemon. It creates a kind cluster, verifies it exists,
-// then tears it down. Skipped when Docker is not available or when
-// running with -short.
+// then tears it down. Skipped when Docker is not available.
+// Requires -tags integration.
 func TestKindAddon_RealDocker(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
 	checker := cluster.NewProvider()
 
 	if _, err := checker.List(); err != nil {

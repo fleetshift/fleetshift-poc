@@ -1,3 +1,5 @@
+//go:build integration
+
 package kind_test
 
 import (
@@ -108,12 +110,9 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 // the kubernetes agent with [kubeaddon.WithVault], exercising the full
 // vault-backed credential resolution flow.
 //
-// Requires Docker or Podman (skipped when unavailable or -short).
+// Requires Docker or Podman (skipped when unavailable).
+// Requires -tags integration.
 func TestKubernetesAgent_RealCluster(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
 	f := setupKindCluster(t)
 
 	if len(f.deliveryResult.ProvisionedTargets) != 1 {
