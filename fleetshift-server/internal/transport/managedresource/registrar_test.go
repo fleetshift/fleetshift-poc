@@ -791,7 +791,8 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 
 func TestDynamic_ResumeRPC(t *testing.T) {
 	env := setup(t)
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 
 	// Create a resource.
 	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
@@ -808,6 +809,9 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err := env.conn.Invoke(ctx, "/fleetshift.v1.KindClusterService/CreateKindCluster", createReq, createResp); err != nil {
 		t.Fatalf("CreateKindCluster: %v", err)
 	}
+
+	// Wait for orchestration to finish before manipulating state directly.
+	awaitDynamicState(t, ctx, env, "resume-cluster", 2)
 
 	// Transition to paused_auth state.
 	tx, err := env.store.Begin(ctx)
