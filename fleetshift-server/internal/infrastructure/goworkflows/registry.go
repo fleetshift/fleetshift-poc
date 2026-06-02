@@ -97,21 +97,18 @@ func (r *Registry) RegisterOrchestration(spec *domain.OrchestrationWorkflowSpec)
 	wfFunc := func(ctx workflow.Context, fulfillmentID domain.FulfillmentID) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.FulfillmentEvent](ctx, domain.FulfillmentEventSignal.Name)
 		port := newSignalPort(ch)
-		record := &baseRecord{
-			wfCtx:    ctx,
-			invokers: invokers,
-			signals: map[string]func() (any, error){
-				domain.FulfillmentEventSignal.Name: func() (any, error) {
-					val, ok := ch.Receive(ctx)
-					if !ok {
-						return nil, fmt.Errorf("signal channel %q closed", domain.FulfillmentEventSignal.Name)
-					}
-					return val, nil
-				},
+		record := newBaseRecord(ctx, invokers)
+		record.signals = map[string]func() (any, error){
+			domain.FulfillmentEventSignal.Name: func() (any, error) {
+				val, ok := ch.Receive(ctx)
+				if !ok {
+					return nil, fmt.Errorf("signal channel %q closed", domain.FulfillmentEventSignal.Name)
+				}
+				return val, nil
 			},
-			signalPorts: map[string]*signalPort{
-				domain.FulfillmentEventSignal.Name: port,
-			},
+		}
+		record.signalPorts = map[string]*signalPort{
+			domain.FulfillmentEventSignal.Name: port,
 		}
 		val, err := spec.Run(record, fulfillmentID)
 		var can *domain.ContinueAsNewError
@@ -140,8 +137,7 @@ func (r *Registry) RegisterCreateDeployment(spec *domain.CreateDeploymentWorkflo
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.CreateDeploymentInput) (domain.DeploymentView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -170,8 +166,7 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 	}
 
 	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (domain.DeploymentView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
-		return spec.Run(record, deploymentID)
+		return spec.Run(newBaseRecord(ctx, invokers), deploymentID)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -196,21 +191,18 @@ func (r *Registry) RegisterDeleteDeploymentCleanup(spec *domain.DeleteDeployment
 	wfFunc := func(ctx workflow.Context, input domain.DeleteDeploymentCleanupInput) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
 		port := newSignalPort(ch)
-		record := &baseRecord{
-			wfCtx:    ctx,
-			invokers: invokers,
-			signals: map[string]func() (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
-					val, ok := ch.Receive(ctx)
-					if !ok {
-						return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
-					}
-					return val, nil
-				},
+		record := newBaseRecord(ctx, invokers)
+		record.signals = map[string]func() (any, error){
+			domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
+				val, ok := ch.Receive(ctx)
+				if !ok {
+					return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
+				}
+				return val, nil
 			},
-			signalPorts: map[string]*signalPort{
-				domain.DeleteCleanupCompleteSignal.Name: port,
-			},
+		}
+		record.signalPorts = map[string]*signalPort{
+			domain.DeleteCleanupCompleteSignal.Name: port,
 		}
 		return spec.Run(record, input)
 	}
@@ -237,21 +229,18 @@ func (r *Registry) RegisterDeleteManagedResourceCleanup(spec *domain.DeleteManag
 	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceCleanupInput) (struct{}, error) {
 		ch := workflow.NewSignalChannel[domain.DeleteCleanupCompleteEvent](ctx, domain.DeleteCleanupCompleteSignal.Name)
 		port := newSignalPort(ch)
-		record := &baseRecord{
-			wfCtx:    ctx,
-			invokers: invokers,
-			signals: map[string]func() (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
-					val, ok := ch.Receive(ctx)
-					if !ok {
-						return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
-					}
-					return val, nil
-				},
+		record := newBaseRecord(ctx, invokers)
+		record.signals = map[string]func() (any, error){
+			domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
+				val, ok := ch.Receive(ctx)
+				if !ok {
+					return nil, fmt.Errorf("signal channel %q closed", domain.DeleteCleanupCompleteSignal.Name)
+				}
+				return val, nil
 			},
-			signalPorts: map[string]*signalPort{
-				domain.DeleteCleanupCompleteSignal.Name: port,
-			},
+		}
+		record.signalPorts = map[string]*signalPort{
+			domain.DeleteCleanupCompleteSignal.Name: port,
 		}
 		return spec.Run(record, input)
 	}
@@ -279,8 +268,7 @@ func (r *Registry) RegisterResumeManagedResource(spec *domain.ResumeManagedResou
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.ResumeManagedResourceInput) (domain.ManagedResourceView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -306,8 +294,7 @@ func (r *Registry) RegisterResumeDeployment(spec *domain.ResumeDeploymentWorkflo
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.ResumeDeploymentInput) (domain.DeploymentView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -333,8 +320,7 @@ func (r *Registry) RegisterProvisionIdP(spec *domain.ProvisionIdPWorkflowSpec) (
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.ProvisionIdPInput) (domain.AuthMethod, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers, signals: nil}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -360,8 +346,7 @@ func (r *Registry) RegisterCreateManagedResource(spec *domain.CreateManagedResou
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.CreateManagedResourceInput) (domain.ManagedResourceView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -390,8 +375,7 @@ func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResou
 	}
 
 	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceInput) (domain.ManagedResourceView, error) {
-		record := &baseRecord{wfCtx: ctx, invokers: invokers}
-		return spec.Run(record, input)
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -448,9 +432,18 @@ type signalPort struct {
 
 type baseRecord struct {
 	wfCtx       workflow.Context
+	execCtx     context.Context
 	invokers    map[string]activityInvoker
 	signals     map[string]func() (any, error)
 	signalPorts map[string]*signalPort
+}
+
+func newBaseRecord(wfCtx workflow.Context, invokers map[string]activityInvoker) *baseRecord {
+	return &baseRecord{
+		wfCtx:    wfCtx,
+		execCtx:  context.Background(),
+		invokers: invokers,
+	}
 }
 
 func (r *baseRecord) ID() string {
@@ -458,7 +451,7 @@ func (r *baseRecord) ID() string {
 }
 
 func (r *baseRecord) Context() context.Context {
-	return context.Background()
+	return r.execCtx
 }
 
 func (r *baseRecord) Run(activity domain.Activity[any, any], in any) (any, error) {

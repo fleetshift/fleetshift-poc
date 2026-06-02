@@ -32,9 +32,13 @@ type Activity[I any, O any] interface {
 type Record interface {
 	ID() string
 
-	// Context returns the workflow execution context. In a durable
-	// engine this is the deterministic replay context; in the
-	// synchronous backend it is the caller's context.
+	// Context returns a fully detached execution context
+	// (context.Background). The workflow may execute at an arbitrary
+	// later time, so nothing from the caller's request context —
+	// values, deadlines, or cancellation — is inherited. Any
+	// cross-cutting data (e.g. trace context) must be explicitly
+	// persisted and reconstructed by the engine, not carried on the
+	// Go context.
 	Context() context.Context
 
 	// Run durably runs an activity. The engine provides the activity's

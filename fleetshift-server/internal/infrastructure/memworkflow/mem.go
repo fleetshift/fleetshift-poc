@@ -283,8 +283,10 @@ func startWorkflow[I, O any](
 // newRecord builds a [baseRecord] wired with the given signal
 // bindings. Workflows without signals get a plain record.
 func newRecord(id string, ctx context.Context, signals []signalBinding) *baseRecord {
+	execCtx := context.Background()
+
 	if len(signals) == 0 {
-		return &baseRecord{id: id, ctx: ctx}
+		return &baseRecord{id: id, ctx: ctx, execCtx: execCtx}
 	}
 
 	sigs := make(map[string]func() (any, error), len(signals))
@@ -308,6 +310,7 @@ func newRecord(id string, ctx context.Context, signals []signalBinding) *baseRec
 	return &baseRecord{
 		id:           id,
 		ctx:          ctx,
+		execCtx:      execCtx,
 		signals:      sigs,
 		signalChans:  sigChans,
 		unmarshalers: unmarshalers,
@@ -471,14 +474,15 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 
 type baseRecord struct {
 	id           string
-	ctx          context.Context
+	ctx          context.Context                      // lifecycle context for internal use (Sleep, runOnce)
+	execCtx      context.Context                      // detached execution context returned by Context()
 	signals      map[string]func() (any, error)       // per-signal-name blocking receivers
 	signalChans  map[string]<-chan []byte             // raw channels for AwaitWithTimeout
 	unmarshalers map[string]func([]byte) (any, error) // per-signal-name deserializers
 }
 
 func (r *baseRecord) ID() string               { return r.id }
-func (r *baseRecord) Context() context.Context { return r.ctx }
+func (r *baseRecord) Context() context.Context { return r.execCtx }
 
 func (r *baseRecord) unmarshalSignal(name string, data []byte) (any, error) {
 	unmarshal, ok := r.unmarshalers[name]
