@@ -158,132 +158,203 @@ func (r *Registry) RegisterResumeManagedResource(spec *domain.ResumeManagedResou
 	return &resumeManagedResourceWorkflow{registry: r, spec: spec}, nil
 }
 
+// --- Workflow execution helpers ---
+
+type result[T any] struct {
+	val T
+	err error
+}
+
+type execution[T any] struct {
+	id   string
+	done <-chan result[T]
+}
+
+func (e *execution[T]) WorkflowID() string { return e.id }
+func (e *execution[T]) AwaitResult(ctx context.Context) (T, error) {
+	select {
+	case r := <-e.done:
+		return r.val, r.err
+	case <-ctx.Done():
+		var zero T
+		return zero, ctx.Err()
+	}
+}
+
+// guard provides single-instance-per-ID deduplication, matching the
+// instance-ID uniqueness enforced by durable workflow backends.
+type guard struct {
+	mu      sync.Mutex
+	running map[string]struct{}
+}
+
+// signalBinding pairs a signal name with its raw channel and a
+// type-erased unmarshaler. Use [bindSignal] to construct one.
+type signalBinding struct {
+	name        string
+	ch          <-chan []byte
+	unmarshaler func([]byte) (any, error)
+}
+
+// bindSignal creates a [signalBinding] that deserializes incoming
+// JSON-encoded signals into the concrete event type E.
+func bindSignal[E any](name string, ch <-chan []byte) signalBinding {
+	return signalBinding{
+		name: name,
+		ch:   ch,
+		unmarshaler: func(data []byte) (any, error) {
+			var event E
+			if err := json.Unmarshal(data, &event); err != nil {
+				return nil, fmt.Errorf("memworkflow: unmarshal signal: %w", err)
+			}
+			return event, nil
+		},
+	}
+}
+
+// startWorkflow is the single entry point for launching any workflow.
+// It handles the complete lifecycle:
+//   - Guard check: returns [domain.ErrAlreadyRunning] if an instance
+//     with the same ID is already active.
+//   - Record construction: builds a [baseRecord] from instanceID, ctx,
+//     and the optional signal bindings.
+//   - ContinueAsNew: wraps the run call in a loop that restarts on
+//     [domain.ContinueAsNewError] (harmless for specs that never
+//     return it -- the loop executes exactly once).
+//   - Atomic finish: under the guard's lock, removes the running
+//     entry, calls the optional cleanup, and sends the result, so a
+//     concurrent Start cannot see the slot as vacant before the
+//     result is delivered.
+//   - Panic recovery: surfaced as an error on the execution.
+func startWorkflow[I, O any](
+	g *guard,
+	instanceID string,
+	ctx context.Context,
+	cleanup func(),
+	run func(domain.Record, I) (O, error),
+	input I,
+	signals ...signalBinding,
+) (*execution[O], error) {
+	g.mu.Lock()
+	if g.running == nil {
+		g.running = make(map[string]struct{})
+	}
+	if _, active := g.running[instanceID]; active {
+		g.mu.Unlock()
+		return nil, domain.ErrAlreadyRunning
+	}
+	g.running[instanceID] = struct{}{}
+	g.mu.Unlock()
+
+	done := make(chan result[O], 1)
+
+	go func() {
+		finish := func(r result[O]) {
+			g.mu.Lock()
+			delete(g.running, instanceID)
+			if cleanup != nil {
+				cleanup()
+			}
+			done <- r
+			g.mu.Unlock()
+		}
+		defer func() {
+			if rec := recover(); rec != nil {
+				finish(result[O]{err: fmt.Errorf("workflow panicked: %v", rec)})
+			}
+		}()
+
+		for {
+			record := newRecord(instanceID, ctx, signals)
+			val, err := run(record, input)
+			var can *domain.ContinueAsNewError
+			if errors.As(err, &can) {
+				input = can.Input.(I)
+				continue
+			}
+			finish(result[O]{val: val, err: err})
+			return
+		}
+	}()
+
+	return &execution[O]{id: instanceID, done: done}, nil
+}
+
+// newRecord builds a [baseRecord] wired with the given signal
+// bindings. Workflows without signals get a plain record.
+func newRecord(id string, ctx context.Context, signals []signalBinding) *baseRecord {
+	if len(signals) == 0 {
+		return &baseRecord{id: id, ctx: ctx}
+	}
+
+	sigs := make(map[string]func() (any, error), len(signals))
+	sigChans := make(map[string]<-chan []byte, len(signals))
+	unmarshalers := make(map[string]func([]byte) (any, error), len(signals))
+
+	for _, s := range signals {
+		s := s
+		sigs[s.name] = func() (any, error) {
+			select {
+			case data := <-s.ch:
+				return s.unmarshaler(data)
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			}
+		}
+		sigChans[s.name] = s.ch
+		unmarshalers[s.name] = s.unmarshaler
+	}
+
+	return &baseRecord{
+		id:           id,
+		ctx:          ctx,
+		signals:      sigs,
+		signalChans:  sigChans,
+		unmarshalers: unmarshalers,
+	}
+}
+
 // --- OrchestrationWorkflow ---
 
 type orchestrationWorkflow struct {
 	registry *Registry
 	spec     *domain.OrchestrationWorkflowSpec
-	mu       sync.Mutex
-	running  map[domain.FulfillmentID]struct{}
+	guard    guard
 }
 
 func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.FulfillmentID) (domain.Execution[struct{}], error) {
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[domain.FulfillmentID]struct{})
-	}
-	if _, active := w.running[fulfillmentID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrAlreadyRunning
-	}
-	w.running[fulfillmentID] = struct{}{}
-	w.mu.Unlock()
-
 	inst := w.registry.getInstance(fulfillmentID)
-
-	done := make(chan orchResult, 1)
-
-	go func() {
-		finish := func(result orchResult) {
-			w.mu.Lock()
-			w.registry.removeInstance(fulfillmentID)
-			delete(w.running, fulfillmentID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
-
-		id := fulfillmentID
-		for {
-			eventsCh := inst.events
-			record := &baseRecord{
-				id:  string(id),
-				ctx: ctx,
-				signals: map[string]func() (any, error){
-					domain.FulfillmentEventSignal.Name: func() (any, error) {
-						select {
-						case data := <-eventsCh:
-							var event domain.FulfillmentEvent
-							if err := json.Unmarshal(data, &event); err != nil {
-								return nil, fmt.Errorf("memworkflow: unmarshal signal: %w", err)
-							}
-							return event, nil
-						case <-ctx.Done():
-							return nil, ctx.Err()
-						}
-					},
-				},
-				signalChans: map[string]<-chan []byte{
-					domain.FulfillmentEventSignal.Name: eventsCh,
-				},
-				unmarshalers: map[string]func([]byte) (any, error){
-					domain.FulfillmentEventSignal.Name: func(data []byte) (any, error) {
-						var event domain.FulfillmentEvent
-						if err := json.Unmarshal(data, &event); err != nil {
-							return nil, fmt.Errorf("memworkflow: unmarshal signal: %w", err)
-						}
-						return event, nil
-					},
-				},
-			}
-			val, err := w.spec.Run(record, id)
-			var can *domain.ContinueAsNewError
-			if errors.As(err, &can) {
-				id = can.Input.(domain.FulfillmentID)
-				continue
-			}
-			finish(orchResult{val: val, err: err})
-			return
-		}
-	}()
-
-	return &orchExecution{id: string(fulfillmentID), done: done}, nil
+	return startWorkflow(&w.guard, string(fulfillmentID), ctx,
+		func() { w.registry.removeInstance(fulfillmentID) },
+		w.spec.Run, fulfillmentID,
+		bindSignal[domain.FulfillmentEvent](domain.FulfillmentEventSignal.Name, inst.events),
+	)
 }
 
 // --- CreateDeploymentWorkflow ---
 
 type createDeploymentWorkflow struct {
-	spec *domain.CreateDeploymentWorkflowSpec
+	spec  *domain.CreateDeploymentWorkflowSpec
+	guard guard
 }
 
 func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
-	done := make(chan createResult, 1)
-
-	go func() {
-		record := &baseRecord{
-			id:  "create-" + string(input.ID),
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		done <- createResult{val: val, err: err}
-	}()
-
-	return &createExecution{id: "create-" + string(input.ID), done: done}, nil
+	return startWorkflow(&w.guard, "create-"+string(input.ID), ctx,
+		nil, w.spec.Run, input,
+	)
 }
 
 // --- ProvisionIdPWorkflow ---
 
 type provisionIdPWorkflow struct {
-	spec *domain.ProvisionIdPWorkflowSpec
+	spec  *domain.ProvisionIdPWorkflowSpec
+	guard guard
 }
 
 func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.ProvisionIdPInput) (domain.Execution[domain.AuthMethod], error) {
-	done := make(chan provisionResult, 1)
-
-	go func() {
-		record := &baseRecord{
-			id:  "provision-idp-" + string(input.AuthMethodID),
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		done <- provisionResult{val: val, err: err}
-	}()
-
-	return &provisionExecution{id: "provision-idp-" + string(input.AuthMethodID), done: done}, nil
+	return startWorkflow(&w.guard, "provision-idp-"+string(input.AuthMethodID), ctx,
+		nil, w.spec.Run, input,
+	)
 }
 
 // --- DeleteDeploymentWorkflow ---
@@ -291,48 +362,14 @@ func (w *provisionIdPWorkflow) Start(ctx context.Context, input domain.Provision
 type deleteDeploymentWorkflow struct {
 	registry *Registry
 	spec     *domain.DeleteDeploymentWorkflowSpec
-	mu       sync.Mutex
-	running  map[string]struct{}
+	guard    guard
 }
 
 func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
-
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[string]struct{})
-	}
-	if _, active := w.running[instanceID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrConcurrentUpdate
-	}
-	w.running[instanceID] = struct{}{}
-	w.mu.Unlock()
-
-	done := make(chan deploymentResult, 1)
-
-	go func() {
-		finish := func(result deploymentResult) {
-			w.mu.Lock()
-			delete(w.running, instanceID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
-
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, deploymentID)
-		finish(deploymentResult{val: val, err: err})
-	}()
-
-	return &deploymentExecution{id: instanceID, done: done}, nil
+	return startWorkflow(&w.guard, instanceID, ctx,
+		nil, w.spec.Run, deploymentID,
+	)
 }
 
 // --- ResumeDeploymentWorkflow ---
@@ -340,48 +377,14 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 type resumeDeploymentWorkflow struct {
 	registry *Registry
 	spec     *domain.ResumeDeploymentWorkflowSpec
-	mu       sync.Mutex
-	running  map[string]struct{}
+	guard    guard
 }
 
 func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
 	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
-
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[string]struct{})
-	}
-	if _, active := w.running[instanceID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrConcurrentUpdate
-	}
-	w.running[instanceID] = struct{}{}
-	w.mu.Unlock()
-
-	done := make(chan deploymentResult, 1)
-
-	go func() {
-		finish := func(result deploymentResult) {
-			w.mu.Lock()
-			delete(w.running, instanceID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
-
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		finish(deploymentResult{val: val, err: err})
-	}()
-
-	return &deploymentExecution{id: instanceID, done: done}, nil
+	return startWorkflow(&w.guard, instanceID, ctx,
+		nil, w.spec.Run, input,
+	)
 }
 
 // --- DeleteDeploymentCleanupWorkflow ---
@@ -389,77 +392,17 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 type deleteDeploymentCleanupWorkflow struct {
 	registry *Registry
 	spec     *domain.DeleteDeploymentCleanupWorkflowSpec
-	mu       sync.Mutex
-	running  map[string]struct{}
+	guard    guard
 }
 
 func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentCleanupInput) (domain.Execution[struct{}], error) {
 	instanceID := domain.DeleteCleanupWorkflowID(input.FulfillmentID)
-
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[string]struct{})
-	}
-	if _, active := w.running[instanceID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrAlreadyRunning
-	}
-	w.running[instanceID] = struct{}{}
-	w.mu.Unlock()
-
 	inst := w.registry.getCleanupInstance(input.FulfillmentID)
-	done := make(chan orchResult, 1)
-
-	go func() {
-		finish := func(result orchResult) {
-			w.mu.Lock()
-			delete(w.running, instanceID)
-			w.registry.removeCleanupInstance(input.FulfillmentID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
-
-		eventsCh := inst.events
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-			signals: map[string]func() (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
-					select {
-					case data := <-eventsCh:
-						var event domain.DeleteCleanupCompleteEvent
-						if err := json.Unmarshal(data, &event); err != nil {
-							return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
-						}
-						return event, nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				},
-			},
-			signalChans: map[string]<-chan []byte{
-				domain.DeleteCleanupCompleteSignal.Name: eventsCh,
-			},
-			unmarshalers: map[string]func([]byte) (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func(data []byte) (any, error) {
-					var event domain.DeleteCleanupCompleteEvent
-					if err := json.Unmarshal(data, &event); err != nil {
-						return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
-					}
-					return event, nil
-				},
-			},
-		}
-		val, err := w.spec.Run(record, input)
-		finish(orchResult{val: val, err: err})
-	}()
-
-	return &orchExecution{id: instanceID, done: done}, nil
+	return startWorkflow(&w.guard, instanceID, ctx,
+		func() { w.registry.removeCleanupInstance(input.FulfillmentID) },
+		w.spec.Run, input,
+		bindSignal[domain.DeleteCleanupCompleteEvent](domain.DeleteCleanupCompleteSignal.Name, inst.events),
+	)
 }
 
 // --- DeleteManagedResourceCleanupWorkflow ---
@@ -467,87 +410,71 @@ func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domai
 type deleteManagedResourceCleanupWorkflow struct {
 	registry *Registry
 	spec     *domain.DeleteManagedResourceCleanupWorkflowSpec
-	mu       sync.Mutex
-	running  map[string]struct{}
+	guard    guard
 }
 
 func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceCleanupInput) (domain.Execution[struct{}], error) {
 	instanceID := domain.DeleteCleanupWorkflowID(input.FulfillmentID)
-
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[string]struct{})
-	}
-	if _, active := w.running[instanceID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrAlreadyRunning
-	}
-	w.running[instanceID] = struct{}{}
-	w.mu.Unlock()
-
 	inst := w.registry.getCleanupInstance(input.FulfillmentID)
-	done := make(chan orchResult, 1)
+	return startWorkflow(&w.guard, instanceID, ctx,
+		func() { w.registry.removeCleanupInstance(input.FulfillmentID) },
+		w.spec.Run, input,
+		bindSignal[domain.DeleteCleanupCompleteEvent](domain.DeleteCleanupCompleteSignal.Name, inst.events),
+	)
+}
 
-	go func() {
-		finish := func(result orchResult) {
-			w.mu.Lock()
-			delete(w.running, instanceID)
-			w.registry.removeCleanupInstance(input.FulfillmentID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
+// --- CreateManagedResourceWorkflow ---
 
-		eventsCh := inst.events
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-			signals: map[string]func() (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func() (any, error) {
-					select {
-					case data := <-eventsCh:
-						var event domain.DeleteCleanupCompleteEvent
-						if err := json.Unmarshal(data, &event); err != nil {
-							return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
-						}
-						return event, nil
-					case <-ctx.Done():
-						return nil, ctx.Err()
-					}
-				},
-			},
-			signalChans: map[string]<-chan []byte{
-				domain.DeleteCleanupCompleteSignal.Name: eventsCh,
-			},
-			unmarshalers: map[string]func([]byte) (any, error){
-				domain.DeleteCleanupCompleteSignal.Name: func(data []byte) (any, error) {
-					var event domain.DeleteCleanupCompleteEvent
-					if err := json.Unmarshal(data, &event); err != nil {
-						return nil, fmt.Errorf("memworkflow: unmarshal cleanup signal: %w", err)
-					}
-					return event, nil
-				},
-			},
-		}
-		val, err := w.spec.Run(record, input)
-		finish(orchResult{val: val, err: err})
-	}()
+type createManagedResourceWorkflow struct {
+	spec  *domain.CreateManagedResourceWorkflowSpec
+	guard guard
+}
 
-	return &orchExecution{id: instanceID, done: done}, nil
+func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
+	return startWorkflow(&w.guard, instanceID, ctx,
+		nil, w.spec.Run, input,
+	)
+}
+
+// --- DeleteManagedResourceWorkflow ---
+
+type deleteManagedResourceWorkflow struct {
+	registry *Registry
+	spec     *domain.DeleteManagedResourceWorkflowSpec
+	guard    guard
+}
+
+func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
+	return startWorkflow(&w.guard, instanceID, ctx,
+		nil, w.spec.Run, input,
+	)
+}
+
+// --- ResumeManagedResourceWorkflow ---
+
+type resumeManagedResourceWorkflow struct {
+	registry *Registry
+	spec     *domain.ResumeManagedResourceWorkflowSpec
+	guard    guard
+}
+
+func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
+	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
+	return startWorkflow(&w.guard, instanceID, ctx,
+		nil, w.spec.Run, input,
+	)
 }
 
 // --- shared base Record ---
 
 type baseRecord struct {
-	id          string
-	ctx         context.Context
-	signals     map[string]func() (any, error)         // per-signal-name blocking receivers
-	signalChans map[string]<-chan []byte                // raw channels for AwaitWithTimeout
-	unmarshalers map[string]func([]byte) (any, error)  // per-signal-name deserializers
+	id           string
+	ctx          context.Context
+	signals      map[string]func() (any, error)        // per-signal-name blocking receivers
+	signalChans  map[string]<-chan []byte               // raw channels for AwaitWithTimeout
+	unmarshalers map[string]func([]byte) (any, error)   // per-signal-name deserializers
 }
 
 func (r *baseRecord) ID() string               { return r.id }
@@ -689,205 +616,6 @@ func jsonRoundTrip(v any) (any, error) {
 		return nil, err
 	}
 	return ptr.Elem().Interface(), nil
-}
-
-// --- Executions and result types ---
-
-type orchResult struct {
-	val struct{}
-	err error
-}
-
-type orchExecution struct {
-	id   string
-	done <-chan orchResult
-}
-
-func (e *orchExecution) WorkflowID() string { return e.id }
-func (e *orchExecution) AwaitResult(ctx context.Context) (struct{}, error) {
-	select {
-	case r := <-e.done:
-		return r.val, r.err
-	case <-ctx.Done():
-		return struct{}{}, ctx.Err()
-	}
-}
-
-type createResult struct {
-	val domain.DeploymentView
-	err error
-}
-
-type createExecution struct {
-	id   string
-	done <-chan createResult
-}
-
-func (e *createExecution) WorkflowID() string { return e.id }
-func (e *createExecution) AwaitResult(ctx context.Context) (domain.DeploymentView, error) {
-	select {
-	case r := <-e.done:
-		return r.val, r.err
-	case <-ctx.Done():
-		return domain.DeploymentView{}, ctx.Err()
-	}
-}
-
-type deploymentResult struct {
-	val domain.DeploymentView
-	err error
-}
-
-type deploymentExecution struct {
-	id   string
-	done <-chan deploymentResult
-}
-
-func (e *deploymentExecution) WorkflowID() string { return e.id }
-func (e *deploymentExecution) AwaitResult(ctx context.Context) (domain.DeploymentView, error) {
-	select {
-	case r := <-e.done:
-		return r.val, r.err
-	case <-ctx.Done():
-		return domain.DeploymentView{}, ctx.Err()
-	}
-}
-
-type provisionResult struct {
-	val domain.AuthMethod
-	err error
-}
-
-type provisionExecution struct {
-	id   string
-	done <-chan provisionResult
-}
-
-func (e *provisionExecution) WorkflowID() string { return e.id }
-func (e *provisionExecution) AwaitResult(ctx context.Context) (domain.AuthMethod, error) {
-	select {
-	case r := <-e.done:
-		return r.val, r.err
-	case <-ctx.Done():
-		return domain.AuthMethod{}, ctx.Err()
-	}
-}
-
-// --- CreateManagedResourceWorkflow ---
-
-type createManagedResourceWorkflow struct {
-	spec *domain.CreateManagedResourceWorkflowSpec
-}
-
-func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
-	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
-	done := make(chan managedResourceResult, 1)
-
-	go func() {
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		done <- managedResourceResult{val: val, err: err}
-	}()
-
-	return &managedResourceExecution{id: instanceID, done: done}, nil
-}
-
-// --- DeleteManagedResourceWorkflow ---
-
-type deleteManagedResourceWorkflow struct {
-	registry *Registry
-	spec     *domain.DeleteManagedResourceWorkflowSpec
-}
-
-func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
-	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
-	done := make(chan managedResourceResult, 1)
-
-	go func() {
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		done <- managedResourceResult{val: val, err: err}
-	}()
-
-	return &managedResourceExecution{
-		id:   instanceID,
-		done: done,
-	}, nil
-}
-
-type managedResourceResult struct {
-	val domain.ManagedResourceView
-	err error
-}
-
-type managedResourceExecution struct {
-	id   string
-	done <-chan managedResourceResult
-}
-
-func (e *managedResourceExecution) WorkflowID() string { return e.id }
-func (e *managedResourceExecution) AwaitResult(ctx context.Context) (domain.ManagedResourceView, error) {
-	select {
-	case r := <-e.done:
-		return r.val, r.err
-	case <-ctx.Done():
-		return domain.ManagedResourceView{}, ctx.Err()
-	}
-}
-
-// --- ResumeManagedResourceWorkflow ---
-
-type resumeManagedResourceWorkflow struct {
-	registry *Registry
-	spec     *domain.ResumeManagedResourceWorkflowSpec
-	mu       sync.Mutex
-	running  map[string]struct{}
-}
-
-func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
-	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
-
-	w.mu.Lock()
-	if w.running == nil {
-		w.running = make(map[string]struct{})
-	}
-	if _, active := w.running[instanceID]; active {
-		w.mu.Unlock()
-		return nil, domain.ErrConcurrentUpdate
-	}
-	w.running[instanceID] = struct{}{}
-	w.mu.Unlock()
-
-	done := make(chan managedResourceResult, 1)
-
-	go func() {
-		finish := func(result managedResourceResult) {
-			w.mu.Lock()
-			delete(w.running, instanceID)
-			done <- result
-			w.mu.Unlock()
-		}
-		defer func() {
-			if r := recover(); r != nil {
-				finish(managedResourceResult{err: fmt.Errorf("workflow panicked: %v", r)})
-			}
-		}()
-
-		record := &baseRecord{
-			id:  instanceID,
-			ctx: ctx,
-		}
-		val, err := w.spec.Run(record, input)
-		finish(managedResourceResult{val: val, err: err})
-	}()
-
-	return &managedResourceExecution{id: instanceID, done: done}, nil
 }
 
 // Compile-time interface checks.

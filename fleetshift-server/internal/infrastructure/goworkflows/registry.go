@@ -622,7 +622,7 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 		InstanceID: instanceID,
 	}, w.wfName, deploymentID)
 	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
-		return nil, domain.ErrConcurrentUpdate
+		return nil, domain.ErrAlreadyRunning
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create workflow instance: %w", err)
@@ -703,7 +703,7 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 		InstanceID: instanceID,
 	}, w.wfName, input)
 	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
-		return nil, domain.ErrConcurrentUpdate
+		return nil, domain.ErrAlreadyRunning
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create workflow instance: %w", err)
@@ -794,7 +794,7 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 		InstanceID: instanceID,
 	}, w.wfName, input)
 	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
-		return nil, domain.ErrConcurrentUpdate
+		return nil, domain.ErrAlreadyRunning
 	}
 	if err != nil {
 		return nil, fmt.Errorf("create workflow instance: %w", err)
