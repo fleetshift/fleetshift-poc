@@ -83,10 +83,10 @@ func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
 			return m, fmt.Errorf("oidc_config is required when type is TYPE_OIDC")
 		}
 		m.OIDC = &domain.OIDCConfig{
-			IssuerURL:             domain.IssuerURL(oc.GetIssuerUrl()),
-			Audience:              domain.Audience(oc.GetAudience()),
-			KeyEnrollmentAudience: domain.Audience(oc.GetKeyEnrollmentAudience()),
-			PublicKeyClaimExpression:    oc.GetPublicKeyClaimExpression(),
+			IssuerURL:                domain.IssuerURL(oc.GetIssuerUrl()),
+			Audience:                 domain.Audience(oc.GetAudience()),
+			KeyEnrollmentAudience:    domain.Audience(oc.GetKeyEnrollmentAudience()),
+			PublicKeyClaimExpression: oc.GetPublicKeyClaimExpression(),
 		}
 		if rsm := oc.GetRegistrySubjectMapping(); rsm != nil {
 			m.OIDC.RegistrySubjectMapping = &domain.RegistrySubjectMapping{
@@ -109,13 +109,13 @@ func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 		out.Type = pb.AuthMethod_TYPE_OIDC
 		if m.OIDC != nil {
 			oc := &pb.OIDCConfig{
-				IssuerUrl:             string(m.OIDC.IssuerURL),
-				Audience:              string(m.OIDC.Audience),
-				AuthorizationEndpoint: string(m.OIDC.AuthorizationEndpoint),
-				TokenEndpoint:         string(m.OIDC.TokenEndpoint),
-				JwksUri:               string(m.OIDC.JWKSURI),
-				KeyEnrollmentAudience: string(m.OIDC.KeyEnrollmentAudience),
-				PublicKeyClaimExpression:    m.OIDC.PublicKeyClaimExpression,
+				IssuerUrl:                string(m.OIDC.IssuerURL),
+				Audience:                 string(m.OIDC.Audience),
+				AuthorizationEndpoint:    string(m.OIDC.AuthorizationEndpoint),
+				TokenEndpoint:            string(m.OIDC.TokenEndpoint),
+				JwksUri:                  string(m.OIDC.JWKSURI),
+				KeyEnrollmentAudience:    string(m.OIDC.KeyEnrollmentAudience),
+				PublicKeyClaimExpression: m.OIDC.PublicKeyClaimExpression,
 			}
 			if rsm := m.OIDC.RegistrySubjectMapping; rsm != nil {
 				oc.RegistrySubjectMapping = &pb.RegistrySubjectMapping{

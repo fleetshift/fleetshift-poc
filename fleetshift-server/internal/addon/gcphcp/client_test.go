@@ -367,9 +367,9 @@ func TestCLSClient_ListNodepools_RejectsMissingNodepoolsField(t *testing.T) {
 
 func TestCLSClient_AuthExpiredErrorClassification(t *testing.T) {
 	tests := []struct {
-		name           string
-		statusCode     int
-		body           string
+		name            string
+		statusCode      int
+		body            string
 		wantAuthExpired bool
 	}{
 		{"HTTP401_ReturnsAuthExpiredError", http.StatusUnauthorized, `{"error":"token expired"}`, true},

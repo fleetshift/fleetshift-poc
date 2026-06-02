@@ -472,9 +472,9 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 type baseRecord struct {
 	id           string
 	ctx          context.Context
-	signals      map[string]func() (any, error)        // per-signal-name blocking receivers
-	signalChans  map[string]<-chan []byte               // raw channels for AwaitWithTimeout
-	unmarshalers map[string]func([]byte) (any, error)   // per-signal-name deserializers
+	signals      map[string]func() (any, error)       // per-signal-name blocking receivers
+	signalChans  map[string]<-chan []byte             // raw channels for AwaitWithTimeout
+	unmarshalers map[string]func([]byte) (any, error) // per-signal-name deserializers
 }
 
 func (r *baseRecord) ID() string               { return r.id }

@@ -15,12 +15,12 @@ const KubernetesTargetType domain.TargetType = "kubernetes"
 // credentials (ServiceAccount token, kubeconfig, SSH key), and OCP
 // cluster metadata (InfraID, ClusterID, Region).
 type ClusterOutput struct {
-	TargetID   domain.TargetID
-	Name       string
-	APIServer  string // e.g. "https://api.example.openshiftapps.com:6443"
-	CACert     []byte // PEM-encoded cluster CA certificate
-	InfraID    string // OCP infrastructure ID
-	ClusterID  string // OCP cluster UUID
+	TargetID     domain.TargetID
+	Name         string
+	APIServer    string // e.g. "https://api.example.openshiftapps.com:6443"
+	CACert       []byte // PEM-encoded cluster CA certificate
+	InfraID      string // OCP infrastructure ID
+	ClusterID    string // OCP cluster UUID
 	Region       string // cloud region (e.g. "us-east-1")
 	RoleARN      string // AWS IAM role ARN used for provisioning
 	ReleaseImage string // OCP release image used for provisioning

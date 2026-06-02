@@ -12,10 +12,10 @@ import (
 )
 
 type UIConfigOptions struct {
-	WebDir          string
-	OIDCAuthority   string
-	OIDCUIClientID  string
-	Logger          *slog.Logger
+	WebDir         string
+	OIDCAuthority  string
+	OIDCUIClientID string
+	Logger         *slog.Logger
 }
 
 type pluginManifest struct {

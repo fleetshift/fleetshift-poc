@@ -81,4 +81,3 @@ func parseSSHPublicKey(line string) (crypto.PublicKey, error) {
 	}
 	return cpk.CryptoPublicKey(), nil
 }
-

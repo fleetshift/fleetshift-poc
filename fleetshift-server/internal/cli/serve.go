@@ -442,10 +442,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	deploymentSvc := &application.DeploymentService{
-		Store:      store,
-		CreateWF:   createWf,
-		DeleteWF:   deleteWf,
-		ResumeWF:   resumeWf,
+		Store:         store,
+		CreateWF:      createWf,
+		DeleteWF:      deleteWf,
+		ResumeWF:      resumeWf,
 		ProvenanceSvc: provenanceSvc,
 	}
 
@@ -456,10 +456,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	managedResourceSvc := &application.ManagedResourceService{
-		Store:      store,
-		CreateWF:   createMRWf,
-		DeleteWF:   deleteMRWf,
-		ResumeWF:   resumeMRWf,
+		Store:         store,
+		CreateWF:      createMRWf,
+		DeleteWF:      deleteMRWf,
+		ResumeWF:      resumeMRWf,
 		ProvenanceSvc: provenanceSvc,
 	}
 
@@ -527,9 +527,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
 	topMux.HandleFunc("GET /api/ui/github-signing-keys/{username}", transporthttp.HandleGitHubSigningKeys)
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
-		AuthMethods: authMethodSvc,
-		Verifier:    tokenVerifier,
-		Store:       store,
+		AuthMethods:   authMethodSvc,
+		Verifier:      tokenVerifier,
+		Store:         store,
 		ProvenanceSvc: provenanceSvc,
 	})
 	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)

@@ -66,7 +66,7 @@ type ManagedResourceCapability struct {
 	ResourceType ResourceType
 }
 
-func (ManagedResourceCapability) addonCapability()        {}
+func (ManagedResourceCapability) addonCapability()       {}
 func (ManagedResourceCapability) CapabilityType() string { return "managed_resource" }
 
 // DeliveryCapability declares that the addon provides a
@@ -75,7 +75,7 @@ type DeliveryCapability struct {
 	TargetType TargetType
 }
 
-func (DeliveryCapability) addonCapability()        {}
+func (DeliveryCapability) addonCapability()       {}
 func (DeliveryCapability) CapabilityType() string { return "delivery" }
 
 // ManagedResourceSchema is provided by the workload at connect time.

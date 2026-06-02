@@ -18,8 +18,8 @@ import (
 )
 
 const (
-	platformSAName                 = "fleetshift-platform"
-	platformSANamespace            = "kube-system"
+	platformSAName                          = "fleetshift-platform"
+	platformSANamespace                     = "kube-system"
 	defaultPlatformTokenExpirySeconds int64 = 24 * 3600
 )
 

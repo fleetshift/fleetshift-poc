@@ -13,9 +13,9 @@ import (
 // VerifySignHandler verifies a detached ECDSA signature against the
 // caller's enrolled signing key.
 type VerifySignHandler struct {
-	AuthMethods *application.AuthMethodService
-	Verifier    domain.OIDCTokenVerifier
-	Store       domain.Store
+	AuthMethods   *application.AuthMethodService
+	Verifier      domain.OIDCTokenVerifier
+	Store         domain.Store
 	ProvenanceSvc *domain.ProvenanceService
 }
 

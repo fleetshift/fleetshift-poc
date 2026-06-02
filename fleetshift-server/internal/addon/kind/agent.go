@@ -5,12 +5,12 @@
 package kind
 
 import (
-	"slices"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"

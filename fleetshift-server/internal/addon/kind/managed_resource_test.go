@@ -50,9 +50,9 @@ func TestParseClusterManifest(t *testing.T) {
 			},
 		},
 		{
-			name:    "workers only is allowed",
-			raw:     `{"name":"workers","nodes":[{"role":"worker"},{"role":"worker"}]}`,
-			want:    ClusterSpec{Name: "workers", Nodes: []NodeSpec{{Role: "worker"}, {Role: "worker"}}},
+			name: "workers only is allowed",
+			raw:  `{"name":"workers","nodes":[{"role":"worker"},{"role":"worker"}]}`,
+			want: ClusterSpec{Name: "workers", Nodes: []NodeSpec{{Role: "worker"}, {Role: "worker"}}},
 		},
 		{
 			name:    "empty name",

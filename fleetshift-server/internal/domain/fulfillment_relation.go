@@ -61,9 +61,9 @@ type SignedRelation struct {
 // MarshalJSON implements json.Marshaler for SignedRelation.
 func (sr SignedRelation) MarshalJSON() ([]byte, error) {
 	type alias struct {
-		ResourceType ResourceType         `json:"resource_type"`
-		Relation     fulfillmentRelJSON   `json:"relation"`
-		Signature    Signature            `json:"signature"`
+		ResourceType ResourceType       `json:"resource_type"`
+		Relation     fulfillmentRelJSON `json:"relation"`
+		Signature    Signature          `json:"signature"`
 	}
 	rel, err := marshalFulfillmentRelation(sr.Relation)
 	if err != nil {
@@ -100,7 +100,7 @@ func (sr *SignedRelation) UnmarshalJSON(data []byte) error {
 // fulfillmentRelJSON is the discriminated union representation for
 // FulfillmentRelation serialization.
 type fulfillmentRelJSON struct {
-	Type                 string               `json:"Type"`
+	Type                 string                `json:"Type"`
 	RegisteredSelfTarget *RegisteredSelfTarget `json:"RegisteredSelfTarget,omitempty"`
 }
 

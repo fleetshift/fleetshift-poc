@@ -49,14 +49,14 @@ type EndpointURL string
 
 // OIDCConfig holds the configuration for an OIDC authentication method.
 type OIDCConfig struct {
-	IssuerURL             IssuerURL
-	Audience              Audience
-	JWKSURI               EndpointURL // resolved from discovery
-	AuthorizationEndpoint EndpointURL // resolved from discovery
-	TokenEndpoint         EndpointURL // resolved from discovery
-	KeyEnrollmentAudience  Audience    // audience for signer enrollment ID tokens
-	PublicKeyClaimExpression string    // CEL expression extracting the base64 SPKI public key from ID token claims
-	RegistrySubjectMapping *RegistrySubjectMapping
+	IssuerURL                IssuerURL
+	Audience                 Audience
+	JWKSURI                  EndpointURL // resolved from discovery
+	AuthorizationEndpoint    EndpointURL // resolved from discovery
+	TokenEndpoint            EndpointURL // resolved from discovery
+	KeyEnrollmentAudience    Audience    // audience for signer enrollment ID tokens
+	PublicKeyClaimExpression string      // CEL expression extracting the base64 SPKI public key from ID token claims
+	RegistrySubjectMapping   *RegistrySubjectMapping
 }
 
 // KeyRegistryID identifies a known external key registry.
@@ -105,11 +105,11 @@ type RegistrySubjectMapping struct {
 // subjects. The kind agent serializes these into provisioned target
 // properties; the kubernetes agent deserializes them to build verifiers.
 type TrustBundleEntry struct {
-	IssuerURL              IssuerURL              `json:"issuer_url"`
-	JWKSURI                EndpointURL            `json:"jwks_uri"`
-	EnrollmentAudience     Audience               `json:"enrollment_audience"`
-	PublicKeyClaimExpression string                `json:"public_key_claim_expression,omitempty"`
-	RegistrySubjectMapping *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
+	IssuerURL                IssuerURL               `json:"issuer_url"`
+	JWKSURI                  EndpointURL             `json:"jwks_uri"`
+	EnrollmentAudience       Audience                `json:"enrollment_audience"`
+	PublicKeyClaimExpression string                  `json:"public_key_claim_expression,omitempty"`
+	RegistrySubjectMapping   *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
 }
 
 // TrustBundleResourceType is the [ResourceType] for IdP trust bundle

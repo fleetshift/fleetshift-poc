@@ -162,4 +162,3 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		}
 	}
 }
-

@@ -329,4 +329,3 @@ func RegisterCompositeReflection(s *grpc.Server, mux *DynamicServiceMux, fileReg
 	v1alphareflectiongrpc.RegisterServerReflectionServer(s, reflection.NewServer(opts))
 	v1reflectiongrpc.RegisterServerReflectionServer(s, reflection.NewServerV1(opts))
 }
-
