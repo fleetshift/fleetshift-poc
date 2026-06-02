@@ -83,6 +83,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
 		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

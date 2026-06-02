@@ -7,13 +7,29 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
+
+// awaitDone drains one result from ch with a safety-net timeout so
+// that a regression in the fake delivery pipeline hangs for at most
+// [testutil.UnitTimeout] rather than the global go-test deadline.
+func awaitDone(t *testing.T, ch <-chan domain.DeliveryResult) domain.DeliveryResult {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(testutil.UnitTimeout):
+		t.Fatal("timed out waiting for delivery result")
+		return domain.DeliveryResult{}
+	}
+}
 
 // fakeProvider is a reusable in-memory implementation of
 // [kind.ClusterProvider] for tests. It signals on created after each
@@ -199,7 +215,7 @@ func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver should not return dispatch error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
@@ -250,7 +266,7 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		t.Fatalf("Remove: %v", err)
 	}
 
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateDelivered {
 		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
@@ -275,7 +291,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
 	}
 
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateDelivered {
 		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
@@ -347,7 +363,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 
 	if result.State != domain.DeliveryStateDelivered {
 		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateDelivered)
@@ -391,7 +407,7 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 
 	if len(result.ProvisionedTargets) != 2 {
 		t.Errorf("ProvisionedTargets count = %d, want 2", len(result.ProvisionedTargets))
@@ -477,7 +493,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-reporter.done
+	awaitDone(t, reporter.done)
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -513,7 +529,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-reporter.done
+	awaitDone(t, reporter.done)
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -569,7 +585,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	doneResult := <-reporter.done
+	doneResult := awaitDone(t, reporter.done)
 	if doneResult.State != domain.DeliveryStateDelivered {
 		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
 	}
@@ -607,7 +623,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver should not return a dispatch error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -642,7 +658,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	doneResult := <-reporter.done
+	doneResult := awaitDone(t, reporter.done)
 	if doneResult.State != domain.DeliveryStateDelivered {
 		t.Errorf("async State = %q, want %q", doneResult.State, domain.DeliveryStateDelivered)
 	}
@@ -664,7 +680,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
-	<-reporter.done
+	awaitDone(t, reporter.done)
 
 	agentObs.mu.Lock()
 	defer agentObs.mu.Unlock()
@@ -709,7 +725,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	done := <-reporter.done
+	done := awaitDone(t, reporter.done)
 	if done.State != domain.DeliveryStateDelivered {
 		t.Fatalf("async State = %q, want Delivered", done.State)
 	}
@@ -744,7 +760,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		Raw:          trustRaw,
 	}}
 	_ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil, 1)
-	<-reporter.done
+	awaitDone(t, reporter.done)
 
 	// Now deliver a cluster spec. The same agent retains the trust
 	// bundle in memory, and the done channel has been drained.
@@ -759,7 +775,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	done := <-reporter.done
+	done := awaitDone(t, reporter.done)
 	if done.State != domain.DeliveryStateDelivered {
 		t.Fatalf("async State = %q (message: %s)", done.State, done.Message)
 	}

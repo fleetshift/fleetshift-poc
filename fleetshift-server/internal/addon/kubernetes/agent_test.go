@@ -11,10 +11,26 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
+
+// awaitDone drains one result from ch with a safety-net timeout so
+// that a regression in the fake delivery pipeline hangs for at most
+// [testutil.UnitTimeout] rather than the global go-test deadline.
+func awaitDone(t *testing.T, ch <-chan domain.DeliveryResult) domain.DeliveryResult {
+	t.Helper()
+	select {
+	case r := <-ch:
+		return r
+	case <-time.After(testutil.UnitTimeout):
+		t.Fatal("timed out waiting for delivery result")
+		return domain.DeliveryResult{}
+	}
+}
 
 func tlsServerCAPEM(ts *httptest.Server) string {
 	return string(pem.EncodeToMemory(&pem.Block{
@@ -135,7 +151,7 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
-	asyncResult := <-reporter.done
+	asyncResult := awaitDone(t, reporter.done)
 	if asyncResult.State != domain.DeliveryStateFailed {
 		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateFailed)
 	}
@@ -206,7 +222,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
-	asyncResult := <-reporter.done
+	asyncResult := awaitDone(t, reporter.done)
 	if asyncResult.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("async State = %q, want %q; message: %s", asyncResult.State, domain.DeliveryStateAuthFailed, asyncResult.Message)
 	}
@@ -244,7 +260,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
 
-	asyncResult := <-reporter.done
+	asyncResult := awaitDone(t, reporter.done)
 	if asyncResult.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("async State = %q, want %q; message: %s", asyncResult.State, domain.DeliveryStateAuthFailed, asyncResult.Message)
 	}
@@ -281,7 +297,7 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateAuthFailed, result.Message)
 	}
@@ -316,7 +332,7 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -350,13 +366,13 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 	agent := kubernetes.NewAgent(reporter)
 
 	_ = agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
-	result1 := <-reporter.done
+	result1 := awaitDone(t, reporter.done)
 	if result1.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("first: State = %q, want AuthFailed", result1.State)
 	}
 
 	_ = agent.Deliver(context.Background(), target, "d2", nil, domain.DeliveryAuth{}, att, 1)
-	result2 := <-reporter.done
+	result2 := awaitDone(t, reporter.done)
 	if result2.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("second: State = %q, want AuthFailed", result2.State)
 	}
@@ -393,7 +409,7 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Deliver should not return error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -430,7 +446,7 @@ func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Remove should not return error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}
@@ -468,7 +484,7 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReportsAuthFailed(t *testing
 	if err != nil {
 		t.Fatalf("Remove should not return error: %v", err)
 	}
-	result := <-reporter.done
+	result := awaitDone(t, reporter.done)
 	if result.State != domain.DeliveryStateAuthFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateAuthFailed)
 	}

@@ -23,6 +23,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -158,10 +159,11 @@ func setupWithDelivery(
 	router.Register(clusterTargetType, recordingAgent)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        router,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         router,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -434,7 +436,7 @@ func TestDynamic_ListAndDelete(t *testing.T) {
 }
 
 func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 
 	var blocker *blockingRemoveDynamicDelivery
@@ -478,7 +480,7 @@ func TestDynamic_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
 
 	select {
 	case <-blocker.started:
-	case <-time.After(5 * time.Second):
+	case <-ctx.Done():
 		t.Fatal("timed out waiting for remove to start")
 	}
 

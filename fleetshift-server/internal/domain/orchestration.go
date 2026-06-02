@@ -150,6 +150,12 @@ type OrchestrationWorkflowSpec struct {
 	Observer        FulfillmentObserver
 	Vault           Vault
 	Now             func() time.Time
+
+	// AckRetryInterval is how long the dispatch-and-await loop waits
+	// for an acknowledgement signal before redispatching unacked
+	// deliveries. Zero defaults to 30 s. Tests should set a short
+	// value (e.g. 100 ms) to avoid burning wall-clock time.
+	AckRetryInterval time.Duration
 }
 
 type outputCleanupPlan struct {
@@ -163,6 +169,13 @@ func (s *OrchestrationWorkflowSpec) now() time.Time {
 		return s.Now()
 	}
 	return time.Now()
+}
+
+func (s *OrchestrationWorkflowSpec) ackRetryInterval() time.Duration {
+	if s.AckRetryInterval > 0 {
+		return s.AckRetryInterval
+	}
+	return 30 * time.Second
 }
 
 func (s *OrchestrationWorkflowSpec) Name() string { return "orchestrate-fulfillment" }
@@ -1032,9 +1045,6 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	return nil
 }
 
-// ackRetryInterval is the duration the workflow waits for an ack
-// signal before redispatching unacknowledged deliveries.
-const ackRetryInterval = 30 * time.Second
 
 // dispatchAndAwait dispatches all targets, waits for acks (with retry
 // on timeout), then waits for all completions. The dispatch closure is
@@ -1095,7 +1105,7 @@ func (s *OrchestrationWorkflowSpec) dispatchAndAwait(
 			var event FulfillmentEvent
 			var err error
 			if len(unacked) > 0 {
-				event, err = AwaitSignalWithTimeout(record, FulfillmentEventSignal, ackRetryInterval)
+				event, err = AwaitSignalWithTimeout(record, FulfillmentEventSignal, s.ackRetryInterval())
 				if errors.Is(err, ErrSignalTimeout) {
 					probe.AckTimeout(len(unacked))
 					break // back to outer loop to re-dispatch unacked

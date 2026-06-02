@@ -41,10 +41,11 @@ func setupWithStoreAndAgent(t *testing.T, store domain.Store, agent domain.Deliv
 	reporter := application.NewDeliveryReportService(store, reg)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        router,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         router,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -507,26 +508,6 @@ func awaitDeploymentGone(ctx context.Context, t *testing.T, store domain.Store, 
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for deployment %s to be deleted", id)
-		case <-time.After(5 * time.Millisecond):
-		}
-	}
-}
-
-func awaitCondition(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, cond func(domain.DeploymentView) bool) domain.DeploymentView {
-	t.Helper()
-	for {
-		tx, err := store.BeginReadOnly(ctx)
-		if err != nil {
-			t.Fatalf("Begin: %v", err)
-		}
-		view, err := tx.Deployments().GetView(ctx, id)
-		tx.Rollback()
-		if err == nil && cond(view) {
-			return view
-		}
-		select {
-		case <-ctx.Done():
-			t.Fatalf("timed out waiting for condition on deployment %s", id)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

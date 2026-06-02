@@ -184,13 +184,16 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 	done := make(chan orchResult, 1)
 
 	go func() {
-		defer func() {
-			w.registry.removeInstance(fulfillmentID)
+		finish := func(result orchResult) {
 			w.mu.Lock()
+			w.registry.removeInstance(fulfillmentID)
 			delete(w.running, fulfillmentID)
+			done <- result
 			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -233,7 +236,7 @@ func (w *orchestrationWorkflow) Start(ctx context.Context, fulfillmentID domain.
 				id = can.Input.(domain.FulfillmentID)
 				continue
 			}
-			done <- orchResult{val: val, err: err}
+			finish(orchResult{val: val, err: err})
 			return
 		}
 	}()
@@ -309,12 +312,15 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 	done := make(chan deploymentResult, 1)
 
 	go func() {
-		defer func() {
+		finish := func(result deploymentResult) {
 			w.mu.Lock()
 			delete(w.running, instanceID)
+			done <- result
 			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -323,7 +329,7 @@ func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domai
 			ctx: ctx,
 		}
 		val, err := w.spec.Run(record, deploymentID)
-		done <- deploymentResult{val: val, err: err}
+		finish(deploymentResult{val: val, err: err})
 	}()
 
 	return &deploymentExecution{id: instanceID, done: done}, nil
@@ -355,12 +361,15 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 	done := make(chan deploymentResult, 1)
 
 	go func() {
-		defer func() {
+		finish := func(result deploymentResult) {
 			w.mu.Lock()
 			delete(w.running, instanceID)
+			done <- result
 			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(deploymentResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -369,7 +378,7 @@ func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.Resum
 			ctx: ctx,
 		}
 		val, err := w.spec.Run(record, input)
-		done <- deploymentResult{val: val, err: err}
+		finish(deploymentResult{val: val, err: err})
 	}()
 
 	return &deploymentExecution{id: instanceID, done: done}, nil
@@ -402,13 +411,16 @@ func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domai
 	done := make(chan orchResult, 1)
 
 	go func() {
-		defer func() {
+		finish := func(result orchResult) {
 			w.mu.Lock()
 			delete(w.running, instanceID)
-			w.mu.Unlock()
 			w.registry.removeCleanupInstance(input.FulfillmentID)
+			done <- result
+			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -444,7 +456,7 @@ func (w *deleteDeploymentCleanupWorkflow) Start(ctx context.Context, input domai
 			},
 		}
 		val, err := w.spec.Run(record, input)
-		done <- orchResult{val: val, err: err}
+		finish(orchResult{val: val, err: err})
 	}()
 
 	return &orchExecution{id: instanceID, done: done}, nil
@@ -477,13 +489,16 @@ func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input 
 	done := make(chan orchResult, 1)
 
 	go func() {
-		defer func() {
+		finish := func(result orchResult) {
 			w.mu.Lock()
 			delete(w.running, instanceID)
-			w.mu.Unlock()
 			w.registry.removeCleanupInstance(input.FulfillmentID)
+			done <- result
+			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- orchResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(orchResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -519,7 +534,7 @@ func (w *deleteManagedResourceCleanupWorkflow) Start(ctx context.Context, input 
 			},
 		}
 		val, err := w.spec.Run(record, input)
-		done <- orchResult{val: val, err: err}
+		finish(orchResult{val: val, err: err})
 	}()
 
 	return &orchExecution{id: instanceID, done: done}, nil
@@ -852,12 +867,15 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 	done := make(chan managedResourceResult, 1)
 
 	go func() {
-		defer func() {
+		finish := func(result managedResourceResult) {
 			w.mu.Lock()
 			delete(w.running, instanceID)
+			done <- result
 			w.mu.Unlock()
+		}
+		defer func() {
 			if r := recover(); r != nil {
-				done <- managedResourceResult{err: fmt.Errorf("workflow panicked: %v", r)}
+				finish(managedResourceResult{err: fmt.Errorf("workflow panicked: %v", r)})
 			}
 		}()
 
@@ -866,7 +884,7 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 			ctx: ctx,
 		}
 		val, err := w.spec.Run(record, input)
-		done <- managedResourceResult{val: val, err: err}
+		finish(managedResourceResult{val: val, err: err})
 	}()
 
 	return &managedResourceExecution{id: instanceID, done: done}, nil

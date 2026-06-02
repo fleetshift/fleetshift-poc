@@ -41,10 +41,11 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        router,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         router,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

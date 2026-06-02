@@ -11,6 +11,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
 
 type mrTestHarness struct {
@@ -154,10 +155,11 @@ func setupManagedResourcesWithDelivery(
 	}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        agent,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         agent,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -213,7 +215,7 @@ func setupManagedResourcesWithDelivery(
 }
 
 func TestManagedResourceService_CreateReadDelete(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 	h := setupManagedResources(t)
 
@@ -289,7 +291,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 }
 
 func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 
 	var blocker *blockingRemoveDeliveryService
@@ -350,7 +352,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 }
 
 func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 	h := setupManagedResources(t)
 
@@ -398,10 +400,11 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 	agent := &authFailThenSucceedAgent{reporter: reporter}
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        agent,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         agent,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

@@ -707,10 +707,11 @@ func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliv
 func newTestWorkflow(store domain.Store, delivery domain.DeliveryAgent, events chan domain.FulfillmentEvent, opts ...func(*domain.OrchestrationWorkflowSpec)) *domain.OrchestrationWorkflowSpec {
 	reg := &stubRegistry{events: events}
 	wf := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        delivery,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
+		Store:            store,
+		Delivery:         delivery,
+		Strategies:       domain.StrategyFactory{Store: store},
+		CleanupSignaler:  reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	for _, opt := range opts {
 		opt(wf)
@@ -1107,7 +1108,7 @@ func TestOrchestration_DeletePipeline_ResetsDeliveryForRemove(t *testing.T) {
 	}
 	wf := newTestWorkflow(store, delivery, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1275,7 +1276,7 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 		State: domain.DeliveryStateDelivered,
 	})
 
-	ctx := context.Background()
+	ctx := testContext(t)
 	if err := vault.Put(ctx, "targets/k8s-guest-cluster/sa-token", []byte("fake-sa-token")); err != nil {
 		t.Fatalf("vault put: %v", err)
 	}
@@ -2228,7 +2229,7 @@ func TestOrchestration_AuthFailure_PreservesResolvedTargets(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
@@ -2254,15 +2255,15 @@ func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 	seedTargets(t, store, domain.TargetInfo{ID: "t1", Name: "t1", Type: "test"})
 
 	// Phase 1: delivery auth-fails → PausedAuth with ResolvedTargets preserved.
+	ctx := testContext(t)
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: ctx, events: events}
 	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
 		t.Fatalf("Run (create): %v", err)
 	}
 
 	// Phase 2: transition to deleting (simulates user calling Delete).
-	ctx := context.Background()
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -2357,7 +2358,7 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 	authErr := fmt.Errorf("%w: STS token exchange failed: invalid_grant", domain.ErrAuthExpired)
 	wf := newTestWorkflow(store, &failingRemoveDelivery{events: events, err: authErr}, events)
 
-	rec := &simpleRecord{ctx: context.Background(), events: events}
+	rec := &simpleRecord{ctx: testContext(t), events: events}
 	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)

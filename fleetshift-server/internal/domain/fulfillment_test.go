@@ -216,7 +216,7 @@ func TestFulfillment_Resume_RejectsNonPausedState(t *testing.T) {
 }
 
 func TestFulfillment_Resume_RequiresProvenanceWhenPreviouslyPresent(t *testing.T) {
-	// TODO: revisit this behavior; it might be fine to resume without provenance
+	// TODO: revisit this behavior; it might be fine to resume without provenance depending on the desired auth
 	f := Fulfillment{
 		ID:         "f1",
 		State:      FulfillmentStatePausedAuth,

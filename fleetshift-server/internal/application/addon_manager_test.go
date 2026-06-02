@@ -7,6 +7,7 @@ import (
 	"slices"
 	"sync"
 	"testing"
+	"time"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
@@ -116,6 +117,7 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 	orchSpec := &domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
 		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
+		AckRetryInterval: 100 * time.Millisecond,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -743,6 +745,7 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		orchSpec := &domain.OrchestrationWorkflowSpec{
 			Store: store, Delivery: router,
 			Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
+			AckRetryInterval: 100 * time.Millisecond,
 		}
 		orchWf, err := reg.RegisterOrchestration(orchSpec)
 		if err != nil {
