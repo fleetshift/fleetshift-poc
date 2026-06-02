@@ -153,12 +153,13 @@ func oidcK8sClient(t *testing.T, kubeconfig, token string) *kubernetes.Clientset
 	return client
 }
 
-// TestKindAddon_OIDCAuth creates a kind cluster with OIDC authentication
-// derived from the caller's identity, then verifies that JWTs from the
-// fake OIDC provider are accepted by the K8s API server.
+// TestKindAddon_OIDCIntegration creates a single kind cluster with OIDC
+// authentication and runs subtests that verify JWT auth, RBAC bootstrap,
+// and token-passthrough delivery against it. Sharing one cluster avoids
+// paying the ~20s cluster creation cost three times.
 //
 // Requires Docker or Podman (skipped when unavailable or -short).
-func TestKindAddon_OIDCAuth(t *testing.T) {
+func TestKindAddon_OIDCIntegration(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real Docker test in short mode")
 	}
@@ -171,223 +172,187 @@ func TestKindAddon_OIDCAuth(t *testing.T) {
 	}
 	res := createOIDCCluster(t, "fleetshift-oidc-test", auth)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+	t.Run("Auth", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-	token := res.IDP.IssueToken(t, oidctest.TokenClaims{
-		Subject: "alice",
-		Groups:  []string{"developers"},
+		token := res.IDP.IssueToken(t, oidctest.TokenClaims{
+			Subject: "alice",
+			Groups:  []string{"developers"},
+		})
+
+		client := oidcK8sClient(t, res.Kubeconfig, token)
+
+		ssr, err := client.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("SelfSubjectReview: %v", err)
+		}
+
+		wantUsername := string(res.IssuerURL) + "#alice"
+		if ssr.Status.UserInfo.Username != wantUsername {
+			t.Errorf("Username = %q, want %q", ssr.Status.UserInfo.Username, wantUsername)
+		}
+
+		foundGroup := false
+		for _, g := range ssr.Status.UserInfo.Groups {
+			if g == "developers" {
+				foundGroup = true
+				break
+			}
+		}
+		if !foundGroup {
+			t.Errorf("Groups = %v, expected to contain %q", ssr.Status.UserInfo.Groups, "developers")
+		}
+
+		expiredToken := res.IDP.IssueToken(t, oidctest.TokenClaims{
+			Subject: "alice",
+			Expiry:  -time.Hour,
+		})
+		expiredClient := oidcK8sClient(t, res.Kubeconfig, expiredToken)
+		_, err = expiredClient.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
+		if err == nil {
+			t.Error("expected error for expired token, got nil")
+		}
 	})
 
-	client := oidcK8sClient(t, res.Kubeconfig, token)
+	t.Run("RBAC", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
-	ssr, err := client.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("SelfSubjectReview: %v", err)
-	}
+		aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
+		aliceClient := oidcK8sClient(t, res.Kubeconfig, aliceToken)
 
-	wantUsername := string(res.IssuerURL) + "#alice"
-	if ssr.Status.UserInfo.Username != wantUsername {
-		t.Errorf("Username = %q, want %q", ssr.Status.UserInfo.Username, wantUsername)
-	}
-
-	foundGroup := false
-	for _, g := range ssr.Status.UserInfo.Groups {
-		if g == "developers" {
-			foundGroup = true
-			break
+		nsList, err := aliceClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+		if err != nil {
+			t.Fatalf("alice Namespaces().List: %v", err)
 		}
-	}
-	if !foundGroup {
-		t.Errorf("Groups = %v, expected to contain %q", ssr.Status.UserInfo.Groups, "developers")
-	}
+		if len(nsList.Items) == 0 {
+			t.Error("expected at least one namespace")
+		}
 
-	expiredToken := res.IDP.IssueToken(t, oidctest.TokenClaims{
-		Subject: "alice",
-		Expiry:  -time.Hour,
+		bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
+		bobClient := oidcK8sClient(t, res.Kubeconfig, bobToken)
+
+		_, err = bobClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+		if err == nil {
+			t.Error("expected bob to be forbidden, got nil error")
+		}
 	})
-	expiredClient := oidcK8sClient(t, res.Kubeconfig, expiredToken)
-	_, err = expiredClient.AuthenticationV1().SelfSubjectReviews().Create(ctx, &authv1.SelfSubjectReview{}, metav1.CreateOptions{})
-	if err == nil {
-		t.Error("expected error for expired token, got nil")
-	}
-}
 
-// TestKindAddon_OIDCAuthWithRBAC verifies that the RBAC bootstrap
-// grants the caller cluster-admin. Alice (the caller) can list
-// namespaces; bob (not bootstrapped) gets 403.
-//
-// Requires Docker or Podman (skipped when unavailable or -short).
-func TestKindAddon_OIDCAuthWithRBAC(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
-	auth := domain.DeliveryAuth{
-		Caller: &domain.SubjectClaims{
-			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
-		},
-		Audience: []domain.Audience{"fleetshift"},
-	}
-	res := createOIDCCluster(t, "fleetshift-rbac-test", auth)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
-	aliceClient := oidcK8sClient(t, res.Kubeconfig, aliceToken)
-
-	nsList, err := aliceClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		t.Fatalf("alice Namespaces().List: %v", err)
-	}
-	if len(nsList.Items) == 0 {
-		t.Error("expected at least one namespace")
-	}
-
-	bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
-	bobClient := oidcK8sClient(t, res.Kubeconfig, bobToken)
-
-	_, err = bobClient.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err == nil {
-		t.Error("expected bob to be forbidden, got nil error")
-	}
-}
-
-// TestKindAddon_TokenPassthrough verifies that the kubernetes delivery
-// agent can apply manifests using the caller's JWT (token passthrough)
-// instead of a stored kubeconfig. Alice (with cluster-admin RBAC) can
-// create a ConfigMap; bob (no RBAC) gets rejected.
-//
-// Requires Docker or Podman (skipped when unavailable or -short).
-func TestKindAddon_TokenPassthrough(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real Docker test in short mode")
-	}
-
-	auth := domain.DeliveryAuth{
-		Caller: &domain.SubjectClaims{
-			FederatedIdentity: domain.FederatedIdentity{Subject: "alice"},
-		},
-		Audience: []domain.Audience{"fleetshift"},
-	}
-	res := createOIDCCluster(t, "fleetshift-passthrough-test", auth)
-
-	apiServer, caCert, err := kindaddon.ExtractClusterConnInfo([]byte(res.Kubeconfig))
-	if err != nil {
-		t.Fatalf("ExtractClusterConnInfo: %v", err)
-	}
-
-	k8sTarget := domain.TargetInfo{
-		ID:   domain.TargetID("k8s-" + res.ClusterName),
-		Type: kubeaddon.TargetType,
-		Name: res.ClusterName,
-		Properties: map[string]string{
-			"api_server": apiServer,
-			"ca_cert":    string(caCert),
-		},
-	}
-
-	configMapManifest := json.RawMessage(`{
-		"apiVersion": "v1",
-		"kind": "ConfigMap",
-		"metadata": {
-			"name": "passthrough-test",
-			"namespace": "default"
-		},
-		"data": {
-			"hello": "world"
+	t.Run("TokenPassthrough", func(t *testing.T) {
+		apiServer, caCert, err := kindaddon.ExtractClusterConnInfo([]byte(res.Kubeconfig))
+		if err != nil {
+			t.Fatalf("ExtractClusterConnInfo: %v", err)
 		}
-	}`)
-	manifests := []domain.Manifest{{
-		ResourceType: kubeaddon.ManifestResourceType,
-		Raw:          configMapManifest,
-	}}
 
-	kubeReporter := newChannelReporter()
-	kubeAgent := kubeaddon.NewAgent(kubeReporter)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	// Alice has cluster-admin via RBAC bootstrap: delivery should succeed.
-	aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
-	aliceAuth := domain.DeliveryAuth{
-		Caller: &domain.SubjectClaims{
-			FederatedIdentity: domain.FederatedIdentity{
-				Subject: "alice",
-				Issuer:  res.IssuerURL,
+		k8sTarget := domain.TargetInfo{
+			ID:   domain.TargetID("k8s-" + res.ClusterName),
+			Type: kubeaddon.TargetType,
+			Name: res.ClusterName,
+			Properties: map[string]string{
+				"api_server": apiServer,
+				"ca_cert":    string(caCert),
 			},
-		},
-		Audience: []domain.Audience{"fleetshift"},
-		Token:    domain.RawToken(aliceToken),
-	}
-
-	err = kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, 1)
-	if err != nil {
-		t.Fatalf("Deliver (alice): %v", err)
-	}
-
-	select {
-	case doneResult := <-kubeReporter.done:
-		if doneResult.State != domain.DeliveryStateDelivered {
-			t.Fatalf("alice delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateDelivered, doneResult.Message)
 		}
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for alice delivery")
-	}
 
-	// Verify the ConfigMap was actually created on the cluster.
-	adminClient := oidcK8sClient(t, res.Kubeconfig, aliceToken)
-	cm, err := adminClient.CoreV1().ConfigMaps("default").Get(ctx, "passthrough-test", metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("get ConfigMap: %v", err)
-	}
-	if cm.Data["hello"] != "world" {
-		t.Errorf("ConfigMap data = %v, want hello=world", cm.Data)
-	}
-
-	// Bob has no RBAC: delivery should fail with a 403-like error.
-	bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
-	bobAuth := domain.DeliveryAuth{
-		Caller: &domain.SubjectClaims{
-			FederatedIdentity: domain.FederatedIdentity{
-				Subject: "bob",
-				Issuer:  res.IssuerURL,
+		configMapManifest := json.RawMessage(`{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "passthrough-test",
+				"namespace": "default"
 			},
-		},
-		Audience: []domain.Audience{"fleetshift"},
-		Token:    domain.RawToken(bobToken),
-	}
+			"data": {
+				"hello": "world"
+			}
+		}`)
+		manifests := []domain.Manifest{{
+			ResourceType: kubeaddon.ManifestResourceType,
+			Raw:          configMapManifest,
+		}}
 
-	bobManifest := json.RawMessage(`{
-		"apiVersion": "v1",
-		"kind": "ConfigMap",
-		"metadata": {
-			"name": "bob-test",
-			"namespace": "default"
-		},
-		"data": {
-			"should": "fail"
+		kubeReporter := newChannelReporter()
+		kubeAgent := kubeaddon.NewAgent(kubeReporter)
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
+		aliceAuth := domain.DeliveryAuth{
+			Caller: &domain.SubjectClaims{
+				FederatedIdentity: domain.FederatedIdentity{
+					Subject: "alice",
+					Issuer:  res.IssuerURL,
+				},
+			},
+			Audience: []domain.Audience{"fleetshift"},
+			Token:    domain.RawToken(aliceToken),
 		}
-	}`)
 
-	err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
-		ResourceType: kubeaddon.ManifestResourceType,
-		Raw:          bobManifest,
-	}}, bobAuth, nil, 1)
-	if err != nil {
-		t.Fatalf("Deliver (bob): %v", err)
-	}
-
-	select {
-	case doneResult := <-kubeReporter.done:
-		if doneResult.State != domain.DeliveryStateAuthFailed {
-			t.Fatalf("bob delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateAuthFailed, doneResult.Message)
+		err = kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, 1)
+		if err != nil {
+			t.Fatalf("Deliver (alice): %v", err)
 		}
-	case <-ctx.Done():
-		t.Fatal("timed out waiting for bob delivery")
-	}
+
+		select {
+		case doneResult := <-kubeReporter.done:
+			if doneResult.State != domain.DeliveryStateDelivered {
+				t.Fatalf("alice delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateDelivered, doneResult.Message)
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for alice delivery")
+		}
+
+		adminClient := oidcK8sClient(t, res.Kubeconfig, aliceToken)
+		cm, err := adminClient.CoreV1().ConfigMaps("default").Get(ctx, "passthrough-test", metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("get ConfigMap: %v", err)
+		}
+		if cm.Data["hello"] != "world" {
+			t.Errorf("ConfigMap data = %v, want hello=world", cm.Data)
+		}
+
+		bobToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "bob"})
+		bobAuth := domain.DeliveryAuth{
+			Caller: &domain.SubjectClaims{
+				FederatedIdentity: domain.FederatedIdentity{
+					Subject: "bob",
+					Issuer:  res.IssuerURL,
+				},
+			},
+			Audience: []domain.Audience{"fleetshift"},
+			Token:    domain.RawToken(bobToken),
+		}
+
+		bobManifest := json.RawMessage(`{
+			"apiVersion": "v1",
+			"kind": "ConfigMap",
+			"metadata": {
+				"name": "bob-test",
+				"namespace": "default"
+			},
+			"data": {
+				"should": "fail"
+			}
+		}`)
+
+		err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
+			ResourceType: kubeaddon.ManifestResourceType,
+			Raw:          bobManifest,
+		}}, bobAuth, nil, 1)
+		if err != nil {
+			t.Fatalf("Deliver (bob): %v", err)
+		}
+
+		select {
+		case doneResult := <-kubeReporter.done:
+			if doneResult.State != domain.DeliveryStateAuthFailed {
+				t.Fatalf("bob delivery State = %q, want %q (message: %s)", doneResult.State, domain.DeliveryStateAuthFailed, doneResult.Message)
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for bob delivery")
+		}
+	})
 }
 
 // TestKindAddon_ManagedResource_OIDCAuth exercises the managed resource
