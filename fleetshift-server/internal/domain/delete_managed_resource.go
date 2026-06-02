@@ -16,10 +16,14 @@ type DeleteManagedResourceInput struct {
 }
 
 // DeleteManagedResourceWorkflowSpec transitions the derived fulfillment
-// to [FulfillmentStateDeleting], starts a background
-// [DeleteManagedResourceCleanupWorkflow], and starts orchestration to
-// process the deletion on the delivery side. The managed resource row
-// remains visible in DELETING until cleanup completes.
+// to [FulfillmentStateDeleting], bumps its generation, starts a
+// background [DeleteManagedResourceCleanupWorkflow], and runs a
+// convergence loop to guarantee orchestration picks up the new state.
+// The managed resource row remains visible in DELETING until cleanup
+// completes.
+//
+// Pass this spec to [Registry.RegisterDeleteManagedResource] to obtain
+// a [DeleteManagedResourceWorkflow] that can start instances.
 type DeleteManagedResourceWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
@@ -30,29 +34,28 @@ func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-manag
 
 // MutateToDeleting transitions the fulfillment to deleting, stores the
 // delete request auth for later background remove/retry passes, and
-// bumps its generation. The managed resource HEAD record remains until
-// cleanup completes.
-func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, ManagedResourceView] {
-	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (ManagedResourceView, error) {
+// bumps its generation inside a serialized write transaction.
+func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, managedResourceMutationResult] {
+	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (managedResourceMutationResult, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return ManagedResourceView{}, fmt.Errorf("begin tx: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
 		if err != nil {
-			return ManagedResourceView{}, err
+			return managedResourceMutationResult{}, err
 		}
 
 		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion)
 		if err != nil {
-			return ManagedResourceView{}, fmt.Errorf("get intent: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
 		if err != nil {
-			return ManagedResourceView{}, err
+			return managedResourceMutationResult{}, err
 		}
 
 		// Delete retries read auth from fulfillment state, not the RPC context.
@@ -60,30 +63,43 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		f.State = FulfillmentStateDeleting
 		f.BumpGeneration()
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("update fulfillment: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("commit: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 
-		return ManagedResourceView{
-			ManagedResource: *mr,
-			Intent:          intent,
-			Fulfillment:     *f,
+		return managedResourceMutationResult{
+			View: ManagedResourceView{
+				ManagedResource: *mr,
+				Intent:          intent,
+				Fulfillment:     *f,
+			},
+			FulfillmentID: mr.FulfillmentID,
+			MyGen:         f.Generation,
 		}, nil
 	})
 }
 
-// StartOrchestration starts orchestration to process the deletion on
-// the delivery side.
-func (s *DeleteManagedResourceWorkflowSpec) StartOrchestration() Activity[FulfillmentID, struct{}] {
-	return NewActivity("mr-start-delete-orchestration", func(ctx context.Context, id FulfillmentID) (struct{}, error) {
-		_, err := s.Orchestration.Start(ctx, id)
-		if err == ErrAlreadyRunning {
-			return struct{}{}, nil
+// LoadFulfillment reads the current fulfillment state for convergence
+// checks.
+func (s *DeleteManagedResourceWorkflowSpec) LoadFulfillment() Activity[FulfillmentID, *Fulfillment] {
+	return NewActivity("mr-load-fulfillment-for-delete", func(ctx context.Context, id FulfillmentID) (*Fulfillment, error) {
+		tx, err := s.Store.BeginReadOnly(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin tx: %w", err)
 		}
-		return struct{}{}, err
+		defer tx.Rollback()
+
+		f, err := tx.Fulfillments().Get(ctx, id)
+		if errors.Is(err, ErrNotFound) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return f, tx.Commit()
 	})
 }
 
@@ -103,9 +119,12 @@ func (s *DeleteManagedResourceWorkflowSpec) StartCleanup() Activity[DeleteManage
 }
 
 // Run is the workflow body: mutate to deleting, start the background
-// cleanup workflow, then start orchestration to process the removal.
+// cleanup workflow, then run the convergence loop to ensure
+// orchestration picks up the new state. Returns the DELETING snapshot
+// immediately; the actual row deletion happens asynchronously in the
+// cleanup workflow.
 func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManagedResourceInput) (ManagedResourceView, error) {
-	view, err := RunActivity(record, s.MutateToDeleting(), input)
+	mr, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
 		return ManagedResourceView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
@@ -113,14 +132,14 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteManagedResourceCleanupInput{
 		ResourceType:  input.ResourceType,
 		Name:          input.Name,
-		FulfillmentID: view.Fulfillment.ID,
+		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
 		return ManagedResourceView{}, fmt.Errorf("start cleanup: %w", err)
 	}
 
-	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID); err != nil {
-		return ManagedResourceView{}, fmt.Errorf("start orchestration: %w", err)
+	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
+		return ManagedResourceView{}, err
 	}
 
-	return view, nil
+	return mr.View, nil
 }

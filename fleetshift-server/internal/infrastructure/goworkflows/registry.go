@@ -385,7 +385,7 @@ func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResou
 	if err := registerActivity(r.Worker, invokers, spec.StartCleanup(), opts); err != nil {
 		return nil, err
 	}
-	if err := registerActivity(r.Worker, invokers, spec.StartOrchestration(), opts); err != nil {
+	if err := registerActivity(r.Worker, invokers, spec.LoadFulfillment(), opts); err != nil {
 		return nil, err
 	}
 

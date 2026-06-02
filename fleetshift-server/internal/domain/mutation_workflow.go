@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -58,7 +59,10 @@ func convergenceLoop(
 			return nil
 		}
 
-		_, err = orchestration.Start(record.Context(), fulfillmentID)
+		// Detach from the calling workflow's cancellation so that
+		// orchestration outlives the mutation workflow (whose gRPC
+		// context is cancelled once the RPC response is sent).
+		_, err = orchestration.Start(context.WithoutCancel(record.Context()), fulfillmentID)
 		if err != nil && !errors.Is(err, ErrAlreadyRunning) {
 			return fmt.Errorf("start orchestration: %w", err)
 		}
