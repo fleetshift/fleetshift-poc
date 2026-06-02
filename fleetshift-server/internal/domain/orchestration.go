@@ -153,8 +153,13 @@ type OrchestrationWorkflowSpec struct {
 
 	// AckRetryInterval is how long the dispatch-and-await loop waits
 	// for an acknowledgement signal before redispatching unacked
-	// deliveries. Zero defaults to 30 s. Tests should set a short
-	// value (e.g. 100 ms) to avoid burning wall-clock time.
+	// deliveries. Zero defaults to 30 s.
+	//
+	// Tests should use a value high enough that retries never fire
+	// under normal conditions (e.g. 5 s). Too-short values (e.g.
+	// 100 ms) cause spurious retries on loaded CI runners, spawning
+	// duplicate deliveries and compounding goroutine scheduling
+	// pressure.
 	AckRetryInterval time.Duration
 }
 

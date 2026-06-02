@@ -57,7 +57,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
 		Now:              func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

@@ -44,7 +44,7 @@ func raceTestOrchestration(t *testing.T) (domain.OrchestrationWorkflow, domain.F
 		Delivery:         router,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

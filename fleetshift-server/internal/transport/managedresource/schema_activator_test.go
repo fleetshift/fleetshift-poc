@@ -364,7 +364,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	orchWf, err := reg.RegisterOrchestration(&domain.OrchestrationWorkflowSpec{
 		Store: store, Delivery: router,
 		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)

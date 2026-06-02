@@ -1292,7 +1292,7 @@ func registerWorkflowsWithAgents(t *testing.T, infra Infra, registryFactory Regi
 		Strategies:       domain.StrategyFactory{Store: infra.Store},
 		CleanupSignaler:  reg,
 		Vault:            infra.Vault,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

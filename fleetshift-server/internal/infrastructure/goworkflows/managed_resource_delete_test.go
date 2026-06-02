@@ -179,7 +179,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		Delivery:         router,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

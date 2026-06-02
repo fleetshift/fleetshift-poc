@@ -44,7 +44,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		Delivery:         router,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -177,7 +177,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 		Delivery:         router,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

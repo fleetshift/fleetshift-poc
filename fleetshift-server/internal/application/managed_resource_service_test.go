@@ -159,7 +159,7 @@ func setupManagedResourcesWithDelivery(
 		Delivery:         agent,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -404,7 +404,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 		Delivery:         agent,
 		Strategies:       domain.StrategyFactory{Store: store},
 		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		AckRetryInterval: 5 * time.Second,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
