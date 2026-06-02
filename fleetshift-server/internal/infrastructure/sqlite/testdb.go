@@ -8,11 +8,8 @@ import (
 )
 
 // OpenTestDB opens an in-memory SQLite database with the current schema
-// applied. The database is closed when the test finishes.
-//
-// Schema initialization is fast: migrations run once per process to build
-// a DDL snapshot, and each test database replays the snapshot directly,
-// bypassing goose version tracking and migration-file parsing.
+// applied via goose migrations. The database is closed when the test
+// finishes.
 //
 // Shared-cache mode is used so that all connections from the pool share
 // the same in-memory database, which is necessary when the database is
@@ -45,7 +42,7 @@ func OpenTestDSN(t *testing.T, dsn string) *sql.DB {
 
 func openTestDSN(t *testing.T, dsn string) *sql.DB {
 	t.Helper()
-	db, err := openWithSchema(dsn)
+	db, err := Open(dsn)
 	if err != nil {
 		t.Fatalf("open test db: %v", err)
 	}
