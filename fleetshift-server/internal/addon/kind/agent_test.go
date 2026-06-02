@@ -910,6 +910,49 @@ func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 	}
 }
 
+func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
+	bp := newBlockingProvider()
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
+		bp.fakeProvider.logger = logger
+		return bp
+	})
+
+	trustEntry := domain.TrustBundleEntry{
+		IssuerURL:          "https://issuer.example.com",
+		JWKSURI:            "https://issuer.example.com/jwks",
+		EnrollmentAudience: "fleetshift-enroll",
+	}
+	trustRaw, _ := json.Marshal(trustEntry)
+
+	manifests := []domain.Manifest{
+		{ResourceType: domain.TrustBundleResourceType, Raw: trustRaw},
+		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "tb-retry-cluster"}`)},
+	}
+
+	// First deliver — trust bundle is stored, cluster Create blocks.
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("first Deliver: %v", err)
+	}
+	<-bp.entered
+
+	// Retry with same delivery ID while first is in-flight.
+	// The inflight gate must prevent a second storeTrustBundle call.
+	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("second Deliver: %v", err)
+	}
+
+	bundles := agent.TrustBundles()
+	if len(bundles) != 1 {
+		t.Fatalf("trust bundles len = %d, want 1 (retry must not duplicate)", len(bundles))
+	}
+
+	close(bp.gate)
+	awaitDone(t, reporter.done)
+}
+
 // blockingDeleteProvider blocks Delete until gate is closed.
 type blockingDeleteProvider struct {
 	*fakeProvider

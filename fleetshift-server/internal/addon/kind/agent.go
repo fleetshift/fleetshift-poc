@@ -170,11 +170,16 @@ func (a *Agent) agentObserver() AgentObserver {
 // existing async flow. All delivery outcomes are reported through the
 // [domain.DeliveryReporter].
 func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	if _, loaded := a.inflight.LoadOrStore(deliveryID, struct{}{}); loaded {
+		return nil
+	}
+
 	var clusterManifests []domain.Manifest
 	for _, m := range manifests {
 		switch m.ResourceType {
 		case domain.TrustBundleResourceType:
 			if err := a.storeTrustBundle(m); err != nil {
+				a.inflight.Delete(deliveryID)
 				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 					State:   domain.DeliveryStateFailed,
 					Message: fmt.Sprintf("store trust bundle: %v", err),
@@ -187,6 +192,7 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 	}
 
 	if len(clusterManifests) == 0 {
+		a.inflight.Delete(deliveryID)
 		asyncCtx := context.WithoutCancel(ctx)
 		go func() {
 			_ = a.reporter.ReportResult(asyncCtx, deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
@@ -196,6 +202,7 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 
 	specs, err := a.validateManifests(clusterManifests)
 	if err != nil {
+		a.inflight.Delete(deliveryID)
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
 			Message: fmt.Sprintf("invalid manifests: %v", err),
@@ -204,14 +211,11 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 	}
 
 	if err := a.verifyToken(ctx, auth); err != nil {
+		a.inflight.Delete(deliveryID)
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateAuthFailed,
 			Message: fmt.Sprintf("token verification failed: %v", err),
 		})
-		return nil
-	}
-
-	if _, loaded := a.inflight.LoadOrStore(deliveryID, struct{}{}); loaded {
 		return nil
 	}
 
