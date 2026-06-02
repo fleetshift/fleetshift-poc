@@ -3,87 +3,11 @@ package kind_test
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
-
-func TestBuildKindOIDCConfig_BasicFlags(t *testing.T) {
-	spec := &kind.OIDCSpec{}
-
-	cfg, err := kind.BuildKindOIDCConfig("https://idp.example.com", "fleetshift", spec, "")
-	if err != nil {
-		t.Fatalf("BuildKindOIDCConfig: %v", err)
-	}
-
-	s := string(cfg)
-	assertContains(t, s, "kind: Cluster")
-	assertContains(t, s, "apiVersion: kind.x-k8s.io/v1alpha4")
-	assertContains(t, s, `oidc-issuer-url: "https://idp.example.com"`)
-	assertContains(t, s, `oidc-client-id: "fleetshift"`)
-	assertContains(t, s, `oidc-username-claim: "sub"`)
-	assertContains(t, s, `oidc-groups-claim: "groups"`)
-	assertContains(t, s, `oidc-signing-algs: "RS256,ES256"`)
-
-	if strings.Contains(s, "oidc-ca-file") {
-		t.Error("oidc-ca-file should not be present without CA bundle")
-	}
-	if strings.Contains(s, "extraMounts") {
-		t.Error("extraMounts should not be present without CA bundle")
-	}
-}
-
-func TestBuildKindOIDCConfig_WithCACertPath(t *testing.T) {
-	spec := &kind.OIDCSpec{}
-
-	cfg, err := kind.BuildKindOIDCConfig("https://host.docker.internal:9443", "fleetshift", spec, "/tmp/ca.pem")
-	if err != nil {
-		t.Fatalf("BuildKindOIDCConfig: %v", err)
-	}
-
-	s := string(cfg)
-	assertContains(t, s, `oidc-ca-file: "/etc/kubernetes/pki/oidc-ca.pem"`)
-	assertContains(t, s, "extraMounts:")
-	assertContains(t, s, "hostPath: /tmp/ca.pem")
-	assertContains(t, s, "containerPath: /etc/kubernetes/pki/oidc-ca.pem")
-}
-
-func TestBuildKindOIDCConfig_CustomClaims(t *testing.T) {
-	spec := &kind.OIDCSpec{
-		UsernameClaim: "email",
-		GroupsClaim:   "roles",
-	}
-
-	cfg, err := kind.BuildKindOIDCConfig("https://idp.example.com", "my-app", spec, "")
-	if err != nil {
-		t.Fatalf("BuildKindOIDCConfig: %v", err)
-	}
-
-	s := string(cfg)
-	assertContains(t, s, `oidc-username-claim: "email"`)
-	assertContains(t, s, `oidc-groups-claim: "roles"`)
-}
-
-func TestBuildKindOIDCConfig_ValidationErrors(t *testing.T) {
-	tests := []struct {
-		name      string
-		issuerURL domain.IssuerURL
-		audience  domain.Audience
-	}{
-		{"missing issuer", "", "aud"},
-		{"missing audience", "https://x", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := kind.BuildKindOIDCConfig(tt.issuerURL, tt.audience, &kind.OIDCSpec{}, "")
-			if err == nil {
-				t.Error("expected validation error")
-			}
-		})
-	}
-}
 
 func callerAuth() domain.DeliveryAuth {
 	return domain.DeliveryAuth{
@@ -171,12 +95,5 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 	}
 	if provider.hasCluster("empty-aud") {
 		t.Error("cluster should not have been created")
-	}
-}
-
-func assertContains(t *testing.T, haystack, needle string) {
-	t.Helper()
-	if !strings.Contains(haystack, needle) {
-		t.Errorf("expected to contain %q, got:\n%s", needle, haystack)
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,52 +38,6 @@ func (s *OIDCSpec) groupsClaim() string {
 }
 
 const oidcCACertContainerPath = "/etc/kubernetes/pki/oidc-ca.pem"
-
-// BuildKindOIDCConfig generates a kind cluster config YAML with OIDC
-// API server flags and (optionally) a CA cert mount. issuerURL and
-// audience are derived from the caller's identity; spec provides
-// infrastructure config (claim mappings, CA bundle). caCertHostPath
-// may be empty if no CA bundle is configured.
-func BuildKindOIDCConfig(issuerURL domain.IssuerURL, audience domain.Audience, spec *OIDCSpec, caCertHostPath string) ([]byte, error) {
-	if issuerURL == "" {
-		return nil, fmt.Errorf("oidc: issuerURL is required")
-	}
-	if audience == "" {
-		return nil, fmt.Errorf("oidc: audience is required")
-	}
-
-	var extraArgs strings.Builder
-	fmt.Fprintf(&extraArgs, "        oidc-issuer-url: %q\n", string(issuerURL))
-	fmt.Fprintf(&extraArgs, "        oidc-client-id: %q\n", string(audience))
-	fmt.Fprintf(&extraArgs, "        oidc-username-claim: %q\n", spec.usernameClaim())
-	fmt.Fprintf(&extraArgs, "        oidc-groups-claim: %q\n", spec.groupsClaim())
-	fmt.Fprintf(&extraArgs, "        oidc-signing-algs: \"RS256,ES256\"\n")
-	if caCertHostPath != "" {
-		fmt.Fprintf(&extraArgs, "        oidc-ca-file: %q\n", oidcCACertContainerPath)
-	}
-
-	var extraMounts string
-	if caCertHostPath != "" {
-		extraMounts = fmt.Sprintf(`    extraMounts:
-      - hostPath: %s
-        containerPath: %s
-        readOnly: true
-`, caCertHostPath, oidcCACertContainerPath)
-	}
-
-	config := fmt.Sprintf(`kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-%skubeadmConfigPatches:
-  - |
-    kind: ClusterConfiguration
-    apiServer:
-      extraArgs:
-%s`, extraMounts, extraArgs.String())
-
-	return []byte(config), nil
-}
 
 // bootstrapRBAC creates a ClusterRoleBinding granting the caller
 // cluster-admin on the newly created kind cluster. This uses the
