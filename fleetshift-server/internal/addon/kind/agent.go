@@ -87,6 +87,11 @@ type Agent struct {
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
+
+	// inflight tracks delivery IDs with work currently in progress.
+	// The platform provides at-least-once delivery; a retry for a
+	// delivery that is already being processed is safely skipped.
+	inflight sync.Map // map[domain.DeliveryID]struct{}
 }
 
 // AgentOption configures an [Agent].
@@ -206,6 +211,10 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 		return nil
 	}
 
+	if _, loaded := a.inflight.LoadOrStore(deliveryID, struct{}{}); loaded {
+		return nil
+	}
+
 	asyncCtx := context.WithoutCancel(ctx)
 	provider := a.providerFactory(NewObserverLogger(asyncCtx, a.reporter, deliveryID, generation, time.Now))
 
@@ -261,7 +270,13 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 		return fmt.Errorf("validate manifests: %w", err)
 	}
 
+	if _, loaded := a.inflight.LoadOrStore(deliveryID, struct{}{}); loaded {
+		return nil
+	}
+
 	go func() {
+		defer a.inflight.Delete(deliveryID)
+
 		provider := a.providerFactory(nil)
 		for _, spec := range specs {
 			exists, err := a.clusterExistsErr(provider, spec.Name)
@@ -301,6 +316,8 @@ func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, e
 }
 
 func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, specs []ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) {
+	defer a.inflight.Delete(deliveryID)
+
 	var outputs []ClusterOutput
 
 	for _, spec := range specs {

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -799,4 +800,128 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 	if entries[0].IssuerURL != "https://issuer.example.com" {
 		t.Errorf("issuer = %q", entries[0].IssuerURL)
 	}
+}
+
+// blockingProvider wraps fakeProvider but blocks Create until unblocked.
+type blockingProvider struct {
+	*fakeProvider
+	gate        chan struct{} // close to unblock Create
+	entered     chan struct{} // closed when first Create is entered
+	enteredOnce sync.Once
+	createCount int32
+}
+
+func newBlockingProvider() *blockingProvider {
+	return &blockingProvider{
+		fakeProvider: newFakeProvider(),
+		gate:         make(chan struct{}),
+		entered:      make(chan struct{}),
+	}
+}
+
+func (p *blockingProvider) Create(name string, opts ...cluster.CreateOption) error {
+	atomic.AddInt32(&p.createCount, 1)
+	if p.logger != nil {
+		p.logger.V(0).Infof("Creating cluster %q", name)
+	}
+	p.enteredOnce.Do(func() { close(p.entered) })
+	<-p.gate
+	return p.fakeProvider.Create(name, opts...)
+}
+
+func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
+	bp := newBlockingProvider()
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
+		bp.fakeProvider.logger = logger
+		return bp
+	})
+
+	manifests := []domain.Manifest{{
+		ResourceType: kind.ClusterResourceType,
+		Raw:          json.RawMessage(`{"name": "retry-cluster"}`),
+	}}
+
+	// First deliver — enters Create and blocks.
+	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("first Deliver: %v", err)
+	}
+	<-bp.entered // wait until goroutine is inside Create
+
+	// Second deliver with same delivery ID — should be a no-op.
+	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("second Deliver: %v", err)
+	}
+
+	// Unblock the first goroutine.
+	close(bp.gate)
+
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateDelivered)
+	}
+
+	if n := atomic.LoadInt32(&bp.createCount); n != 1 {
+		t.Fatalf("Create called %d times, want 1", n)
+	}
+}
+
+func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
+	fp := newFakeProvider()
+	fp.clusters["rm-cluster"] = nil
+	reporter := newChannelReporter()
+
+	bdp := &blockingDeleteProvider{
+		fakeProvider: fp,
+		gate:         make(chan struct{}),
+		entered:      make(chan struct{}),
+		count:        new(int32),
+	}
+	agent := kind.NewAgent(reporter, func(_ log.Logger) kind.ClusterProvider {
+		return bdp
+	})
+
+	manifests := []domain.Manifest{{
+		Raw: json.RawMessage(`{"name":"rm-cluster"}`),
+	}}
+
+	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("first Remove: %v", err)
+	}
+	<-bdp.entered
+
+	err = agent.Remove(context.Background(), domain.TargetInfo{}, "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	if err != nil {
+		t.Fatalf("second Remove: %v", err)
+	}
+
+	close(bdp.gate)
+
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Fatalf("State = %q, want %q", result.State, domain.DeliveryStateDelivered)
+	}
+
+	if n := atomic.LoadInt32(bdp.count); n != 1 {
+		t.Fatalf("Delete called %d times, want 1", n)
+	}
+}
+
+// blockingDeleteProvider blocks Delete until gate is closed.
+type blockingDeleteProvider struct {
+	*fakeProvider
+	gate    chan struct{}
+	entered chan struct{}
+	count   *int32
+	once    sync.Once
+}
+
+func (p *blockingDeleteProvider) Delete(name, kc string) error {
+	atomic.AddInt32(p.count, 1)
+	p.once.Do(func() { close(p.entered) })
+	<-p.gate
+	return p.fakeProvider.Delete(name, kc)
 }

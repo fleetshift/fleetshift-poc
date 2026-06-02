@@ -448,11 +448,10 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	router.Register(kindaddon.TargetType, kindAgent)
 
 	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 100 * time.Millisecond,
+		Store:           store,
+		Delivery:        router,
+		Strategies:      domain.StrategyFactory{Store: store},
+		CleanupSignaler: reg,
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
