@@ -12,7 +12,6 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
-	"crypto/rsa"
 	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
@@ -41,7 +40,6 @@ type Provider struct {
 	audience   string
 	caCertPEM  []byte
 	caCertPath string
-	signingKey *rsa.PrivateKey
 	jwkPriv    jwk.Key
 	jwksJSON   []byte
 	server     *http.Server
@@ -114,9 +112,9 @@ func Start(t *testing.T, opts ...Option) *Provider {
 	caCert, caKey := generateCA(t)
 	serverCert, serverKey := generateServerCert(t, caCert, caKey, cfg.extraSANIPs)
 
-	signingKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	signingKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
-		t.Fatalf("oidctest: generate RSA signing key: %v", err)
+		t.Fatalf("oidctest: generate ECDSA signing key: %v", err)
 	}
 
 	jwkPriv, err := jwk.Import(signingKey)
@@ -134,7 +132,7 @@ func Start(t *testing.T, opts ...Option) *Provider {
 	if err := pubKey.Set(jwk.KeyIDKey, "test-kid"); err != nil {
 		t.Fatalf("oidctest: set key ID on public key: %v", err)
 	}
-	if err := pubKey.Set(jwk.AlgorithmKey, jwa.RS256()); err != nil {
+	if err := pubKey.Set(jwk.AlgorithmKey, jwa.ES256()); err != nil {
 		t.Fatalf("oidctest: set algorithm on public key: %v", err)
 	}
 
@@ -196,7 +194,6 @@ func Start(t *testing.T, opts ...Option) *Provider {
 		audience:   cfg.audience,
 		caCertPEM:  caCertPEM,
 		caCertPath: caCertFile.Name(),
-		signingKey: signingKey,
 		jwkPriv:    jwkPriv,
 		jwksJSON:   jwksJSON,
 		listener:   lis,
@@ -308,7 +305,7 @@ func (p *Provider) IssueToken(t *testing.T, claims TokenClaims) string {
 		t.Fatalf("oidctest: build token: %v", err)
 	}
 
-	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.RS256(), p.jwkPriv))
+	signed, err := jwt.Sign(tok, jwt.WithKey(jwa.ES256(), p.jwkPriv))
 	if err != nil {
 		t.Fatalf("oidctest: sign token: %v", err)
 	}
