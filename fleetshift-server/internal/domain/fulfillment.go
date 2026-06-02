@@ -2,6 +2,7 @@ package domain
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 )
 
@@ -52,14 +53,37 @@ type Fulfillment struct {
 	CreatedAt          time.Time
 	UpdatedAt          time.Time
 
+	// loadedGeneration is the generation value as read from the
+	// database. Domain methods that represent user-initiated mutations
+	// set Generation = loadedGeneration + 1, ensuring generation
+	// advances exactly once per logical write transaction regardless
+	// of how many fields change. The repository sets this on hydration
+	// and persists Generation on save.
+	loadedGeneration Generation
+
 	pendingManifest  []ManifestStrategyRecord
 	pendingPlacement []PlacementStrategyRecord
 	pendingRollout   []RolloutStrategyRecord
 }
 
-// BumpGeneration increments the fulfillment's generation counter.
-func (f *Fulfillment) BumpGeneration() {
-	f.Generation++
+// SetLoadedGeneration records the generation as read from persistence.
+// Repository implementations call this after hydration so that
+// [advanceGeneration] can enforce the single-bump invariant.
+func (f *Fulfillment) SetLoadedGeneration(gen Generation) {
+	f.loadedGeneration = gen
+}
+
+// GenerationEtag returns the optimistic concurrency token for this
+// fulfillment's current generation.
+func (f *Fulfillment) GenerationEtag() string {
+	return strconv.FormatInt(int64(f.Generation), 10)
+}
+
+// advanceGeneration advances Generation to loadedGeneration + 1.
+// Calling it multiple times within the same transaction is idempotent
+// — generation advances by exactly one relative to the loaded value.
+func (f *Fulfillment) advanceGeneration() {
+	f.Generation = f.loadedGeneration + 1
 }
 
 // Resume transitions a paused fulfillment back to active reconciliation
@@ -86,53 +110,73 @@ func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
 	if provenance != nil {
 		f.Provenance = provenance
 	}
-	f.BumpGeneration()
+	f.advanceGeneration()
 	return nil
 }
 
+// Touch advances the generation and updates the timestamp without
+// changing any other fulfillment state. This is useful for forcing
+// orchestration to re-evaluate a fulfillment (e.g. diagnostics or
+// administrative nudges).
+func (f *Fulfillment) Touch(now time.Time) {
+	f.UpdatedAt = now
+	f.advanceGeneration()
+}
+
+// TransitionToDeleting moves the fulfillment into the
+// [FulfillmentStateDeleting] lifecycle state and advances the
+// generation so orchestration picks up the transition.
+func (f *Fulfillment) TransitionToDeleting(auth DeliveryAuth) {
+	f.Auth = auth
+	f.State = FulfillmentStateDeleting
+	f.advanceGeneration()
+}
+
 // AdvanceManifestStrategy advances the manifest strategy version,
-// updates the materialized spec, bumps generation, and collects a
-// pending strategy record for the repository to flush.
+// updates the materialized spec, collects a pending strategy record
+// for the repository to flush, and advances generation. Multiple
+// strategy advances within the same transaction are safe — generation
+// advances are idempotent relative to loadedGeneration.
 func (f *Fulfillment) AdvanceManifestStrategy(spec ManifestStrategySpec, now time.Time) {
 	f.ManifestStrategyVersion++
 	f.ManifestStrategy = spec
-	f.BumpGeneration()
 	f.pendingManifest = append(f.pendingManifest, ManifestStrategyRecord{
 		FulfillmentID: f.ID,
 		Version:       f.ManifestStrategyVersion,
 		Spec:          spec,
 		CreatedAt:     now,
 	})
+	f.advanceGeneration()
 }
 
 // AdvancePlacementStrategy advances the placement strategy version,
-// updates the materialized spec, bumps generation, and collects a
-// pending strategy record for the repository to flush.
+// updates the materialized spec, collects a pending strategy record
+// for the repository to flush, and advances generation.
 func (f *Fulfillment) AdvancePlacementStrategy(spec PlacementStrategySpec, now time.Time) {
 	f.PlacementStrategyVersion++
 	f.PlacementStrategy = spec
-	f.BumpGeneration()
 	f.pendingPlacement = append(f.pendingPlacement, PlacementStrategyRecord{
 		FulfillmentID: f.ID,
 		Version:       f.PlacementStrategyVersion,
 		Spec:          spec,
 		CreatedAt:     now,
 	})
+	f.advanceGeneration()
 }
 
 // AdvanceRolloutStrategy advances the rollout strategy version,
-// updates the materialized spec, bumps generation, and collects a
-// pending strategy record for the repository to flush.
+// updates the materialized spec, collects a pending strategy record
+// for the repository to flush, and advances generation.
 func (f *Fulfillment) AdvanceRolloutStrategy(spec *RolloutStrategySpec, now time.Time) {
 	f.RolloutStrategyVersion++
 	f.RolloutStrategy = spec
-	f.BumpGeneration()
 	f.pendingRollout = append(f.pendingRollout, RolloutStrategyRecord{
 		FulfillmentID: f.ID,
 		Version:       f.RolloutStrategyVersion,
 		Spec:          spec,
 		CreatedAt:     now,
 	})
+	f.advanceGeneration()
 }
 
 // ApplyReconciliationResult merges the observable state produced by a

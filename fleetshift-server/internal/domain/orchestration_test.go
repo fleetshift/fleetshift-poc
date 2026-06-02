@@ -1509,18 +1509,21 @@ func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any)
 			tx.Rollback()
 			return out, txErr
 		}
-		fulf, txErr := tx.Fulfillments().Get(context.Background(), thinDep.FulfillmentID)
-		if txErr != nil {
-			tx.Rollback()
-			return out, txErr
-		}
-		for i := 0; i < r.bumps; i++ {
-			fulf.BumpGeneration()
-		}
-		fulf.UpdatedAt = time.Now().UTC()
-		if txErr = tx.Fulfillments().Update(context.Background(), fulf); txErr != nil {
-			tx.Rollback()
-			return out, txErr
+		// Simulate N separate transactions each advancing generation.
+		// Each iteration re-loads (hydrating loadedGeneration from the
+		// repo) then calls Touch to bump generation via the real domain
+		// contract.
+		for range r.bumps {
+			fulf, txErr := tx.Fulfillments().Get(context.Background(), thinDep.FulfillmentID)
+			if txErr != nil {
+				tx.Rollback()
+				return out, txErr
+			}
+			fulf.Touch(time.Now().UTC())
+			if txErr = tx.Fulfillments().Update(context.Background(), fulf); txErr != nil {
+				tx.Rollback()
+				return out, txErr
+			}
 		}
 		tx.Commit()
 	}
@@ -2273,8 +2276,7 @@ func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 		tx.Rollback()
 		t.Fatal(err)
 	}
-	f.State = domain.FulfillmentStateDeleting
-	f.BumpGeneration()
+	f.TransitionToDeleting(f.Auth)
 	if err := tx.Fulfillments().Update(ctx, f); err != nil {
 		tx.Rollback()
 		t.Fatal(err)

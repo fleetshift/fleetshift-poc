@@ -61,6 +61,11 @@ message Deployment {
   // Carries only proof material — content is in the strategy fields above.
   Provenance provenance = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 
+  // Monotonically increasing version counter. Increments exactly once
+  // per logical mutation (create, resume, delete). Clients use this to
+  // compute the generation to sign over when resuming a paused deployment.
+  int64 generation = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
+
   // Lifecycle state of a deployment.
   enum State {
     // Default value. Not used.

@@ -609,6 +609,41 @@ func TestResumeDeployment_NoAuth(t *testing.T) {
 	}
 }
 
+func TestResumeDeployment_StaleEtag(t *testing.T) {
+	h := setup(t)
+	ctx := application.ContextWithAuth(context.Background(), testAuthContext())
+
+	seedDeployment(t, h.store, "d1", func(f *domain.Fulfillment) {
+		f.State = domain.FulfillmentStatePausedAuth
+		f.Generation = 3
+	})
+
+	_, err := h.deployments.Resume(ctx, application.ResumeInput{
+		ID:   "d1",
+		Etag: "99",
+	})
+	if !errors.Is(err, domain.ErrStaleGeneration) {
+		t.Fatalf("expected ErrStaleGeneration, got: %v", err)
+	}
+}
+
+func TestResumeDeployment_EmptyEtag_SkipsCheck(t *testing.T) {
+	h := setup(t)
+	ctx := application.ContextWithAuth(context.Background(), testAuthContext())
+
+	seedDeployment(t, h.store, "d1", func(f *domain.Fulfillment) {
+		f.State = domain.FulfillmentStatePausedAuth
+		f.Generation = 5
+	})
+
+	_, err := h.deployments.Resume(ctx, application.ResumeInput{
+		ID: "d1",
+	})
+	if err != nil {
+		t.Fatalf("expected success with empty etag (skip check), got: %v", err)
+	}
+}
+
 // authFailThenSucceedAgent fails the first delivery with
 // DeliveryStateAuthFailed, then succeeds on all subsequent attempts.
 // Results are reported asynchronously through the reporter.

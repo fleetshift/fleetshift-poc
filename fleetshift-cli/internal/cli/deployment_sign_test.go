@@ -166,9 +166,6 @@ func TestDeploymentCreate_Sign_PopulatesSignatureFields(t *testing.T) {
 	if req.GetValidUntil() == nil {
 		t.Error("valid_until should be set")
 	}
-	if req.GetExpectedGeneration() != 1 {
-		t.Errorf("expected_generation = %d, want 1", req.GetExpectedGeneration())
-	}
 
 	ms, ps := canonicalStrategiesFromReq(req)
 	envelopeBytes, err := canonical.BuildSignedInputEnvelope(
@@ -176,7 +173,7 @@ func TestDeploymentCreate_Sign_PopulatesSignatureFields(t *testing.T) {
 		ms, ps,
 		req.GetValidUntil().AsTime(),
 		nil,
-		req.GetExpectedGeneration(),
+		1,
 	)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
@@ -207,6 +204,8 @@ func TestDeploymentResume_Sign_PopulatesSignatureFields(t *testing.T) {
 		Provenance: &pb.Provenance{
 			ExpectedGeneration: 1,
 		},
+		Generation: 1,
+		Etag:       "1",
 		CreateTime: timestamppb.Now(),
 		UpdateTime: timestamppb.Now(),
 	}
@@ -240,7 +239,11 @@ func TestDeploymentResume_Sign_PopulatesSignatureFields(t *testing.T) {
 	dep := fake.deployments["deployments/paused-signed"]
 	ms, ps := canonicalStrategiesFromDeployment(dep)
 	depID := "paused-signed"
-	expectedGen := dep.GetProvenance().GetExpectedGeneration() + 1
+	expectedGen := dep.GetGeneration() + 1
+
+	if req.GetEtag() != dep.GetEtag() {
+		t.Errorf("etag = %q, want %q", req.GetEtag(), dep.GetEtag())
+	}
 
 	envelopeBytes, err := canonical.BuildSignedInputEnvelope(
 		depID, ms, ps,

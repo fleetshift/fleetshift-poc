@@ -47,7 +47,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 		prov, err := s.ProvenanceSvc.BuildDeploymentProvenance(
 			ctx, tx.SignerEnrollments(), ac.Subject,
 			in.ID, in.ManifestStrategy, in.PlacementStrategy,
-			in.ExpectedGeneration, in.UserSignature, in.ValidUntil,
+			1, in.UserSignature, in.ValidUntil,
 		)
 		if err != nil {
 			return domain.DeploymentView{}, fmt.Errorf("build provenance: %w", err)
@@ -110,6 +110,7 @@ type ResumeInput struct {
 	ID            domain.DeploymentID
 	UserSignature []byte
 	ValidUntil    time.Time
+	Etag          string
 }
 
 // Resume resumes a deployment that is paused for authentication by
@@ -151,6 +152,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 		},
 		UserSignature: in.UserSignature,
 		ValidUntil:    in.ValidUntil,
+		Etag:          in.Etag,
 	}, currentGen)
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("start resume-deployment workflow: %w", err)

@@ -26,4 +26,9 @@ message ResumeDeploymentRequest {
 
   // Client-supplied attestation expiry for envelope reconstruction.
   google.protobuf.Timestamp valid_until = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // Concurrency control token from the most recent GET. When non-empty,
+  // the server verifies the resource has not been modified since the
+  // client last observed it, failing with ABORTED if stale.
+  string etag = 4 [(google.api.field_behavior) = OPTIONAL];
 }

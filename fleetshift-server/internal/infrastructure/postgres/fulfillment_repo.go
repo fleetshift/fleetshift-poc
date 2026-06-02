@@ -234,6 +234,7 @@ func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 	f.State = domain.FulfillmentState(stateStr)
 	f.StatusReason = statusReason
 	f.Generation = domain.Generation(generation)
+	f.SetLoadedGeneration(domain.Generation(generation))
 	f.ObservedGeneration = domain.Generation(observedGeneration)
 	if activeWorkflowGen.Valid {
 		g := domain.Generation(activeWorkflowGen.Int64)

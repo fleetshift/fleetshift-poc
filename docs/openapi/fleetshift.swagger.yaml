@@ -119,12 +119,6 @@ paths:
           required: false
           type: string
           format: date-time
-        - name: expectedGeneration
-          description: Expected deployment generation (always 1 for new deployments).
-          in: query
-          required: false
-          type: string
-          format: int64
       tags:
         - DeploymentService
   /v1/signerEnrollments:
@@ -275,6 +269,12 @@ definitions:
         type: string
         format: date-time
         description: Client-supplied attestation expiry for envelope reconstruction.
+      etag:
+        type: string
+        description: |-
+          Concurrency control token from the most recent GET. When non-empty,
+          the server verifies the resource has not been modified since the
+          client last observed it, failing with ABORTED if stale.
     description: |-
       Request message for
       [DeploymentService.ResumeDeployment][fleetshift.v1.DeploymentService.ResumeDeployment].
@@ -396,6 +396,14 @@ definitions:
           Cryptographic proof that a user authorized this deployment.
           Present when the deployment was created with a user signature.
           Carries only proof material — content is in the strategy fields above.
+        readOnly: true
+      generation:
+        type: string
+        format: int64
+        description: |-
+          Monotonically increasing version counter. Increments exactly once
+          per logical mutation (create, resume, delete). Clients use this to
+          compute the generation to sign over when resuming a paused deployment.
         readOnly: true
     description: |-
       Deployment is the composition of manifest, placement, and rollout strategies.

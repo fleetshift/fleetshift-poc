@@ -23,13 +23,12 @@ type ManagedResourceService struct {
 // CreateManagedResourceInput carries the fields needed to create a
 // managed resource instance.
 type CreateManagedResourceInput struct {
-	ResourceType       domain.ResourceType
-	Name               domain.ResourceName
-	Spec               json.RawMessage
-	Provenance         *domain.Provenance
-	UserSignature      []byte
-	ValidUntil         time.Time
-	ExpectedGeneration domain.Generation
+	ResourceType  domain.ResourceType
+	Name          domain.ResourceName
+	Spec          json.RawMessage
+	Provenance    *domain.Provenance
+	UserSignature []byte
+	ValidUntil    time.Time
 }
 
 // Create persists a pre-validated managed resource, derives fulfillment
@@ -82,7 +81,7 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 			in.ResourceType,
 			in.Name,
 			in.Spec,
-			in.ExpectedGeneration,
+			1,
 			in.UserSignature,
 			in.ValidUntil,
 		)
@@ -183,6 +182,7 @@ type ResumeManagedResourceInput struct {
 	Name          domain.ResourceName
 	UserSignature []byte
 	ValidUntil    time.Time
+	Etag          string
 }
 
 // Resume resumes a managed resource that is paused for authentication
@@ -226,6 +226,7 @@ func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedRes
 		},
 		UserSignature: in.UserSignature,
 		ValidUntil:    in.ValidUntil,
+		Etag:          in.Etag,
 	}, currentGen)
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start resume-managed-resource workflow: %w", err)

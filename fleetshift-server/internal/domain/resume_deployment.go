@@ -15,6 +15,7 @@ type ResumeDeploymentInput struct {
 	Auth          DeliveryAuth // fresh caller credentials for the resumed deployment
 	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
+	Etag          string       // optimistic concurrency token; empty means skip check (backwards compat)
 }
 
 // ResumeDeploymentWorkflowSpec transitions a [FulfillmentStatePausedAuth]
@@ -53,9 +54,15 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			return deploymentMutationResult{}, err
 		}
 
+		nextGen := f.Generation + 1
+		if in.Etag != "" && in.Etag != f.GenerationEtag() {
+			return deploymentMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: etag mismatch (client sent %q, current is %q)",
+				ErrStaleGeneration, in.Etag, f.GenerationEtag()))
+		}
+
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
-			nextGen := f.Generation + 1
 			prov, err = s.ProvenanceSvc.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				dep.ID, f.ManifestStrategy, f.PlacementStrategy,

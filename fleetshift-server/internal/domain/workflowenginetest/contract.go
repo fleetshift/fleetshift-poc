@@ -486,7 +486,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 				t.Fatalf("GetView: %v", err)
 			}
 			ful := view.Fulfillment
-			ful.BumpGeneration()
+			ful.Touch(time.Now().UTC())
 			if err := tx.Fulfillments().Update(ctx, &ful); err != nil {
 				t.Fatalf("Fulfillments.Update: %v", err)
 			}

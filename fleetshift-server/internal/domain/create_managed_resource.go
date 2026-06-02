@@ -76,7 +76,6 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 			Auth:           in.Auth,
 			Provenance:     in.Provenance,
 			AttestationRef: attestRef,
-			Generation:     0,
 			CreatedAt:      now,
 			UpdatedAt:      now,
 		}

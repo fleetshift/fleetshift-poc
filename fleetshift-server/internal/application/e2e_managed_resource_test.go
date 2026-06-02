@@ -144,12 +144,11 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	})
 
 	view, err := resourceSvc.Create(signedCtx, application.CreateManagedResourceInput{
-		ResourceType:       "clusters",
-		Name:               "prod-us-east-1",
-		Spec:               validSpec,
-		UserSignature:      sig,
-		ValidUntil:         validUntil,
-		ExpectedGeneration: 1,
+		ResourceType:  "clusters",
+		Name:          "prod-us-east-1",
+		Spec:          validSpec,
+		UserSignature: sig,
+		ValidUntil:    validUntil,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -243,8 +242,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Errorf("DeliveryAuth.Token = %q, want %q", deliveredAuth.Token, "access-token")
 	}
 
-	if gen := agent.capturedGeneration(); gen != 3 {
-		t.Errorf("Generation = %d, want 3", gen)
+	if gen := agent.capturedGeneration(); gen != 1 {
+		t.Errorf("Generation = %d, want 1", gen)
 	}
 
 	// --- Step 6: Verify the resource is retrievable from the service ---

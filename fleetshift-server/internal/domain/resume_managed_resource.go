@@ -16,6 +16,7 @@ type ResumeManagedResourceInput struct {
 	Auth          DeliveryAuth // fresh caller credentials for the resumed resource
 	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
 	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
+	Etag          string       // optimistic concurrency token; empty means skip check (backwards compat)
 }
 
 // ResumeManagedResourceWorkflowSpec transitions a
@@ -60,9 +61,15 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 			return managedResourceMutationResult{}, err
 		}
 
+		nextGen := f.Generation + 1
+		if in.Etag != "" && in.Etag != f.GenerationEtag() {
+			return managedResourceMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: etag mismatch (client sent %q, current is %q)",
+				ErrStaleGeneration, in.Etag, f.GenerationEtag()))
+		}
+
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
-			nextGen := f.Generation + 1
 			prov, err = s.ProvenanceSvc.BuildManagedResourceProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				in.ResourceType, in.Name, intent.Spec,

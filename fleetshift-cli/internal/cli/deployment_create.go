@@ -179,7 +179,6 @@ func signCreateRequest(req *pb.CreateDeploymentRequest) error {
 
 	req.UserSignature = sig
 	req.ValidUntil = timestamppb.New(validUntil)
-	req.ExpectedGeneration = expectedGeneration
 	return nil
 }
 

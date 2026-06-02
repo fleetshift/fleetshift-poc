@@ -330,6 +330,7 @@ func (r *ManagedResourceRepo) scanView(s interface{ Scan(...any) error }) (domai
 	v.Fulfillment.State = domain.FulfillmentState(stateStr)
 	v.Fulfillment.StatusReason = statusReason
 	v.Fulfillment.Generation = domain.Generation(generation)
+	v.Fulfillment.SetLoadedGeneration(domain.Generation(generation))
 	v.Fulfillment.ObservedGeneration = domain.Generation(observedGeneration)
 	if activeWorkflowGen.Valid {
 		g := domain.Generation(activeWorkflowGen.Int64)

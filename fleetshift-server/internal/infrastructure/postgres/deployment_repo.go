@@ -144,6 +144,7 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	v.Fulfillment.State = domain.FulfillmentState(fStateStr)
 	v.Fulfillment.StatusReason = fStatusReason
 	v.Fulfillment.Generation = domain.Generation(fGen)
+	v.Fulfillment.SetLoadedGeneration(domain.Generation(fGen))
 	v.Fulfillment.ObservedGeneration = domain.Generation(fObsGen)
 	if fActiveWfGen.Valid {
 		g := domain.Generation(fActiveWfGen.Int64)

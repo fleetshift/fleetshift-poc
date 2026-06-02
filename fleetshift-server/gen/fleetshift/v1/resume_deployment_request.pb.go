@@ -34,7 +34,11 @@ type ResumeDeploymentRequest struct {
 	// Required when the deployment has Provenance (re-signing).
 	UserSignature []byte `protobuf:"bytes,2,opt,name=user_signature,json=userSignature,proto3" json:"user_signature,omitempty"`
 	// Client-supplied attestation expiry for envelope reconstruction.
-	ValidUntil    *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	ValidUntil *timestamppb.Timestamp `protobuf:"bytes,3,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	// Concurrency control token from the most recent GET. When non-empty,
+	// the server verifies the resource has not been modified since the
+	// client last observed it, failing with ABORTED if stale.
+	Etag          string `protobuf:"bytes,4,opt,name=etag,proto3" json:"etag,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -90,17 +94,25 @@ func (x *ResumeDeploymentRequest) GetValidUntil() *timestamppb.Timestamp {
 	return nil
 }
 
+func (x *ResumeDeploymentRequest) GetEtag() string {
+	if x != nil {
+		return x.Etag
+	}
+	return ""
+}
+
 var File_fleetshift_v1_resume_deployment_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_resume_deployment_request_proto_rawDesc = "" +
 	"\n" +
-	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xbd\x01\n" +
+	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd6\x01\n" +
 	"\x17ResumeDeploymentRequest\x124\n" +
 	"\x04name\x18\x01 \x01(\tB \xe0A\x02\xfaA\x1a\n" +
 	"\x18fleetshift.io/DeploymentR\x04name\x12*\n" +
 	"\x0euser_signature\x18\x02 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
 	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
-	"validUntilBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"validUntil\x12\x17\n" +
+	"\x04etag\x18\x04 \x01(\tB\x03\xe0A\x01R\x04etagBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_resume_deployment_request_proto_rawDescOnce sync.Once

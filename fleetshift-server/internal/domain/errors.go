@@ -33,6 +33,12 @@ var (
 	// translates this into FulfillmentStatePausedAuth so the
 	// fulfillment waits for fresh credentials.
 	ErrAuthExpired = errors.New("delivery auth expired")
+
+	// ErrStaleGeneration indicates that the client's expected
+	// generation does not match the fulfillment's actual next
+	// generation. This means the fulfillment was concurrently
+	// modified and the client should re-fetch and retry.
+	ErrStaleGeneration = errors.New("stale generation")
 )
 
 // terminalPrefix is the marker prepended to terminal errors.
