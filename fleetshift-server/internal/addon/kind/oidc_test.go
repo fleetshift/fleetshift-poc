@@ -25,6 +25,7 @@ func TestBuildKindOIDCConfig_BasicFlags(t *testing.T) {
 	assertContains(t, s, `oidc-client-id: "fleetshift"`)
 	assertContains(t, s, `oidc-username-claim: "sub"`)
 	assertContains(t, s, `oidc-groups-claim: "groups"`)
+	assertContains(t, s, `oidc-signing-algs: "RS256,ES256"`)
 
 	if strings.Contains(s, "oidc-ca-file") {
 		t.Error("oidc-ca-file should not be present without CA bundle")

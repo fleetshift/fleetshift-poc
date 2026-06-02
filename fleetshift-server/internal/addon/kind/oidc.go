@@ -58,6 +58,7 @@ func BuildKindOIDCConfig(issuerURL domain.IssuerURL, audience domain.Audience, s
 	fmt.Fprintf(&extraArgs, "        oidc-client-id: %q\n", string(audience))
 	fmt.Fprintf(&extraArgs, "        oidc-username-claim: %q\n", spec.usernameClaim())
 	fmt.Fprintf(&extraArgs, "        oidc-groups-claim: %q\n", spec.groupsClaim())
+	fmt.Fprintf(&extraArgs, "        oidc-signing-algs: \"RS256,ES256\"\n")
 	if caCertHostPath != "" {
 		fmt.Fprintf(&extraArgs, "        oidc-ca-file: %q\n", oidcCACertContainerPath)
 	}
