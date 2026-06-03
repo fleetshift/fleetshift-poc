@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
-	"time"
 )
 
 func TestDeploymentView_Etag_Deterministic(t *testing.T) {
@@ -24,8 +23,6 @@ func TestDeploymentView_Etag_Deterministic(t *testing.T) {
 				Type: PlacementStrategyAll,
 			},
 			ResolvedTargets: []TargetID{"t1", "t2"},
-			CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-			UpdatedAt:       time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 		},
 	}
 
@@ -58,8 +55,6 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 			Generation:      3,
 			State:           FulfillmentStateActive,
 			ResolvedTargets: []TargetID{"t1"},
-			CreatedAt:       time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-			UpdatedAt:       time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC),
 		},
 	}
 	baseEtag := base.Etag()
@@ -85,14 +80,6 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 		v.Fulfillment.ResolvedTargets = []TargetID{"t1", "t2"}
 		if v.Etag() == baseEtag {
 			t.Error("etag should change when resolved targets change")
-		}
-	})
-
-	t.Run("update time change", func(t *testing.T) {
-		v := base
-		v.Fulfillment.UpdatedAt = time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-		if v.Etag() == baseEtag {
-			t.Error("etag should change when update time changes")
 		}
 	})
 }

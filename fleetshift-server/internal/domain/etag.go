@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
-	"time"
 )
 
 // Etag returns a weak domain-state concurrency token (RFC 9110 Section
@@ -31,38 +30,24 @@ func (v ManagedResourceView) Etag() Etag {
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
 	h.Write([]byte(v.Deployment.ID))
 	h.Write([]byte(v.Deployment.UID))
-	hashTime(h, v.Deployment.CreatedAt)
-	hashTime(h, v.Deployment.UpdatedAt)
 }
 
 func hashManagedResourceFields(h hash.Hash, v ManagedResourceView) {
 	h.Write([]byte(v.ManagedResource.ResourceType))
 	h.Write([]byte(v.ManagedResource.Name))
 	h.Write([]byte(v.ManagedResource.UID))
-	hashInt64(h, int64(v.ManagedResource.CurrentVersion))
-	hashInt64(h, int64(v.Intent.Version))
+	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.CurrentVersion))
+	binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
 	h.Write(v.Intent.Spec)
 }
 
 func hashFulfillmentFields(h hash.Hash, f Fulfillment) {
-	hashInt64(h, int64(f.Generation))
+	binary.Write(h, binary.BigEndian, int64(f.Generation))
 	h.Write([]byte(f.State))
 	h.Write([]byte(f.StatusReason))
 	for _, t := range f.ResolvedTargets {
 		h.Write([]byte(t))
 	}
-	hashTime(h, f.CreatedAt)
-	hashTime(h, f.UpdatedAt)
-}
-
-func hashInt64(h hash.Hash, v int64) {
-	var buf [8]byte
-	binary.BigEndian.PutUint64(buf[:], uint64(v))
-	h.Write(buf[:])
-}
-
-func hashTime(h hash.Hash, t time.Time) {
-	hashInt64(h, t.UnixNano())
 }
 
 func weakEtag(h hash.Hash) Etag {
