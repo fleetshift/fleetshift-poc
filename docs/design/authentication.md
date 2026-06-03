@@ -296,16 +296,6 @@ The delivery agent verifies the entire chain recursively:
 - **Withholding:** refuse to deliver a validly signed operation (DoS). Observable — the user sees their deployment isn't progressing.
 - **Misdirection:** deliver a legitimately signed operation to the wrong target. Defense: the signed content includes target scope (deployment_id, placement strategy); the delivery agent checks consistency.
 
-**Management-plane generation model.** The fulfillment's `generation` counter is managed cooperatively between the domain model and the persistence layer:
-
-- On hydration from the database, a private `loadedGeneration` field records the persisted value. The public `Generation` field starts equal to `loadedGeneration`.
-- Domain methods that represent user-initiated mutations (Resume, TransitionToDeleting) set `Generation = loadedGeneration + 1`. This is idempotent — multiple calls within the same transaction always produce the same result (one bump).
-- Strategy-only changes (AdvanceManifestStrategy, AdvancePlacementStrategy, AdvanceRolloutStrategy) do **not** advance generation. These are bookkeeping operations the orchestrator performs without user involvement.
-- The repository simply persists `Generation` on save.
-- Creation is also a generation-advancing event: a new fulfillment starts at generation 1.
-
-The `generation` field is exposed on Deployment responses (and managed resource responses) so clients can compute the next generation to sign over (`generation + 1`). Concurrency control uses the standard `etag` field (AIP-154): the etag is derived from the generation, and resume requests pass it back. When present, the server verifies the etag matches the current state **before** attempting signature verification, failing early with `ABORTED` if stale. This gives the client a clear, actionable error ("re-fetch and retry") instead of an opaque signature verification failure.
-
 ### Placement enforcement and removal protection
 
 If a compromised platform can trigger removal of all resources (by manipulating placement or sending unsigned deletions), the signing model hasn't bought much. The delivery agent must be able to independently verify that any placement or removal action is legitimate.
