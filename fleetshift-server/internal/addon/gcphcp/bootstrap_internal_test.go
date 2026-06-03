@@ -2,6 +2,8 @@ package gcphcp
 
 import (
 	"context"
+	"crypto/x509"
+	"fmt"
 	"reflect"
 	"testing"
 
@@ -189,5 +191,46 @@ func TestCreatePlatformRBAC_RecreatesExistingBindingWhenRoleRefDiffers(t *testin
 
 	if got.RoleRef.Name != "cluster-admin" {
 		t.Fatalf("roleRef.name = %q, want cluster-admin", got.RoleRef.Name)
+	}
+}
+
+func TestIsCertVerificationError(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "x509 UnknownAuthorityError",
+			err:  x509.UnknownAuthorityError{},
+			want: true,
+		},
+		{
+			name: "wrapped x509 UnknownAuthorityError",
+			err:  fmt.Errorf("connect failed: %w", &x509.UnknownAuthorityError{}),
+			want: true,
+		},
+		{
+			name: "generic network error",
+			err:  fmt.Errorf("connection refused"),
+			want: false,
+		},
+		{
+			name: "nil error",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "x509 CertificateInvalidError (not unknown authority)",
+			err:  x509.CertificateInvalidError{Reason: x509.Expired},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isCertVerificationError(tt.err); got != tt.want {
+				t.Fatalf("isCertVerificationError() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }

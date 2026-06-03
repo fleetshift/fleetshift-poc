@@ -2,6 +2,8 @@ package gcphcp
 
 import (
 	"context"
+	"crypto/x509"
+	"errors"
 	"fmt"
 
 	authv1 "k8s.io/api/authentication/v1"
@@ -175,4 +177,16 @@ func requestPlatformSAToken(
 	}
 
 	return DeliverySecretRef(targetID), []byte(tokenReq.Status.Token), nil
+}
+
+func isCertVerificationError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var unknownAuth x509.UnknownAuthorityError
+	if errors.As(err, &unknownAuth) {
+		return true
+	}
+	var unknownAuthPtr *x509.UnknownAuthorityError
+	return errors.As(err, &unknownAuthPtr)
 }
