@@ -2,12 +2,20 @@ package gcphcp
 
 import (
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
+	"math/big"
 	"reflect"
 	"testing"
+	"time"
 
 	authv1 "k8s.io/api/authentication/v1"
+	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -273,5 +281,138 @@ func TestProbeWithSystemTrust_NonX509ErrorReturnsNilLeafDER(t *testing.T) {
 	}
 	if leafDER != nil {
 		t.Fatalf("leafDER = %v, want nil for non-x509 error", leafDER)
+	}
+}
+
+func generateTestCA(t *testing.T) (*x509.Certificate, crypto.Signer, []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate CA key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: "test-root-ca", OrganizationalUnit: []string{"openshift"}},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+		KeyUsage:              x509.KeyUsageCertSign,
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("create CA cert: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse CA cert: %v", err)
+	}
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	return cert, key, pemBytes
+}
+
+func generateTestLeaf(t *testing.T, ca *x509.Certificate, caKey crypto.Signer) (*x509.Certificate, []byte) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate leaf key: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(2),
+		Subject:      pkix.Name{CommonName: "kubernetes", Organization: []string{"kubernetes"}},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca, &key.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create leaf cert: %v", err)
+	}
+	cert, err := x509.ParseCertificate(der)
+	if err != nil {
+		t.Fatalf("parse leaf cert: %v", err)
+	}
+	return cert, der
+}
+
+func TestExtractCAFromGuest_Success(t *testing.T) {
+	origNewClient := newKubernetesClientForConfig
+	defer func() { newKubernetesClientForConfig = origNewClient }()
+
+	ca, caKey, caPEM := generateTestCA(t)
+	_, leafDER := generateTestLeaf(t, ca, caKey)
+	fingerprint := leafFingerprint(leafDER)
+
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kube-root-ca.crt",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{
+			"ca.crt": string(caPEM),
+		},
+	})
+
+	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		if !cfg.TLSClientConfig.Insecure {
+			t.Fatal("expected insecure config for CA extraction")
+		}
+		return client, nil
+	}
+
+	gotCA, err := extractCAFromGuest(context.Background(), "https://guest.example:6443", "broker-token", fingerprint, leafDER)
+	if err != nil {
+		t.Fatalf("extractCAFromGuest() error = %v", err)
+	}
+	if string(gotCA) != string(caPEM) {
+		t.Fatalf("extracted CA does not match expected CA PEM")
+	}
+}
+
+func TestExtractCAFromGuest_ConfigMapMissing(t *testing.T) {
+	origNewClient := newKubernetesClientForConfig
+	defer func() { newKubernetesClientForConfig = origNewClient }()
+
+	client := fake.NewSimpleClientset()
+	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		return client, nil
+	}
+
+	fingerprint := leafFingerprint([]byte("dummy-leaf"))
+	_, err := extractCAFromGuest(context.Background(), "https://guest.example:6443", "broker-token", fingerprint, []byte("dummy-leaf"))
+	if err == nil {
+		t.Fatal("expected error for missing ConfigMap")
+	}
+}
+
+func TestExtractCAFromGuest_CADoesNotSignLeaf(t *testing.T) {
+	origNewClient := newKubernetesClientForConfig
+	defer func() { newKubernetesClientForConfig = origNewClient }()
+
+	ca, caKey, _ := generateTestCA(t)
+	_, leafDER := generateTestLeaf(t, ca, caKey)
+	fingerprint := leafFingerprint(leafDER)
+
+	// Generate a second, unrelated CA
+	_, _, wrongCAPEM := generateTestCA(t)
+
+	client := fake.NewSimpleClientset(&corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "kube-root-ca.crt",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{
+			"ca.crt": string(wrongCAPEM),
+		},
+	})
+
+	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		return client, nil
+	}
+
+	_, err := extractCAFromGuest(context.Background(), "https://guest.example:6443", "broker-token", fingerprint, leafDER)
+	if err == nil {
+		t.Fatal("expected error when CA does not sign the leaf cert")
 	}
 }

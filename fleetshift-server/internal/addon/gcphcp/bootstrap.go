@@ -28,6 +28,7 @@ const (
 	platformSAName                          = "fleetshift-platform"
 	platformSANamespace                     = "kube-system"
 	defaultPlatformTokenExpirySeconds int64 = 24 * 3600
+	rootCAConfigMapName                     = "kube-root-ca.crt"
 )
 
 var newKubernetesClientForConfig = func(c *rest.Config) (kubernetes.Interface, error) {
@@ -264,4 +265,63 @@ func probeLeafCert(addr string) []byte {
 
 func leafFingerprint(der []byte) [32]byte {
 	return sha256.Sum256(der)
+}
+
+func extractCAFromGuest(
+	ctx context.Context,
+	guestEndpoint, brokerToken string,
+	expectedFingerprint [32]byte,
+	leafDER []byte,
+) ([]byte, error) {
+	cfg := &rest.Config{
+		Host:        guestEndpoint,
+		BearerToken: brokerToken,
+		TLSClientConfig: rest.TLSClientConfig{
+			Insecure: true,
+		},
+	}
+
+	client, err := newKubernetesClientForConfig(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create insecure kubernetes client for CA extraction: %w", err)
+	}
+
+	cm, err := client.CoreV1().ConfigMaps(platformSANamespace).Get(
+		ctx,
+		rootCAConfigMapName,
+		metav1.GetOptions{},
+	)
+	if err != nil {
+		return nil, fmt.Errorf("read %s/%s ConfigMap: %w", platformSANamespace, rootCAConfigMapName, err)
+	}
+
+	caPEM, ok := cm.Data["ca.crt"]
+	if !ok || caPEM == "" {
+		return nil, fmt.Errorf("ConfigMap %s/%s missing ca.crt data key", platformSANamespace, rootCAConfigMapName)
+	}
+
+	if err := validateCASignsLeaf([]byte(caPEM), leafDER); err != nil {
+		return nil, fmt.Errorf("extracted CA does not sign the server certificate: %w", err)
+	}
+
+	return []byte(caPEM), nil
+}
+
+func validateCASignsLeaf(caPEM, leafDER []byte) error {
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return fmt.Errorf("failed to parse CA certificate PEM")
+	}
+
+	leaf, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		return fmt.Errorf("parse captured leaf certificate: %w", err)
+	}
+
+	_, err = leaf.Verify(x509.VerifyOptions{
+		Roots:       roots,
+		CurrentTime: leaf.NotBefore.Add(time.Second),
+		KeyUsages:   []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	})
+	return err
 }
