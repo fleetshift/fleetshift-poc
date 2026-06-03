@@ -412,7 +412,7 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 	// Field 4: etag (optional)
 	etagReqField := h.descs.ResumeRequest.Fields().ByNumber(4)
 	if etagReqField != nil && reqMsg.Has(etagReqField) {
-		in.Etag = reqMsg.Get(etagReqField).String()
+		in.Etag = domain.Etag(reqMsg.Get(etagReqField).String())
 	}
 
 	// Field 5: expected_generation (optional)
@@ -509,7 +509,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// etag (weak domain-state token)
 	etagField := h.descs.Resource.Fields().ByName("etag")
-	resource.Set(etagField, protoreflect.ValueOfString(v.Etag()))
+	resource.Set(etagField, protoreflect.ValueOfString(string(v.Etag())))
 
 	// provenance
 	if f.Provenance != nil {

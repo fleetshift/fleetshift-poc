@@ -110,7 +110,7 @@ type ResumeInput struct {
 	ID                 domain.DeploymentID
 	UserSignature      []byte
 	ValidUntil         time.Time
-	Etag               string
+	Etag               domain.Etag
 	ExpectedGeneration domain.Generation
 }
 

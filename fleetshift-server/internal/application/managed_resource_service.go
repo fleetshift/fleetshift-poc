@@ -182,7 +182,7 @@ type ResumeManagedResourceInput struct {
 	Name               domain.ResourceName
 	UserSignature      []byte
 	ValidUntil         time.Time
-	Etag               string
+	Etag               domain.Etag
 	ExpectedGeneration domain.Generation
 }
 

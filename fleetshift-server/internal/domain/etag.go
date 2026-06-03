@@ -11,7 +11,7 @@ import (
 // Etag returns a weak domain-state concurrency token (RFC 9110 Section
 // 8.8.1) that changes whenever any API-visible field of the deployment
 // view changes. The value is opaque, W/-prefixed, and quoted.
-func (v DeploymentView) Etag() string {
+func (v DeploymentView) Etag() Etag {
 	h := sha256.New()
 	hashDeploymentFields(h, v)
 	hashFulfillmentFields(h, v.Fulfillment)
@@ -21,7 +21,7 @@ func (v DeploymentView) Etag() string {
 // Etag returns a weak domain-state concurrency token (RFC 9110 Section
 // 8.8.1) that changes whenever any API-visible field of the managed
 // resource view changes. The value is opaque, W/-prefixed, and quoted.
-func (v ManagedResourceView) Etag() string {
+func (v ManagedResourceView) Etag() Etag {
 	h := sha256.New()
 	hashManagedResourceFields(h, v)
 	hashFulfillmentFields(h, v.Fulfillment)
@@ -65,7 +65,7 @@ func hashTime(h hash.Hash, t time.Time) {
 	hashInt64(h, t.UnixNano())
 }
 
-func weakEtag(h hash.Hash) string {
+func weakEtag(h hash.Hash) Etag {
 	sum := h.Sum(nil)
-	return fmt.Sprintf(`W/"%x"`, sum[:16])
+	return Etag(fmt.Sprintf(`W/"%x"`, sum[:16]))
 }

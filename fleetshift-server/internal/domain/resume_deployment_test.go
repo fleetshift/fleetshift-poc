@@ -39,7 +39,7 @@ func TestResumeDeployment_StaleEtag_Aborted(t *testing.T) {
 	_, err := spec.Run(rec, domain.ResumeDeploymentInput{
 		ID:   "d1",
 		Auth: domain.DeliveryAuth{Token: "tok"},
-		Etag: "clearly-wrong",
+		Etag: domain.Etag("clearly-wrong"),
 	})
 	if err == nil {
 		t.Fatal("expected error for stale etag")

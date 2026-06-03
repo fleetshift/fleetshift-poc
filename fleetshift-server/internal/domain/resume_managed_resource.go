@@ -16,7 +16,7 @@ type ResumeManagedResourceInput struct {
 	Auth               DeliveryAuth // fresh caller credentials for the resumed resource
 	UserSignature      []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
 	ValidUntil         time.Time    // client-supplied attestation expiry; zero for unsigned
-	Etag               string       // optimistic concurrency token; empty means skip check
+	Etag               Etag         // optimistic concurrency token; empty means skip check
 	ExpectedGeneration Generation   // client-supplied next generation; zero means skip check (unsigned legacy)
 }
 

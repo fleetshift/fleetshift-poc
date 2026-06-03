@@ -619,7 +619,7 @@ func TestResumeDeployment_StaleEtag(t *testing.T) {
 
 	_, err := h.deployments.Resume(ctx, application.ResumeInput{
 		ID:   "d1",
-		Etag: "99",
+		Etag: domain.Etag("99"),
 	})
 	if !errors.Is(err, domain.ErrStaleGeneration) {
 		t.Fatalf("expected ErrStaleGeneration, got: %v", err)

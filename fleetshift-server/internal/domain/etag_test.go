@@ -41,7 +41,7 @@ func TestDeploymentView_Etag_WeakPrefix(t *testing.T) {
 		Deployment:  Deployment{ID: "dep-1", UID: "uid-abc"},
 		Fulfillment: Fulfillment{ID: "f-1", Generation: 1, State: FulfillmentStateCreating},
 	}
-	etag := v.Etag()
+	etag := string(v.Etag())
 	if !strings.HasPrefix(etag, `W/"`) {
 		t.Errorf("etag should start with W/\", got %q", etag)
 	}
@@ -133,7 +133,7 @@ func TestManagedResourceView_Etag_WeakPrefix(t *testing.T) {
 		},
 		Fulfillment: Fulfillment{ID: "f-2", Generation: 1, State: FulfillmentStateCreating},
 	}
-	etag := v.Etag()
+	etag := string(v.Etag())
 	if !strings.HasPrefix(etag, `W/"`) {
 		t.Errorf("etag should start with W/\", got %q", etag)
 	}
