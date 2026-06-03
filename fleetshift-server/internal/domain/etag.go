@@ -28,26 +28,41 @@ func (v ManagedResourceView) Etag() Etag {
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
-	h.Write([]byte(v.Deployment.ID))
-	h.Write([]byte(v.Deployment.UID))
+	hashString(h, string(v.Deployment.ID))
+	hashString(h, v.Deployment.UID)
 }
 
 func hashManagedResourceFields(h hash.Hash, v ManagedResourceView) {
-	h.Write([]byte(v.ManagedResource.ResourceType))
-	h.Write([]byte(v.ManagedResource.Name))
-	h.Write([]byte(v.ManagedResource.UID))
+	hashString(h, string(v.ManagedResource.ResourceType))
+	hashString(h, string(v.ManagedResource.Name))
+	hashString(h, v.ManagedResource.UID)
 	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.CurrentVersion))
 	binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
-	h.Write(v.Intent.Spec)
+	hashBytes(h, v.Intent.Spec)
 }
 
 func hashFulfillmentFields(h hash.Hash, f Fulfillment) {
 	binary.Write(h, binary.BigEndian, int64(f.Generation))
-	h.Write([]byte(f.State))
-	h.Write([]byte(f.StatusReason))
+	hashString(h, string(f.State))
+	hashString(h, f.StatusReason)
+	binary.Write(h, binary.BigEndian, int64(len(f.ResolvedTargets)))
 	for _, t := range f.ResolvedTargets {
-		h.Write([]byte(t))
+		hashString(h, string(t))
 	}
+}
+
+// hashString writes len(s) as a big-endian int64 followed by the
+// string bytes, making variable-length field boundaries unambiguous.
+func hashString(h hash.Hash, s string) {
+	binary.Write(h, binary.BigEndian, int64(len(s)))
+	h.Write([]byte(s))
+}
+
+// hashBytes writes len(b) as a big-endian int64 followed by the raw
+// bytes, making variable-length field boundaries unambiguous.
+func hashBytes(h hash.Hash, b []byte) {
+	binary.Write(h, binary.BigEndian, int64(len(b)))
+	h.Write(b)
 }
 
 func weakEtag(h hash.Hash) Etag {

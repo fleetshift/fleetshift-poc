@@ -84,6 +84,89 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 	})
 }
 
+func TestDeploymentView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
+	// Two views whose variable-length fields concatenate to the same
+	// byte stream without length-framing: (ID="ab", UID="c") vs
+	// (ID="a", UID="bc"). They must produce distinct etags.
+	a := DeploymentView{
+		Deployment:  Deployment{ID: "ab", UID: "c"},
+		Fulfillment: Fulfillment{Generation: 1, State: FulfillmentStateActive},
+	}
+	b := DeploymentView{
+		Deployment:  Deployment{ID: "a", UID: "bc"},
+		Fulfillment: Fulfillment{Generation: 1, State: FulfillmentStateActive},
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when field values differ, even if concatenation is the same")
+	}
+}
+
+func TestFulfillment_Etag_ResolvedTargetBoundariesAreUnambiguous(t *testing.T) {
+	// Two views whose ResolvedTargets concatenate to the same bytes:
+	// ["ab","c"] vs ["a","bc"]. They must produce distinct etags.
+	a := DeploymentView{
+		Deployment: Deployment{ID: "d", UID: "u"},
+		Fulfillment: Fulfillment{
+			Generation:      1,
+			State:           FulfillmentStateActive,
+			ResolvedTargets: []TargetID{"ab", "c"},
+		},
+	}
+	b := DeploymentView{
+		Deployment: Deployment{ID: "d", UID: "u"},
+		Fulfillment: Fulfillment{
+			Generation:      1,
+			State:           FulfillmentStateActive,
+			ResolvedTargets: []TargetID{"a", "bc"},
+		},
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when resolved target boundaries differ")
+	}
+}
+
+func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
+	// ["abc"] vs ["ab","c"] — same concatenated bytes but different
+	// slice lengths. Must produce distinct etags.
+	a := DeploymentView{
+		Deployment: Deployment{ID: "d", UID: "u"},
+		Fulfillment: Fulfillment{
+			Generation:      1,
+			State:           FulfillmentStateActive,
+			ResolvedTargets: []TargetID{"abc"},
+		},
+	}
+	b := DeploymentView{
+		Deployment: Deployment{ID: "d", UID: "u"},
+		Fulfillment: Fulfillment{
+			Generation:      1,
+			State:           FulfillmentStateActive,
+			ResolvedTargets: []TargetID{"ab", "c"},
+		},
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when resolved target count differs")
+	}
+}
+
+func TestManagedResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
+	// (Name="ab", UID="c") vs (Name="a", UID="bc") — same concat,
+	// must differ.
+	a := ManagedResourceView{
+		ManagedResource: ManagedResource{ResourceType: "t", Name: "ab", UID: "c"},
+		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
+		Fulfillment:     Fulfillment{Generation: 1, State: FulfillmentStateActive},
+	}
+	b := ManagedResourceView{
+		ManagedResource: ManagedResource{ResourceType: "t", Name: "a", UID: "bc"},
+		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
+		Fulfillment:     Fulfillment{Generation: 1, State: FulfillmentStateActive},
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when field values differ, even if concatenation is the same")
+	}
+}
+
 func TestManagedResourceView_Etag_Deterministic(t *testing.T) {
 	v := ManagedResourceView{
 		ManagedResource: ManagedResource{
