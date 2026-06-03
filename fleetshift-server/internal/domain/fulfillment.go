@@ -2,7 +2,6 @@ package domain
 
 import (
 	"fmt"
-	"strconv"
 	"time"
 )
 
@@ -71,12 +70,6 @@ type Fulfillment struct {
 // [advanceGeneration] can enforce the single-bump invariant.
 func (f *Fulfillment) SetLoadedGeneration(gen Generation) {
 	f.loadedGeneration = gen
-}
-
-// GenerationEtag returns the optimistic concurrency token for this
-// fulfillment's current generation.
-func (f *Fulfillment) GenerationEtag() string {
-	return strconv.FormatInt(int64(f.Generation), 10)
 }
 
 // advanceGeneration advances Generation to loadedGeneration + 1.

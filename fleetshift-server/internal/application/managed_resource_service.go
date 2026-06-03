@@ -178,11 +178,12 @@ func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceT
 // ResumeManagedResourceInput carries the fields needed to resume a
 // paused managed resource.
 type ResumeManagedResourceInput struct {
-	ResourceType  domain.ResourceType
-	Name          domain.ResourceName
-	UserSignature []byte
-	ValidUntil    time.Time
-	Etag          string
+	ResourceType       domain.ResourceType
+	Name               domain.ResourceName
+	UserSignature      []byte
+	ValidUntil         time.Time
+	Etag               string
+	ExpectedGeneration domain.Generation
 }
 
 // Resume resumes a managed resource that is paused for authentication
@@ -224,9 +225,10 @@ func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedRes
 			Audience: ac.Audience,
 			Token:    ac.Token,
 		},
-		UserSignature: in.UserSignature,
-		ValidUntil:    in.ValidUntil,
-		Etag:          in.Etag,
+		UserSignature:      in.UserSignature,
+		ValidUntil:         in.ValidUntil,
+		Etag:               in.Etag,
+		ExpectedGeneration: in.ExpectedGeneration,
 	}, currentGen)
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start resume-managed-resource workflow: %w", err)

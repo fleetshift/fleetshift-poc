@@ -555,7 +555,6 @@ func seedDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID,
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Etag:          "test-etag",
 	}
 	if err := tx.Deployments().Create(ctx, d); err != nil {
 		t.Fatalf("Create deployment: %v", err)

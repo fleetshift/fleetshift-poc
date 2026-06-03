@@ -296,9 +296,10 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 	})
 
 	dep, err := h.deployments.Resume(ctx, application.ResumeInput{
-		ID:            "resign-dep",
-		UserSignature: sig,
-		ValidUntil:    validUntil,
+		ID:                 "resign-dep",
+		UserSignature:      sig,
+		ValidUntil:         validUntil,
+		ExpectedGeneration: 2,
 	})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -400,7 +401,6 @@ func TestRepoRoundTrip_ProvenanceOnFulfillment(t *testing.T) {
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Etag:          "test-etag",
 	}); err != nil {
 		t.Fatalf("create deployment: %v", err)
 	}

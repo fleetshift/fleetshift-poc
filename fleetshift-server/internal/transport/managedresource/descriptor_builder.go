@@ -239,6 +239,7 @@ func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
 			bytesField("user_signature", 2),
 			messageField("valid_until", 3, "google.protobuf.Timestamp"),
 			stringField("etag", 4),
+			int64Field("expected_generation", 5),
 		},
 	}
 }

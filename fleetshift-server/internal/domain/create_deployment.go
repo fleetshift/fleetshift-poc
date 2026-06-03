@@ -78,7 +78,6 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 			FulfillmentID: fID,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-			Etag:          uid,
 		}
 		if err := tx.Deployments().Create(ctx, dep); err != nil {
 			return DeploymentView{}, err

@@ -53,7 +53,11 @@ message Deployment {
   // When the deployment was last updated.
   google.protobuf.Timestamp update_time = 10 [(google.api.field_behavior) = OUTPUT_ONLY];
 
-  // Concurrency control token.
+  // Weak domain-state concurrency token (AIP-154, RFC 9110 Section 8.8.1).
+  // Changes whenever any API-visible state changes, not just on
+  // generation-advancing mutations. Clients send this on mutation
+  // requests to abort if the resource has been modified since their
+  // last read.
   string etag = 11;
 
   // Cryptographic proof that a user authorized this deployment.
@@ -62,8 +66,11 @@ message Deployment {
   Provenance provenance = 12 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Monotonically increasing version counter. Increments exactly once
-  // per logical mutation (create, resume, delete). Clients use this to
-  // compute the generation to sign over when resuming a paused deployment.
+  // per generation-advancing mutation (create, resume, delete). Clients
+  // supply generation + 1 as expected_generation when signing a resume
+  // request; delivery agents verify this for anti-replay. Unlike etag,
+  // generation only advances on logical mutations, not on reconciliation
+  // state changes.
   int64 generation = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 
   // Lifecycle state of a deployment.

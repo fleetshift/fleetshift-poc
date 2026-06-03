@@ -93,8 +93,8 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 	if !dep.Deployment.UpdatedAt.Equal(fixedTime) {
 		t.Errorf("Deployment.UpdatedAt = %v, want %v", dep.Deployment.UpdatedAt, fixedTime)
 	}
-	if dep.Deployment.Etag == "" {
-		t.Error("Deployment.Etag is empty, want non-empty")
+	if dep.Etag() == "" {
+		t.Error("DeploymentView.Etag() is empty, want non-empty")
 	}
 
 	persisted := getThinDeployment(t, store, "d1")

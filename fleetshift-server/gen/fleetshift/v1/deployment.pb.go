@@ -114,15 +114,22 @@ type Deployment struct {
 	CreateTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	// When the deployment was last updated.
 	UpdateTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=update_time,json=updateTime,proto3" json:"update_time,omitempty"`
-	// Concurrency control token.
+	// Weak domain-state concurrency token (AIP-154, RFC 9110 Section 8.8.1).
+	// Changes whenever any API-visible state changes, not just on
+	// generation-advancing mutations. Clients send this on mutation
+	// requests to abort if the resource has been modified since their
+	// last read.
 	Etag string `protobuf:"bytes,11,opt,name=etag,proto3" json:"etag,omitempty"`
 	// Cryptographic proof that a user authorized this deployment.
 	// Present when the deployment was created with a user signature.
 	// Carries only proof material — content is in the strategy fields above.
 	Provenance *Provenance `protobuf:"bytes,12,opt,name=provenance,proto3" json:"provenance,omitempty"`
 	// Monotonically increasing version counter. Increments exactly once
-	// per logical mutation (create, resume, delete). Clients use this to
-	// compute the generation to sign over when resuming a paused deployment.
+	// per generation-advancing mutation (create, resume, delete). Clients
+	// supply generation + 1 as expected_generation when signing a resume
+	// request; delivery agents verify this for anti-replay. Unlike etag,
+	// generation only advances on logical mutations, not on reconciliation
+	// state changes.
 	Generation    int64 `protobuf:"varint,13,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache

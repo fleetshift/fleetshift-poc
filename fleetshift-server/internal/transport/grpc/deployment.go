@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"google.golang.org/grpc/codes"
@@ -66,9 +65,10 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 	}
 
 	in := application.ResumeInput{
-		ID:            id,
-		UserSignature: req.GetUserSignature(),
-		Etag:          req.GetEtag(),
+		ID:                 id,
+		UserSignature:      req.GetUserSignature(),
+		Etag:               req.GetEtag(),
+		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
 	}
 	if req.GetValidUntil() != nil {
 		in.ValidUntil = req.GetValidUntil().AsTime()
@@ -253,7 +253,7 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 		dep.UpdateTime = timestamppb.New(d.UpdatedAt)
 	}
 	dep.Uid = d.UID
-	dep.Etag = generationEtag(f.Generation)
+	dep.Etag = v.Etag()
 
 	if f.Provenance != nil {
 		dep.Provenance = provenanceToProto(f.Provenance)
@@ -354,11 +354,6 @@ func rolloutStrategyTypeToProto(t domain.RolloutStrategyType) pb.RolloutStrategy
 	default:
 		return pb.RolloutStrategy_TYPE_UNSPECIFIED
 	}
-}
-
-// generationEtag produces the etag string for a given generation.
-func generationEtag(gen domain.Generation) string {
-	return strconv.FormatInt(int64(gen), 10)
 }
 
 // --- error mapping ---

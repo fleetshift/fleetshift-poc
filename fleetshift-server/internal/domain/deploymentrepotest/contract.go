@@ -47,7 +47,6 @@ func Run(t *testing.T, factory Factory) {
 			FulfillmentID: fid,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-			Etag:          "etag-v1",
 		}
 	}
 
@@ -81,9 +80,6 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if !got.UpdatedAt.Equal(fixedTime) {
 			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt, fixedTime)
-		}
-		if got.Etag != "etag-v1" {
-			t.Errorf("Etag = %q, want %q", got.Etag, "etag-v1")
 		}
 	})
 

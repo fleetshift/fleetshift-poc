@@ -31,4 +31,11 @@ message ResumeDeploymentRequest {
   // the server verifies the resource has not been modified since the
   // client last observed it, failing with ABORTED if stale.
   string etag = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // The generation the client expects this mutation to produce
+  // (current generation + 1). When user_signature is present the
+  // server requires this field and signs it into provenance for
+  // anti-replay verification by delivery agents. When absent and
+  // unsigned, the server infers next-generation server-side.
+  int64 expected_generation = 5 [(google.api.field_behavior) = OPTIONAL];
 }

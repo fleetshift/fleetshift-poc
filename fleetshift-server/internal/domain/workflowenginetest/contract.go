@@ -1004,7 +1004,6 @@ func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, dep
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Etag:          dUID,
 	}
 	tx, err := infra.Store.Begin(ctx)
 	if err != nil {

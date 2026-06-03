@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -416,6 +415,12 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 		in.Etag = reqMsg.Get(etagReqField).String()
 	}
 
+	// Field 5: expected_generation (optional)
+	expGenField := h.descs.ResumeRequest.Fields().ByNumber(5)
+	if expGenField != nil && reqMsg.Has(expGenField) {
+		in.ExpectedGeneration = domain.Generation(reqMsg.Get(expGenField).Int())
+	}
+
 	view, err := h.resources.Resume(ctx, in)
 	if err != nil {
 		return nil, toDomainError(err)
@@ -502,9 +507,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 		}
 	}
 
-	// etag (derived from generation for optimistic concurrency)
+	// etag (weak domain-state token)
 	etagField := h.descs.Resource.Fields().ByName("etag")
-	resource.Set(etagField, protoreflect.ValueOfString(strconv.FormatInt(int64(f.Generation), 10)))
+	resource.Set(etagField, protoreflect.ValueOfString(v.Etag()))
 
 	// provenance
 	if f.Provenance != nil {

@@ -38,9 +38,15 @@ type ResumeDeploymentRequest struct {
 	// Concurrency control token from the most recent GET. When non-empty,
 	// the server verifies the resource has not been modified since the
 	// client last observed it, failing with ABORTED if stale.
-	Etag          string `protobuf:"bytes,4,opt,name=etag,proto3" json:"etag,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Etag string `protobuf:"bytes,4,opt,name=etag,proto3" json:"etag,omitempty"`
+	// The generation the client expects this mutation to produce
+	// (current generation + 1). When user_signature is present the
+	// server requires this field and signs it into provenance for
+	// anti-replay verification by delivery agents. When absent and
+	// unsigned, the server infers next-generation server-side.
+	ExpectedGeneration int64 `protobuf:"varint,5,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *ResumeDeploymentRequest) Reset() {
@@ -101,18 +107,26 @@ func (x *ResumeDeploymentRequest) GetEtag() string {
 	return ""
 }
 
+func (x *ResumeDeploymentRequest) GetExpectedGeneration() int64 {
+	if x != nil {
+		return x.ExpectedGeneration
+	}
+	return 0
+}
+
 var File_fleetshift_v1_resume_deployment_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_resume_deployment_request_proto_rawDesc = "" +
 	"\n" +
-	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\xd6\x01\n" +
+	"-fleetshift/v1/resume_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"\x8c\x02\n" +
 	"\x17ResumeDeploymentRequest\x124\n" +
 	"\x04name\x18\x01 \x01(\tB \xe0A\x02\xfaA\x1a\n" +
 	"\x18fleetshift.io/DeploymentR\x04name\x12*\n" +
 	"\x0euser_signature\x18\x02 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
 	"\vvalid_until\x18\x03 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
 	"validUntil\x12\x17\n" +
-	"\x04etag\x18\x04 \x01(\tB\x03\xe0A\x01R\x04etagBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"\x04etag\x18\x04 \x01(\tB\x03\xe0A\x01R\x04etag\x124\n" +
+	"\x13expected_generation\x18\x05 \x01(\x03B\x03\xe0A\x01R\x12expectedGenerationBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_resume_deployment_request_proto_rawDescOnce sync.Once

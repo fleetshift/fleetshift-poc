@@ -148,7 +148,6 @@ func Run(t *testing.T, factory Factory) {
 			FulfillmentID: "f-cross",
 			CreatedAt:     fixed,
 			UpdatedAt:     fixed,
-			Etag:          "etag-1",
 		}); err != nil {
 			t.Fatalf("Create deployment: %v", err)
 		}

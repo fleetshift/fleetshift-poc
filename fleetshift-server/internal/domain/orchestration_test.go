@@ -73,7 +73,6 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 		FulfillmentID: f.ID,
 		CreatedAt:     f.CreatedAt,
 		UpdatedAt:     f.UpdatedAt,
-		Etag:          "test-etag",
 	}
 	tx, err := store.Begin(context.Background())
 	if err != nil {

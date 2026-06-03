@@ -18,12 +18,11 @@ type DeploymentRepo struct {
 
 func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
 	_, err := r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, fulfillment_id, created_at, updated_at, etag)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
+		`INSERT INTO deployments (id, uid, fulfillment_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
 		string(d.ID), d.UID, string(d.FulfillmentID),
 		d.CreatedAt.UTC().Format(time.RFC3339),
 		d.UpdatedAt.UTC().Format(time.RFC3339),
-		d.Etag,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -34,7 +33,7 @@ func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error 
 	return nil
 }
 
-const thinDeploymentColumns = `id, uid, fulfillment_id, created_at, updated_at, etag`
+const thinDeploymentColumns = `id, uid, fulfillment_id, created_at, updated_at`
 
 func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
@@ -46,7 +45,7 @@ func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domai
 
 func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
+		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
 		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
 		 JOIN fulfillments f ON f.id = d.fulfillment_id
@@ -59,7 +58,7 @@ func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (d
 
 func (r *DeploymentRepo) ListView(ctx context.Context) ([]domain.DeploymentView, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at, d.etag,
+		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
 		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
 		 JOIN fulfillments f ON f.id = d.fulfillment_id
@@ -85,8 +84,8 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 
 func scanThinDeployment(s scanner) (domain.Deployment, error) {
 	var d domain.Deployment
-	var id, uid, fID, createdAtStr, updatedAtStr, etag string
-	if err := s.Scan(&id, &uid, &fID, &createdAtStr, &updatedAtStr, &etag); err != nil {
+	var id, uid, fID, createdAtStr, updatedAtStr string
+	if err := s.Scan(&id, &uid, &fID, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return d, domain.ErrNotFound
 		}
@@ -95,7 +94,6 @@ func scanThinDeployment(s scanner) (domain.Deployment, error) {
 	d.ID = domain.DeploymentID(id)
 	d.UID = uid
 	d.FulfillmentID = domain.FulfillmentID(fID)
-	d.Etag = etag
 	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
 		d.CreatedAt = t
 	}
@@ -107,14 +105,14 @@ func scanThinDeployment(s scanner) (domain.Deployment, error) {
 
 func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	var v domain.DeploymentView
-	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr, etag string
+	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr string
 	var fID, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
 	var fMsSpec, fPsSpec, fRsSpec, fProvJSON, fAttestRefJSON sql.NullString
 	var fMsVer, fPsVer, fRsVer, fGen, fObsGen int64
 	var fActiveWfGen sql.NullInt64
 
 	if err := s.Scan(
-		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr, &etag,
+		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr,
 		&fID, &fMsVer, &fMsSpec, &fPsVer, &fPsSpec, &fRsVer, &fRsSpec,
 		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON, &fAttestRefJSON,
 		&fGen, &fObsGen, &fActiveWfGen,
@@ -129,7 +127,6 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	v.Deployment.ID = domain.DeploymentID(dID)
 	v.Deployment.UID = uid
 	v.Deployment.FulfillmentID = domain.FulfillmentID(fRefID)
-	v.Deployment.Etag = etag
 	if t, err := time.Parse(time.RFC3339, dCreatedAtStr); err == nil {
 		v.Deployment.CreatedAt = t
 	}

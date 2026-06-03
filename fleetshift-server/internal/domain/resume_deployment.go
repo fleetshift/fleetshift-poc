@@ -11,11 +11,12 @@ import (
 // resume a paused deployment. It intentionally excludes transport-only
 // state (full AuthorizationContext, request metadata, peer addresses).
 type ResumeDeploymentInput struct {
-	ID            DeploymentID
-	Auth          DeliveryAuth // fresh caller credentials for the resumed deployment
-	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
-	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
-	Etag          string       // optimistic concurrency token; empty means skip check (backwards compat)
+	ID                 DeploymentID
+	Auth               DeliveryAuth // fresh caller credentials for the resumed deployment
+	UserSignature      []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
+	ValidUntil         time.Time    // client-supplied attestation expiry; zero for unsigned
+	Etag               string       // optimistic concurrency token; empty means skip check
+	ExpectedGeneration Generation   // client-supplied next generation; zero means skip check (unsigned legacy)
 }
 
 // ResumeDeploymentWorkflowSpec transitions a [FulfillmentStatePausedAuth]
@@ -54,19 +55,43 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			return deploymentMutationResult{}, err
 		}
 
-		nextGen := f.Generation + 1
-		if in.Etag != "" && in.Etag != f.GenerationEtag() {
+		// Etag check: construct the view and compare against the client's
+		// token. This covers all domain-visible state, not just generation.
+		currentView := DeploymentView{Deployment: dep, Fulfillment: *f}
+		if in.Etag != "" && in.Etag != currentView.Etag() {
 			return deploymentMutationResult{}, TerminalError(fmt.Errorf(
 				"%w: etag mismatch (client sent %q, current is %q)",
-				ErrStaleGeneration, in.Etag, f.GenerationEtag()))
+				ErrStaleGeneration, in.Etag, currentView.Etag()))
+		}
+
+		nextGen := f.Generation + 1
+
+		// Expected-generation check: if supplied, it must match the
+		// next generation the server is about to produce.
+		if in.ExpectedGeneration != 0 && in.ExpectedGeneration != nextGen {
+			return deploymentMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: expected_generation mismatch (client sent %d, server will produce %d)",
+				ErrStaleGeneration, in.ExpectedGeneration, nextGen))
+		}
+
+		// Signed resumes must supply expected_generation so the server
+		// can bind it into provenance without inferring it.
+		if len(in.UserSignature) > 0 && in.ExpectedGeneration == 0 {
+			return deploymentMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: expected_generation is required when user_signature is present",
+				ErrInvalidArgument))
 		}
 
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
+			provenanceGen := in.ExpectedGeneration
+			if provenanceGen == 0 {
+				provenanceGen = nextGen
+			}
 			prov, err = s.ProvenanceSvc.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				dep.ID, f.ManifestStrategy, f.PlacementStrategy,
-				nextGen, in.UserSignature, in.ValidUntil,
+				provenanceGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {
 				return deploymentMutationResult{}, fmt.Errorf("build provenance: %w", err)
