@@ -35,6 +35,10 @@ var newKubernetesClientForConfig = func(c *rest.Config) (kubernetes.Interface, e
 	return kubernetes.NewForConfig(c)
 }
 
+var probeWithSystemTrustFn = probeWithSystemTrust
+
+var extractCAFromGuestFn = extractCAFromGuest
+
 // BootstrapResult contains the credentials and metadata obtained from
 // bootstrapping a guest cluster.
 type BootstrapResult struct {
@@ -52,20 +56,39 @@ func DeliverySecretRef(targetID domain.TargetID) domain.SecretRef {
 // BootstrapGuestCluster creates a ServiceAccount with cluster-admin RBAC
 // on the guest cluster and returns a short-lived bearer token for it.
 //
-// The function uses the broker token to authenticate to the guest cluster
-// endpoint, creates the necessary resources, and extracts the credentials
-// needed for ongoing platform access. Bootstrap uses the host's normal
-// system trust store to verify the guest API endpoint.
+// Uses a three-phase connection strategy:
+//   - Phase 1: probe with system trust (handles publicly-trusted certs)
+//   - Phase 2: if x509 error, extract root CA from kube-root-ca.crt ConfigMap
+//     with leaf-cert pinning and CA-to-leaf chain validation
+//   - Phase 3: reconnect with extracted CA for all privileged operations
 func BootstrapGuestCluster(
 	ctx context.Context,
 	guestEndpoint, brokerToken string,
 	targetID domain.TargetID,
 ) (BootstrapResult, error) {
-	cfg := buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken, nil)
+	// Phase 1: try with system trust
+	client, leafDER, probeErr := probeWithSystemTrustFn(guestEndpoint, brokerToken)
 
-	client, err := newKubernetesClientForConfig(cfg)
-	if err != nil {
-		return BootstrapResult{}, fmt.Errorf("create kubernetes client: %w", err)
+	var caCert []byte
+	if probeErr != nil {
+		if !isCertVerificationError(probeErr) || leafDER == nil {
+			return BootstrapResult{}, fmt.Errorf("probe guest cluster: %w", probeErr)
+		}
+
+		// Phase 2: extract CA from guest cluster
+		fingerprint := leafFingerprint(leafDER)
+		var err error
+		caCert, err = extractCAFromGuestFn(ctx, guestEndpoint, brokerToken, fingerprint, leafDER)
+		if err != nil {
+			return BootstrapResult{}, fmt.Errorf("extract guest cluster CA: %w", err)
+		}
+
+		// Phase 3: reconnect with extracted CA
+		cfg := buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken, caCert)
+		client, err = newKubernetesClientForConfig(cfg)
+		if err != nil {
+			return BootstrapResult{}, fmt.Errorf("create verified kubernetes client: %w", err)
+		}
 	}
 
 	if err := createPlatformSA(ctx, client); err != nil {
@@ -84,6 +107,7 @@ func BootstrapGuestCluster(
 	return BootstrapResult{
 		SATokenRef: ref,
 		SAToken:    token,
+		CACert:     caCert,
 	}, nil
 }
 

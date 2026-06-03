@@ -113,8 +113,10 @@ func TestRequestPlatformSAToken_CreatesShortLivedToken(t *testing.T) {
 
 func TestBootstrapGuestCluster_UsesVerifiedTLSAndTokenRequest(t *testing.T) {
 	origNewClient := newKubernetesClientForConfig
+	origProbe := probeWithSystemTrustFn
 	defer func() {
 		newKubernetesClientForConfig = origNewClient
+		probeWithSystemTrustFn = origProbe
 	}()
 
 	client := fake.NewSimpleClientset()
@@ -129,9 +131,11 @@ func TestBootstrapGuestCluster_UsesVerifiedTLSAndTokenRequest(t *testing.T) {
 		}, nil
 	})
 
-	var captured *rest.Config
+	probeWithSystemTrustFn = func(endpoint, token string) (kubernetes.Interface, []byte, error) {
+		return client, nil, nil
+	}
+
 	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
-		captured = rest.CopyConfig(cfg)
 		return client, nil
 	}
 
@@ -143,16 +147,6 @@ func TestBootstrapGuestCluster_UsesVerifiedTLSAndTokenRequest(t *testing.T) {
 	)
 	if err != nil {
 		t.Fatalf("BootstrapGuestCluster() error = %v", err)
-	}
-
-	if captured == nil {
-		t.Fatal("expected kubernetes client config to be captured")
-	}
-	if captured.TLSClientConfig.Insecure {
-		t.Fatal("expected verified TLS, got insecure config")
-	}
-	if len(captured.TLSClientConfig.CAData) != 0 {
-		t.Fatalf("captured CAData = %q, want empty system-trust config", string(captured.TLSClientConfig.CAData))
 	}
 	if result.SATokenRef != "targets/guest-target/sa-token" {
 		t.Fatalf("SATokenRef = %q, want %q", result.SATokenRef, "targets/guest-target/sa-token")
@@ -440,5 +434,125 @@ func TestExtractCAFromGuest_CADoesNotSignLeaf(t *testing.T) {
 	_, err := extractCAFromGuest(context.Background(), "https://guest.example:6443", "broker-token", fingerprint, leafDER)
 	if err == nil {
 		t.Fatal("expected error when CA does not sign the leaf cert")
+	}
+}
+
+func TestBootstrapGuestCluster_Phase1Success_NoCACert(t *testing.T) {
+	origNewClient := newKubernetesClientForConfig
+	origProbe := probeWithSystemTrustFn
+	defer func() {
+		newKubernetesClientForConfig = origNewClient
+		probeWithSystemTrustFn = origProbe
+	}()
+
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "serviceaccounts", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() != "token" {
+			return false, nil, nil
+		}
+		return true, &authv1.TokenRequest{
+			Status: authv1.TokenRequestStatus{Token: "short-lived-token"},
+		}, nil
+	})
+
+	probeWithSystemTrustFn = func(endpoint, token string) (kubernetes.Interface, []byte, error) {
+		return client, nil, nil
+	}
+
+	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		return client, nil
+	}
+
+	result, err := BootstrapGuestCluster(context.Background(), "https://guest.example:6443", "broker-token", "guest-target")
+	if err != nil {
+		t.Fatalf("BootstrapGuestCluster() error = %v", err)
+	}
+	if len(result.CACert) != 0 {
+		t.Fatalf("CACert = %q, want empty for Phase 1 success", string(result.CACert))
+	}
+	if string(result.SAToken) != "short-lived-token" {
+		t.Fatalf("SAToken = %q, want short-lived-token", string(result.SAToken))
+	}
+}
+
+func TestBootstrapGuestCluster_Phase2FallbackPopulatesCACert(t *testing.T) {
+	origProbe := probeWithSystemTrustFn
+	origExtract := extractCAFromGuestFn
+	origNewClient := newKubernetesClientForConfig
+	defer func() {
+		probeWithSystemTrustFn = origProbe
+		extractCAFromGuestFn = origExtract
+		newKubernetesClientForConfig = origNewClient
+	}()
+
+	ca, caKey, caPEM := generateTestCA(t)
+	_, leafDER := generateTestLeaf(t, ca, caKey)
+
+	probeWithSystemTrustFn = func(endpoint, token string) (kubernetes.Interface, []byte, error) {
+		return nil, leafDER, &x509.UnknownAuthorityError{}
+	}
+
+	extractCAFromGuestFn = func(ctx context.Context, endpoint, token string, fp [32]byte, ld []byte) ([]byte, error) {
+		if string(ld) != string(leafDER) {
+			t.Fatalf("extractCAFromGuest received wrong leafDER")
+		}
+		return caPEM, nil
+	}
+
+	client := fake.NewSimpleClientset()
+	client.PrependReactor("create", "serviceaccounts", func(action ktesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() != "token" {
+			return false, nil, nil
+		}
+		return true, &authv1.TokenRequest{
+			Status: authv1.TokenRequestStatus{Token: "short-lived-token"},
+		}, nil
+	})
+
+	var capturedCfg *rest.Config
+	newKubernetesClientForConfig = func(cfg *rest.Config) (kubernetes.Interface, error) {
+		capturedCfg = rest.CopyConfig(cfg)
+		return client, nil
+	}
+
+	result, err := BootstrapGuestCluster(context.Background(), "https://guest.example:6443", "broker-token", "guest-target")
+	if err != nil {
+		t.Fatalf("BootstrapGuestCluster() error = %v", err)
+	}
+	if string(result.CACert) != string(caPEM) {
+		t.Fatalf("CACert not populated with extracted CA")
+	}
+	if capturedCfg == nil {
+		t.Fatal("expected Phase 3 REST config to be captured")
+	}
+	if string(capturedCfg.TLSClientConfig.CAData) != string(caPEM) {
+		t.Fatal("Phase 3 REST config missing extracted CA in CAData")
+	}
+}
+
+func TestBootstrapGuestCluster_NonX509ErrorDoesNotFallback(t *testing.T) {
+	origProbe := probeWithSystemTrustFn
+	origExtract := extractCAFromGuestFn
+	defer func() {
+		probeWithSystemTrustFn = origProbe
+		extractCAFromGuestFn = origExtract
+	}()
+
+	probeWithSystemTrustFn = func(endpoint, token string) (kubernetes.Interface, []byte, error) {
+		return nil, nil, fmt.Errorf("connection refused")
+	}
+
+	extractCalled := false
+	extractCAFromGuestFn = func(ctx context.Context, endpoint, token string, fp [32]byte, ld []byte) ([]byte, error) {
+		extractCalled = true
+		return nil, nil
+	}
+
+	_, err := BootstrapGuestCluster(context.Background(), "https://guest.example:6443", "broker-token", "guest-target")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if extractCalled {
+		t.Fatal("extractCAFromGuest should not be called for non-x509 errors")
 	}
 }
