@@ -26,7 +26,7 @@ import (
 )
 
 func TestBuildGuestBootstrapRESTConfig_UsesSystemTrust(t *testing.T) {
-	cfg := buildGuestBootstrapRESTConfig("https://guest.example:6443", "broker-token")
+	cfg := buildGuestBootstrapRESTConfig("https://guest.example:6443", "broker-token", nil)
 
 	if cfg.Host != "https://guest.example:6443" {
 		t.Fatalf("Host = %q, want %q", cfg.Host, "https://guest.example:6443")
@@ -39,6 +39,32 @@ func TestBuildGuestBootstrapRESTConfig_UsesSystemTrust(t *testing.T) {
 	}
 	if len(cfg.TLSClientConfig.CAData) != 0 {
 		t.Fatalf("CAData = %q, want empty system-trust config", string(cfg.TLSClientConfig.CAData))
+	}
+}
+
+func TestBuildGuestBootstrapRESTConfig_WithCACert(t *testing.T) {
+	caCert := []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----")
+	cfg := buildGuestBootstrapRESTConfig("https://guest.example:6443", "broker-token", caCert)
+
+	if cfg.Host != "https://guest.example:6443" {
+		t.Fatalf("Host = %q, want %q", cfg.Host, "https://guest.example:6443")
+	}
+	if cfg.BearerToken != "broker-token" {
+		t.Fatalf("BearerToken = %q, want broker-token", cfg.BearerToken)
+	}
+	if cfg.TLSClientConfig.Insecure {
+		t.Fatal("expected verified TLS, got insecure config")
+	}
+	if string(cfg.TLSClientConfig.CAData) != string(caCert) {
+		t.Fatalf("CAData = %q, want test CA cert", string(cfg.TLSClientConfig.CAData))
+	}
+}
+
+func TestBuildGuestBootstrapRESTConfig_WithNilCACert(t *testing.T) {
+	cfg := buildGuestBootstrapRESTConfig("https://guest.example:6443", "broker-token", nil)
+
+	if len(cfg.TLSClientConfig.CAData) != 0 {
+		t.Fatalf("CAData = %q, want empty for nil CA", string(cfg.TLSClientConfig.CAData))
 	}
 }
 

@@ -61,7 +61,7 @@ func BootstrapGuestCluster(
 	guestEndpoint, brokerToken string,
 	targetID domain.TargetID,
 ) (BootstrapResult, error) {
-	cfg := buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken)
+	cfg := buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken, nil)
 
 	client, err := newKubernetesClientForConfig(cfg)
 	if err != nil {
@@ -87,11 +87,15 @@ func BootstrapGuestCluster(
 	}, nil
 }
 
-func buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken string) *rest.Config {
-	return &rest.Config{
+func buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken string, caCert []byte) *rest.Config {
+	cfg := &rest.Config{
 		Host:        guestEndpoint,
 		BearerToken: brokerToken,
 	}
+	if len(caCert) > 0 {
+		cfg.TLSClientConfig.CAData = caCert
+	}
+	return cfg
 }
 
 // createPlatformSA creates the fleetshift-platform ServiceAccount in kube-system.
