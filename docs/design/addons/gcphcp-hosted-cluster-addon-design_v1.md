@@ -612,8 +612,8 @@ The broker ID token provides initial privileged access because the CLS backend g
 the `ClusterRoleBinding` creation are idempotent -- they handle `AlreadyExists` errors gracefully
 and update existing bindings if the subjects have drifted.
 
-Bootstrap uses the host's normal system trust store to verify the guest API endpoint TLS
-certificate.
+Bootstrap uses a three-phase TLS trust strategy (see section 6.7) to handle both publicly
+trusted and private certificate authorities.
 
 ### 6.5 Emitted guest target contract
 
@@ -632,9 +632,9 @@ Target properties:
 - `trust_bundle` -- the trust configuration used by FleetShift's Kubernetes delivery agent to
   verify attestation before it uses the platform `ServiceAccount` token (serialized as JSON,
   sorted by issuer URL for deterministic output)
-- `ca_cert` -- conditionally set from the bootstrap result; in the current environment the
-  CLS-exposed guest API endpoint uses a publicly trusted certificate chain (Let's Encrypt), so
-  this property is not populated
+- `ca_cert` -- conditionally set from the bootstrap result; populated when the guest API
+  endpoint uses a private CA (extracted from the guest cluster's `kube-root-ca.crt` ConfigMap
+  during bootstrap), empty when the endpoint uses a publicly trusted certificate chain
 
 The corresponding `ProducedSecret`:
 
@@ -670,16 +670,27 @@ itself only sees the bootstrapped platform `ServiceAccount` credential.
 
 ### 6.7 TLS trust strategy
 
-The addon uses the host's normal trust store for both the initial guest bootstrap connection and
-later FleetShift delivery to the emitted guest target.
+The addon uses a three-phase connection strategy for the guest API endpoint:
 
-The CLS-exposed guest API endpoint is expected to present a publicly trusted certificate chain. In
-the current environment that chain is Let's Encrypt, so the addon does not persist `ca_cert` on the
-emitted target.
+1. **Phase 1 — Optimistic secure connect:** probe with the host's normal system trust store. If
+   the guest API endpoint presents a publicly trusted certificate chain, bootstrap proceeds
+   without any custom CA configuration.
 
-If a future deployment exposes the guest API behind a private or self-signed CA, the addon needs a
-backend-supported path to surface the correct trust material before that configuration can be
-supported cleanly (see section 11).
+2. **Phase 2 — Guarded CA extraction:** if Phase 1 fails with `x509.UnknownAuthorityError`,
+   the addon captures the leaf certificate fingerprint from the failed handshake, then makes a
+   single insecure connection (pinned to the same leaf fingerprint) to read the
+   `kube-root-ca.crt` ConfigMap from `kube-system`. The extracted CA is validated against the
+   captured leaf cert before use.
+
+3. **Phase 3 — Secure reconnect:** all privileged bootstrap operations (ServiceAccount creation,
+   RBAC binding, token request) use a REST config verified against the extracted CA.
+
+The extracted CA is returned in `BootstrapResult.CACert` and flows to the emitted target's
+`ca_cert` property, so that FleetShift's Kubernetes delivery agent also uses proper TLS
+verification for ongoing deliveries.
+
+Non-x509 errors (network failures, auth errors) fail immediately without attempting CA
+extraction.
 
 ---
 
@@ -1063,9 +1074,12 @@ managed resource status mechanism and periodic resync (see 11.3) to keep it curr
 
 ### 11.9 Private guest API trust material
 
-The current implementation assumes the CLS-exposed guest API endpoint presents a publicly trusted
-certificate chain. If a future deployment exposes the guest API behind a private or self-signed CA,
-that likely depends on CLS backend changes to surface the CA bundle in the status payloads.
+~~The current implementation assumes the CLS-exposed guest API endpoint presents a publicly
+trusted certificate chain.~~
+
+Addressed: the addon now extracts the guest cluster's root CA from the `kube-root-ca.crt`
+ConfigMap during bootstrap when the endpoint uses a private CA (see section 6.7). No CLS
+backend changes were needed.
 
 ### 11.10 Durable trust-bundle reconstruction across addon restart
 
