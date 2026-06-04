@@ -98,36 +98,46 @@ func (r *recordingSignal) snapshot() []signalRecord {
 type testDeliveryObserver struct {
 	domain.NoOpDeliveryObserver
 	mu      sync.Mutex
-	events  []domain.DeliveryEvent
-	results []domain.DeliveryResult
+	events  []testReportEventRecord
+	results []testReportResultRecord
 }
 
-func (o *testDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetID, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+type testReportEventRecord struct {
+	DeliveryID domain.DeliveryID
+	Generation domain.Generation
+}
+
+type testReportResultRecord struct {
+	DeliveryID domain.DeliveryID
+	Generation domain.Generation
+}
+
+func (o *testDeliveryObserver) ReportEventStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportEventProbe) {
 	o.mu.Lock()
-	o.events = append(o.events, event)
+	o.events = append(o.events, testReportEventRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()
-	return ctx, domain.NoOpEventEmittedProbe{}
+	return context.Background(), domain.NoOpReportEventProbe{}
 }
 
-func (o *testDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetID, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+func (o *testDeliveryObserver) ReportResultStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportResultProbe) {
 	o.mu.Lock()
-	o.results = append(o.results, result)
+	o.results = append(o.results, testReportResultRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()
-	return ctx, domain.NoOpCompletedProbe{}
+	return context.Background(), domain.NoOpReportResultProbe{}
 }
 
-func (o *testDeliveryObserver) snapshotEvents() []domain.DeliveryEvent {
+func (o *testDeliveryObserver) snapshotEvents() []testReportEventRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]domain.DeliveryEvent, len(o.events))
+	out := make([]testReportEventRecord, len(o.events))
 	copy(out, o.events)
 	return out
 }
 
-func (o *testDeliveryObserver) snapshotResults() []domain.DeliveryResult {
+func (o *testDeliveryObserver) snapshotResults() []testReportResultRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]domain.DeliveryResult, len(o.results))
+	out := make([]testReportResultRecord, len(o.results))
 	copy(out, o.results)
 	return out
 }
@@ -203,8 +213,8 @@ func TestDeliveryReportService_ReportEvent_CallsObserver(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Message != "applying" {
-		t.Errorf("message = %q, want %q", events[0].Message, "applying")
+	if events[0].DeliveryID != "del-1" {
+		t.Errorf("delivery ID = %q, want %q", events[0].DeliveryID, "del-1")
 	}
 }
 
@@ -273,8 +283,8 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].State != domain.DeliveryStateFailed {
-		t.Errorf("state = %q, want %q", results[0].State, domain.DeliveryStateFailed)
+	if results[0].DeliveryID != "del-1" {
+		t.Errorf("delivery ID = %q, want %q", results[0].DeliveryID, "del-1")
 	}
 }
 
@@ -551,10 +561,10 @@ func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingTarget(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// NilObserver tests
+// NoOp default observer tests
 // ---------------------------------------------------------------------------
 
-func TestDeliveryReportService_NilObserver_DoesNotPanic(t *testing.T) {
+func TestDeliveryReportService_DefaultObserver_DoesNotPanic(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	sig := &recordingSignal{}

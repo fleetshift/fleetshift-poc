@@ -51,6 +51,7 @@ func NewDeliveryReportService(
 	s := &DeliveryReportService{
 		store:    store,
 		signaler: signaler,
+		observer: domain.NoOpDeliveryObserver{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -69,19 +70,25 @@ func NewDeliveryReportService(
 // generation are silently discarded (stale work).
 // FIXME: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) error {
+	ctx, probe := s.observer.ReportEventStarted(ctx, deliveryID, generation)
+	defer probe.End()
+	probe.Event(event)
+
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
+		probe.Error(err)
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	d, err := tx.Deliveries().Get(ctx, deliveryID)
 	if err != nil {
+		probe.Error(err)
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
 	if d.Generation() != generation {
-		// TODO: need observer to log this
+		probe.Stale(generation, d.Generation())
 		return nil
 	}
 
@@ -91,19 +98,17 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
 			return nil
 		}
+		probe.Error(err)
 		return fmt.Errorf("transition delivery state: %w", err)
 	}
 	if err := tx.Deliveries().Put(ctx, d); err != nil {
+		probe.Error(err)
 		return fmt.Errorf("update delivery state: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
+		probe.Error(err)
 		return fmt.Errorf("commit: %w", err)
-	}
-
-	if s.observer != nil {
-		_, probe := s.observer.EventEmitted(ctx, deliveryID, d.TargetID(), event)
-		probe.End()
 	}
 
 	if wasPending && s.signaler != nil {
@@ -130,18 +135,25 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 // transition (e.g. the delivery is already terminal).
 // FIXME: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) error {
+	ctx, probe := s.observer.ReportResultStarted(ctx, deliveryID, generation)
+	defer probe.End()
+	probe.Result(result)
+
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
+		probe.Error(err)
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
 	d, err := tx.Deliveries().Get(ctx, deliveryID)
 	if err != nil {
+		probe.Error(err)
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
 	if d.Generation() != generation {
+		probe.Stale(generation, d.Generation())
 		return nil
 	}
 
@@ -151,18 +163,16 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
 			return nil
 		}
+		probe.Error(err)
 		return fmt.Errorf("transition delivery state: %w", err)
 	}
 	if err := tx.Deliveries().Put(ctx, d); err != nil {
+		probe.Error(err)
 		return fmt.Errorf("update delivery state: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
+		probe.Error(err)
 		return fmt.Errorf("commit: %w", err)
-	}
-
-	if s.observer != nil {
-		_, probe := s.observer.Completed(ctx, deliveryID, d.TargetID(), result)
-		probe.End()
 	}
 
 	if s.signaler != nil {
