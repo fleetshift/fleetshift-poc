@@ -11,11 +11,13 @@ import (
 // to resume a paused managed resource. It intentionally excludes
 // transport-only state (full AuthorizationContext, request metadata).
 type ResumeManagedResourceInput struct {
-	ResourceType  ResourceType
-	Name          ResourceName
-	Auth          DeliveryAuth // fresh caller credentials for the resumed resource
-	UserSignature []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
-	ValidUntil    time.Time    // client-supplied attestation expiry; zero for unsigned
+	ResourceType       ResourceType
+	Name               ResourceName
+	Auth               DeliveryAuth // fresh caller credentials for the resumed resource
+	UserSignature      []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
+	ValidUntil         time.Time    // client-supplied attestation expiry; zero for unsigned
+	Etag               Etag         // optimistic concurrency token; empty means skip check
+	ExpectedGeneration Generation   // client-supplied next generation; zero means skip check (unsigned legacy)
 }
 
 // ResumeManagedResourceWorkflowSpec transitions a
@@ -60,13 +62,47 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 			return managedResourceMutationResult{}, err
 		}
 
+		// Etag check: construct the view and compare against the client's
+		// token. This covers all domain-visible state, not just generation.
+		currentView := ManagedResourceView{
+			ManagedResource: *mr,
+			Intent:          intent,
+			Fulfillment:     *f,
+		}
+		if in.Etag != "" && in.Etag != currentView.Etag() {
+			return managedResourceMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: etag mismatch (client sent %q, current is %q)",
+				ErrStaleGeneration, in.Etag, currentView.Etag()))
+		}
+
+		nextGen := f.Generation + 1
+
+		// Expected-generation check: if supplied, it must match the
+		// next generation the server is about to produce.
+		if in.ExpectedGeneration != 0 && in.ExpectedGeneration != nextGen {
+			return managedResourceMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: expected_generation mismatch (client sent %d, server will produce %d)",
+				ErrStaleGeneration, in.ExpectedGeneration, nextGen))
+		}
+
+		// Signed resumes must supply expected_generation so the server
+		// can bind it into provenance without inferring it.
+		if len(in.UserSignature) > 0 && in.ExpectedGeneration == 0 {
+			return managedResourceMutationResult{}, TerminalError(fmt.Errorf(
+				"%w: expected_generation is required when user_signature is present",
+				ErrInvalidArgument))
+		}
+
 		var prov *Provenance
 		if f.Provenance != nil || len(in.UserSignature) > 0 {
-			nextGen := f.Generation + 1
+			provenanceGen := in.ExpectedGeneration
+			if provenanceGen == 0 {
+				provenanceGen = nextGen
+			}
 			prov, err = s.ProvenanceSvc.BuildManagedResourceProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
 				in.ResourceType, in.Name, intent.Spec,
-				nextGen, in.UserSignature, in.ValidUntil,
+				provenanceGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {
 				return managedResourceMutationResult{}, fmt.Errorf("build provenance: %w", err)

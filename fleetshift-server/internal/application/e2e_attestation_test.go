@@ -79,12 +79,11 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	})
 
 	dep, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID:                 "e2e-dep",
-		ManifestStrategy:   ms,
-		PlacementStrategy:  ps,
-		UserSignature:      sig,
-		ValidUntil:         validUntil,
-		ExpectedGeneration: 1,
+		ID:                "e2e-dep",
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		UserSignature:     sig,
+		ValidUntil:        validUntil,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -151,8 +150,8 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		t.Fatalf("Verify: %v", err)
 	}
 
-	if gen := agent.capturedGeneration(); gen != 3 {
-		t.Errorf("Generation = %d, want 3", gen)
+	if gen := agent.capturedGeneration(); gen != 1 {
+		t.Errorf("Generation = %d, want 1", gen)
 	}
 }
 

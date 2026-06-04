@@ -11,7 +11,6 @@ type Deployment struct {
 	FulfillmentID FulfillmentID
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
-	Etag          string
 }
 
 // DeploymentView is the read model that joins a [Deployment] with its

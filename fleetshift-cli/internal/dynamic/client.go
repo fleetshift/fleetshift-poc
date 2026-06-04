@@ -24,12 +24,12 @@ import (
 // discovery. These are core platform services, not addon-provided
 // managed resource services.
 var staticServices = map[string]bool{
-	"fleetshift.v1.DeploymentService":       true,
-	"fleetshift.v1.AuthMethodService":       true,
-	"fleetshift.v1.SignerEnrollmentService":  true,
-	"grpc.reflection.v1.ServerReflection":   true,
+	"fleetshift.v1.DeploymentService":          true,
+	"fleetshift.v1.AuthMethodService":          true,
+	"fleetshift.v1.SignerEnrollmentService":    true,
+	"grpc.reflection.v1.ServerReflection":      true,
 	"grpc.reflection.v1alpha.ServerReflection": true,
-	"grpc.health.v1.Health":                 true,
+	"grpc.health.v1.Health":                    true,
 }
 
 // ResourceType holds metadata for a discovered managed resource service.

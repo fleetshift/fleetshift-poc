@@ -59,9 +59,7 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		}
 
 		// Delete retries read auth from fulfillment state, not the RPC context.
-		f.Auth = in.Auth
-		f.State = FulfillmentStateDeleting
-		f.BumpGeneration()
+		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}

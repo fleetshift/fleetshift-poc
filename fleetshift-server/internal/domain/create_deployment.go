@@ -18,8 +18,6 @@ type CreateDeploymentInput struct {
 	Provenance        *Provenance // set by the service layer after signature verification
 	UserSignature     []byte      // ECDSA-P256-SHA256 signature; empty for unsigned deployments
 	ValidUntil        time.Time   // client-supplied attestation expiry; zero for unsigned
-	// TODO: not sure this makes sense here
-	ExpectedGeneration Generation // always 1 for new deployments; 0 means unsigned
 }
 
 // CreateDeploymentWorkflowSpec is a short-lived parent workflow that
@@ -63,7 +61,6 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 			State:      FulfillmentStateCreating,
 			Auth:       in.Auth,
 			Provenance: in.Provenance,
-			Generation: 0,
 			CreatedAt:  now,
 			UpdatedAt:  now,
 		}
@@ -81,7 +78,6 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 			FulfillmentID: fID,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-			Etag:          uid,
 		}
 		if err := tx.Deployments().Create(ctx, dep); err != nil {
 			return DeploymentView{}, err

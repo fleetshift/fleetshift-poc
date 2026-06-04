@@ -486,7 +486,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 				t.Fatalf("GetView: %v", err)
 			}
 			ful := view.Fulfillment
-			ful.BumpGeneration()
+			ful.Touch(time.Now().UTC())
 			if err := tx.Fulfillments().Update(ctx, &ful); err != nil {
 				t.Fatalf("Fulfillments.Update: %v", err)
 			}
@@ -1004,7 +1004,6 @@ func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, dep
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Etag:          dUID,
 	}
 	tx, err := infra.Store.Begin(ctx)
 	if err != nil {

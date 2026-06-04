@@ -65,8 +65,10 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 	}
 
 	in := application.ResumeInput{
-		ID:            id,
-		UserSignature: req.GetUserSignature(),
+		ID:                 id,
+		UserSignature:      req.GetUserSignature(),
+		Etag:               domain.Etag(req.GetEtag()),
+		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
 	}
 	if req.GetValidUntil() != nil {
 		in.ValidUntil = req.GetValidUntil().AsTime()
@@ -143,12 +145,11 @@ func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploym
 		rs = &v
 	}
 	in := domain.CreateDeploymentInput{
-		ID:                 domain.DeploymentID(req.GetDeploymentId()),
-		ManifestStrategy:   ms,
-		PlacementStrategy:  ps,
-		RolloutStrategy:    rs,
-		UserSignature:      req.GetUserSignature(),
-		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
+		ID:                domain.DeploymentID(req.GetDeploymentId()),
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		RolloutStrategy:   rs,
+		UserSignature:     req.GetUserSignature(),
 	}
 	if req.GetValidUntil() != nil {
 		in.ValidUntil = req.GetValidUntil().AsTime()
@@ -252,11 +253,13 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 		dep.UpdateTime = timestamppb.New(d.UpdatedAt)
 	}
 	dep.Uid = d.UID
-	dep.Etag = d.Etag
+	dep.Etag = string(v.Etag())
 
 	if f.Provenance != nil {
 		dep.Provenance = provenanceToProto(f.Provenance)
 	}
+
+	dep.Generation = int64(f.Generation)
 
 	return dep
 }
@@ -361,6 +364,8 @@ func domainError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, domain.ErrStaleGeneration):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:

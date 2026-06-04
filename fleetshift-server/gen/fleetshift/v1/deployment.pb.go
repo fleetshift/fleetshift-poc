@@ -114,12 +114,23 @@ type Deployment struct {
 	CreateTime *timestamppb.Timestamp `protobuf:"bytes,9,opt,name=create_time,json=createTime,proto3" json:"create_time,omitempty"`
 	// When the deployment was last updated.
 	UpdateTime *timestamppb.Timestamp `protobuf:"bytes,10,opt,name=update_time,json=updateTime,proto3" json:"update_time,omitempty"`
-	// Concurrency control token.
+	// Weak domain-state concurrency token (AIP-154, RFC 9110 Section 8.8.1).
+	// Changes whenever any API-visible state changes, not just on
+	// generation-advancing mutations. Clients send this on mutation
+	// requests to abort if the resource has been modified since their
+	// last read.
 	Etag string `protobuf:"bytes,11,opt,name=etag,proto3" json:"etag,omitempty"`
 	// Cryptographic proof that a user authorized this deployment.
 	// Present when the deployment was created with a user signature.
 	// Carries only proof material — content is in the strategy fields above.
-	Provenance    *Provenance `protobuf:"bytes,12,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	Provenance *Provenance `protobuf:"bytes,12,opt,name=provenance,proto3" json:"provenance,omitempty"`
+	// Monotonically increasing version counter. Increments exactly once
+	// per generation-advancing mutation (create, resume, delete). Clients
+	// supply generation + 1 as expected_generation when signing a resume
+	// request; delivery agents verify this for anti-replay. Unlike etag,
+	// generation only advances on logical mutations, not on reconciliation
+	// state changes.
+	Generation    int64 `protobuf:"varint,13,opt,name=generation,proto3" json:"generation,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -238,11 +249,18 @@ func (x *Deployment) GetProvenance() *Provenance {
 	return nil
 }
 
+func (x *Deployment) GetGeneration() int64 {
+	if x != nil {
+		return x.Generation
+	}
+	return 0
+}
+
 var File_fleetshift_v1_deployment_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\n" +
-	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ffleetshift/v1/attestation.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\xe5\x06\n" +
+	"\x1efleetshift/v1/deployment.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x19google/api/resource.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1ffleetshift/v1/attestation.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a$fleetshift/v1/rollout_strategy.proto\"\x8a\a\n" +
 	"\n" +
 	"Deployment\x12\x17\n" +
 	"\x04name\x18\x01 \x01(\tB\x03\xe0A\bR\x04name\x12\x15\n" +
@@ -261,7 +279,10 @@ const file_fleetshift_v1_deployment_proto_rawDesc = "" +
 	"\x04etag\x18\v \x01(\tR\x04etag\x12>\n" +
 	"\n" +
 	"provenance\x18\f \x01(\v2\x19.fleetshift.v1.ProvenanceB\x03\xe0A\x03R\n" +
-	"provenance\"\x81\x01\n" +
+	"provenance\x12#\n" +
+	"\n" +
+	"generation\x18\r \x01(\x03B\x03\xe0A\x03R\n" +
+	"generation\"\x81\x01\n" +
 	"\x05State\x12\x15\n" +
 	"\x11STATE_UNSPECIFIED\x10\x00\x12\x12\n" +
 	"\x0eSTATE_CREATING\x10\x01\x12\x10\n" +

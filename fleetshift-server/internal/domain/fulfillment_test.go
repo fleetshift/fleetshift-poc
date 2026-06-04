@@ -9,8 +9,9 @@ import (
 func TestFulfillment_AdvanceManifestStrategy(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	f := Fulfillment{
-		ID:         "f1",
-		Generation: 1,
+		ID:               "f1",
+		Generation:       1,
+		loadedGeneration: 1,
 	}
 	spec := ManifestStrategySpec{Type: ManifestStrategyInline}
 
@@ -50,8 +51,9 @@ func TestFulfillment_AdvanceManifestStrategy(t *testing.T) {
 func TestFulfillment_AdvancePlacementStrategy(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	f := Fulfillment{
-		ID:         "f1",
-		Generation: 1,
+		ID:               "f1",
+		Generation:       1,
+		loadedGeneration: 1,
 	}
 	spec := PlacementStrategySpec{Type: PlacementStrategyAll}
 
@@ -76,8 +78,9 @@ func TestFulfillment_AdvancePlacementStrategy(t *testing.T) {
 func TestFulfillment_AdvanceRolloutStrategy(t *testing.T) {
 	now := time.Date(2026, 5, 1, 12, 0, 0, 0, time.UTC)
 	f := Fulfillment{
-		ID:         "f1",
-		Generation: 1,
+		ID:               "f1",
+		Generation:       1,
+		loadedGeneration: 1,
 	}
 	spec := &RolloutStrategySpec{Type: RolloutStrategyImmediate}
 
@@ -107,9 +110,10 @@ func TestFulfillment_MultipleAdvances_AccumulatePending(t *testing.T) {
 	f.AdvancePlacementStrategy(PlacementStrategySpec{Type: PlacementStrategyAll}, now)
 	f.AdvanceRolloutStrategy(nil, now)
 
-	// Three advances = 3 generation bumps (0 -> 1 -> 2 -> 3).
-	if f.Generation != 3 {
-		t.Errorf("Generation = %d, want 3", f.Generation)
+	// All three advances happen in the same "transaction" (loadedGeneration=0),
+	// so generation advances exactly once to 1 regardless of how many calls.
+	if f.Generation != 1 {
+		t.Errorf("Generation = %d, want 1", f.Generation)
 	}
 	if f.ManifestStrategyVersion != 1 {
 		t.Errorf("ManifestStrategyVersion = %d, want 1", f.ManifestStrategyVersion)
@@ -240,10 +244,11 @@ func TestFulfillment_Resume_RequiresProvenanceWhenPreviouslyPresent(t *testing.T
 
 func TestFulfillment_Resume_HappyPath_NoProvenance(t *testing.T) {
 	f := Fulfillment{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 3,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:               "f1",
+		State:            FulfillmentStatePausedAuth,
+		Generation:       3,
+		loadedGeneration: 3,
+		Auth:             DeliveryAuth{Token: "old-token"},
 	}
 
 	newAuth := DeliveryAuth{Token: "fresh-token"}
@@ -264,10 +269,11 @@ func TestFulfillment_Resume_HappyPath_NoProvenance(t *testing.T) {
 
 func TestFulfillment_Resume_HappyPath_WithProvenance(t *testing.T) {
 	f := Fulfillment{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 5,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:               "f1",
+		State:            FulfillmentStatePausedAuth,
+		Generation:       5,
+		loadedGeneration: 5,
+		Auth:             DeliveryAuth{Token: "old-token"},
 		Provenance: &Provenance{
 			Sig:                Signature{Signer: FederatedIdentity{Subject: "u1", Issuer: "iss"}},
 			ExpectedGeneration: 5,
@@ -296,10 +302,11 @@ func TestFulfillment_Resume_HappyPath_WithProvenance(t *testing.T) {
 
 func TestFulfillment_Resume_AcceptsProvenanceWhenNonePreviously(t *testing.T) {
 	f := Fulfillment{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 2,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:               "f1",
+		State:            FulfillmentStatePausedAuth,
+		Generation:       2,
+		loadedGeneration: 2,
+		Auth:             DeliveryAuth{Token: "old-token"},
 	}
 
 	newProv := &Provenance{

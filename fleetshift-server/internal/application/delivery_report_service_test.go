@@ -368,12 +368,10 @@ func newFulfillment(id domain.FulfillmentID, gen domain.Generation, auth domain.
 		Type: domain.PlacementStrategyStatic,
 	}, now)
 	f.AdvanceRolloutStrategy(nil, now)
-	// AdvanceManifestStrategy + AdvancePlacementStrategy + AdvanceRolloutStrategy
-	// each call BumpGeneration, so generation is 3 after construction.
-	// Adjust to the desired generation.
-	for f.Generation < gen {
-		f.BumpGeneration()
-	}
+	// Override generation to the caller's desired value after strategy
+	// advances have set it to 1.
+	f.Generation = gen
+	f.SetLoadedGeneration(gen)
 	return f
 }
 

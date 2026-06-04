@@ -16,6 +16,11 @@ type DeploymentID string
 // and compared against [ObservedGeneration] to detect pending work.
 type Generation int64
 
+// Etag is a weak domain-state concurrency token (RFC 9110 Section
+// 8.8.1, AIP-154). It is opaque, W/-prefixed, and changes whenever
+// any API-visible state changes.
+type Etag string
+
 // DeliveryID uniquely identifies a delivery (one deployment-target pair).
 type DeliveryID string
 

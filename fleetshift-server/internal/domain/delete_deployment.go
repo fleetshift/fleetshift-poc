@@ -47,8 +47,7 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID,
 			return deploymentMutationResult{}, err
 		}
 
-		f.State = FulfillmentStateDeleting
-		f.BumpGeneration()
+		f.TransitionToDeleting(f.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}

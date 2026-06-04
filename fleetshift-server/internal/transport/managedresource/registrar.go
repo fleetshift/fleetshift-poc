@@ -222,12 +222,6 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 		in.ValidUntil = ts.AsTime()
 	}
 
-	// Field 5: expected_generation (optional)
-	genField := h.descs.CreateRequest.Fields().ByNumber(5)
-	if genField != nil {
-		in.ExpectedGeneration = domain.Generation(reqMsg.Get(genField).Int())
-	}
-
 	view, err := h.resources.Create(ctx, in)
 	if err != nil {
 		return nil, toDomainError(err)
@@ -415,6 +409,18 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 		in.ValidUntil = ts.AsTime()
 	}
 
+	// Field 4: etag (optional)
+	etagReqField := h.descs.ResumeRequest.Fields().ByNumber(4)
+	if etagReqField != nil && reqMsg.Has(etagReqField) {
+		in.Etag = domain.Etag(reqMsg.Get(etagReqField).String())
+	}
+
+	// Field 5: expected_generation (optional)
+	expGenField := h.descs.ResumeRequest.Fields().ByNumber(5)
+	if expGenField != nil && reqMsg.Has(expGenField) {
+		in.ExpectedGeneration = domain.Generation(reqMsg.Get(expGenField).Int())
+	}
+
 	view, err := h.resources.Resume(ctx, in)
 	if err != nil {
 		return nil, toDomainError(err)
@@ -501,9 +507,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 		}
 	}
 
-	// etag
+	// etag (weak domain-state token)
 	etagField := h.descs.Resource.Fields().ByName("etag")
-	resource.Set(etagField, protoreflect.ValueOfString(mr.UID))
+	resource.Set(etagField, protoreflect.ValueOfString(string(v.Etag())))
 
 	// provenance
 	if f.Provenance != nil {
@@ -514,6 +520,10 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 			resource.Set(provField, provVal)
 		}
 	}
+
+	// generation
+	genField := h.descs.Resource.Fields().ByName("generation")
+	resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation)))
 
 	return resource, nil
 }
@@ -591,6 +601,8 @@ func toDomainError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, domain.ErrStaleGeneration):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:

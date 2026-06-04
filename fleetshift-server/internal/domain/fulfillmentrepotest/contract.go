@@ -212,6 +212,9 @@ func Run(t *testing.T, factory Factory) {
 		if got.State != domain.FulfillmentStateActive {
 			t.Errorf("State after Update = %q, want %q", got.State, domain.FulfillmentStateActive)
 		}
+		if got.Generation != 3 {
+			t.Errorf("Generation = %d, want 3", got.Generation)
+		}
 		if len(got.ResolvedTargets) != 2 {
 			t.Errorf("ResolvedTargets = %d, want 2", len(got.ResolvedTargets))
 		}
@@ -497,6 +500,83 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if string(got.Provenance.Sig.ContentHash) != "hash" {
 			t.Errorf("Provenance.Sig.ContentHash = %q, want %q", got.Provenance.Sig.ContentHash, "hash")
+		}
+	})
+
+	t.Run("LoadedGeneration_SetOnHydration", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		f := domain.Fulfillment{
+			ID:         domain.FulfillmentID("f1"),
+			State:      domain.FulfillmentStateCreating,
+			Generation: 1,
+			CreatedAt:  fixedTime,
+			UpdatedAt:  fixedTime,
+		}
+		f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		}, fixedTime)
+		f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		}, fixedTime)
+
+		if err := repo.Create(ctx, &f); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+		got, err := repo.Get(ctx, "f1")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		if got.Generation != 1 {
+			t.Errorf("Generation = %d, want 1", got.Generation)
+		}
+	})
+
+	t.Run("Generation_UpdateAdvances", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		f := sampleFulfillment()
+		f.Generation = 1
+		_ = repo.Create(ctx, &f)
+		f.DrainPendingStrategyRecords()
+
+		got, _ := repo.Get(ctx, "f1")
+		if got.Generation != 1 {
+			t.Fatalf("setup: Generation = %d, want 1", got.Generation)
+		}
+
+		got.Generation = got.Generation + 1
+		got.UpdatedAt = fixedTime.Add(time.Minute)
+		if err := repo.Update(ctx, got); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got2, _ := repo.Get(ctx, "f1")
+		if got2.Generation != 2 {
+			t.Errorf("Generation after advance = %d, want 2", got2.Generation)
+		}
+	})
+
+	t.Run("Generation_NoAdvanceOnBookkeepingUpdate", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+		f := sampleFulfillment()
+		f.Generation = 1
+		_ = repo.Create(ctx, &f)
+		f.DrainPendingStrategyRecords()
+
+		got, _ := repo.Get(ctx, "f1")
+		got.ObservedGeneration = 1
+		got.UpdatedAt = fixedTime.Add(time.Minute)
+		if err := repo.Update(ctx, got); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got2, _ := repo.Get(ctx, "f1")
+		if got2.Generation != 1 {
+			t.Errorf("Generation after bookkeeping = %d, want 1 (unchanged)", got2.Generation)
 		}
 	})
 }

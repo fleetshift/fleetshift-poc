@@ -114,12 +114,11 @@ func TestCreateDeployment_WithSignature_AttachesProvenance(t *testing.T) {
 	})
 
 	dep, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID:                 "signed-dep",
-		ManifestStrategy:   ms,
-		PlacementStrategy:  ps,
-		UserSignature:      sig,
-		ValidUntil:         validUntil,
-		ExpectedGeneration: 1,
+		ID:                "signed-dep",
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		UserSignature:     sig,
+		ValidUntil:        validUntil,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
@@ -180,12 +179,11 @@ func TestCreateDeployment_WithSignature_NoEnrollment_Fails(t *testing.T) {
 	})
 
 	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID:                 "no-binding-dep",
-		ManifestStrategy:   ms,
-		PlacementStrategy:  ps,
-		UserSignature:      sig,
-		ValidUntil:         validUntil,
-		ExpectedGeneration: 1,
+		ID:                "no-binding-dep",
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		UserSignature:     sig,
+		ValidUntil:        validUntil,
 	})
 	if err == nil {
 		t.Fatal("expected error for missing key binding")
@@ -210,12 +208,11 @@ func TestCreateDeployment_WithBadSignature_Fails(t *testing.T) {
 	})
 
 	_, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID:                 "bad-sig-dep",
-		ManifestStrategy:   defaultManifestStrategy(),
-		PlacementStrategy:  defaultPlacementStrategy(),
-		UserSignature:      []byte("not-a-valid-signature"),
-		ValidUntil:         time.Now().Add(24 * time.Hour),
-		ExpectedGeneration: 1,
+		ID:                "bad-sig-dep",
+		ManifestStrategy:  defaultManifestStrategy(),
+		PlacementStrategy: defaultPlacementStrategy(),
+		UserSignature:     []byte("not-a-valid-signature"),
+		ValidUntil:        time.Now().Add(24 * time.Hour),
 	})
 	if err == nil {
 		t.Fatal("expected error for bad signature")
@@ -299,9 +296,10 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 	})
 
 	dep, err := h.deployments.Resume(ctx, application.ResumeInput{
-		ID:            "resign-dep",
-		UserSignature: sig,
-		ValidUntil:    validUntil,
+		ID:                 "resign-dep",
+		UserSignature:      sig,
+		ValidUntil:         validUntil,
+		ExpectedGeneration: 2,
 	})
 	if err != nil {
 		t.Fatalf("Resume: %v", err)
@@ -403,7 +401,6 @@ func TestRepoRoundTrip_ProvenanceOnFulfillment(t *testing.T) {
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-		Etag:          "test-etag",
 	}); err != nil {
 		t.Fatalf("create deployment: %v", err)
 	}

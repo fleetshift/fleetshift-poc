@@ -41,11 +41,9 @@ type CreateDeploymentRequest struct {
 	UserSignature []byte `protobuf:"bytes,3,opt,name=user_signature,json=userSignature,proto3" json:"user_signature,omitempty"`
 	// Client-supplied attestation expiry. The server uses this timestamp
 	// to reconstruct the identical signed envelope (avoiding clock skew).
-	ValidUntil *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
-	// Expected deployment generation (always 1 for new deployments).
-	ExpectedGeneration int64 `protobuf:"varint,5,opt,name=expected_generation,json=expectedGeneration,proto3" json:"expected_generation,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	ValidUntil    *timestamppb.Timestamp `protobuf:"bytes,4,opt,name=valid_until,json=validUntil,proto3" json:"valid_until,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
 }
 
 func (x *CreateDeploymentRequest) Reset() {
@@ -106,18 +104,11 @@ func (x *CreateDeploymentRequest) GetValidUntil() *timestamppb.Timestamp {
 	return nil
 }
 
-func (x *CreateDeploymentRequest) GetExpectedGeneration() int64 {
-	if x != nil {
-		return x.ExpectedGeneration
-	}
-	return 0
-}
-
 var File_fleetshift_v1_create_deployment_request_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_create_deployment_request_proto_rawDesc = "" +
 	"\n" +
-	"-fleetshift/v1/create_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1efleetshift/v1/deployment.proto\"\xa7\x02\n" +
+	"-fleetshift/v1/create_deployment_request.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1efleetshift/v1/deployment.proto\"\xf1\x01\n" +
 	"\x17CreateDeploymentRequest\x12(\n" +
 	"\rdeployment_id\x18\x01 \x01(\tB\x03\xe0A\x02R\fdeploymentId\x12>\n" +
 	"\n" +
@@ -125,8 +116,7 @@ const file_fleetshift_v1_create_deployment_request_proto_rawDesc = "" +
 	"deployment\x12*\n" +
 	"\x0euser_signature\x18\x03 \x01(\fB\x03\xe0A\x01R\ruserSignature\x12@\n" +
 	"\vvalid_until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampB\x03\xe0A\x01R\n" +
-	"validUntil\x124\n" +
-	"\x13expected_generation\x18\x05 \x01(\x03B\x03\xe0A\x01R\x12expectedGenerationBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
+	"validUntilBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (
 	file_fleetshift_v1_create_deployment_request_proto_rawDescOnce sync.Once
