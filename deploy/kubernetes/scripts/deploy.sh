@@ -55,7 +55,7 @@ set -a
 source "${ROOT_DIR}/.env"
 set +a
 
-FLEETSHIFT_SERVER_ADDONS="ocp,kubernetes"
+FLEETSHIFT_SERVER_ADDONS="kubernetes"
 GCPHCP_CONFIG_PATH=""
 if is_truthy "${GCPHCP_ENABLED:-false}"; then
   FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS},gcphcp"
