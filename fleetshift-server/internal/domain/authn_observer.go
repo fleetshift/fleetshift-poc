@@ -9,10 +9,10 @@ import "context"
 // Implementations should embed [NoOpAuthnObserver] for forward
 // compatibility with new methods added to this interface.
 type AuthnObserver interface {
-	// Authenticate is called when a request enters the
+	// AuthenticateStarted is called when a request enters the
 	// authentication pipeline. The returned [AuthnProbe] tracks
 	// the outcome.
-	Authenticate(ctx context.Context, info AuthnRequestInfo) (context.Context, AuthnProbe)
+	AuthenticateStarted(ctx context.Context, info AuthnRequestInfo) (context.Context, AuthnProbe)
 }
 
 // AuthnRequestInfo captures the request-level context available when
@@ -58,7 +58,7 @@ type AuthnProbe interface {
 // NoOpAuthnObserver is an [AuthnObserver] that returns no-op probes.
 type NoOpAuthnObserver struct{}
 
-func (NoOpAuthnObserver) Authenticate(ctx context.Context, _ AuthnRequestInfo) (context.Context, AuthnProbe) {
+func (NoOpAuthnObserver) AuthenticateStarted(ctx context.Context, _ AuthnRequestInfo) (context.Context, AuthnProbe) {
 	return ctx, NoOpAuthnProbe{}
 }
 

@@ -16,7 +16,7 @@ func TestAuthnObserver_FullLifecycle_Authenticated(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	ctx, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	ctx, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
@@ -66,7 +66,7 @@ func TestAuthnObserver_FullLifecycle_Anonymous(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	_, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
@@ -103,7 +103,7 @@ func TestAuthnObserver_FullLifecycle_VerificationError(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	_, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/CreateDeployment",
 		PeerAddr: "10.0.0.1:12345",
 	})
@@ -145,7 +145,7 @@ func TestAuthnObserver_MethodsLoaded_LogsAtDebug(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	_, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
@@ -168,7 +168,7 @@ func TestAuthnObserver_CredentialMissing_LogsAtDebug(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	_, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/ListDeployments",
 		PeerAddr: "127.0.0.1:54321",
 	})
@@ -192,7 +192,7 @@ func TestAuthnObserver_ErrorTakesPrecedence(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewAuthnObserver(logger)
-	_, probe := obs.Authenticate(context.Background(), domain.AuthnRequestInfo{
+	_, probe := obs.AuthenticateStarted(context.Background(), domain.AuthnRequestInfo{
 		Method:   "/fleetshift.v1.DeploymentService/CreateDeployment",
 		PeerAddr: "10.0.0.1:12345",
 	})

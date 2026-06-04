@@ -1308,14 +1308,11 @@ func registerWorkflowsWithAgents(t *testing.T, infra Infra, registryFactory Regi
 		}
 	}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            infra.Store,
-		Delivery:         infra.Delivery,
-		Strategies:       domain.StrategyFactory{Store: infra.Store},
-		CleanupSignaler:  reg,
-		Vault:            infra.Vault,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		infra.Store, infra.Delivery, domain.StrategyFactory{Store: infra.Store}, reg,
+		domain.WithVault(infra.Vault),
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)

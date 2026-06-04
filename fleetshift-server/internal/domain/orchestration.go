@@ -163,6 +163,60 @@ type OrchestrationWorkflowSpec struct {
 	AckRetryInterval time.Duration
 }
 
+// OrchestrationWorkflowOption configures optional fields on
+// [OrchestrationWorkflowSpec].
+type OrchestrationWorkflowOption func(*OrchestrationWorkflowSpec)
+
+// WithFulfillmentObserver sets the [FulfillmentObserver] for the
+// orchestration workflow.
+func WithFulfillmentObserver(o FulfillmentObserver) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.Observer = o }
+}
+
+// WithAttestation sets the [AttestationAssembler] for provenance.
+func WithAttestation(a AttestationAssembler) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.Attestation = a }
+}
+
+// WithVault sets the [Vault] for secret storage.
+func WithVault(v Vault) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.Vault = v }
+}
+
+// WithNow sets the clock function used by the orchestration.
+func WithNow(fn func() time.Time) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.Now = fn }
+}
+
+// WithAckRetryInterval sets how long the dispatch-and-await loop waits
+// before redispatching unacked deliveries.
+func WithAckRetryInterval(d time.Duration) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) { s.AckRetryInterval = d }
+}
+
+// NewOrchestrationWorkflowSpec creates an [OrchestrationWorkflowSpec]
+// with the given required dependencies and applies any options.
+// Observer defaults to [NoOpFulfillmentObserver].
+func NewOrchestrationWorkflowSpec(
+	store Store,
+	delivery DeliveryAgent,
+	strategies StrategyFactory,
+	signaler DeleteCleanupSignaler,
+	opts ...OrchestrationWorkflowOption,
+) *OrchestrationWorkflowSpec {
+	s := &OrchestrationWorkflowSpec{
+		Store:           store,
+		Delivery:        delivery,
+		Strategies:      strategies,
+		CleanupSignaler: signaler,
+		Observer:        NoOpFulfillmentObserver{},
+	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
 type outputCleanupPlan struct {
 	targetIDs    []TargetID
 	inventoryIDs []InventoryItemID
@@ -696,10 +750,7 @@ func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[FulfillmentID, Ge
 }
 
 func (s *OrchestrationWorkflowSpec) observer() FulfillmentObserver {
-	if s.Observer != nil {
-		return s.Observer
-	}
-	return NoOpFulfillmentObserver{}
+	return s.Observer
 }
 
 // Run is the deterministic workflow body. Each execution does a single

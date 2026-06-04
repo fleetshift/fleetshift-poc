@@ -361,11 +361,10 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 
 	reg := &memworkflow.Registry{}
 	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
-	orchWf, err := reg.RegisterOrchestration(&domain.OrchestrationWorkflowSpec{
-		Store: store, Delivery: router,
-		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
-		AckRetryInterval: 5 * time.Second,
-	})
+	orchWf, err := reg.RegisterOrchestration(domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	))
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
 	}

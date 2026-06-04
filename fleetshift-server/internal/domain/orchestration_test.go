@@ -726,13 +726,10 @@ func (d *recordingDelivery) Remove(_ context.Context, _ domain.TargetInfo, deliv
 
 func newTestWorkflow(store domain.Store, delivery domain.DeliveryAgent, events chan domain.FulfillmentEvent, opts ...func(*domain.OrchestrationWorkflowSpec)) *domain.OrchestrationWorkflowSpec {
 	reg := &stubRegistry{events: events}
-	wf := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         delivery,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	wf := domain.NewOrchestrationWorkflowSpec(
+		store, delivery, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	for _, opt := range opts {
 		opt(wf)
 	}

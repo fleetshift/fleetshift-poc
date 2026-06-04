@@ -253,14 +253,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        router,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
-		Observer:        observability.NewFulfillmentObserver(logger),
-		Vault:           vault,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
+		domain.WithVault(vault),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		return fmt.Errorf("register orchestration: %w", err)

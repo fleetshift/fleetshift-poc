@@ -79,7 +79,7 @@ func (a *AuthnInterceptor) authenticate(ctx context.Context, fullMethod string) 
 		reqInfo.PeerAddr = p.Addr.String()
 	}
 
-	ctx, probe := a.observer.Authenticate(ctx, reqInfo)
+	ctx, probe := a.observer.AuthenticateStarted(ctx, reqInfo)
 	defer probe.End()
 
 	methods, err := a.loadMethods(ctx)
