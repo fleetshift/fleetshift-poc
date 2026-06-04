@@ -20,21 +20,23 @@ func NewDeliveryObserver(logger *slog.Logger) *DeliveryObserver {
 	return &DeliveryObserver{logger: logger.With("component", "delivery")}
 }
 
-func (o *DeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportEventProbe) {
+func (o *DeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
 	return ctx, &reportEventProbe{
 		logger:     o.logger.With(slog.String("delivery_id", string(deliveryID))),
 		ctx:        ctx,
 		startTime:  time.Now(),
 		generation: generation,
+		event:      event,
 	}
 }
 
-func (o *DeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportResultProbe) {
+func (o *DeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
 	return ctx, &reportResultProbe{
 		logger:     o.logger.With(slog.String("delivery_id", string(deliveryID))),
 		ctx:        ctx,
 		startTime:  time.Now(),
 		generation: generation,
+		result:     result,
 	}
 }
 
@@ -44,12 +46,10 @@ type reportEventProbe struct {
 	ctx        context.Context
 	startTime  time.Time
 	generation domain.Generation
-	event      *domain.DeliveryEvent
+	event      domain.DeliveryEvent
 	stale      bool
 	err        error
 }
-
-func (p *reportEventProbe) Event(event domain.DeliveryEvent) { p.event = &event }
 
 func (p *reportEventProbe) Stale(reportGen, currentGen domain.Generation) {
 	p.stale = true
@@ -75,9 +75,6 @@ func (p *reportEventProbe) End() {
 	if p.stale {
 		return
 	}
-	if p.event == nil {
-		return
-	}
 	level := deliveryEventLevel(p.event.Kind)
 	if !p.logger.Enabled(p.ctx, level) {
 		return
@@ -95,12 +92,10 @@ type reportResultProbe struct {
 	ctx        context.Context
 	startTime  time.Time
 	generation domain.Generation
-	result     *domain.DeliveryResult
+	result     domain.DeliveryResult
 	stale      bool
 	err        error
 }
-
-func (p *reportResultProbe) Result(result domain.DeliveryResult) { p.result = &result }
 
 func (p *reportResultProbe) Stale(reportGen, currentGen domain.Generation) {
 	p.stale = true
@@ -131,12 +126,10 @@ func (p *reportResultProbe) End() {
 	}
 	attrs := []slog.Attr{
 		slog.Duration("duration", duration),
+		slog.String("state", string(p.result.State)),
 	}
-	if p.result != nil {
-		attrs = append(attrs, slog.String("state", string(p.result.State)))
-		if p.result.Message != "" {
-			attrs = append(attrs, slog.String("message", p.result.Message))
-		}
+	if p.result.Message != "" {
+		attrs = append(attrs, slog.String("message", p.result.Message))
 	}
 	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery result done", attrs...)
 }

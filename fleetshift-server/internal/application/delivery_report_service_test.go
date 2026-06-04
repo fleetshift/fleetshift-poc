@@ -112,14 +112,14 @@ type testReportResultRecord struct {
 	Generation domain.Generation
 }
 
-func (o *testDeliveryObserver) ReportEventStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportEventProbe) {
+func (o *testDeliveryObserver) ReportEventStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation, _ domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
 	o.mu.Lock()
 	o.events = append(o.events, testReportEventRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()
 	return context.Background(), domain.NoOpReportEventProbe{}
 }
 
-func (o *testDeliveryObserver) ReportResultStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation) (context.Context, domain.ReportResultProbe) {
+func (o *testDeliveryObserver) ReportResultStarted(_ context.Context, deliveryID domain.DeliveryID, generation domain.Generation, _ domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
 	o.mu.Lock()
 	o.results = append(o.results, testReportResultRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()

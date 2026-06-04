@@ -16,14 +16,13 @@ func TestDeliveryObserver_ReportEventStarted_LogsEvent(t *testing.T) {
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	ctx, probe := obs.ReportEventStarted(context.Background(), "del-1", 0)
-	if ctx == nil {
-		t.Fatal("expected non-nil context")
-	}
-	probe.Event(domain.DeliveryEvent{
+	ctx, probe := obs.ReportEventStarted(context.Background(), "del-1", 0, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
 		Message: "creating cluster",
 	})
+	if ctx == nil {
+		t.Fatal("expected non-nil context")
+	}
 	probe.End()
 
 	records := handler.Records()
@@ -45,8 +44,7 @@ func TestDeliveryObserver_ReportEventStarted_WarningLevel(t *testing.T) {
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	_, probe := obs.ReportEventStarted(context.Background(), "del-2", 0)
-	probe.Event(domain.DeliveryEvent{
+	_, probe := obs.ReportEventStarted(context.Background(), "del-2", 0, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventWarning,
 		Message: "slow network",
 	})
@@ -68,8 +66,7 @@ func TestDeliveryObserver_ReportEventStarted_ErrorLogsAtErrorLevel(t *testing.T)
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	_, probe := obs.ReportEventStarted(context.Background(), "del-5", 0)
-	probe.Event(domain.DeliveryEvent{
+	_, probe := obs.ReportEventStarted(context.Background(), "del-5", 0, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
 		Message: "applying",
 	})
@@ -99,8 +96,7 @@ func TestDeliveryObserver_ReportEventStarted_Stale(t *testing.T) {
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	_, probe := obs.ReportEventStarted(context.Background(), "del-6", 3)
-	probe.Event(domain.DeliveryEvent{
+	_, probe := obs.ReportEventStarted(context.Background(), "del-6", 3, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
 		Message: "stale event",
 	})
@@ -126,13 +122,12 @@ func TestDeliveryObserver_ReportResultStarted_LogsResult(t *testing.T) {
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	ctx, probe := obs.ReportResultStarted(context.Background(), "del-3", 0)
+	ctx, probe := obs.ReportResultStarted(context.Background(), "del-3", 0, domain.DeliveryResult{
+		State: domain.DeliveryStateDelivered,
+	})
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
-	probe.Result(domain.DeliveryResult{
-		State: domain.DeliveryStateDelivered,
-	})
 	probe.End()
 
 	records := handler.Records()
@@ -154,8 +149,7 @@ func TestDeliveryObserver_ReportResultProbe_ErrorLogsAtErrorLevel(t *testing.T) 
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	_, probe := obs.ReportResultStarted(context.Background(), "del-4", 0)
-	probe.Result(domain.DeliveryResult{
+	_, probe := obs.ReportResultStarted(context.Background(), "del-4", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateFailed,
 	})
 	probe.Error(domain.ErrNotFound)
@@ -184,8 +178,7 @@ func TestDeliveryObserver_ReportResultStarted_Stale(t *testing.T) {
 
 	obs := observability.NewDeliveryObserver(logger)
 
-	_, probe := obs.ReportResultStarted(context.Background(), "del-7", 3)
-	probe.Result(domain.DeliveryResult{
+	_, probe := obs.ReportResultStarted(context.Background(), "del-7", 3, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
 	})
 	probe.Stale(3, 5)

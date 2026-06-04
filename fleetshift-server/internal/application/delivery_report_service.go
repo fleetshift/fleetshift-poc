@@ -70,9 +70,8 @@ func NewDeliveryReportService(
 // generation are silently discarded (stale work).
 // FIXME: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) error {
-	ctx, probe := s.observer.ReportEventStarted(ctx, deliveryID, generation)
+	ctx, probe := s.observer.ReportEventStarted(ctx, deliveryID, generation, event)
 	defer probe.End()
-	probe.Event(event)
 
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
@@ -135,9 +134,8 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 // transition (e.g. the delivery is already terminal).
 // FIXME: This is not atomic with fulfillment signal; requires own workflow
 func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) error {
-	ctx, probe := s.observer.ReportResultStarted(ctx, deliveryID, generation)
+	ctx, probe := s.observer.ReportResultStarted(ctx, deliveryID, generation, result)
 	defer probe.End()
-	probe.Result(result)
 
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
