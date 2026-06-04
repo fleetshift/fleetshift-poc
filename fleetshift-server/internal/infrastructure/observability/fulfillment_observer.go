@@ -126,8 +126,8 @@ func (p *fulfillmentRunProbe) DeleteStarted(targetCount int) {
 func (p *fulfillmentRunProbe) ManifestsFiltered(target domain.TargetInfo, total, accepted int) {
 	if accepted == 0 {
 		p.logger.LogAttrs(p.ctx, slog.LevelWarn, "all manifests filtered for target",
-			slog.String("target_id", string(target.ID)),
-			slog.String("target_type", string(target.Type)),
+			slog.String("target_id", string(target.ID())),
+			slog.String("target_type", string(target.Type())),
 			slog.Int("total", total),
 		)
 		return
@@ -136,8 +136,8 @@ func (p *fulfillmentRunProbe) ManifestsFiltered(target domain.TargetInfo, total,
 		return
 	}
 	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "manifests filtered for target",
-		slog.String("target_id", string(target.ID)),
-		slog.String("target_type", string(target.Type)),
+		slog.String("target_id", string(target.ID())),
+		slog.String("target_type", string(target.Type())),
 		slog.Int("total", total),
 		slog.Int("accepted", accepted),
 	)
@@ -332,7 +332,7 @@ func (o *FulfillmentObserver) DeliverStarted(ctx context.Context, input domain.D
 	logger := o.logger.With(
 		slog.String("fulfillment_id", string(input.FulfillmentID)),
 		slog.String("delivery_id", string(input.DeliveryID)),
-		slog.String("target_id", string(input.Target.ID)),
+		slog.String("target_id", string(input.Target.ID())),
 	)
 	if logger.Enabled(ctx, slog.LevelDebug) {
 		logger.LogAttrs(ctx, slog.LevelDebug, "deliver to target started")
@@ -417,7 +417,7 @@ func (o *FulfillmentObserver) RemoveStarted(ctx context.Context, input domain.Re
 	logger := o.logger.With(
 		slog.String("fulfillment_id", string(input.FulfillmentID)),
 		slog.String("delivery_id", string(input.DeliveryID)),
-		slog.String("target_id", string(input.Target.ID)),
+		slog.String("target_id", string(input.Target.ID())),
 	)
 	if logger.Enabled(ctx, slog.LevelDebug) {
 		logger.LogAttrs(ctx, slog.LevelDebug, "remove from target started")

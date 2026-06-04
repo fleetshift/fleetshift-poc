@@ -46,7 +46,7 @@ func (r *RoutingDeliveryService) Deregister(targetType domain.TargetType) {
 
 // Deliver routes to the agent registered for target.Type.
 func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation, generation domain.Generation) error {
-	agent, err := r.agentFor(target.Type)
+	agent, err := r.agentFor(target.Type())
 	if err != nil {
 		return err
 	}
@@ -55,7 +55,7 @@ func (r *RoutingDeliveryService) Deliver(ctx context.Context, target domain.Targ
 
 // Remove routes to the agent registered for target.Type.
 func (r *RoutingDeliveryService) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, attestation *domain.Attestation, generation domain.Generation) error {
-	agent, err := r.agentFor(target.Type)
+	agent, err := r.agentFor(target.Type())
 	if err != nil {
 		return err
 	}

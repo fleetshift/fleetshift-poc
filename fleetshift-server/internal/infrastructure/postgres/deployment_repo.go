@@ -3,7 +3,6 @@ package postgres
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -17,16 +16,17 @@ type DeploymentRepo struct {
 }
 
 func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
+	s := d.Snapshot()
 	_, err := r.DB.ExecContext(ctx,
 		`INSERT INTO deployments (id, uid, fulfillment_id, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5)`,
-		string(d.ID), d.UID, string(d.FulfillmentID),
-		d.CreatedAt.UTC().Format(time.RFC3339),
-		d.UpdatedAt.UTC().Format(time.RFC3339),
+		string(s.ID), s.UID, string(s.FulfillmentID),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("deployment %q: %w", d.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("deployment %q: %w", s.ID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert deployment: %w", err)
 	}
@@ -40,7 +40,11 @@ func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domai
 		`SELECT `+thinDeploymentColumns+` FROM deployments WHERE id = $1`,
 		string(id),
 	)
-	return scanThinDeployment(row)
+	snap, err := scanDeploymentSnapshot(row)
+	if err != nil {
+		return domain.Deployment{}, err
+	}
+	return domain.DeploymentFromSnapshot(snap), nil
 }
 
 func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
@@ -82,25 +86,25 @@ func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) err
 	return nil
 }
 
-func scanThinDeployment(s scanner) (domain.Deployment, error) {
-	var d domain.Deployment
+func scanDeploymentSnapshot(s scanner) (domain.DeploymentSnapshot, error) {
+	var snap domain.DeploymentSnapshot
 	var id, uid, fID, createdAtStr, updatedAtStr string
 	if err := s.Scan(&id, &uid, &fID, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return d, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return d, fmt.Errorf("scan deployment: %w", err)
+		return snap, fmt.Errorf("scan deployment: %w", err)
 	}
-	d.ID = domain.DeploymentID(id)
-	d.UID = uid
-	d.FulfillmentID = domain.FulfillmentID(fID)
+	snap.ID = domain.DeploymentID(id)
+	snap.UID = uid
+	snap.FulfillmentID = domain.FulfillmentID(fID)
 	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
-		d.CreatedAt = t
+		snap.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
-		d.UpdatedAt = t
+		snap.UpdatedAt = t
 	}
-	return d, nil
+	return snap, nil
 }
 
 func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
@@ -124,79 +128,29 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 		return v, fmt.Errorf("scan deployment view: %w", err)
 	}
 
-	v.Deployment.ID = domain.DeploymentID(dID)
-	v.Deployment.UID = uid
-	v.Deployment.FulfillmentID = domain.FulfillmentID(fRefID)
+	dSnap := domain.DeploymentSnapshot{
+		ID:            domain.DeploymentID(dID),
+		UID:           uid,
+		FulfillmentID: domain.FulfillmentID(fRefID),
+	}
 	if t, err := time.Parse(time.RFC3339, dCreatedAtStr); err == nil {
-		v.Deployment.CreatedAt = t
+		dSnap.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, dUpdatedAtStr); err == nil {
-		v.Deployment.UpdatedAt = t
+		dSnap.UpdatedAt = t
 	}
+	v.Deployment = domain.DeploymentFromSnapshot(dSnap)
 
-	v.Fulfillment.ID = domain.FulfillmentID(fID)
-	v.Fulfillment.ManifestStrategyVersion = domain.StrategyVersion(fMsVer)
-	v.Fulfillment.PlacementStrategyVersion = domain.StrategyVersion(fPsVer)
-	v.Fulfillment.RolloutStrategyVersion = domain.StrategyVersion(fRsVer)
-	v.Fulfillment.State = domain.FulfillmentState(fStateStr)
-	v.Fulfillment.StatusReason = fStatusReason
-	v.Fulfillment.Generation = domain.Generation(fGen)
-	v.Fulfillment.SetLoadedGeneration(domain.Generation(fGen))
-	v.Fulfillment.ObservedGeneration = domain.Generation(fObsGen)
-	if fActiveWfGen.Valid {
-		g := domain.Generation(fActiveWfGen.Int64)
-		v.Fulfillment.ActiveWorkflowGen = &g
-	}
-	if t, err := time.Parse(time.RFC3339, fCreatedAtStr); err == nil {
-		v.Fulfillment.CreatedAt = t
-	}
-	if t, err := time.Parse(time.RFC3339, fUpdatedAtStr); err == nil {
-		v.Fulfillment.UpdatedAt = t
-	}
-
-	if fMsSpec.Valid {
-		if err := unmarshalJSON(fMsSpec.String, &v.Fulfillment.ManifestStrategy, "manifest strategy"); err != nil {
-			return v, err
-		}
-	}
-	if fPsSpec.Valid {
-		if err := unmarshalJSON(fPsSpec.String, &v.Fulfillment.PlacementStrategy, "placement strategy"); err != nil {
-			return v, err
-		}
-	}
-	if fRsSpec.Valid {
-		v.Fulfillment.RolloutStrategy = &domain.RolloutStrategySpec{}
-		if err := unmarshalJSON(fRsSpec.String, v.Fulfillment.RolloutStrategy, "rollout strategy"); err != nil {
-			return v, err
-		}
-	}
-	if err := unmarshalJSON(fRtJSON, &v.Fulfillment.ResolvedTargets, "resolved targets"); err != nil {
+	fSnap, err := fulfillmentSnapshotFromColumns(
+		fID, fMsVer, fMsSpec, fPsVer, fPsSpec, fRsVer, fRsSpec,
+		fRtJSON, fStateStr, fStatusReason, fAuthJSON, fProvJSON, fAttestRefJSON,
+		fGen, fObsGen, fActiveWfGen,
+		fCreatedAtStr, fUpdatedAtStr,
+	)
+	if err != nil {
 		return v, err
 	}
-	if fAuthJSON != "" {
-		if err := unmarshalJSON(fAuthJSON, &v.Fulfillment.Auth, "auth"); err != nil {
-			return v, err
-		}
-	}
-	if fProvJSON.Valid {
-		v.Fulfillment.Provenance = &domain.Provenance{}
-		if err := unmarshalJSON(fProvJSON.String, v.Fulfillment.Provenance, "provenance"); err != nil {
-			return v, err
-		}
-	}
-	if fAttestRefJSON.Valid {
-		v.Fulfillment.AttestationRef = &domain.AttestationRef{}
-		if err := unmarshalJSON(fAttestRefJSON.String, v.Fulfillment.AttestationRef, "attestation ref"); err != nil {
-			return v, err
-		}
-	}
+	v.Fulfillment = *domain.FulfillmentFromSnapshot(fSnap)
 
 	return v, nil
-}
-
-func unmarshalJSON[T any](data string, dst *T, label string) error {
-	if err := json.Unmarshal([]byte(data), dst); err != nil {
-		return fmt.Errorf("unmarshal %s: %w", label, err)
-	}
-	return nil
 }

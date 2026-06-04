@@ -96,22 +96,22 @@ func (a *AuthnInterceptor) authenticate(ctx context.Context, fullMethod string) 
 	var matchedType domain.AuthMethodType
 
 	for _, m := range methods {
-		switch m.Type {
+		switch m.Type() {
 		case domain.AuthMethodTypeOIDC:
 			token := extractBearerToken(ctx)
 			if token == "" {
-				probe.CredentialMissing(m.Type)
+				probe.CredentialMissing(m.Type())
 				continue
 			}
-			probe.VerifyingCredential(m.ID, m.Type)
-			claims, verifyErr := a.verifier.Verify(ctx, *m.OIDC, token)
+			probe.VerifyingCredential(m.ID(), m.Type())
+			claims, verifyErr := a.verifier.Verify(ctx, *m.OIDC(), token)
 			if verifyErr != nil {
 				probe.Error(verifyErr)
 				return ctx, status.Errorf(codes.Unauthenticated, "token verification failed: %v", verifyErr)
 			}
 			subject = &claims
-			matchedType = m.Type
-			matchedAudience = []domain.Audience{m.OIDC.Audience}
+			matchedType = m.Type()
+			matchedAudience = []domain.Audience{m.OIDC().Audience}
 			matchedToken = domain.RawToken(token)
 			// TODO: this is inappropriate here
 			if azp, ok := claims.Extra["azp"]; ok && len(azp) > 0 {

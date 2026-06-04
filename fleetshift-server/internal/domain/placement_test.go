@@ -8,9 +8,9 @@ import (
 )
 
 var testPool = []domain.TargetInfo{
-	{ID: "t1", Name: "cluster-a", Labels: map[string]string{"env": "prod", "region": "us-east"}},
-	{ID: "t2", Name: "cluster-b", Labels: map[string]string{"env": "staging", "region": "us-west"}},
-	{ID: "t3", Name: "cluster-c", Labels: map[string]string{"env": "prod", "region": "eu-west"}},
+	domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a", Labels: map[string]string{"env": "prod", "region": "us-east"}}),
+	domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "cluster-b", Labels: map[string]string{"env": "staging", "region": "us-west"}}),
+	domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t3", Name: "cluster-c", Labels: map[string]string{"env": "prod", "region": "eu-west"}}),
 }
 
 var testPlacementPool = domain.PlacementTargets(testPool)

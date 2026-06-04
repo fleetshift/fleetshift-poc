@@ -97,7 +97,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 		t.Fatalf("marshal spec: %v", err)
 	}
 
-	target := domain.TargetInfo{ID: "oidc-kind", Type: kindaddon.TargetType, Name: "OIDC Kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "oidc-kind", Type: kindaddon.TargetType, Name: "OIDC Kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kindaddon.ClusterResourceType,
 		Raw:          json.RawMessage(specBytes),
@@ -244,7 +244,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 			t.Fatalf("ExtractClusterConnInfo: %v", err)
 		}
 
-		k8sTarget := domain.TargetInfo{
+		k8sTarget := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:   domain.TargetID("k8s-" + res.ClusterName),
 			Type: kubeaddon.TargetType,
 			Name: res.ClusterName,
@@ -252,7 +252,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 				"api_server": apiServer,
 				"ca_cert":    string(caCert),
 			},
-		}
+		})
 
 		configMapManifest := json.RawMessage(`{
 			"apiVersion": "v1",
@@ -439,12 +439,12 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	// Register target with accepted resource types.
 	{
 		tx, _ := store.Begin(ctx)
-		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+		_ = tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-mr-oidc",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Docker Kind Provider (MR OIDC)",
 			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-		})
+		}))
 		_ = tx.Commit()
 	}
 
@@ -486,7 +486,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	}
 
 	// Wait for fulfillment to reach Active (includes RBAC bootstrap).
-	awaitFulfillment(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	// Verify OIDC auth works: issue a JWT and authenticate against the cluster.
 	token := idp.IssueToken(t, oidctest.TokenClaims{

@@ -15,7 +15,7 @@ func TestDeliveryObserver_EventEmitted_LogsEvent(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind", Name: "cluster-1"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "kind", Name: "cluster-1"})
 
 	ctx, probe := obs.EventEmitted(context.Background(), "del-1", target, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
@@ -44,7 +44,7 @@ func TestDeliveryObserver_EventEmitted_WarningLevel(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "kind"})
 
 	_, probe := obs.EventEmitted(context.Background(), "del-2", target, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventWarning,
@@ -67,7 +67,7 @@ func TestDeliveryObserver_Completed_LogsResult(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind", Name: "cluster-1"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "kind", Name: "cluster-1"})
 
 	ctx, probe := obs.Completed(context.Background(), "del-3", target, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
@@ -103,7 +103,7 @@ func TestDeliveryObserver_CompletedProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "kind"})
 
 	_, probe := obs.Completed(context.Background(), "del-4", target, domain.DeliveryResult{
 		State: domain.DeliveryStateFailed,

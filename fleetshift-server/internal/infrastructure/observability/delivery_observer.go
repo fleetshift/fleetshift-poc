@@ -57,8 +57,8 @@ func (o *DeliveryObserver) Completed(ctx context.Context, deliveryID domain.Deli
 func (o *DeliveryObserver) loggerFor(deliveryID domain.DeliveryID, target domain.TargetInfo) *slog.Logger {
 	return o.logger.With(
 		slog.String("delivery_id", string(deliveryID)),
-		slog.String("target_id", string(target.ID)),
-		slog.String("target_type", string(target.Type)),
+		slog.String("target_id", string(target.ID())),
+		slog.String("target_type", string(target.Type())),
 	)
 }
 

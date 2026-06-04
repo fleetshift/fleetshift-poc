@@ -12,9 +12,10 @@ type TargetRepository interface {
 }
 
 // FulfillmentRepository persists and retrieves fulfillments.
-// Create and Update drain pending strategy records (via
-// [Fulfillment.DrainPendingStrategyRecords]) and insert them.
-// Get materializes current strategy specs by joining the version tables.
+// Create and Update read pending strategy records from [Fulfillment.Snapshot]
+// and flush them to storage, then call [Fulfillment.DrainPendingStrategyRecords]
+// to clear the buffers. Get materializes current strategy specs by joining
+// the version tables.
 type FulfillmentRepository interface {
 	Create(ctx context.Context, f *Fulfillment) error
 	Get(ctx context.Context, id FulfillmentID) (*Fulfillment, error)
@@ -59,8 +60,9 @@ type DeliveryRepository interface {
 // because these three tables form a cohesive aggregate boundary.
 //
 // Intent versioning is owned by the [ManagedResource] aggregate.
-// CreateInstance (and future UpdateInstance) drain pending intents via
-// [ManagedResource.DrainPendingIntents] and flush them to storage.
+// CreateInstance (and future UpdateInstance) read pending intents from
+// [ManagedResource.Snapshot] and flush them to storage, then call
+// [ManagedResource.DrainPendingIntents] to clear the buffer.
 type ManagedResourceRepository interface {
 	// Type registration
 	CreateType(ctx context.Context, def ManagedResourceTypeDef) error

@@ -56,36 +56,23 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 		uid := uuid.New().String()
 		fID := FulfillmentID(uuid.New().String())
 
-		f := Fulfillment{
-			ID:         fID,
-			State:      FulfillmentStateCreating,
-			Auth:       in.Auth,
-			Provenance: in.Provenance,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}
+		f := NewFulfillment(fID, in.Auth, in.Provenance, nil, now)
 		f.AdvanceManifestStrategy(in.ManifestStrategy, now)
 		f.AdvancePlacementStrategy(in.PlacementStrategy, now)
 		f.AdvanceRolloutStrategy(in.RolloutStrategy, now)
 
-		if err := tx.Fulfillments().Create(ctx, &f); err != nil {
+		if err := tx.Fulfillments().Create(ctx, f); err != nil {
 			return DeploymentView{}, err
 		}
 
-		dep := Deployment{
-			ID:            in.ID,
-			UID:           uid,
-			FulfillmentID: fID,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
+		dep := NewDeployment(in.ID, uid, fID, now)
 		if err := tx.Deployments().Create(ctx, dep); err != nil {
 			return DeploymentView{}, err
 		}
 		if err := tx.Commit(); err != nil {
 			return DeploymentView{}, fmt.Errorf("commit: %w", err)
 		}
-		return DeploymentView{Deployment: dep, Fulfillment: f}, nil
+		return DeploymentView{Deployment: dep, Fulfillment: *f}, nil
 	})
 }
 
@@ -107,7 +94,7 @@ func (s *CreateDeploymentWorkflowSpec) Run(record Record, input CreateDeployment
 		return DeploymentView{}, fmt.Errorf("persist deployment: %w", err)
 	}
 
-	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID); err != nil {
+	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID()); err != nil {
 		return DeploymentView{}, fmt.Errorf("start orchestration: %w", err)
 	}
 

@@ -17,24 +17,25 @@ type FulfillmentRepo struct {
 }
 
 func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) error {
-	rt, err := json.Marshal(f.ResolvedTargets)
+	s := f.Snapshot()
+	rt, err := json.Marshal(s.ResolvedTargets)
 	if err != nil {
 		return fmt.Errorf("marshal resolved targets: %w", err)
 	}
-	auth, err := json.Marshal(f.Auth)
+	auth, err := json.Marshal(s.Auth)
 	if err != nil {
 		return fmt.Errorf("marshal auth: %w", err)
 	}
 	var provJSON []byte
-	if f.Provenance != nil {
-		provJSON, err = json.Marshal(f.Provenance)
+	if s.Provenance != nil {
+		provJSON, err = json.Marshal(s.Provenance)
 		if err != nil {
 			return fmt.Errorf("marshal provenance: %w", err)
 		}
 	}
 	var attestRefJSON []byte
-	if f.AttestationRef != nil {
-		attestRefJSON, err = json.Marshal(f.AttestationRef)
+	if s.AttestationRef != nil {
+		attestRefJSON, err = json.Marshal(s.AttestationRef)
 		if err != nil {
 			return fmt.Errorf("marshal attestation ref: %w", err)
 		}
@@ -50,26 +51,30 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) err
 			generation, observed_generation, active_workflow_gen,
 			created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
-		string(f.ID),
-		int64(f.ManifestStrategyVersion),
-		int64(f.PlacementStrategyVersion),
-		int64(f.RolloutStrategyVersion),
-		string(rt), string(f.State), f.StatusReason,
+		string(s.ID),
+		int64(s.ManifestStrategyVersion),
+		int64(s.PlacementStrategyVersion),
+		int64(s.RolloutStrategyVersion),
+		string(rt), string(s.State), s.StatusReason,
 		string(auth), nullStringFromBytes(provJSON),
 		nullStringFromBytes(attestRefJSON),
-		int64(f.Generation), int64(f.ObservedGeneration),
-		nullGeneration(f.ActiveWorkflowGen),
-		f.CreatedAt.UTC().Format(time.RFC3339),
-		f.UpdatedAt.UTC().Format(time.RFC3339),
+		int64(s.Generation), int64(s.ObservedGeneration),
+		nullGeneration(s.ActiveWorkflowGen),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("fulfillment %q: %w", f.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("fulfillment %q: %w", s.ID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert fulfillment: %w", err)
 	}
 
-	return r.flushPendingStrategyRecords(ctx, f)
+	if err := r.flushPendingStrategyRecords(ctx, s.PendingStrategyRecords); err != nil {
+		return err
+	}
+	f.DrainPendingStrategyRecords()
+	return nil
 }
 
 func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (*domain.Fulfillment, error) {
@@ -80,23 +85,24 @@ func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (*do
 		 WHERE f.id = $1`,
 		string(id),
 	)
-	f, err := scanFulfillment(row)
+	snap, err := scanFulfillmentSnapshot(row)
 	if err != nil {
 		return nil, err
 	}
-	return &f, nil
+	return domain.FulfillmentFromSnapshot(snap), nil
 }
 
 func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) error {
-	rt, _ := json.Marshal(f.ResolvedTargets)
-	auth, _ := json.Marshal(f.Auth)
+	s := f.Snapshot()
+	rt, _ := json.Marshal(s.ResolvedTargets)
+	auth, _ := json.Marshal(s.Auth)
 	var provJSON []byte
-	if f.Provenance != nil {
-		provJSON, _ = json.Marshal(f.Provenance)
+	if s.Provenance != nil {
+		provJSON, _ = json.Marshal(s.Provenance)
 	}
 	var attestRefJSON []byte
-	if f.AttestationRef != nil {
-		attestRefJSON, _ = json.Marshal(f.AttestationRef)
+	if s.AttestationRef != nil {
+		attestRefJSON, _ = json.Marshal(s.AttestationRef)
 	}
 
 	res, err := r.DB.ExecContext(ctx,
@@ -109,25 +115,29 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 			generation = $10, observed_generation = $11, active_workflow_gen = $12,
 			updated_at = $13
 		WHERE id = $14`,
-		int64(f.ManifestStrategyVersion),
-		int64(f.PlacementStrategyVersion),
-		int64(f.RolloutStrategyVersion),
-		string(rt), string(f.State), f.StatusReason,
+		int64(s.ManifestStrategyVersion),
+		int64(s.PlacementStrategyVersion),
+		int64(s.RolloutStrategyVersion),
+		string(rt), string(s.State), s.StatusReason,
 		string(auth), nullStringFromBytes(provJSON), nullStringFromBytes(attestRefJSON),
-		int64(f.Generation), int64(f.ObservedGeneration),
-		nullGeneration(f.ActiveWorkflowGen),
-		f.UpdatedAt.UTC().Format(time.RFC3339),
-		string(f.ID),
+		int64(s.Generation), int64(s.ObservedGeneration),
+		nullGeneration(s.ActiveWorkflowGen),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
+		string(s.ID),
 	)
 	if err != nil {
 		return fmt.Errorf("update fulfillment: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("fulfillment %q: %w", f.ID, domain.ErrNotFound)
+		return fmt.Errorf("fulfillment %q: %w", s.ID, domain.ErrNotFound)
 	}
 
-	return r.flushPendingStrategyRecords(ctx, f)
+	if err := r.flushPendingStrategyRecords(ctx, s.PendingStrategyRecords); err != nil {
+		return err
+	}
+	f.DrainPendingStrategyRecords()
+	return nil
 }
 
 func (r *FulfillmentRepo) Delete(ctx context.Context, id domain.FulfillmentID) error {
@@ -150,8 +160,7 @@ func (r *FulfillmentRepo) Delete(ctx context.Context, id domain.FulfillmentID) e
 	return nil
 }
 
-func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, f *domain.Fulfillment) error {
-	pending := f.DrainPendingStrategyRecords()
+func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, pending domain.PendingStrategyRecords) error {
 	for _, rec := range pending.Manifest {
 		spec, _ := json.Marshal(rec.Spec)
 		if _, err := r.DB.ExecContext(ctx,
@@ -210,8 +219,8 @@ func strategyJoins(f string) string {
 		 LEFT JOIN rollout_strategies rs ON rs.fulfillment_id = ` + f + `.id AND rs.version = ` + f + `.rollout_strategy_version`
 }
 
-func scanFulfillment(s scanner) (domain.Fulfillment, error) {
-	var f domain.Fulfillment
+func scanFulfillmentSnapshot(s scanner) (domain.FulfillmentSnapshot, error) {
+	var snap domain.FulfillmentSnapshot
 	var id, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
 	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
@@ -223,66 +232,85 @@ func scanFulfillment(s scanner) (domain.Fulfillment, error) {
 		&createdAtStr, &updatedAtStr,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return f, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return f, fmt.Errorf("scan fulfillment: %w", err)
+		return snap, fmt.Errorf("scan fulfillment: %w", err)
 	}
-	f.ID = domain.FulfillmentID(id)
-	f.ManifestStrategyVersion = domain.StrategyVersion(msVer)
-	f.PlacementStrategyVersion = domain.StrategyVersion(psVer)
-	f.RolloutStrategyVersion = domain.StrategyVersion(rsVer)
-	f.State = domain.FulfillmentState(stateStr)
-	f.StatusReason = statusReason
-	f.Generation = domain.Generation(generation)
-	f.SetLoadedGeneration(domain.Generation(generation))
-	f.ObservedGeneration = domain.Generation(observedGeneration)
+	return fulfillmentSnapshotFromColumns(
+		id, msVer, msSpec, psVer, psSpec, rsVer, rsSpec,
+		rtJSON, stateStr, statusReason, authJSON, provJSON, attestRefJSON,
+		generation, observedGeneration, activeWorkflowGen,
+		createdAtStr, updatedAtStr,
+	)
+}
+
+func fulfillmentSnapshotFromColumns(
+	id string,
+	msVer int64, msSpec sql.NullString,
+	psVer int64, psSpec sql.NullString,
+	rsVer int64, rsSpec sql.NullString,
+	rtJSON, stateStr, statusReason, authJSON string,
+	provJSON, attestRefJSON sql.NullString,
+	generation, observedGeneration int64,
+	activeWorkflowGen sql.NullInt64,
+	createdAtStr, updatedAtStr string,
+) (domain.FulfillmentSnapshot, error) {
+	var snap domain.FulfillmentSnapshot
+	snap.ID = domain.FulfillmentID(id)
+	snap.ManifestStrategyVersion = domain.StrategyVersion(msVer)
+	snap.PlacementStrategyVersion = domain.StrategyVersion(psVer)
+	snap.RolloutStrategyVersion = domain.StrategyVersion(rsVer)
+	snap.State = domain.FulfillmentState(stateStr)
+	snap.StatusReason = statusReason
+	snap.Generation = domain.Generation(generation)
+	snap.ObservedGeneration = domain.Generation(observedGeneration)
 	if activeWorkflowGen.Valid {
 		g := domain.Generation(activeWorkflowGen.Int64)
-		f.ActiveWorkflowGen = &g
+		snap.ActiveWorkflowGen = &g
 	}
 
 	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
-		f.CreatedAt = t
+		snap.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
-		f.UpdatedAt = t
+		snap.UpdatedAt = t
 	}
 
 	if msSpec.Valid {
-		if err := json.Unmarshal([]byte(msSpec.String), &f.ManifestStrategy); err != nil {
-			return f, fmt.Errorf("unmarshal manifest strategy: %w", err)
+		if err := json.Unmarshal([]byte(msSpec.String), &snap.ManifestStrategy); err != nil {
+			return snap, fmt.Errorf("unmarshal manifest strategy: %w", err)
 		}
 	}
 	if psSpec.Valid {
-		if err := json.Unmarshal([]byte(psSpec.String), &f.PlacementStrategy); err != nil {
-			return f, fmt.Errorf("unmarshal placement strategy: %w", err)
+		if err := json.Unmarshal([]byte(psSpec.String), &snap.PlacementStrategy); err != nil {
+			return snap, fmt.Errorf("unmarshal placement strategy: %w", err)
 		}
 	}
 	if rsSpec.Valid {
-		f.RolloutStrategy = &domain.RolloutStrategySpec{}
-		if err := json.Unmarshal([]byte(rsSpec.String), f.RolloutStrategy); err != nil {
-			return f, fmt.Errorf("unmarshal rollout strategy: %w", err)
+		snap.RolloutStrategy = &domain.RolloutStrategySpec{}
+		if err := json.Unmarshal([]byte(rsSpec.String), snap.RolloutStrategy); err != nil {
+			return snap, fmt.Errorf("unmarshal rollout strategy: %w", err)
 		}
 	}
-	if err := json.Unmarshal([]byte(rtJSON), &f.ResolvedTargets); err != nil {
-		return f, fmt.Errorf("unmarshal resolved targets: %w", err)
+	if err := json.Unmarshal([]byte(rtJSON), &snap.ResolvedTargets); err != nil {
+		return snap, fmt.Errorf("unmarshal resolved targets: %w", err)
 	}
 	if authJSON != "" {
-		if err := json.Unmarshal([]byte(authJSON), &f.Auth); err != nil {
-			return f, fmt.Errorf("unmarshal auth: %w", err)
+		if err := json.Unmarshal([]byte(authJSON), &snap.Auth); err != nil {
+			return snap, fmt.Errorf("unmarshal auth: %w", err)
 		}
 	}
 	if provJSON.Valid {
-		f.Provenance = &domain.Provenance{}
-		if err := json.Unmarshal([]byte(provJSON.String), f.Provenance); err != nil {
-			return f, fmt.Errorf("unmarshal provenance: %w", err)
+		snap.Provenance = &domain.Provenance{}
+		if err := json.Unmarshal([]byte(provJSON.String), snap.Provenance); err != nil {
+			return snap, fmt.Errorf("unmarshal provenance: %w", err)
 		}
 	}
 	if attestRefJSON.Valid {
-		f.AttestationRef = &domain.AttestationRef{}
-		if err := json.Unmarshal([]byte(attestRefJSON.String), f.AttestationRef); err != nil {
-			return f, fmt.Errorf("unmarshal attestation ref: %w", err)
+		snap.AttestationRef = &domain.AttestationRef{}
+		if err := json.Unmarshal([]byte(attestRefJSON.String), snap.AttestationRef); err != nil {
+			return snap, fmt.Errorf("unmarshal attestation ref: %w", err)
 		}
 	}
-	return f, nil
+	return snap, nil
 }

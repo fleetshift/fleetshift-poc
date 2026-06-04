@@ -42,12 +42,12 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID,
 			return deploymentMutationResult{}, err
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
+		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID())
 		if err != nil {
 			return deploymentMutationResult{}, err
 		}
 
-		f.TransitionToDeleting(f.Auth)
+		f.TransitionToDeleting(f.Auth())
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
@@ -56,8 +56,8 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID,
 		}
 		return deploymentMutationResult{
 			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
-			FulfillmentID: dep.FulfillmentID,
-			MyGen:         f.Generation,
+			FulfillmentID: dep.FulfillmentID(),
+			MyGen:         f.Generation(),
 		}, nil
 	})
 }

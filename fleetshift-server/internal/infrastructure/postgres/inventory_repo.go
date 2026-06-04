@@ -17,32 +17,33 @@ type InventoryRepo struct {
 }
 
 func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) error {
-	props := item.Properties
+	s := item.Snapshot()
+	props := s.Properties
 	if props == nil {
 		props = json.RawMessage("{}")
 	}
-	labels, err := json.Marshal(item.Labels)
+	labels, err := json.Marshal(s.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
 	var srcDeliveryID *string
-	if item.SourceDeliveryID != nil {
-		s := string(*item.SourceDeliveryID)
-		srcDeliveryID = &s
+	if s.SourceDeliveryID != nil {
+		id := string(*s.SourceDeliveryID)
+		srcDeliveryID = &id
 	}
 
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		item.ID, item.Type, item.Name,
+		s.ID, s.Type, s.Name,
 		string(props), string(labels), srcDeliveryID,
-		item.CreatedAt.UTC().Format(time.RFC3339),
-		item.UpdatedAt.UTC().Format(time.RFC3339),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("inventory item %q: %w", item.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("inventory item %q: %w", s.ID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert inventory item: %w", err)
 	}
@@ -50,19 +51,20 @@ func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) e
 }
 
 func (r *InventoryRepo) CreateOrUpdate(ctx context.Context, item domain.InventoryItem) error {
-	props := item.Properties
+	s := item.Snapshot()
+	props := s.Properties
 	if props == nil {
 		props = json.RawMessage("{}")
 	}
-	labels, err := json.Marshal(item.Labels)
+	labels, err := json.Marshal(s.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
 	var srcDeliveryID *string
-	if item.SourceDeliveryID != nil {
-		s := string(*item.SourceDeliveryID)
-		srcDeliveryID = &s
+	if s.SourceDeliveryID != nil {
+		id := string(*s.SourceDeliveryID)
+		srcDeliveryID = &id
 	}
 
 	_, err = r.DB.ExecContext(ctx,
@@ -75,10 +77,10 @@ func (r *InventoryRepo) CreateOrUpdate(ctx context.Context, item domain.Inventor
 		   labels = EXCLUDED.labels,
 		   source_delivery_id = EXCLUDED.source_delivery_id,
 		   updated_at = EXCLUDED.updated_at`,
-		item.ID, item.Type, item.Name,
+		s.ID, s.Type, s.Name,
 		string(props), string(labels), srcDeliveryID,
-		item.CreatedAt.UTC().Format(time.RFC3339),
-		item.UpdatedAt.UTC().Format(time.RFC3339),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert inventory item: %w", err)
@@ -109,34 +111,35 @@ func (r *InventoryRepo) ListByType(ctx context.Context, t domain.InventoryType) 
 }
 
 func (r *InventoryRepo) Update(ctx context.Context, item domain.InventoryItem) error {
-	props := item.Properties
+	s := item.Snapshot()
+	props := s.Properties
 	if props == nil {
 		props = json.RawMessage("{}")
 	}
-	labels, err := json.Marshal(item.Labels)
+	labels, err := json.Marshal(s.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
 	var srcDeliveryID *string
-	if item.SourceDeliveryID != nil {
-		s := string(*item.SourceDeliveryID)
-		srcDeliveryID = &s
+	if s.SourceDeliveryID != nil {
+		id := string(*s.SourceDeliveryID)
+		srcDeliveryID = &id
 	}
 
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE inventory_items
 		 SET type = $1, name = $2, properties = $3, labels = $4, source_delivery_id = $5, updated_at = $6
 		 WHERE id = $7`,
-		item.Type, item.Name, string(props), string(labels), srcDeliveryID,
-		item.UpdatedAt.UTC().Format(time.RFC3339), item.ID,
+		s.Type, s.Name, string(props), string(labels), srcDeliveryID,
+		s.UpdatedAt.UTC().Format(time.RFC3339), s.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update inventory item: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("inventory item %q: %w", item.ID, domain.ErrNotFound)
+		return fmt.Errorf("inventory item %q: %w", s.ID, domain.ErrNotFound)
 	}
 	return nil
 }
@@ -162,36 +165,44 @@ func (r *InventoryRepo) queryItems(ctx context.Context, query string, args ...an
 }
 
 func scanInventoryItem(s scanner) (domain.InventoryItem, error) {
-	var item domain.InventoryItem
+	snap, err := scanInventoryItemSnapshot(s)
+	if err != nil {
+		return domain.InventoryItem{}, err
+	}
+	return domain.InventoryItemFromSnapshot(snap), nil
+}
+
+func scanInventoryItemSnapshot(s scanner) (domain.InventoryItemSnapshot, error) {
+	var snap domain.InventoryItemSnapshot
 	var id, itemType, name, propsJSON, labelsJSON, createdAtStr, updatedAtStr string
 	var srcDeliveryID sql.NullString
 
 	if err := s.Scan(&id, &itemType, &name, &propsJSON, &labelsJSON, &srcDeliveryID, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return item, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return item, fmt.Errorf("scan inventory item: %w", err)
+		return snap, fmt.Errorf("scan inventory item: %w", err)
 	}
-	item.ID = domain.InventoryItemID(id)
-	item.Type = domain.InventoryType(itemType)
-	item.Name = name
-	item.Properties = json.RawMessage(propsJSON)
-	if err := json.Unmarshal([]byte(labelsJSON), &item.Labels); err != nil {
-		return item, fmt.Errorf("unmarshal labels: %w", err)
+	snap.ID = domain.InventoryItemID(id)
+	snap.Type = domain.InventoryType(itemType)
+	snap.Name = name
+	snap.Properties = json.RawMessage(propsJSON)
+	if err := json.Unmarshal([]byte(labelsJSON), &snap.Labels); err != nil {
+		return snap, fmt.Errorf("unmarshal labels: %w", err)
 	}
 	if srcDeliveryID.Valid {
 		did := domain.DeliveryID(srcDeliveryID.String)
-		item.SourceDeliveryID = &did
+		snap.SourceDeliveryID = &did
 	}
 	t, err := time.Parse(time.RFC3339, createdAtStr)
 	if err != nil {
-		return item, fmt.Errorf("parse created_at: %w", err)
+		return snap, fmt.Errorf("parse created_at: %w", err)
 	}
-	item.CreatedAt = t
+	snap.CreatedAt = t
 	t, err = time.Parse(time.RFC3339, updatedAtStr)
 	if err != nil {
-		return item, fmt.Errorf("parse updated_at: %w", err)
+		return snap, fmt.Errorf("parse updated_at: %w", err)
 	}
-	item.UpdatedAt = t
-	return item, nil
+	snap.UpdatedAt = t
+	return snap, nil
 }

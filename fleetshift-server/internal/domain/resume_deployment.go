@@ -50,7 +50,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			return deploymentMutationResult{}, err
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
+		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID())
 		if err != nil {
 			return deploymentMutationResult{}, err
 		}
@@ -64,7 +64,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 				ErrStaleGeneration, in.Etag, currentView.Etag()))
 		}
 
-		nextGen := f.Generation + 1
+		nextGen := f.Generation() + 1
 
 		// Expected-generation check: if supplied, it must match the
 		// next generation the server is about to produce.
@@ -83,14 +83,14 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 		}
 
 		var prov *Provenance
-		if f.Provenance != nil || len(in.UserSignature) > 0 {
+		if f.Provenance() != nil || len(in.UserSignature) > 0 {
 			provenanceGen := in.ExpectedGeneration
 			if provenanceGen == 0 {
 				provenanceGen = nextGen
 			}
 			prov, err = s.ProvenanceSvc.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
-				dep.ID, f.ManifestStrategy, f.PlacementStrategy,
+				dep.ID(), f.ManifestStrategy(), f.PlacementStrategy(),
 				provenanceGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {
@@ -110,8 +110,8 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 		}
 		return deploymentMutationResult{
 			View:          DeploymentView{Deployment: dep, Fulfillment: *f},
-			FulfillmentID: dep.FulfillmentID,
-			MyGen:         f.Generation,
+			FulfillmentID: dep.FulfillmentID(),
+			MyGen:         f.Generation(),
 		}, nil
 	})
 }

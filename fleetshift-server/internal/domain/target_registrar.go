@@ -25,30 +25,38 @@ func (r *TargetRegistrar) now() time.Time {
 
 // Register validates and persists a target along with a corresponding
 // inventory item (when an [InventoryRepository] is configured). The
-// target's [InventoryItemID] is set to "target:<TargetID>".
+// target's [InventoryItemID] is derived as "target:<TargetID>" by
+// [NewTargetInfo].
 func (r *TargetRegistrar) Register(ctx context.Context, target TargetInfo) error {
-	if target.ID == "" {
+	if target.ID() == "" {
 		return fmt.Errorf("%w: target ID is required", ErrInvalidArgument)
 	}
-	if target.Name == "" {
+	if target.Name() == "" {
 		return fmt.Errorf("%w: target name is required", ErrInvalidArgument)
 	}
 
-	if r.Inventory != nil {
-		invID := InventoryItemID("target:" + string(target.ID))
-		target.InventoryItemID = invID
+	target = NewTargetInfo(
+		target.ID(),
+		target.Type(),
+		target.Name(),
+		target.State(),
+		target.Labels(),
+		target.Properties(),
+		target.AcceptedResourceTypes(),
+	)
 
-		props, _ := json.Marshal(target.Properties)
+	if r.Inventory != nil {
+		props, _ := json.Marshal(target.Properties())
 		now := r.now()
-		if err := r.Inventory.Create(ctx, InventoryItem{
-			ID:         invID,
-			Type:       InventoryType(target.Type),
-			Name:       target.Name,
-			Properties: props,
-			Labels:     target.Labels,
-			CreatedAt:  now,
-			UpdatedAt:  now,
-		}); err != nil {
+		if err := r.Inventory.Create(ctx, NewInventoryItem(
+			target.InventoryItemID(),
+			InventoryType(target.Type()),
+			target.Name(),
+			props,
+			target.Labels(),
+			nil,
+			now,
+		)); err != nil {
 			return fmt.Errorf("create inventory item for target: %w", err)
 		}
 	}

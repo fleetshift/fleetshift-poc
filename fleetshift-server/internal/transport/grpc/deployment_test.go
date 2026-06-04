@@ -97,9 +97,9 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 
 	// Register a test target so placements resolve.
 	targetSvc := &application.TargetService{Store: store}
-	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: testTargetType, Name: "test-target",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 

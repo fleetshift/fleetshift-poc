@@ -21,7 +21,7 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	}
 
 	got, err := s.Generate(context.Background(), domain.GenerateContext{
-		Target: domain.TargetInfo{ID: "addon-target"},
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "addon-target"}),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -73,12 +73,12 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	}
 	defer tx.Rollback()
 
-	f := &domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        domain.FulfillmentID("f-" + string(name)),
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
+	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyManagedResource,
 		IntentRef: domain.IntentRef{ResourceType: rt, Name: name, Version: 1},
@@ -92,14 +92,14 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 		t.Fatalf("Create fulfillment: %v", err)
 	}
 
-	mr := &domain.ManagedResource{
+	mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 		ResourceType:  rt,
 		Name:          name,
 		UID:           "uid-" + string(name),
-		FulfillmentID: f.ID,
+		FulfillmentID: f.ID(),
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}
+	})
 	mr.RecordIntent(spec, now)
 	if err := tx.ManagedResources().CreateInstance(context.Background(), mr); err != nil {
 		t.Fatalf("CreateInstance: %v", err)

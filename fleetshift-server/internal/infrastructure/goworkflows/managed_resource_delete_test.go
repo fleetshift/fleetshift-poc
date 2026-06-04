@@ -109,7 +109,7 @@ func awaitGoFulfillmentState(
 		}
 		f, err := tx.Fulfillments().Get(ctx, id)
 		_ = tx.Rollback()
-		if err == nil && f.State == want {
+		if err == nil && f.State() == want {
 			return
 		}
 		select {
@@ -219,12 +219,12 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	if err := tx.Targets().Create(ctx, domain.TargetInfo{
+	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "addon-cluster-mgmt",
 		Name:                  "Cluster Management Addon",
 		Type:                  "addon",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("create target: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -257,7 +257,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		t.Fatalf("Create: %v", err)
 	}
 
-	awaitGoFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitGoFulfillmentState(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	deleteCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{
@@ -300,10 +300,10 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 	if err != nil {
 		t.Fatalf("Get during delete: %v", err)
 	}
-	if viewDuringDelete.Fulfillment.State != domain.FulfillmentStateDeleting {
-		t.Fatalf("Get during delete state = %q, want deleting", viewDuringDelete.Fulfillment.State)
+	if viewDuringDelete.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("Get during delete state = %q, want deleting", viewDuringDelete.Fulfillment.State())
 	}
 
 	close(deliveryAgent.allowRemove)
-	awaitGoFulfillmentGone(ctx, t, store, view.Fulfillment.ID)
+	awaitGoFulfillmentGone(ctx, t, store, view.Fulfillment.ID())
 }

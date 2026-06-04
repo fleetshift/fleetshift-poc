@@ -212,10 +212,10 @@ func setupWithDelivery(
 	}
 
 	targetSvc := &application.TargetService{Store: store}
-	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: clusterTargetType, Name: "Kind Cluster Addon",
 		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
@@ -730,11 +730,12 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get managed resource: %v", err)
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 	if err != nil {
 		t.Fatalf("get fulfillment: %v", err)
 	}
-	f.Provenance = &domain.Provenance{
+	snap := f.Snapshot()
+	snap.Provenance = &domain.Provenance{
 		Sig: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"},
 			ContentHash:    []byte("hash-bytes"),
@@ -743,6 +744,7 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 		ValidUntil:         time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
 		ExpectedGeneration: 1,
 	}
+	f = domain.FulfillmentFromSnapshot(snap)
 	if err := tx.Fulfillments().Update(ctx, f); err != nil {
 		t.Fatalf("update fulfillment: %v", err)
 	}
@@ -822,11 +824,13 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get managed resource: %v", err)
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 	if err != nil {
 		t.Fatalf("get fulfillment: %v", err)
 	}
-	f.State = domain.FulfillmentStatePausedAuth
+	snap := f.Snapshot()
+	snap.State = domain.FulfillmentStatePausedAuth
+	f = domain.FulfillmentFromSnapshot(snap)
 	if err := tx.Fulfillments().Update(ctx, f); err != nil {
 		t.Fatalf("update fulfillment: %v", err)
 	}

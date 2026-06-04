@@ -8,7 +8,7 @@ import (
 )
 
 func TestFilterAcceptedManifests_UnconstrainedTarget(t *testing.T) {
-	target := domain.TargetInfo{ID: "t1", Name: "unconstrained"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "unconstrained"})
 	manifests := []domain.Manifest{
 		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
 		{ResourceType: "kubernetes", Raw: json.RawMessage(`{}`)},
@@ -20,11 +20,11 @@ func TestFilterAcceptedManifests_UnconstrainedTarget(t *testing.T) {
 }
 
 func TestFilterAcceptedManifests_FiltersToAcceptedTypes(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "kind-only",
 		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster"},
-	}
+	})
 	manifests := []domain.Manifest{
 		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
 		{ResourceType: "kubernetes", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)},
@@ -39,11 +39,11 @@ func TestFilterAcceptedManifests_FiltersToAcceptedTypes(t *testing.T) {
 }
 
 func TestFilterAcceptedManifests_AllFiltered(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "k8s",
 		AcceptedResourceTypes: []domain.ResourceType{"kubernetes"},
-	}
+	})
 	manifests := []domain.Manifest{
 		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
 	}
@@ -54,11 +54,11 @@ func TestFilterAcceptedManifests_AllFiltered(t *testing.T) {
 }
 
 func TestFilterAcceptedManifests_EmptyManifests(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "k8s",
 		AcceptedResourceTypes: []domain.ResourceType{"kubernetes"},
-	}
+	})
 	got := domain.FilterAcceptedManifests(target, nil)
 	if len(got) != 0 {
 		t.Fatalf("expected 0 manifests for nil input; got %d", len(got))
@@ -66,11 +66,11 @@ func TestFilterAcceptedManifests_EmptyManifests(t *testing.T) {
 }
 
 func TestFilterAcceptedManifests_MultipleAcceptedTypes(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "multi",
 		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster", "kubernetes"},
-	}
+	})
 	manifests := []domain.Manifest{
 		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
 		{ResourceType: "kubernetes", Raw: json.RawMessage(`{}`)},

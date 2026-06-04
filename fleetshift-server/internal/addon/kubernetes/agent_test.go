@@ -89,12 +89,12 @@ func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]d
 func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
 		Type:       kubernetes.TargetType,
 		Name:       "test-cluster",
 		Properties: map[string]string{},
-	}
+	})
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
 	err := agent.Deliver(context.Background(), target, "d1", nil, auth, nil, 1)
@@ -109,14 +109,14 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 func TestAgent_Deliver_MissingToken(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
 			"api_server": "https://127.0.0.1:6443",
 		},
-	}
+	})
 
 	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil, 1)
 	if err == nil {
@@ -131,14 +131,14 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
 			"api_server": "https://127.0.0.1:1",
 		},
-	}
+	})
 
 	auth := domain.DeliveryAuth{Token: "not-a-real-token"}
 	manifests := []domain.Manifest{{
@@ -160,12 +160,12 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 func TestAgent_Remove_MissingAPIServer(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
 		Type:       kubernetes.TargetType,
 		Name:       "test-cluster",
 		Properties: map[string]string{},
-	}
+	})
 
 	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
 	if err == nil {
@@ -176,14 +176,14 @@ func TestAgent_Remove_MissingAPIServer(t *testing.T) {
 func TestAgent_Remove_EmptyManifests(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
 			"api_server": "https://127.0.0.1:6443",
 		},
-	}
+	})
 
 	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1); err != nil {
 		t.Fatalf("Remove with empty manifests: %v", err)
@@ -201,7 +201,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -209,7 +209,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 			"api_server": ts.URL,
 			"ca_cert":    tlsServerCAPEM(ts),
 		},
-	}
+	})
 
 	auth := domain.DeliveryAuth{Token: "expired-token"}
 	manifests := []domain.Manifest{{
@@ -239,7 +239,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -247,7 +247,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 			"api_server": ts.URL,
 			"ca_cert":    tlsServerCAPEM(ts),
 		},
-	}
+	})
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
 	manifests := []domain.Manifest{{
@@ -271,7 +271,7 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -279,7 +279,7 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 			"api_server":   "https://127.0.0.1:6443",
 			"trust_bundle": trustBundle,
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
@@ -307,14 +307,14 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
 			"api_server": "https://127.0.0.1:6443",
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
@@ -340,7 +340,7 @@ func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testin
 
 func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -348,7 +348,7 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 			"api_server":   "https://127.0.0.1:6443",
 			"trust_bundle": trustBundle,
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
@@ -383,7 +383,7 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -391,7 +391,7 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 			"api_server":   "https://127.0.0.1:6443",
 			"trust_bundle": trustBundle,
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
@@ -420,7 +420,7 @@ func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
 	agent := kubernetes.NewAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
@@ -428,7 +428,7 @@ func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
 			"api_server":   "https://127.0.0.1:6443",
 			"trust_bundle": trustBundle,
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{
@@ -459,14 +459,14 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReportsAuthFailed(t *testing
 	reporter := newChannelReporter()
 	agent := kubernetes.NewAgent(reporter)
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
 		Name: "test-cluster",
 		Properties: map[string]string{
 			"api_server": "https://127.0.0.1:6443",
 		},
-	}
+	})
 
 	att := &domain.Attestation{
 		Input: domain.SignedInput{

@@ -399,9 +399,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("load auth methods: %w", err)
 	}
 	for _, m := range existingMethods {
-		if m.Type == domain.AuthMethodTypeOIDC && m.OIDC != nil {
-			if err := tokenVerifier.RegisterKeySet(ctx, m.OIDC.JWKSURI); err != nil {
-				logger.Warn("failed to register JWKS for auth method", "id", m.ID, "err", err)
+		if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+			if err := tokenVerifier.RegisterKeySet(ctx, m.OIDC().JWKSURI); err != nil {
+				logger.Warn("failed to register JWKS for auth method", "id", m.ID(), "err", err)
 			}
 		}
 	}
@@ -614,12 +614,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if enabledAddons["kind"] {
 		if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
 			Agent: kindAgent,
-			Targets: []domain.TargetInfo{{
+			Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 				ID:                    "kind-local",
 				Type:                  kindaddon.TargetType,
 				Name:                  "Local Kind Provider",
 				AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			}},
+			})},
 			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
 		}); err != nil {
 			return fmt.Errorf("connect kind addon: %w", err)
@@ -629,12 +629,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if enabledAddons["ocp"] {
 		if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
 			Agent: ocpAgent,
-			Targets: []domain.TargetInfo{{
+			Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 				ID:                    "ocp-aws",
 				Type:                  ocpaddon.TargetType,
 				Name:                  "OCP on AWS",
 				AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
-			}},
+			})},
 		}); err != nil {
 			return fmt.Errorf("connect ocp addon: %w", err)
 		}
@@ -653,13 +653,13 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		targetID := domain.TargetID(activeTarget.ID)
 		if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
 			Agent: gcphcpAgent,
-			Targets: []domain.TargetInfo{{
+			Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 				ID:                    targetID,
 				Type:                  gcphcpaddon.TargetType,
 				Name:                  fmt.Sprintf("GCP HCP %s/%s", activeTarget.GCPProject, activeTarget.Region),
 				Properties:            activeTarget.TargetProperties(),
 				AcceptedResourceTypes: []domain.ResourceType{gcphcpaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			}},
+			})},
 			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
 		}); err != nil {
 			return fmt.Errorf("connect gcphcp addon: %w", err)

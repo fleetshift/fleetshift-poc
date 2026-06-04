@@ -11,7 +11,7 @@ import (
 
 func seedPausedDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID, gen domain.Generation) {
 	t.Helper()
-	seedFulfillmentAndDeployment(t, store, depID, domain.Fulfillment{
+	seedFulfillmentAndDeployment(t, store, depID, domain.FulfillmentSnapshot{
 		Generation: gen,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -75,8 +75,8 @@ func TestResumeDeployment_CorrectEtag_Succeeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Fulfillment.Generation != 4 {
-		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation)
+	if result.Fulfillment.Generation() != 4 {
+		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation())
 	}
 }
 
@@ -113,14 +113,14 @@ func TestResumeDeployment_CorrectExpectedGeneration_Succeeds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Fulfillment.Generation != 4 {
-		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation)
+	if result.Fulfillment.Generation() != 4 {
+		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation())
 	}
 }
 
 func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.Fulfillment{
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
 		Generation: 3,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -145,8 +145,8 @@ func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Fulfillment.Generation != 4 {
-		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation)
+	if result.Fulfillment.Generation() != 4 {
+		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation())
 	}
 }
 
@@ -183,7 +183,7 @@ func TestResumeDeployment_UnsignedLegacy_NoEtagNoGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if result.Fulfillment.Generation != 4 {
-		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation)
+	if result.Fulfillment.Generation() != 4 {
+		t.Errorf("Generation = %d, want 4", result.Fulfillment.Generation())
 	}
 }

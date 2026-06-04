@@ -208,11 +208,11 @@ func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedRes
 	if err != nil {
 		return domain.ManagedResourceView{}, err
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 	if err != nil {
 		return domain.ManagedResourceView{}, err
 	}
-	currentGen := f.Generation
+	currentGen := f.Generation()
 	if err := tx.Commit(); err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
 	}

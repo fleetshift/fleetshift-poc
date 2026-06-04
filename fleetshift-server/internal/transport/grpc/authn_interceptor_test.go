@@ -28,14 +28,14 @@ func newFakeAuthMethodRepo() *fakeAuthMethodRepo {
 }
 
 func (r *fakeAuthMethodRepo) Save(ctx context.Context, method domain.AuthMethod) error {
-	r.methods[method.ID] = method
+	r.methods[method.ID()] = method
 	return nil
 }
 
 func (r *fakeAuthMethodRepo) Get(ctx context.Context, id domain.AuthMethodID) (domain.AuthMethod, error) {
 	m, ok := r.methods[id]
 	if !ok {
-		return domain.AuthMethod{}, domain.ErrNotFound
+		return domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{}), domain.ErrNotFound
 	}
 	return m, nil
 }
@@ -155,7 +155,7 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 	repo := newFakeAuthMethodRepo()
 	ctx := context.Background()
 	// Save OIDC method directly (bypass Create to avoid discovery in test)
-	if err := repo.Save(ctx, domain.AuthMethod{
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -166,7 +166,7 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Save auth method: %v", err)
 	}
 
@@ -206,7 +206,7 @@ func TestAuthnInterceptor_ValidToken_AuthenticatedSubject(t *testing.T) {
 func TestAuthnInterceptor_InvalidToken_Unauthenticated(t *testing.T) {
 	repo := newFakeAuthMethodRepo()
 	ctx := context.Background()
-	if err := repo.Save(ctx, domain.AuthMethod{
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -217,7 +217,7 @@ func TestAuthnInterceptor_InvalidToken_Unauthenticated(t *testing.T) {
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Save auth method: %v", err)
 	}
 
@@ -237,7 +237,7 @@ func TestAuthnInterceptor_InvalidToken_Unauthenticated(t *testing.T) {
 func TestAuthnInterceptor_NoToken_WithMethodsConfigured(t *testing.T) {
 	repo := newFakeAuthMethodRepo()
 	ctx := context.Background()
-	if err := repo.Save(ctx, domain.AuthMethod{
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "oidc-1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -248,7 +248,7 @@ func TestAuthnInterceptor_NoToken_WithMethodsConfigured(t *testing.T) {
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Save auth method: %v", err)
 	}
 

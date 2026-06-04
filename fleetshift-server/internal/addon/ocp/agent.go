@@ -545,14 +545,14 @@ func (a *Agent) doRemove(
 }
 
 // removeByTargetProperties destroys a successfully provisioned cluster
-// using infra_id/region/role_arn stored in target.Properties. It creates a
+// using infra_id/region/role_arn stored in target.Properties(). It creates a
 // temporary work directory with reconstructed metadata.json.
 func (a *Agent) removeByTargetProperties(ctx context.Context, target domain.TargetInfo, auth domain.DeliveryAuth) error {
-	// 1. Read infra_id, region, role_arn from target.Properties
-	infraID := target.Properties["infra_id"]
-	region := target.Properties["region"]
-	roleARN := target.Properties["role_arn"]
-	clusterID := target.Properties["cluster_id"]
+	// 1. Read infra_id, region, role_arn from target.Properties()
+	infraID := target.Properties()["infra_id"]
+	region := target.Properties()["region"]
+	roleARN := target.Properties()["role_arn"]
+	clusterID := target.Properties()["cluster_id"]
 
 	if infraID == "" {
 		return fmt.Errorf("target property 'infra_id' is required for removal")
@@ -587,9 +587,9 @@ func (a *Agent) removeByTargetProperties(ctx context.Context, target domain.Targ
 	}
 
 	// 5. Write cluster.yaml so ocp-engine knows about STS mode
-	ccostsMode := target.Properties["cco_sts_mode"] == "true"
-	releaseImage := target.Properties["release_image"]
-	clusterName := target.Name
+	ccostsMode := target.Properties()["cco_sts_mode"] == "true"
+	releaseImage := target.Properties()["release_image"]
+	clusterName := target.Name()
 
 	// 6. Run ocp-engine destroy
 	if err := a.runDestroy(ctx, workDir, awsCreds); err != nil {

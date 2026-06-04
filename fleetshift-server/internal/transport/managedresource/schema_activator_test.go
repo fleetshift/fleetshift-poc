@@ -414,10 +414,10 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	t.Cleanup(func() { conn.Close() })
 
 	targetSvc := &application.TargetService{Store: store}
-	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "widget-addon", Type: widgetTargetType, Name: "Widget Addon",
 		AcceptedResourceTypes: []domain.ResourceType{"widgets"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 

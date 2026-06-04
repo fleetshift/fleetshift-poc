@@ -99,11 +99,11 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("expected 2 delivery records, got %d", len(records))
 		}
 		for _, rec := range records {
-			if rec.State != domain.DeliveryStateDelivered {
-				t.Errorf("record for %s: State = %q, want %q", rec.TargetID, rec.State, domain.DeliveryStateDelivered)
+			if rec.State() != domain.DeliveryStateDelivered {
+				t.Errorf("record for %s: State = %q, want %q", rec.TargetID(), rec.State(), domain.DeliveryStateDelivered)
 			}
-			if len(rec.Manifests) != 1 {
-				t.Errorf("record for %s: Manifests len = %d, want 1", rec.TargetID, len(rec.Manifests))
+			if len(rec.Manifests()) != 1 {
+				t.Errorf("record for %s: Manifests len = %d, want 1", rec.TargetID(), len(rec.Manifests()))
 			}
 		}
 	})
@@ -144,9 +144,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "t1", Type: TestTargetType, Name: "cluster-prod", Labels: map[string]string{"env": "prod"}},
-			domain.TargetInfo{ID: "t2", Type: TestTargetType, Name: "cluster-staging", Labels: map[string]string{"env": "staging"}},
-			domain.TargetInfo{ID: "t3", Type: TestTargetType, Name: "cluster-prod-eu", Labels: map[string]string{"env": "prod"}},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: TestTargetType, Name: "cluster-prod", Labels: map[string]string{"env": "prod"}}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Type: TestTargetType, Name: "cluster-staging", Labels: map[string]string{"env": "staging"}}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t3", Type: TestTargetType, Name: "cluster-prod-eu", Labels: map[string]string{"env": "prod"}}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -213,7 +213,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 
 		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
-		fID := view.Deployment.FulfillmentID
+		fID := view.Deployment.FulfillmentID()
 
 		exec, err := wfs.DeleteDeployment.Start(ctx, "d1", 1)
 		if err != nil {
@@ -277,7 +277,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 		// Engine may be idempotent (same workflow instance ID) and return success.
 		view, err := queryDeploymentView(ctx, t, infra, "d1")
-		if err != nil || view.Deployment.ID != "d1" {
+		if err != nil || view.Deployment.ID() != "d1" {
 			t.Fatalf("second Create succeeded but deployment d1 missing or wrong: %v", err)
 		}
 	})
@@ -289,8 +289,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "t1", Type: TestTargetType, Name: "a", Labels: map[string]string{"env": "prod"}},
-			domain.TargetInfo{ID: "t2", Type: TestTargetType, Name: "b", Labels: map[string]string{"env": "staging"}},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: TestTargetType, Name: "a", Labels: map[string]string{"env": "prod"}}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Type: TestTargetType, Name: "b", Labels: map[string]string{"env": "staging"}}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -315,14 +315,14 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Get: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q, want %q", f.State, domain.FulfillmentStateActive)
+		if f.State() != domain.FulfillmentStateActive {
+			t.Fatalf("State = %q, want %q", f.State(), domain.FulfillmentStateActive)
 		}
-		if len(f.ResolvedTargets) != 0 {
-			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", f.ResolvedTargets)
+		if len(f.ResolvedTargets()) != 0 {
+			t.Fatalf("selector matched no targets: ResolvedTargets = %v, want []", f.ResolvedTargets())
 		}
-		if f.ActiveWorkflowGen != nil {
-			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen)
+		if f.ActiveWorkflowGen() != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen())
 		}
 
 		records := queryDeliveries(ctx, t, infra, "d1")
@@ -338,7 +338,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "provisioner", Type: OutputTargetType, Name: "provisioner"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Type: OutputTargetType, Name: "provisioner"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -370,11 +370,11 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 		tx.Rollback()
 
-		if tgt.Type != "kubernetes" {
-			t.Errorf("target type = %q, want %q", tgt.Type, "kubernetes")
+		if tgt.Type() != "kubernetes" {
+			t.Errorf("target type = %q, want %q", tgt.Type(), "kubernetes")
 		}
-		if tgt.Properties["kubeconfig_ref"] != "targets/k8s-new-cluster/kubeconfig" {
-			t.Errorf("target kubeconfig_ref = %q, want %q", tgt.Properties["kubeconfig_ref"], "targets/k8s-new-cluster/kubeconfig")
+		if tgt.Properties()["kubeconfig_ref"] != "targets/k8s-new-cluster/kubeconfig" {
+			t.Errorf("target kubeconfig_ref = %q, want %q", tgt.Properties()["kubeconfig_ref"], "targets/k8s-new-cluster/kubeconfig")
 		}
 
 		if infra.Vault != nil {
@@ -517,8 +517,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
-		if view.Fulfillment.State != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q after invalidation, want %q", view.Fulfillment.State, domain.FulfillmentStateActive)
+		if view.Fulfillment.State() != domain.FulfillmentStateActive {
+			t.Fatalf("State = %q after invalidation, want %q", view.Fulfillment.State(), domain.FulfillmentStateActive)
 		}
 	})
 
@@ -529,7 +529,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "af1", Type: AuthFailTargetType, Name: "auth-fail-1"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "af1", Type: AuthFailTargetType, Name: "auth-fail-1"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -625,7 +625,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "tf1", Type: TransientFailTargetType, Name: "transient-fail-1"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "tf1", Type: TransientFailTargetType, Name: "transient-fail-1"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -650,11 +650,11 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("GetView: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q, want %q", f.State, domain.FulfillmentStateActive)
+		if f.State() != domain.FulfillmentStateActive {
+			t.Fatalf("State = %q, want %q", f.State(), domain.FulfillmentStateActive)
 		}
-		if f.ActiveWorkflowGen != nil {
-			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen)
+		if f.ActiveWorkflowGen() != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen())
 		}
 		assertResolvedTargets(t, f, "tf1")
 	})
@@ -670,7 +670,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "term1", Type: TerminalFailTargetType, Name: "terminal-fail-1"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "term1", Type: TerminalFailTargetType, Name: "terminal-fail-1"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -695,13 +695,13 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("GetView: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State != domain.FulfillmentStateFailed {
-			t.Fatalf("State = %q, want %q", f.State, domain.FulfillmentStateFailed)
+		if f.State() != domain.FulfillmentStateFailed {
+			t.Fatalf("State = %q, want %q", f.State(), domain.FulfillmentStateFailed)
 		}
-		if f.ActiveWorkflowGen != nil {
-			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen)
+		if f.ActiveWorkflowGen() != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen())
 		}
-		if f.StatusReason == "" {
+		if f.StatusReason() == "" {
 			t.Fatal("StatusReason should be populated for a terminal failure")
 		}
 		if n := agent.Calls(); n != 1 {
@@ -722,7 +722,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "tr1", Type: TransientRemoveTargetType, Name: "transient-remove-1"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "tr1", Type: TransientRemoveTargetType, Name: "transient-remove-1"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -774,7 +774,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		defer cancel()
 
 		createTargets(ctx, t, infra,
-			domain.TargetInfo{ID: "af1", Type: AsyncFailTargetType, Name: "async-fail-1"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "af1", Type: AsyncFailTargetType, Name: "async-fail-1"}),
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
@@ -799,11 +799,11 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("GetView: %v", err)
 		}
 		f := view.Fulfillment
-		if f.State != domain.FulfillmentStateActive {
-			t.Fatalf("State = %q, want %q (async failure should be retried)", f.State, domain.FulfillmentStateActive)
+		if f.State() != domain.FulfillmentStateActive {
+			t.Fatalf("State = %q, want %q (async failure should be retried)", f.State(), domain.FulfillmentStateActive)
 		}
-		if f.ActiveWorkflowGen != nil {
-			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen)
+		if f.ActiveWorkflowGen() != nil {
+			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen())
 		}
 		assertResolvedTargets(t, f, "af1")
 	})
@@ -853,11 +853,11 @@ func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...stri
 	}
 	defer tx.Rollback()
 	for _, id := range ids {
-		must(t, tx.Targets().Create(ctx, domain.TargetInfo{
+		must(t, tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:   domain.TargetID(id),
 			Type: TestTargetType,
 			Name: "cluster-" + id,
-		}))
+		})))
 	}
 	must(t, tx.Commit())
 }
@@ -874,12 +874,12 @@ func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id 
 		if err != nil {
 			t.Fatalf("GetView(%s): %v", id, err)
 		}
-		if view.Fulfillment.ObservedGeneration >= want {
+		if view.Fulfillment.ObservedGeneration() >= want {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for ObservedGeneration >= %d (last: %d)", want, view.Fulfillment.ObservedGeneration)
+			t.Fatalf("timed out waiting for ObservedGeneration >= %d (last: %d)", want, view.Fulfillment.ObservedGeneration())
 		case <-time.After(5 * time.Millisecond):
 		}
 	}
@@ -897,14 +897,14 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id dom
 		if err != nil && !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("GetView(%s): %v", id, err)
 		}
-		if err == nil && view.Fulfillment.State == want {
+		if err == nil && view.Fulfillment.State() == want {
 			return view
 		}
 		select {
 		case <-ctx.Done():
 			last := domain.FulfillmentState("")
 			if err == nil {
-				last = view.Fulfillment.State
+				last = view.Fulfillment.State()
 			}
 			t.Fatalf("timed out waiting for deployment %s fulfillment to reach state %q (last: %q)", id, want, last)
 		case <-time.After(5 * time.Millisecond):
@@ -914,11 +914,11 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id dom
 
 func assertResolvedTargets(t *testing.T, ful domain.Fulfillment, expectedIDs ...string) {
 	t.Helper()
-	if len(ful.ResolvedTargets) != len(expectedIDs) {
-		t.Fatalf("ResolvedTargets: got %d, want %d", len(ful.ResolvedTargets), len(expectedIDs))
+	if len(ful.ResolvedTargets()) != len(expectedIDs) {
+		t.Fatalf("ResolvedTargets: got %d, want %d", len(ful.ResolvedTargets()), len(expectedIDs))
 	}
 	got := make(map[domain.TargetID]bool)
-	for _, id := range ful.ResolvedTargets {
+	for _, id := range ful.ResolvedTargets() {
 		got[id] = true
 	}
 	for _, id := range expectedIDs {
@@ -939,7 +939,7 @@ func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domai
 	if err != nil {
 		t.Fatalf("GetView(%s): %v", depID, err)
 	}
-	records, err := tx.Deliveries().ListByFulfillment(ctx, view.Deployment.FulfillmentID)
+	records, err := tx.Deliveries().ListByFulfillment(ctx, view.Deployment.FulfillmentID())
 	if err != nil {
 		t.Fatalf("ListByFulfillment: %v", err)
 	}
@@ -981,7 +981,7 @@ func fulfillmentID(ctx context.Context, t *testing.T, infra Infra, id domain.Dep
 	if err != nil {
 		t.Fatalf("GetView(%s): %v", id, err)
 	}
-	return view.Deployment.FulfillmentID
+	return view.Deployment.FulfillmentID()
 }
 
 func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID, manifest domain.ManifestStrategySpec, placement domain.PlacementStrategySpec) domain.FulfillmentID {
@@ -989,28 +989,28 @@ func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, dep
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fID := domain.FulfillmentID(uuid.New().String())
 	dUID := uuid.New().String()
-	f := domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        fID,
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
+	})
 	f.AdvanceManifestStrategy(manifest, now)
 	f.AdvancePlacementStrategy(placement, now)
 	f.AdvanceRolloutStrategy(nil, now)
-	dep := domain.Deployment{
+	dep := domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
 		ID:            depID,
 		UID:           dUID,
 		FulfillmentID: fID,
 		CreatedAt:     now,
 		UpdatedAt:     now,
-	}
+	})
 	tx, err := infra.Store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
 	defer tx.Rollback()
-	must(t, tx.Fulfillments().Create(ctx, &f))
+	must(t, tx.Fulfillments().Create(ctx, f))
 	must(t, tx.Deployments().Create(ctx, dep))
 	must(t, tx.Commit())
 	return fID
@@ -1362,7 +1362,7 @@ type stubAuthMethodRepo struct{}
 
 func (stubAuthMethodRepo) Save(_ context.Context, _ domain.AuthMethod) error { return nil }
 func (stubAuthMethodRepo) Get(_ context.Context, _ domain.AuthMethodID) (domain.AuthMethod, error) {
-	return domain.AuthMethod{}, domain.ErrNotFound
+	return domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{}), domain.ErrNotFound
 }
 func (stubAuthMethodRepo) List(_ context.Context) ([]domain.AuthMethod, error) { return nil, nil }
 

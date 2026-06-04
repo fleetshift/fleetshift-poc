@@ -162,7 +162,7 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
 	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
@@ -184,7 +184,7 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 	provider.clusters["dev-cluster"] = nil
 	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
@@ -206,7 +206,7 @@ func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{}`),
@@ -228,7 +228,7 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
@@ -262,7 +262,7 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		Raw: json.RawMessage(`{"name":"my-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Remove: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Remove should succeed for non-existent cluster: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 	provider := newFakeProvider()
 	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
@@ -329,7 +329,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
@@ -353,7 +353,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
@@ -397,7 +397,7 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
@@ -490,7 +490,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "default-cfg"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -526,7 +526,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "custom-cfg", "nodes": [{"role": "control-plane"}, {"role": "worker"}]}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -581,7 +581,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "verified-cluster"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -620,7 +620,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "rejected-cluster"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver should not return a dispatch error: %v", err)
 	}
@@ -654,7 +654,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		Raw:          json.RawMessage(`{"name": "no-token-cluster"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -677,7 +677,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "b"}`)},
 	}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -721,7 +721,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 		Raw:          raw,
 	}}
 
-	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -760,7 +760,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		ResourceType: domain.TrustBundleResourceType,
 		Raw:          trustRaw,
 	}}
-	_ = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-trust", trustManifests, domain.DeliveryAuth{}, nil, 1)
+	_ = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-trust", trustManifests, domain.DeliveryAuth{}, nil, 1)
 	awaitDone(t, reporter.done)
 
 	// Now deliver a cluster spec. The same agent retains the trust
@@ -771,7 +771,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 		ResourceType: kind.ClusterResourceType,
 		Raw:          specRaw,
 	}}
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}
@@ -843,14 +843,14 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 	}}
 
 	// First deliver — enters Create and blocks.
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("first Deliver: %v", err)
 	}
 	<-bp.entered // wait until goroutine is inside Create
 
 	// Second deliver with same delivery ID — should be a no-op.
-	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-retry:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("second Deliver: %v", err)
 	}
@@ -887,13 +887,13 @@ func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 		Raw: json.RawMessage(`{"name":"rm-cluster"}`),
 	}}
 
-	err := agent.Remove(context.Background(), domain.TargetInfo{}, "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("first Remove: %v", err)
 	}
 	<-bdp.entered
 
-	err = agent.Remove(context.Background(), domain.TargetInfo{}, "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
+	err = agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("second Remove: %v", err)
 	}
@@ -931,7 +931,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	}
 
 	// First deliver — trust bundle is stored, cluster Create blocks.
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("first Deliver: %v", err)
 	}
@@ -939,7 +939,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 
 	// Retry with same delivery ID while first is in-flight.
 	// The inflight gate must prevent a second storeTrustBundle call.
-	err = agent.Deliver(context.Background(), domain.TargetInfo{}, "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
+	err = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-tb-retry", manifests, domain.DeliveryAuth{}, nil, 1)
 	if err != nil {
 		t.Fatalf("second Deliver: %v", err)
 	}

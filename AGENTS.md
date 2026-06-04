@@ -41,6 +41,6 @@ For how to...
 - write tests, see fleetshift-server/docs/testing.md
 - write durable workflows and integrate with durable computing libraries, see fleetshift-server/docs/durable-workflows.md
 - write or modify constructors, see fleetshift-server/docs/constructors.md
-- write domain objects, see fleetshift-server/docs/domain.md
+- write domain objects and understand the snapshot persistence pattern, see fleetshift-server/docs/domain.md
 
 When running tests, iterate with `go test ./...` (the default suite excludes Docker-heavy integration tests). Tests gated behind `//go:build integration` require `-tags integration` and a container runtime; run them explicitly when working on that code (e.g. `go test -tags integration ./internal/addon/kind/`) and/or to verify we haven't broken anything before completing.

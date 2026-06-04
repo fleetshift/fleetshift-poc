@@ -69,15 +69,35 @@ var knownDeliveryStates = map[DeliveryState]struct{}{
 
 // Delivery is a first-class entity capturing a single
 // fulfillment-to-target delivery and its lifecycle.
+//
+// Construct new instances with [NewDelivery]; reconstitute from
+// persistence with [DeliveryFromSnapshot]. Mutations go through domain
+// methods; reads go through accessor methods.
 type Delivery struct {
-	ID            DeliveryID
-	FulfillmentID FulfillmentID
-	TargetID      TargetID
-	Manifests     []Manifest
-	Generation    Generation // fulfillment generation at dispatch; used for stale-delivery fencing
-	State         DeliveryState
-	CreatedAt     time.Time
-	UpdatedAt     time.Time
+	id            DeliveryID
+	fulfillmentID FulfillmentID
+	targetID      TargetID
+	manifests     []Manifest
+	generation    Generation // fulfillment generation at dispatch; used for stale-delivery fencing
+	state         DeliveryState
+	createdAt     time.Time
+	updatedAt     time.Time
+}
+
+// NewDelivery creates a brand-new [Delivery] in the
+// [DeliveryStatePending] lifecycle state. Use this on creation paths;
+// use [DeliveryFromSnapshot] only for reconstituting from persistence.
+func NewDelivery(id DeliveryID, fulfillmentID FulfillmentID, targetID TargetID, manifests []Manifest, generation Generation, now time.Time) Delivery {
+	return Delivery{
+		id:            id,
+		fulfillmentID: fulfillmentID,
+		targetID:      targetID,
+		manifests:     manifests,
+		generation:    generation,
+		state:         DeliveryStatePending,
+		createdAt:     now,
+		updatedAt:     now,
+	}
 }
 
 // TransitionTo moves the delivery to the given state if the transition
@@ -89,25 +109,25 @@ func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
 	if _, ok := knownDeliveryStates[state]; !ok {
 		return fmt.Errorf("%w: unknown delivery state %q", ErrIllegalStateTransition, state)
 	}
-	if d.State == state {
+	if d.state == state {
 		return nil
 	}
-	if d.State.IsTerminal() {
+	if d.state.IsTerminal() {
 		return fmt.Errorf(
 			"%w: delivery %s is in terminal state %q, cannot transition to %q",
-			ErrIllegalStateTransition, d.ID, d.State, state)
+			ErrIllegalStateTransition, d.id, d.state, state)
 	}
 	if !state.IsTerminal() {
-		fromOrd, fromOk := deliveryStateOrder[d.State]
+		fromOrd, fromOk := deliveryStateOrder[d.state]
 		toOrd, toOk := deliveryStateOrder[state]
 		if fromOk && toOk && toOrd <= fromOrd {
 			return fmt.Errorf(
 				"%w: delivery %s cannot move backward from %q to %q",
-				ErrIllegalStateTransition, d.ID, d.State, state)
+				ErrIllegalStateTransition, d.id, d.state, state)
 		}
 	}
-	d.State = state
-	d.UpdatedAt = now
+	d.state = state
+	d.updatedAt = now
 	return nil
 }
 
@@ -119,14 +139,14 @@ func (d *Delivery) TransitionTo(state DeliveryState, now time.Time) error {
 // Returns [ErrIllegalStateTransition] if generation does not advance
 // past the delivery's current generation.
 func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now time.Time) error {
-	if generation <= d.Generation {
+	if generation <= d.generation {
 		return fmt.Errorf("%w: cannot redispatch at generation %d (current %d)",
-			ErrIllegalStateTransition, generation, d.Generation)
+			ErrIllegalStateTransition, generation, d.generation)
 	}
-	d.Manifests = manifests
-	d.Generation = generation
-	d.State = DeliveryStatePending
-	d.UpdatedAt = now
+	d.manifests = manifests
+	d.generation = generation
+	d.state = DeliveryStatePending
+	d.updatedAt = now
 	return nil
 }
 
@@ -152,21 +172,41 @@ func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now t
 // In general the identity of Delivery seems possibly fragile; we might want something
 // to differentiate between all of the fulfillment, target, and generation.
 func (d *Delivery) Withdraw(generation Generation, now time.Time) (bool, error) {
-	if generation < d.Generation {
+	if generation < d.generation {
 		return false, fmt.Errorf("%w: withdraw generation %d is older than current %d",
-			ErrIllegalStateTransition, generation, d.Generation)
+			ErrIllegalStateTransition, generation, d.generation)
 	}
 
 	// Same generation and not terminal: either already Pending (retry case
 	// handled by Retry) or already in progress (acked, signal queued).
-	if generation == d.Generation && !d.State.IsTerminal() {
+	if generation == d.generation && !d.state.IsTerminal() {
 		return false, nil
 	}
 
-	d.State = DeliveryStatePending
-	d.Generation = generation
-	d.UpdatedAt = now
+	d.state = DeliveryStatePending
+	d.generation = generation
+	d.updatedAt = now
 	return true, nil
+}
+
+// ResetForRetry resets a terminal delivery back to
+// [DeliveryStatePending] for at-least-once re-dispatch. This is the
+// put-path counterpart to [Delivery.Withdraw]: after a workflow
+// ContinueAsNew restart, the delivery may have already reached a
+// terminal state during the previous execution. Addons are idempotent,
+// so resetting to Pending is safe.
+//
+// Returns [ErrIllegalStateTransition] if the delivery is not in a
+// terminal state.
+func (d *Delivery) ResetForRetry(now time.Time) error {
+	if !d.state.IsTerminal() {
+		return fmt.Errorf(
+			"%w: delivery %s is in non-terminal state %q, cannot reset for retry",
+			ErrIllegalStateTransition, d.id, d.state)
+	}
+	d.state = DeliveryStatePending
+	d.updatedAt = now
+	return nil
 }
 
 // Retry prepares the delivery for a same-generation re-dispatch. It
@@ -176,15 +216,41 @@ func (d *Delivery) Withdraw(generation Generation, now time.Time) (bool, error) 
 // false if the delivery has already progressed past Pending, or the
 // generation doesn't match (stale activity invocation).
 func (d *Delivery) Retry(generation Generation, now time.Time) bool {
-	if d.Generation != generation {
+	if d.generation != generation {
 		return false
 	}
-	if d.State != DeliveryStatePending {
+	if d.state != DeliveryStatePending {
 		return false
 	}
-	d.UpdatedAt = now
+	d.updatedAt = now
 	return true
 }
+
+// Accessor methods -- read-only getters for private fields.
+
+// ID returns the delivery's unique identifier.
+func (d *Delivery) ID() DeliveryID { return d.id }
+
+// FulfillmentID returns the associated fulfillment's identifier.
+func (d *Delivery) FulfillmentID() FulfillmentID { return d.fulfillmentID }
+
+// TargetID returns the delivery target's identifier.
+func (d *Delivery) TargetID() TargetID { return d.targetID }
+
+// Manifests returns the delivered manifest payloads.
+func (d *Delivery) Manifests() []Manifest { return d.manifests }
+
+// Generation returns the fulfillment generation at dispatch.
+func (d *Delivery) Generation() Generation { return d.generation }
+
+// State returns the current delivery lifecycle state.
+func (d *Delivery) State() DeliveryState { return d.state }
+
+// CreatedAt returns the creation timestamp.
+func (d *Delivery) CreatedAt() time.Time { return d.createdAt }
+
+// UpdatedAt returns the last-updated timestamp.
+func (d *Delivery) UpdatedAt() time.Time { return d.updatedAt }
 
 // ActiveDelivery is the enriched view of a [Delivery] returned by
 // [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery
