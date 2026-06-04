@@ -241,7 +241,7 @@ func TestResumeDeployment_WithProvenance_RequiresReSign(t *testing.T) {
 		ExpectedGeneration: 1,
 	}
 	fID := seedDeployment(t, h.store, "prov-dep", domain.DeliveryAuth{}, prov)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
@@ -280,7 +280,7 @@ func TestResumeDeployment_WithReSign_UpdatesProvenance(t *testing.T) {
 		ExpectedGeneration: 1,
 	}
 	fID := seedDeployment(t, h.store, "resign-dep", domain.DeliveryAuth{}, prov)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	validUntil := time.Now().Add(24 * time.Hour)
 	sig := signEnvelope(t, privKey, "resign-dep", ms, ps, validUntil, 2)
@@ -312,7 +312,7 @@ func TestResumeDeployment_TokenPassthrough_NoProvenance(t *testing.T) {
 	h := setup(t)
 
 	fID := seedDeployment(t, h.store, "token-dep", domain.DeliveryAuth{}, nil)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	ctx := application.ContextWithAuth(context.Background(), &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},

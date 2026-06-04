@@ -19,7 +19,8 @@ func seedPausedDeployment(t *testing.T, store domain.Store, depID domain.Deploym
 		PlacementStrategy: domain.PlacementStrategySpec{
 			Type: domain.PlacementStrategyAll,
 		},
-		State: domain.FulfillmentStatePausedAuth,
+		State:       domain.FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
 	})
 }
 
@@ -128,8 +129,9 @@ func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(
 		PlacementStrategy: domain.PlacementStrategySpec{
 			Type: domain.PlacementStrategyAll,
 		},
-		State:     domain.FulfillmentStatePausedAuth,
-		UpdatedAt: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
+		State:       domain.FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
+		UpdatedAt:   time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC),
 	})
 
 	spec := newResumeSpec(store)

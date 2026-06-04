@@ -114,7 +114,7 @@ func scanDeploymentSnapshot(s scanner) (domain.DeploymentSnapshot, error) {
 func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	var v domain.DeploymentView
 	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr string
-	var fID, fRtJSON, fStateStr, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
+	var fID, fRtJSON, fStateStr, fPauseReason, fStatusReason, fAuthJSON, fCreatedAtStr, fUpdatedAtStr string
 	var fMsSpec, fPsSpec, fRsSpec, fProvJSON, fAttestRefJSON sql.NullString
 	var fMsVer, fPsVer, fRsVer, fGen, fObsGen int64
 	var fActiveWfGen sql.NullInt64
@@ -122,7 +122,7 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	if err := s.Scan(
 		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr,
 		&fID, &fMsVer, &fMsSpec, &fPsVer, &fPsSpec, &fRsVer, &fRsSpec,
-		&fRtJSON, &fStateStr, &fStatusReason, &fAuthJSON, &fProvJSON, &fAttestRefJSON,
+		&fRtJSON, &fStateStr, &fPauseReason, &fStatusReason, &fAuthJSON, &fProvJSON, &fAttestRefJSON,
 		&fGen, &fObsGen, &fActiveWfGen,
 		&fCreatedAtStr, &fUpdatedAtStr,
 	); err != nil {
@@ -151,7 +151,7 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 
 	fSnap, err := fulfillmentSnapshotFromColumns(
 		fID, fMsVer, fMsSpec, fPsVer, fPsSpec, fRsVer, fRsSpec,
-		fRtJSON, fStateStr, fStatusReason, fAuthJSON, fProvJSON, fAttestRefJSON,
+		fRtJSON, fStateStr, fPauseReason, fStatusReason, fAuthJSON, fProvJSON, fAttestRefJSON,
 		fGen, fObsGen, fActiveWfGen,
 		fCreatedAtStr, fUpdatedAtStr,
 	)

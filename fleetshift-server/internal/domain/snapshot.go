@@ -30,6 +30,7 @@ type FulfillmentSnapshot struct {
 	RolloutStrategyVersion   StrategyVersion
 	ResolvedTargets          []TargetID
 	State                    FulfillmentState
+	PauseReason              string
 	StatusReason             string
 	Auth                     DeliveryAuth
 	Provenance               *Provenance
@@ -149,6 +150,7 @@ func (f *Fulfillment) Snapshot() FulfillmentSnapshot {
 		RolloutStrategyVersion:   f.rolloutStrategyVersion,
 		ResolvedTargets:          f.resolvedTargets,
 		State:                    f.state,
+		PauseReason:              f.pauseReason,
 		StatusReason:             f.statusReason,
 		Auth:                     f.auth,
 		Provenance:               f.provenance,
@@ -280,6 +282,7 @@ func FulfillmentFromSnapshot(s FulfillmentSnapshot) *Fulfillment {
 		rolloutStrategyVersion:   s.RolloutStrategyVersion,
 		resolvedTargets:          s.ResolvedTargets,
 		state:                    s.State,
+		pauseReason:              s.PauseReason,
 		statusReason:             s.StatusReason,
 		auth:                     s.Auth,
 		provenance:               s.Provenance,

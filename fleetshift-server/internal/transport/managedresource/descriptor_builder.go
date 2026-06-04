@@ -177,6 +177,7 @@ func buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName str
 			stringField("etag", 10),
 			messageField("provenance", 11, "fleetshift.v1.Provenance"),
 			int64Field("generation", 12),
+			stringField("pause_reason", 13),
 		},
 	}
 }
@@ -289,7 +290,6 @@ func buildResourceStateEnum(name string) *descriptorpb.EnumDescriptorProto {
 			{Name: proto.String("ACTIVE"), Number: proto.Int32(2)},
 			{Name: proto.String("DELETING"), Number: proto.Int32(3)},
 			{Name: proto.String("FAILED"), Number: proto.Int32(4)},
-			{Name: proto.String("PAUSED_AUTH"), Number: proto.Int32(5)},
 		},
 	}
 }

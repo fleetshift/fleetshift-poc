@@ -30,8 +30,8 @@ var (
 
 	// ErrAuthExpired indicates that a delivery agent's credentials
 	// have expired or been invalidated. The orchestration layer
-	// translates this into FulfillmentStatePausedAuth so the
-	// fulfillment waits for fresh credentials.
+	// sets the fulfillment's pause reason so it waits for fresh
+	// credentials.
 	ErrAuthExpired = errors.New("delivery auth expired")
 
 	// ErrStaleGeneration indicates that the client's expected

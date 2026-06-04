@@ -815,7 +815,7 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	// Wait for orchestration to finish before manipulating state directly.
 	awaitDynamicState(t, ctx, env, "resume-cluster", 2)
 
-	// Transition to paused_auth state.
+	// Pause the fulfillment (simulate auth failure).
 	tx, err := env.store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -828,9 +828,12 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get fulfillment: %v", err)
 	}
-	snap := f.Snapshot()
-	snap.State = domain.FulfillmentStatePausedAuth
-	f = domain.FulfillmentFromSnapshot(snap)
+	f.ApplyReconciliationResult(domain.ReconciliationResult{
+		FulfillmentID:   f.ID(),
+		PauseReason:     "delivery auth failed",
+		ResolvedTargets: f.ResolvedTargets(),
+		Auth:            f.Auth(),
+	})
 	if err := tx.Fulfillments().Update(ctx, f); err != nil {
 		t.Fatalf("update fulfillment: %v", err)
 	}

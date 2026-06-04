@@ -227,8 +227,8 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 	}
 
 	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
-		dep.State == pb.Deployment_STATE_DELETING ||
-		dep.State == pb.Deployment_STATE_PAUSED_AUTH
+		dep.State == pb.Deployment_STATE_DELETING
+	dep.PauseReason = f.PauseReason()
 
 	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy())
 	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy())
@@ -301,8 +301,6 @@ func fulfillmentStateToProto(s domain.FulfillmentState) pb.Deployment_State {
 		return pb.Deployment_STATE_DELETING
 	case domain.FulfillmentStateFailed:
 		return pb.Deployment_STATE_FAILED
-	case domain.FulfillmentStatePausedAuth:
-		return pb.Deployment_STATE_PAUSED_AUTH
 	default:
 		return pb.Deployment_STATE_UNSPECIFIED
 	}

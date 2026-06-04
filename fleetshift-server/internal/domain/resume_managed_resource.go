@@ -20,10 +20,10 @@ type ResumeManagedResourceInput struct {
 	ExpectedGeneration Generation   // client-supplied next generation; zero means skip check (unsigned legacy)
 }
 
-// ResumeManagedResourceWorkflowSpec transitions a
-// [FulfillmentStatePausedAuth] managed resource fulfillment back to
-// active by updating auth/provenance, bumping its generation, and
-// running a convergence loop.
+// ResumeManagedResourceWorkflowSpec transitions a paused managed
+// resource fulfillment back to active reconciliation by updating
+// auth/provenance, bumping its generation, and running a convergence
+// loop.
 //
 // Pass this spec to [Registry.RegisterResumeManagedResource] to obtain
 // a [ResumeManagedResourceWorkflow] that can start instances.

@@ -547,7 +547,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStatePausedAuth)
+		awaitDeploymentPaused(ctx, t, infra, "d1")
 		awaitObservedGeneration(ctx, t, infra, "d1", 1)
 
 		exec, err := wfs.ResumeDeployment.Start(ctx, domain.ResumeDeploymentInput{
@@ -880,6 +880,29 @@ func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id 
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for ObservedGeneration >= %d (last: %d)", want, view.Fulfillment.ObservedGeneration())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func awaitDeploymentPaused(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) domain.DeploymentView {
+	t.Helper()
+	for {
+		tx, err := infra.Store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		view, err := tx.Deployments().GetView(ctx, id)
+		tx.Rollback()
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("GetView(%s): %v", id, err)
+		}
+		if err == nil && view.Fulfillment.Paused() {
+			return view
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for deployment %s fulfillment to be paused", id)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

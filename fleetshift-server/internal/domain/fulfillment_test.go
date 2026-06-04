@@ -227,9 +227,10 @@ func TestFulfillment_Resume_RejectsNonPausedState(t *testing.T) {
 func TestFulfillment_Resume_RequiresProvenanceWhenPreviouslyPresent(t *testing.T) {
 	// TODO: revisit this behavior; it might be fine to resume without provenance depending on the desired auth
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 3,
+		ID:          "f1",
+		State:       FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
+		Generation:  3,
 		Provenance: &Provenance{
 			Sig:                Signature{Signer: FederatedIdentity{Subject: "u1", Issuer: "iss"}},
 			ExpectedGeneration: 3,
@@ -249,10 +250,11 @@ func TestFulfillment_Resume_RequiresProvenanceWhenPreviouslyPresent(t *testing.T
 
 func TestFulfillment_Resume_HappyPath_NoProvenance(t *testing.T) {
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 3,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:          "f1",
+		State:       FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
+		Generation:  3,
+		Auth:        DeliveryAuth{Token: "old-token"},
 	})
 
 	newAuth := DeliveryAuth{Token: "fresh-token"}
@@ -276,10 +278,11 @@ func TestFulfillment_Resume_HappyPath_NoProvenance(t *testing.T) {
 
 func TestFulfillment_Resume_HappyPath_WithProvenance(t *testing.T) {
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 5,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:          "f1",
+		State:       FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
+		Generation:  5,
+		Auth:        DeliveryAuth{Token: "old-token"},
 		Provenance: &Provenance{
 			Sig:                Signature{Signer: FederatedIdentity{Subject: "u1", Issuer: "iss"}},
 			ExpectedGeneration: 5,
@@ -311,10 +314,11 @@ func TestFulfillment_Resume_HappyPath_WithProvenance(t *testing.T) {
 
 func TestFulfillment_Resume_AcceptsProvenanceWhenNonePreviously(t *testing.T) {
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
-		ID:         "f1",
-		State:      FulfillmentStatePausedAuth,
-		Generation: 2,
-		Auth:       DeliveryAuth{Token: "old-token"},
+		ID:          "f1",
+		State:       FulfillmentStateActive,
+		PauseReason: "delivery auth failed",
+		Generation:  2,
+		Auth:        DeliveryAuth{Token: "old-token"},
 	})
 
 	newProv := &Provenance{

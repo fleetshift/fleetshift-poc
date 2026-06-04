@@ -1025,8 +1025,11 @@ func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 	}
 
 	dep := getFulfillment(t, store, "d1")
-	if dep.State() != domain.FulfillmentStatePausedAuth {
-		t.Errorf("State = %q, want paused_auth", dep.State())
+	if !dep.Paused() {
+		t.Error("expected fulfillment to be paused after auth failure")
+	}
+	if dep.State() != domain.FulfillmentStateCreating {
+		t.Errorf("State = %q, want creating (pause must preserve lifecycle state)", dep.State())
 	}
 }
 
@@ -1855,8 +1858,11 @@ func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
 		dep := getFulfillment(t, store, "d1")
-		if dep.State() != domain.FulfillmentStatePausedAuth {
-			t.Errorf("State = %q, want paused_auth", dep.State())
+		if !dep.Paused() {
+			t.Error("expected fulfillment to be paused after auth failure")
+		}
+		if dep.State() != domain.FulfillmentStateCreating {
+			t.Errorf("State = %q, want creating (pause must preserve lifecycle state)", dep.State())
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("orchestration hung: deliver-to-target returned auth_failed without signaling Done, dispatchAndAwait blocked forever")
@@ -2265,8 +2271,11 @@ func TestOrchestration_AuthFailure_PreservesResolvedTargets(t *testing.T) {
 	}
 
 	dep := getFulfillment(t, store, "d1")
-	if dep.State() != domain.FulfillmentStatePausedAuth {
-		t.Fatalf("State = %q, want paused_auth", dep.State())
+	if !dep.Paused() {
+		t.Fatalf("expected fulfillment to be paused after auth failure")
+	}
+	if dep.State() != domain.FulfillmentStateCreating {
+		t.Fatalf("State = %q, want creating (pause must preserve lifecycle state)", dep.State())
 	}
 	if len(dep.ResolvedTargets()) != 1 || dep.ResolvedTargets()[0] != "t1" {
 		t.Errorf("ResolvedTargets = %v, want [t1]; placement resolved before auth failure so targets must be preserved", dep.ResolvedTargets())
@@ -2393,11 +2402,106 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 	}
 
 	dep := getFulfillment(t, store, "d1")
-	if dep.State() != domain.FulfillmentStatePausedAuth {
-		t.Errorf("State = %q, want paused_auth", dep.State())
+	if !dep.Paused() {
+		t.Errorf("expected fulfillment to be paused after auth failure")
+	}
+	if dep.State() != domain.FulfillmentStateDeleting {
+		t.Errorf("State = %q, want deleting (pause must preserve lifecycle state)", dep.State())
 	}
 	if len(dep.ResolvedTargets()) != 1 || dep.ResolvedTargets()[0] != "t1" {
 		t.Errorf("ResolvedTargets = %v, want [t1]; targets must be preserved across auth pause", dep.ResolvedTargets())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Delete-pause-resume: state preserved, resume takes delete path
+// ---------------------------------------------------------------------------
+
+// TestOrchestration_DeletePausedResume_StaysDeleting verifies that a
+// fulfillment paused during the delete pipeline correctly re-enters
+// the delete path (not the create/update path) after resume.
+func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.FulfillmentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
+	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		State:     domain.DeliveryStateDelivered,
+	}))
+
+	ctx := testContext(t)
+
+	// Phase 1: orchestration attempts delete, auth fails → paused.
+	events1 := make(chan domain.FulfillmentEvent, 16)
+	authErr := fmt.Errorf("%w: STS token exchange failed: invalid_grant", domain.ErrAuthExpired)
+	wf1 := newTestWorkflow(store, &failingRemoveDelivery{events: events1, err: authErr}, events1)
+	rec1 := &simpleRecord{ctx: ctx, events: events1}
+	if _, err := wf1.Run(rec1, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run (delete attempt): %v", err)
+	}
+
+	f := getFulfillment(t, store, "d1")
+	if !f.Paused() {
+		t.Fatalf("expected fulfillment to be paused after auth failure")
+	}
+	if f.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("State = %q, want %q; pause must not overwrite lifecycle state",
+			f.State(), domain.FulfillmentStateDeleting)
+	}
+
+	// Phase 2: resume with fresh auth.
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fPtr, err := tx.Fulfillments().Get(ctx, domain.FulfillmentID("d1"))
+	if err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := fPtr.Resume(domain.DeliveryAuth{Token: "fresh-token"}, nil); err != nil {
+		tx.Rollback()
+		t.Fatalf("Resume: %v", err)
+	}
+	if err := tx.Fulfillments().Update(ctx, fPtr); err != nil {
+		tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// Phase 3: re-run orchestration. It must take the delete path (Remove),
+	// not the default create/update path (Deliver).
+	events2 := make(chan domain.FulfillmentEvent, 16)
+	removeAgent := &recordingRemoveDelivery{events: events2}
+	wf2 := newTestWorkflow(store, removeAgent, events2)
+	rec2 := &simpleRecord{ctx: ctx, events: events2}
+	if _, err := wf2.Run(rec2, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run (after resume): %v", err)
+	}
+
+	removeAgent.mu.Lock()
+	removed := removeAgent.removed
+	removeAgent.mu.Unlock()
+
+	if len(removed) != 1 || removed[0] != "t1" {
+		t.Errorf("Remove called for targets %v, want [t1]; resumed delete must take the delete path", removed)
+	}
+
+	f = getFulfillment(t, store, "d1")
+	if f.State() != domain.FulfillmentStateDeleting {
+		t.Errorf("final State = %q, want deleting", f.State())
+	}
+	if f.Paused() {
+		t.Errorf("fulfillment should not be paused after successful reconciliation")
 	}
 }
 

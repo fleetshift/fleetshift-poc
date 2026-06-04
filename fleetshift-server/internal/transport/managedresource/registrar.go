@@ -472,9 +472,14 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	stateNum := int32(stateFromFulfillment(f.State()))
 	resource.Set(stateField, protoreflect.ValueOfEnum(protoreflect.EnumNumber(stateNum)))
 
+	// pause_reason
+	if prField := h.descs.Resource.Fields().ByName("pause_reason"); prField != nil {
+		resource.Set(prField, protoreflect.ValueOfString(f.PauseReason()))
+	}
+
 	// reconciling
 	reconcilingField := h.descs.Resource.Fields().ByName("reconciling")
-	isReconciling := stateNum == 1 || stateNum == 3 || stateNum == 5
+	isReconciling := stateNum == 1 || stateNum == 3
 	resource.Set(reconcilingField, protoreflect.ValueOfBool(isReconciling))
 
 	// create_time
@@ -538,8 +543,6 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 		return 3
 	case domain.FulfillmentStateFailed:
 		return 4
-	case domain.FulfillmentStatePausedAuth:
-		return 5
 	default:
 		return 0
 	}

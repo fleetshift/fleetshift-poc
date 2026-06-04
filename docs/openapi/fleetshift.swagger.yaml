@@ -422,6 +422,13 @@ definitions:
           generation only advances on logical mutations, not on reconciliation
           state changes.
         readOnly: true
+      pauseReason:
+        type: string
+        description: |-
+          Non-empty when reconciliation is paused (e.g. expired delivery
+          credentials). Contains the reason for the pause. The lifecycle
+          state is preserved independently.
+        readOnly: true
     description: |-
       Deployment is the composition of manifest, placement, and rollout strategies.
 
@@ -438,7 +445,6 @@ definitions:
       - STATE_ACTIVE
       - STATE_DELETING
       - STATE_FAILED
-      - STATE_PAUSED_AUTH
     default: STATE_UNSPECIFIED
     description: |-
       Lifecycle state of a deployment.
@@ -448,7 +454,6 @@ definitions:
        - STATE_ACTIVE: Reconciled and operational.
        - STATE_DELETING: Removal is in progress.
        - STATE_FAILED: Orchestration failed permanently.
-       - STATE_PAUSED_AUTH: Paused waiting for fresh authentication credentials.
   v1FederatedIdentity:
     type: object
     properties:

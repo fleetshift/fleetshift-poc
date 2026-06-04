@@ -279,6 +279,26 @@ func awaitFulfillmentState(ctx context.Context, t *testing.T, store domain.Store
 	}
 }
 
+func awaitFulfillmentPaused(ctx context.Context, t *testing.T, store domain.Store, fID domain.FulfillmentID) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		f, err := tx.Fulfillments().Get(ctx, fID)
+		tx.Rollback()
+		if err == nil && f.Paused() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for fulfillment %s to be paused", fID)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // mrCapturingDeliveryAgent wraps another delivery agent and captures
 // the last attestation, manifests, and auth delivered.
 type mrCapturingDeliveryAgent struct {

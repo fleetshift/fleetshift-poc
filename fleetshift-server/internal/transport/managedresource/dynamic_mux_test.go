@@ -668,11 +668,11 @@ func TestDynamicHTTPMux_ResumeForwardsAuth(t *testing.T) {
 		t.Fatalf("GET status = %d, want 200", getResp.StatusCode)
 	}
 
-	// We can't easily transition to paused_auth via HTTP alone, so we
-	// verify the auth forwarding by calling resume on a non-paused
-	// resource WITH a bearer token. The expected error is
-	// "not paused_auth" (InvalidArgument/400), NOT "requires authenticated
-	// caller" — which would mean the token wasn't forwarded.
+	// We can't easily pause via HTTP alone, so we verify the auth
+	// forwarding by calling resume on a non-paused resource WITH a
+	// bearer token. The expected error is "not paused"
+	// (InvalidArgument/400), NOT "requires authenticated caller" —
+	// which would mean the token wasn't forwarded.
 	req, err := http.NewRequest(http.MethodPost, ts.URL+"/v1/kindClusters/http-resume-test:resume", nil)
 	if err != nil {
 		t.Fatalf("new request: %v", err)
@@ -688,12 +688,12 @@ func TestDynamicHTTPMux_ResumeForwardsAuth(t *testing.T) {
 
 	// 400 (InvalidArgument) = auth succeeded, state check failed.
 	// If auth forwarding were broken, we'd get 400 with "requires
-	// authenticated caller" instead of "not paused_auth".
+	// authenticated caller" instead of "not paused".
 	if resumeResp.StatusCode != http.StatusBadRequest {
 		t.Fatalf("resume status = %d, want 400; body = %s", resumeResp.StatusCode, body)
 	}
-	if !strings.Contains(string(body), "not paused_auth") {
-		t.Errorf("expected 'not paused_auth' error, got: %s", body)
+	if !strings.Contains(string(body), "not paused") {
+		t.Errorf("expected 'not paused' error, got: %s", body)
 	}
 }
 

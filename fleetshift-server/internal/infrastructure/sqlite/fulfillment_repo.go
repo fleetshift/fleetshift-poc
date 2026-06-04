@@ -46,16 +46,16 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) err
 			id, manifest_strategy_version,
 			placement_strategy_version,
 			rollout_strategy_version,
-			resolved_targets, state, status_reason, auth, provenance,
+			resolved_targets, state, pause_reason, status_reason, auth, provenance,
 			attestation_ref,
 			generation, observed_generation, active_workflow_gen,
 			created_at, updated_at
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(s.ID),
 		int64(s.ManifestStrategyVersion),
 		int64(s.PlacementStrategyVersion),
 		int64(s.RolloutStrategyVersion),
-		string(rt), string(s.State), s.StatusReason,
+		string(rt), string(s.State), s.PauseReason, s.StatusReason,
 		string(auth), nullString(provJSON),
 		nullString(attestRefJSON),
 		int64(s.Generation), int64(s.ObservedGeneration),
@@ -122,7 +122,7 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 			manifest_strategy_version = ?,
 			placement_strategy_version = ?,
 			rollout_strategy_version = ?,
-			resolved_targets = ?, state = ?, status_reason = ?,
+			resolved_targets = ?, state = ?, pause_reason = ?, status_reason = ?,
 			auth = ?, provenance = ?, attestation_ref = ?,
 			generation = ?, observed_generation = ?, active_workflow_gen = ?,
 			updated_at = ?
@@ -130,7 +130,7 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 		int64(s.ManifestStrategyVersion),
 		int64(s.PlacementStrategyVersion),
 		int64(s.RolloutStrategyVersion),
-		string(rt), string(s.State), s.StatusReason,
+		string(rt), string(s.State), s.PauseReason, s.StatusReason,
 		string(auth), nullString(provJSON), nullString(attestRefJSON),
 		int64(s.Generation), int64(s.ObservedGeneration),
 		nullGeneration(s.ActiveWorkflowGen),
@@ -227,7 +227,7 @@ func fulfillmentColumnsJoined(f string) string {
 		f + ".manifest_strategy_version, ms.spec, " +
 		f + ".placement_strategy_version, ps.spec, " +
 		f + ".rollout_strategy_version, rs.spec, " +
-		f + ".resolved_targets, " + f + ".state, " + f + ".status_reason, " +
+		f + ".resolved_targets, " + f + ".state, " + f + ".pause_reason, " + f + ".status_reason, " +
 		f + ".auth, " + f + ".provenance, " + f + ".attestation_ref, " +
 		f + ".generation, " + f + ".observed_generation, " + f + ".active_workflow_gen, " +
 		f + ".created_at, " + f + ".updated_at"
@@ -245,16 +245,16 @@ func strategyJoins(f string) string {
 // columns produced by [fulfillmentColumnsJoined]. Embed its dests in
 // a wider Scan for joined queries, then call snapshot().
 type fulfillmentScanColumns struct {
-	id, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
-	msSpec, psSpec, rsSpec, provJSON, attestRefJSON                          sql.NullString
-	msVer, psVer, rsVer, generation, observedGeneration                      int64
-	activeWorkflowGen                                                        sql.NullInt64
+	id, rtJSON, stateStr, pauseReason, statusReason, authJSON, createdAtStr, updatedAtStr string
+	msSpec, psSpec, rsSpec, provJSON, attestRefJSON                                       sql.NullString
+	msVer, psVer, rsVer, generation, observedGeneration                                   int64
+	activeWorkflowGen                                                                     sql.NullInt64
 }
 
 func (c *fulfillmentScanColumns) dests() []any {
 	return []any{
 		&c.id, &c.msVer, &c.msSpec, &c.psVer, &c.psSpec, &c.rsVer, &c.rsSpec,
-		&c.rtJSON, &c.stateStr, &c.statusReason, &c.authJSON, &c.provJSON, &c.attestRefJSON,
+		&c.rtJSON, &c.stateStr, &c.pauseReason, &c.statusReason, &c.authJSON, &c.provJSON, &c.attestRefJSON,
 		&c.generation, &c.observedGeneration, &c.activeWorkflowGen,
 		&c.createdAtStr, &c.updatedAtStr,
 	}
@@ -267,6 +267,7 @@ func (c *fulfillmentScanColumns) snapshot() (domain.FulfillmentSnapshot, error) 
 	s.PlacementStrategyVersion = domain.StrategyVersion(c.psVer)
 	s.RolloutStrategyVersion = domain.StrategyVersion(c.rsVer)
 	s.State = domain.FulfillmentState(c.stateStr)
+	s.PauseReason = c.pauseReason
 	s.StatusReason = c.statusReason
 	s.Generation = domain.Generation(c.generation)
 	s.ObservedGeneration = domain.Generation(c.observedGeneration)

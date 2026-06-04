@@ -73,6 +73,11 @@ message Deployment {
   // state changes.
   int64 generation = 13 [(google.api.field_behavior) = OUTPUT_ONLY];
 
+  // Non-empty when reconciliation is paused (e.g. expired delivery
+  // credentials). Contains the reason for the pause. The lifecycle
+  // state is preserved independently.
+  string pause_reason = 14 [(google.api.field_behavior) = OUTPUT_ONLY];
+
   // Lifecycle state of a deployment.
   enum State {
     // Default value. Not used.
@@ -90,7 +95,7 @@ message Deployment {
     // Orchestration failed permanently.
     STATE_FAILED = 4;
 
-    // Paused waiting for fresh authentication credentials.
-    STATE_PAUSED_AUTH = 5;
+    reserved 5;
+    reserved "STATE_PAUSED_AUTH";
   }
 }

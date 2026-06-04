@@ -14,8 +14,8 @@ import (
 
 // errAuthPaused is a sentinel error returned by [dispatchAndAwait] when
 // a delivery reports [DeliveryStateAuthFailed]. The orchestration
-// catches this to transition to [FulfillmentStatePausedAuth] and
-// complete the workflow.
+// catches this to set the pause reason (without changing lifecycle
+// state) and complete the workflow.
 var errAuthPaused = errors.New("delivery auth failed: pausing for fresh credentials")
 
 // TargetDelta represents the difference between the previous and current
@@ -735,7 +735,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 				if errors.Is(err, errAuthPaused) {
 					result = ReconciliationResult{
 						FulfillmentID:   fulfillmentID,
-						State:           FulfillmentStatePausedAuth,
+						PauseReason:     err.Error(),
 						ResolvedTargets: f.ResolvedTargets(),
 						Auth:            f.Auth(),
 					}
@@ -768,7 +768,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 				probe.Error(err)
 				result = ReconciliationResult{
 					FulfillmentID:   fulfillmentID,
-					State:           FulfillmentStatePausedAuth,
+					PauseReason:     err.Error(),
 					ResolvedTargets: resolvedIDs,
 					Auth:            f.Auth(),
 				}
@@ -794,7 +794,11 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 			}
 		}
 
-		probe.StateChanged(result.State)
+		if result.PauseReason != "" {
+			probe.StateChanged(f.State())
+		} else {
+			probe.StateChanged(result.State)
+		}
 		needsRestart, err := RunActivity(record, s.PersistAndCompleteReconciliation(), PersistAndCompleteInput{
 			Result:        result,
 			ReconciledGen: startGen,

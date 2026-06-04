@@ -46,16 +46,16 @@ func (r *FulfillmentRepo) Create(ctx context.Context, f *domain.Fulfillment) err
 			id, manifest_strategy_version,
 			placement_strategy_version,
 			rollout_strategy_version,
-			resolved_targets, state, status_reason, auth, provenance,
+			resolved_targets, state, pause_reason, status_reason, auth, provenance,
 			attestation_ref,
 			generation, observed_generation, active_workflow_gen,
 			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)`,
 		string(s.ID),
 		int64(s.ManifestStrategyVersion),
 		int64(s.PlacementStrategyVersion),
 		int64(s.RolloutStrategyVersion),
-		string(rt), string(s.State), s.StatusReason,
+		string(rt), string(s.State), s.PauseReason, s.StatusReason,
 		string(auth), nullStringFromBytes(provJSON),
 		nullStringFromBytes(attestRefJSON),
 		int64(s.Generation), int64(s.ObservedGeneration),
@@ -122,15 +122,15 @@ func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) err
 			manifest_strategy_version = $1,
 			placement_strategy_version = $2,
 			rollout_strategy_version = $3,
-			resolved_targets = $4, state = $5, status_reason = $6,
-			auth = $7, provenance = $8, attestation_ref = $9,
-			generation = $10, observed_generation = $11, active_workflow_gen = $12,
-			updated_at = $13
-		WHERE id = $14`,
+			resolved_targets = $4, state = $5, pause_reason = $6, status_reason = $7,
+			auth = $8, provenance = $9, attestation_ref = $10,
+			generation = $11, observed_generation = $12, active_workflow_gen = $13,
+			updated_at = $14
+		WHERE id = $15`,
 		int64(s.ManifestStrategyVersion),
 		int64(s.PlacementStrategyVersion),
 		int64(s.RolloutStrategyVersion),
-		string(rt), string(s.State), s.StatusReason,
+		string(rt), string(s.State), s.PauseReason, s.StatusReason,
 		string(auth), nullStringFromBytes(provJSON), nullStringFromBytes(attestRefJSON),
 		int64(s.Generation), int64(s.ObservedGeneration),
 		nullGeneration(s.ActiveWorkflowGen),
@@ -227,7 +227,7 @@ func fulfillmentColumnsJoined(f string) string {
 		f + ".manifest_strategy_version, ms.spec, " +
 		f + ".placement_strategy_version, ps.spec, " +
 		f + ".rollout_strategy_version, rs.spec, " +
-		f + ".resolved_targets, " + f + ".state, " + f + ".status_reason, " +
+		f + ".resolved_targets, " + f + ".state, " + f + ".pause_reason, " + f + ".status_reason, " +
 		f + ".auth, " + f + ".provenance, " + f + ".attestation_ref, " +
 		f + ".generation, " + f + ".observed_generation, " + f + ".active_workflow_gen, " +
 		f + ".created_at, " + f + ".updated_at"
@@ -243,13 +243,13 @@ func strategyJoins(f string) string {
 
 func scanFulfillmentSnapshot(s scanner) (domain.FulfillmentSnapshot, error) {
 	var snap domain.FulfillmentSnapshot
-	var id, rtJSON, stateStr, statusReason, authJSON, createdAtStr, updatedAtStr string
+	var id, rtJSON, stateStr, pauseReason, statusReason, authJSON, createdAtStr, updatedAtStr string
 	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
 	if err := s.Scan(
 		&id, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
-		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON, &attestRefJSON,
+		&rtJSON, &stateStr, &pauseReason, &statusReason, &authJSON, &provJSON, &attestRefJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&createdAtStr, &updatedAtStr,
 	); err != nil {
@@ -260,7 +260,7 @@ func scanFulfillmentSnapshot(s scanner) (domain.FulfillmentSnapshot, error) {
 	}
 	return fulfillmentSnapshotFromColumns(
 		id, msVer, msSpec, psVer, psSpec, rsVer, rsSpec,
-		rtJSON, stateStr, statusReason, authJSON, provJSON, attestRefJSON,
+		rtJSON, stateStr, pauseReason, statusReason, authJSON, provJSON, attestRefJSON,
 		generation, observedGeneration, activeWorkflowGen,
 		createdAtStr, updatedAtStr,
 	)
@@ -271,7 +271,7 @@ func fulfillmentSnapshotFromColumns(
 	msVer int64, msSpec sql.NullString,
 	psVer int64, psSpec sql.NullString,
 	rsVer int64, rsSpec sql.NullString,
-	rtJSON, stateStr, statusReason, authJSON string,
+	rtJSON, stateStr, pauseReason, statusReason, authJSON string,
 	provJSON, attestRefJSON sql.NullString,
 	generation, observedGeneration int64,
 	activeWorkflowGen sql.NullInt64,
@@ -283,6 +283,7 @@ func fulfillmentSnapshotFromColumns(
 	snap.PlacementStrategyVersion = domain.StrategyVersion(psVer)
 	snap.RolloutStrategyVersion = domain.StrategyVersion(rsVer)
 	snap.State = domain.FulfillmentState(stateStr)
+	snap.PauseReason = pauseReason
 	snap.StatusReason = statusReason
 	snap.Generation = domain.Generation(generation)
 	snap.ObservedGeneration = domain.Generation(observedGeneration)

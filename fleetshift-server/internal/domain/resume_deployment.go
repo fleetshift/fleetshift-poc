@@ -19,8 +19,8 @@ type ResumeDeploymentInput struct {
 	ExpectedGeneration Generation   // client-supplied next generation; zero means skip check (unsigned legacy)
 }
 
-// ResumeDeploymentWorkflowSpec transitions a [FulfillmentStatePausedAuth]
-// fulfillment back to active by updating auth/provenance, bumping its
+// ResumeDeploymentWorkflowSpec transitions a paused fulfillment back to
+// active reconciliation by updating auth/provenance, bumping its
 // generation, and running a convergence loop.
 //
 // Pass this spec to [Registry.RegisterResumeDeployment] to obtain a

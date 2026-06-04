@@ -17,11 +17,10 @@ type StrategyVersion int64
 type FulfillmentState string
 
 const (
-	FulfillmentStateCreating   FulfillmentState = "creating"
-	FulfillmentStateActive     FulfillmentState = "active"
-	FulfillmentStateDeleting   FulfillmentState = "deleting"
-	FulfillmentStateFailed     FulfillmentState = "failed"
-	FulfillmentStatePausedAuth FulfillmentState = "paused_auth"
+	FulfillmentStateCreating FulfillmentState = "creating"
+	FulfillmentStateActive   FulfillmentState = "active"
+	FulfillmentStateDeleting FulfillmentState = "deleting"
+	FulfillmentStateFailed   FulfillmentState = "failed"
 )
 
 // Fulfillment is the kernel aggregate that owns strategies, state,
@@ -46,6 +45,7 @@ type Fulfillment struct {
 
 	resolvedTargets    []TargetID
 	state              FulfillmentState
+	pauseReason        string
 	statusReason       string
 	auth               DeliveryAuth
 	provenance         *Provenance
@@ -100,16 +100,14 @@ func (f *Fulfillment) advanceGeneration() {
 // by replacing its delivery credentials and optionally its provenance,
 // then bumping the generation to trigger orchestration.
 //
-// Returns [ErrInvalidArgument] if the fulfillment is not in
-// [FulfillmentStatePausedAuth], or if the fulfillment previously had
-// provenance but no replacement is supplied (re-signing is required).
+// Returns [ErrInvalidArgument] if the fulfillment is not paused, or if
+// the fulfillment previously had provenance but no replacement is
+// supplied (re-signing is required).
 //
 // TODO: revisit the provenance requirement
-// TODO: also revisit state requirement – maybe it's fine to "resume" something that is still active with new auth
 func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
-	if f.state != FulfillmentStatePausedAuth {
-		return fmt.Errorf("%w: fulfillment is in state %q, not paused_auth",
-			ErrInvalidArgument, f.state)
+	if f.pauseReason == "" {
+		return fmt.Errorf("%w: fulfillment is not paused", ErrInvalidArgument)
 	}
 	if f.provenance != nil && provenance == nil {
 		return fmt.Errorf(
@@ -120,7 +118,7 @@ func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
 	if provenance != nil {
 		f.provenance = provenance
 	}
-	f.state = FulfillmentStateActive
+	f.pauseReason = ""
 	f.advanceGeneration()
 	return nil
 }
@@ -191,11 +189,19 @@ func (f *Fulfillment) AdvanceRolloutStrategy(spec *RolloutStrategySpec, now time
 }
 
 // ApplyReconciliationResult merges the observable state produced by a
-// reconciliation workflow onto this fulfillment. Bookkeeping fields
-// (Generation, ObservedGeneration) are left untouched so that
-// concurrent service-layer mutations are preserved.
+// reconciliation workflow onto this fulfillment. When PauseReason is
+// set on the result, the lifecycle state is left unchanged and only
+// the pause reason is applied. Otherwise state advances normally and
+// any prior pause is cleared. Bookkeeping fields (Generation,
+// ObservedGeneration) are left untouched so that concurrent
+// service-layer mutations are preserved.
 func (f *Fulfillment) ApplyReconciliationResult(r ReconciliationResult) {
-	f.state = r.State
+	if r.PauseReason != "" {
+		f.pauseReason = r.PauseReason
+	} else {
+		f.state = r.State
+		f.pauseReason = ""
+	}
 	f.statusReason = r.StatusReason
 	f.resolvedTargets = r.ResolvedTargets
 	f.auth = r.Auth
@@ -292,6 +298,13 @@ func (f *Fulfillment) ID() FulfillmentID { return f.id }
 // State returns the current lifecycle state.
 func (f *Fulfillment) State() FulfillmentState { return f.state }
 
+// Paused reports whether orchestration is paused for this fulfillment.
+func (f *Fulfillment) Paused() bool { return f.pauseReason != "" }
+
+// PauseReason returns the human-readable reason for the pause, or
+// empty if the fulfillment is not paused.
+func (f *Fulfillment) PauseReason() string { return f.pauseReason }
+
 // Generation returns the current generation counter.
 func (f *Fulfillment) Generation() Generation { return f.generation }
 
@@ -345,9 +358,14 @@ func (f *Fulfillment) UpdatedAt() time.Time { return f.updatedAt }
 // single reconciliation workflow run. It is the typed output that the
 // workflow hands to the [PersistReconciliationResult] activity, making the
 // contract between workflow and persistence explicit.
+//
+// When PauseReason is non-empty the fulfillment is being paused; State
+// is ignored and the lifecycle state is left unchanged by
+// [Fulfillment.ApplyReconciliationResult].
 type ReconciliationResult struct {
 	FulfillmentID   FulfillmentID
 	State           FulfillmentState
+	PauseReason     string // non-empty pauses fulfillment without changing lifecycle state
 	StatusReason    string // human-readable; populated on failure, cleared on success
 	ResolvedTargets []TargetID
 	Auth            DeliveryAuth

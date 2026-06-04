@@ -274,7 +274,7 @@ func scanView(s interface{ Scan(...any) error }) (domain.ManagedResourceView, er
 	var mrDeletedAt sql.NullString
 	var riSpec, riCreatedAt string
 
-	var fID, rtJSON, stateStr, statusReason, authJSON, fCreatedAt, fUpdatedAt string
+	var fID, rtJSON, stateStr, pauseReason, statusReason, authJSON, fCreatedAt, fUpdatedAt string
 	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
@@ -286,7 +286,7 @@ func scanView(s interface{ Scan(...any) error }) (domain.ManagedResourceView, er
 		&mrCreatedAt, &mrUpdatedAt, &mrDeletedAt,
 		&riSpec, &riCreatedAt,
 		&fID, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
-		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON, &attestRefJSON,
+		&rtJSON, &stateStr, &pauseReason, &statusReason, &authJSON, &provJSON, &attestRefJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&fCreatedAt, &fUpdatedAt,
 	); err != nil {
@@ -322,7 +322,7 @@ func scanView(s interface{ Scan(...any) error }) (domain.ManagedResourceView, er
 
 	fSnap, err := fulfillmentSnapshotFromColumns(
 		fID, msVer, msSpec, psVer, psSpec, rsVer, rsSpec,
-		rtJSON, stateStr, statusReason, authJSON, provJSON, attestRefJSON,
+		rtJSON, stateStr, pauseReason, statusReason, authJSON, provJSON, attestRefJSON,
 		generation, observedGeneration, activeWorkflowGen,
 		fCreatedAt, fUpdatedAt,
 	)

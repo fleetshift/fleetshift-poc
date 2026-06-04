@@ -65,7 +65,7 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 
 	t.Run("state change", func(t *testing.T) {
 		snap := base.Fulfillment.Snapshot()
-		snap.State = FulfillmentStatePausedAuth
+		snap.State = FulfillmentStateFailed
 		v := base
 		v.Fulfillment = fulfillmentValue(snap)
 		if v.Etag() == baseEtag {
@@ -247,7 +247,7 @@ func TestManagedResourceView_Etag_ChangesOnStateChange(t *testing.T) {
 
 	t.Run("state change", func(t *testing.T) {
 		snap := base.Fulfillment.Snapshot()
-		snap.State = FulfillmentStatePausedAuth
+		snap.State = FulfillmentStateFailed
 		v := base
 		v.Fulfillment = fulfillmentValue(snap)
 		if v.Etag() == baseEtag {

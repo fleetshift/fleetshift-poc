@@ -91,9 +91,10 @@ func (s *capturingDeploymentServer) ResumeDeployment(_ context.Context, req *pb.
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "deployment %q not found", req.GetName())
 	}
-	if dep.GetState() != pb.Deployment_STATE_PAUSED_AUTH {
-		return nil, status.Errorf(codes.FailedPrecondition, "deployment is not paused for auth")
+	if dep.GetPauseReason() == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "deployment is not paused")
 	}
+	dep.PauseReason = ""
 	dep.State = pb.Deployment_STATE_CREATING
 	return dep, nil
 }
@@ -189,8 +190,9 @@ func TestDeploymentResume_Sign_PopulatesSignatureFields(t *testing.T) {
 	fake := newCapturingDeploymentServer()
 
 	fake.deployments["deployments/paused-signed"] = &pb.Deployment{
-		Name:  "deployments/paused-signed",
-		State: pb.Deployment_STATE_PAUSED_AUTH,
+		Name:        "deployments/paused-signed",
+		State:       pb.Deployment_STATE_CREATING,
+		PauseReason: "delivery auth failed",
 		ManifestStrategy: &pb.ManifestStrategy{
 			Type: pb.ManifestStrategy_TYPE_INLINE,
 			Manifests: []*pb.Manifest{{

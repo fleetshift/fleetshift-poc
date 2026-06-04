@@ -36,7 +36,12 @@ func deploymentColumns() []output.Column {
 			return m.(*pb.Deployment).GetName()
 		}},
 		{Header: "State", Value: func(m proto.Message) string {
-			return formatState(m.(*pb.Deployment).GetState())
+			d := m.(*pb.Deployment)
+			s := formatState(d.GetState())
+			if d.GetPauseReason() != "" {
+				s += " (Paused)"
+			}
+			return s
 		}},
 		{Header: "Reconciling", Value: func(m proto.Message) string {
 			if m.(*pb.Deployment).GetReconciling() {
@@ -71,8 +76,6 @@ func formatState(s pb.Deployment_State) string {
 		return "Deleting"
 	case pb.Deployment_STATE_FAILED:
 		return "Failed"
-	case pb.Deployment_STATE_PAUSED_AUTH:
-		return "PausedAuth"
 	default:
 		return "Unknown"
 	}

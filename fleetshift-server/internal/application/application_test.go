@@ -148,6 +148,29 @@ func awaitDeploymentState(ctx context.Context, t *testing.T, store domain.Store,
 	}
 }
 
+func awaitDeploymentPaused(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID) domain.DeploymentView {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		view, err := tx.Deployments().GetView(ctx, id)
+		tx.Rollback()
+		if err != nil && !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("GetView(%s): %v", id, err)
+		}
+		if err == nil && view.Fulfillment.Paused() {
+			return view
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for deployment %s fulfillment to be paused", id)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func queryDeliveries(ctx context.Context, t *testing.T, store domain.Store, depID domain.DeploymentID) []domain.Delivery {
 	t.Helper()
 	tx, err := store.BeginReadOnly(ctx)
@@ -583,6 +606,32 @@ func reconcileFulfillmentState(t *testing.T, store domain.Store, fID domain.Fulf
 	}
 }
 
+func pauseFulfillment(t *testing.T, store domain.Store, fID domain.FulfillmentID, reason string) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("Begin: %v", err)
+	}
+	defer tx.Rollback()
+	f, err := tx.Fulfillments().Get(ctx, fID)
+	if err != nil {
+		t.Fatalf("Get fulfillment: %v", err)
+	}
+	f.ApplyReconciliationResult(domain.ReconciliationResult{
+		FulfillmentID:   fID,
+		PauseReason:     reason,
+		ResolvedTargets: f.ResolvedTargets(),
+		Auth:            f.Auth(),
+	})
+	if err := tx.Fulfillments().Update(ctx, f); err != nil {
+		t.Fatalf("Update fulfillment: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+}
+
 // advanceFulfillmentToGeneration performs read/write cycles using
 // [domain.Fulfillment.Touch] until the fulfillment's generation reaches
 // targetGen, mirroring the "N-1 read, modify, write cycles" guidance in
@@ -648,7 +697,7 @@ func TestResumeDeployment_NoAuth(t *testing.T) {
 	h := setup(t)
 
 	fID := seedDeployment(t, h.store, "d1", domain.DeliveryAuth{}, nil)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	_, err := h.deployments.Resume(context.Background(), application.ResumeInput{ID: "d1"})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -662,7 +711,7 @@ func TestResumeDeployment_StaleEtag(t *testing.T) {
 
 	fID := seedDeployment(t, h.store, "d1", domain.DeliveryAuth{}, nil)
 	advanceFulfillmentToGeneration(t, h.store, fID, 3)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	_, err := h.deployments.Resume(ctx, application.ResumeInput{
 		ID:   "d1",
@@ -679,7 +728,7 @@ func TestResumeDeployment_EmptyEtag_SkipsCheck(t *testing.T) {
 
 	fID := seedDeployment(t, h.store, "d1", domain.DeliveryAuth{}, nil)
 	advanceFulfillmentToGeneration(t, h.store, fID, 5)
-	reconcileFulfillmentState(t, h.store, fID, domain.FulfillmentStatePausedAuth)
+	pauseFulfillment(t, h.store, fID, "delivery auth failed")
 
 	_, err := h.deployments.Resume(ctx, application.ResumeInput{
 		ID: "d1",
@@ -754,7 +803,7 @@ func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	awaitDeploymentState(ctx, t, h.store, "d1", domain.FulfillmentStatePausedAuth)
+	awaitDeploymentPaused(ctx, t, h.store, "d1")
 
 	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},

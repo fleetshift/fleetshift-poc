@@ -454,7 +454,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 	}
 
 	// Wait for the fulfillment to pause due to auth failure.
-	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStatePausedAuth)
+	awaitFulfillmentPaused(ctx, t, store, view.Fulfillment.ID())
 
 	// Resume with fresh credentials.
 	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
