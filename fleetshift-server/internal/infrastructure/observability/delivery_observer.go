@@ -146,29 +146,35 @@ func NewMultiDeliveryObserver(observers ...domain.DeliveryObserver) *MultiDelive
 	return &MultiDeliveryObserver{observers: observers}
 }
 
-func (m *MultiDeliveryObserver) EventEmitted(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
-	probes := make([]domain.EventEmittedProbe, 0, len(m.observers))
+func (m *MultiDeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
+	probes := make([]domain.ReportEventProbe, 0, len(m.observers))
 	for _, o := range m.observers {
-		var p domain.EventEmittedProbe
-		ctx, p = o.EventEmitted(ctx, deliveryID, target, event)
+		var p domain.ReportEventProbe
+		ctx, p = o.ReportEventStarted(ctx, deliveryID, generation, event)
 		probes = append(probes, p)
 	}
 	return ctx, &multiEventProbe{probes: probes}
 }
 
-func (m *MultiDeliveryObserver) Completed(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
-	probes := make([]domain.CompletedProbe, 0, len(m.observers))
+func (m *MultiDeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
+	probes := make([]domain.ReportResultProbe, 0, len(m.observers))
 	for _, o := range m.observers {
-		var p domain.CompletedProbe
-		ctx, p = o.Completed(ctx, deliveryID, target, result)
+		var p domain.ReportResultProbe
+		ctx, p = o.ReportResultStarted(ctx, deliveryID, generation, result)
 		probes = append(probes, p)
 	}
-	return ctx, &multiCompletedProbe{probes: probes}
+	return ctx, &multiResultProbe{probes: probes}
 }
 
 type multiEventProbe struct {
-	domain.NoOpEventEmittedProbe
-	probes []domain.EventEmittedProbe
+	domain.NoOpReportEventProbe
+	probes []domain.ReportEventProbe
+}
+
+func (m *multiEventProbe) Stale(reportGen, currentGen domain.Generation) {
+	for _, p := range m.probes {
+		p.Stale(reportGen, currentGen)
+	}
 }
 
 func (m *multiEventProbe) Error(err error) {
@@ -183,18 +189,24 @@ func (m *multiEventProbe) End() {
 	}
 }
 
-type multiCompletedProbe struct {
-	domain.NoOpCompletedProbe
-	probes []domain.CompletedProbe
+type multiResultProbe struct {
+	domain.NoOpReportResultProbe
+	probes []domain.ReportResultProbe
 }
 
-func (m *multiCompletedProbe) Error(err error) {
+func (m *multiResultProbe) Stale(reportGen, currentGen domain.Generation) {
+	for _, p := range m.probes {
+		p.Stale(reportGen, currentGen)
+	}
+}
+
+func (m *multiResultProbe) Error(err error) {
 	for _, p := range m.probes {
 		p.Error(err)
 	}
 }
 
-func (m *multiCompletedProbe) End() {
+func (m *multiResultProbe) End() {
 	for _, p := range m.probes {
 		p.End()
 	}

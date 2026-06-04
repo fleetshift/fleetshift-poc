@@ -83,32 +83,28 @@ func (h *EventHub) unsubscribe(ch chan []byte) {
 	h.mu.Unlock()
 }
 
-// EventEmitted implements [domain.DeliveryObserver].
-func (h *EventHub) EventEmitted(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+// ReportEventStarted implements [domain.DeliveryObserver].
+func (h *EventHub) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, _ domain.Generation, event domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
 	h.Publish(Event{
 		Type:       "delivery.event",
 		DeliveryID: string(deliveryID),
-		TargetID:   string(target.ID),
-		TargetType: string(target.Type),
 		EventKind:  string(event.Kind),
 		Message:    event.Message,
 		Timestamp:  event.Timestamp.UnixMilli(),
 	})
-	return ctx, domain.NoOpEventEmittedProbe{}
+	return ctx, domain.NoOpReportEventProbe{}
 }
 
-// Completed implements [domain.DeliveryObserver].
-func (h *EventHub) Completed(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+// ReportResultStarted implements [domain.DeliveryObserver].
+func (h *EventHub) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, _ domain.Generation, result domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
 	h.Publish(Event{
 		Type:       "delivery.completed",
 		DeliveryID: string(deliveryID),
-		TargetID:   string(target.ID),
-		TargetType: string(target.Type),
 		EventKind:  string(result.State),
 		Message:    result.Message,
 		Timestamp:  time.Now().UnixMilli(),
 	})
-	return ctx, domain.NoOpCompletedProbe{}
+	return ctx, domain.NoOpReportResultProbe{}
 }
 
 // HandleWS upgrades to WebSocket and streams events until the client

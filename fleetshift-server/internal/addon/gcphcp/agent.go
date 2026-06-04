@@ -112,10 +112,11 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 	}
 
 	for _, ad := range active {
+		manifests := ad.Delivery.Manifests()
 		var clusterManifest *domain.Manifest
-		for i, m := range ad.Delivery.Manifests {
+		for i, m := range manifests {
 			if m.ResourceType == ClusterResourceType {
-				clusterManifest = &ad.Delivery.Manifests[i]
+				clusterManifest = &manifests[i]
 				break
 			}
 		}
@@ -125,29 +126,29 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 
 		spec, err := ParseClusterSpec(clusterManifest.Raw)
 		if err != nil {
-			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID, "error", err)
+			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
 		spec.Name = string(clusterManifest.Name)
 
-		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation) {
+		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation()) {
 			continue
 		}
 
 		if ad.Auth.Token == "" {
-			a.observer.Error("recovery: auth token empty, skipping", "delivery", ad.Delivery.ID)
+			a.observer.Error("recovery: auth token empty, skipping", "delivery", ad.Delivery.ID())
 			continue
 		}
 
 		a.observer.Info("recovering active delivery",
-			"delivery", ad.Delivery.ID,
+			"delivery", ad.Delivery.ID(),
 			"cluster", spec.Name,
-			"state", ad.Delivery.State,
-			"generation", ad.Delivery.Generation,
+			"state", ad.Delivery.State(),
+			"generation", ad.Delivery.Generation(),
 		)
 
-		targetCfg := TargetConfigFromProperties(ad.Target.Properties)
-		progress := newDeliveryProgress(a.reporter, ad.Delivery.ID, ad.Delivery.Generation)
+		targetCfg := TargetConfigFromProperties(ad.Target.Properties())
+		progress := newDeliveryProgress(a.reporter, ad.Delivery.ID(), ad.Delivery.Generation())
 
 		lock := a.clusterLock(spec.Name)
 		lock.Lock()

@@ -476,7 +476,7 @@ func (r *recoveryReporter) ListActiveDeliveries(_ context.Context, _ []domain.Ta
 func makeActiveDelivery(id string, clusterName string, gen domain.Generation, token string) domain.ActiveDelivery {
 	spec := validClusterSpecJSON2()
 	return domain.ActiveDelivery{
-		Delivery: domain.Delivery{
+		Delivery: domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:         domain.DeliveryID(id),
 			Generation: gen,
 			State:      domain.DeliveryStateProgressing,
@@ -485,15 +485,15 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 				Name:         domain.ResourceName(clusterName),
 				Raw:          spec,
 			}},
-		},
-		Target: domain.TargetInfo{
+		}),
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "target-1",
 			Properties: map[string]string{
 				"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 				"workforce_pool": "pool", "workforce_provider": "prov",
 				"broker_sa_email": "broker@example.com",
 			},
-		},
+		}),
 		Auth: domain.DeliveryAuth{Token: domain.RawToken(token)},
 	}
 }
@@ -573,7 +573,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsEmptyAuthToken(t *testing.T) {
 
 func TestAgent_RecoverActiveDeliveries_SkipsNonClusterManifests(t *testing.T) {
 	ad := domain.ActiveDelivery{
-		Delivery: domain.Delivery{
+		Delivery: domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:         "recovery-no-cluster",
 			Generation: 1,
 			State:      domain.DeliveryStateProgressing,
@@ -582,8 +582,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsNonClusterManifests(t *testing.T) {
 				Name:         "something",
 				Raw:          json.RawMessage(`{}`),
 			}},
-		},
-		Target: domain.TargetInfo{ID: "target-1"},
+		}),
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "target-1"}),
 		Auth:   domain.DeliveryAuth{Token: "token"},
 	}
 	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
@@ -669,7 +669,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 
 func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 	ad := domain.ActiveDelivery{
-		Delivery: domain.Delivery{
+		Delivery: domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:         "recovery-bad-spec",
 			Generation: 1,
 			State:      domain.DeliveryStateProgressing,
@@ -678,8 +678,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 				Name:         "test-cls",
 				Raw:          json.RawMessage(`{{{not json`),
 			}},
-		},
-		Target: domain.TargetInfo{ID: "target-1"},
+		}),
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "target-1"}),
 		Auth:   domain.DeliveryAuth{Token: "token"},
 	}
 	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
