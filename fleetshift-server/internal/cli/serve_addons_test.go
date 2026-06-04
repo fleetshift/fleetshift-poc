@@ -14,13 +14,8 @@ func TestParseAddons(t *testing.T) {
 	}{
 		{
 			name:  "all addons",
-			input: "kind,ocp,kubernetes",
-			want:  map[string]bool{"kind": true, "ocp": true, "kubernetes": true},
-		},
-		{
-			name:  "production subset",
-			input: "ocp,kubernetes",
-			want:  map[string]bool{"ocp": true, "kubernetes": true},
+			input: "kind,kubernetes,gcphcp",
+			want:  map[string]bool{"kind": true, "kubernetes": true, "gcphcp": true},
 		},
 		{
 			name:  "single addon",
@@ -29,8 +24,8 @@ func TestParseAddons(t *testing.T) {
 		},
 		{
 			name:  "whitespace trimmed",
-			input: " kind , ocp ",
-			want:  map[string]bool{"kind": true, "ocp": true},
+			input: " kind , kubernetes ",
+			want:  map[string]bool{"kind": true, "kubernetes": true},
 		},
 		{
 			name:  "empty string",

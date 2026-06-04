@@ -34,7 +34,7 @@ jobs:
 
       - name: Build all modules
         run: |
-          for mod in fleetshift-server fleetshift-cli ocp-engine; do
+          for mod in fleetshift-server fleetshift-cli; do
             if [ -d "$mod" ]; then
               echo "Building $mod..."
               (cd "$mod" && go build ./...) # The parentheses run this in a subshell

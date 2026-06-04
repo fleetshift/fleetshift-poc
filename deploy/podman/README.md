@@ -122,7 +122,7 @@ Copy `.env.template` to `.env` and edit. All available settings are documented i
 
 ### `gcphcp` Addon Toggle
 
-- Default: `kind,ocp,kubernetes`
+- Default: `kind,kubernetes`
 - Add `gcphcp`: set `GCPHCP_ENABLED=true` and fill in the `GCPHCP_*` values in
   `.env`
 - Runtime artifact: Podman renders `deploy/podman/.gcphcp.yaml` from `.env` and
