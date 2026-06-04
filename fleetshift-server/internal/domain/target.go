@@ -1,5 +1,7 @@
 package domain
 
+import "maps"
+
 // TargetState indicates where a target is in its lifecycle.
 type TargetState string
 
@@ -100,9 +102,7 @@ type PlacementTarget struct {
 // Properties are omitted).
 func ToPlacementTarget(t TargetInfo) PlacementTarget {
 	labels := make(map[string]string, len(t.labels))
-	for k, v := range t.labels {
-		labels[k] = v
-	}
+	maps.Copy(labels, t.labels)
 	art := make([]ResourceType, len(t.acceptedResourceTypes))
 	copy(art, t.acceptedResourceTypes)
 	return PlacementTarget{ID: t.id, Type: t.targetType, Name: t.name, State: t.state, Labels: labels, AcceptedResourceTypes: art}
