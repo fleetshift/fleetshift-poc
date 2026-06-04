@@ -3,6 +3,7 @@ package gcphcp_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -446,5 +447,277 @@ func trustBundleManifest(t *testing.T, entry domain.TrustBundleEntry) domain.Man
 	return domain.Manifest{
 		ResourceType: domain.TrustBundleResourceType,
 		Raw:          json.RawMessage(raw),
+	}
+}
+
+// --- Recovery tests ---
+
+// recoveryReporter extends recordingReporter with configurable ListActiveDeliveries.
+type recoveryReporter struct {
+	recordingReporter
+	active    []domain.ActiveDelivery
+	activeErr error
+}
+
+func newRecoveryReporter(active []domain.ActiveDelivery) *recoveryReporter {
+	return &recoveryReporter{
+		recordingReporter: recordingReporter{
+			results: make(map[domain.DeliveryID]domain.DeliveryResult),
+			done:    make(chan domain.DeliveryResult, 10),
+		},
+		active: active,
+	}
+}
+
+func (r *recoveryReporter) ListActiveDeliveries(_ context.Context, _ []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return r.active, r.activeErr
+}
+
+func makeActiveDelivery(id string, clusterName string, gen domain.Generation, token string) domain.ActiveDelivery {
+	spec := validClusterSpecJSON2()
+	return domain.ActiveDelivery{
+		Delivery: domain.Delivery{
+			ID:         domain.DeliveryID(id),
+			Generation: gen,
+			State:      domain.DeliveryStateProgressing,
+			Manifests: []domain.Manifest{{
+				ResourceType: gcphcp.ClusterResourceType,
+				Name:         domain.ResourceName(clusterName),
+				Raw:          spec,
+			}},
+		},
+		Target: domain.TargetInfo{
+			ID: "target-1",
+			Properties: map[string]string{
+				"id": "target-1", "gcp_project": "proj", "region": "us-central1",
+				"workforce_pool": "pool", "workforce_provider": "prov",
+				"broker_sa_email": "broker@example.com",
+			},
+		},
+		Auth: domain.DeliveryAuth{Token: domain.RawToken(token)},
+	}
+}
+
+func validClusterSpecJSON2() json.RawMessage {
+	return json.RawMessage(`{
+		"endpointAccess":"PublicAndPrivate","releaseVersion":"4.22.0","channelGroup":"stable",
+		"nodepools":[{"id":"np1","replicas":2,"instanceType":"n1-standard-4",
+		"rootVolumeSize":128,"rootVolumeType":"pd-standard","autoRepair":true,"upgradeType":"Replace"}]
+	}`)
+}
+
+func TestAgent_RecoverActiveDeliveries_NoActiveDeliveries(t *testing.T) {
+	reporter := newRecoveryReporter(nil)
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_ListError(t *testing.T) {
+	reporter := newRecoveryReporter(nil)
+	reporter.activeErr = fmt.Errorf("database unavailable")
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err == nil {
+		t.Fatal("expected error when ListActiveDeliveries fails")
+	}
+	if !strings.Contains(err.Error(), "database unavailable") {
+		t.Fatalf("error = %q, want wrapped cause", err.Error())
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_ResumesActiveDelivery(t *testing.T) {
+	ad := makeActiveDelivery("recovery-1", "test-cls", 1, "caller-token")
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	// The delivery will fail because there's no real GCP backend,
+	// but it proves the goroutine was launched and reported a result.
+	select {
+	case result := <-reporter.done:
+		if result.State == "" {
+			t.Fatal("expected non-empty delivery state from recovered delivery")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for recovered delivery result")
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_SkipsEmptyAuthToken(t *testing.T) {
+	ad := makeActiveDelivery("recovery-no-auth", "test-cls", 1, "")
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	// No goroutine should be launched — no result expected.
+	select {
+	case result := <-reporter.done:
+		t.Fatalf("expected no delivery result for empty auth, got state=%q", result.State)
+	case <-time.After(200 * time.Millisecond):
+		// expected: empty auth token is skipped
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_SkipsNonClusterManifests(t *testing.T) {
+	ad := domain.ActiveDelivery{
+		Delivery: domain.Delivery{
+			ID:         "recovery-no-cluster",
+			Generation: 1,
+			State:      domain.DeliveryStateProgressing,
+			Manifests: []domain.Manifest{{
+				ResourceType: "some.other.type",
+				Name:         "something",
+				Raw:          json.RawMessage(`{}`),
+			}},
+		},
+		Target: domain.TargetInfo{ID: "target-1"},
+		Auth:   domain.DeliveryAuth{Token: "token"},
+	}
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		t.Fatalf("expected no result for non-cluster manifest, got state=%q", result.State)
+	case <-time.After(200 * time.Millisecond):
+		// expected: no cluster manifest means no recovery goroutine
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
+	reporter := newRecordingReporter()
+	agent := newTestAgent(reporter)
+
+	// Accept generation 10 via a normal Deliver call.
+	spec := validClusterSpecJSON(t)
+	_ = agent.Deliver(
+		context.Background(),
+		domain.TargetInfo{},
+		domain.DeliveryID("seed"),
+		[]domain.Manifest{{
+			ResourceType: gcphcp.ClusterResourceType,
+			Name:         "test-cls",
+			Raw:          spec,
+		}},
+		domain.DeliveryAuth{Token: "token"},
+		nil,
+		10,
+	)
+	select {
+	case <-reporter.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for seed delivery")
+	}
+
+	// Now try to recover a stale delivery (generation 5) for the same cluster.
+	ad := makeActiveDelivery("recovery-stale", "test-cls", 5, "token")
+	recovReporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	// Need a new agent that shares generation state — use a fresh one
+	// with the recovery reporter, then seed its generation.
+	agent2 := newTestAgent(recovReporter)
+	// Seed generation 10
+	_ = agent2.Deliver(
+		context.Background(),
+		domain.TargetInfo{},
+		domain.DeliveryID("seed2"),
+		[]domain.Manifest{{
+			ResourceType: gcphcp.ClusterResourceType,
+			Name:         "test-cls",
+			Raw:          spec,
+		}},
+		domain.DeliveryAuth{Token: "token"},
+		nil,
+		10,
+	)
+	select {
+	case <-recovReporter.done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for seed delivery")
+	}
+
+	err := agent2.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	// Stale generation should be skipped — no result.
+	select {
+	case result := <-recovReporter.done:
+		t.Fatalf("expected stale delivery to be skipped, got state=%q", result.State)
+	case <-time.After(200 * time.Millisecond):
+		// expected
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
+	ad := domain.ActiveDelivery{
+		Delivery: domain.Delivery{
+			ID:         "recovery-bad-spec",
+			Generation: 1,
+			State:      domain.DeliveryStateProgressing,
+			Manifests: []domain.Manifest{{
+				ResourceType: gcphcp.ClusterResourceType,
+				Name:         "test-cls",
+				Raw:          json.RawMessage(`{{{not json`),
+			}},
+		},
+		Target: domain.TargetInfo{ID: "target-1"},
+		Auth:   domain.DeliveryAuth{Token: "token"},
+	}
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v, want nil (bad specs are skipped)", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		t.Fatalf("expected no result for invalid spec, got state=%q", result.State)
+	case <-time.After(200 * time.Millisecond):
+		// expected: invalid spec is logged and skipped
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_MultipleDeliveries(t *testing.T) {
+	ad1 := makeActiveDelivery("recovery-a", "cls-a", 1, "token-a")
+	ad2 := makeActiveDelivery("recovery-b", "cls-b", 1, "token-b")
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad1, ad2})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	// Both should produce results (failures since no real backend).
+	for i := 0; i < 2; i++ {
+		select {
+		case result := <-reporter.done:
+			if result.State == "" {
+				t.Fatalf("delivery %d: expected non-empty state", i)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("timeout waiting for delivery %d result", i)
+		}
 	}
 }
