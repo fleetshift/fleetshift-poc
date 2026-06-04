@@ -19,7 +19,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        module: [fleetshift-server, fleetshift-cli, ocp-engine]
+        module: [fleetshift-server, fleetshift-cli]
 
     steps:
       - name: Checkout

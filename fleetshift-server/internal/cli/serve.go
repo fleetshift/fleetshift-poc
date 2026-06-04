@@ -37,7 +37,6 @@ import (
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -91,7 +90,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
 	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
-	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes,gcphcp", "comma-separated list of addons to enable (default: all)")
+	cmd.Flags().StringVar(&f.addons, "addons", "kind,kubernetes,gcphcp", "comma-separated list of addons to enable (default: all)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd
 }
@@ -228,20 +227,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			},
 			kindOpts...,
 		)
-	}
-
-	var ocpAgent *ocpaddon.Agent
-	if enabledAddons["ocp"] {
-		ocpAgent = ocpaddon.NewAgent(
-			deliveryReporter,
-			ocpaddon.WithVault(vault),
-			ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
-		)
-		if err := ocpAgent.Start(); err != nil {
-			return fmt.Errorf("start ocp agent: %w", err)
-		}
-		defer ocpAgent.Shutdown(ctx)
-		logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
 	}
 
 	var gcphcpAgent domain.DeliveryAgent
@@ -576,11 +561,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			return fmt.Errorf("enable kind addon: %w", err)
 		}
 	}
-	if enabledAddons["ocp"] {
-		if err := addonMgr.Enable(ctx, ocpaddon.Descriptor()); err != nil {
-			return fmt.Errorf("enable ocp addon: %w", err)
-		}
-	}
 	if enabledAddons["kubernetes"] {
 		if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
 			return fmt.Errorf("enable kubernetes addon: %w", err)
@@ -626,23 +606,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
 		}); err != nil {
 			return fmt.Errorf("connect kind addon: %w", err)
-		}
-	}
-
-	if enabledAddons["ocp"] {
-		if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
-			Agent: ocpAgent,
-			Targets: []domain.TargetInfo{domain.NewTargetInfo(
-				"ocp-aws",
-				ocpaddon.TargetType,
-				"OCP on AWS",
-				domain.TargetStateReady,
-				nil,
-				nil,
-				[]domain.ResourceType{ocpaddon.ClusterResourceType},
-			)},
-		}); err != nil {
-			return fmt.Errorf("connect ocp addon: %w", err)
 		}
 	}
 

@@ -33,7 +33,7 @@ tasks:
 
   build:all:
     desc: Build all binaries
-    deps: [build:server, build:cli, build:ocp-engine]
+    deps: [build:server, build:cli]
 
   build:server:
     desc: Build the server binary
@@ -47,15 +47,9 @@ tasks:
     cmds:
       - go build -o ../bin/fleetctl ./cmd/fleetctl
 
-  build:ocp-engine:
-    desc: Build the ocp-engine binary
-    dir: ocp-engine
-    cmds:
-      - go build -o ../bin/ocp-engine .
-
   test:all:
     desc: Run unit tests for all modules
-    deps: [test:server, test:cli, test:ocp-engine]
+    deps: [test:server, test:cli]
 
   test:server:
     desc: Run server tests
@@ -69,41 +63,14 @@ tasks:
     cmds:
       - go test -count=1 ./...
 
-  test:ocp-engine:
-    desc: Run ocp-engine tests
-    dir: ocp-engine
-    cmds:
-      - go test -count=1 ./...
-
-  test:e2e:
-    desc: Run end-to-end tests (requires .env and interactive auth)
-    deps: [build:all]
-    dir: e2e
-    preconditions:
-      - sh: test -f {{.ROOT_DIR}}/.env
-        msg: "No .env found. E2E tests require environment configuration."
-    cmds:
-      - go test -tags e2e -timeout 3h -v
-
-  test:e2e-aws:
-    desc: Run AWS provision/destroy E2E test
-    deps: [build:all]
-    dir: e2e
-    preconditions:
-      - sh: test -f {{.ROOT_DIR}}/.env
-        msg: "No .env found. E2E tests require environment configuration."
-    cmds:
-      - go test -tags e2e -timeout 3h -v -run TestAWSProvision
-
   protogen:
     desc: Generate protobuf and gRPC code (skips if unchanged)
     preconditions:
       - sh: command -v buf
         msg: "buf is not installed. See https://buf.build/docs/installation"
-    sources: ['proto/**/*.proto', buf.yaml, buf.gen.yaml, buf.gen.ocp.yaml]
+    sources: ['proto/**/*.proto', buf.yaml, buf.gen.yaml]
     cmds:
       - buf generate --path proto/fleetshift
-      - buf generate --template buf.gen.ocp.yaml --path proto/ocp/v1
 
   image:build:
     desc: Build fleetshift container images
