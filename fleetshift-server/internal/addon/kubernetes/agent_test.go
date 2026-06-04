@@ -106,6 +106,44 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 	}
 }
 
+func TestAgent_Deliver_EmptyAPIServer(t *testing.T) {
+	agent := kubernetes.NewAgent(nopReporter{})
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:         "k8s-test",
+		Type:       kubernetes.TargetType,
+		Name:       "test-cluster",
+		Properties: map[string]string{"api_server": ""},
+	})
+
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
+	if err == nil {
+		t.Fatal("expected error for empty api_server")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestAgent_Remove_EmptyAPIServer(t *testing.T) {
+	agent := kubernetes.NewAgent(nopReporter{})
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:         "k8s-test",
+		Type:       kubernetes.TargetType,
+		Name:       "test-cluster",
+		Properties: map[string]string{"api_server": ""},
+	})
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
+	if err == nil {
+		t.Fatal("expected error for empty api_server")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
 func TestAgent_Deliver_MissingToken(t *testing.T) {
 	agent := kubernetes.NewAgent(nopReporter{})
 

@@ -98,7 +98,7 @@ func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 // config, the attestation is verified before apply. Verification
 // failure is reported as [domain.DeliveryStateAuthFailed].
 func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	if _, ok := target.Properties()["api_server"]; !ok {
+	if target.Properties()["api_server"] == "" {
 		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
 
@@ -271,7 +271,7 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // inputs synchronously and returns nil, then reports the outcome via
 // [domain.DeliveryReporter.ReportResult].
 func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	if _, ok := target.Properties()["api_server"]; !ok {
+	if target.Properties()["api_server"] == "" {
 		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
 

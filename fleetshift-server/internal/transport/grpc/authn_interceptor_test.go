@@ -268,3 +268,31 @@ func TestAuthnInterceptor_NoToken_WithMethodsConfigured(t *testing.T) {
 		t.Errorf("Subject = %v, want nil (anonymous, no token sent)", capture.authCtx.Subject)
 	}
 }
+
+func TestAuthnInterceptor_NilOIDCConfig_Anonymous(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	ctx := context.Background()
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "oidc-broken",
+		Type: domain.AuthMethodTypeOIDC,
+		OIDC: nil,
+	})); err != nil {
+		t.Fatalf("Save auth method: %v", err)
+	}
+
+	verifier := &fakeOIDCTokenVerifier{acceptToken: "valid-token"}
+	client, capture := setupAuthnTest(t, repo, verifier)
+
+	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer valid-token")
+	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+
+	if capture.authCtx == nil {
+		t.Fatal("AuthorizationContext is nil")
+	}
+	if capture.authCtx.Subject != nil {
+		t.Errorf("Subject = %v, want nil (nil OIDC config should be skipped)", capture.authCtx.Subject)
+	}
+}

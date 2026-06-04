@@ -108,12 +108,16 @@ func scanDeploymentSnapshot(s scanner) (domain.DeploymentSnapshot, error) {
 	snap.ID = domain.DeploymentID(id)
 	snap.UID = uid
 	snap.FulfillmentID = domain.FulfillmentID(fID)
-	if t, err := time.Parse(time.RFC3339, createdAtStr); err == nil {
-		snap.CreatedAt = t
+	t, err := time.Parse(time.RFC3339, createdAtStr)
+	if err != nil {
+		return snap, fmt.Errorf("parse deployment.created_at for %q: %w", id, err)
 	}
-	if t, err := time.Parse(time.RFC3339, updatedAtStr); err == nil {
-		snap.UpdatedAt = t
+	snap.CreatedAt = t
+	t, err = time.Parse(time.RFC3339, updatedAtStr)
+	if err != nil {
+		return snap, fmt.Errorf("parse deployment.updated_at for %q: %w", id, err)
 	}
+	snap.UpdatedAt = t
 	return snap, nil
 }
 
@@ -136,12 +140,16 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 		UID:           uid,
 		FulfillmentID: domain.FulfillmentID(fRefID),
 	}
-	if t, err := time.Parse(time.RFC3339, dCreatedAtStr); err == nil {
-		ds.CreatedAt = t
+	t, err := time.Parse(time.RFC3339, dCreatedAtStr)
+	if err != nil {
+		return v, fmt.Errorf("parse deployment.created_at for %q: %w", dID, err)
 	}
-	if t, err := time.Parse(time.RFC3339, dUpdatedAtStr); err == nil {
-		ds.UpdatedAt = t
+	ds.CreatedAt = t
+	t, err = time.Parse(time.RFC3339, dUpdatedAtStr)
+	if err != nil {
+		return v, fmt.Errorf("parse deployment.updated_at for %q: %w", dID, err)
 	}
+	ds.UpdatedAt = t
 	v.Deployment = domain.DeploymentFromSnapshot(ds)
 
 	fs, err := fCols.snapshot()

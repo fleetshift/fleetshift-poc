@@ -2,6 +2,7 @@ package sqlite
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -62,8 +63,11 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 	defer tx.Rollback()
 
 	_, err = tx.Deliveries().GetByFulfillmentTarget(ctx, fulfillmentIDFromDeliveryID(deliveryID), target.ID())
-	if err != nil {
+	if errors.Is(err, domain.ErrNotFound) {
 		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get delivery: %w", err)
 	}
 	now := s.now()
 	if err := tx.Deliveries().Put(ctx, domain.NewDelivery(

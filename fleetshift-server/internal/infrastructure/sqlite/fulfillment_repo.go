@@ -94,15 +94,27 @@ func (r *FulfillmentRepo) Get(ctx context.Context, id domain.FulfillmentID) (*do
 
 func (r *FulfillmentRepo) Update(ctx context.Context, f *domain.Fulfillment) error {
 	s := f.Snapshot()
-	rt, _ := json.Marshal(s.ResolvedTargets)
-	auth, _ := json.Marshal(s.Auth)
+	rt, err := json.Marshal(s.ResolvedTargets)
+	if err != nil {
+		return fmt.Errorf("marshal resolved targets: %w", err)
+	}
+	auth, err := json.Marshal(s.Auth)
+	if err != nil {
+		return fmt.Errorf("marshal auth: %w", err)
+	}
 	var provJSON []byte
 	if s.Provenance != nil {
-		provJSON, _ = json.Marshal(s.Provenance)
+		provJSON, err = json.Marshal(s.Provenance)
+		if err != nil {
+			return fmt.Errorf("marshal provenance: %w", err)
+		}
 	}
 	var attestRefJSON []byte
 	if s.AttestationRef != nil {
-		attestRefJSON, _ = json.Marshal(s.AttestationRef)
+		attestRefJSON, err = json.Marshal(s.AttestationRef)
+		if err != nil {
+			return fmt.Errorf("marshal attestation ref: %w", err)
+		}
 	}
 
 	res, err := r.DB.ExecContext(ctx,
@@ -162,7 +174,10 @@ func (r *FulfillmentRepo) Delete(ctx context.Context, id domain.FulfillmentID) e
 
 func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, pending domain.PendingStrategyRecords) error {
 	for _, rec := range pending.Manifest {
-		spec, _ := json.Marshal(rec.Spec)
+		spec, err := json.Marshal(rec.Spec)
+		if err != nil {
+			return fmt.Errorf("marshal manifest strategy v%d: %w", rec.Version, err)
+		}
 		if _, err := r.DB.ExecContext(ctx,
 			`INSERT INTO manifest_strategies (fulfillment_id, version, spec, created_at) VALUES (?, ?, ?, ?)`,
 			string(rec.FulfillmentID), int64(rec.Version), string(spec),
@@ -172,7 +187,10 @@ func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, pendi
 		}
 	}
 	for _, rec := range pending.Placement {
-		spec, _ := json.Marshal(rec.Spec)
+		spec, err := json.Marshal(rec.Spec)
+		if err != nil {
+			return fmt.Errorf("marshal placement strategy v%d: %w", rec.Version, err)
+		}
 		if _, err := r.DB.ExecContext(ctx,
 			`INSERT INTO placement_strategies (fulfillment_id, version, spec, created_at) VALUES (?, ?, ?, ?)`,
 			string(rec.FulfillmentID), int64(rec.Version), string(spec),
@@ -184,7 +202,11 @@ func (r *FulfillmentRepo) flushPendingStrategyRecords(ctx context.Context, pendi
 	for _, rec := range pending.Rollout {
 		var spec []byte
 		if rec.Spec != nil {
-			spec, _ = json.Marshal(rec.Spec)
+			var err error
+			spec, err = json.Marshal(rec.Spec)
+			if err != nil {
+				return fmt.Errorf("marshal rollout strategy v%d: %w", rec.Version, err)
+			}
 		}
 		if _, err := r.DB.ExecContext(ctx,
 			`INSERT INTO rollout_strategies (fulfillment_id, version, spec, created_at) VALUES (?, ?, ?, ?)`,

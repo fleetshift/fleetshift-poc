@@ -120,6 +120,7 @@ func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
 	if provenance != nil {
 		f.provenance = provenance
 	}
+	f.state = FulfillmentStateActive
 	f.advanceGeneration()
 	return nil
 }
