@@ -11,11 +11,11 @@ import "context"
 type DeliveryObserver interface {
 	// EventEmitted is called when the delivery agent emits an event
 	// via [DeliveryReporter.ReportEvent].
-	EventEmitted(ctx context.Context, deliveryID DeliveryID, target TargetInfo, event DeliveryEvent) (context.Context, EventEmittedProbe)
+	EventEmitted(ctx context.Context, deliveryID DeliveryID, targetID TargetID, event DeliveryEvent) (context.Context, EventEmittedProbe)
 
 	// Completed is called when the delivery reaches a terminal state
 	// via [DeliveryReporter.ReportResult].
-	Completed(ctx context.Context, deliveryID DeliveryID, target TargetInfo, result DeliveryResult) (context.Context, CompletedProbe)
+	Completed(ctx context.Context, deliveryID DeliveryID, targetID TargetID, result DeliveryResult) (context.Context, CompletedProbe)
 }
 
 // EventEmittedProbe tracks a single [DeliveryReporter.ReportEvent]
@@ -37,11 +37,11 @@ type CompletedProbe interface {
 // NoOpDeliveryObserver is a [DeliveryObserver] that returns no-op probes.
 type NoOpDeliveryObserver struct{}
 
-func (NoOpDeliveryObserver) EventEmitted(ctx context.Context, _ DeliveryID, _ TargetInfo, _ DeliveryEvent) (context.Context, EventEmittedProbe) {
+func (NoOpDeliveryObserver) EventEmitted(ctx context.Context, _ DeliveryID, _ TargetID, _ DeliveryEvent) (context.Context, EventEmittedProbe) {
 	return ctx, NoOpEventEmittedProbe{}
 }
 
-func (NoOpDeliveryObserver) Completed(ctx context.Context, _ DeliveryID, _ TargetInfo, _ DeliveryResult) (context.Context, CompletedProbe) {
+func (NoOpDeliveryObserver) Completed(ctx context.Context, _ DeliveryID, _ TargetID, _ DeliveryResult) (context.Context, CompletedProbe) {
 	return ctx, NoOpCompletedProbe{}
 }
 

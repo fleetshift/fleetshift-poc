@@ -52,12 +52,12 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 			return managedResourceMutationResult{}, err
 		}
 
-		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion)
+		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion())
 		if err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 		if err != nil {
 			return managedResourceMutationResult{}, err
 		}
@@ -75,7 +75,7 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 				ErrStaleGeneration, in.Etag, currentView.Etag()))
 		}
 
-		nextGen := f.Generation + 1
+		nextGen := f.Generation() + 1
 
 		// Expected-generation check: if supplied, it must match the
 		// next generation the server is about to produce.
@@ -94,7 +94,7 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 		}
 
 		var prov *Provenance
-		if f.Provenance != nil || len(in.UserSignature) > 0 {
+		if f.Provenance() != nil || len(in.UserSignature) > 0 {
 			provenanceGen := in.ExpectedGeneration
 			if provenanceGen == 0 {
 				provenanceGen = nextGen
@@ -126,8 +126,8 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 				Intent:          intent,
 				Fulfillment:     *f,
 			},
-			FulfillmentID: mr.FulfillmentID,
-			MyGen:         f.Generation,
+			FulfillmentID: mr.FulfillmentID(),
+			MyGen:         f.Generation(),
 		}, nil
 	})
 }

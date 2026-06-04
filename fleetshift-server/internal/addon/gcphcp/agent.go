@@ -179,7 +179,7 @@ func (a *Agent) Deliver(
 	}
 
 	// Extract target config from properties
-	targetCfg := TargetConfigFromProperties(target.Properties)
+	targetCfg := TargetConfigFromProperties(target.Properties())
 
 	// Launch async provisioning with per-cluster serialization
 	lock := a.clusterLock(spec.Name)
@@ -257,7 +257,7 @@ func (a *Agent) Remove(
 	progress := newDeliveryProgress(a.reporter, deliveryID, generation)
 
 	// Extract target config from properties
-	targetCfg := TargetConfigFromProperties(target.Properties)
+	targetCfg := TargetConfigFromProperties(target.Properties())
 
 	// Process each cluster manifest
 	for _, m := range manifests {

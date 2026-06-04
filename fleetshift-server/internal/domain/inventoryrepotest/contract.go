@@ -24,7 +24,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		did := domain.DeliveryID("d1:t1")
-		item := domain.InventoryItem{
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 			ID:               "inv-1",
 			Type:             "docker.daemon",
 			Name:             "local-docker",
@@ -33,7 +33,7 @@ func Run(t *testing.T, factory Factory) {
 			SourceDeliveryID: &did,
 			CreatedAt:        now,
 			UpdatedAt:        now,
-		}
+		})
 		if err := repo.Create(ctx, item); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -42,21 +42,21 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Type != "docker.daemon" {
-			t.Errorf("Type = %q, want %q", got.Type, "docker.daemon")
+		if got.Type() != "docker.daemon" {
+			t.Errorf("Type = %q, want %q", got.Type(), "docker.daemon")
 		}
-		if got.Name != "local-docker" {
-			t.Errorf("Name = %q, want %q", got.Name, "local-docker")
+		if got.Name() != "local-docker" {
+			t.Errorf("Name = %q, want %q", got.Name(), "local-docker")
 		}
-		if got.Labels["host"] != "laptop" {
-			t.Errorf("Labels[host] = %q, want %q", got.Labels["host"], "laptop")
+		if got.Labels()["host"] != "laptop" {
+			t.Errorf("Labels[host] = %q, want %q", got.Labels()["host"], "laptop")
 		}
-		if got.SourceDeliveryID == nil || *got.SourceDeliveryID != "d1:t1" {
-			t.Errorf("SourceDeliveryID = %v, want d1:t1", got.SourceDeliveryID)
+		if got.SourceDeliveryID() == nil || *got.SourceDeliveryID() != "d1:t1" {
+			t.Errorf("SourceDeliveryID = %v, want d1:t1", got.SourceDeliveryID())
 		}
 
 		var props map[string]string
-		if err := json.Unmarshal(got.Properties, &props); err != nil {
+		if err := json.Unmarshal(got.Properties(), &props); err != nil {
 			t.Fatalf("unmarshal properties: %v", err)
 		}
 		if props["engine"] != "docker" {
@@ -68,13 +68,13 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		item := domain.InventoryItem{
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 			ID:        "inv-1",
 			Type:      "kubernetes.node",
 			Name:      "worker-1",
 			CreatedAt: now,
 			UpdatedAt: now,
-		}
+		})
 		if err := repo.Create(ctx, item); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -83,8 +83,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.SourceDeliveryID != nil {
-			t.Errorf("SourceDeliveryID = %v, want nil", got.SourceDeliveryID)
+		if got.SourceDeliveryID() != nil {
+			t.Errorf("SourceDeliveryID = %v, want nil", got.SourceDeliveryID())
 		}
 	})
 
@@ -92,14 +92,14 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		item := domain.InventoryItem{
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 			ID:         "inv-1",
 			Type:       "docker.daemon",
 			Name:       "local-docker",
 			Properties: json.RawMessage(`{"version":"24"}`),
 			CreatedAt:  now,
 			UpdatedAt:  now,
-		}
+		})
 		if err := repo.CreateOrUpdate(ctx, item); err != nil {
 			t.Fatalf("CreateOrUpdate (insert): %v", err)
 		}
@@ -108,8 +108,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "local-docker" {
-			t.Errorf("Name = %q, want %q", got.Name, "local-docker")
+		if got.Name() != "local-docker" {
+			t.Errorf("Name = %q, want %q", got.Name(), "local-docker")
 		}
 	})
 
@@ -117,18 +117,24 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		item := domain.InventoryItem{
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 			ID: "inv-1", Type: "docker.daemon", Name: "old",
 			Properties: json.RawMessage(`{"version":"23"}`),
 			CreatedAt:  now, UpdatedAt: now,
-		}
+		})
 		if err := repo.Create(ctx, item); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		item.Name = "new"
-		item.Properties = json.RawMessage(`{"version":"24"}`)
-		item.UpdatedAt = now.Add(time.Minute)
+		item = domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
+			ID:         item.ID(),
+			Type:       item.Type(),
+			Name:       "new",
+			Properties: json.RawMessage(`{"version":"24"}`),
+			Labels:     item.Labels(),
+			CreatedAt:  item.CreatedAt(),
+			UpdatedAt:  now.Add(time.Minute),
+		})
 		if err := repo.CreateOrUpdate(ctx, item); err != nil {
 			t.Fatalf("CreateOrUpdate (update): %v", err)
 		}
@@ -137,11 +143,11 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "new" {
-			t.Errorf("Name = %q, want new", got.Name)
+		if got.Name() != "new" {
+			t.Errorf("Name = %q, want new", got.Name())
 		}
-		if !got.CreatedAt.Equal(now) {
-			t.Errorf("CreatedAt changed: got %v, want %v", got.CreatedAt, now)
+		if !got.CreatedAt().Equal(now) {
+			t.Errorf("CreatedAt changed: got %v, want %v", got.CreatedAt(), now)
 		}
 	})
 
@@ -149,7 +155,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		item := domain.InventoryItem{ID: "inv-1", Type: "a", Name: "x", CreatedAt: now, UpdatedAt: now}
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "inv-1", Type: "a", Name: "x", CreatedAt: now, UpdatedAt: now})
 		_ = repo.Create(ctx, item)
 		err := repo.Create(ctx, item)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
@@ -169,8 +175,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "a", Type: "x", Name: "1", CreatedAt: now, UpdatedAt: now})
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "b", Type: "y", Name: "2", CreatedAt: now, UpdatedAt: now})
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "a", Type: "x", Name: "1", CreatedAt: now, UpdatedAt: now}))
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "b", Type: "y", Name: "2", CreatedAt: now, UpdatedAt: now}))
 
 		got, err := repo.List(ctx)
 		if err != nil {
@@ -185,9 +191,9 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "a", Type: "docker.daemon", Name: "1", CreatedAt: now, UpdatedAt: now})
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "b", Type: "kubernetes.node", Name: "2", CreatedAt: now, UpdatedAt: now})
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "c", Type: "docker.daemon", Name: "3", CreatedAt: now, UpdatedAt: now})
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "a", Type: "docker.daemon", Name: "1", CreatedAt: now, UpdatedAt: now}))
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "b", Type: "kubernetes.node", Name: "2", CreatedAt: now, UpdatedAt: now}))
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "c", Type: "docker.daemon", Name: "3", CreatedAt: now, UpdatedAt: now}))
 
 		got, err := repo.ListByType(ctx, "docker.daemon")
 		if err != nil {
@@ -202,16 +208,22 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		item := domain.InventoryItem{
+		item := domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
 			ID: "inv-1", Type: "docker.daemon", Name: "old",
 			Properties: json.RawMessage(`{"version":"23"}`),
 			CreatedAt:  now, UpdatedAt: now,
-		}
+		})
 		_ = repo.Create(ctx, item)
 
-		item.Name = "new"
-		item.Properties = json.RawMessage(`{"version":"24"}`)
-		item.UpdatedAt = now.Add(time.Minute)
+		item = domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
+			ID:         item.ID(),
+			Type:       item.Type(),
+			Name:       "new",
+			Properties: json.RawMessage(`{"version":"24"}`),
+			Labels:     item.Labels(),
+			CreatedAt:  item.CreatedAt(),
+			UpdatedAt:  now.Add(time.Minute),
+		})
 		if err := repo.Update(ctx, item); err != nil {
 			t.Fatalf("Update: %v", err)
 		}
@@ -220,14 +232,14 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "new" {
-			t.Errorf("Name = %q, want new", got.Name)
+		if got.Name() != "new" {
+			t.Errorf("Name = %q, want new", got.Name())
 		}
 	})
 
 	t.Run("UpdateNotFound", func(t *testing.T) {
 		repo := factory(t)
-		err := repo.Update(context.Background(), domain.InventoryItem{ID: "missing", UpdatedAt: now})
+		err := repo.Update(context.Background(), domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "missing", UpdatedAt: now}))
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -237,7 +249,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Create(ctx, domain.InventoryItem{ID: "inv-1", Type: "a", Name: "x", CreatedAt: now, UpdatedAt: now})
+		_ = repo.Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{ID: "inv-1", Type: "a", Name: "x", CreatedAt: now, UpdatedAt: now}))
 		if err := repo.Delete(ctx, "inv-1"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}

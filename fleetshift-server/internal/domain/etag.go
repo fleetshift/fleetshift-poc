@@ -28,25 +28,25 @@ func (v ManagedResourceView) Etag() Etag {
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
-	hashString(h, string(v.Deployment.ID))
-	hashString(h, v.Deployment.UID)
+	hashString(h, string(v.Deployment.id))
+	hashString(h, v.Deployment.uid)
 }
 
 func hashManagedResourceFields(h hash.Hash, v ManagedResourceView) {
-	hashString(h, string(v.ManagedResource.ResourceType))
-	hashString(h, string(v.ManagedResource.Name))
-	hashString(h, v.ManagedResource.UID)
-	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.CurrentVersion))
+	hashString(h, string(v.ManagedResource.resourceType))
+	hashString(h, string(v.ManagedResource.name))
+	hashString(h, v.ManagedResource.uid)
+	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.currentVersion))
 	binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
 	hashBytes(h, v.Intent.Spec)
 }
 
 func hashFulfillmentFields(h hash.Hash, f Fulfillment) {
-	binary.Write(h, binary.BigEndian, int64(f.Generation))
-	hashString(h, string(f.State))
-	hashString(h, f.StatusReason)
-	binary.Write(h, binary.BigEndian, int64(len(f.ResolvedTargets)))
-	for _, t := range f.ResolvedTargets {
+	binary.Write(h, binary.BigEndian, int64(f.generation))
+	hashString(h, string(f.state))
+	hashString(h, f.statusReason)
+	binary.Write(h, binary.BigEndian, int64(len(f.resolvedTargets)))
+	for _, t := range f.resolvedTargets {
 		hashString(h, string(t))
 	}
 }

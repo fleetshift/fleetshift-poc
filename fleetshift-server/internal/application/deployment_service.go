@@ -135,11 +135,11 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
-	fulfillment, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
+	fulfillment, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID())
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
-	currentGen := fulfillment.Generation
+	currentGen := fulfillment.Generation()
 	if err := tx.Commit(); err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("commit read tx: %w", err)
 	}
@@ -184,7 +184,7 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
-	fulfillment, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID)
+	fulfillment, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID())
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
@@ -192,11 +192,11 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 		return domain.DeploymentView{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
-	if fulfillment.State == domain.FulfillmentStateDeleting {
+	if fulfillment.State() == domain.FulfillmentStateDeleting {
 		return domain.DeploymentView{Deployment: dep, Fulfillment: *fulfillment}, nil
 	}
 
-	exec, err := s.DeleteWF.Start(ctx, id, fulfillment.Generation)
+	exec, err := s.DeleteWF.Start(ctx, id, fulfillment.Generation())
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("start delete-deployment workflow: %w", err)
 	}

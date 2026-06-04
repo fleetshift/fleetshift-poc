@@ -107,11 +107,11 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if err := targetSvc.Register(ctx, domain.TargetInfo{
+	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "kind-docker",
 		Type: kindaddon.TargetType,
 		Name: "Docker Kind Provider",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Register target: %v", err)
 	}
 
@@ -140,8 +140,8 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	}
 
 	view := awaitState(ctx, t, store, "kind-docker-deploy", domain.FulfillmentStateActive)
-	if len(view.Fulfillment.ResolvedTargets) != 1 || view.Fulfillment.ResolvedTargets[0] != "kind-docker" {
-		t.Fatalf("unexpected ResolvedTargets: %v", view.Fulfillment.ResolvedTargets)
+	if len(view.Fulfillment.ResolvedTargets()) != 1 || view.Fulfillment.ResolvedTargets()[0] != "kind-docker" {
+		t.Fatalf("unexpected ResolvedTargets: %v", view.Fulfillment.ResolvedTargets())
 	}
 
 	// Delivery is async; poll until the cluster appears or context expires.

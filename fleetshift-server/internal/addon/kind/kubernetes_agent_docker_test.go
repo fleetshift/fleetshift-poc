@@ -60,7 +60,7 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	target := domain.TargetInfo{ID: "kind-k8s-agent", Type: kindaddon.TargetType}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "kind-k8s-agent", Type: kindaddon.TargetType})
 	manifests := []domain.Manifest{{
 		ResourceType: kindaddon.ClusterResourceType,
 		Raw:          json.RawMessage(`{"name":"` + clusterName + `"}`),
@@ -143,12 +143,12 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 	// Build the target info as it would appear after
 	// ProcessDeliveryOutputs registers the provisioned target.
-	k8sTarget := domain.TargetInfo{
+	k8sTarget := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         pt.ID,
 		Type:       pt.Type,
 		Name:       pt.Name,
 		Properties: pt.Properties,
-	}
+	})
 
 	// For token-passthrough tests, resolve the SA token directly so we
 	// have a bearer token to pass in DeliveryAuth.
@@ -274,9 +274,10 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		targetWithTrust := k8sTarget
-		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
-		targetWithTrust.Properties["trust_bundle"] = att.trustBundleJSON
+		targetWithTrustSnap := k8sTarget.Snapshot()
+		targetWithTrustSnap.Properties = copyProps(targetWithTrustSnap.Properties)
+		targetWithTrustSnap.Properties["trust_bundle"] = att.trustBundleJSON
+		targetWithTrust := domain.TargetInfoFromSnapshot(targetWithTrustSnap)
 
 		err := agent.Deliver(ctx, targetWithTrust, "att-vault-1", manifests, domain.DeliveryAuth{}, att.attestation, 1)
 		if err != nil {
@@ -306,9 +307,10 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		agent := kubeaddon.NewAgent(reporter)
 
 		trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
-		targetWithTrust := k8sTarget
-		targetWithTrust.Properties = copyProps(k8sTarget.Properties)
-		targetWithTrust.Properties["trust_bundle"] = trustBundle
+		targetWithTrustSnap := k8sTarget.Snapshot()
+		targetWithTrustSnap.Properties = copyProps(targetWithTrustSnap.Properties)
+		targetWithTrustSnap.Properties["trust_bundle"] = trustBundle
+		targetWithTrust := domain.TargetInfoFromSnapshot(targetWithTrustSnap)
 
 		bogusAtt := &domain.Attestation{
 			Input: domain.SignedInput{

@@ -54,7 +54,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 
 	registerTargets(t, h, "t1")
 
-	enrollSignerDirect(t, store, domain.SignerEnrollment{
+	enrollSignerDirect(t, store, domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
 		ID:                "se-e2e",
 		FederatedIdentity: domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
 		IdentityToken:     domain.RawToken(identityToken),
@@ -62,7 +62,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		RegistryID:        "github.com",
 		CreatedAt:         time.Now().UTC(),
 		ExpiresAt:         time.Now().Add(365 * 24 * time.Hour).UTC(),
-	})
+	}))
 
 	ms := defaultManifestStrategy()
 	ps := defaultPlacementStrategy()
@@ -88,7 +88,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if dep.Fulfillment.Provenance == nil {
+	if dep.Fulfillment.Provenance() == nil {
 		t.Fatal("expected Provenance on fulfillment")
 	}
 

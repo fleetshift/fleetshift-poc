@@ -15,9 +15,8 @@ func TestDeliveryObserver_EventEmitted_LogsEvent(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind", Name: "cluster-1"}
 
-	ctx, probe := obs.EventEmitted(context.Background(), "del-1", target, domain.DeliveryEvent{
+	ctx, probe := obs.EventEmitted(context.Background(), "del-1", "t1", domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
 		Message: "creating cluster",
 	})
@@ -44,9 +43,8 @@ func TestDeliveryObserver_EventEmitted_WarningLevel(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind"}
 
-	_, probe := obs.EventEmitted(context.Background(), "del-2", target, domain.DeliveryEvent{
+	_, probe := obs.EventEmitted(context.Background(), "del-2", "t1", domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventWarning,
 		Message: "slow network",
 	})
@@ -67,9 +65,8 @@ func TestDeliveryObserver_Completed_LogsResult(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind", Name: "cluster-1"}
 
-	ctx, probe := obs.Completed(context.Background(), "del-3", target, domain.DeliveryResult{
+	ctx, probe := obs.Completed(context.Background(), "del-3", "t1", domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
 	})
 	if ctx == nil {
@@ -103,9 +100,8 @@ func TestDeliveryObserver_CompletedProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	logger := slog.New(handler)
 
 	obs := observability.NewDeliveryObserver(logger)
-	target := domain.TargetInfo{ID: "t1", Type: "kind"}
 
-	_, probe := obs.Completed(context.Background(), "del-4", target, domain.DeliveryResult{
+	_, probe := obs.Completed(context.Background(), "del-4", "t1", domain.DeliveryResult{
 		State: domain.DeliveryStateFailed,
 	})
 	probe.Error(domain.ErrNotFound)

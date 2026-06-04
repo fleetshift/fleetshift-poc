@@ -80,12 +80,12 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
-	if d.Generation != generation {
+	if d.Generation() != generation {
 		// TODO: need observer to log this
 		return nil
 	}
 
-	wasPending := d.State == domain.DeliveryStatePending
+	wasPending := d.State() == domain.DeliveryStatePending
 
 	if err := d.TransitionTo(domain.DeliveryStateProgressing, time.Now()); err != nil {
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
@@ -102,13 +102,12 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 	}
 
 	if s.observer != nil {
-		target := s.lookupTarget(ctx, d.TargetID)
-		_, probe := s.observer.EventEmitted(ctx, deliveryID, target, event)
+		_, probe := s.observer.EventEmitted(ctx, deliveryID, d.TargetID(), event)
 		probe.End()
 	}
 
 	if wasPending && s.signaler != nil {
-		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+		if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID(), domain.FulfillmentEvent{
 			DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID, Generation: generation},
 		}); err != nil {
 			return fmt.Errorf("signal ack: %w", err)
@@ -142,11 +141,11 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 		return fmt.Errorf("get delivery: %w", err)
 	}
 
-	if d.Generation != generation {
+	if d.Generation() != generation {
 		return nil
 	}
 
-	wasPending := d.State == domain.DeliveryStatePending
+	wasPending := d.State() == domain.DeliveryStatePending
 
 	if err := d.TransitionTo(result.State, time.Now()); err != nil {
 		if errors.Is(err, domain.ErrIllegalStateTransition) {
@@ -162,22 +161,21 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 	}
 
 	if s.observer != nil {
-		target := s.lookupTarget(ctx, d.TargetID)
-		_, probe := s.observer.Completed(ctx, deliveryID, target, result)
+		_, probe := s.observer.Completed(ctx, deliveryID, d.TargetID(), result)
 		probe.End()
 	}
 
 	if s.signaler != nil {
 		// TODO: maybe result should not accept non terminal states? not sure it makes sense otherwise
 		if wasPending && !result.State.IsTerminal() {
-			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID(), domain.FulfillmentEvent{
 				DeliveryAcked: &domain.DeliveryAckedEvent{DeliveryID: deliveryID, Generation: generation},
 			}); err != nil {
 				return fmt.Errorf("signal ack: %w", err)
 			}
 		}
 		if result.State.IsTerminal() {
-			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID, domain.FulfillmentEvent{
+			if err := s.signaler.SignalFulfillmentEvent(ctx, d.FulfillmentID(), domain.FulfillmentEvent{
 				DeliveryCompleted: &domain.DeliveryCompletionEvent{
 					DeliveryID: deliveryID,
 					Generation: generation,
@@ -219,8 +217,8 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 	fulfillments := make(map[domain.FulfillmentID]*domain.Fulfillment, len(deliveries))
 	targets := make(map[domain.TargetID]domain.TargetInfo, len(deliveries))
 	for _, d := range deliveries {
-		fulfillments[d.FulfillmentID] = nil
-		targets[d.TargetID] = domain.TargetInfo{}
+		fulfillments[d.FulfillmentID()] = nil
+		targets[d.TargetID()] = domain.TargetInfo{}
 	}
 
 	for fID := range fulfillments {
@@ -249,7 +247,7 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 	// without provenance (unsigned / token-passthrough) get nil.
 	evidence := make(map[domain.FulfillmentID]*domain.ResolvedEvidence, len(fulfillments))
 	for fID, f := range fulfillments {
-		if f == nil || f.Provenance == nil {
+		if f == nil || f.Provenance() == nil {
 			continue
 		}
 		ev, err := s.attestation.Resolve(ctx, tx, f)
@@ -262,44 +260,28 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 
 	var result []domain.ActiveDelivery
 	for _, d := range deliveries {
-		f := fulfillments[d.FulfillmentID]
+		f := fulfillments[d.FulfillmentID()]
 		if f == nil {
 			continue // fulfillment deleted
 		}
-		if d.Generation < f.Generation {
+		if d.Generation() < f.Generation() {
 			continue // stale: fulfillment has advanced
 		}
 
-		t, ok := targets[d.TargetID]
-		if !ok || t.ID == "" {
+		t, ok := targets[d.TargetID()]
+		if !ok || t.ID() == "" {
 			continue // target deleted
 		}
 
 		ad := domain.ActiveDelivery{
 			Delivery: d,
 			Target:   t,
-			Auth:     f.Auth,
+			Auth:     f.Auth(),
 		}
-		if ev := evidence[d.FulfillmentID]; ev != nil {
-			ad.Attestation = domain.AssembleDeliverAttestation(*f, d.Manifests, ev)
+		if ev := evidence[d.FulfillmentID()]; ev != nil {
+			ad.Attestation = domain.AssembleDeliverAttestation(*f, d.Manifests(), ev)
 		}
 		result = append(result, ad)
 	}
 	return result, nil
-}
-
-// lookupTarget is a best-effort read of the target for observer
-// callbacks. Returns a minimal TargetInfo with just the ID if the
-// lookup fails.
-func (s *DeliveryReportService) lookupTarget(ctx context.Context, targetID domain.TargetID) domain.TargetInfo {
-	tx, err := s.store.BeginReadOnly(ctx)
-	if err != nil {
-		return domain.TargetInfo{ID: targetID}
-	}
-	defer tx.Rollback()
-	t, err := tx.Targets().Get(ctx, targetID)
-	if err != nil {
-		return domain.TargetInfo{ID: targetID}
-	}
-	return t
 }

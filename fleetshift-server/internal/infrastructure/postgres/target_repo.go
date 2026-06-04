@@ -16,31 +16,32 @@ type TargetRepo struct {
 }
 
 func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
-	labels, err := json.Marshal(t.Labels)
+	s := t.Snapshot()
+	labels, err := json.Marshal(s.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
-	props, err := json.Marshal(t.Properties)
+	props, err := json.Marshal(s.Properties)
 	if err != nil {
 		return fmt.Errorf("marshal properties: %w", err)
 	}
-	art, err := marshalResourceTypes(t.AcceptedResourceTypes)
+	art, err := marshalResourceTypes(s.AcceptedResourceTypes)
 	if err != nil {
 		return fmt.Errorf("marshal accepted_resource_types: %w", err)
 	}
 
-	state := t.State
+	state := s.State
 	if state == "" {
 		state = domain.TargetStateReady
 	}
 
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		t.ID, t.Type, t.Name, state, string(labels), string(props), t.InventoryItemID, art,
+		s.ID, s.Type, s.Name, state, string(labels), string(props), s.InventoryItemID, art,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("target %q: %w", t.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("target %q: %w", s.ID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert target: %w", err)
 	}
@@ -48,20 +49,21 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 }
 
 func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) error {
-	labels, err := json.Marshal(t.Labels)
+	s := t.Snapshot()
+	labels, err := json.Marshal(s.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
-	props, err := json.Marshal(t.Properties)
+	props, err := json.Marshal(s.Properties)
 	if err != nil {
 		return fmt.Errorf("marshal properties: %w", err)
 	}
-	art, err := marshalResourceTypes(t.AcceptedResourceTypes)
+	art, err := marshalResourceTypes(s.AcceptedResourceTypes)
 	if err != nil {
 		return fmt.Errorf("marshal accepted_resource_types: %w", err)
 	}
 
-	state := t.State
+	state := s.State
 	if state == "" {
 		state = domain.TargetStateReady
 	}
@@ -77,7 +79,7 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 		   properties = EXCLUDED.properties,
 		   inventory_item_id = EXCLUDED.inventory_item_id,
 		   accepted_resource_types = EXCLUDED.accepted_resource_types`,
-		t.ID, t.Type, t.Name, state, string(labels), string(props), t.InventoryItemID, art,
+		s.ID, s.Type, s.Name, state, string(labels), string(props), s.InventoryItemID, art,
 	)
 	if err != nil {
 		return fmt.Errorf("upsert target: %w", err)
@@ -114,30 +116,38 @@ func (r *TargetRepo) Delete(ctx context.Context, id domain.TargetID) error {
 }
 
 func scanTarget(s scanner) (domain.TargetInfo, error) {
-	var t domain.TargetInfo
+	snap, err := scanTargetSnapshot(s)
+	if err != nil {
+		return domain.TargetInfo{}, err
+	}
+	return domain.TargetInfoFromSnapshot(snap), nil
+}
+
+func scanTargetSnapshot(s scanner) (domain.TargetInfoSnapshot, error) {
+	var snap domain.TargetInfoSnapshot
 	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID, artJSON string
-	if err := s.Scan(&id, &targetType, &t.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID, &artJSON); err != nil {
+	if err := s.Scan(&id, &targetType, &snap.Name, &stateStr, &labelsJSON, &propsJSON, &inventoryItemID, &artJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return t, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return t, fmt.Errorf("scan target: %w", err)
+		return snap, fmt.Errorf("scan target: %w", err)
 	}
-	t.ID = domain.TargetID(id)
-	t.Type = domain.TargetType(targetType)
-	t.State = domain.TargetState(stateStr)
-	t.InventoryItemID = domain.InventoryItemID(inventoryItemID)
-	if err := json.Unmarshal([]byte(labelsJSON), &t.Labels); err != nil {
-		return t, fmt.Errorf("unmarshal labels: %w", err)
+	snap.ID = domain.TargetID(id)
+	snap.Type = domain.TargetType(targetType)
+	snap.State = domain.TargetState(stateStr)
+	snap.InventoryItemID = domain.InventoryItemID(inventoryItemID)
+	if err := json.Unmarshal([]byte(labelsJSON), &snap.Labels); err != nil {
+		return snap, fmt.Errorf("unmarshal labels: %w", err)
 	}
-	if err := json.Unmarshal([]byte(propsJSON), &t.Properties); err != nil {
-		return t, fmt.Errorf("unmarshal properties: %w", err)
+	if err := json.Unmarshal([]byte(propsJSON), &snap.Properties); err != nil {
+		return snap, fmt.Errorf("unmarshal properties: %w", err)
 	}
 	art, err := unmarshalResourceTypes(artJSON)
 	if err != nil {
-		return t, fmt.Errorf("unmarshal accepted_resource_types: %w", err)
+		return snap, fmt.Errorf("unmarshal accepted_resource_types: %w", err)
 	}
-	t.AcceptedResourceTypes = art
-	return t, nil
+	snap.AcceptedResourceTypes = art
+	return snap, nil
 }
 
 func marshalResourceTypes(rts []domain.ResourceType) (string, error) {

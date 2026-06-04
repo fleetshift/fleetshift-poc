@@ -22,7 +22,7 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("PutAndGet", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		d := domain.Delivery{
+		d := domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f1:t1",
 			FulfillmentID: "f1",
 			TargetID:      "t1",
@@ -30,7 +30,7 @@ func Run(t *testing.T, factory Factory) {
 			State:         domain.DeliveryStateDelivered,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		}
+		})
 
 		if err := repo.Put(ctx, d); err != nil {
 			t.Fatalf("Put: %v", err)
@@ -40,21 +40,21 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.State != domain.DeliveryStateDelivered {
-			t.Errorf("State = %q, want %q", got.State, domain.DeliveryStateDelivered)
+		if got.State() != domain.DeliveryStateDelivered {
+			t.Errorf("State = %q, want %q", got.State(), domain.DeliveryStateDelivered)
 		}
-		if len(got.Manifests) != 1 {
-			t.Errorf("Manifests len = %d, want 1", len(got.Manifests))
+		if len(got.Manifests()) != 1 {
+			t.Errorf("Manifests len = %d, want 1", len(got.Manifests()))
 		}
-		if got.ID != "f1:t1" {
-			t.Errorf("ID = %q, want %q", got.ID, "f1:t1")
+		if got.ID() != "f1:t1" {
+			t.Errorf("ID = %q, want %q", got.ID(), "f1:t1")
 		}
 	})
 
 	t.Run("GetByFulfillmentTarget", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		d := domain.Delivery{
+		d := domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f1:t1",
 			FulfillmentID: "f1",
 			TargetID:      "t1",
@@ -62,7 +62,7 @@ func Run(t *testing.T, factory Factory) {
 			State:         domain.DeliveryStateDelivered,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		}
+		})
 		if err := repo.Put(ctx, d); err != nil {
 			t.Fatalf("Put: %v", err)
 		}
@@ -71,8 +71,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("GetByFulfillmentTarget: %v", err)
 		}
-		if got.ID != "f1:t1" {
-			t.Errorf("ID = %q, want %q", got.ID, "f1:t1")
+		if got.ID() != "f1:t1" {
+			t.Errorf("ID = %q, want %q", got.ID(), "f1:t1")
 		}
 	})
 
@@ -80,25 +80,26 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		d := domain.Delivery{
+		d := domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f1:t1",
 			FulfillmentID: "f1",
 			TargetID:      "t1",
 			State:         domain.DeliveryStatePending,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		}
+		})
 		_ = repo.Put(ctx, d)
 
-		d.State = domain.DeliveryStateDelivered
-		d.UpdatedAt = now.Add(time.Minute)
+		if err := d.TransitionTo(domain.DeliveryStateDelivered, now.Add(time.Minute)); err != nil {
+			t.Fatalf("TransitionTo: %v", err)
+		}
 		if err := repo.Put(ctx, d); err != nil {
 			t.Fatalf("second Put: %v", err)
 		}
 
 		got, _ := repo.Get(ctx, "f1:t1")
-		if got.State != domain.DeliveryStateDelivered {
-			t.Errorf("State after upsert = %q, want %q", got.State, domain.DeliveryStateDelivered)
+		if got.State() != domain.DeliveryStateDelivered {
+			t.Errorf("State after upsert = %q, want %q", got.State(), domain.DeliveryStateDelivered)
 		}
 	})
 
@@ -115,23 +116,23 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		for _, tid := range []domain.TargetID{"t1", "t2"} {
-			_ = repo.Put(ctx, domain.Delivery{
+			_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 				ID:            domain.DeliveryID("f1:" + string(tid)),
 				FulfillmentID: "f1",
 				TargetID:      tid,
 				State:         domain.DeliveryStateDelivered,
 				CreatedAt:     now,
 				UpdatedAt:     now,
-			})
+			}))
 		}
-		_ = repo.Put(ctx, domain.Delivery{
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f2:t3",
 			FulfillmentID: "f2",
 			TargetID:      "t3",
 			State:         domain.DeliveryStateDelivered,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		})
+		}))
 
 		got, err := repo.ListByFulfillment(ctx, "f1")
 		if err != nil {
@@ -146,18 +147,18 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Put(ctx, domain.Delivery{
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f1:t1", FulfillmentID: "f1", TargetID: "t1",
 			State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-		})
-		_ = repo.Put(ctx, domain.Delivery{
+		}))
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f2:t2", FulfillmentID: "f2", TargetID: "t2",
 			State: domain.DeliveryStateAccepted, CreatedAt: now, UpdatedAt: now,
-		})
-		_ = repo.Put(ctx, domain.Delivery{
+		}))
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f3:t3", FulfillmentID: "f3", TargetID: "t3",
 			State: domain.DeliveryStateDelivered, CreatedAt: now, UpdatedAt: now,
-		})
+		}))
 
 		got, err := repo.ListActive(ctx, nil)
 		if err != nil {
@@ -168,7 +169,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		byTarget := make(map[domain.TargetID]domain.DeliveryState, len(got))
 		for _, d := range got {
-			byTarget[d.TargetID] = d.State
+			byTarget[d.TargetID()] = d.State()
 		}
 		if s, ok := byTarget["t1"]; !ok || s != domain.DeliveryStateProgressing {
 			t.Errorf("expected t1 progressing, got ok=%v state=%q", ok, s)
@@ -185,18 +186,18 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Put(ctx, domain.Delivery{
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f1:t1", FulfillmentID: "f1", TargetID: "t1",
 			State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-		})
-		_ = repo.Put(ctx, domain.Delivery{
+		}))
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f2:t2", FulfillmentID: "f2", TargetID: "t2",
 			State: domain.DeliveryStateAccepted, CreatedAt: now, UpdatedAt: now,
-		})
-		_ = repo.Put(ctx, domain.Delivery{
+		}))
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID: "f3:t3", FulfillmentID: "f3", TargetID: "t3",
 			State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-		})
+		}))
 
 		got, err := repo.ListActive(ctx, []domain.TargetID{"t1", "t3"})
 		if err != nil {
@@ -207,7 +208,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		byTarget := make(map[domain.TargetID]domain.DeliveryState, len(got))
 		for _, d := range got {
-			byTarget[d.TargetID] = d.State
+			byTarget[d.TargetID()] = d.State()
 		}
 		if s, ok := byTarget["t1"]; !ok || s != domain.DeliveryStateProgressing {
 			t.Errorf("expected t1 progressing, got ok=%v state=%q", ok, s)
@@ -223,8 +224,8 @@ func Run(t *testing.T, factory Factory) {
 		if len(got) != 1 {
 			t.Fatalf("ListActive([t2]): got %d, want 1", len(got))
 		}
-		if got[0].TargetID != "t2" {
-			t.Errorf("TargetID = %q, want %q", got[0].TargetID, "t2")
+		if got[0].TargetID() != "t2" {
+			t.Errorf("TargetID = %q, want %q", got[0].TargetID(), "t2")
 		}
 
 		got, err = repo.ListActive(ctx, []domain.TargetID{"t-unknown"})
@@ -240,22 +241,22 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_ = repo.Put(ctx, domain.Delivery{
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f1:t1",
 			FulfillmentID: "f1",
 			TargetID:      "t1",
 			State:         domain.DeliveryStateDelivered,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		})
-		_ = repo.Put(ctx, domain.Delivery{
+		}))
+		_ = repo.Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 			ID:            "f1:t2",
 			FulfillmentID: "f1",
 			TargetID:      "t2",
 			State:         domain.DeliveryStateDelivered,
 			CreatedAt:     now,
 			UpdatedAt:     now,
-		})
+		}))
 
 		if err := repo.DeleteByFulfillment(ctx, "f1"); err != nil {
 			t.Fatalf("DeleteByFulfillment: %v", err)

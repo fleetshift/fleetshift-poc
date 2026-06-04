@@ -24,7 +24,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 			startedInput = in
 			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
-				Deployment: domain.Deployment{ID: in.ID},
+				Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{ID: in.ID}),
 			}}, nil
 		}},
 		TrustBundlePlacement: domain.PlacementStrategySpec{
@@ -36,7 +36,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 
 	input := domain.ProvisionIdPInput{
 		AuthMethodID: "test-idp",
-		AuthMethod: domain.AuthMethod{
+		AuthMethod: domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 			Type: domain.AuthMethodTypeOIDC,
 			OIDC: &domain.OIDCConfig{
 				IssuerURL:             "https://issuer.example.com",
@@ -47,7 +47,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 					Expression: "claims.preferred_username",
 				},
 			},
-		},
+		}),
 	}
 
 	record := &provisionSyncRecord{}
@@ -56,15 +56,15 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.ID != "test-idp" {
-		t.Errorf("result.ID = %q, want %q", result.ID, "test-idp")
+	if result.ID() != "test-idp" {
+		t.Errorf("result.ID = %q, want %q", result.ID(), "test-idp")
 	}
-	if result.OIDC.JWKSURI != "https://issuer.example.com/jwks" {
-		t.Errorf("JWKSURI = %q, want discovery-resolved value", result.OIDC.JWKSURI)
+	if result.OIDC().JWKSURI != "https://issuer.example.com/jwks" {
+		t.Errorf("JWKSURI = %q, want discovery-resolved value", result.OIDC().JWKSURI)
 	}
 
-	if savedMethod.ID != "test-idp" {
-		t.Errorf("saved method ID = %q, want %q", savedMethod.ID, "test-idp")
+	if savedMethod.ID() != "test-idp" {
+		t.Errorf("saved method ID = %q, want %q", savedMethod.ID(), "test-idp")
 	}
 
 	if startedInput.ID != "idp-trust-test-idp" {
@@ -101,8 +101,8 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 	if len(sink.created) != 1 {
 		t.Fatalf("created events = %d, want 1", len(sink.created))
 	}
-	if sink.created[0].ID != result.ID {
-		t.Errorf("created event ID = %q, want %q", sink.created[0].ID, result.ID)
+	if sink.created[0].ID() != result.ID() {
+		t.Errorf("created event ID = %q, want %q", sink.created[0].ID(), result.ID())
 	}
 	if len(sink.failed) != 0 {
 		t.Errorf("failed events = %d, want 0", len(sink.failed))
@@ -119,7 +119,7 @@ func TestProvisionIdPWorkflowSpec_Run_InvalidMethod(t *testing.T) {
 
 	input := domain.ProvisionIdPInput{
 		AuthMethodID: "bad",
-		AuthMethod:   domain.AuthMethod{Type: "unknown"},
+		AuthMethod:   domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{Type: "unknown"}),
 	}
 
 	record := &provisionSyncRecord{}
@@ -153,14 +153,14 @@ func TestProvisionIdPWorkflowSpec_Run_SkipsTrustBundleDeploymentWhenPlacementUns
 
 	input := domain.ProvisionIdPInput{
 		AuthMethodID: "test-idp",
-		AuthMethod: domain.AuthMethod{
+		AuthMethod: domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 			Type: domain.AuthMethodTypeOIDC,
 			OIDC: &domain.OIDCConfig{
 				IssuerURL:             "https://issuer.example.com",
 				Audience:              "fleetshift",
 				KeyEnrollmentAudience: "fleetshift-enroll",
 			},
-		},
+		}),
 	}
 
 	record := &provisionSyncRecord{}
@@ -169,11 +169,11 @@ func TestProvisionIdPWorkflowSpec_Run_SkipsTrustBundleDeploymentWhenPlacementUns
 		t.Fatalf("Run: %v", err)
 	}
 
-	if result.ID != "test-idp" {
-		t.Errorf("result.ID = %q, want %q", result.ID, "test-idp")
+	if result.ID() != "test-idp" {
+		t.Errorf("result.ID = %q, want %q", result.ID(), "test-idp")
 	}
-	if savedMethod.ID != "test-idp" {
-		t.Errorf("saved method ID = %q, want %q", savedMethod.ID, "test-idp")
+	if savedMethod.ID() != "test-idp" {
+		t.Errorf("saved method ID = %q, want %q", savedMethod.ID(), "test-idp")
 	}
 	if startCalled {
 		t.Fatal("expected trust-bundle deployment to be skipped when placement is unset")
@@ -194,7 +194,7 @@ func (f *fakeAuthMethodRepo) Save(ctx context.Context, m domain.AuthMethod) erro
 }
 
 func (f *fakeAuthMethodRepo) Get(_ context.Context, _ domain.AuthMethodID) (domain.AuthMethod, error) {
-	return domain.AuthMethod{}, domain.ErrNotFound
+	return domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{}), domain.ErrNotFound
 }
 
 func (f *fakeAuthMethodRepo) List(_ context.Context) ([]domain.AuthMethod, error) {
@@ -221,7 +221,7 @@ func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDepl
 		return f.startFn(ctx, in)
 	}
 	return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
-		Deployment: domain.Deployment{ID: in.ID},
+		Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{ID: in.ID}),
 	}}, nil
 }
 

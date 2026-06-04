@@ -49,11 +49,11 @@ func convergenceLoop(
 		if f == nil {
 			return fmt.Errorf("fulfillment %q: %w", fulfillmentID, ErrNotFound)
 		}
-		if f.ObservedGeneration >= myGen {
+		if f.ObservedGeneration() >= myGen {
 			// Reconciled already to at least this gen; done
 			return nil
 		}
-		if f.Generation > myGen {
+		if f.Generation() > myGen {
 			// Something else updated, let that convergence loop take over
 			return nil
 		}

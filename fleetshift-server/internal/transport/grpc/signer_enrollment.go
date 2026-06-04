@@ -52,18 +52,18 @@ func parseSignerEnrollmentName(name string) (domain.SignerEnrollmentID, error) {
 
 func signerEnrollmentToProto(e domain.SignerEnrollment) *pb.SignerEnrollment {
 	out := &pb.SignerEnrollment{
-		Name:            signerEnrollmentName(e.ID),
-		Subject:         string(e.Subject),
-		Issuer:          string(e.Issuer),
-		IdentityToken:   string(e.IdentityToken),
-		RegistrySubject: string(e.RegistrySubject),
-		RegistryId:      string(e.RegistryID),
+		Name:            signerEnrollmentName(e.ID()),
+		Subject:         string(e.Subject()),
+		Issuer:          string(e.Issuer()),
+		IdentityToken:   string(e.IdentityToken()),
+		RegistrySubject: string(e.RegistrySubject()),
+		RegistryId:      string(e.RegistryID()),
 	}
-	if !e.CreatedAt.IsZero() {
-		out.CreateTime = timestamppb.New(e.CreatedAt)
+	if !e.CreatedAt().IsZero() {
+		out.CreateTime = timestamppb.New(e.CreatedAt())
 	}
-	if !e.ExpiresAt.IsZero() {
-		out.ExpireTime = timestamppb.New(e.ExpiresAt)
+	if !e.ExpiresAt().IsZero() {
+		out.ExpireTime = timestamppb.New(e.ExpiresAt())
 	}
 	return out
 }

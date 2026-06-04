@@ -75,34 +75,34 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 		t.Fatalf("Run: %v", err)
 	}
 
-	if dep.Deployment.ID != "d1" {
-		t.Errorf("Deployment.ID = %q, want %q", dep.Deployment.ID, "d1")
+	if dep.Deployment.ID() != "d1" {
+		t.Errorf("Deployment.ID = %q, want %q", dep.Deployment.ID(), "d1")
 	}
-	if dep.Fulfillment.State != domain.FulfillmentStateCreating {
-		t.Errorf("Fulfillment.State = %q, want %q", dep.Fulfillment.State, domain.FulfillmentStateCreating)
+	if dep.Fulfillment.State() != domain.FulfillmentStateCreating {
+		t.Errorf("Fulfillment.State = %q, want %q", dep.Fulfillment.State(), domain.FulfillmentStateCreating)
 	}
-	if dep.Deployment.UID == "" {
+	if dep.Deployment.UID() == "" {
 		t.Error("Deployment.UID is empty, want non-empty UUID")
 	}
-	if dep.Deployment.CreatedAt.IsZero() {
+	if dep.Deployment.CreatedAt().IsZero() {
 		t.Error("Deployment.CreatedAt is zero, want non-zero")
 	}
-	if !dep.Deployment.CreatedAt.Equal(fixedTime) {
-		t.Errorf("Deployment.CreatedAt = %v, want %v", dep.Deployment.CreatedAt, fixedTime)
+	if !dep.Deployment.CreatedAt().Equal(fixedTime) {
+		t.Errorf("Deployment.CreatedAt = %v, want %v", dep.Deployment.CreatedAt(), fixedTime)
 	}
-	if !dep.Deployment.UpdatedAt.Equal(fixedTime) {
-		t.Errorf("Deployment.UpdatedAt = %v, want %v", dep.Deployment.UpdatedAt, fixedTime)
+	if !dep.Deployment.UpdatedAt().Equal(fixedTime) {
+		t.Errorf("Deployment.UpdatedAt = %v, want %v", dep.Deployment.UpdatedAt(), fixedTime)
 	}
 	if dep.Etag() == "" {
 		t.Error("DeploymentView.Etag() is empty, want non-empty")
 	}
 
 	persisted := getThinDeployment(t, store, "d1")
-	if persisted.ID != "d1" {
-		t.Errorf("persisted ID = %q, want %q", persisted.ID, "d1")
+	if persisted.ID() != "d1" {
+		t.Errorf("persisted ID = %q, want %q", persisted.ID(), "d1")
 	}
 
-	if fakeOrch.started != dep.Deployment.FulfillmentID {
-		t.Errorf("Orchestration.Start called with %q, want %q", fakeOrch.started, dep.Deployment.FulfillmentID)
+	if fakeOrch.started != dep.Deployment.FulfillmentID() {
+		t.Errorf("Orchestration.Start called with %q, want %q", fakeOrch.started, dep.Deployment.FulfillmentID())
 	}
 }

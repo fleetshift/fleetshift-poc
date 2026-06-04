@@ -74,50 +74,48 @@ func parseAuthMethodName(name string) (domain.AuthMethodID, error) {
 }
 
 func authMethodFromProto(p *pb.AuthMethod) (domain.AuthMethod, error) {
-	m := domain.AuthMethod{}
 	switch p.GetType() {
 	case pb.AuthMethod_TYPE_OIDC:
-		m.Type = domain.AuthMethodTypeOIDC
 		oc := p.GetOidcConfig()
 		if oc == nil {
-			return m, fmt.Errorf("oidc_config is required when type is TYPE_OIDC")
+			return domain.AuthMethod{}, fmt.Errorf("oidc_config is required when type is TYPE_OIDC")
 		}
-		m.OIDC = &domain.OIDCConfig{
+		oidc := &domain.OIDCConfig{
 			IssuerURL:                domain.IssuerURL(oc.GetIssuerUrl()),
 			Audience:                 domain.Audience(oc.GetAudience()),
 			KeyEnrollmentAudience:    domain.Audience(oc.GetKeyEnrollmentAudience()),
 			PublicKeyClaimExpression: oc.GetPublicKeyClaimExpression(),
 		}
 		if rsm := oc.GetRegistrySubjectMapping(); rsm != nil {
-			m.OIDC.RegistrySubjectMapping = &domain.RegistrySubjectMapping{
+			oidc.RegistrySubjectMapping = &domain.RegistrySubjectMapping{
 				RegistryID: domain.KeyRegistryID(rsm.GetRegistryId()),
 				Expression: rsm.GetExpression(),
 			}
 		}
+		return domain.NewOIDCAuthMethod("", oidc), nil
 	default:
-		return m, fmt.Errorf("unsupported auth method type: %v", p.GetType())
+		return domain.AuthMethod{}, fmt.Errorf("unsupported auth method type: %v", p.GetType())
 	}
-	return m, nil
 }
 
 func authMethodToProto(m domain.AuthMethod) *pb.AuthMethod {
 	out := &pb.AuthMethod{
-		Name: authMethodName(m.ID),
+		Name: authMethodName(m.ID()),
 	}
-	switch m.Type {
+	switch m.Type() {
 	case domain.AuthMethodTypeOIDC:
 		out.Type = pb.AuthMethod_TYPE_OIDC
-		if m.OIDC != nil {
+		if oidc := m.OIDC(); oidc != nil {
 			oc := &pb.OIDCConfig{
-				IssuerUrl:                string(m.OIDC.IssuerURL),
-				Audience:                 string(m.OIDC.Audience),
-				AuthorizationEndpoint:    string(m.OIDC.AuthorizationEndpoint),
-				TokenEndpoint:            string(m.OIDC.TokenEndpoint),
-				JwksUri:                  string(m.OIDC.JWKSURI),
-				KeyEnrollmentAudience:    string(m.OIDC.KeyEnrollmentAudience),
-				PublicKeyClaimExpression: m.OIDC.PublicKeyClaimExpression,
+				IssuerUrl:                string(oidc.IssuerURL),
+				Audience:                 string(oidc.Audience),
+				AuthorizationEndpoint:    string(oidc.AuthorizationEndpoint),
+				TokenEndpoint:            string(oidc.TokenEndpoint),
+				JwksUri:                  string(oidc.JWKSURI),
+				KeyEnrollmentAudience:    string(oidc.KeyEnrollmentAudience),
+				PublicKeyClaimExpression: oidc.PublicKeyClaimExpression,
 			}
-			if rsm := m.OIDC.RegistrySubjectMapping; rsm != nil {
+			if rsm := oidc.RegistrySubjectMapping; rsm != nil {
 				oc.RegistrySubjectMapping = &pb.RegistrySubjectMapping{
 					RegistryId: string(rsm.RegistryID),
 					Expression: rsm.Expression,

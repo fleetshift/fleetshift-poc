@@ -16,7 +16,7 @@ func TestInlineManifest_ReturnsManifestsVerbatim(t *testing.T) {
 	s := &domain.InlineManifestStrategy{Manifests: manifests}
 
 	got, err := s.Generate(context.Background(), domain.GenerateContext{
-		Target: domain.TargetInfo{ID: "t1"},
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
 	})
 	if err != nil {
 		t.Fatal(err)

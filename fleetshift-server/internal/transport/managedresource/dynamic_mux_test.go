@@ -117,10 +117,10 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 	}
 
 	targetSvc := &application.TargetService{Store: store}
-	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: clusterTargetType, Name: "Kind Cluster Addon",
 		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 

@@ -28,7 +28,7 @@ func setupSignerEnrollmentService(t *testing.T) (*application.SignerEnrollmentSe
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: store.DB}
-	if err := authMethodRepo.Save(context.Background(), domain.AuthMethod{
+	if err := authMethodRepo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "default",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -41,7 +41,7 @@ func setupSignerEnrollmentService(t *testing.T) (*application.SignerEnrollmentSe
 				Expression: `claims.preferred_username`,
 			},
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("save auth method: %v", err)
 	}
 
@@ -87,17 +87,17 @@ func TestSignerEnrollmentService_Create_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if enrollment.ID != "se-1" {
-		t.Errorf("ID = %q, want %q", enrollment.ID, "se-1")
+	if enrollment.ID() != "se-1" {
+		t.Errorf("ID = %q, want %q", enrollment.ID(), "se-1")
 	}
-	if enrollment.Subject != "user-1" {
-		t.Errorf("Subject = %q, want %q", enrollment.Subject, "user-1")
+	if enrollment.Subject() != "user-1" {
+		t.Errorf("Subject = %q, want %q", enrollment.Subject(), "user-1")
 	}
-	if enrollment.RegistrySubject != "gh-user-1" {
-		t.Errorf("RegistrySubject = %q, want %q", enrollment.RegistrySubject, "gh-user-1")
+	if enrollment.RegistrySubject() != "gh-user-1" {
+		t.Errorf("RegistrySubject = %q, want %q", enrollment.RegistrySubject(), "gh-user-1")
 	}
-	if enrollment.RegistryID != "github.com" {
-		t.Errorf("RegistryID = %q, want %q", enrollment.RegistryID, "github.com")
+	if enrollment.RegistryID() != "github.com" {
+		t.Errorf("RegistryID = %q, want %q", enrollment.RegistryID(), "github.com")
 	}
 }
 
@@ -167,7 +167,7 @@ func TestSignerEnrollmentService_Create_MissingEnrollmentAudience(t *testing.T) 
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: store.DB}
-	if err := authMethodRepo.Save(context.Background(), domain.AuthMethod{
+	if err := authMethodRepo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "default",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -176,7 +176,7 @@ func TestSignerEnrollmentService_Create_MissingEnrollmentAudience(t *testing.T) 
 			JWKSURI:   domain.EndpointURL(string(provider.IssuerURL()) + "/jwks"),
 			// KeyEnrollmentAudience intentionally omitted
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("save auth method: %v", err)
 	}
 
@@ -218,7 +218,7 @@ func TestSignerEnrollmentService_Create_NoRegistryConfigured(t *testing.T) {
 	}
 
 	authMethodRepo := &sqlite.AuthMethodRepo{DB: store.DB}
-	if err := authMethodRepo.Save(context.Background(), domain.AuthMethod{
+	if err := authMethodRepo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "default",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -228,7 +228,7 @@ func TestSignerEnrollmentService_Create_NoRegistryConfigured(t *testing.T) {
 			KeyEnrollmentAudience: enrollmentAudience,
 			// Neither PublicKeyClaimExpression nor RegistrySubjectMapping configured
 		},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("save auth method: %v", err)
 	}
 

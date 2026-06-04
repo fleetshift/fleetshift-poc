@@ -19,17 +19,33 @@ const (
 
 // AuthMethod is a configured authentication method. Exactly one of the
 // protocol-specific config fields is set, corresponding to Type.
+//
+// Construct new instances with [NewOIDCAuthMethod]; reconstitute from
+// persistence with [AuthMethodFromSnapshot]. Read via accessor methods.
 type AuthMethod struct {
-	ID   AuthMethodID
-	Type AuthMethodType
-	OIDC *OIDCConfig // non-nil when Type == AuthMethodTypeOIDC
+	id         AuthMethodID
+	authType   AuthMethodType
+	oidcConfig *OIDCConfig // non-nil when authType == AuthMethodTypeOIDC
+}
+
+// NewOIDCAuthMethod creates a brand-new OIDC [AuthMethod]. The id may
+// be empty when the transport layer constructs from a proto message
+// before the service assigns the final identifier. Use this on
+// creation paths; use [AuthMethodFromSnapshot] only for reconstituting
+// from persistence.
+func NewOIDCAuthMethod(id AuthMethodID, config *OIDCConfig) AuthMethod {
+	return AuthMethod{
+		id:         id,
+		authType:   AuthMethodTypeOIDC,
+		oidcConfig: config,
+	}
 }
 
 // Validate checks that exactly one protocol config is set for the given type.
 func (m AuthMethod) Validate() error {
-	switch m.Type {
+	switch m.authType {
 	case AuthMethodTypeOIDC:
-		if m.OIDC == nil {
+		if m.oidcConfig == nil {
 			return ErrInvalidArgument
 		}
 	default:
@@ -37,6 +53,15 @@ func (m AuthMethod) Validate() error {
 	}
 	return nil
 }
+
+// ID returns the auth method's unique identifier.
+func (m AuthMethod) ID() AuthMethodID { return m.id }
+
+// Type returns the authentication protocol type.
+func (m AuthMethod) Type() AuthMethodType { return m.authType }
+
+// OIDC returns the OIDC configuration, if any.
+func (m AuthMethod) OIDC() *OIDCConfig { return m.oidcConfig }
 
 // IssuerURL identifies an OIDC issuer.
 type IssuerURL string
@@ -193,15 +218,61 @@ type SignerEnrollmentID string
 // with the platform. The external key registry (identified by
 // RegistryID) is the authority for the user's public keys — there is
 // no self-signed key bundle.
+//
+// Construct new instances with [NewSignerEnrollment]; reconstitute from
+// persistence with [SignerEnrollmentFromSnapshot]. Read via accessor
+// methods.
 type SignerEnrollment struct {
-	ID SignerEnrollmentID
-	FederatedIdentity
-	IdentityToken   RawToken        // purpose-scoped enrollment ID token
-	RegistrySubject RegistrySubject // derived from CEL mapping at enrollment time
-	RegistryID      KeyRegistryID   // which registry holds the user's signing keys
-	CreatedAt       time.Time
-	ExpiresAt       time.Time
+	id                SignerEnrollmentID
+	federatedIdentity FederatedIdentity
+	identityToken     RawToken        // purpose-scoped enrollment ID token
+	registrySubject   RegistrySubject // derived from CEL mapping at enrollment time
+	registryID        KeyRegistryID   // which registry holds the user's signing keys
+	createdAt         time.Time
+	expiresAt         time.Time
 }
+
+// NewSignerEnrollment creates a brand-new [SignerEnrollment]. Use this
+// on creation paths; use [SignerEnrollmentFromSnapshot] only for
+// reconstituting from persistence.
+func NewSignerEnrollment(id SignerEnrollmentID, identity FederatedIdentity, token RawToken, subject RegistrySubject, registryID KeyRegistryID, now time.Time, expiresAt time.Time) SignerEnrollment {
+	return SignerEnrollment{
+		id:                id,
+		federatedIdentity: identity,
+		identityToken:     token,
+		registrySubject:   subject,
+		registryID:        registryID,
+		createdAt:         now,
+		expiresAt:         expiresAt,
+	}
+}
+
+// ID returns the enrollment's unique identifier.
+func (e SignerEnrollment) ID() SignerEnrollmentID { return e.id }
+
+// Subject returns the enrolled subject's identifier.
+func (e SignerEnrollment) Subject() SubjectID { return e.federatedIdentity.Subject }
+
+// Issuer returns the enrolled subject's issuer.
+func (e SignerEnrollment) Issuer() IssuerURL { return e.federatedIdentity.Issuer }
+
+// FederatedIdentity returns the full federated identity.
+func (e SignerEnrollment) FederatedIdentity() FederatedIdentity { return e.federatedIdentity }
+
+// IdentityToken returns the purpose-scoped enrollment ID token.
+func (e SignerEnrollment) IdentityToken() RawToken { return e.identityToken }
+
+// RegistrySubject returns the derived registry subject.
+func (e SignerEnrollment) RegistrySubject() RegistrySubject { return e.registrySubject }
+
+// RegistryID returns the external key registry identifier.
+func (e SignerEnrollment) RegistryID() KeyRegistryID { return e.registryID }
+
+// CreatedAt returns the creation timestamp.
+func (e SignerEnrollment) CreatedAt() time.Time { return e.createdAt }
+
+// ExpiresAt returns the enrollment expiry timestamp.
+func (e SignerEnrollment) ExpiresAt() time.Time { return e.expiresAt }
 
 // SignerEnrollmentRepository persists signer enrollments.
 //

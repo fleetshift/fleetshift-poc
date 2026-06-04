@@ -319,11 +319,11 @@ func TestAgent_Deliver_SuccessReportsProvisionedTargetAndSecrets(t *testing.T) {
 
 	err = agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{Properties: map[string]string{
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{Properties: map[string]string{
 			"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 			"workforce_pool": "pool", "workforce_provider": "prov",
 			"broker_sa_email": "broker@example.com",
-		}},
+		}}),
 		domain.DeliveryID("delivery-success"),
 		[]domain.Manifest{{
 			ResourceType: ClusterResourceType,
@@ -418,11 +418,11 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 
 	err := agent.Remove(
 		context.Background(),
-		domain.TargetInfo{Properties: map[string]string{
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{Properties: map[string]string{
 			"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 			"workforce_pool": "pool", "workforce_provider": "prov",
 			"broker_sa_email": "broker@example.com",
-		}},
+		}}),
 		domain.DeliveryID("remove-1"),
 		[]domain.Manifest{{
 			ResourceType: ClusterResourceType,
@@ -501,11 +501,11 @@ func TestAgent_Remove_ClearsGenerationSoRecreateIsAccepted(t *testing.T) {
 		"rootVolumeSize":128,"rootVolumeType":"pd-standard","autoRepair":true,"upgradeType":"Replace"}]
 	}`)
 
-	target := domain.TargetInfo{Properties: map[string]string{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{Properties: map[string]string{
 		"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 		"workforce_pool": "pool", "workforce_provider": "prov",
 		"broker_sa_email": "broker@example.com",
-	}}
+	}})
 	manifest := domain.Manifest{
 		ResourceType: ClusterResourceType,
 		Name:         "test-cls",
@@ -574,11 +574,11 @@ func TestAgent_Remove_AuthExpiredSignalsAuthFailed(t *testing.T) {
 
 	err := agent.Remove(
 		context.Background(),
-		domain.TargetInfo{Properties: map[string]string{
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{Properties: map[string]string{
 			"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 			"workforce_pool": "pool", "workforce_provider": "prov",
 			"broker_sa_email": "broker@example.com",
-		}},
+		}}),
 		domain.DeliveryID("remove-auth-fail"),
 		[]domain.Manifest{{
 			ResourceType: ClusterResourceType,
@@ -661,11 +661,11 @@ func TestAgent_Remove_SubprocessInvalidGrantSignalsAuthFailed(t *testing.T) {
 
 	err := agent.Remove(
 		context.Background(),
-		domain.TargetInfo{Properties: map[string]string{
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{Properties: map[string]string{
 			"id": "target-1", "gcp_project": "proj", "region": "us-central1",
 			"workforce_pool": "pool", "workforce_provider": "prov",
 			"broker_sa_email": "broker@example.com",
-		}},
+		}}),
 		domain.DeliveryID("remove-invalid-grant"),
 		[]domain.Manifest{{
 			ResourceType: ClusterResourceType,

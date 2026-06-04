@@ -222,44 +222,44 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 	d := v.Deployment
 	f := v.Fulfillment
 	dep := &pb.Deployment{
-		Name:  deploymentName(d.ID),
-		State: fulfillmentStateToProto(f.State),
+		Name:  deploymentName(d.ID()),
+		State: fulfillmentStateToProto(f.State()),
 	}
 
 	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
 		dep.State == pb.Deployment_STATE_DELETING ||
 		dep.State == pb.Deployment_STATE_PAUSED_AUTH
 
-	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy)
-	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy)
-	if f.RolloutStrategy != nil {
+	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy())
+	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy())
+	if rs := f.RolloutStrategy(); rs != nil {
 		dep.RolloutStrategy = &pb.RolloutStrategy{
-			Type: rolloutStrategyTypeToProto(f.RolloutStrategy.Type),
+			Type: rolloutStrategyTypeToProto(rs.Type),
 		}
 	}
 
-	if len(f.ResolvedTargets) > 0 {
-		ids := make([]string, len(f.ResolvedTargets))
-		for i, t := range f.ResolvedTargets {
+	if targets := f.ResolvedTargets(); len(targets) > 0 {
+		ids := make([]string, len(targets))
+		for i, t := range targets {
 			ids[i] = string(t)
 		}
 		dep.ResolvedTargetIds = ids
 	}
 
-	if !d.CreatedAt.IsZero() {
-		dep.CreateTime = timestamppb.New(d.CreatedAt)
+	if !d.CreatedAt().IsZero() {
+		dep.CreateTime = timestamppb.New(d.CreatedAt())
 	}
-	if !d.UpdatedAt.IsZero() {
-		dep.UpdateTime = timestamppb.New(d.UpdatedAt)
+	if !d.UpdatedAt().IsZero() {
+		dep.UpdateTime = timestamppb.New(d.UpdatedAt())
 	}
-	dep.Uid = d.UID
+	dep.Uid = d.UID()
 	dep.Etag = string(v.Etag())
 
-	if f.Provenance != nil {
-		dep.Provenance = provenanceToProto(f.Provenance)
+	if prov := f.Provenance(); prov != nil {
+		dep.Provenance = provenanceToProto(prov)
 	}
 
-	dep.Generation = int64(f.Generation)
+	dep.Generation = int64(f.Generation())
 
 	return dep
 }

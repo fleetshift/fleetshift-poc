@@ -227,12 +227,12 @@ func Start(t *testing.T) string {
 
 	schema := kindaddon.Schema()
 	if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
-		Targets: []domain.TargetInfo{{
+		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
 			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-		}},
+		})},
 		Schemas: []domain.ManagedResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)

@@ -43,17 +43,17 @@ func (r *fakeSignerEnrollmentRepo) Create(_ context.Context, e domain.SignerEnro
 
 func (r *fakeSignerEnrollmentRepo) Get(_ context.Context, id domain.SignerEnrollmentID) (domain.SignerEnrollment, error) {
 	for _, e := range r.enrollments {
-		if e.ID == id {
+		if e.ID() == id {
 			return e, nil
 		}
 	}
-	return domain.SignerEnrollment{}, domain.ErrNotFound
+	return domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{}), domain.ErrNotFound
 }
 
 func (r *fakeSignerEnrollmentRepo) ListBySubject(_ context.Context, identity domain.FederatedIdentity) ([]domain.SignerEnrollment, error) {
 	var out []domain.SignerEnrollment
 	for _, e := range r.enrollments {
-		if e.FederatedIdentity == identity {
+		if e.FederatedIdentity() == identity {
 			out = append(out, e)
 		}
 	}
@@ -88,12 +88,14 @@ func TestProvenanceService_BuildDeploymentProvenance(t *testing.T) {
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-1",
-			FederatedIdentity: identity,
-			RegistrySubject:   registrySubject,
-			RegistryID:        "github.com",
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-1",
+				FederatedIdentity: identity,
+				RegistrySubject:   registrySubject,
+				RegistryID:        "github.com",
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -156,12 +158,14 @@ func TestProvenanceService_BuildDeploymentProvenance_BadSignature(t *testing.T) 
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-1",
-			FederatedIdentity: identity,
-			RegistrySubject:   registrySubject,
-			RegistryID:        "github.com",
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-1",
+				FederatedIdentity: identity,
+				RegistrySubject:   registrySubject,
+				RegistryID:        "github.com",
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -210,12 +214,14 @@ func TestProvenanceService_BuildManagedResourceProvenance(t *testing.T) {
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-1",
-			FederatedIdentity: identity,
-			RegistrySubject:   registrySubject,
-			RegistryID:        "github.com",
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-1",
+				FederatedIdentity: identity,
+				RegistrySubject:   registrySubject,
+				RegistryID:        "github.com",
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -281,12 +287,14 @@ func TestProvenanceService_VerifySignature(t *testing.T) {
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-1",
-			FederatedIdentity: identity,
-			RegistrySubject:   registrySubject,
-			RegistryID:        "github.com",
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-1",
+				FederatedIdentity: identity,
+				RegistrySubject:   registrySubject,
+				RegistryID:        "github.com",
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -330,12 +338,14 @@ func TestProvenanceService_VerifySignature_InvalidSig(t *testing.T) {
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-1",
-			FederatedIdentity: identity,
-			RegistrySubject:   registrySubject,
-			RegistryID:        "github.com",
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-1",
+				FederatedIdentity: identity,
+				RegistrySubject:   registrySubject,
+				RegistryID:        "github.com",
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -375,13 +385,15 @@ func TestProvenanceService_OIDC_KeyFromClaim(t *testing.T) {
 		"." + base64.RawURLEncoding.EncodeToString([]byte("fake-sig"))
 
 	authMethods := &provenanceTestAuthMethodRepo{
-		methods: []domain.AuthMethod{{
-			ID:   "oidc-1",
-			Type: domain.AuthMethodTypeOIDC,
-			OIDC: &domain.OIDCConfig{
-				PublicKeyClaimExpression: `claims.public_key`,
-			},
-		}},
+		methods: []domain.AuthMethod{
+			domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+				ID:   "oidc-1",
+				Type: domain.AuthMethodTypeOIDC,
+				OIDC: &domain.OIDCConfig{
+					PublicKeyClaimExpression: `claims.public_key`,
+				},
+			}),
+		},
 	}
 
 	svc := &domain.ProvenanceService{
@@ -393,12 +405,14 @@ func TestProvenanceService_OIDC_KeyFromClaim(t *testing.T) {
 	}
 
 	enrollments := &fakeSignerEnrollmentRepo{
-		enrollments: []domain.SignerEnrollment{{
-			ID:                "enroll-oidc",
-			FederatedIdentity: identity,
-			RegistryID:        "oidc",
-			IdentityToken:     domain.RawToken(fakeJWT),
-		}},
+		enrollments: []domain.SignerEnrollment{
+			domain.SignerEnrollmentFromSnapshot(domain.SignerEnrollmentSnapshot{
+				ID:                "enroll-oidc",
+				FederatedIdentity: identity,
+				RegistryID:        "oidc",
+				IdentityToken:     domain.RawToken(fakeJWT),
+			}),
+		},
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
@@ -427,11 +441,11 @@ func (r *provenanceTestAuthMethodRepo) Save(_ context.Context, m domain.AuthMeth
 
 func (r *provenanceTestAuthMethodRepo) Get(_ context.Context, id domain.AuthMethodID) (domain.AuthMethod, error) {
 	for _, m := range r.methods {
-		if m.ID == id {
+		if m.ID() == id {
 			return m, nil
 		}
 	}
-	return domain.AuthMethod{}, domain.ErrNotFound
+	return domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{}), domain.ErrNotFound
 }
 
 func (r *provenanceTestAuthMethodRepo) List(_ context.Context) ([]domain.AuthMethod, error) {

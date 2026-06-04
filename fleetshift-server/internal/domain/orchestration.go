@@ -319,7 +319,7 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 		defer tx.Rollback()
 
 		now := s.now()
-		existing, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
+		existing, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID())
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			probe.Error(err)
 			return struct{}{}, fmt.Errorf("load delivery record: %w", err)
@@ -328,34 +328,27 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 		var d Delivery
 		if errors.Is(err, ErrNotFound) {
 			probe.NewDelivery()
-			d = Delivery{
-				ID:            in.DeliveryID,
-				FulfillmentID: in.FulfillmentID,
-				TargetID:      in.Target.ID,
-				Manifests:     in.Manifests,
-				Generation:    in.Generation,
-				State:         DeliveryStatePending,
-				CreatedAt:     now,
-				UpdatedAt:     now,
-			}
+			d = NewDelivery(in.DeliveryID, in.FulfillmentID, in.Target.ID(), in.Manifests, in.Generation, now)
 		} else {
 			d = existing
-			if in.Generation > d.Generation {
-				probe.Redispatched(d.Generation)
+			if in.Generation > d.Generation() {
+				probe.Redispatched(d.Generation())
 				if err := d.Redispatch(in.Manifests, in.Generation, now); err != nil {
 					probe.Error(err)
-					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID, err)
+					return struct{}{}, fmt.Errorf("redispatch delivery %s: %w", d.ID(), err)
 				}
 			} else if !d.Retry(in.Generation, now) {
-				if d.Generation == in.Generation && d.State.IsTerminal() {
+				if d.Generation() == in.Generation && d.State().IsTerminal() {
 					// Delivery reached a terminal state during a previous
 					// workflow run. ContinueAsNew restarted the workflow;
 					// reset to Pending for retry — addons are idempotent
 					// and the platform provides at-least-once delivery.
 					// This mirrors Withdraw for the remove path.
-					probe.ResetForRetry(d.State)
-					d.State = DeliveryStatePending
-					d.UpdatedAt = now
+					probe.ResetForRetry(d.State())
+					if err := d.ResetForRetry(now); err != nil {
+						probe.Error(err)
+						return struct{}{}, fmt.Errorf("reset delivery %s for retry: %w", d.ID(), err)
+					}
 				} else {
 					// Delivery already progressed past Pending (addon received
 					// and acked). The ack signal is queued; no re-dispatch needed.
@@ -413,20 +406,20 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 		}
 		defer tx.Rollback()
 
-		delivery, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID)
+		delivery, err := tx.Deliveries().GetByFulfillmentTarget(ctx, in.FulfillmentID, in.Target.ID())
 		if errors.Is(err, ErrNotFound) {
 			probe.TargetNotFound()
 			return RemoveOutput{Dispatched: false}, nil
 		}
 		if err != nil {
 			probe.Error(err)
-			return RemoveOutput{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID, err)
+			return RemoveOutput{}, fmt.Errorf("load delivery record for target %s: %w", in.Target.ID(), err)
 		}
 
 		modified, err := delivery.Withdraw(in.Generation, s.now())
 		if err != nil {
 			probe.Error(err)
-			return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID, err)
+			return RemoveOutput{}, fmt.Errorf("withdraw delivery %s: %w", delivery.ID(), err)
 		}
 		if !modified {
 			if !delivery.Retry(in.Generation, s.now()) {
@@ -447,7 +440,7 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 			return RemoveOutput{}, fmt.Errorf("commit: %w", err)
 		}
 
-		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests, in.Auth, in.Attestation, in.Generation); err != nil {
+		if err := s.Delivery.Remove(context.Background(), in.Target, in.DeliveryID, delivery.Manifests(), in.Auth, in.Attestation, in.Generation); err != nil {
 			probe.Error(err)
 			return RemoveOutput{}, fmt.Errorf("dispatch removal %s: %w", in.DeliveryID, err)
 		}
@@ -558,8 +551,7 @@ func (s *OrchestrationWorkflowSpec) PersistAndCompleteReconciliation() Activity[
 		}
 
 		fresh.ApplyReconciliationResult(in.Result)
-		needsRestart := fresh.CompleteReconciliation(in.ReconciledGen)
-		fresh.UpdatedAt = s.now()
+		needsRestart := fresh.CompleteReconciliation(in.ReconciledGen, s.now())
 
 		if err := tx.Fulfillments().Update(ctx, fresh); err != nil {
 			probe.Error(err)
@@ -625,32 +617,30 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 		// TODO: revisit the "TargetRegistrar" thing – should we make that upsert instead? remove that?
 		now := s.now()
 		for _, pt := range in.Result.ProvisionedTargets {
-			invID := InventoryItemID("target:" + string(pt.ID))
-
 			props, _ := json.Marshal(pt.Properties)
-			if err := tx.Inventory().CreateOrUpdate(ctx, InventoryItem{
-				ID:               invID,
-				Type:             InventoryType(pt.Type),
-				Name:             pt.Name,
-				Properties:       props,
-				Labels:           pt.Labels,
-				SourceDeliveryID: &in.DeliveryID,
-				CreatedAt:        now,
-				UpdatedAt:        now,
-			}); err != nil {
+			invID := InventoryItemID("target:" + string(pt.ID))
+			if err := tx.Inventory().CreateOrUpdate(ctx, NewInventoryItem(
+				invID,
+				InventoryType(pt.Type),
+				pt.Name,
+				props,
+				pt.Labels,
+				&in.DeliveryID,
+				now,
+			)); err != nil {
 				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert inventory item for target %q: %w", pt.ID, err)
 			}
 
-			if err := tx.Targets().CreateOrUpdate(ctx, TargetInfo{
-				ID:                    pt.ID,
-				Type:                  pt.Type,
-				Name:                  pt.Name,
-				Labels:                pt.Labels,
-				Properties:            pt.Properties,
-				AcceptedResourceTypes: pt.AcceptedResourceTypes,
-				InventoryItemID:       invID,
-			}); err != nil {
+			if err := tx.Targets().CreateOrUpdate(ctx, NewTargetInfo(
+				pt.ID,
+				pt.Type,
+				pt.Name,
+				"",
+				pt.Labels,
+				pt.Properties,
+				pt.AcceptedResourceTypes,
+			)); err != nil {
 				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
 			}
@@ -701,7 +691,7 @@ func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[FulfillmentID, Ge
 		if err != nil {
 			return 0, err
 		}
-		return f.Generation, tx.Commit()
+		return f.Generation(), tx.Commit()
 	})
 }
 
@@ -734,11 +724,11 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 			return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
 		}
 		f, pool := loaded.Fulfillment, loaded.Pool
-		startGen := f.Generation
+		startGen := f.Generation()
 
 		var result ReconciliationResult
 
-		switch f.State {
+		switch f.State() {
 		case FulfillmentStateDeleting:
 			if err := s.executeDelete(record, f, pool, fulfillmentID, probe, loaded.Evidence); err != nil {
 				probe.Error(err)
@@ -746,8 +736,8 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					result = ReconciliationResult{
 						FulfillmentID:   fulfillmentID,
 						State:           FulfillmentStatePausedAuth,
-						ResolvedTargets: f.ResolvedTargets,
-						Auth:            f.Auth,
+						ResolvedTargets: f.ResolvedTargets(),
+						Auth:            f.Auth(),
 					}
 				} else if !IsTerminal(err) {
 					return struct{}{}, s.releaseLockAndContinue(record, fulfillmentID, probe)
@@ -755,9 +745,9 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					result = ReconciliationResult{
 						FulfillmentID:   fulfillmentID,
 						State:           FulfillmentStateFailed,
-						ResolvedTargets: f.ResolvedTargets,
+						ResolvedTargets: f.ResolvedTargets(),
 						StatusReason:    err.Error(),
-						Auth:            f.Auth,
+						Auth:            f.Auth(),
 					}
 				}
 			} else {
@@ -768,7 +758,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 				result = ReconciliationResult{
 					FulfillmentID: fulfillmentID,
 					State:         FulfillmentStateDeleting,
-					Auth:          f.Auth,
+					Auth:          f.Auth(),
 				}
 			}
 
@@ -780,7 +770,7 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					FulfillmentID:   fulfillmentID,
 					State:           FulfillmentStatePausedAuth,
 					ResolvedTargets: resolvedIDs,
-					Auth:            f.Auth,
+					Auth:            f.Auth(),
 				}
 			} else if err != nil {
 				probe.Error(err)
@@ -792,14 +782,14 @@ func (s *OrchestrationWorkflowSpec) Run(record Record, fulfillmentID Fulfillment
 					State:           FulfillmentStateFailed,
 					ResolvedTargets: resolvedIDs,
 					StatusReason:    err.Error(),
-					Auth:            f.Auth,
+					Auth:            f.Auth(),
 				}
 			} else {
 				result = ReconciliationResult{
 					FulfillmentID:   fulfillmentID,
 					State:           FulfillmentStateActive,
 					ResolvedTargets: resolvedIDs,
-					Auth:            f.Auth,
+					Auth:            f.Auth(),
 				}
 			}
 		}
@@ -847,7 +837,7 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	evidence *ResolvedEvidence,
 ) ([]TargetID, error) {
 	resolved, err := RunActivity(record, s.ResolvePlacement(), ResolvePlacementInput{
-		Spec: f.PlacementStrategy,
+		Spec: f.PlacementStrategy(),
 		Pool: PlacementTargets(pool),
 	})
 	if err != nil {
@@ -864,10 +854,10 @@ func (s *OrchestrationWorkflowSpec) executePlacementPipeline(
 	}
 
 	resolvedTargets := ResolvedTargetInfos(resolved, pool)
-	delta := ComputeTargetDelta(f.ResolvedTargets, resolvedTargets, pool)
+	delta := ComputeTargetDelta(f.ResolvedTargets(), resolvedTargets, pool)
 
 	plan, err := RunActivity(record, s.PlanRollout(), PlanRolloutInput{
-		Spec:  f.RolloutStrategy,
+		Spec:  f.RolloutStrategy(),
 		Delta: delta,
 	})
 	if err != nil {
@@ -895,7 +885,7 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	probe FulfillmentRunProbe,
 	evidence *ResolvedEvidence,
 ) error {
-	targets := targetInfosByID(f.ResolvedTargets, pool)
+	targets := targetInfosByID(f.ResolvedTargets(), pool)
 	probe.DeleteStarted(len(targets))
 
 	inputs := make(map[DeliveryID]RemoveInput, len(targets))
@@ -903,10 +893,10 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 	for _, target := range targets {
 		in := RemoveInput{
 			Target:        target,
-			DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
+			DeliveryID:    deliveryIDFor(fulfillmentID, target.ID()),
 			FulfillmentID: fulfillmentID,
-			Auth:          f.Auth,
-			Generation:    f.Generation,
+			Auth:          f.Auth(),
+			Generation:    f.Generation(),
 		}
 		if evidence != nil {
 			in.Attestation = assembleRemoveAttestation(f, evidence)
@@ -919,12 +909,12 @@ func (s *OrchestrationWorkflowSpec) executeDelete(
 		out, err := RunActivity(record, s.RemoveFromTarget(), inputs[id])
 		if err != nil {
 			if errors.Is(err, ErrAuthExpired) {
-				return false, fmt.Errorf("%w: target %s: %v", errAuthPaused, inputs[id].Target.ID, err)
+				return false, fmt.Errorf("%w: target %s: %v", errAuthPaused, inputs[id].Target.ID(), err)
 			}
-			return false, fmt.Errorf("remove delivery for target %s: %w", inputs[id].Target.ID, err)
+			return false, fmt.Errorf("remove delivery for target %s: %w", inputs[id].Target.ID(), err)
 		}
 		return out.Dispatched, nil
-	}, ids, f.Generation, probe)
+	}, ids, f.Generation(), probe)
 	return err
 }
 
@@ -943,7 +933,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 	probe FulfillmentRunProbe,
 	evidence *ResolvedEvidence,
 ) error {
-	policy := f.RolloutStrategy.EffectiveVersionConflictPolicy()
+	policy := f.RolloutStrategy().EffectiveVersionConflictPolicy()
 
 	for i, step := range plan.Steps {
 		probe.RolloutStepStarted(i, len(plan.Steps), step.Deliver != nil)
@@ -955,9 +945,9 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				// TODO: need to call the manifest generator on remove hook
 				in := RemoveInput{
 					Target:        target,
-					DeliveryID:    deliveryIDFor(fulfillmentID, target.ID),
+					DeliveryID:    deliveryIDFor(fulfillmentID, target.ID()),
 					FulfillmentID: fulfillmentID,
-					Auth:          f.Auth,
+					Auth:          f.Auth(),
 					Generation:    startGen,
 				}
 				if evidence != nil {
@@ -970,7 +960,7 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 			if _, err := s.dispatchAndAwait(record, func(id DeliveryID) (bool, error) {
 				out, err := RunActivity(record, s.RemoveFromTarget(), removeInputs[id])
 				if err != nil {
-					return false, fmt.Errorf("remove delivery for target %s: %w", removeInputs[id].Target.ID, err)
+					return false, fmt.Errorf("remove delivery for target %s: %w", removeInputs[id].Target.ID(), err)
 				}
 				return out.Dispatched, nil
 			}, removeIDs, startGen, probe); err != nil {
@@ -982,11 +972,11 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 			inputs := make(map[DeliveryID]DeliverInput)
 			for _, target := range step.Deliver.Targets {
 				manifests, err := RunActivity(record, s.GenerateManifests(), GenerateManifestsInput{
-					Spec:   f.ManifestStrategy,
+					Spec:   f.ManifestStrategy(),
 					Target: target,
 				})
 				if err != nil {
-					return fmt.Errorf("generate manifests for target %s: %w", target.ID, err)
+					return fmt.Errorf("generate manifests for target %s: %w", target.ID(), err)
 				}
 				// TODO: partial delivery (where some manifests are filtered out)
 				// may result in an incomplete or incoherent manifest set for a
@@ -997,13 +987,13 @@ func (s *OrchestrationWorkflowSpec) executeRolloutPlan(
 				if len(manifests) == 0 {
 					continue
 				}
-				did := deliveryIDFor(fulfillmentID, target.ID)
+				did := deliveryIDFor(fulfillmentID, target.ID())
 				in := DeliverInput{
 					Target:        target,
 					DeliveryID:    did,
 					FulfillmentID: fulfillmentID,
 					Manifests:     manifests,
-					Auth:          f.Auth,
+					Auth:          f.Auth(),
 					Generation:    startGen,
 				}
 				if evidence != nil {
@@ -1181,7 +1171,7 @@ func (s *OrchestrationWorkflowSpec) processDeliveryEvent(
 func buildOutputCleanupPlan(deliveries []Delivery, items []InventoryItem) (outputCleanupPlan, error) {
 	deliveryIDs := make(map[DeliveryID]struct{}, len(deliveries))
 	for _, delivery := range deliveries {
-		deliveryIDs[delivery.ID] = struct{}{}
+		deliveryIDs[delivery.ID()] = struct{}{}
 	}
 
 	targetIDs := make(map[TargetID]struct{})
@@ -1189,22 +1179,22 @@ func buildOutputCleanupPlan(deliveries []Delivery, items []InventoryItem) (outpu
 	secretRefs := make(map[SecretRef]struct{})
 
 	for _, item := range items {
-		if item.SourceDeliveryID == nil {
+		if item.SourceDeliveryID() == nil {
 			continue
 		}
-		if _, ok := deliveryIDs[*item.SourceDeliveryID]; !ok {
+		if _, ok := deliveryIDs[*item.SourceDeliveryID()]; !ok {
 			continue
 		}
 
-		inventoryIDs[item.ID] = struct{}{}
-		refs, err := secretRefsFromProperties(item.ID, item.Properties)
+		inventoryIDs[item.ID()] = struct{}{}
+		refs, err := secretRefsFromProperties(item.ID(), item.Properties())
 		if err != nil {
 			return outputCleanupPlan{}, err
 		}
 		for _, ref := range refs {
 			secretRefs[ref] = struct{}{}
 		}
-		if targetID, ok := targetIDFromInventoryItem(item.ID); ok {
+		if targetID, ok := targetIDFromInventoryItem(item.ID()); ok {
 			targetIDs[targetID] = struct{}{}
 		}
 	}
@@ -1269,7 +1259,7 @@ func deliveryIDFor(fID FulfillmentID, tgtID TargetID) DeliveryID {
 func targetInfosByID(ids []TargetID, pool []TargetInfo) []TargetInfo {
 	index := make(map[TargetID]TargetInfo, len(pool))
 	for _, t := range pool {
-		index[t.ID] = t
+		index[t.ID()] = t
 	}
 	out := make([]TargetInfo, 0, len(ids))
 	for _, id := range ids {
@@ -1290,12 +1280,12 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 
 	resolvedSet := make(map[TargetID]struct{}, len(resolved))
 	for _, t := range resolved {
-		resolvedSet[t.ID] = struct{}{}
+		resolvedSet[t.ID()] = struct{}{}
 	}
 
 	var delta TargetDelta
 	for _, t := range resolved {
-		if _, wasPrevious := prevSet[t.ID]; wasPrevious {
+		if _, wasPrevious := prevSet[t.ID()]; wasPrevious {
 			delta.Unchanged = append(delta.Unchanged, t)
 		} else {
 			delta.Added = append(delta.Added, t)
@@ -1304,14 +1294,14 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 
 	poolIndex := make(map[TargetID]TargetInfo, len(pool))
 	for _, t := range pool {
-		poolIndex[t.ID] = t
+		poolIndex[t.ID()] = t
 	}
 	for _, id := range previousIDs {
 		if _, stillResolved := resolvedSet[id]; !stillResolved {
 			if t, ok := poolIndex[id]; ok {
 				delta.Removed = append(delta.Removed, t)
 			} else {
-				delta.Removed = append(delta.Removed, TargetInfo{ID: id})
+				delta.Removed = append(delta.Removed, TargetInfoFromSnapshot(TargetInfoSnapshot{ID: id}))
 			}
 		}
 	}
@@ -1325,7 +1315,7 @@ func ComputeTargetDelta(previousIDs []TargetID, resolved []TargetInfo, pool []Ta
 func AssembleDeliverAttestation(f Fulfillment, manifests []Manifest, ev *ResolvedEvidence) *Attestation {
 	return &Attestation{
 		Input: SignedInput{
-			Provenance: *f.Provenance,
+			Provenance: *f.Provenance(),
 			Signer:     *ev.SignerAssertion,
 		},
 		SignedRelation: ev.SignedRelation,
@@ -1338,12 +1328,12 @@ func AssembleDeliverAttestation(f Fulfillment, manifests []Manifest, ev *Resolve
 func assembleRemoveAttestation(f Fulfillment, ev *ResolvedEvidence) *Attestation {
 	return &Attestation{
 		Input: SignedInput{
-			Provenance: *f.Provenance,
+			Provenance: *f.Provenance(),
 			Signer:     *ev.SignerAssertion,
 		},
 		SignedRelation: ev.SignedRelation,
 		Output: &RemoveByDeploymentId{
-			DeploymentID: DeploymentID(f.Provenance.Content.ContentID()),
+			DeploymentID: DeploymentID(f.Provenance().Content.ContentID()),
 		},
 	}
 }

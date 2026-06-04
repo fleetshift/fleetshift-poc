@@ -447,11 +447,11 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// name
 	nameField := h.descs.Resource.Fields().ByName("name")
-	resource.Set(nameField, protoreflect.ValueOfString(h.collection+string(mr.Name)))
+	resource.Set(nameField, protoreflect.ValueOfString(h.collection+string(mr.Name())))
 
 	// uid
 	uidField := h.descs.Resource.Fields().ByName("uid")
-	resource.Set(uidField, protoreflect.ValueOfString(mr.UID))
+	resource.Set(uidField, protoreflect.ValueOfString(mr.UID()))
 
 	// spec
 	specField := h.descs.Resource.Fields().ByName("spec")
@@ -465,11 +465,11 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// intent_version
 	versionField := h.descs.Resource.Fields().ByName("intent_version")
-	resource.Set(versionField, protoreflect.ValueOfInt64(int64(mr.CurrentVersion)))
+	resource.Set(versionField, protoreflect.ValueOfInt64(int64(mr.CurrentVersion())))
 
 	// state
 	stateField := h.descs.Resource.Fields().ByName("state")
-	stateNum := int32(stateFromFulfillment(f.State))
+	stateNum := int32(stateFromFulfillment(f.State()))
 	resource.Set(stateField, protoreflect.ValueOfEnum(protoreflect.EnumNumber(stateNum)))
 
 	// reconciling
@@ -478,9 +478,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	resource.Set(reconcilingField, protoreflect.ValueOfBool(isReconciling))
 
 	// create_time
-	if !mr.CreatedAt.IsZero() {
+	if !mr.CreatedAt().IsZero() {
 		createTimeField := h.descs.Resource.Fields().ByName("create_time")
-		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt); err != nil {
+		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(createTimeField, tsVal)
@@ -488,9 +488,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	}
 
 	// update_time
-	if !mr.UpdatedAt.IsZero() {
+	if !mr.UpdatedAt().IsZero() {
 		updateTimeField := h.descs.Resource.Fields().ByName("update_time")
-		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt); err != nil {
+		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(updateTimeField, tsVal)
@@ -498,9 +498,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	}
 
 	// delete_time
-	if mr.DeletedAt != nil {
+	if mr.DeletedAt() != nil {
 		deleteTimeField := h.descs.Resource.Fields().ByName("delete_time")
-		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt); err != nil {
+		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(deleteTimeField, tsVal)
@@ -512,9 +512,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	resource.Set(etagField, protoreflect.ValueOfString(string(v.Etag())))
 
 	// provenance
-	if f.Provenance != nil {
+	if f.Provenance() != nil {
 		provField := h.descs.Resource.Fields().ByName("provenance")
-		if provVal, err := marshalProvenance(provField, f.Provenance); err != nil {
+		if provVal, err := marshalProvenance(provField, f.Provenance()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(provField, provVal)
@@ -523,7 +523,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// generation
 	genField := h.descs.Resource.Fields().ByName("generation")
-	resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation)))
+	resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation())))
 
 	return resource, nil
 }

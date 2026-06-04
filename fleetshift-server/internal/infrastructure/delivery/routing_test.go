@@ -48,8 +48,8 @@ func TestRoutingDeliveryService_RoutesToCorrectAgent(t *testing.T) {
 	router.Register("kubernetes", k8sAgent)
 
 	ctx := context.Background()
-	kindTarget := domain.TargetInfo{ID: "k1", Type: "kind", Name: "local-kind"}
-	k8sTarget := domain.TargetInfo{ID: "c1", Type: "kubernetes", Name: "prod-cluster"}
+	kindTarget := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: "kind", Name: "local-kind"})
+	k8sTarget := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "c1", Type: "kubernetes", Name: "prod-cluster"})
 
 	manifests := []domain.Manifest{{Raw: json.RawMessage(`{}`)}}
 
@@ -88,7 +88,7 @@ func TestRoutingDeliveryService_RemoveRoutesToCorrectAgent(t *testing.T) {
 	router.Register("kind", agent)
 
 	ctx := context.Background()
-	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: "kind", Name: "local-kind"})
 
 	if err := router.Remove(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nil, 1); err != nil {
 		t.Fatalf("Remove: %v", err)
@@ -109,7 +109,7 @@ func TestRoutingDeliveryService_UnregisteredTypeReturnsError(t *testing.T) {
 	router := delivery.NewRoutingDeliveryService()
 
 	ctx := context.Background()
-	target := domain.TargetInfo{ID: "k1", Type: "unknown", Name: "target"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: "unknown", Name: "target"})
 
 	err := router.Deliver(ctx, target, "d1:k1", nil, domain.DeliveryAuth{}, nil, 1)
 	if err == nil {
@@ -137,7 +137,7 @@ func TestRoutingDeliveryService_RegisterReplacesPrevious(t *testing.T) {
 	router.Register("kind", second)
 
 	ctx := context.Background()
-	target := domain.TargetInfo{ID: "k1", Type: "kind", Name: "target"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: "kind", Name: "target"})
 	manifests := []domain.Manifest{{Raw: json.RawMessage(`{}`)}}
 
 	if err := router.Deliver(ctx, target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {

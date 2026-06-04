@@ -37,7 +37,7 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 	}
 	specBytes, _ := json.Marshal(spec)
 
-	target := domain.TargetInfo{ID: "k1", Type: kind.TargetType, Name: "local-kind"}
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
 		ResourceType: kind.ClusterResourceType,
 		Raw:          json.RawMessage(specBytes),
@@ -84,7 +84,7 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 		Raw:          json.RawMessage(`{"name": "empty-aud"}`),
 	}}
 
-	err := agent.Deliver(context.Background(), domain.TargetInfo{}, "d1:k1", manifests, auth, nil, 1)
+	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, auth, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver: %v", err)
 	}

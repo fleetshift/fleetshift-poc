@@ -44,13 +44,13 @@ func (h *VerifySignHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	var caller *domain.SubjectClaims
 	for _, m := range methods {
-		if m.Type != domain.AuthMethodTypeOIDC || m.OIDC == nil {
+		if m.Type() != domain.AuthMethodTypeOIDC || m.OIDC() == nil {
 			continue
 		}
 		// Verify against the enrollment audience — the UI sends an ID token
 		// (aud = OIDC client ID) for signing operations.
-		enrollConfig := *m.OIDC
-		enrollConfig.Audience = m.OIDC.KeyEnrollmentAudience
+		enrollConfig := *m.OIDC()
+		enrollConfig.Audience = m.OIDC().KeyEnrollmentAudience
 		claims, verifyErr := h.Verifier.Verify(r.Context(), enrollConfig, token)
 		if verifyErr != nil {
 			writeJSON(w, http.StatusUnauthorized, verifySignResponse{Error: verifyErr.Error()})
