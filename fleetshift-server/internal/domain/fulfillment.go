@@ -303,6 +303,14 @@ func (f *Fulfillment) State() FulfillmentState { return f.state }
 // Paused reports whether orchestration is paused for this fulfillment.
 func (f *Fulfillment) Paused() bool { return f.pauseReason != "" }
 
+// Reconciling reports whether the fulfillment is in a transitional
+// lifecycle state (creating or deleting) and is not paused. A paused
+// fulfillment is not actively reconciling even if its lifecycle state
+// has not yet settled.
+func (f *Fulfillment) Reconciling() bool {
+	return (f.state == FulfillmentStateCreating || f.state == FulfillmentStateDeleting) && f.pauseReason == ""
+}
+
 // PauseReason returns the human-readable reason for the pause, or
 // empty if the fulfillment is not paused.
 func (f *Fulfillment) PauseReason() string { return f.pauseReason }

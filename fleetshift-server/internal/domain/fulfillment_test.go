@@ -337,6 +337,35 @@ func TestFulfillment_Resume_AcceptsProvenanceWhenNonePreviously(t *testing.T) {
 	}
 }
 
+func TestFulfillment_Reconciling(t *testing.T) {
+	tests := []struct {
+		name        string
+		state       FulfillmentState
+		pauseReason string
+		want        bool
+	}{
+		{"creating, not paused", FulfillmentStateCreating, "", true},
+		{"deleting, not paused", FulfillmentStateDeleting, "", true},
+		{"creating, paused", FulfillmentStateCreating, "credential rotation required", false},
+		{"deleting, paused", FulfillmentStateDeleting, "credential rotation required", false},
+		{"active, not paused", FulfillmentStateActive, "", false},
+		{"active, paused", FulfillmentStateActive, "paused", false},
+		{"failed, not paused", FulfillmentStateFailed, "", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := FulfillmentFromSnapshot(FulfillmentSnapshot{
+				ID:          "f1",
+				State:       tt.state,
+				PauseReason: tt.pauseReason,
+			})
+			if got := f.Reconciling(); got != tt.want {
+				t.Errorf("Reconciling() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFulfillment_ApplyReconciliationResult(t *testing.T) {
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
 		ID:         "f1",

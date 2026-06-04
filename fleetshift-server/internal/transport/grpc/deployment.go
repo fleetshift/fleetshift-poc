@@ -226,8 +226,7 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 		State: fulfillmentStateToProto(f.State()),
 	}
 
-	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
-		dep.State == pb.Deployment_STATE_DELETING
+	dep.Reconciling = f.Reconciling()
 	dep.PauseReason = f.PauseReason()
 
 	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy())

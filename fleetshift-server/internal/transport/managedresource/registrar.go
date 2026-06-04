@@ -479,8 +479,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// reconciling
 	reconcilingField := h.descs.Resource.Fields().ByName("reconciling")
-	isReconciling := stateNum == 1 || stateNum == 3
-	resource.Set(reconcilingField, protoreflect.ValueOfBool(isReconciling))
+	resource.Set(reconcilingField, protoreflect.ValueOfBool(f.Reconciling()))
 
 	// create_time
 	if !mr.CreatedAt().IsZero() {
