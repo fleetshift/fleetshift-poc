@@ -102,14 +102,14 @@ type testDeliveryObserver struct {
 	results []domain.DeliveryResult
 }
 
-func (o *testDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+func (o *testDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetID, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
 	o.mu.Lock()
 	o.events = append(o.events, event)
 	o.mu.Unlock()
 	return ctx, domain.NoOpEventEmittedProbe{}
 }
 
-func (o *testDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+func (o *testDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetID, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
 	o.mu.Lock()
 	o.results = append(o.results, result)
 	o.mu.Unlock()

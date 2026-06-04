@@ -102,8 +102,7 @@ func (s *DeliveryReportService) ReportEvent(ctx context.Context, deliveryID doma
 	}
 
 	if s.observer != nil {
-		target := s.lookupTarget(ctx, d.TargetID())
-		_, probe := s.observer.EventEmitted(ctx, deliveryID, target, event)
+		_, probe := s.observer.EventEmitted(ctx, deliveryID, d.TargetID(), event)
 		probe.End()
 	}
 
@@ -162,8 +161,7 @@ func (s *DeliveryReportService) ReportResult(ctx context.Context, deliveryID dom
 	}
 
 	if s.observer != nil {
-		target := s.lookupTarget(ctx, d.TargetID())
-		_, probe := s.observer.Completed(ctx, deliveryID, target, result)
+		_, probe := s.observer.Completed(ctx, deliveryID, d.TargetID(), result)
 		probe.End()
 	}
 
@@ -286,20 +284,4 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 		result = append(result, ad)
 	}
 	return result, nil
-}
-
-// lookupTarget is a best-effort read of the target for observer
-// callbacks. Returns a minimal TargetInfo with just the ID if the
-// lookup fails.
-func (s *DeliveryReportService) lookupTarget(ctx context.Context, targetID domain.TargetID) domain.TargetInfo {
-	tx, err := s.store.BeginReadOnly(ctx)
-	if err != nil {
-		return domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: targetID})
-	}
-	defer tx.Rollback()
-	t, err := tx.Targets().Get(ctx, targetID)
-	if err != nil {
-		return domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: targetID})
-	}
-	return t
 }

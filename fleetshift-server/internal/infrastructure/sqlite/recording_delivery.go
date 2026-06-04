@@ -23,16 +23,14 @@ type RecordingDeliveryService struct {
 
 func (s *RecordingDeliveryService) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	now := s.now()
-	d := domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID:            deliveryID,
-		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
-		TargetID:      target.ID(),
-		Manifests:     manifests,
-		Generation:    generation,
-		State:         domain.DeliveryStatePending,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	})
+	d := domain.NewDelivery(
+		deliveryID,
+		fulfillmentIDFromDeliveryID(deliveryID),
+		target.ID(),
+		manifests,
+		generation,
+		now,
+	)
 
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
@@ -67,15 +65,15 @@ func (s *RecordingDeliveryService) Remove(ctx context.Context, target domain.Tar
 	if err != nil {
 		return nil
 	}
-	if err := tx.Deliveries().Put(ctx, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID:            deliveryID,
-		FulfillmentID: fulfillmentIDFromDeliveryID(deliveryID),
-		TargetID:      target.ID(),
-		Generation:    generation,
-		State:         domain.DeliveryStatePending,
-		CreatedAt:     s.now(),
-		UpdatedAt:     s.now(),
-	})); err != nil {
+	now := s.now()
+	if err := tx.Deliveries().Put(ctx, domain.NewDelivery(
+		deliveryID,
+		fulfillmentIDFromDeliveryID(deliveryID),
+		target.ID(),
+		nil,
+		generation,
+		now,
+	)); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
