@@ -260,9 +260,8 @@ func TestFulfillment_Resume_HappyPath_NoProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if f.state != FulfillmentStatePausedAuth {
-		t.Errorf("State = %q, want %q (orchestration, not Resume, owns the transition to active)",
-			f.state, FulfillmentStatePausedAuth)
+	if f.state != FulfillmentStateActive {
+		t.Errorf("State = %q, want %q", f.state, FulfillmentStateActive)
 	}
 	if f.auth.Token != "fresh-token" {
 		t.Errorf("Auth.Token = %q, want %q", f.auth.Token, "fresh-token")
@@ -296,9 +295,8 @@ func TestFulfillment_Resume_HappyPath_WithProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if f.state != FulfillmentStatePausedAuth {
-		t.Errorf("State = %q, want %q (orchestration, not Resume, owns the transition to active)",
-			f.state, FulfillmentStatePausedAuth)
+	if f.state != FulfillmentStateActive {
+		t.Errorf("State = %q, want %q", f.state, FulfillmentStateActive)
 	}
 	if f.auth.Token != "fresh-token" {
 		t.Errorf("Auth.Token = %q, want %q", f.auth.Token, "fresh-token")
