@@ -8,7 +8,7 @@ import (
 )
 
 func TestAuthMethod_Validate_ValidOIDCPasses(t *testing.T) {
-	m := domain.AuthMethod{
+	m := domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "am1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: &domain.OIDCConfig{
@@ -18,18 +18,18 @@ func TestAuthMethod_Validate_ValidOIDCPasses(t *testing.T) {
 			AuthorizationEndpoint: "https://issuer.example.com/authorize",
 			TokenEndpoint:         "https://issuer.example.com/token",
 		},
-	}
+	})
 	if err := m.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil", err)
 	}
 }
 
 func TestAuthMethod_Validate_OIDCWithoutConfigReturnsErrInvalidArgument(t *testing.T) {
-	m := domain.AuthMethod{
+	m := domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "am1",
 		Type: domain.AuthMethodTypeOIDC,
 		OIDC: nil,
-	}
+	})
 	err := m.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want ErrInvalidArgument")
@@ -40,10 +40,10 @@ func TestAuthMethod_Validate_OIDCWithoutConfigReturnsErrInvalidArgument(t *testi
 }
 
 func TestAuthMethod_Validate_UnknownTypeReturnsErrInvalidArgument(t *testing.T) {
-	m := domain.AuthMethod{
+	m := domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "am1",
 		Type: domain.AuthMethodType("unknown"),
-	}
+	})
 	err := m.Validate()
 	if err == nil {
 		t.Fatal("Validate() = nil, want ErrInvalidArgument")

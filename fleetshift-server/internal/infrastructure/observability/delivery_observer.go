@@ -20,92 +20,118 @@ func NewDeliveryObserver(logger *slog.Logger) *DeliveryObserver {
 	return &DeliveryObserver{logger: logger.With("component", "delivery")}
 }
 
-func (o *DeliveryObserver) EventEmitted(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
-	logger := o.loggerFor(deliveryID, target)
-	level := deliveryEventLevel(event.Kind)
-	if logger.Enabled(ctx, level) {
-		logger.LogAttrs(ctx, level, "delivery event",
-			slog.String("event_kind", string(event.Kind)),
-			slog.String("message", event.Message),
-		)
-	}
-	return ctx, &eventEmittedProbe{
-		logger:    logger,
-		ctx:       ctx,
-		startTime: time.Now(),
+func (o *DeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
+	return ctx, &reportEventProbe{
+		logger:     o.logger.With(slog.String("delivery_id", string(deliveryID))),
+		ctx:        ctx,
+		startTime:  time.Now(),
+		generation: generation,
+		event:      event,
 	}
 }
 
-func (o *DeliveryObserver) Completed(ctx context.Context, deliveryID domain.DeliveryID, target domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
-	logger := o.loggerFor(deliveryID, target)
-	if logger.Enabled(ctx, slog.LevelInfo) {
-		attrs := []slog.Attr{
-			slog.String("state", string(result.State)),
-		}
-		if result.Message != "" {
-			attrs = append(attrs, slog.String("message", result.Message))
-		}
-		logger.LogAttrs(ctx, slog.LevelInfo, "delivery completed", attrs...)
-	}
-	return ctx, &completedProbe{
-		logger:    logger,
-		ctx:       ctx,
-		startTime: time.Now(),
+func (o *DeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
+	return ctx, &reportResultProbe{
+		logger:     o.logger.With(slog.String("delivery_id", string(deliveryID))),
+		ctx:        ctx,
+		startTime:  time.Now(),
+		generation: generation,
+		result:     result,
 	}
 }
 
-func (o *DeliveryObserver) loggerFor(deliveryID domain.DeliveryID, target domain.TargetInfo) *slog.Logger {
-	return o.logger.With(
-		slog.String("delivery_id", string(deliveryID)),
-		slog.String("target_id", string(target.ID)),
-		slog.String("target_type", string(target.Type)),
-	)
+type reportEventProbe struct {
+	domain.NoOpReportEventProbe
+	logger     *slog.Logger
+	ctx        context.Context
+	startTime  time.Time
+	generation domain.Generation
+	event      domain.DeliveryEvent
+	stale      bool
+	err        error
 }
 
-type eventEmittedProbe struct {
-	domain.NoOpEventEmittedProbe
-	logger    *slog.Logger
-	ctx       context.Context
-	startTime time.Time
-	err       error
-}
-
-func (p *eventEmittedProbe) Error(err error) { p.err = err }
-
-func (p *eventEmittedProbe) End() {
-	if p.err != nil {
-		p.logger.LogAttrs(p.ctx, slog.LevelError, "delivery emit failed",
-			slog.Duration("duration", time.Since(p.startTime)),
-			slog.String("error", p.err.Error()),
+func (p *reportEventProbe) Stale(reportGen, currentGen domain.Generation) {
+	p.stale = true
+	if p.logger.Enabled(p.ctx, slog.LevelDebug) {
+		p.logger.LogAttrs(p.ctx, slog.LevelDebug, "delivery event stale",
+			slog.Int64("report_generation", int64(reportGen)),
+			slog.Int64("current_generation", int64(currentGen)),
 		)
 	}
 }
 
-type completedProbe struct {
-	domain.NoOpCompletedProbe
-	logger    *slog.Logger
-	ctx       context.Context
-	startTime time.Time
-	err       error
-}
+func (p *reportEventProbe) Error(err error) { p.err = err }
 
-func (p *completedProbe) Error(err error) { p.err = err }
-
-func (p *completedProbe) End() {
+func (p *reportEventProbe) End() {
 	duration := time.Since(p.startTime)
 	if p.err != nil {
-		p.logger.LogAttrs(p.ctx, slog.LevelError, "delivery completion failed",
+		p.logger.LogAttrs(p.ctx, slog.LevelError, "delivery event failed",
 			slog.Duration("duration", duration),
 			slog.String("error", p.err.Error()),
 		)
 		return
 	}
+	if p.stale {
+		return
+	}
+	level := deliveryEventLevel(p.event.Kind)
+	if !p.logger.Enabled(p.ctx, level) {
+		return
+	}
+	p.logger.LogAttrs(p.ctx, level, "delivery event",
+		slog.Duration("duration", duration),
+		slog.String("event_kind", string(p.event.Kind)),
+		slog.String("message", p.event.Message),
+	)
+}
+
+type reportResultProbe struct {
+	domain.NoOpReportResultProbe
+	logger     *slog.Logger
+	ctx        context.Context
+	startTime  time.Time
+	generation domain.Generation
+	result     domain.DeliveryResult
+	stale      bool
+	err        error
+}
+
+func (p *reportResultProbe) Stale(reportGen, currentGen domain.Generation) {
+	p.stale = true
+	if p.logger.Enabled(p.ctx, slog.LevelDebug) {
+		p.logger.LogAttrs(p.ctx, slog.LevelDebug, "delivery result stale",
+			slog.Int64("report_generation", int64(reportGen)),
+			slog.Int64("current_generation", int64(currentGen)),
+		)
+	}
+}
+
+func (p *reportResultProbe) Error(err error) { p.err = err }
+
+func (p *reportResultProbe) End() {
+	duration := time.Since(p.startTime)
+	if p.err != nil {
+		p.logger.LogAttrs(p.ctx, slog.LevelError, "delivery result failed",
+			slog.Duration("duration", duration),
+			slog.String("error", p.err.Error()),
+		)
+		return
+	}
+	if p.stale {
+		return
+	}
 	if !p.logger.Enabled(p.ctx, slog.LevelInfo) {
 		return
 	}
-	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery completion done",
+	attrs := []slog.Attr{
 		slog.Duration("duration", duration),
-	)
+		slog.String("state", string(p.result.State)),
+	}
+	if p.result.Message != "" {
+		attrs = append(attrs, slog.String("message", p.result.Message))
+	}
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery result done", attrs...)
 }
 
 // MultiDeliveryObserver chains multiple [domain.DeliveryObserver]

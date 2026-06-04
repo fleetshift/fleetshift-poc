@@ -6,15 +6,12 @@ WORKDIR /src
 # CLI has a replace directive pointing to ../fleetshift-server
 COPY fleetshift-server/go.mod fleetshift-server/go.sum ./fleetshift-server/
 COPY fleetshift-cli/go.mod fleetshift-cli/go.sum ./fleetshift-cli/
-COPY gen/go.mod gen/go.sum ./gen/
 RUN cd fleetshift-server && go mod download && \
     cd ../fleetshift-cli && go mod download
 
-# Copy all source (server, cli, gen, proto)
+# Copy all source (server, cli)
 COPY fleetshift-server/ ./fleetshift-server/
 COPY fleetshift-cli/ ./fleetshift-cli/
-COPY gen/ ./gen/
-COPY proto/ ./proto/
 
 # Build both binaries
 RUN cd fleetshift-server && CGO_ENABLED=0 go build -o /bin/fleetshift ./cmd/fleetshift

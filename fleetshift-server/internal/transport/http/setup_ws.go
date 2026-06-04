@@ -106,24 +106,24 @@ type wsAuthMethod struct {
 
 func authMethodToWS(m domain.AuthMethod) *wsAuthMethod {
 	out := &wsAuthMethod{
-		Name: "authMethods/" + string(m.ID),
+		Name: "authMethods/" + string(m.ID()),
 		Type: "TYPE_OIDC",
 	}
-	if m.OIDC != nil {
-		oidc := &wsOIDCConfig{
-			IssuerURL:             string(m.OIDC.IssuerURL),
-			Audience:              string(m.OIDC.Audience),
-			AuthorizationEndpoint: string(m.OIDC.AuthorizationEndpoint),
-			TokenEndpoint:         string(m.OIDC.TokenEndpoint),
-			JWKSURI:               string(m.OIDC.JWKSURI),
+	if oidc := m.OIDC(); oidc != nil {
+		ws := &wsOIDCConfig{
+			IssuerURL:             string(oidc.IssuerURL),
+			Audience:              string(oidc.Audience),
+			AuthorizationEndpoint: string(oidc.AuthorizationEndpoint),
+			TokenEndpoint:         string(oidc.TokenEndpoint),
+			JWKSURI:               string(oidc.JWKSURI),
 		}
-		if m.OIDC.RegistrySubjectMapping != nil {
-			oidc.RegistrySubjectMapping = &wsRegistrySubjectMapping{
-				RegistryID: string(m.OIDC.RegistrySubjectMapping.RegistryID),
-				Expression: m.OIDC.RegistrySubjectMapping.Expression,
+		if oidc.RegistrySubjectMapping != nil {
+			ws.RegistrySubjectMapping = &wsRegistrySubjectMapping{
+				RegistryID: string(oidc.RegistrySubjectMapping.RegistryID),
+				Expression: oidc.RegistrySubjectMapping.Expression,
 			}
 		}
-		out.OIDCConfig = oidc
+		out.OIDCConfig = ws
 	}
 	return out
 }

@@ -62,13 +62,10 @@ func Start(t *testing.T) string {
 	reg := &memworkflow.Registry{}
 	recording.Reporter = application.NewDeliveryReportService(store, reg)
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -227,12 +224,12 @@ func Start(t *testing.T) string {
 
 	schema := kindaddon.Schema()
 	if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
-		Targets: []domain.TargetInfo{{
+		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
 			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-		}},
+		})},
 		Schemas: []domain.ManagedResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)

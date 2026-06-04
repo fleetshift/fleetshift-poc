@@ -114,15 +114,15 @@ func (r *ManagedResourceRepo) DeleteIntents(ctx context.Context, rt domain.Resou
 }
 
 func (r *ManagedResourceRepo) CreateInstance(ctx context.Context, mr *domain.ManagedResource) error {
-	pending := mr.DrainPendingIntents()
-	for i, intent := range pending {
+	s := mr.Snapshot()
+	for _, intent := range s.PendingIntents {
 		if _, err := r.DB.ExecContext(ctx,
 			`INSERT INTO resource_intents (resource_type, name, version, spec, created_at)
 			 VALUES ($1, $2, $3, $4, $5)`,
 			intent.ResourceType, intent.Name, intent.Version, string(intent.Spec),
 			intent.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
 			if isUniqueViolation(err) {
-				return fmt.Errorf("%w: intent %s/%s v%d", domain.ErrAlreadyExists, intent.ResourceType, intent.Name, pending[i].Version)
+				return fmt.Errorf("%w: intent %s/%s v%d", domain.ErrAlreadyExists, intent.ResourceType, intent.Name, intent.Version)
 			}
 			return err
 		}
@@ -131,15 +131,16 @@ func (r *ManagedResourceRepo) CreateInstance(ctx context.Context, mr *domain.Man
 	_, err := r.DB.ExecContext(ctx,
 		`INSERT INTO managed_resources (resource_type, name, uid, current_version, fulfillment_id, created_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		mr.ResourceType, mr.Name, mr.UID, mr.CurrentVersion, string(mr.FulfillmentID),
-		mr.CreatedAt.UTC().Format(time.RFC3339),
-		mr.UpdatedAt.UTC().Format(time.RFC3339))
+		s.ResourceType, s.Name, s.UID, s.CurrentVersion, string(s.FulfillmentID),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("%w: managed resource %s/%s", domain.ErrAlreadyExists, mr.ResourceType, mr.Name)
+			return fmt.Errorf("%w: managed resource %s/%s", domain.ErrAlreadyExists, s.ResourceType, s.Name)
 		}
 		return err
 	}
+	mr.DrainPendingIntents()
 	return nil
 }
 
@@ -147,11 +148,12 @@ func (r *ManagedResourceRepo) GetInstance(ctx context.Context, rt domain.Resourc
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT resource_type, name, uid, current_version, fulfillment_id, created_at, updated_at, deleted_at
 		 FROM managed_resources WHERE resource_type = $1 AND name = $2 AND deleted_at IS NULL`, rt, name)
-	mr, err := scanInstance(row)
+	snap, err := scanManagedResourceSnapshot(row)
 	if err != nil {
 		return nil, err
 	}
-	return &mr, nil
+	mr := domain.ManagedResourceFromSnapshot(snap)
+	return mr, nil
 }
 
 func (r *ManagedResourceRepo) GetView(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) (domain.ManagedResourceView, error) {
@@ -238,52 +240,53 @@ func scanTypeDef(s interface{ Scan(...any) error }) (domain.ManagedResourceTypeD
 	return def, nil
 }
 
-func scanInstance(s interface{ Scan(...any) error }) (domain.ManagedResource, error) {
-	var mr domain.ManagedResource
+func scanManagedResourceSnapshot(s interface{ Scan(...any) error }) (domain.ManagedResourceSnapshot, error) {
+	var snap domain.ManagedResourceSnapshot
 	var fID string
 	var createdAt, updatedAt string
 	var deletedAt sql.NullString
-	if err := s.Scan(&mr.ResourceType, &mr.Name, &mr.UID, &mr.CurrentVersion, &fID,
+	if err := s.Scan(&snap.ResourceType, &snap.Name, &snap.UID, &snap.CurrentVersion, &fID,
 		&createdAt, &updatedAt, &deletedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ManagedResource{}, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return domain.ManagedResource{}, err
+		return snap, fmt.Errorf("scan managed resource: %w", err)
 	}
-	mr.FulfillmentID = domain.FulfillmentID(fID)
+	snap.FulfillmentID = domain.FulfillmentID(fID)
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
-		mr.CreatedAt = t
+		snap.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, updatedAt); err == nil {
-		mr.UpdatedAt = t
+		snap.UpdatedAt = t
 	}
 	if deletedAt.Valid {
 		if t, err := time.Parse(time.RFC3339, deletedAt.String); err == nil {
-			mr.DeletedAt = &t
+			snap.DeletedAt = &t
 		}
 	}
-	return mr, nil
+	return snap, nil
 }
 
 func scanView(s interface{ Scan(...any) error }) (domain.ManagedResourceView, error) {
 	var v domain.ManagedResourceView
-	var mrFID string
+	var mrSnap domain.ManagedResourceSnapshot
 	var mrCreatedAt, mrUpdatedAt string
 	var mrDeletedAt sql.NullString
 	var riSpec, riCreatedAt string
 
-	var fID, rtJSON, stateStr, statusReason, authJSON, fCreatedAt, fUpdatedAt string
+	var fID, rtJSON, stateStr, pauseReason, statusReason, authJSON, fCreatedAt, fUpdatedAt string
 	var msSpec, psSpec, rsSpec, provJSON, attestRefJSON sql.NullString
 	var msVer, psVer, rsVer, generation, observedGeneration int64
 	var activeWorkflowGen sql.NullInt64
+	var mrFID string
 
 	if err := s.Scan(
-		&v.ManagedResource.ResourceType, &v.ManagedResource.Name, &v.ManagedResource.UID,
-		&v.ManagedResource.CurrentVersion, &mrFID,
+		&mrSnap.ResourceType, &mrSnap.Name, &mrSnap.UID,
+		&mrSnap.CurrentVersion, &mrFID,
 		&mrCreatedAt, &mrUpdatedAt, &mrDeletedAt,
 		&riSpec, &riCreatedAt,
 		&fID, &msVer, &msSpec, &psVer, &psSpec, &rsVer, &rsSpec,
-		&rtJSON, &stateStr, &statusReason, &authJSON, &provJSON, &attestRefJSON,
+		&rtJSON, &stateStr, &pauseReason, &statusReason, &authJSON, &provJSON, &attestRefJSON,
 		&generation, &observedGeneration, &activeWorkflowGen,
 		&fCreatedAt, &fUpdatedAt,
 	); err != nil {
@@ -293,69 +296,40 @@ func scanView(s interface{ Scan(...any) error }) (domain.ManagedResourceView, er
 		return domain.ManagedResourceView{}, fmt.Errorf("scan managed resource view: %w", err)
 	}
 
-	v.ManagedResource.FulfillmentID = domain.FulfillmentID(mrFID)
+	mrSnap.FulfillmentID = domain.FulfillmentID(mrFID)
 	if t, err := time.Parse(time.RFC3339, mrCreatedAt); err == nil {
-		v.ManagedResource.CreatedAt = t
+		mrSnap.CreatedAt = t
 	}
 	if t, err := time.Parse(time.RFC3339, mrUpdatedAt); err == nil {
-		v.ManagedResource.UpdatedAt = t
+		mrSnap.UpdatedAt = t
 	}
 	if mrDeletedAt.Valid {
 		if t, err := time.Parse(time.RFC3339, mrDeletedAt.String); err == nil {
-			v.ManagedResource.DeletedAt = &t
+			mrSnap.DeletedAt = &t
 		}
 	}
+	v.ManagedResource = *domain.ManagedResourceFromSnapshot(mrSnap)
 
 	v.Intent = domain.ResourceIntent{
-		ResourceType: v.ManagedResource.ResourceType,
-		Name:         v.ManagedResource.Name,
-		Version:      v.ManagedResource.CurrentVersion,
+		ResourceType: v.ManagedResource.ResourceType(),
+		Name:         v.ManagedResource.Name(),
+		Version:      v.ManagedResource.CurrentVersion(),
 		Spec:         json.RawMessage(riSpec),
 	}
 	if t, err := time.Parse(time.RFC3339, riCreatedAt); err == nil {
 		v.Intent.CreatedAt = t
 	}
 
-	v.Fulfillment.ID = domain.FulfillmentID(fID)
-	v.Fulfillment.ManifestStrategyVersion = domain.StrategyVersion(msVer)
-	v.Fulfillment.PlacementStrategyVersion = domain.StrategyVersion(psVer)
-	v.Fulfillment.RolloutStrategyVersion = domain.StrategyVersion(rsVer)
-	v.Fulfillment.State = domain.FulfillmentState(stateStr)
-	v.Fulfillment.StatusReason = statusReason
-	v.Fulfillment.Generation = domain.Generation(generation)
-	v.Fulfillment.ObservedGeneration = domain.Generation(observedGeneration)
-	if activeWorkflowGen.Valid {
-		g := domain.Generation(activeWorkflowGen.Int64)
-		v.Fulfillment.ActiveWorkflowGen = &g
+	fSnap, err := fulfillmentSnapshotFromColumns(
+		fID, msVer, msSpec, psVer, psSpec, rsVer, rsSpec,
+		rtJSON, stateStr, pauseReason, statusReason, authJSON, provJSON, attestRefJSON,
+		generation, observedGeneration, activeWorkflowGen,
+		fCreatedAt, fUpdatedAt,
+	)
+	if err != nil {
+		return domain.ManagedResourceView{}, err
 	}
-	if t, err := time.Parse(time.RFC3339, fCreatedAt); err == nil {
-		v.Fulfillment.CreatedAt = t
-	}
-	if t, err := time.Parse(time.RFC3339, fUpdatedAt); err == nil {
-		v.Fulfillment.UpdatedAt = t
-	}
-	if msSpec.Valid {
-		_ = json.Unmarshal([]byte(msSpec.String), &v.Fulfillment.ManifestStrategy)
-	}
-	if psSpec.Valid {
-		_ = json.Unmarshal([]byte(psSpec.String), &v.Fulfillment.PlacementStrategy)
-	}
-	if rsSpec.Valid {
-		v.Fulfillment.RolloutStrategy = &domain.RolloutStrategySpec{}
-		_ = json.Unmarshal([]byte(rsSpec.String), v.Fulfillment.RolloutStrategy)
-	}
-	_ = json.Unmarshal([]byte(rtJSON), &v.Fulfillment.ResolvedTargets)
-	if authJSON != "" {
-		_ = json.Unmarshal([]byte(authJSON), &v.Fulfillment.Auth)
-	}
-	if provJSON.Valid {
-		v.Fulfillment.Provenance = &domain.Provenance{}
-		_ = json.Unmarshal([]byte(provJSON.String), v.Fulfillment.Provenance)
-	}
-	if attestRefJSON.Valid {
-		v.Fulfillment.AttestationRef = &domain.AttestationRef{}
-		_ = json.Unmarshal([]byte(attestRefJSON.String), v.Fulfillment.AttestationRef)
-	}
+	v.Fulfillment = *domain.FulfillmentFromSnapshot(fSnap)
 
 	return v, nil
 }

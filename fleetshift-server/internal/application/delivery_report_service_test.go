@@ -64,7 +64,7 @@ func getDeliveryState(t *testing.T, store domain.Store, id domain.DeliveryID) do
 	if err != nil {
 		t.Fatalf("get delivery %q: %v", id, err)
 	}
-	return d.State
+	return d.State()
 }
 
 // recordingSignal implements [domain.FulfillmentSignaler] and captures
@@ -98,36 +98,46 @@ func (r *recordingSignal) snapshot() []signalRecord {
 type testDeliveryObserver struct {
 	domain.NoOpDeliveryObserver
 	mu      sync.Mutex
-	events  []domain.DeliveryEvent
-	results []domain.DeliveryResult
+	events  []testReportEventRecord
+	results []testReportResultRecord
 }
 
-func (o *testDeliveryObserver) EventEmitted(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, event domain.DeliveryEvent) (context.Context, domain.EventEmittedProbe) {
+type testReportEventRecord struct {
+	DeliveryID domain.DeliveryID
+	Generation domain.Generation
+}
+
+type testReportResultRecord struct {
+	DeliveryID domain.DeliveryID
+	Generation domain.Generation
+}
+
+func (o *testDeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, _ domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
 	o.mu.Lock()
-	o.events = append(o.events, event)
+	o.events = append(o.events, testReportEventRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()
-	return ctx, domain.NoOpEventEmittedProbe{}
+	return ctx, domain.NoOpReportEventProbe{}
 }
 
-func (o *testDeliveryObserver) Completed(ctx context.Context, _ domain.DeliveryID, _ domain.TargetInfo, result domain.DeliveryResult) (context.Context, domain.CompletedProbe) {
+func (o *testDeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, _ domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
 	o.mu.Lock()
-	o.results = append(o.results, result)
+	o.results = append(o.results, testReportResultRecord{DeliveryID: deliveryID, Generation: generation})
 	o.mu.Unlock()
-	return ctx, domain.NoOpCompletedProbe{}
+	return ctx, domain.NoOpReportResultProbe{}
 }
 
-func (o *testDeliveryObserver) snapshotEvents() []domain.DeliveryEvent {
+func (o *testDeliveryObserver) snapshotEvents() []testReportEventRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]domain.DeliveryEvent, len(o.events))
+	out := make([]testReportEventRecord, len(o.events))
 	copy(out, o.events)
 	return out
 }
 
-func (o *testDeliveryObserver) snapshotResults() []domain.DeliveryResult {
+func (o *testDeliveryObserver) snapshotResults() []testReportResultRecord {
 	o.mu.Lock()
 	defer o.mu.Unlock()
-	out := make([]domain.DeliveryResult, len(o.results))
+	out := make([]testReportResultRecord, len(o.results))
 	copy(out, o.results)
 	return out
 }
@@ -141,11 +151,11 @@ func TestDeliveryReportService_ReportEvent_TransitionsToProgressing(t *testing.T
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "step 1",
@@ -165,11 +175,11 @@ func TestDeliveryReportService_ReportEvent_AlreadyProgressing_NoStateChange(t *t
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "step 2",
@@ -189,11 +199,11 @@ func TestDeliveryReportService_ReportEvent_CallsObserver(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	_ = svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "applying",
@@ -203,8 +213,8 @@ func TestDeliveryReportService_ReportEvent_CallsObserver(t *testing.T) {
 	if len(events) != 1 {
 		t.Fatalf("expected 1 event, got %d", len(events))
 	}
-	if events[0].Message != "applying" {
-		t.Errorf("message = %q, want %q", events[0].Message, "applying")
+	if events[0].DeliveryID != "del-1" {
+		t.Errorf("delivery ID = %q, want %q", events[0].DeliveryID, "del-1")
 	}
 }
 
@@ -217,11 +227,11 @@ func TestDeliveryReportService_ReportResult_UpdatesStateAndSignals(t *testing.T)
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	err := svc.ReportResult(ctx, "del-1", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
@@ -259,11 +269,11 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	_ = svc.ReportResult(ctx, "del-1", 0, domain.DeliveryResult{
 		State: domain.DeliveryStateFailed, Message: "connection refused",
@@ -273,8 +283,8 @@ func TestDeliveryReportService_ReportResult_CallsObserver(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("expected 1 result, got %d", len(results))
 	}
-	if results[0].State != domain.DeliveryStateFailed {
-		t.Errorf("state = %q, want %q", results[0].State, domain.DeliveryStateFailed)
+	if results[0].DeliveryID != "del-1" {
+		t.Errorf("delivery ID = %q, want %q", results[0].DeliveryID, "del-1")
 	}
 }
 
@@ -283,12 +293,12 @@ func TestDeliveryReportService_ReportResult_StaleGeneration_Discarded(t *testing
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		Generation: 5,
 		State:      domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	err := svc.ReportResult(ctx, "del-1", 3, domain.DeliveryResult{
 		State: domain.DeliveryStateDelivered,
@@ -311,12 +321,12 @@ func TestDeliveryReportService_ReportEvent_StaleGeneration_Discarded(t *testing.
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		Generation: 5,
 		State:      domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	err := svc.ReportEvent(ctx, "del-1", 3, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "stale event",
@@ -355,12 +365,12 @@ func seedFulfillment(t *testing.T, store domain.Store, f *domain.Fulfillment) {
 }
 
 func newFulfillment(id domain.FulfillmentID, gen domain.Generation, auth domain.DeliveryAuth, now time.Time) *domain.Fulfillment {
-	f := &domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        id,
 		Auth:      auth,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
+	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type: domain.ManifestStrategyInline,
 	}, now)
@@ -368,13 +378,9 @@ func newFulfillment(id domain.FulfillmentID, gen domain.Generation, auth domain.
 		Type: domain.PlacementStrategyStatic,
 	}, now)
 	f.AdvanceRolloutStrategy(nil, now)
-	// AdvanceManifestStrategy + AdvancePlacementStrategy + AdvanceRolloutStrategy
-	// each call BumpGeneration, so generation is 3 after construction.
-	// Adjust to the desired generation.
-	for f.Generation < gen {
-		f.BumpGeneration()
-	}
-	return f
+	snap := f.Snapshot()
+	snap.Generation = gen
+	return domain.FulfillmentFromSnapshot(snap)
 }
 
 func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
@@ -389,20 +395,20 @@ func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-2", Issuer: "https://idp.test"}},
 	}
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test", Name: "target-1"})
-	seedTarget(t, store, domain.TargetInfo{ID: "t2", Type: "test", Name: "target-2"})
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test", Name: "target-1"}))
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Type: "test", Name: "target-2"}))
 	seedFulfillment(t, store, newFulfillment("f1", 3, auth1, now))
 	seedFulfillment(t, store, newFulfillment("f2", 3, auth2, now))
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-active-1", FulfillmentID: "f1", TargetID: "t1",
 		Generation: 3,
 		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-active-2", FulfillmentID: "f2", TargetID: "t2",
 		Generation: 3,
 		State:      domain.DeliveryStateAccepted, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	t.Run("nil targets returns all active", func(t *testing.T) {
 		active, err := svc.ListActiveDeliveries(ctx, nil)
@@ -422,8 +428,8 @@ func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 		if len(active) != 1 {
 			t.Fatalf("expected 1 active delivery, got %d", len(active))
 		}
-		if active[0].Delivery.ID != "del-active-1" {
-			t.Errorf("ID = %q, want %q", active[0].Delivery.ID, "del-active-1")
+		if active[0].Delivery.ID() != "del-active-1" {
+			t.Errorf("ID = %q, want %q", active[0].Delivery.ID(), "del-active-1")
 		}
 	})
 
@@ -456,11 +462,11 @@ func TestDeliveryReportService_ListActiveDeliveries(t *testing.T) {
 			t.Fatalf("expected 1, got %d", len(active))
 		}
 		ad := active[0]
-		if ad.Target.ID != "t1" {
-			t.Errorf("Target.ID = %q, want %q", ad.Target.ID, "t1")
+		if ad.Target.ID() != "t1" {
+			t.Errorf("Target.ID = %q, want %q", ad.Target.ID(), "t1")
 		}
-		if ad.Target.Name != "target-1" {
-			t.Errorf("Target.Name = %q, want %q", ad.Target.Name, "target-1")
+		if ad.Target.Name() != "target-1" {
+			t.Errorf("Target.Name = %q, want %q", ad.Target.Name(), "target-1")
 		}
 		if ad.Auth.Caller == nil || ad.Auth.Caller.Subject != "user-1" {
 			t.Errorf("Auth.Caller.Subject = %v, want user-1", ad.Auth.Caller)
@@ -492,13 +498,13 @@ func TestDeliveryReportService_ListActiveDeliveries_SkipsStale(t *testing.T) {
 		Caller: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-a", Issuer: "https://idp.test"}},
 	}
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test", Name: "target-1"})
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test", Name: "target-1"}))
 	seedFulfillment(t, store, newFulfillment("f-stale", 5, auth, now))
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-stale", FulfillmentID: "f-stale", TargetID: "t1",
 		Generation: 3, // older than fulfillment gen 5
 		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	active, err := svc.ListActiveDeliveries(ctx, nil)
 	if err != nil {
@@ -514,12 +520,12 @@ func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingFulfillment(t *t
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-orphan", FulfillmentID: "f-missing", TargetID: "t1",
 		Generation: 1,
 		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	active, err := svc.ListActiveDeliveries(ctx, nil)
 	if err != nil {
@@ -539,11 +545,11 @@ func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingTarget(t *testin
 	}
 
 	seedFulfillment(t, store, newFulfillment("f1", 3, auth, now))
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-no-target", FulfillmentID: "f1", TargetID: "t-gone",
 		Generation: 3,
 		State:      domain.DeliveryStateProgressing, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	active, err := svc.ListActiveDeliveries(ctx, nil)
 	if err != nil {
@@ -555,10 +561,10 @@ func TestDeliveryReportService_ListActiveDeliveries_SkipsMissingTarget(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// NilObserver tests
+// NoOp default observer tests
 // ---------------------------------------------------------------------------
 
-func TestDeliveryReportService_NilObserver_DoesNotPanic(t *testing.T) {
+func TestDeliveryReportService_DefaultObserver_DoesNotPanic(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	sig := &recordingSignal{}
@@ -567,11 +573,11 @@ func TestDeliveryReportService_NilObserver_DoesNotPanic(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Second)
 
-	seedTarget(t, store, domain.TargetInfo{ID: "t1", Type: "test"})
-	seedDeliveryRecord(t, store, domain.Delivery{
+	seedTarget(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Type: "test"}))
+	seedDeliveryRecord(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID: "del-1", FulfillmentID: "f1", TargetID: "t1",
 		State: domain.DeliveryStatePending, CreatedAt: now, UpdatedAt: now,
-	})
+	}))
 
 	if err := svc.ReportEvent(ctx, "del-1", 0, domain.DeliveryEvent{
 		Kind: domain.DeliveryEventProgress, Message: "ok",

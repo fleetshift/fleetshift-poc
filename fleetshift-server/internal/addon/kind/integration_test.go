@@ -39,13 +39,10 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -96,12 +93,12 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := targetSvc.Register(ctx, domain.TargetInfo{
+	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:     "my-kind",
 		Type:   kindaddon.TargetType,
 		Name:   "Local Kind Provider",
 		Labels: map[string]string{"env": "dev"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("Register target: %v", err)
 	}
 
@@ -133,11 +130,11 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	view := awaitState(ctx, t, store, "kind-deployment", domain.FulfillmentStateActive)
-	if len(view.Fulfillment.ResolvedTargets) != 1 {
-		t.Fatalf("ResolvedTargets: got %d, want 1", len(view.Fulfillment.ResolvedTargets))
+	if len(view.Fulfillment.ResolvedTargets()) != 1 {
+		t.Fatalf("ResolvedTargets: got %d, want 1", len(view.Fulfillment.ResolvedTargets()))
 	}
-	if view.Fulfillment.ResolvedTargets[0] != "my-kind" {
-		t.Errorf("ResolvedTargets[0] = %q, want %q", view.Fulfillment.ResolvedTargets[0], "my-kind")
+	if view.Fulfillment.ResolvedTargets()[0] != "my-kind" {
+		t.Errorf("ResolvedTargets[0] = %q, want %q", view.Fulfillment.ResolvedTargets()[0], "my-kind")
 	}
 
 	<-provider.created
@@ -172,13 +169,10 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -205,12 +199,12 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	// --- Step 1-2: Register target ---
 	{
 		tx, _ := store.Begin(ctx)
-		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+		_ = tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
 			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
-		})
+		}))
 		_ = tx.Commit()
 	}
 
@@ -241,7 +235,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	}
 
 	// --- Step 5: Wait for delivery and verify ---
-	awaitFulfillment(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
 	if !provider.hasCluster("mr-cluster") {
@@ -258,7 +252,7 @@ func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain
 		}
 		view, err := tx.Deployments().GetView(ctx, id)
 		tx.Rollback()
-		if err == nil && view.Fulfillment.State == want {
+		if err == nil && view.Fulfillment.State() == want {
 			return view
 		}
 		select {
@@ -278,14 +272,14 @@ func awaitFulfillment(ctx context.Context, t *testing.T, store domain.Store, fID
 		}
 		f, err := tx.Fulfillments().Get(ctx, fID)
 		tx.Rollback()
-		if err == nil && f.State == want {
+		if err == nil && f.State() == want {
 			return
 		}
 		select {
 		case <-ctx.Done():
 			var state domain.FulfillmentState
 			if f != nil {
-				state = f.State
+				state = f.State()
 			}
 			t.Fatalf("timed out waiting for fulfillment %s to reach state %q (current: %q)", fID, want, state)
 		case <-time.After(5 * time.Millisecond):

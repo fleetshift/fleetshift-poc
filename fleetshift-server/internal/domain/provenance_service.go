@@ -169,8 +169,8 @@ func (s *ProvenanceService) loadEnrollment(
 
 	// TODO: just getting the first one?
 	enrollment := found[0]
-	if !enrollment.ExpiresAt.IsZero() && time.Now().After(enrollment.ExpiresAt) {
-		return SignerEnrollment{}, fmt.Errorf("%w: signer enrollment %s has expired", ErrInvalidArgument, enrollment.ID)
+	if !enrollment.ExpiresAt().IsZero() && time.Now().After(enrollment.ExpiresAt()) {
+		return SignerEnrollment{}, fmt.Errorf("%w: signer enrollment %s has expired", ErrInvalidArgument, enrollment.ID())
 	}
 
 	return enrollment, nil
@@ -182,7 +182,7 @@ func (s *ProvenanceService) loadEnrollment(
 // expression. For external registries (GitHub) it delegates to
 // KeyResolver.
 func (s *ProvenanceService) resolveSigningKeys(ctx context.Context, enrollment SignerEnrollment) ([]crypto.PublicKey, error) {
-	if enrollment.RegistryID == "oidc" {
+	if enrollment.RegistryID() == "oidc" {
 		oidcConfig, err := s.loadOIDCConfig(ctx)
 		if err != nil {
 			return nil, err
@@ -190,13 +190,13 @@ func (s *ProvenanceService) resolveSigningKeys(ctx context.Context, enrollment S
 		if oidcConfig.PublicKeyClaimExpression == "" {
 			return nil, fmt.Errorf("OIDC auth method has no public_key_claim_expression configured")
 		}
-		base64Key, err := EvalCELClaim(oidcConfig.PublicKeyClaimExpression, string(enrollment.IdentityToken))
+		base64Key, err := EvalCELClaim(oidcConfig.PublicKeyClaimExpression, string(enrollment.IdentityToken()))
 		if err != nil {
 			return nil, fmt.Errorf("evaluate public key claim: %w", err)
 		}
 		return ParsePublicKeyFromBase64(base64Key)
 	}
-	return s.KeyResolver.Resolve(ctx, enrollment.RegistryID, enrollment.RegistrySubject)
+	return s.KeyResolver.Resolve(ctx, enrollment.RegistryID(), enrollment.RegistrySubject())
 }
 
 // verifySignatureAgainstKeySet tries each public key in the set until
@@ -221,8 +221,8 @@ func (s *ProvenanceService) loadOIDCConfig(ctx context.Context) (OIDCConfig, err
 		return OIDCConfig{}, fmt.Errorf("list auth methods: %w", err)
 	}
 	for _, m := range methods {
-		if m.Type == AuthMethodTypeOIDC && m.OIDC != nil {
-			return *m.OIDC, nil
+		if m.Type() == AuthMethodTypeOIDC && m.OIDC() != nil {
+			return *m.OIDC(), nil
 		}
 	}
 	return OIDCConfig{}, fmt.Errorf("no OIDC auth method configured")

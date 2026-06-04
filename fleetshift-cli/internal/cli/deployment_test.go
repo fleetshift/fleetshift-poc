@@ -112,11 +112,11 @@ func (s *fakeDeploymentServer) ResumeDeployment(_ context.Context, req *pb.Resum
 	if !ok {
 		return nil, status.Errorf(codes.NotFound, "deployment %q not found", req.GetName())
 	}
-	if dep.GetState() != pb.Deployment_STATE_PAUSED_AUTH {
-		return nil, status.Errorf(codes.FailedPrecondition, "deployment %q is not paused for auth", req.GetName())
+	if dep.GetPauseReason() == "" {
+		return nil, status.Errorf(codes.FailedPrecondition, "deployment %q is not paused", req.GetName())
 	}
 
-	dep.State = pb.Deployment_STATE_CREATING
+	dep.PauseReason = ""
 	dep.Reconciling = true
 	return dep, nil
 }
@@ -323,8 +323,9 @@ func TestDeploymentResume(t *testing.T) {
 
 	fakeSrv.deployments["deployments/paused-dep"] = &pb.Deployment{
 		Name:        "deployments/paused-dep",
-		State:       pb.Deployment_STATE_PAUSED_AUTH,
-		Reconciling: true,
+		State:       pb.Deployment_STATE_CREATING,
+		PauseReason: "delivery auth failed",
+		Reconciling: false,
 		CreateTime:  timestamppb.Now(),
 		UpdateTime:  timestamppb.Now(),
 		ManifestStrategy: &pb.ManifestStrategy{

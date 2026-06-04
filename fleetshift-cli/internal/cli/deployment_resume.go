@@ -72,10 +72,7 @@ func signResumeRequest(cmd *cobra.Command, client pb.DeploymentServiceClient, re
 		depID = depID[idx:]
 	}
 
-	var expectedGeneration int64
-	if dep.GetProvenance() != nil {
-		expectedGeneration = dep.GetProvenance().GetExpectedGeneration() + 1
-	}
+	expectedGeneration := dep.GetGeneration() + 1
 
 	validUntil := time.Now().Add(24 * time.Hour)
 
@@ -94,5 +91,6 @@ func signResumeRequest(cmd *cobra.Command, client pb.DeploymentServiceClient, re
 
 	req.UserSignature = sig
 	req.ValidUntil = timestamppb.New(validUntil)
+	req.Etag = dep.GetEtag()
 	return nil
 }

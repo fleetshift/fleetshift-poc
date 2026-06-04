@@ -176,6 +176,8 @@ func buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName str
 			messageField("delete_time", 9, "google.protobuf.Timestamp"),
 			stringField("etag", 10),
 			messageField("provenance", 11, "fleetshift.v1.Provenance"),
+			int64Field("generation", 12),
+			stringField("pause_reason", 13),
 		},
 	}
 }
@@ -188,7 +190,6 @@ func buildCreateRequest(singular, lower, resourceFQN string) *descriptorpb.Descr
 			messageField(lower, 2, resourceFQN),
 			bytesField("user_signature", 3),
 			messageField("valid_until", 4, "google.protobuf.Timestamp"),
-			int64Field("expected_generation", 5),
 		},
 	}
 }
@@ -238,6 +239,8 @@ func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
 			stringField("name", 1),
 			bytesField("user_signature", 2),
 			messageField("valid_until", 3, "google.protobuf.Timestamp"),
+			stringField("etag", 4),
+			int64Field("expected_generation", 5),
 		},
 	}
 }
@@ -287,7 +290,6 @@ func buildResourceStateEnum(name string) *descriptorpb.EnumDescriptorProto {
 			{Name: proto.String("ACTIVE"), Number: proto.Int32(2)},
 			{Name: proto.String("DELETING"), Number: proto.Int32(3)},
 			{Name: proto.String("FAILED"), Number: proto.Int32(4)},
-			{Name: proto.String("PAUSED_AUTH"), Number: proto.Int32(5)},
 		},
 	}
 }

@@ -52,25 +52,26 @@ func (s *ProvisionIdPWorkflowSpec) Name() string { return "provision-idp" }
 // overwrites the same auth method ID.
 func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInput, AuthMethod] {
 	return NewActivity("resolve-and-persist-auth-method", func(ctx context.Context, in ProvisionIdPInput) (AuthMethod, error) {
-		method := in.AuthMethod
-		method.ID = in.AuthMethodID
+		method := NewOIDCAuthMethod(in.AuthMethodID, in.AuthMethod.OIDC())
 
 		if err := method.Validate(); err != nil {
 			return AuthMethod{}, fmt.Errorf("%w: %v", ErrInvalidArgument, err)
 		}
 
-		switch method.Type {
+		switch method.Type() {
 		case AuthMethodTypeOIDC:
-			if method.OIDC.IssuerURL == "" {
+			if method.OIDC() == nil || method.OIDC().IssuerURL == "" {
 				return AuthMethod{}, fmt.Errorf("%w: issuer_url is required", ErrInvalidArgument)
 			}
-			meta, err := s.Discovery.FetchMetadata(ctx, method.OIDC.IssuerURL)
+			meta, err := s.Discovery.FetchMetadata(ctx, method.OIDC().IssuerURL)
 			if err != nil {
 				return AuthMethod{}, fmt.Errorf("fetch OIDC discovery: %w", err)
 			}
-			method.OIDC.JWKSURI = meta.JWKSURI
-			method.OIDC.AuthorizationEndpoint = meta.AuthorizationEndpoint
-			method.OIDC.TokenEndpoint = meta.TokenEndpoint
+			updated := *method.OIDC()
+			updated.JWKSURI = meta.JWKSURI
+			updated.AuthorizationEndpoint = meta.AuthorizationEndpoint
+			updated.TokenEndpoint = meta.TokenEndpoint
+			method.oidcConfig = &updated
 		}
 
 		if err := s.AuthMethods.Save(ctx, method); err != nil {
@@ -89,7 +90,7 @@ func (s *ProvisionIdPWorkflowSpec) ResolveAndPersist() Activity[ProvisionIdPInpu
 // delivery independently.
 func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, struct{}] {
 	return NewActivity("deploy-trust-bundle", func(ctx context.Context, method AuthMethod) (struct{}, error) {
-		if method.Type != AuthMethodTypeOIDC || method.OIDC == nil {
+		if method.Type() != AuthMethodTypeOIDC || method.OIDC() == nil {
 			return struct{}{}, nil
 		}
 		if s.TrustBundlePlacement.Type == "" {
@@ -97,11 +98,11 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 		}
 
 		entry := TrustBundleEntry{
-			IssuerURL:                method.OIDC.IssuerURL,
-			JWKSURI:                  method.OIDC.JWKSURI,
-			EnrollmentAudience:       method.OIDC.KeyEnrollmentAudience,
-			PublicKeyClaimExpression: method.OIDC.PublicKeyClaimExpression,
-			RegistrySubjectMapping:   method.OIDC.RegistrySubjectMapping,
+			IssuerURL:                method.OIDC().IssuerURL,
+			JWKSURI:                  method.OIDC().JWKSURI,
+			EnrollmentAudience:       method.OIDC().KeyEnrollmentAudience,
+			PublicKeyClaimExpression: method.OIDC().PublicKeyClaimExpression,
+			RegistrySubjectMapping:   method.OIDC().RegistrySubjectMapping,
 		}
 
 		raw, err := json.Marshal(entry)
@@ -110,7 +111,7 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 		}
 
 		input := CreateDeploymentInput{
-			ID: DeploymentID("idp-trust-" + string(method.ID)),
+			ID: DeploymentID("idp-trust-" + string(method.ID())),
 			ManifestStrategy: ManifestStrategySpec{
 				Type: ManifestStrategyInline,
 				Manifests: []Manifest{{

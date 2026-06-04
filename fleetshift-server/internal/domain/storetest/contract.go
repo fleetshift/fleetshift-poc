@@ -16,12 +16,12 @@ import (
 type Factory func(t *testing.T) domain.Store
 
 func sampleFulfillment(id domain.FulfillmentID, now time.Time) *domain.Fulfillment {
-	f := domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        id,
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
+	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyInline,
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -29,7 +29,7 @@ func sampleFulfillment(id domain.FulfillmentID, now time.Time) *domain.Fulfillme
 	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
 		Type: domain.PlacementStrategyAll,
 	}, now)
-	return &f
+	return f
 }
 
 // Run exercises the [domain.Store] contract.
@@ -44,7 +44,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx.Rollback()
 
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{ID: "t1", Name: "cluster-a"}); err != nil {
+		if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -61,8 +61,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get after commit: %v", err)
 		}
-		if got.Name != "cluster-a" {
-			t.Errorf("Name = %q, want %q", got.Name, "cluster-a")
+		if got.Name() != "cluster-a" {
+			t.Errorf("Name = %q, want %q", got.Name(), "cluster-a")
 		}
 	})
 
@@ -75,7 +75,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Begin: %v", err)
 		}
 
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{ID: "t1", Name: "cluster-a"}); err != nil {
+		if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if err := tx.Rollback(); err != nil {
@@ -103,7 +103,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Begin: %v", err)
 		}
 
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{ID: "t1", Name: "cluster-a"}); err != nil {
+		if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -136,20 +136,19 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx.Rollback()
 
-		if err := tx.Targets().Create(ctx, domain.TargetInfo{ID: "t1", Name: "cluster-a"}); err != nil {
+		if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})); err != nil {
 			t.Fatalf("Create target: %v", err)
 		}
 		if err := tx.Fulfillments().Create(ctx, sampleFulfillment("f-cross", fixed)); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
-		if err := tx.Deployments().Create(ctx, domain.Deployment{
+		if err := tx.Deployments().Create(ctx, domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
 			ID:            "d1",
 			UID:           "uid-cross",
 			FulfillmentID: "f-cross",
 			CreatedAt:     fixed,
 			UpdatedAt:     fixed,
-			Etag:          "etag-1",
-		}); err != nil {
+		})); err != nil {
 			t.Fatalf("Create deployment: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -172,8 +171,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("deployment not found after cross-repo commit: %v", err)
 		}
-		if d.FulfillmentID != "f-cross" {
-			t.Fatalf("deployment.FulfillmentID = %q, want f-cross", d.FulfillmentID)
+		if d.FulfillmentID() != "f-cross" {
+			t.Fatalf("deployment.FulfillmentID = %q, want f-cross", d.FulfillmentID())
 		}
 	})
 
@@ -204,7 +203,7 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get fulfillment after commit: %v", err)
 		}
-		if got.ID != "f-acc" || got.State != domain.FulfillmentStateCreating {
+		if got.ID() != "f-acc" || got.State() != domain.FulfillmentStateCreating {
 			t.Fatalf("loaded fulfillment = %+v, want ID f-acc and creating state", got)
 		}
 	})

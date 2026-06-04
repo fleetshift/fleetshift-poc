@@ -23,12 +23,12 @@ func Run(t *testing.T, factory Factory) {
 	ctx := context.Background()
 
 	sampleFulfillment := func(id domain.FulfillmentID) *domain.Fulfillment {
-		f := domain.Fulfillment{
+		f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 			ID:        id,
 			State:     domain.FulfillmentStateCreating,
 			CreatedAt: fixedTime,
 			UpdatedAt: fixedTime,
-		}
+		})
 		f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
@@ -37,18 +37,17 @@ func Run(t *testing.T, factory Factory) {
 			Type:    domain.PlacementStrategyStatic,
 			Targets: []domain.TargetID{"t1", "t2"},
 		}, fixedTime)
-		return &f
+		return f
 	}
 
 	sampleThinDeployment := func(depID domain.DeploymentID, fid domain.FulfillmentID) domain.Deployment {
-		return domain.Deployment{
+		return domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
 			ID:            depID,
 			UID:           "uid-abc-123",
 			FulfillmentID: fid,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-			Etag:          "etag-v1",
-		}
+		})
 	}
 
 	t.Run("CreateAndGet", func(t *testing.T) {
@@ -70,20 +69,17 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.FulfillmentID != fid {
-			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID, fid)
+		if got.FulfillmentID() != fid {
+			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID(), fid)
 		}
-		if got.UID != "uid-abc-123" {
-			t.Errorf("UID = %q, want %q", got.UID, "uid-abc-123")
+		if got.UID() != "uid-abc-123" {
+			t.Errorf("UID = %q, want %q", got.UID(), "uid-abc-123")
 		}
-		if !got.CreatedAt.Equal(fixedTime) {
-			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, fixedTime)
+		if !got.CreatedAt().Equal(fixedTime) {
+			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt(), fixedTime)
 		}
-		if !got.UpdatedAt.Equal(fixedTime) {
-			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt, fixedTime)
-		}
-		if got.Etag != "etag-v1" {
-			t.Errorf("Etag = %q, want %q", got.Etag, "etag-v1")
+		if !got.UpdatedAt().Equal(fixedTime) {
+			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt(), fixedTime)
 		}
 	})
 
@@ -130,7 +126,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
 
-		d := sampleThinDeployment("d-view", f.ID)
+		d := sampleThinDeployment("d-view", f.ID())
 		repo := tx.Deployments()
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create deployment: %v", err)
@@ -140,29 +136,29 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
-		if v.Deployment.ID != "d-view" {
-			t.Errorf("Deployment.ID = %q, want %q", v.Deployment.ID, "d-view")
+		if v.Deployment.ID() != "d-view" {
+			t.Errorf("Deployment.ID = %q, want %q", v.Deployment.ID(), "d-view")
 		}
-		if v.Deployment.FulfillmentID != f.ID {
-			t.Errorf("Deployment.FulfillmentID = %q, want %q", v.Deployment.FulfillmentID, f.ID)
+		if v.Deployment.FulfillmentID() != f.ID() {
+			t.Errorf("Deployment.FulfillmentID = %q, want %q", v.Deployment.FulfillmentID(), f.ID())
 		}
-		if v.Fulfillment.ID != f.ID {
-			t.Errorf("Fulfillment.ID = %q, want %q", v.Fulfillment.ID, f.ID)
+		if v.Fulfillment.ID() != f.ID() {
+			t.Errorf("Fulfillment.ID = %q, want %q", v.Fulfillment.ID(), f.ID())
 		}
-		if v.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyInline {
-			t.Errorf("Fulfillment.ManifestStrategy.Type = %q, want %q", v.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyInline)
+		if v.Fulfillment.ManifestStrategy().Type != domain.ManifestStrategyInline {
+			t.Errorf("Fulfillment.ManifestStrategy.Type = %q, want %q", v.Fulfillment.ManifestStrategy().Type, domain.ManifestStrategyInline)
 		}
-		if len(v.Fulfillment.PlacementStrategy.Targets) != 2 {
-			t.Errorf("Fulfillment.PlacementStrategy.Targets len = %d, want 2", len(v.Fulfillment.PlacementStrategy.Targets))
+		if len(v.Fulfillment.PlacementStrategy().Targets) != 2 {
+			t.Errorf("Fulfillment.PlacementStrategy.Targets len = %d, want 2", len(v.Fulfillment.PlacementStrategy().Targets))
 		}
-		if v.Fulfillment.State != domain.FulfillmentStateCreating {
-			t.Errorf("Fulfillment.State = %q, want %q", v.Fulfillment.State, domain.FulfillmentStateCreating)
+		if v.Fulfillment.State() != domain.FulfillmentStateCreating {
+			t.Errorf("Fulfillment.State = %q, want %q", v.Fulfillment.State(), domain.FulfillmentStateCreating)
 		}
-		if v.Fulfillment.RolloutStrategy == nil {
+		if v.Fulfillment.RolloutStrategy() == nil {
 			t.Fatal("Fulfillment.RolloutStrategy is nil after GetView")
 		}
-		if v.Fulfillment.RolloutStrategy.Type != domain.RolloutStrategyImmediate {
-			t.Errorf("RolloutStrategy.Type = %q, want %q", v.Fulfillment.RolloutStrategy.Type, domain.RolloutStrategyImmediate)
+		if v.Fulfillment.RolloutStrategy().Type != domain.RolloutStrategyImmediate {
+			t.Errorf("RolloutStrategy.Type = %q, want %q", v.Fulfillment.RolloutStrategy().Type, domain.RolloutStrategyImmediate)
 		}
 	})
 
@@ -196,9 +192,9 @@ func Run(t *testing.T, factory Factory) {
 		}
 		seen := map[domain.DeploymentID]bool{}
 		for _, v := range views {
-			seen[v.Deployment.ID] = true
-			if v.Deployment.FulfillmentID != v.Fulfillment.ID {
-				t.Errorf("deployment %s: FulfillmentID %q != Fulfillment.ID %q", v.Deployment.ID, v.Deployment.FulfillmentID, v.Fulfillment.ID)
+			seen[v.Deployment.ID()] = true
+			if v.Deployment.FulfillmentID() != v.Fulfillment.ID() {
+				t.Errorf("deployment %s: FulfillmentID %q != Fulfillment.ID %q", v.Deployment.ID(), v.Deployment.FulfillmentID(), v.Fulfillment.ID())
 			}
 		}
 		for _, id := range []domain.DeploymentID{"d-list-a", "d-list-b"} {

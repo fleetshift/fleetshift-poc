@@ -63,7 +63,7 @@ func TestAgent_Deliver_RejectsMissingName(t *testing.T) {
 
 	err := agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("test-delivery"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "test-token"},
@@ -108,7 +108,7 @@ func TestAgent_Deliver_TrustBundleOnly(t *testing.T) {
 
 	err = agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("test-delivery"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{},
@@ -156,7 +156,7 @@ func TestAgent_Deliver_TrustBundleOnly_CompletesEvenIfRequestContextCanceled(t *
 
 	err = agent.Deliver(
 		ctx,
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("test-delivery"),
 		[]domain.Manifest{{
 			ResourceType: domain.TrustBundleResourceType,
@@ -247,7 +247,7 @@ func TestAgent_Remove_TrustBundle_RemovesStoredIssuerEntry(t *testing.T) {
 
 	err := agent.Remove(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("test-delivery"),
 		[]domain.Manifest{trustBundleManifest(t, entry)},
 		domain.DeliveryAuth{},
@@ -277,7 +277,7 @@ func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 	// First delivery with generation 10 — accepted (will fail async since no real backend, but generation is accepted)
 	err := agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("delivery-1"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
@@ -298,7 +298,7 @@ func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 	// Second delivery with stale generation 5 — should be rejected
 	err = agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("delivery-2"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
@@ -336,7 +336,7 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 	// First: accept generation 10 via Deliver (it will fail async, but the generation is recorded)
 	_ = agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("delivery-1"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
@@ -352,7 +352,7 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 	// Remove with stale generation 5 — should skip the cluster (not error)
 	err := agent.Remove(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("remove-1"),
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
@@ -416,7 +416,7 @@ func deliverTrustBundle(t *testing.T, agent *gcphcp.Agent, reporter *recordingRe
 
 	err := agent.Deliver(
 		context.Background(),
-		domain.TargetInfo{},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("trust-delivery"),
 		[]domain.Manifest{trustBundleManifest(t, entry)},
 		domain.DeliveryAuth{},

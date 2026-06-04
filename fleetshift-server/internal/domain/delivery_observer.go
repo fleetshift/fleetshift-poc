@@ -9,50 +9,66 @@ import "context"
 // Implementations should embed [NoOpDeliveryObserver] for forward
 // compatibility with new methods added to this interface.
 type DeliveryObserver interface {
-	// EventEmitted is called when the delivery agent emits an event
-	// via [DeliveryReporter.ReportEvent].
-	EventEmitted(ctx context.Context, deliveryID DeliveryID, target TargetInfo, event DeliveryEvent) (context.Context, EventEmittedProbe)
+	// ReportEventStarted is called when the delivery agent reports a
+	// non-terminal event via [DeliveryReporter.ReportEvent].
+	ReportEventStarted(ctx context.Context, deliveryID DeliveryID, generation Generation, event DeliveryEvent) (context.Context, ReportEventProbe)
 
-	// Completed is called when the delivery reaches a terminal state
-	// via [DeliveryReporter.ReportResult].
-	Completed(ctx context.Context, deliveryID DeliveryID, target TargetInfo, result DeliveryResult) (context.Context, CompletedProbe)
+	// ReportResultStarted is called when the delivery agent reports a
+	// terminal result via [DeliveryReporter.ReportResult].
+	ReportResultStarted(ctx context.Context, deliveryID DeliveryID, generation Generation, result DeliveryResult) (context.Context, ReportResultProbe)
 }
 
-// EventEmittedProbe tracks a single [DeliveryReporter.ReportEvent]
-// invocation. Implementations should embed [NoOpEventEmittedProbe]
+// ReportEventProbe tracks a single [DeliveryReporter.ReportEvent]
+// invocation. Implementations should embed [NoOpReportEventProbe]
 // for forward compatibility.
-type EventEmittedProbe interface {
+type ReportEventProbe interface {
+	// Stale is called when the report's generation does not match
+	// the delivery's current generation and is silently discarded.
+	Stale(reportGen, currentGen Generation)
+
+	// Error is called when an error occurs.
 	Error(err error)
+
+	// End signals the operation is complete (for timing). Called via defer.
 	End()
 }
 
-// CompletedProbe tracks a single [DeliveryReporter.ReportResult]
-// invocation. Implementations should embed [NoOpCompletedProbe] for
-// forward compatibility.
-type CompletedProbe interface {
+// ReportResultProbe tracks a single [DeliveryReporter.ReportResult]
+// invocation. Implementations should embed [NoOpReportResultProbe]
+// for forward compatibility.
+type ReportResultProbe interface {
+	// Stale is called when the report's generation does not match
+	// the delivery's current generation and is silently discarded.
+	Stale(reportGen, currentGen Generation)
+
+	// Error is called when an error occurs.
 	Error(err error)
+
+	// End signals the operation is complete (for timing). Called via defer.
 	End()
 }
 
 // NoOpDeliveryObserver is a [DeliveryObserver] that returns no-op probes.
 type NoOpDeliveryObserver struct{}
 
-func (NoOpDeliveryObserver) EventEmitted(ctx context.Context, _ DeliveryID, _ TargetInfo, _ DeliveryEvent) (context.Context, EventEmittedProbe) {
-	return ctx, NoOpEventEmittedProbe{}
+func (NoOpDeliveryObserver) ReportEventStarted(ctx context.Context, _ DeliveryID, _ Generation, _ DeliveryEvent) (context.Context, ReportEventProbe) {
+	return ctx, NoOpReportEventProbe{}
 }
 
-func (NoOpDeliveryObserver) Completed(ctx context.Context, _ DeliveryID, _ TargetInfo, _ DeliveryResult) (context.Context, CompletedProbe) {
-	return ctx, NoOpCompletedProbe{}
+func (NoOpDeliveryObserver) ReportResultStarted(ctx context.Context, _ DeliveryID, _ Generation, _ DeliveryResult) (context.Context, ReportResultProbe) {
+	return ctx, NoOpReportResultProbe{}
 }
 
-// NoOpEventEmittedProbe is an [EventEmittedProbe] that discards all calls.
-type NoOpEventEmittedProbe struct{}
+// NoOpReportEventProbe is a [ReportEventProbe] that discards all calls.
+type NoOpReportEventProbe struct{}
 
-func (NoOpEventEmittedProbe) Error(error) {}
-func (NoOpEventEmittedProbe) End()        {}
+func (NoOpReportEventProbe) Stale(Generation, Generation) {}
+func (NoOpReportEventProbe) Error(error)                  {}
+func (NoOpReportEventProbe) End()                         {}
 
-// NoOpCompletedProbe is a [CompletedProbe] that discards all calls.
-type NoOpCompletedProbe struct{}
+// NoOpReportResultProbe is a [ReportResultProbe] that discards all calls.
+type NoOpReportResultProbe struct{}
 
-func (NoOpCompletedProbe) Error(error) {}
-func (NoOpCompletedProbe) End()        {}
+func (NoOpReportResultProbe) Stale(Generation, Generation) {}
+func (NoOpReportResultProbe) Error(error)                  {}
+func (NoOpReportResultProbe) End()                         {}

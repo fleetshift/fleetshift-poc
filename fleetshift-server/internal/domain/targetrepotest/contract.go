@@ -18,14 +18,14 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("CreateAndGet", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:         "t1",
 			Type:       "kubernetes",
 			Name:       "cluster-a",
 			State:      domain.TargetStateInitializing,
 			Labels:     map[string]string{"env": "prod"},
 			Properties: map[string]string{"region": "us-east"},
-		}
+		})
 
 		if err := repo.Create(ctx, target); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -35,27 +35,27 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Type != "kubernetes" {
-			t.Errorf("Type = %q, want %q", got.Type, "kubernetes")
+		if got.Type() != "kubernetes" {
+			t.Errorf("Type = %q, want %q", got.Type(), "kubernetes")
 		}
-		if got.Name != "cluster-a" {
-			t.Errorf("Name = %q, want %q", got.Name, "cluster-a")
+		if got.Name() != "cluster-a" {
+			t.Errorf("Name = %q, want %q", got.Name(), "cluster-a")
 		}
-		if got.State != domain.TargetStateInitializing {
-			t.Errorf("State = %q, want %q", got.State, domain.TargetStateInitializing)
+		if got.State() != domain.TargetStateInitializing {
+			t.Errorf("State = %q, want %q", got.State(), domain.TargetStateInitializing)
 		}
-		if got.Labels["env"] != "prod" {
-			t.Errorf("Labels[env] = %q, want %q", got.Labels["env"], "prod")
+		if got.Labels()["env"] != "prod" {
+			t.Errorf("Labels[env] = %q, want %q", got.Labels()["env"], "prod")
 		}
-		if got.Properties["region"] != "us-east" {
-			t.Errorf("Properties[region] = %q, want %q", got.Properties["region"], "us-east")
+		if got.Properties()["region"] != "us-east" {
+			t.Errorf("Properties[region] = %q, want %q", got.Properties()["region"], "us-east")
 		}
 	})
 
 	t.Run("CreateDefaultsToReady", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{ID: "t1", Name: "cluster-a"}
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})
 
 		if err := repo.Create(ctx, target); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -64,22 +64,22 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.State != domain.TargetStateReady {
-			t.Errorf("State = %q, want %q (default)", got.State, domain.TargetStateReady)
+		if got.State() != domain.TargetStateReady {
+			t.Errorf("State = %q, want %q (default)", got.State(), domain.TargetStateReady)
 		}
 	})
 
 	t.Run("CreateAndGet_WithAcceptedResourceTypes", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "t1",
 			Type:                  "kubernetes",
 			Name:                  "cluster-a",
 			Labels:                map[string]string{"env": "prod"},
 			Properties:            map[string]string{"region": "us-east"},
 			AcceptedResourceTypes: []domain.ResourceType{"kubernetes.manifest", "helm.chart"},
-		}
+		})
 
 		if err := repo.Create(ctx, target); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -89,28 +89,28 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.AcceptedResourceTypes) != 2 {
-			t.Fatalf("AcceptedResourceTypes len = %d, want 2", len(got.AcceptedResourceTypes))
+		if len(got.AcceptedResourceTypes()) != 2 {
+			t.Fatalf("AcceptedResourceTypes len = %d, want 2", len(got.AcceptedResourceTypes()))
 		}
 		types := map[domain.ResourceType]bool{}
-		for _, rt := range got.AcceptedResourceTypes {
+		for _, rt := range got.AcceptedResourceTypes() {
 			types[rt] = true
 		}
 		if !types["kubernetes.manifest"] || !types["helm.chart"] {
-			t.Errorf("AcceptedResourceTypes = %v, want [kubernetes.manifest helm.chart]", got.AcceptedResourceTypes)
+			t.Errorf("AcceptedResourceTypes = %v, want [kubernetes.manifest helm.chart]", got.AcceptedResourceTypes())
 		}
 	})
 
 	t.Run("CreateOrUpdate_Insert", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:         "t1",
 			Type:       "kubernetes",
 			Name:       "cluster-a",
 			Labels:     map[string]string{"env": "prod"},
 			Properties: map[string]string{"region": "us-east"},
-		}
+		})
 
 		if err := repo.CreateOrUpdate(ctx, target); err != nil {
 			t.Fatalf("CreateOrUpdate (insert): %v", err)
@@ -120,25 +120,31 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "cluster-a" {
-			t.Errorf("Name = %q, want %q", got.Name, "cluster-a")
+		if got.Name() != "cluster-a" {
+			t.Errorf("Name = %q, want %q", got.Name(), "cluster-a")
 		}
 	})
 
 	t.Run("CreateOrUpdate_Update", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:   "t1",
 			Type: "kubernetes",
 			Name: "cluster-a",
-		}
+		})
 		if err := repo.Create(ctx, target); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		target.Name = "cluster-a-updated"
-		target.Properties = map[string]string{"region": "eu-west"}
+		target = domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:         target.ID(),
+			Type:       target.Type(),
+			Name:       "cluster-a-updated",
+			State:      target.State(),
+			Labels:     target.Labels(),
+			Properties: map[string]string{"region": "eu-west"},
+		})
 		if err := repo.CreateOrUpdate(ctx, target); err != nil {
 			t.Fatalf("CreateOrUpdate (update): %v", err)
 		}
@@ -147,18 +153,18 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.Name != "cluster-a-updated" {
-			t.Errorf("Name = %q, want %q", got.Name, "cluster-a-updated")
+		if got.Name() != "cluster-a-updated" {
+			t.Errorf("Name = %q, want %q", got.Name(), "cluster-a-updated")
 		}
-		if got.Properties["region"] != "eu-west" {
-			t.Errorf("Properties[region] = %q, want %q", got.Properties["region"], "eu-west")
+		if got.Properties()["region"] != "eu-west" {
+			t.Errorf("Properties[region] = %q, want %q", got.Properties()["region"], "eu-west")
 		}
 	})
 
 	t.Run("CreateDuplicate", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
-		target := domain.TargetInfo{ID: "t1", Name: "cluster-a"}
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "cluster-a"})
 
 		if err := repo.Create(ctx, target); err != nil {
 			t.Fatalf("first Create: %v", err)
@@ -182,12 +188,12 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		targets := []domain.TargetInfo{
-			{ID: "t1", Name: "a"},
-			{ID: "t2", Name: "b"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "a"}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "b"}),
 		}
 		for _, tgt := range targets {
 			if err := repo.Create(ctx, tgt); err != nil {
-				t.Fatalf("Create %s: %v", tgt.ID, err)
+				t.Fatalf("Create %s: %v", tgt.ID(), err)
 			}
 		}
 
@@ -204,7 +210,7 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		if err := repo.Create(ctx, domain.TargetInfo{ID: "t1", Name: "a"}); err != nil {
+		if err := repo.Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "a"})); err != nil {
 			t.Fatal(err)
 		}
 		if err := repo.Delete(ctx, "t1"); err != nil {

@@ -51,14 +51,11 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 	provenanceSvc := &domain.ProvenanceService{KeyResolver: keyResolver}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		Now:              func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) },
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithNow(func() time.Time { return time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC) }),
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -105,12 +102,12 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	// --- Step 1: Register target (the addon) ---
 	{
 		tx, _ := store.Begin(ctx)
-		_ = tx.Targets().Create(ctx, domain.TargetInfo{
+		_ = tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "addon-cluster-mgmt",
 			Name:                  "Cluster Management Addon",
 			Type:                  "addon",
 			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-		})
+		}))
 		_ = tx.Commit()
 	}
 
@@ -144,44 +141,43 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	})
 
 	view, err := resourceSvc.Create(signedCtx, application.CreateManagedResourceInput{
-		ResourceType:       "clusters",
-		Name:               "prod-us-east-1",
-		Spec:               validSpec,
-		UserSignature:      sig,
-		ValidUntil:         validUntil,
-		ExpectedGeneration: 1,
+		ResourceType:  "clusters",
+		Name:          "prod-us-east-1",
+		Spec:          validSpec,
+		UserSignature: sig,
+		ValidUntil:    validUntil,
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if view.ManagedResource.Name != "prod-us-east-1" {
-		t.Errorf("Name = %q, want %q", view.ManagedResource.Name, "prod-us-east-1")
+	if view.ManagedResource.Name() != "prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", view.ManagedResource.Name(), "prod-us-east-1")
 	}
-	if view.ManagedResource.CurrentVersion != 1 {
-		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion)
+	if view.ManagedResource.CurrentVersion() != 1 {
+		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion())
 	}
-	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyManagedResource {
-		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyManagedResource)
+	if view.Fulfillment.ManifestStrategy().Type != domain.ManifestStrategyManagedResource {
+		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy().Type, domain.ManifestStrategyManagedResource)
 	}
-	if view.Fulfillment.ManifestStrategy.IntentRef.ResourceType != "clusters" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy.IntentRef.ResourceType, "clusters")
+	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "clusters" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "clusters")
 	}
-	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
-		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
+	if view.Fulfillment.ManifestStrategy().IntentRef.Version != 1 {
+		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy().IntentRef.Version)
 	}
-	if view.Fulfillment.Provenance == nil {
+	if view.Fulfillment.Provenance() == nil {
 		t.Fatal("expected fulfillment provenance on signed managed resource")
 	}
-	if view.Fulfillment.AttestationRef == nil {
+	if view.Fulfillment.AttestationRef() == nil {
 		t.Fatal("expected AttestationRef on signed managed resource fulfillment")
 	}
-	if view.Fulfillment.AttestationRef.RelationRef == nil || *view.Fulfillment.AttestationRef.RelationRef != "clusters" {
-		t.Errorf("AttestationRef.RelationRef = %v, want clusters", view.Fulfillment.AttestationRef.RelationRef)
+	if view.Fulfillment.AttestationRef().RelationRef == nil || *view.Fulfillment.AttestationRef().RelationRef != "clusters" {
+		t.Errorf("AttestationRef.RelationRef = %v, want clusters", view.Fulfillment.AttestationRef().RelationRef)
 	}
 
 	// --- Step 4: Wait for delivery (orchestration runs async) ---
-	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	// --- Step 5: Verify attestation and delivered manifests ---
 	att := agent.capturedAttestation()
@@ -243,8 +239,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Errorf("DeliveryAuth.Token = %q, want %q", deliveredAuth.Token, "access-token")
 	}
 
-	if gen := agent.capturedGeneration(); gen != 3 {
-		t.Errorf("Generation = %d, want 3", gen)
+	if gen := agent.capturedGeneration(); gen != 1 {
+		t.Errorf("Generation = %d, want 1", gen)
 	}
 
 	// --- Step 6: Verify the resource is retrievable from the service ---
@@ -252,11 +248,11 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.ManagedResource.FulfillmentID != view.Fulfillment.ID {
-		t.Errorf("FulfillmentID = %q, want %q", got.ManagedResource.FulfillmentID, view.Fulfillment.ID)
+	if got.ManagedResource.FulfillmentID() != view.Fulfillment.ID() {
+		t.Errorf("FulfillmentID = %q, want %q", got.ManagedResource.FulfillmentID(), view.Fulfillment.ID())
 	}
-	if got.Fulfillment.State != domain.FulfillmentStateActive {
-		t.Errorf("State = %q, want %q", got.Fulfillment.State, domain.FulfillmentStateActive)
+	if got.Fulfillment.State() != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want %q", got.Fulfillment.State(), domain.FulfillmentStateActive)
 	}
 }
 
@@ -269,12 +265,32 @@ func awaitFulfillmentState(ctx context.Context, t *testing.T, store domain.Store
 		}
 		f, err := tx.Fulfillments().Get(ctx, fID)
 		tx.Rollback()
-		if err == nil && f.State == want {
+		if err == nil && f.State() == want {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for fulfillment %s to reach state %q (current: %q)", fID, want, f.State)
+			t.Fatalf("timed out waiting for fulfillment %s to reach state %q (current: %q)", fID, want, f.State())
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+func awaitFulfillmentPaused(ctx context.Context, t *testing.T, store domain.Store, fID domain.FulfillmentID) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		f, err := tx.Fulfillments().Get(ctx, fID)
+		tx.Rollback()
+		if err == nil && f.Paused() {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for fulfillment %s to be paused", fID)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

@@ -271,35 +271,35 @@ type AttestationAssembler struct{}
 // [AttestationRef] within the given transaction. Returns nil when the
 // fulfillment has no provenance (unsigned).
 func (AttestationAssembler) Resolve(ctx context.Context, tx Tx, f *Fulfillment) (*ResolvedEvidence, error) {
-	if f.Provenance == nil {
+	if f.Provenance() == nil {
 		return nil, nil
 	}
 
-	found, err := tx.SignerEnrollments().ListBySubject(ctx, f.Provenance.Sig.Signer)
+	found, err := tx.SignerEnrollments().ListBySubject(ctx, f.Provenance().Sig.Signer)
 	if err != nil {
 		return nil, fmt.Errorf("list signer enrollments: %w", err)
 	}
 	if len(found) == 0 {
 		return nil, fmt.Errorf("no signer enrollment found for %s / %s",
-			f.Provenance.Sig.Signer.Subject, f.Provenance.Sig.Signer.Issuer)
+			f.Provenance().Sig.Signer.Subject, f.Provenance().Sig.Signer.Issuer)
 	}
 	enrollment := found[0]
 
 	ev := &ResolvedEvidence{
 		SignerAssertion: &SignerAssertion{
-			IdentityToken:   enrollment.IdentityToken,
-			RegistryID:      enrollment.RegistryID,
-			RegistrySubject: enrollment.RegistrySubject,
+			IdentityToken:   enrollment.IdentityToken(),
+			RegistryID:      enrollment.RegistryID(),
+			RegistrySubject: enrollment.RegistrySubject(),
 		},
 	}
 
-	if f.AttestationRef != nil && f.AttestationRef.RelationRef != nil {
-		typeDef, err := tx.ManagedResources().GetType(ctx, *f.AttestationRef.RelationRef)
+	if f.AttestationRef() != nil && f.AttestationRef().RelationRef != nil {
+		typeDef, err := tx.ManagedResources().GetType(ctx, *f.AttestationRef().RelationRef)
 		if err != nil {
-			return nil, fmt.Errorf("get managed resource type %q: %w", *f.AttestationRef.RelationRef, err)
+			return nil, fmt.Errorf("get managed resource type %q: %w", *f.AttestationRef().RelationRef, err)
 		}
 		ev.SignedRelation = &SignedRelation{
-			ResourceType: *f.AttestationRef.RelationRef,
+			ResourceType: *f.AttestationRef().RelationRef,
 			Relation:     typeDef.Relation,
 			Signature:    typeDef.Signature,
 		}

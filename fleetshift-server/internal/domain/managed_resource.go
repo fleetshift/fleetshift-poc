@@ -96,21 +96,37 @@ type ResourceIntent struct {
 // versioning. Mutations that affect orchestration go through the
 // referenced [Fulfillment].
 //
-// Intent versioning follows the same drain pattern as
-// [Fulfillment.DrainPendingStrategyRecords]: call [RecordIntent] to
-// advance the version and collect a pending record, then the repository
-// flushes it during Create/Update.
+// Construct new instances with [NewManagedResource]; reconstitute from
+// persistence with [ManagedResourceFromSnapshot]. Intent recording goes
+// through [ManagedResource.RecordIntent].
 type ManagedResource struct {
-	ResourceType   ResourceType
-	Name           ResourceName
-	UID            string
-	CurrentVersion IntentVersion
-	FulfillmentID  FulfillmentID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
-	DeletedAt      *time.Time
+	resourceType   ResourceType
+	name           ResourceName
+	uid            string
+	currentVersion IntentVersion
+	fulfillmentID  FulfillmentID
+	createdAt      time.Time
+	updatedAt      time.Time
+	deletedAt      *time.Time
 
 	pendingIntents []ResourceIntent
+}
+
+// NewManagedResource creates a brand-new [ManagedResource]. Use this
+// on creation paths; use [ManagedResourceFromSnapshot] only for
+// reconstituting from persistence.
+//
+// After construction, call [ManagedResource.RecordIntent] to attach
+// the initial spec version.
+func NewManagedResource(resourceType ResourceType, name ResourceName, uid string, fulfillmentID FulfillmentID, now time.Time) *ManagedResource {
+	return &ManagedResource{
+		resourceType:  resourceType,
+		name:          name,
+		uid:           uid,
+		fulfillmentID: fulfillmentID,
+		createdAt:     now,
+		updatedAt:     now,
+	}
 }
 
 // RecordIntent advances the intent version and collects a pending
@@ -119,11 +135,11 @@ type ManagedResource struct {
 // [FulfillmentRelation.DeriveStrategies]). This is the only way to
 // create intents — the aggregate owns the version counter.
 func (mr *ManagedResource) RecordIntent(spec json.RawMessage, now time.Time) ResourceIntent {
-	mr.CurrentVersion++
+	mr.currentVersion++
 	intent := ResourceIntent{
-		ResourceType: mr.ResourceType,
-		Name:         mr.Name,
-		Version:      mr.CurrentVersion,
+		ResourceType: mr.resourceType,
+		Name:         mr.name,
+		Version:      mr.currentVersion,
 		Spec:         spec,
 		CreatedAt:    now,
 	}
@@ -131,13 +147,42 @@ func (mr *ManagedResource) RecordIntent(spec json.RawMessage, now time.Time) Res
 	return intent
 }
 
-// DrainPendingIntents returns and clears the collected intent records.
-// Called by the repository implementation inside Create and Update.
+// DrainPendingIntents returns the pending intents collected by
+// [ManagedResource.RecordIntent] and nils the internal buffer.
+// Repositories call this to extract intents for flushing to storage,
+// ensuring each intent is written exactly once. Subsequent calls (or
+// [ManagedResource.Snapshot]) will see an empty pending buffer.
 func (mr *ManagedResource) DrainPendingIntents() []ResourceIntent {
-	p := mr.pendingIntents
+	intents := mr.pendingIntents
 	mr.pendingIntents = nil
-	return p
+	return intents
 }
+
+// Accessor methods -- read-only getters for private fields.
+
+// ResourceType returns the managed resource type.
+func (mr *ManagedResource) ResourceType() ResourceType { return mr.resourceType }
+
+// Name returns the resource instance name.
+func (mr *ManagedResource) Name() ResourceName { return mr.name }
+
+// UID returns the resource's external UID.
+func (mr *ManagedResource) UID() string { return mr.uid }
+
+// CurrentVersion returns the current intent version.
+func (mr *ManagedResource) CurrentVersion() IntentVersion { return mr.currentVersion }
+
+// FulfillmentID returns the linked fulfillment's identifier.
+func (mr *ManagedResource) FulfillmentID() FulfillmentID { return mr.fulfillmentID }
+
+// CreatedAt returns the creation timestamp.
+func (mr *ManagedResource) CreatedAt() time.Time { return mr.createdAt }
+
+// UpdatedAt returns the last-updated timestamp.
+func (mr *ManagedResource) UpdatedAt() time.Time { return mr.updatedAt }
+
+// DeletedAt returns the deletion timestamp, if soft-deleted.
+func (mr *ManagedResource) DeletedAt() *time.Time { return mr.deletedAt }
 
 // ManagedResourceView is the read model that joins a [ManagedResource]
 // with its current [ResourceIntent] and [Fulfillment]. Constructed by

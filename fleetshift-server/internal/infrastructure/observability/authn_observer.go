@@ -20,7 +20,7 @@ func NewAuthnObserver(logger *slog.Logger) *AuthnObserver {
 	return &AuthnObserver{logger: logger.With("component", "authn")}
 }
 
-func (o *AuthnObserver) Authenticate(ctx context.Context, info domain.AuthnRequestInfo) (context.Context, domain.AuthnProbe) {
+func (o *AuthnObserver) AuthenticateStarted(ctx context.Context, info domain.AuthnRequestInfo) (context.Context, domain.AuthnProbe) {
 	return ctx, &authnProbe{
 		logger:    o.logger,
 		ctx:       ctx,

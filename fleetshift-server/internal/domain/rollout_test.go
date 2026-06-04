@@ -10,9 +10,16 @@ import (
 func TestImmediateRollout_EmitsRemoveThenDeliverSteps(t *testing.T) {
 	r := &domain.ImmediateRollout{}
 	delta := domain.TargetDelta{
-		Removed:   []domain.TargetInfo{{ID: "gone"}},
-		Added:     []domain.TargetInfo{{ID: "t1"}, {ID: "t2"}},
-		Unchanged: []domain.TargetInfo{{ID: "t3"}},
+		Removed: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "gone"}),
+		},
+		Added: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2"}),
+		},
+		Unchanged: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t3"}),
+		},
 	}
 	plan, err := r.Plan(context.Background(), delta)
 	if err != nil {
@@ -24,7 +31,7 @@ func TestImmediateRollout_EmitsRemoveThenDeliverSteps(t *testing.T) {
 	if plan.Steps[0].Remove == nil {
 		t.Fatal("first step should be remove")
 	}
-	if len(plan.Steps[0].Remove.Targets) != 1 || plan.Steps[0].Remove.Targets[0].ID != "gone" {
+	if len(plan.Steps[0].Remove.Targets) != 1 || plan.Steps[0].Remove.Targets[0].ID() != "gone" {
 		t.Fatalf("remove step should have one target gone, got %v", plan.Steps[0].Remove.Targets)
 	}
 	if plan.Steps[1].Deliver == nil {
@@ -39,9 +46,9 @@ func TestImmediateRollout_OnlyAddedAndUnchangedInDeliverStep(t *testing.T) {
 	r := &domain.ImmediateRollout{}
 	delta := domain.TargetDelta{
 		Added: []domain.TargetInfo{
-			{ID: "t1"},
-			{ID: "t2"},
-			{ID: "t3"},
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2"}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t3"}),
 		},
 	}
 	plan, err := r.Plan(context.Background(), delta)
@@ -62,8 +69,12 @@ func TestImmediateRollout_OnlyAddedAndUnchangedInDeliverStep(t *testing.T) {
 func TestImmediateRollout_IncludesUnchanged(t *testing.T) {
 	r := &domain.ImmediateRollout{}
 	delta := domain.TargetDelta{
-		Added:     []domain.TargetInfo{{ID: "t1"}},
-		Unchanged: []domain.TargetInfo{{ID: "t2"}},
+		Added: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
+		},
+		Unchanged: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2"}),
+		},
 	}
 	plan, err := r.Plan(context.Background(), delta)
 	if err != nil {
@@ -80,7 +91,10 @@ func TestImmediateRollout_IncludesUnchanged(t *testing.T) {
 func TestImmediateRollout_OnlyRemoved(t *testing.T) {
 	r := &domain.ImmediateRollout{}
 	delta := domain.TargetDelta{
-		Removed: []domain.TargetInfo{{ID: "r1"}, {ID: "r2"}},
+		Removed: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "r1"}),
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "r2"}),
+		},
 	}
 	plan, err := r.Plan(context.Background(), delta)
 	if err != nil {

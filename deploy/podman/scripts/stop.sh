@@ -12,7 +12,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 export DB_FLAG="unused"
 export OIDC_ISSUER_URL="${OIDC_ISSUER_URL:-unused}"
 export GCPHCP_CONFIG="${GCPHCP_CONFIG:-/dev/null}"
-export FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS:-kind,ocp,kubernetes}"
+export FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}"
 
 # Always include all override files so compose can find every possible service,
 # regardless of which mode was used to start the stack.

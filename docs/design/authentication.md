@@ -296,6 +296,8 @@ The delivery agent verifies the entire chain recursively:
 - **Withholding:** refuse to deliver a validly signed operation (DoS). Observable — the user sees their deployment isn't progressing.
 - **Misdirection:** deliver a legitimately signed operation to the wrong target. Defense: the signed content includes target scope (deployment_id, placement strategy); the delivery agent checks consistency.
 
+**Management-plane concurrency control.** The management plane exposes two orthogonal precondition mechanisms on mutation requests (e.g. resume). `etag` is a weak domain-state token (per AIP-154 and RFC 9110 Section 8.8.1, `W/`-prefixed) that changes whenever any relevant API-visible state changes — not just generation-advancing mutations (for example, `state`). `expected_generation` is an explicit version-lineage claim that the client signs into provenance; delivery agents verify it for anti-replay. Clients can combine both for exact-snapshot writes, supply only `expected_generation` for low-churn generation-bound writes, or omit both for unsigned legacy operations.
+
 ### Placement enforcement and removal protection
 
 If a compromised platform can trigger removal of all resources (by manipulating placement or sending unsigned deletions), the signing model hasn't bought much. The delivery agent must be able to independently verify that any placement or removal action is legitimate.

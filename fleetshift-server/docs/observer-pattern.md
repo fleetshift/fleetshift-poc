@@ -29,8 +29,9 @@ type {Component}Observer interface {
 // {Op}Probe tracks a single {Op} invocation.
 // Implementations should embed NoOp{Op}Probe for forward compatibility.
 type {Op}Probe interface {
-    // Result is called with the operation result.
-    Result(...)
+    // Operation-specific methods for recording outcomes, state
+    // changes, or branch decisions (e.g. Stale, Persisted,
+    // Dispatched). Shape these to the operation being observed.
     
     // Error is called when an error occurs.
     Error(err error)
@@ -53,7 +54,7 @@ func (NoOp{Component}Observer) {Op}Started(ctx context.Context, ...) (context.Co
 
 type NoOp{Op}Probe struct{}
 
-func (NoOp{Op}Probe) Result(...) {}
+// ... no-op stubs for operation-specific methods ...
 func (NoOp{Op}Probe) Error(error) {}
 func (NoOp{Op}Probe) End() {}
 ```
@@ -108,13 +109,13 @@ func (s *Service) DoOperation(ctx context.Context, ...) error {
     defer probe.End()
     
     // ... operation logic ...
+    // Call operation-specific probe methods at branch points
+    // (e.g. probe.Stale(), probe.Persisted(), etc.)
     
     if err != nil {
         probe.Error(err)
         return err
     }
-    
-    probe.Result(...)
     return nil
 }
 ```
@@ -122,6 +123,8 @@ func (s *Service) DoOperation(ctx context.Context, ...) error {
 ## Key Principles
 
 - Always use `defer probe.End()` for timing accuracy
+- **Never replace the caller's context.** `Started` methods must pass the incoming `ctx` through (or enrich it, e.g. by injecting a trace span). Returning `context.Background()` or any unrelated context severs request-scoped values (trace IDs, deadlines, cancellation) from downstream code. NoOp implementations return the incoming `ctx` unchanged.
+- Constructors should default the observer field to a NoOp implementation (e.g. `observer: NoOp{Component}Observer{}`). This eliminates nil checks at every call site.
 - Probes either emit signals throughout method calls, or may collect state via methods and only emit upon `End()`. It depends on signal best practices and what minimizes overhead. Logs usually emit at the end, unless the probe runs long.
 - Domain interfaces live in `domain/` or `application/`; implementations in `observability/`
 - Include `request_id` from context in logs
@@ -143,3 +146,4 @@ See `FulfillmentObserver` in `domain/fulfillment_observer.go` for the canonical 
 - **Cheap to obtain**: Parameters should already be available at the call site. Avoid requiring expensive computation, allocations, or I/O just to call an observer method.
 - **Informative**: Parameters should provide enough context for useful logs, metrics, or traces (e.g., IDs, counts, interesting details, error details). Optimize for minimium runtime cost while maximizing information available to probes.
 - **Domain-oriented**: Use domain types rather than primitives where practical. Speak in the language of the model.
+- **Started vs. probe methods**: If data is unconditionally available at the call site and always passed to the probe, put it in the `Started` signature. Probe methods are for signals that occur conditionally during the operation (branch decisions, outcomes, errors). A probe method that is always called immediately after `Started` is a sign the data belongs in `Started` instead.

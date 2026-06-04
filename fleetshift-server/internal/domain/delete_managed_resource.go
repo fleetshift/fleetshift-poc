@@ -48,20 +48,18 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 			return managedResourceMutationResult{}, err
 		}
 
-		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion)
+		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion())
 		if err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 		if err != nil {
 			return managedResourceMutationResult{}, err
 		}
 
 		// Delete retries read auth from fulfillment state, not the RPC context.
-		f.Auth = in.Auth
-		f.State = FulfillmentStateDeleting
-		f.BumpGeneration()
+		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
@@ -76,8 +74,8 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 				Intent:          intent,
 				Fulfillment:     *f,
 			},
-			FulfillmentID: mr.FulfillmentID,
-			MyGen:         f.Generation,
+			FulfillmentID: mr.FulfillmentID(),
+			MyGen:         f.Generation(),
 		}, nil
 	})
 }

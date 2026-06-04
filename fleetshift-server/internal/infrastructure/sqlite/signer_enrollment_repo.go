@@ -17,22 +17,23 @@ type SignerEnrollmentRepo struct {
 }
 
 func (r *SignerEnrollmentRepo) Create(ctx context.Context, e domain.SignerEnrollment) error {
+	s := e.Snapshot()
 	_, err := r.DB.ExecContext(ctx,
 		`INSERT INTO signer_enrollments
 		 (id, subject_id, issuer, identity_token, registry_subject, registry_id, created_at, expires_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		string(e.ID),
-		string(e.Subject),
-		string(e.Issuer),
-		string(e.IdentityToken),
-		string(e.RegistrySubject),
-		string(e.RegistryID),
-		e.CreatedAt.UTC().Format(time.RFC3339),
-		e.ExpiresAt.UTC().Format(time.RFC3339),
+		string(s.ID),
+		string(s.Subject),
+		string(s.Issuer),
+		string(s.IdentityToken),
+		string(s.RegistrySubject),
+		string(s.RegistryID),
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.ExpiresAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("signer enrollment %q: %w", e.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("signer enrollment %q: %w", s.ID, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert signer enrollment: %w", err)
 	}
@@ -46,7 +47,11 @@ func (r *SignerEnrollmentRepo) Get(ctx context.Context, id domain.SignerEnrollme
 		 FROM signer_enrollments WHERE id = ?`,
 		string(id),
 	)
-	return scanSignerEnrollment(row)
+	s, err := scanSignerEnrollmentSnapshot(row)
+	if err != nil {
+		return domain.SignerEnrollment{}, err
+	}
+	return domain.SignerEnrollmentFromSnapshot(s), nil
 }
 
 func (r *SignerEnrollmentRepo) ListBySubject(ctx context.Context, identity domain.FederatedIdentity) ([]domain.SignerEnrollment, error) {
@@ -64,45 +69,45 @@ func (r *SignerEnrollmentRepo) ListBySubject(ctx context.Context, identity domai
 
 	var enrollments []domain.SignerEnrollment
 	for rows.Next() {
-		e, err := scanSignerEnrollment(rows)
+		s, err := scanSignerEnrollmentSnapshot(rows)
 		if err != nil {
 			return nil, err
 		}
-		enrollments = append(enrollments, e)
+		enrollments = append(enrollments, domain.SignerEnrollmentFromSnapshot(s))
 	}
 	return enrollments, rows.Err()
 }
 
-func scanSignerEnrollment(s scanner) (domain.SignerEnrollment, error) {
-	var e domain.SignerEnrollment
+func scanSignerEnrollmentSnapshot(s scanner) (domain.SignerEnrollmentSnapshot, error) {
+	var snap domain.SignerEnrollmentSnapshot
 	var id, subjectID, issuer, identityToken, registrySubject, registryID, createdAtStr, expiresAtStr string
 
 	if err := s.Scan(&id, &subjectID, &issuer, &identityToken, &registrySubject, &registryID,
 		&createdAtStr, &expiresAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return e, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return e, fmt.Errorf("scan signer enrollment: %w", err)
+		return snap, fmt.Errorf("scan signer enrollment: %w", err)
 	}
 
-	e.ID = domain.SignerEnrollmentID(id)
-	e.Subject = domain.SubjectID(subjectID)
-	e.Issuer = domain.IssuerURL(issuer)
-	e.IdentityToken = domain.RawToken(identityToken)
-	e.RegistrySubject = domain.RegistrySubject(registrySubject)
-	e.RegistryID = domain.KeyRegistryID(registryID)
+	snap.ID = domain.SignerEnrollmentID(id)
+	snap.Subject = domain.SubjectID(subjectID)
+	snap.Issuer = domain.IssuerURL(issuer)
+	snap.IdentityToken = domain.RawToken(identityToken)
+	snap.RegistrySubject = domain.RegistrySubject(registrySubject)
+	snap.RegistryID = domain.KeyRegistryID(registryID)
 
 	t, err := time.Parse(time.RFC3339, createdAtStr)
 	if err != nil {
-		return e, fmt.Errorf("parse created_at: %w", err)
+		return snap, fmt.Errorf("parse created_at: %w", err)
 	}
-	e.CreatedAt = t
+	snap.CreatedAt = t
 
 	t, err = time.Parse(time.RFC3339, expiresAtStr)
 	if err != nil {
-		return e, fmt.Errorf("parse expires_at: %w", err)
+		return snap, fmt.Errorf("parse expires_at: %w", err)
 	}
-	e.ExpiresAt = t
+	snap.ExpiresAt = t
 
-	return e, nil
+	return snap, nil
 }

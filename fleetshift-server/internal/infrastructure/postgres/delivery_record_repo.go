@@ -17,7 +17,8 @@ type DeliveryRepo struct {
 }
 
 func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
-	manifests, err := json.Marshal(d.Manifests)
+	s := d.Snapshot()
+	manifests, err := json.Marshal(s.Manifests)
 	if err != nil {
 		return fmt.Errorf("marshal manifests: %w", err)
 	}
@@ -31,10 +32,10 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 		   generation = excluded.generation,
 		   state = excluded.state,
 		   updated_at = excluded.updated_at`,
-		string(d.ID), string(d.FulfillmentID), string(d.TargetID),
-		string(manifests), int64(d.Generation), d.State,
-		d.CreatedAt.UTC().Format(time.RFC3339),
-		d.UpdatedAt.UTC().Format(time.RFC3339),
+		string(s.ID), string(s.FulfillmentID), string(s.TargetID),
+		string(manifests), int64(s.Generation), s.State,
+		s.CreatedAt.UTC().Format(time.RFC3339),
+		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert delivery: %w", err)
@@ -112,32 +113,40 @@ func (r *DeliveryRepo) DeleteByFulfillment(ctx context.Context, fID domain.Fulfi
 }
 
 func scanDelivery(s scanner) (domain.Delivery, error) {
-	var d domain.Delivery
+	snap, err := scanDeliverySnapshot(s)
+	if err != nil {
+		return domain.Delivery{}, err
+	}
+	return domain.DeliveryFromSnapshot(snap), nil
+}
+
+func scanDeliverySnapshot(s scanner) (domain.DeliverySnapshot, error) {
+	var snap domain.DeliverySnapshot
 	var id, fID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
 	var generation int64
 	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &generation, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return d, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return d, fmt.Errorf("scan delivery: %w", err)
+		return snap, fmt.Errorf("scan delivery: %w", err)
 	}
-	d.ID = domain.DeliveryID(id)
-	d.FulfillmentID = domain.FulfillmentID(fID)
-	d.TargetID = domain.TargetID(tgtID)
-	d.Generation = domain.Generation(generation)
-	d.State = domain.DeliveryState(stateStr)
-	if err := json.Unmarshal([]byte(manifestsJSON), &d.Manifests); err != nil {
-		return d, fmt.Errorf("unmarshal manifests: %w", err)
+	snap.ID = domain.DeliveryID(id)
+	snap.FulfillmentID = domain.FulfillmentID(fID)
+	snap.TargetID = domain.TargetID(tgtID)
+	snap.Generation = domain.Generation(generation)
+	snap.State = domain.DeliveryState(stateStr)
+	if err := json.Unmarshal([]byte(manifestsJSON), &snap.Manifests); err != nil {
+		return snap, fmt.Errorf("unmarshal manifests: %w", err)
 	}
 	t, err := time.Parse(time.RFC3339, createdAtStr)
 	if err != nil {
-		return d, fmt.Errorf("parse created_at: %w", err)
+		return snap, fmt.Errorf("parse created_at: %w", err)
 	}
-	d.CreatedAt = t
+	snap.CreatedAt = t
 	t, err = time.Parse(time.RFC3339, updatedAtStr)
 	if err != nil {
-		return d, fmt.Errorf("parse updated_at: %w", err)
+		return snap, fmt.Errorf("parse updated_at: %w", err)
 	}
-	d.UpdatedAt = t
-	return d, nil
+	snap.UpdatedAt = t
+	return snap, nil
 }

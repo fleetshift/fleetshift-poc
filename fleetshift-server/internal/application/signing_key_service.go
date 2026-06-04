@@ -91,15 +91,15 @@ func (s *SignerEnrollmentService) Create(ctx context.Context, in CreateSignerEnr
 	}
 
 	now := time.Now().UTC()
-	enrollment := domain.SignerEnrollment{
-		ID:                in.ID,
-		FederatedIdentity: ac.Subject.FederatedIdentity,
-		IdentityToken:     domain.RawToken(in.IdentityToken),
-		RegistrySubject:   registrySubject,
-		RegistryID:        registryID,
-		CreatedAt:         now,
-		ExpiresAt:         now.Add(365 * 24 * time.Hour), // TODO: make configurable
-	}
+	enrollment := domain.NewSignerEnrollment(
+		in.ID,
+		ac.Subject.FederatedIdentity,
+		domain.RawToken(in.IdentityToken),
+		registrySubject,
+		registryID,
+		now,
+		now.Add(365*24*time.Hour), // TODO: make configurable
+	)
 
 	tx, err := s.Store.Begin(ctx)
 	if err != nil {
@@ -124,13 +124,13 @@ func (s *SignerEnrollmentService) loadEnrollmentConfig(ctx context.Context) (dom
 	}
 
 	for _, m := range methods {
-		if m.Type == domain.AuthMethodTypeOIDC && m.OIDC != nil {
-			if m.OIDC.KeyEnrollmentAudience == "" {
+		if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+			if m.OIDC().KeyEnrollmentAudience == "" {
 				return domain.OIDCConfig{}, fmt.Errorf(
 					"%w: auth method %q has no key_enrollment_audience configured",
-					domain.ErrInvalidArgument, m.ID)
+					domain.ErrInvalidArgument, m.ID())
 			}
-			return *m.OIDC, nil
+			return *m.OIDC(), nil
 		}
 	}
 

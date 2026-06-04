@@ -39,13 +39,10 @@ func raceTestOrchestration(t *testing.T) (domain.OrchestrationWorkflow, domain.F
 	reporter := application.NewDeliveryReportService(store, reg)
 	recordingAgent.Reporter = reporter
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -58,9 +55,9 @@ func raceTestOrchestration(t *testing.T) (domain.OrchestrationWorkflow, domain.F
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	if err := tx.Targets().Create(ctx, domain.TargetInfo{
+	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: "test", Name: "cluster-t1",
-	}); err != nil {
+	})); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -69,12 +66,12 @@ func raceTestOrchestration(t *testing.T) (domain.OrchestrationWorkflow, domain.F
 
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fID := domain.FulfillmentID(uuid.New().String())
-	f := domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        fID,
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
-	}
+	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyInline,
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -90,7 +87,7 @@ func raceTestOrchestration(t *testing.T) (domain.OrchestrationWorkflow, domain.F
 		t.Fatal(err)
 	}
 	defer tx2.Rollback()
-	if err := tx2.Fulfillments().Create(ctx, &f); err != nil {
+	if err := tx2.Fulfillments().Create(ctx, f); err != nil {
 		t.Fatal(err)
 	}
 	if err := tx2.Commit(); err != nil {

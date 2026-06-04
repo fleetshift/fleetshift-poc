@@ -7,14 +7,14 @@ import (
 )
 
 func TestToPlacementTarget_OmitsProperties(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "t1",
 		Name:       "cluster-a",
 		Labels:     map[string]string{"env": "prod"},
 		Properties: map[string]string{"region": "us-east"},
-	}
+	})
 	got := domain.ToPlacementTarget(target)
-	if got.ID != target.ID || got.Name != target.Name {
+	if got.ID != target.ID() || got.Name != target.Name() {
 		t.Errorf("ID or Name changed: got %+v", got)
 	}
 	if got.Labels["env"] != "prod" {
@@ -24,11 +24,11 @@ func TestToPlacementTarget_OmitsProperties(t *testing.T) {
 }
 
 func TestToPlacementTarget_PropagatesAcceptedResourceTypes(t *testing.T) {
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "cluster-a",
 		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster", "kubernetes"},
-	}
+	})
 	got := domain.ToPlacementTarget(target)
 	if len(got.AcceptedResourceTypes) != 2 {
 		t.Fatalf("len(AcceptedResourceTypes) = %d, want 2", len(got.AcceptedResourceTypes))
@@ -39,15 +39,15 @@ func TestToPlacementTarget_PropagatesAcceptedResourceTypes(t *testing.T) {
 
 	// Verify it's a copy, not a shared slice.
 	got.AcceptedResourceTypes[0] = "mutated"
-	if target.AcceptedResourceTypes[0] == "mutated" {
+	if target.AcceptedResourceTypes()[0] == "mutated" {
 		t.Error("AcceptedResourceTypes should be copied, not shared")
 	}
 }
 
 func TestPlacementTargets_PreservesOrderAndLength(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "a", Name: "n1", State: domain.TargetStateReady, Labels: map[string]string{"x": "1"}},
-		{ID: "b", Name: "n2", State: domain.TargetStateReady, Labels: map[string]string{"y": "2"}},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "a", Name: "n1", State: domain.TargetStateReady, Labels: map[string]string{"x": "1"}}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "b", Name: "n2", State: domain.TargetStateReady, Labels: map[string]string{"y": "2"}}),
 	}
 	got := domain.PlacementTargets(pool)
 	if len(got) != 2 {
@@ -60,11 +60,11 @@ func TestPlacementTargets_PreservesOrderAndLength(t *testing.T) {
 
 func TestPlacementTargets_FiltersNonReadyTargets(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "a", Name: "n1", State: domain.TargetStateReady},
-		{ID: "b", Name: "n2", State: domain.TargetStateInitializing},
-		{ID: "c", Name: "n3", State: domain.TargetStateDraining},
-		{ID: "d", Name: "n4", State: domain.TargetStateTerminated},
-		{ID: "e", Name: "n5", State: domain.TargetStateDiscovered},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "a", Name: "n1", State: domain.TargetStateReady}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "b", Name: "n2", State: domain.TargetStateInitializing}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "c", Name: "n3", State: domain.TargetStateDraining}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "d", Name: "n4", State: domain.TargetStateTerminated}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "e", Name: "n5", State: domain.TargetStateDiscovered}),
 	}
 	got := domain.PlacementTargets(pool)
 	if len(got) != 1 {
@@ -77,7 +77,7 @@ func TestPlacementTargets_FiltersNonReadyTargets(t *testing.T) {
 
 func TestPlacementTargets_EmptyStateIsEligible(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "a", Name: "n1"},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "a", Name: "n1"}),
 	}
 	got := domain.PlacementTargets(pool)
 	if len(got) != 1 {
@@ -87,9 +87,9 @@ func TestPlacementTargets_EmptyStateIsEligible(t *testing.T) {
 
 func TestResolvedTargetInfos_LookupAndOrder(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "t1", Name: "c1", Labels: map[string]string{"env": "prod"}, Properties: map[string]string{"region": "us"}},
-		{ID: "t2", Name: "c2", Labels: map[string]string{"env": "staging"}, Properties: map[string]string{"region": "eu"}},
-		{ID: "t3", Name: "c3", Labels: map[string]string{"env": "prod"}, Properties: nil},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "c1", Labels: map[string]string{"env": "prod"}, Properties: map[string]string{"region": "us"}}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "c2", Labels: map[string]string{"env": "staging"}, Properties: map[string]string{"region": "eu"}}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t3", Name: "c3", Labels: map[string]string{"env": "prod"}, Properties: nil}),
 	}
 	resolved := []domain.PlacementTarget{
 		{ID: "t3", Name: "c3", Labels: map[string]string{"env": "prod"}},
@@ -99,17 +99,17 @@ func TestResolvedTargetInfos_LookupAndOrder(t *testing.T) {
 	if len(got) != 2 {
 		t.Fatalf("len(got) = %d, want 2", len(got))
 	}
-	if got[0].ID != "t3" || got[1].ID != "t1" {
-		t.Errorf("order wrong: got [%s, %s], want [t3, t1]", got[0].ID, got[1].ID)
+	if got[0].ID() != "t3" || got[1].ID() != "t1" {
+		t.Errorf("order wrong: got [%s, %s], want [t3, t1]", got[0].ID(), got[1].ID())
 	}
-	if got[1].Properties == nil || got[1].Properties["region"] != "us" {
-		t.Errorf("full TargetInfo from pool: got[1].Properties = %v, want map with region=us", got[1].Properties)
+	if got[1].Properties() == nil || got[1].Properties()["region"] != "us" {
+		t.Errorf("full TargetInfo from pool: got[1].Properties = %v, want map with region=us", got[1].Properties())
 	}
 }
 
 func TestResolvedTargetInfos_OmitsMissingFromPool(t *testing.T) {
 	pool := []domain.TargetInfo{
-		{ID: "t1", Name: "c1", Labels: nil},
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "c1", Labels: nil}),
 	}
 	resolved := []domain.PlacementTarget{
 		{ID: "t1", Name: "c1", Labels: nil},
@@ -119,7 +119,7 @@ func TestResolvedTargetInfos_OmitsMissingFromPool(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("len(got) = %d, want 1 (missing ID omitted)", len(got))
 	}
-	if got[0].ID != "t1" {
-		t.Errorf("got[0].ID = %s, want t1", got[0].ID)
+	if got[0].ID() != "t1" {
+		t.Errorf("got[0].ID = %s, want t1", got[0].ID())
 	}
 }

@@ -283,7 +283,7 @@ func BenchmarkFullResponsePath(b *testing.B) {
 
 	now := time.Now()
 	view := domain.ManagedResourceView{
-		ManagedResource: domain.ManagedResource{
+		ManagedResource: *domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:   kindaddon.ClusterResourceType,
 			Name:           "prod-us-east-1",
 			UID:            "550e8400-e29b-41d4-a716-446655440000",
@@ -291,13 +291,13 @@ func BenchmarkFullResponsePath(b *testing.B) {
 			FulfillmentID:  "ful-123",
 			CreatedAt:      now.Add(-1 * time.Hour),
 			UpdatedAt:      now,
-		},
+		}),
 		Intent: domain.ResourceIntent{
 			Spec: json.RawMessage(`{"name":"prod-us-east-1"}`),
 		},
-		Fulfillment: domain.Fulfillment{
+		Fulfillment: *domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 			State: domain.FulfillmentStateActive,
-		},
+		}),
 	}
 
 	nameField := resourceDesc.Fields().ByName("name")
@@ -311,17 +311,17 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("kindClusters/"+string(view.ManagedResource.Name)))
-		msg.Set(uidField, protoreflect.ValueOfString(view.ManagedResource.UID))
+		msg.Set(nameField, protoreflect.ValueOfString("kindClusters/"+string(view.ManagedResource.Name())))
+		msg.Set(uidField, protoreflect.ValueOfString(view.ManagedResource.UID()))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)
 		_ = protojson.Unmarshal(view.Intent.Spec, specMsg)
 		msg.Set(specField, protoreflect.ValueOfMessage(specMsg))
 
-		msg.Set(versionField, protoreflect.ValueOfInt64(int64(view.ManagedResource.CurrentVersion)))
+		msg.Set(versionField, protoreflect.ValueOfInt64(int64(view.ManagedResource.CurrentVersion())))
 		msg.Set(stateField, protoreflect.ValueOfInt32(2))
 		msg.Set(reconcilingField, protoreflect.ValueOfBool(false))
-		msg.Set(etagField, protoreflect.ValueOfString(view.ManagedResource.UID))
+		msg.Set(etagField, protoreflect.ValueOfString(view.ManagedResource.UID()))
 
 		// Wire marshal (what gRPC does)
 		out, _ := proto.Marshal(msg)

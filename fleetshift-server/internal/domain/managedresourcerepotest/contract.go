@@ -27,12 +27,12 @@ func Run(t *testing.T, factory Factory) {
 func seedFulfillment(t *testing.T, tx domain.Tx, fID domain.FulfillmentID, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	f := domain.Fulfillment{
+	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        fID,
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: at,
 		UpdatedAt: at,
-	}
+	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyInline,
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -41,7 +41,7 @@ func seedFulfillment(t *testing.T, tx domain.Tx, fID domain.FulfillmentID, at ti
 		Type:    domain.PlacementStrategyStatic,
 		Targets: []domain.TargetID{"t1"},
 	}, at)
-	if err := tx.Fulfillments().Create(ctx, &f); err != nil {
+	if err := tx.Fulfillments().Create(ctx, f); err != nil {
 		t.Fatalf("seed fulfillment: %v", err)
 	}
 }
@@ -178,17 +178,17 @@ func runIntentTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-intent-drain")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := domain.ManagedResource{
+		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:  "clusters",
 			Name:          "prod-1",
 			UID:           "uid-intent-1",
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-		}
+		})
 		mr.RecordIntent(json.RawMessage(`{"provider":"rosa"}`), fixedTime)
 
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
@@ -225,17 +225,17 @@ func runIntentTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-intent-delete")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := domain.ManagedResource{
+		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:  "clusters",
 			Name:          "prod-delete",
 			UID:           "uid-intent-delete",
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-		}
+		})
 		mr.RecordIntent(json.RawMessage(`{"provider":"rosa"}`), fixedTime)
 
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 		if err := repo.DeleteInstance(ctx, "clusters", "prod-delete"); err != nil {
@@ -262,15 +262,15 @@ func runInstanceTests(t *testing.T, factory Factory) {
 
 	// newMR constructs a ManagedResource with a single recorded intent,
 	// ready for CreateInstance to drain.
-	newMR := func(rt domain.ResourceType, name domain.ResourceName, uid string, fID domain.FulfillmentID) domain.ManagedResource {
-		mr := domain.ManagedResource{
+	newMR := func(rt domain.ResourceType, name domain.ResourceName, uid string, fID domain.FulfillmentID) *domain.ManagedResource {
+		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:  rt,
 			Name:          name,
 			UID:           uid,
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-		}
+		})
 		mr.RecordIntent(json.RawMessage(`{"provider":"rosa"}`), fixedTime)
 		return mr
 	}
@@ -284,7 +284,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := newMR("clusters", "prod-1", "uid-001", fID)
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
@@ -292,14 +292,14 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("GetInstance: %v", err)
 		}
-		if got.UID != "uid-001" {
-			t.Errorf("UID = %q, want %q", got.UID, "uid-001")
+		if got.UID() != "uid-001" {
+			t.Errorf("UID = %q, want %q", got.UID(), "uid-001")
 		}
-		if got.FulfillmentID != fID {
-			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID, fID)
+		if got.FulfillmentID() != fID {
+			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID(), fID)
 		}
-		if got.CurrentVersion != 1 {
-			t.Errorf("CurrentVersion = %d, want 1", got.CurrentVersion)
+		if got.CurrentVersion() != 1 {
+			t.Errorf("CurrentVersion = %d, want 1", got.CurrentVersion())
 		}
 	})
 
@@ -312,19 +312,19 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := newMR("clusters", "dup-res", "uid-dup", fID)
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("first: %v", err)
 		}
-		mr2 := domain.ManagedResource{
+		mr2 := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:  "clusters",
 			Name:          "dup-res",
 			UID:           "uid-dup-2",
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
-		}
+		})
 		mr2.RecordIntent(json.RawMessage(`{}`), fixedTime)
-		err := repo.CreateInstance(ctx, &mr2)
+		err := repo.CreateInstance(ctx, mr2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second: got %v, want ErrAlreadyExists", err)
 		}
@@ -349,7 +349,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := newMR("clusters", "view-res", "uid-view", fID)
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
@@ -357,17 +357,17 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
-		if v.ManagedResource.Name != "view-res" {
-			t.Errorf("Name = %q, want %q", v.ManagedResource.Name, "view-res")
+		if v.ManagedResource.Name() != "view-res" {
+			t.Errorf("Name = %q, want %q", v.ManagedResource.Name(), "view-res")
 		}
 		if string(v.Intent.Spec) != `{"provider":"rosa"}` {
 			t.Errorf("Intent.Spec = %s", v.Intent.Spec)
 		}
-		if v.Fulfillment.ID != fID {
-			t.Errorf("Fulfillment.ID = %q, want %q", v.Fulfillment.ID, fID)
+		if v.Fulfillment.ID() != fID {
+			t.Errorf("Fulfillment.ID = %q, want %q", v.Fulfillment.ID(), fID)
 		}
-		if v.Fulfillment.State != domain.FulfillmentStateCreating {
-			t.Errorf("Fulfillment.State = %q, want %q", v.Fulfillment.State, domain.FulfillmentStateCreating)
+		if v.Fulfillment.State() != domain.FulfillmentStateCreating {
+			t.Errorf("Fulfillment.State = %q, want %q", v.Fulfillment.State(), domain.FulfillmentStateCreating)
 		}
 	})
 
@@ -380,7 +380,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 			fID := domain.FulfillmentID(fmt.Sprintf("f-list-%d", i))
 			seedFulfillment(t, tx, fID, fixedTime)
 			mr := newMR("clusters", name, fmt.Sprintf("uid-list-%d", i), fID)
-			if err := repo.CreateInstance(ctx, &mr); err != nil {
+			if err := repo.CreateInstance(ctx, mr); err != nil {
 				t.Fatalf("CreateInstance %s: %v", name, err)
 			}
 		}
@@ -392,8 +392,8 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		if len(views) != 2 {
 			t.Fatalf("len = %d, want 2", len(views))
 		}
-		if views[0].ManagedResource.Name != "a-res" {
-			t.Errorf("first name = %q, want %q", views[0].ManagedResource.Name, "a-res")
+		if views[0].ManagedResource.Name() != "a-res" {
+			t.Errorf("first name = %q, want %q", views[0].ManagedResource.Name(), "a-res")
 		}
 	})
 
@@ -406,7 +406,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := newMR("clusters", "del-res", "uid-del", fID)
-		if err := repo.CreateInstance(ctx, &mr); err != nil {
+		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 		if err := repo.DeleteInstance(ctx, "clusters", "del-res"); err != nil {

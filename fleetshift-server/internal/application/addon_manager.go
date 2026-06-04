@@ -234,7 +234,7 @@ func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, tar
 			if errors.Is(err, domain.ErrAlreadyExists) {
 				continue
 			}
-			return fmt.Errorf("register target %q: %w", t.ID, err)
+			return fmt.Errorf("register target %q: %w", t.ID(), err)
 		}
 	}
 	return nil

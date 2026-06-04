@@ -5,8 +5,9 @@ import "errors"
 // authExpiredError marks failures caused by expired or invalidated
 // credentials during a reconciliation pass. When this error propagates
 // to deliveryResultForReconcileError it produces DeliveryStateAuthFailed
-// instead of DeliveryStateFailed, which causes the platform to
-// transition the fulfillment to FulfillmentStatePausedAuth.
+// instead of DeliveryStateFailed, which causes the platform to pause
+// the fulfillment (setting its pause reason) until fresh credentials
+// are supplied.
 //
 // HTTP 401 (Unauthorized) from any backend (CLS, IAM, STS) and OAuth
 // "invalid_grant" from the STS endpoint are wrapped in this type.

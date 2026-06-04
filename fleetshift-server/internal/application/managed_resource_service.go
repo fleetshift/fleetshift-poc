@@ -23,13 +23,12 @@ type ManagedResourceService struct {
 // CreateManagedResourceInput carries the fields needed to create a
 // managed resource instance.
 type CreateManagedResourceInput struct {
-	ResourceType       domain.ResourceType
-	Name               domain.ResourceName
-	Spec               json.RawMessage
-	Provenance         *domain.Provenance
-	UserSignature      []byte
-	ValidUntil         time.Time
-	ExpectedGeneration domain.Generation
+	ResourceType  domain.ResourceType
+	Name          domain.ResourceName
+	Spec          json.RawMessage
+	Provenance    *domain.Provenance
+	UserSignature []byte
+	ValidUntil    time.Time
 }
 
 // Create persists a pre-validated managed resource, derives fulfillment
@@ -82,7 +81,7 @@ func (s *ManagedResourceService) Create(ctx context.Context, in CreateManagedRes
 			in.ResourceType,
 			in.Name,
 			in.Spec,
-			in.ExpectedGeneration,
+			1,
 			in.UserSignature,
 			in.ValidUntil,
 		)
@@ -179,10 +178,12 @@ func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceT
 // ResumeManagedResourceInput carries the fields needed to resume a
 // paused managed resource.
 type ResumeManagedResourceInput struct {
-	ResourceType  domain.ResourceType
-	Name          domain.ResourceName
-	UserSignature []byte
-	ValidUntil    time.Time
+	ResourceType       domain.ResourceType
+	Name               domain.ResourceName
+	UserSignature      []byte
+	ValidUntil         time.Time
+	Etag               domain.Etag
+	ExpectedGeneration domain.Generation
 }
 
 // Resume resumes a managed resource that is paused for authentication
@@ -207,11 +208,11 @@ func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedRes
 	if err != nil {
 		return domain.ManagedResourceView{}, err
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID)
+	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 	if err != nil {
 		return domain.ManagedResourceView{}, err
 	}
-	currentGen := f.Generation
+	currentGen := f.Generation()
 	if err := tx.Commit(); err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
 	}
@@ -224,8 +225,10 @@ func (s *ManagedResourceService) Resume(ctx context.Context, in ResumeManagedRes
 			Audience: ac.Audience,
 			Token:    ac.Token,
 		},
-		UserSignature: in.UserSignature,
-		ValidUntil:    in.ValidUntil,
+		UserSignature:      in.UserSignature,
+		ValidUntil:         in.ValidUntil,
+		Etag:               in.Etag,
+		ExpectedGeneration: in.ExpectedGeneration,
 	}, currentGen)
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start resume-managed-resource workflow: %w", err)

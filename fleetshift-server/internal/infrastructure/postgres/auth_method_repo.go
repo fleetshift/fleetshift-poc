@@ -19,7 +19,8 @@ type AuthMethodRepo struct {
 }
 
 func (r *AuthMethodRepo) Save(ctx context.Context, method domain.AuthMethod) error {
-	configJSON, err := marshalAuthMethodConfig(method)
+	s := method.Snapshot()
+	configJSON, err := marshalAuthMethodConfig(s)
 	if err != nil {
 		return err
 	}
@@ -27,7 +28,7 @@ func (r *AuthMethodRepo) Save(ctx context.Context, method domain.AuthMethod) err
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO auth_methods (id, type, config_json) VALUES ($1, $2, $3)
 		 ON CONFLICT(id) DO UPDATE SET type = excluded.type, config_json = excluded.config_json`,
-		method.ID, method.Type, string(configJSON),
+		s.ID, s.Type, string(configJSON),
 	)
 	if err != nil {
 		return fmt.Errorf("save auth method: %w", err)
@@ -51,39 +52,46 @@ func (r *AuthMethodRepo) List(ctx context.Context) ([]domain.AuthMethod, error) 
 	return collectRows(rows, scanAuthMethod)
 }
 
-func marshalAuthMethodConfig(m domain.AuthMethod) ([]byte, error) {
-	switch m.Type {
+func marshalAuthMethodConfig(s domain.AuthMethodSnapshot) ([]byte, error) {
+	switch s.Type {
 	case domain.AuthMethodTypeOIDC:
-		return json.Marshal(m.OIDC)
+		return json.Marshal(s.OIDC)
 	default:
-		return nil, fmt.Errorf("unknown auth method type: %s", m.Type)
+		return nil, fmt.Errorf("unknown auth method type: %s", s.Type)
 	}
 }
 
 func scanAuthMethod(s scanner) (domain.AuthMethod, error) {
+	snap, err := scanAuthMethodSnapshot(s)
+	if err != nil {
+		return domain.AuthMethod{}, err
+	}
+	return domain.AuthMethodFromSnapshot(snap), nil
+}
+
+func scanAuthMethodSnapshot(s scanner) (domain.AuthMethodSnapshot, error) {
+	var snap domain.AuthMethodSnapshot
 	var id, methodType, configJSON string
 	if err := s.Scan(&id, &methodType, &configJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.AuthMethod{}, domain.ErrNotFound
+			return snap, domain.ErrNotFound
 		}
-		return domain.AuthMethod{}, fmt.Errorf("scan auth method: %w", err)
+		return snap, fmt.Errorf("scan auth method: %w", err)
 	}
 
-	m := domain.AuthMethod{
-		ID:   domain.AuthMethodID(id),
-		Type: domain.AuthMethodType(methodType),
-	}
+	snap.ID = domain.AuthMethodID(id)
+	snap.Type = domain.AuthMethodType(methodType)
 
-	switch m.Type {
+	switch snap.Type {
 	case domain.AuthMethodTypeOIDC:
 		var cfg domain.OIDCConfig
 		if err := json.Unmarshal([]byte(configJSON), &cfg); err != nil {
-			return domain.AuthMethod{}, fmt.Errorf("unmarshal OIDC config: %w", err)
+			return snap, fmt.Errorf("unmarshal OIDC config: %w", err)
 		}
-		m.OIDC = &cfg
+		snap.OIDC = &cfg
 	default:
-		return domain.AuthMethod{}, fmt.Errorf("unknown auth method type: %s", m.Type)
+		return snap, fmt.Errorf("unknown auth method type: %s", snap.Type)
 	}
 
-	return m, nil
+	return snap, nil
 }

@@ -17,7 +17,6 @@ Deployment-specific prerequisites (podman, oc, kind, etc.) are listed in each de
 task build:all              # build all Go binaries → bin/
 task build:server           # fleetshift-server
 task build:cli              # fleetctl CLI
-task build:ocp-engine       # ocp-engine
 ```
 
 Builds are incremental — only recompiles when source files change.
@@ -26,8 +25,6 @@ Builds are incremental — only recompiles when source files change.
 
 ```bash
 task test:all               # unit tests for all modules
-task test:e2e               # end-to-end tests (requires .env + interactive auth)
-task test:e2e-aws           # AWS provision/destroy end-to-end test
 ```
 
 ## Generate & Images

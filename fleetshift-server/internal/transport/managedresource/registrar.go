@@ -222,12 +222,6 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 		in.ValidUntil = ts.AsTime()
 	}
 
-	// Field 5: expected_generation (optional)
-	genField := h.descs.CreateRequest.Fields().ByNumber(5)
-	if genField != nil {
-		in.ExpectedGeneration = domain.Generation(reqMsg.Get(genField).Int())
-	}
-
 	view, err := h.resources.Create(ctx, in)
 	if err != nil {
 		return nil, toDomainError(err)
@@ -415,6 +409,18 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 		in.ValidUntil = ts.AsTime()
 	}
 
+	// Field 4: etag (optional)
+	etagReqField := h.descs.ResumeRequest.Fields().ByNumber(4)
+	if etagReqField != nil && reqMsg.Has(etagReqField) {
+		in.Etag = domain.Etag(reqMsg.Get(etagReqField).String())
+	}
+
+	// Field 5: expected_generation (optional)
+	expGenField := h.descs.ResumeRequest.Fields().ByNumber(5)
+	if expGenField != nil && reqMsg.Has(expGenField) {
+		in.ExpectedGeneration = domain.Generation(reqMsg.Get(expGenField).Int())
+	}
+
 	view, err := h.resources.Resume(ctx, in)
 	if err != nil {
 		return nil, toDomainError(err)
@@ -441,11 +447,11 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// name
 	nameField := h.descs.Resource.Fields().ByName("name")
-	resource.Set(nameField, protoreflect.ValueOfString(h.collection+string(mr.Name)))
+	resource.Set(nameField, protoreflect.ValueOfString(h.collection+string(mr.Name())))
 
 	// uid
 	uidField := h.descs.Resource.Fields().ByName("uid")
-	resource.Set(uidField, protoreflect.ValueOfString(mr.UID))
+	resource.Set(uidField, protoreflect.ValueOfString(mr.UID()))
 
 	// spec
 	specField := h.descs.Resource.Fields().ByName("spec")
@@ -459,22 +465,26 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// intent_version
 	versionField := h.descs.Resource.Fields().ByName("intent_version")
-	resource.Set(versionField, protoreflect.ValueOfInt64(int64(mr.CurrentVersion)))
+	resource.Set(versionField, protoreflect.ValueOfInt64(int64(mr.CurrentVersion())))
 
 	// state
 	stateField := h.descs.Resource.Fields().ByName("state")
-	stateNum := int32(stateFromFulfillment(f.State))
+	stateNum := int32(stateFromFulfillment(f.State()))
 	resource.Set(stateField, protoreflect.ValueOfEnum(protoreflect.EnumNumber(stateNum)))
+
+	// pause_reason
+	if prField := h.descs.Resource.Fields().ByName("pause_reason"); prField != nil {
+		resource.Set(prField, protoreflect.ValueOfString(f.PauseReason()))
+	}
 
 	// reconciling
 	reconcilingField := h.descs.Resource.Fields().ByName("reconciling")
-	isReconciling := stateNum == 1 || stateNum == 3 || stateNum == 5
-	resource.Set(reconcilingField, protoreflect.ValueOfBool(isReconciling))
+	resource.Set(reconcilingField, protoreflect.ValueOfBool(f.Reconciling()))
 
 	// create_time
-	if !mr.CreatedAt.IsZero() {
+	if !mr.CreatedAt().IsZero() {
 		createTimeField := h.descs.Resource.Fields().ByName("create_time")
-		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt); err != nil {
+		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(createTimeField, tsVal)
@@ -482,9 +492,9 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	}
 
 	// update_time
-	if !mr.UpdatedAt.IsZero() {
+	if !mr.UpdatedAt().IsZero() {
 		updateTimeField := h.descs.Resource.Fields().ByName("update_time")
-		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt); err != nil {
+		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(updateTimeField, tsVal)
@@ -492,28 +502,32 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	}
 
 	// delete_time
-	if mr.DeletedAt != nil {
+	if mr.DeletedAt() != nil {
 		deleteTimeField := h.descs.Resource.Fields().ByName("delete_time")
-		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt); err != nil {
+		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(deleteTimeField, tsVal)
 		}
 	}
 
-	// etag
+	// etag (weak domain-state token)
 	etagField := h.descs.Resource.Fields().ByName("etag")
-	resource.Set(etagField, protoreflect.ValueOfString(mr.UID))
+	resource.Set(etagField, protoreflect.ValueOfString(string(v.Etag())))
 
 	// provenance
-	if f.Provenance != nil {
+	if f.Provenance() != nil {
 		provField := h.descs.Resource.Fields().ByName("provenance")
-		if provVal, err := marshalProvenance(provField, f.Provenance); err != nil {
+		if provVal, err := marshalProvenance(provField, f.Provenance()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(provField, provVal)
 		}
 	}
+
+	// generation
+	genField := h.descs.Resource.Fields().ByName("generation")
+	resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation())))
 
 	return resource, nil
 }
@@ -528,8 +542,6 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 		return 3
 	case domain.FulfillmentStateFailed:
 		return 4
-	case domain.FulfillmentStatePausedAuth:
-		return 5
 	default:
 		return 0
 	}
@@ -591,6 +603,8 @@ func toDomainError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, domain.ErrStaleGeneration):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:

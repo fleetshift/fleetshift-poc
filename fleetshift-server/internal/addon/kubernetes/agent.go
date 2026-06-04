@@ -98,8 +98,8 @@ func NewAgent(reporter domain.DeliveryReporter, opts ...AgentOption) *Agent {
 // config, the attestation is verified before apply. Verification
 // failure is reported as [domain.DeliveryStateAuthFailed].
 func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	if _, ok := target.Properties["api_server"]; !ok {
-		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+	if target.Properties()["api_server"] == "" {
+		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
 
 	if att != nil {
@@ -107,7 +107,7 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryI
 		if err != nil {
 			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
-				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
+				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID(), err),
 			})
 			return nil
 		}
@@ -123,7 +123,7 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryI
 	}
 
 	if auth.Token == "" {
-		return fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
+		return fmt.Errorf("%w: delivery to target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID())
 	}
 	go a.deliverAsync(context.WithoutCancel(ctx), target, deliveryID, generation, manifests, auth)
 	return nil
@@ -134,9 +134,9 @@ func (a *Agent) Deliver(ctx context.Context, target domain.TargetInfo, deliveryI
 // target has no trust_bundle (you cannot deliver attested content to a
 // target without trust config).
 func (a *Agent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifier, error) {
-	trustJSON := target.Properties["trust_bundle"]
+	trustJSON := target.Properties()["trust_bundle"]
 	if trustJSON == "" {
-		return nil, fmt.Errorf("target %q has no trust_bundle property", target.ID)
+		return nil, fmt.Errorf("target %q has no trust_bundle property", target.ID())
 	}
 
 	a.mu.RLock()
@@ -187,7 +187,7 @@ func (a *Agent) deliverAsyncPlatform(ctx context.Context, target domain.TargetIn
 	if err != nil {
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("build platform kubernetes client for target %q: %v", target.ID, err),
+			Message: fmt.Sprintf("build platform kubernetes client for target %q: %v", target.ID(), err),
 		})
 		return
 	}
@@ -199,7 +199,7 @@ func (a *Agent) deliverAsync(ctx context.Context, target domain.TargetInfo, deli
 	if err != nil {
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
+			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID(), err),
 		})
 		return
 	}
@@ -211,7 +211,7 @@ func (a *Agent) applyManifests(ctx context.Context, target domain.TargetInfo, de
 	if err != nil {
 		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State:   deliveryStateForError(err),
-			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID, err),
+			Message: fmt.Sprintf("build kubernetes client for target %q: %v", target.ID(), err),
 		})
 		return
 	}
@@ -271,8 +271,8 @@ func deliveryStateForError(err error) domain.DeliveryState {
 // inputs synchronously and returns nil, then reports the outcome via
 // [domain.DeliveryReporter.ReportResult].
 func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	if _, ok := target.Properties["api_server"]; !ok {
-		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID)
+	if target.Properties()["api_server"] == "" {
+		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
 
 	asyncCtx := context.WithoutCancel(ctx)
@@ -281,7 +281,7 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID
 		if err != nil {
 			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 				State:   domain.DeliveryStateAuthFailed,
-				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID, err),
+				Message: fmt.Sprintf("build verifier for target %q: %v", target.ID(), err),
 			})
 			return nil
 		}
@@ -316,7 +316,7 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID
 	}
 
 	if auth.Token == "" {
-		return fmt.Errorf("%w: removal from target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID)
+		return fmt.Errorf("%w: removal from target %q requires an authenticated caller token", domain.ErrInvalidArgument, target.ID())
 	}
 
 	cfg, err := buildRESTConfig(target, auth.Token)
@@ -348,9 +348,9 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID
 //  1. Direct service_account_token property (for tests / simple setups).
 //  2. service_account_token_ref resolved from the agent's [domain.Vault].
 func (a *Agent) buildPlatformRESTConfig(ctx context.Context, target domain.TargetInfo) (*rest.Config, error) {
-	apiServer := target.Properties["api_server"]
+	apiServer := target.Properties()["api_server"]
 	if apiServer == "" {
-		return nil, fmt.Errorf("target %q missing api_server property", target.ID)
+		return nil, fmt.Errorf("target %q missing api_server property", target.ID())
 	}
 	token, err := a.resolvePlatformToken(ctx, target)
 	if err != nil {
@@ -360,40 +360,40 @@ func (a *Agent) buildPlatformRESTConfig(ctx context.Context, target domain.Targe
 		Host:        apiServer,
 		BearerToken: token,
 	}
-	if ca := target.Properties["ca_cert"]; ca != "" {
+	if ca := target.Properties()["ca_cert"]; ca != "" {
 		cfg.TLSClientConfig.CAData = []byte(ca)
 	}
 	return cfg, nil
 }
 
 func (a *Agent) resolvePlatformToken(ctx context.Context, target domain.TargetInfo) (string, error) {
-	if token := target.Properties["service_account_token"]; token != "" {
+	if token := target.Properties()["service_account_token"]; token != "" {
 		return token, nil
 	}
-	ref := target.Properties["service_account_token_ref"]
+	ref := target.Properties()["service_account_token_ref"]
 	if ref == "" {
-		return "", fmt.Errorf("target %q missing service_account_token or service_account_token_ref for platform delivery", target.ID)
+		return "", fmt.Errorf("target %q missing service_account_token or service_account_token_ref for platform delivery", target.ID())
 	}
 	if a.vault == nil {
-		return "", fmt.Errorf("target %q has service_account_token_ref but agent has no vault configured", target.ID)
+		return "", fmt.Errorf("target %q has service_account_token_ref but agent has no vault configured", target.ID())
 	}
 	val, err := a.vault.Get(ctx, domain.SecretRef(ref))
 	if err != nil {
-		return "", fmt.Errorf("resolve service_account_token_ref %q for target %q: %w", ref, target.ID, err)
+		return "", fmt.Errorf("resolve service_account_token_ref %q for target %q: %w", ref, target.ID(), err)
 	}
 	return string(val), nil
 }
 
 func buildRESTConfig(target domain.TargetInfo, token domain.RawToken) (*rest.Config, error) {
-	apiServer := target.Properties["api_server"]
+	apiServer := target.Properties()["api_server"]
 	if apiServer == "" {
-		return nil, fmt.Errorf("target %q missing api_server property", target.ID)
+		return nil, fmt.Errorf("target %q missing api_server property", target.ID())
 	}
 	cfg := &rest.Config{
 		Host:        apiServer,
 		BearerToken: string(token),
 	}
-	if ca := target.Properties["ca_cert"]; ca != "" {
+	if ca := target.Properties()["ca_cert"]; ca != "" {
 		cfg.TLSClientConfig.CAData = []byte(ca)
 	}
 	return cfg, nil

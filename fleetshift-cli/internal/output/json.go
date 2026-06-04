@@ -9,9 +9,9 @@ import (
 )
 
 var jsonOpts = protojson.MarshalOptions{
-	Multiline:       true,
-	Indent:          "  ",
-	UseProtoNames:   true,
+	Multiline:         true,
+	Indent:            "  ",
+	UseProtoNames:     true,
 	EmitDefaultValues: true,
 }
 

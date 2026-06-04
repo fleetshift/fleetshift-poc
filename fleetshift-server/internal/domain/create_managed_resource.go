@@ -52,14 +52,7 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		now := s.now()
 		fID := FulfillmentID(uuid.New().String())
 
-		mr := ManagedResource{
-			ResourceType:  in.ResourceType,
-			Name:          in.Name,
-			UID:           uuid.New().String(),
-			FulfillmentID: fID,
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		}
+		mr := NewManagedResource(in.ResourceType, in.Name, uuid.New().String(), fID, now)
 		intent := mr.RecordIntent(in.Spec, now)
 
 		ms, ps, rs := in.TypeDef.Relation.DeriveStrategies(intent)
@@ -70,25 +63,16 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 			attestRef = &AttestationRef{RelationRef: &rt}
 		}
 
-		f := Fulfillment{
-			ID:             fID,
-			State:          FulfillmentStateCreating,
-			Auth:           in.Auth,
-			Provenance:     in.Provenance,
-			AttestationRef: attestRef,
-			Generation:     0,
-			CreatedAt:      now,
-			UpdatedAt:      now,
-		}
+		f := NewFulfillment(fID, in.Auth, in.Provenance, attestRef, now)
 		f.AdvanceManifestStrategy(ms, now)
 		f.AdvancePlacementStrategy(ps, now)
 		f.AdvanceRolloutStrategy(rs, now)
 
-		if err := tx.Fulfillments().Create(ctx, &f); err != nil {
+		if err := tx.Fulfillments().Create(ctx, f); err != nil {
 			return ManagedResourceView{}, fmt.Errorf("create fulfillment: %w", err)
 		}
 
-		if err := tx.ManagedResources().CreateInstance(ctx, &mr); err != nil {
+		if err := tx.ManagedResources().CreateInstance(ctx, mr); err != nil {
 			return ManagedResourceView{}, fmt.Errorf("create instance: %w", err)
 		}
 
@@ -97,9 +81,9 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		}
 
 		return ManagedResourceView{
-			ManagedResource: mr,
+			ManagedResource: *mr,
 			Intent:          intent,
-			Fulfillment:     f,
+			Fulfillment:     *f,
 		}, nil
 	})
 }
@@ -120,7 +104,7 @@ func (s *CreateManagedResourceWorkflowSpec) Run(record Record, input CreateManag
 		return ManagedResourceView{}, fmt.Errorf("persist managed resource: %w", err)
 	}
 
-	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID); err != nil {
+	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID()); err != nil {
 		return ManagedResourceView{}, fmt.Errorf("start orchestration: %w", err)
 	}
 

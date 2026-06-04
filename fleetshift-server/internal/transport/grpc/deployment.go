@@ -65,8 +65,10 @@ func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeD
 	}
 
 	in := application.ResumeInput{
-		ID:            id,
-		UserSignature: req.GetUserSignature(),
+		ID:                 id,
+		UserSignature:      req.GetUserSignature(),
+		Etag:               domain.Etag(req.GetEtag()),
+		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
 	}
 	if req.GetValidUntil() != nil {
 		in.ValidUntil = req.GetValidUntil().AsTime()
@@ -143,12 +145,11 @@ func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploym
 		rs = &v
 	}
 	in := domain.CreateDeploymentInput{
-		ID:                 domain.DeploymentID(req.GetDeploymentId()),
-		ManifestStrategy:   ms,
-		PlacementStrategy:  ps,
-		RolloutStrategy:    rs,
-		UserSignature:      req.GetUserSignature(),
-		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
+		ID:                domain.DeploymentID(req.GetDeploymentId()),
+		ManifestStrategy:  ms,
+		PlacementStrategy: ps,
+		RolloutStrategy:   rs,
+		UserSignature:     req.GetUserSignature(),
 	}
 	if req.GetValidUntil() != nil {
 		in.ValidUntil = req.GetValidUntil().AsTime()
@@ -221,42 +222,43 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 	d := v.Deployment
 	f := v.Fulfillment
 	dep := &pb.Deployment{
-		Name:  deploymentName(d.ID),
-		State: fulfillmentStateToProto(f.State),
+		Name:  deploymentName(d.ID()),
+		State: fulfillmentStateToProto(f.State()),
 	}
 
-	dep.Reconciling = dep.State == pb.Deployment_STATE_CREATING ||
-		dep.State == pb.Deployment_STATE_DELETING ||
-		dep.State == pb.Deployment_STATE_PAUSED_AUTH
+	dep.Reconciling = f.Reconciling()
+	dep.PauseReason = f.PauseReason()
 
-	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy)
-	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy)
-	if f.RolloutStrategy != nil {
+	dep.ManifestStrategy = manifestStrategyToProto(f.ManifestStrategy())
+	dep.PlacementStrategy = placementStrategyToProto(f.PlacementStrategy())
+	if rs := f.RolloutStrategy(); rs != nil {
 		dep.RolloutStrategy = &pb.RolloutStrategy{
-			Type: rolloutStrategyTypeToProto(f.RolloutStrategy.Type),
+			Type: rolloutStrategyTypeToProto(rs.Type),
 		}
 	}
 
-	if len(f.ResolvedTargets) > 0 {
-		ids := make([]string, len(f.ResolvedTargets))
-		for i, t := range f.ResolvedTargets {
+	if targets := f.ResolvedTargets(); len(targets) > 0 {
+		ids := make([]string, len(targets))
+		for i, t := range targets {
 			ids[i] = string(t)
 		}
 		dep.ResolvedTargetIds = ids
 	}
 
-	if !d.CreatedAt.IsZero() {
-		dep.CreateTime = timestamppb.New(d.CreatedAt)
+	if !d.CreatedAt().IsZero() {
+		dep.CreateTime = timestamppb.New(d.CreatedAt())
 	}
-	if !d.UpdatedAt.IsZero() {
-		dep.UpdateTime = timestamppb.New(d.UpdatedAt)
+	if !d.UpdatedAt().IsZero() {
+		dep.UpdateTime = timestamppb.New(d.UpdatedAt())
 	}
-	dep.Uid = d.UID
-	dep.Etag = d.Etag
+	dep.Uid = d.UID()
+	dep.Etag = string(v.Etag())
 
-	if f.Provenance != nil {
-		dep.Provenance = provenanceToProto(f.Provenance)
+	if prov := f.Provenance(); prov != nil {
+		dep.Provenance = provenanceToProto(prov)
 	}
+
+	dep.Generation = int64(f.Generation())
 
 	return dep
 }
@@ -298,8 +300,6 @@ func fulfillmentStateToProto(s domain.FulfillmentState) pb.Deployment_State {
 		return pb.Deployment_STATE_DELETING
 	case domain.FulfillmentStateFailed:
 		return pb.Deployment_STATE_FAILED
-	case domain.FulfillmentStatePausedAuth:
-		return pb.Deployment_STATE_PAUSED_AUTH
 	default:
 		return pb.Deployment_STATE_UNSPECIFIED
 	}
@@ -361,6 +361,8 @@ func domainError(err error) error {
 		return status.Error(codes.NotFound, err.Error())
 	case errors.Is(err, domain.ErrAlreadyExists):
 		return status.Error(codes.AlreadyExists, err.Error())
+	case errors.Is(err, domain.ErrStaleGeneration):
+		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
 	default:

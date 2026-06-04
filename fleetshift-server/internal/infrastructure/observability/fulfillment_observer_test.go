@@ -71,7 +71,7 @@ func TestFulfillmentRunProbe_ManifestsFiltered_AllDroppedLogsWarning(t *testing.
 	obs := observability.NewFulfillmentObserver(logger)
 	_, probe := obs.RunStarted(context.Background(), "ful-filter")
 
-	probe.ManifestsFiltered(domain.TargetInfo{ID: "k8s-1", Type: "kubernetes"}, 2, 0)
+	probe.ManifestsFiltered(domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k8s-1", Type: "kubernetes"}), 2, 0)
 	probe.End()
 
 	records := handler.Records()
@@ -98,7 +98,7 @@ func TestFulfillmentRunProbe_ManifestsFiltered_PartialLogsDebug(t *testing.T) {
 	obs := observability.NewFulfillmentObserver(logger)
 	_, probe := obs.RunStarted(context.Background(), "ful-partial")
 
-	probe.ManifestsFiltered(domain.TargetInfo{ID: "kind-1", Type: "kind"}, 3, 2)
+	probe.ManifestsFiltered(domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "kind-1", Type: "kind"}), 3, 2)
 	probe.End()
 
 	records := handler.Records()
@@ -265,7 +265,7 @@ func TestDeliverProbe_NewDelivery(t *testing.T) {
 	_, probe := obs.DeliverStarted(context.Background(), domain.DeliverInput{
 		FulfillmentID: "ful-1",
 		DeliveryID:    "d1:t1",
-		Target:        domain.TargetInfo{ID: "t1"},
+		Target:        domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
 	})
 
 	probe.NewDelivery()
@@ -293,7 +293,7 @@ func TestRemoveProbe_Withdrawn(t *testing.T) {
 	_, probe := obs.RemoveStarted(context.Background(), domain.RemoveInput{
 		FulfillmentID: "ful-1",
 		DeliveryID:    "d1:t1",
-		Target:        domain.TargetInfo{ID: "t1"},
+		Target:        domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1"}),
 	})
 
 	probe.Withdrawn()

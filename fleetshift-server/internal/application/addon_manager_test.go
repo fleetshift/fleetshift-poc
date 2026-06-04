@@ -114,11 +114,10 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 	router := delivery.NewRoutingDeliveryService()
 
 	reg := &memworkflow.Registry{}
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store: store, Delivery: router,
-		Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -239,10 +238,10 @@ func TestAddonManager_ConnectActivatesSchemas(t *testing.T) {
 		t.Fatalf("Enable: %v", err)
 	}
 
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
@@ -382,10 +381,10 @@ func TestAddonManager_DisconnectDoesNotDeactivateSchemas(t *testing.T) {
 	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
@@ -410,10 +409,10 @@ func TestAddonManager_DisableDeactivatesSchemas(t *testing.T) {
 	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
@@ -452,12 +451,14 @@ func TestAddonManager_ConnectRegistersTargets(t *testing.T) {
 	agent := &stubDeliveryAgent{}
 	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
 		Agent: agent,
-		Targets: []domain.TargetInfo{{
-			ID:                    "kind-local",
-			Type:                  kindaddon.TargetType,
-			Name:                  "Local Kind Provider",
-			AcceptedResourceTypes: []domain.ResourceType{"clusters", domain.TrustBundleResourceType},
-		}},
+		Targets: []domain.TargetInfo{
+			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+				ID:                    "kind-local",
+				Type:                  kindaddon.TargetType,
+				Name:                  "Local Kind Provider",
+				AcceptedResourceTypes: []domain.ResourceType{"clusters", domain.TrustBundleResourceType},
+			}),
+		},
 	})
 	if err != nil {
 		t.Fatalf("Connect with targets: %v", err)
@@ -477,20 +478,22 @@ func TestAddonManager_ConnectDuplicateTargetIsIdempotent(t *testing.T) {
 		t.Fatalf("Enable: %v", err)
 	}
 
-	target := domain.TargetInfo{
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "kind-local",
 		Type:                  kindaddon.TargetType,
 		Name:                  "Local Kind Provider",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}
+	})
 
 	if err := env.targetSvc.Register(ctx, target); err != nil {
 		t.Fatalf("pre-register target: %v", err)
 	}
 
 	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Agent:   &stubDeliveryAgent{},
-		Targets: []domain.TargetInfo{target},
+		Agent: &stubDeliveryAgent{},
+		Targets: []domain.TargetInfo{
+			target,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Connect should silently skip existing target: %v", err)
@@ -513,10 +516,10 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 		t.Fatalf("Enable: %v", err)
 	}
 
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters", "databases"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
@@ -573,10 +576,10 @@ func TestAddonManager_ReconnectWithSameSchemasIsIdempotent(t *testing.T) {
 	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
@@ -614,10 +617,10 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 
@@ -667,10 +670,10 @@ func TestAddonManager_ReEnableAfterDisable(t *testing.T) {
 	if err := env.mgr.Enable(ctx, desc); err != nil {
 		t.Fatalf("Enable: %v", err)
 	}
-	if err := env.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
@@ -742,11 +745,10 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 	buildManager := func() *addonManagerEnv {
 		router := delivery.NewRoutingDeliveryService()
 		reg := &memworkflow.Registry{}
-		orchSpec := &domain.OrchestrationWorkflowSpec{
-			Store: store, Delivery: router,
-			Strategies: domain.StrategyFactory{Store: store}, CleanupSignaler: reg,
-			AckRetryInterval: 5 * time.Second,
-		}
+		orchSpec := domain.NewOrchestrationWorkflowSpec(
+			store, router, domain.StrategyFactory{Store: store}, reg,
+			domain.WithAckRetryInterval(5*time.Second),
+		)
 		orchWf, err := reg.RegisterOrchestration(orchSpec)
 		if err != nil {
 			t.Fatalf("RegisterOrchestration: %v", err)
@@ -795,10 +797,10 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 	if err := env1.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
 		t.Fatalf("Enable (pod 1): %v", err)
 	}
-	if err := env1.targetSvc.Register(ctx, domain.TargetInfo{
+	if err := env1.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: "kind", Name: "Local Kind",
 		AcceptedResourceTypes: []domain.ResourceType{"clusters"},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target (pod 1): %v", err)
 	}
 	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{

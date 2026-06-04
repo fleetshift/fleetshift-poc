@@ -40,13 +40,10 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 	reg := &memworkflow.Registry{}
 	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         router,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -97,9 +94,9 @@ func setup(t *testing.T) pb.DeploymentServiceClient {
 
 	// Register a test target so placements resolve.
 	targetSvc := &application.TargetService{Store: store}
-	if err := targetSvc.Register(context.Background(), domain.TargetInfo{
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: testTargetType, Name: "test-target",
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
 

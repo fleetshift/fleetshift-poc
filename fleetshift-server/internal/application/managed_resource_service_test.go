@@ -39,12 +39,12 @@ func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.Res
 	}
 	defer tx.Rollback()
 
-	if err := tx.Targets().Create(ctx, domain.TargetInfo{
+	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    targetID,
 		Name:                  "Test Addon (" + string(resourceType) + ")",
 		Type:                  "test",
 		AcceptedResourceTypes: []domain.ResourceType{resourceType},
-	}); err != nil {
+	})); err != nil {
 		t.Fatalf("registerTestAddon: create target: %v", err)
 	}
 
@@ -154,13 +154,10 @@ func setupManagedResourcesWithDelivery(
 		agent = buildDelivery(store, reporter)
 	}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         agent,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, agent, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -230,37 +227,37 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if view.ManagedResource.Name != "prod-us-east-1" {
-		t.Errorf("Name = %q, want %q", view.ManagedResource.Name, "prod-us-east-1")
+	if view.ManagedResource.Name() != "prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", view.ManagedResource.Name(), "prod-us-east-1")
 	}
-	if view.ManagedResource.CurrentVersion != 1 {
-		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion)
+	if view.ManagedResource.CurrentVersion() != 1 {
+		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion())
 	}
-	if view.Fulfillment.State != domain.FulfillmentStateCreating {
-		t.Errorf("Fulfillment.State = %q, want %q", view.Fulfillment.State, domain.FulfillmentStateCreating)
+	if view.Fulfillment.State() != domain.FulfillmentStateCreating {
+		t.Errorf("Fulfillment.State = %q, want %q", view.Fulfillment.State(), domain.FulfillmentStateCreating)
 	}
-	if view.Fulfillment.ManifestStrategy.Type != domain.ManifestStrategyManagedResource {
-		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy.Type, domain.ManifestStrategyManagedResource)
+	if view.Fulfillment.ManifestStrategy().Type != domain.ManifestStrategyManagedResource {
+		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy().Type, domain.ManifestStrategyManagedResource)
 	}
-	if view.Fulfillment.ManifestStrategy.IntentRef.ResourceType != "clusters" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy.IntentRef.ResourceType, "clusters")
+	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "clusters" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "clusters")
 	}
-	if view.Fulfillment.ManifestStrategy.IntentRef.Version != 1 {
-		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy.IntentRef.Version)
+	if view.Fulfillment.ManifestStrategy().IntentRef.Version != 1 {
+		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy().IntentRef.Version)
 	}
-	if view.Fulfillment.PlacementStrategy.Targets[0] != targetID {
-		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy.Targets[0], targetID)
+	if view.Fulfillment.PlacementStrategy().Targets[0] != targetID {
+		t.Errorf("PlacementStrategy.Targets[0] = %q, want %q", view.Fulfillment.PlacementStrategy().Targets[0], targetID)
 	}
 
-	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	// Get the resource.
 	got, err := h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.ManagedResource.UID != view.ManagedResource.UID {
-		t.Errorf("Get UID = %q, want %q", got.ManagedResource.UID, view.ManagedResource.UID)
+	if got.ManagedResource.UID() != view.ManagedResource.UID() {
+		t.Errorf("Get UID = %q, want %q", got.ManagedResource.UID(), view.ManagedResource.UID())
 	}
 
 	// List resources.
@@ -277,11 +274,11 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if deleted.Fulfillment.State != domain.FulfillmentStateDeleting {
-		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State)
+	if deleted.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State())
 	}
 
-	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID())
 
 	// Verify gone after cleanup completes.
 	_, err = h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
@@ -312,14 +309,14 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 		t.Fatalf("Create: %v", err)
 	}
 
-	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	if deleted.Fulfillment.State != domain.FulfillmentStateDeleting {
-		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State)
+	if deleted.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("Delete state = %q, want deleting", deleted.Fulfillment.State())
 	}
 
 	select {
@@ -332,8 +329,8 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 	if err != nil {
 		t.Fatalf("Get during delete: %v", err)
 	}
-	if got.Fulfillment.State != domain.FulfillmentStateDeleting {
-		t.Fatalf("Get state during delete = %q, want deleting", got.Fulfillment.State)
+	if got.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("Get state during delete = %q, want deleting", got.Fulfillment.State())
 	}
 
 	views, err := h.resourceSvc.List(ctx, "clusters")
@@ -343,12 +340,12 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 	if len(views) != 1 {
 		t.Fatalf("List during delete len = %d, want 1", len(views))
 	}
-	if views[0].Fulfillment.State != domain.FulfillmentStateDeleting {
-		t.Fatalf("List state during delete = %q, want deleting", views[0].Fulfillment.State)
+	if views[0].Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("List state during delete = %q, want deleting", views[0].Fulfillment.State())
 	}
 
 	close(blocker.release)
-	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID())
 }
 
 func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
@@ -367,14 +364,14 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 		t.Fatalf("first Create: %v", err)
 	}
 
-	awaitFulfillmentState(ctx, t, h.store, first.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, h.store, first.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
-	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID)
+	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID())
 
 	recreated, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: "clusters",
@@ -384,8 +381,8 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("recreate after delete: %v", err)
 	}
-	if recreated.ManagedResource.CurrentVersion != 1 {
-		t.Fatalf("recreated CurrentVersion = %d, want 1", recreated.ManagedResource.CurrentVersion)
+	if recreated.ManagedResource.CurrentVersion() != 1 {
+		t.Fatalf("recreated CurrentVersion = %d, want 1", recreated.ManagedResource.CurrentVersion())
 	}
 }
 
@@ -399,13 +396,10 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 
 	agent := &authFailThenSucceedAgent{reporter: reporter}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:            store,
-		Delivery:         agent,
-		Strategies:       domain.StrategyFactory{Store: store},
-		CleanupSignaler:  reg,
-		AckRetryInterval: 5 * time.Second,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, agent, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		t.Fatalf("RegisterOrchestration: %v", err)
@@ -454,7 +448,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 	}
 
 	// Wait for the fulfillment to pause due to auth failure.
-	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStatePausedAuth)
+	awaitFulfillmentPaused(ctx, t, store, view.Fulfillment.ID())
 
 	// Resume with fresh credentials.
 	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
@@ -472,16 +466,16 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 
 	// The returned view is a snapshot from mutation time (before
 	// orchestration converges), so verify auth was updated.
-	if resumed.Fulfillment.Auth.Token != "fresh-token" {
-		t.Errorf("Auth.Token = %q, want %q", resumed.Fulfillment.Auth.Token, "fresh-token")
+	if resumed.Fulfillment.Auth().Token != "fresh-token" {
+		t.Errorf("Auth.Token = %q, want %q", resumed.Fulfillment.Auth().Token, "fresh-token")
 	}
-	if resumed.ManagedResource.Name != "prod-us-east-1" {
-		t.Errorf("Name = %q, want %q", resumed.ManagedResource.Name, "prod-us-east-1")
+	if resumed.ManagedResource.Name() != "prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", resumed.ManagedResource.Name(), "prod-us-east-1")
 	}
 
 	// After the workflow completes (convergence loop returned), the
 	// fulfillment in the store should be active.
-	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 }
 
 func TestManagedResourceService_Resume_NotPaused(t *testing.T) {
@@ -500,7 +494,7 @@ func TestManagedResourceService_Resume_NotPaused(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID, domain.FulfillmentStateActive)
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	// Attempt to resume an active resource — should fail.
 	resumeCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{

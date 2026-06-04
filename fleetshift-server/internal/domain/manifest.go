@@ -21,11 +21,11 @@ type Manifest struct {
 // AcceptedResourceTypes (unconstrained / legacy), all manifests are
 // returned unchanged.
 func FilterAcceptedManifests(target TargetInfo, manifests []Manifest) []Manifest {
-	if len(target.AcceptedResourceTypes) == 0 {
+	if len(target.AcceptedResourceTypes()) == 0 {
 		return manifests
 	}
-	accepted := make(map[ResourceType]struct{}, len(target.AcceptedResourceTypes))
-	for _, rt := range target.AcceptedResourceTypes {
+	accepted := make(map[ResourceType]struct{}, len(target.AcceptedResourceTypes()))
+	for _, rt := range target.AcceptedResourceTypes() {
 		accepted[rt] = struct{}{}
 	}
 	out := make([]Manifest, 0, len(manifests))

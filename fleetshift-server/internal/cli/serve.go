@@ -37,7 +37,6 @@ import (
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
-	ocpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/ocp"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -91,7 +90,7 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().StringVar(&f.webDir, "web-dir", "", "directory containing frontend assets to serve (empty = API only)")
 	cmd.Flags().StringVar(&f.oidcUIAuthority, "oidc-ui-authority", os.Getenv("OIDC_ISSUER_URL"), "OIDC authority URL for the frontend UI")
 	cmd.Flags().StringVar(&f.oidcUIClientID, "oidc-ui-client-id", envOrDefault("OIDC_UI_CLIENT_ID", "fleetshift-ui"), "OIDC client ID for the frontend UI")
-	cmd.Flags().StringVar(&f.addons, "addons", "kind,ocp,kubernetes,gcphcp", "comma-separated list of addons to enable (default: all)")
+	cmd.Flags().StringVar(&f.addons, "addons", "kind,kubernetes,gcphcp", "comma-separated list of addons to enable (default: all)")
 	cmd.Flags().StringVar(&f.gcphcpConfig, "gcphcp-config", "", "path to gcphcp addon config file (or GCPHCP_CONFIG env)")
 	return cmd
 }
@@ -235,20 +234,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		)
 	}
 
-	var ocpAgent *ocpaddon.Agent
-	if enabledAddons["ocp"] {
-		ocpAgent = ocpaddon.NewAgent(
-			deliveryReporter,
-			ocpaddon.WithVault(vault),
-			ocpaddon.WithObserver(ocpaddon.NewSlogAgentObserver(logger)),
-		)
-		if err := ocpAgent.Start(); err != nil {
-			return fmt.Errorf("start ocp agent: %w", err)
-		}
-		defer ocpAgent.Shutdown(ctx)
-		logger.Info("OCP addon callback server listening", "addr", ocpAgent.CallbackAddr())
-	}
-
 	var gcphcpAgent domain.DeliveryAgent
 	var gcphcpConcreteAgent *gcphcpaddon.Agent
 	var gcphcpCfg gcphcpaddon.Config
@@ -275,14 +260,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	orchSpec := &domain.OrchestrationWorkflowSpec{
-		Store:           store,
-		Delivery:        router,
-		Strategies:      domain.StrategyFactory{Store: store},
-		CleanupSignaler: reg,
-		Observer:        observability.NewFulfillmentObserver(logger),
-		Vault:           vault,
-	}
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
+		domain.WithVault(vault),
+	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		return fmt.Errorf("register orchestration: %w", err)
@@ -406,9 +388,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("load auth methods: %w", err)
 	}
 	for _, m := range existingMethods {
-		if m.Type == domain.AuthMethodTypeOIDC && m.OIDC != nil {
-			if err := tokenVerifier.RegisterKeySet(ctx, m.OIDC.JWKSURI); err != nil {
-				logger.Warn("failed to register JWKS for auth method", "id", m.ID, "err", err)
+		if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+			if err := tokenVerifier.RegisterKeySet(ctx, m.OIDC().JWKSURI); err != nil {
+				logger.Warn("failed to register JWKS for auth method", "id", m.ID(), "err", err)
 			}
 		}
 	}
@@ -584,11 +566,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			return fmt.Errorf("enable kind addon: %w", err)
 		}
 	}
-	if enabledAddons["ocp"] {
-		if err := addonMgr.Enable(ctx, ocpaddon.Descriptor()); err != nil {
-			return fmt.Errorf("enable ocp addon: %w", err)
-		}
-	}
 	if enabledAddons["kubernetes"] {
 		if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
 			return fmt.Errorf("enable kubernetes addon: %w", err)
@@ -622,29 +599,18 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if enabledAddons["kind"] {
 		if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
 			Agent: kindAgent,
-			Targets: []domain.TargetInfo{{
-				ID:                    "kind-local",
-				Type:                  kindaddon.TargetType,
-				Name:                  "Local Kind Provider",
-				AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			}},
+			Targets: []domain.TargetInfo{domain.NewTargetInfo(
+				"kind-local",
+				kindaddon.TargetType,
+				"Local Kind Provider",
+				domain.TargetStateReady,
+				nil,
+				nil,
+				[]domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
+			)},
 			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
 		}); err != nil {
 			return fmt.Errorf("connect kind addon: %w", err)
-		}
-	}
-
-	if enabledAddons["ocp"] {
-		if err := addonMgr.Connect(ctx, "ocp", application.ConnectInput{
-			Agent: ocpAgent,
-			Targets: []domain.TargetInfo{{
-				ID:                    "ocp-aws",
-				Type:                  ocpaddon.TargetType,
-				Name:                  "OCP on AWS",
-				AcceptedResourceTypes: []domain.ResourceType{ocpaddon.ClusterResourceType},
-			}},
-		}); err != nil {
-			return fmt.Errorf("connect ocp addon: %w", err)
 		}
 	}
 
@@ -661,13 +627,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		targetID := domain.TargetID(activeTarget.ID)
 		if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
 			Agent: gcphcpAgent,
-			Targets: []domain.TargetInfo{{
-				ID:                    targetID,
-				Type:                  gcphcpaddon.TargetType,
-				Name:                  fmt.Sprintf("GCP HCP %s/%s", activeTarget.GCPProject, activeTarget.Region),
-				Properties:            activeTarget.TargetProperties(),
-				AcceptedResourceTypes: []domain.ResourceType{gcphcpaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			}},
+			Targets: []domain.TargetInfo{domain.NewTargetInfo(
+				targetID,
+				gcphcpaddon.TargetType,
+				fmt.Sprintf("GCP HCP %s/%s", activeTarget.GCPProject, activeTarget.Region),
+				domain.TargetStateReady,
+				nil,
+				activeTarget.TargetProperties(),
+				[]domain.ResourceType{gcphcpaddon.ClusterResourceType, domain.TrustBundleResourceType},
+			)},
 			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
 		}); err != nil {
 			return fmt.Errorf("connect gcphcp addon: %w", err)

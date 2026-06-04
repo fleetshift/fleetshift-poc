@@ -7,8 +7,6 @@ inputs:
       # protocompile. They must NOT have generated Go code — the dynamic
       # service builder produces descriptors at runtime instead.
       - proto/addons
-      # OCP callback service is addon-internal; not part of the main server.
-      - proto/ocp
 plugins:
   - remote: buf.build/protocolbuffers/go
     out: fleetshift-server/gen
