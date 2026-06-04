@@ -105,6 +105,8 @@ func (f *Fulfillment) advanceGeneration() {
 // supplied (re-signing is required).
 //
 // TODO: revisit the provenance requirement
+// TODO: also revisit status requirement; maybe it's fine to "resume"
+// something not paused, to change the auth
 func (f *Fulfillment) Resume(auth DeliveryAuth, provenance *Provenance) error {
 	if f.pauseReason == "" {
 		return fmt.Errorf("%w: fulfillment is not paused", ErrInvalidArgument)
