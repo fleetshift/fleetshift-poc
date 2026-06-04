@@ -123,6 +123,7 @@ func (s *Service) DoOperation(ctx context.Context, ...) error {
 ## Key Principles
 
 - Always use `defer probe.End()` for timing accuracy
+- **Never replace the caller's context.** `Started` methods must pass the incoming `ctx` through (or enrich it, e.g. by injecting a trace span). Returning `context.Background()` or any unrelated context severs request-scoped values (trace IDs, deadlines, cancellation) from downstream code. NoOp implementations return the incoming `ctx` unchanged.
 - Constructors should default the observer field to a NoOp implementation (e.g. `observer: NoOp{Component}Observer{}`). This eliminates nil checks at every call site.
 - Probes either emit signals throughout method calls, or may collect state via methods and only emit upon `End()`. It depends on signal best practices and what minimizes overhead. Logs usually emit at the end, unless the probe runs long.
 - Domain interfaces live in `domain/` or `application/`; implementations in `observability/`
