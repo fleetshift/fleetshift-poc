@@ -256,6 +256,176 @@ func TestPollClusterReady_UsesConfigurableTimeout(t *testing.T) {
 	}
 }
 
+func TestPollClusterReady_WaitsForControllerGeneration(t *testing.T) {
+	withFastClusterPollTimers(t)
+
+	// Models the real recovery bug: UpdateCluster bumps generation to 2,
+	// the cluster object immediately shows Ready (transient), but the
+	// /status endpoint still has controllers at the old generation until
+	// they re-report.
+	var statusCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/clusters/c-123/status":
+			statusCalls++
+			gen1Controllers := []any{
+				map[string]any{
+					"controller_name":     "cls-version-resolution-controller",
+					"observed_generation": float64(1),
+				},
+				map[string]any{
+					"controller_name":     "cls-hypershift-client",
+					"observed_generation": float64(1),
+				},
+			}
+			gen2Controllers := []any{
+				map[string]any{
+					"controller_name":     "cls-version-resolution-controller",
+					"observed_generation": float64(2),
+				},
+				map[string]any{
+					"controller_name":     "cls-hypershift-client",
+					"observed_generation": float64(2),
+				},
+			}
+			controllers := gen1Controllers
+			if statusCalls >= 3 {
+				controllers = gen2Controllers
+			}
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"controller_status": controllers,
+				"status":            map[string]any{"phase": "Ready"},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+
+		case r.URL.Path == "/api/v1/clusters/c-123":
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"generation": float64(2),
+				"status": map[string]any{
+					"phase":              "Ready",
+					"reason":             "AllControllersReady",
+					"message":            "Cluster is ready with 1 controllers operational",
+					"observedGeneration": float64(2),
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+
+		default:
+			http.Error(w, "unexpected path", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	clusterPollTimeout = 500 * time.Millisecond
+
+	obs := &testEventRecorder{}
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterReady(context.Background(), client, "c-123", newTestProgress(obs))
+	if err != nil {
+		t.Fatalf("PollClusterReady() error = %v", err)
+	}
+	if statusCalls < 3 {
+		t.Fatalf("expected at least 3 status calls (waited for controllers to catch up), got %d", statusCalls)
+	}
+}
+
+func TestPollClusterReady_RejectsReadyWhenNoControllers(t *testing.T) {
+	withFastClusterPollTimers(t)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"controller_status": []any{},
+				"status": map[string]any{
+					"phase": "Ready",
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+		default:
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"generation": float64(1),
+				"status": map[string]any{
+					"phase":              "Ready",
+					"reason":             "AllControllersReady",
+					"observedGeneration": float64(1),
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterReady(context.Background(), client, "c-123", noopProgress())
+	if err == nil {
+		t.Fatal("expected timeout error when no controllers reported")
+	}
+	if !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestAllControllersAtGeneration(t *testing.T) {
+	tests := []struct {
+		name string
+		data map[string]any
+		gen  float64
+		want bool
+	}{
+		{
+			name: "no controller_status field",
+			data: map[string]any{"status": map[string]any{"phase": "Ready"}},
+			gen:  1,
+			want: false,
+		},
+		{
+			name: "empty controller list",
+			data: map[string]any{"controller_status": []any{}},
+			gen:  1,
+			want: false,
+		},
+		{
+			name: "all controllers at generation",
+			data: map[string]any{"controller_status": []any{
+				map[string]any{"controller_name": "a", "observed_generation": float64(2)},
+				map[string]any{"controller_name": "b", "observed_generation": float64(2)},
+			}},
+			gen:  2,
+			want: true,
+		},
+		{
+			name: "one controller behind",
+			data: map[string]any{"controller_status": []any{
+				map[string]any{"controller_name": "a", "observed_generation": float64(2)},
+				map[string]any{"controller_name": "b", "observed_generation": float64(1)},
+			}},
+			gen:  2,
+			want: false,
+		},
+		{
+			name: "controller missing observed_generation",
+			data: map[string]any{"controller_status": []any{
+				map[string]any{"controller_name": "a"},
+			}},
+			gen:  1,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := allControllersAtGeneration(tt.data, tt.gen)
+			if got != tt.want {
+				t.Errorf("allControllersAtGeneration() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestEmitClusterReadyTransition_EmitsProgressEvent(t *testing.T) {
 	obs := &testEventRecorder{}
 

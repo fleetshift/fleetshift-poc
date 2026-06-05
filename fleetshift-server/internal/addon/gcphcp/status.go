@@ -399,6 +399,19 @@ func PollDesiredNodepoolsHealthy(
 // PollClusterReady polls the cluster status until it reaches "Ready" phase or fails.
 // It polls every 15 seconds for up to 20 minutes.
 // Returns nil when phase="Ready", error when phase="Failed", or error on timeout.
+//
+// It fetches the cluster resource for the current generation, then uses
+// the /status endpoint to check per-controller observed_generation values.
+// After an UpdateCluster call the CLS backend bumps the generation, and
+// fast controllers re-report before slower ones, producing a transient
+// aggregated "Ready" that does not reflect the full controller set. By
+// verifying every controller's observed_generation against the cluster
+// generation we avoid accepting that transient state.
+//
+// TODO: revisit after migrating from CLS to CLM backend. If CLM still
+// produces a transient Ready after a generation bump, report to the CLM
+// backend team — the aggregated status should not flip to Ready until
+// all controllers have re-evaluated at the current generation.
 func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, progress *deliveryProgress) error {
 	ticker := time.NewTicker(clusterPollInterval)
 	defer ticker.Stop()
@@ -425,13 +438,47 @@ func PollClusterReady(ctx context.Context, client *CLSClient, clusterID string, 
 		clusterStatus = parseResourceStatusSummary(clusterData)
 		emitResourceStatusProgress(ctx, progress, "Cluster", clusterData)
 
-		if clusterStatus.Phase == "Ready" {
-			return nil
-		}
 		if clusterStatus.Phase == "Failed" {
 			return fmt.Errorf("cluster provisioning failed: %s", clusterStatus.Message)
 		}
+		if clusterStatus.Phase != "Ready" {
+			continue
+		}
+
+		gen, ok := clusterData["generation"].(float64)
+		if !ok {
+			continue
+		}
+
+		statusData, err := client.GetClusterStatus(ctx, clusterID)
+		if err != nil {
+			return fmt.Errorf("get cluster status: %w", err)
+		}
+		if allControllersAtGeneration(statusData, gen) {
+			return nil
+		}
 	}
+}
+
+// allControllersAtGeneration returns true when every controller in the
+// status response has observed_generation >= the cluster's generation.
+// Returns false if there are no controllers or any is behind.
+func allControllersAtGeneration(statusData map[string]any, clusterGen float64) bool {
+	controllers, ok := statusData["controller_status"].([]any)
+	if !ok || len(controllers) == 0 {
+		return false
+	}
+	for _, raw := range controllers {
+		ctrl, ok := raw.(map[string]any)
+		if !ok {
+			return false
+		}
+		observedGen, ok := ctrl["observed_generation"].(float64)
+		if !ok || observedGen < clusterGen {
+			return false
+		}
+	}
+	return true
 }
 
 // PollClusterDeleted polls until the cluster is deleted (404 response).
