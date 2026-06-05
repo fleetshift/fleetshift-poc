@@ -134,6 +134,84 @@ func (p *reportResultProbe) End() {
 	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery result done", attrs...)
 }
 
+// MultiDeliveryObserver chains multiple [domain.DeliveryObserver]
+// implementations, calling each in order.
+type MultiDeliveryObserver struct {
+	domain.NoOpDeliveryObserver
+	observers []domain.DeliveryObserver
+}
+
+// NewMultiDeliveryObserver returns an observer that delegates to all given observers.
+func NewMultiDeliveryObserver(observers ...domain.DeliveryObserver) *MultiDeliveryObserver {
+	return &MultiDeliveryObserver{observers: observers}
+}
+
+func (m *MultiDeliveryObserver) ReportEventStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, event domain.DeliveryEvent) (context.Context, domain.ReportEventProbe) {
+	probes := make([]domain.ReportEventProbe, 0, len(m.observers))
+	for _, o := range m.observers {
+		var p domain.ReportEventProbe
+		ctx, p = o.ReportEventStarted(ctx, deliveryID, generation, event)
+		probes = append(probes, p)
+	}
+	return ctx, &multiEventProbe{probes: probes}
+}
+
+func (m *MultiDeliveryObserver) ReportResultStarted(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, result domain.DeliveryResult) (context.Context, domain.ReportResultProbe) {
+	probes := make([]domain.ReportResultProbe, 0, len(m.observers))
+	for _, o := range m.observers {
+		var p domain.ReportResultProbe
+		ctx, p = o.ReportResultStarted(ctx, deliveryID, generation, result)
+		probes = append(probes, p)
+	}
+	return ctx, &multiResultProbe{probes: probes}
+}
+
+type multiEventProbe struct {
+	domain.NoOpReportEventProbe
+	probes []domain.ReportEventProbe
+}
+
+func (m *multiEventProbe) Stale(reportGen, currentGen domain.Generation) {
+	for _, p := range m.probes {
+		p.Stale(reportGen, currentGen)
+	}
+}
+
+func (m *multiEventProbe) Error(err error) {
+	for _, p := range m.probes {
+		p.Error(err)
+	}
+}
+
+func (m *multiEventProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
+type multiResultProbe struct {
+	domain.NoOpReportResultProbe
+	probes []domain.ReportResultProbe
+}
+
+func (m *multiResultProbe) Stale(reportGen, currentGen domain.Generation) {
+	for _, p := range m.probes {
+		p.Stale(reportGen, currentGen)
+	}
+}
+
+func (m *multiResultProbe) Error(err error) {
+	for _, p := range m.probes {
+		p.Error(err)
+	}
+}
+
+func (m *multiResultProbe) End() {
+	for _, p := range m.probes {
+		p.End()
+	}
+}
+
 func deliveryEventLevel(kind domain.DeliveryEventKind) slog.Level {
 	switch kind {
 	case domain.DeliveryEventWarning:

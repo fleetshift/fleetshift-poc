@@ -25,3 +25,6 @@ services:
       - fleetshift-data:/data
       - keycloak-certs:/certs:ro
       - ${UI_DIR:-../../../fleetshift-user-interface}/web:/srv/web:ro
+
+volumes:
+  keycloak-certs:
