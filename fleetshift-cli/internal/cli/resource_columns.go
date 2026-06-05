@@ -16,7 +16,14 @@ import (
 func resourceColumns() []output.Column {
 	return []output.Column{
 		{Header: "Name", Value: reflectStringField("name")},
-		{Header: "State", Value: reflectEnumField("state")},
+		{Header: "State", Value: func(m proto.Message) string {
+			s := reflectEnumField("state")(m)
+			fd := m.ProtoReflect().Descriptor().Fields().ByName("pause_reason")
+			if fd != nil && m.ProtoReflect().Get(fd).String() != "" {
+				s += " (Paused)"
+			}
+			return s
+		}},
 		{Header: "UID", Value: reflectStringField("uid")},
 	}
 }
