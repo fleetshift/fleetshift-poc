@@ -388,6 +388,12 @@ func (p *deliverProbe) SkippedAlreadyAcked() {
 	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "delivery skipped: already acked")
 }
 
+func (p *deliverProbe) ResetInProgress(previousState domain.DeliveryState) {
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery reset in-progress for re-dispatch",
+		slog.String("previous_state", string(previousState)),
+	)
+}
+
 func (p *deliverProbe) Error(err error) {
 	p.err = err
 }
@@ -456,6 +462,12 @@ func (p *removeProbe) AlreadyPending() {
 		return
 	}
 	p.logger.LogAttrs(p.ctx, slog.LevelDebug, "remove skipped: already past pending")
+}
+
+func (p *removeProbe) ResetInProgress(previousState domain.DeliveryState) {
+	p.logger.LogAttrs(p.ctx, slog.LevelInfo, "delivery reset in-progress for re-dispatch",
+		slog.String("previous_state", string(previousState)),
+	)
 }
 
 func (p *removeProbe) Error(err error) {

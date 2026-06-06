@@ -698,6 +698,27 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 	}
 }
 
+func TestAgent_RecoverActiveDeliveries_ResumesDeleteDelivery(t *testing.T) {
+	ad := makeActiveDelivery("recovery-del", "test-cls", 2, "caller-token")
+	ad.FulfillmentState = domain.FulfillmentStateDeleting
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		if result.State == "" {
+			t.Fatal("expected non-empty delivery state from recovered delete delivery")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for recovered delete delivery result")
+	}
+}
+
 func TestAgent_RecoverActiveDeliveries_MultipleDeliveries(t *testing.T) {
 	ad1 := makeActiveDelivery("recovery-a", "cls-a", 1, "token-a")
 	ad2 := makeActiveDelivery("recovery-b", "cls-b", 1, "token-b")

@@ -403,9 +403,18 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 						probe.Error(err)
 						return struct{}{}, fmt.Errorf("reset delivery %s for retry: %w", d.ID(), err)
 					}
+				} else if d.Generation() == in.Generation && !d.State().IsTerminal() {
+					// Non-terminal, non-pending at same generation: addon
+					// acked but the goroutine is gone after a crash or
+					// ContinueAsNew. Reset to Pending for re-dispatch.
+					prev := d.State()
+					if err := d.ResetInProgress(now); err != nil {
+						probe.Error(err)
+						return struct{}{}, fmt.Errorf("reset in-progress delivery %s: %w", d.ID(), err)
+					}
+					probe.ResetInProgress(prev)
 				} else {
-					// Delivery already progressed past Pending (addon received
-					// and acked). The ack signal is queued; no re-dispatch needed.
+					// Stale generation or other skip-worthy state.
 					probe.SkippedAlreadyAcked()
 					return struct{}{}, nil
 				}
@@ -477,10 +486,16 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 		}
 		if !modified {
 			if !delivery.Retry(in.Generation, s.now()) {
-				// Already progressed past Pending (addon acked the removal).
-				// Signal is queued; no re-dispatch needed.
-				probe.AlreadyPending()
-				return RemoveOutput{Dispatched: false}, nil
+				// Delivery is past Pending but not terminal — the addon
+				// acked but hasn't completed. After a ContinueAsNew or
+				// crash the addon goroutine is gone and no completion
+				// signal will arrive. Reset to Pending for re-dispatch.
+				prev := delivery.State()
+				if err := delivery.ResetInProgress(s.now()); err != nil {
+					probe.Error(err)
+					return RemoveOutput{}, fmt.Errorf("reset in-progress delivery %s: %w", delivery.ID(), err)
+				}
+				probe.ResetInProgress(prev)
 			}
 		}
 		probe.Withdrawn()

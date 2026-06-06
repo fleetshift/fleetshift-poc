@@ -1179,6 +1179,62 @@ func (d *deliveryStateChecker) Remove(_ context.Context, _ domain.TargetInfo, de
 	return nil
 }
 
+// TestOrchestration_DeletePipeline_ResetsProgressingDeliveryForRemove seeds a
+// delivery in Progressing state (acked but not completed — as happens after a
+// crash) and verifies that RemoveFromTarget resets it to Pending and
+// re-dispatches rather than skipping it.
+func TestOrchestration_DeletePipeline_ResetsProgressingDeliveryForRemove(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        2,
+		ResolvedTargets:   []domain.TargetID{"t1"},
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.FulfillmentStateDeleting,
+	})
+
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
+	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		Generation: 2,
+		State:      domain.DeliveryStateProgressing,
+	}))
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	var observedState domain.DeliveryState
+	var removeCalled bool
+	delivery := &deliveryStateChecker{
+		store:  store,
+		events: events,
+		onRemove: func(deliveryID domain.DeliveryID) {
+			removeCalled = true
+			tx, err := store.BeginReadOnly(context.Background())
+			if err != nil {
+				t.Fatalf("read delivery in Remove: %v", err)
+			}
+			defer tx.Rollback()
+			d, err := tx.Deliveries().Get(context.Background(), deliveryID)
+			if err != nil {
+				t.Fatalf("get delivery in Remove: %v", err)
+			}
+			observedState = d.State()
+		},
+	}
+	wf := newTestWorkflow(store, delivery, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !removeCalled {
+		t.Fatal("Remove was never called — Progressing delivery was incorrectly skipped")
+	}
+	if observedState != domain.DeliveryStatePending {
+		t.Errorf("delivery state inside Remove = %q, want %q (should be reset from Progressing)", observedState, domain.DeliveryStatePending)
+	}
+}
+
 func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
@@ -2534,6 +2590,41 @@ func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.
 	dep := getFulfillment(t, store, "d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active (terminal delivery should be reset and re-dispatched)", dep.State())
+	}
+}
+
+// TestOrchestration_DeliverProgressingDelivery_ResetsAndRedispatches seeds a
+// delivery in Progressing state at the same generation (acked but not
+// completed — as happens after a crash) and verifies that DeliverToTarget
+// resets it to Pending and re-dispatches.
+func TestOrchestration_DeliverProgressingDelivery_ResetsAndRedispatches(t *testing.T) {
+	store, _ := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
+	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
+		Generation: 1,
+		State:      domain.DeliveryStateProgressing,
+	}))
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	dep := getFulfillment(t, store, "d1")
+	if dep.State() != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want active (progressing delivery should be reset and re-dispatched)", dep.State())
 	}
 }
 

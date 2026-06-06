@@ -176,6 +176,11 @@ type DeliverProbe interface {
 	// progressed past Pending, so no re-dispatch is needed.
 	SkippedAlreadyAcked()
 
+	// ResetInProgress is called when a non-terminal, non-pending
+	// delivery is reset to Pending for re-dispatch after a crash
+	// or ContinueAsNew.
+	ResetInProgress(previousState DeliveryState)
+
 	// Error is called when the activity encounters an error.
 	Error(err error)
 
@@ -199,6 +204,11 @@ type RemoveProbe interface {
 	// progressed past Pending (addon acked the removal) so no
 	// re-dispatch is needed.
 	AlreadyPending()
+
+	// ResetInProgress is called when a non-terminal, non-pending
+	// delivery is reset to Pending for re-dispatch after a crash
+	// or ContinueAsNew.
+	ResetInProgress(previousState DeliveryState)
 
 	// Error is called when the activity encounters an error.
 	Error(err error)
@@ -320,22 +330,24 @@ func (NoOpAcquireLockProbe) End()                  {}
 // NoOpDeliverProbe is a [DeliverProbe] that discards all events.
 type NoOpDeliverProbe struct{}
 
-func (NoOpDeliverProbe) NewDelivery()                {}
-func (NoOpDeliverProbe) Redispatched(Generation)     {}
-func (NoOpDeliverProbe) Retried()                    {}
-func (NoOpDeliverProbe) ResetForRetry(DeliveryState) {}
-func (NoOpDeliverProbe) SkippedAlreadyAcked()        {}
-func (NoOpDeliverProbe) Error(error)                 {}
-func (NoOpDeliverProbe) End()                        {}
+func (NoOpDeliverProbe) NewDelivery()                 {}
+func (NoOpDeliverProbe) Redispatched(Generation)      {}
+func (NoOpDeliverProbe) Retried()                     {}
+func (NoOpDeliverProbe) ResetForRetry(DeliveryState)  {}
+func (NoOpDeliverProbe) SkippedAlreadyAcked()         {}
+func (NoOpDeliverProbe) ResetInProgress(DeliveryState) {}
+func (NoOpDeliverProbe) Error(error)                  {}
+func (NoOpDeliverProbe) End()                         {}
 
 // NoOpRemoveProbe is a [RemoveProbe] that discards all events.
 type NoOpRemoveProbe struct{}
 
-func (NoOpRemoveProbe) TargetNotFound() {}
-func (NoOpRemoveProbe) Withdrawn()      {}
-func (NoOpRemoveProbe) AlreadyPending() {}
-func (NoOpRemoveProbe) Error(error)     {}
-func (NoOpRemoveProbe) End()            {}
+func (NoOpRemoveProbe) TargetNotFound()                {}
+func (NoOpRemoveProbe) Withdrawn()                     {}
+func (NoOpRemoveProbe) AlreadyPending()                {}
+func (NoOpRemoveProbe) ResetInProgress(DeliveryState)  {}
+func (NoOpRemoveProbe) Error(error)                    {}
+func (NoOpRemoveProbe) End()                           {}
 
 // NoOpPersistReconciliationProbe is a [PersistReconciliationProbe] that
 // discards all events.

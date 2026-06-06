@@ -381,6 +381,79 @@ func TestDelivery_Withdraw(t *testing.T) {
 	})
 }
 
+func TestDelivery_ResetInProgress(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	later := now.Add(time.Hour)
+
+	t.Run("resets in-progress delivery to pending", func(t *testing.T) {
+		for _, state := range []DeliveryState{
+			DeliveryStateAccepted,
+			DeliveryStateProgressing,
+		} {
+			t.Run(string(state), func(t *testing.T) {
+				d := DeliveryFromSnapshot(DeliverySnapshot{
+					ID:         "d1",
+					State:      state,
+					Generation: 5,
+					CreatedAt:  now,
+					UpdatedAt:  now,
+				})
+				if err := d.ResetInProgress(later); err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				if d.State() != DeliveryStatePending {
+					t.Errorf("State = %q, want %q", d.State(), DeliveryStatePending)
+				}
+				if d.UpdatedAt() != later {
+					t.Errorf("UpdatedAt = %v, want %v", d.UpdatedAt(), later)
+				}
+				if d.Generation() != 5 {
+					t.Errorf("Generation = %d, want 5 (unchanged)", d.Generation())
+				}
+			})
+		}
+	})
+
+	t.Run("rejects pending delivery", func(t *testing.T) {
+		d := DeliveryFromSnapshot(DeliverySnapshot{
+			State:     DeliveryStatePending,
+			UpdatedAt: now,
+		})
+		err := d.ResetInProgress(later)
+		if err == nil {
+			t.Fatal("expected error for pending state")
+		}
+		if !errors.Is(err, ErrIllegalStateTransition) {
+			t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+		}
+	})
+
+	t.Run("rejects terminal delivery", func(t *testing.T) {
+		for _, state := range []DeliveryState{
+			DeliveryStateDelivered,
+			DeliveryStateFailed,
+			DeliveryStateAuthFailed,
+		} {
+			t.Run(string(state), func(t *testing.T) {
+				d := DeliveryFromSnapshot(DeliverySnapshot{
+					State:     state,
+					UpdatedAt: now,
+				})
+				err := d.ResetInProgress(later)
+				if err == nil {
+					t.Fatal("expected error for terminal state")
+				}
+				if !errors.Is(err, ErrIllegalStateTransition) {
+					t.Errorf("error = %v, want ErrIllegalStateTransition", err)
+				}
+				if d.State() != state {
+					t.Errorf("State changed to %q, want %q (unchanged)", d.State(), state)
+				}
+			})
+		}
+	})
+}
+
 func TestDelivery_ResetForRetry(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	later := now.Add(time.Hour)

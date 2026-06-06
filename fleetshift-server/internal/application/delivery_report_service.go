@@ -282,9 +282,10 @@ func (s *DeliveryReportService) ListActiveDeliveries(ctx context.Context, target
 		}
 
 		ad := domain.ActiveDelivery{
-			Delivery: d,
-			Target:   t,
-			Auth:     f.Auth(),
+			Delivery:         d,
+			Target:           t,
+			Auth:             f.Auth(),
+			FulfillmentState: f.State(),
 		}
 		if ev := evidence[d.FulfillmentID()]; ev != nil {
 			ad.Attestation = domain.AssembleDeliverAttestation(*f, d.Manifests(), ev)
