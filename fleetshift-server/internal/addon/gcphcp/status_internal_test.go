@@ -426,6 +426,124 @@ func TestAllControllersAtGeneration(t *testing.T) {
 	}
 }
 
+func TestPollClusterReady_ProgressingThenReady(t *testing.T) {
+	withFastClusterPollTimers(t)
+
+	var clusterCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/clusters/c-123/status":
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"controller_status": []any{
+					map[string]any{"controller_name": "cls-version-resolution-controller", "observed_generation": float64(1)},
+					map[string]any{"controller_name": "cls-hypershift-client", "observed_generation": float64(1)},
+				},
+				"status": map[string]any{"phase": "Ready"},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+
+		case r.URL.Path == "/api/v1/clusters/c-123":
+			clusterCalls++
+			phase := "Progressing"
+			if clusterCalls >= 3 {
+				phase = "Ready"
+			}
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"generation": float64(1),
+				"status": map[string]any{
+					"phase":              phase,
+					"reason":             "AllControllersReady",
+					"observedGeneration": float64(1),
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+
+		default:
+			http.Error(w, "unexpected path", http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	clusterPollTimeout = 500 * time.Millisecond
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterReady(context.Background(), client, "c-123", noopProgress())
+	if err != nil {
+		t.Fatalf("PollClusterReady() error = %v", err)
+	}
+	if clusterCalls < 3 {
+		t.Fatalf("expected at least 3 cluster polls before Ready, got %d", clusterCalls)
+	}
+}
+
+func TestPollClusterReady_FailedReturnsImmediately(t *testing.T) {
+	var statusCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			statusCalls++
+			http.Error(w, "should not be called", http.StatusInternalServerError)
+
+		default:
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"generation": float64(1),
+				"status": map[string]any{
+					"phase":   "Failed",
+					"message": "quota exceeded",
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterReady(context.Background(), client, "c-123", noopProgress())
+	if err == nil {
+		t.Fatal("expected error for Failed phase")
+	}
+	if !strings.Contains(err.Error(), "quota exceeded") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if statusCalls != 0 {
+		t.Fatalf("expected 0 /status calls for Failed phase, got %d", statusCalls)
+	}
+}
+
+func TestPollClusterReady_StatusEndpointError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			http.Error(w, "internal error", http.StatusInternalServerError)
+
+		default:
+			if err := json.NewEncoder(w).Encode(map[string]any{
+				"generation": float64(1),
+				"status": map[string]any{
+					"phase":              "Ready",
+					"reason":             "AllControllersReady",
+					"observedGeneration": float64(1),
+				},
+			}); err != nil {
+				t.Errorf("encode response: %v", err)
+			}
+		}
+	}))
+	defer server.Close()
+
+	client := NewCLSClient(server.URL, "token", "email@example.com", nil)
+	err := PollClusterReady(context.Background(), client, "c-123", noopProgress())
+	if err == nil {
+		t.Fatal("expected error when /status endpoint fails")
+	}
+	if !strings.Contains(err.Error(), "get cluster status") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEmitClusterReadyTransition_EmitsProgressEvent(t *testing.T) {
 	obs := &testEventRecorder{}
 
