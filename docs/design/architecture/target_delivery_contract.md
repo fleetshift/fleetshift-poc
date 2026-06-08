@@ -118,25 +118,26 @@ It is possible the platform could eliminate the need for addon journaling due to
 
 **IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
-## Reporting: drift, state, and conditions
+## Reporting: drift, outputs, observations, and conditions
 
 After fulfilling, there is work to do to consider what's happened since. This is looking at current state to:
 
-1. Report back mostly-static results (e.g. computed IDs or URLs)
-2. Report back more dynamic conditions or events
-3. Detect drift from intent
+1. Report back **outputs** — stable generated values (e.g. computed IDs or URLs) that rarely change once produced
+2. Report back **observations** — point-in-time reports of what the observer sees about a resource, with history kept over time
+3. Report back **conditions** — structured health and progress signals, with a history of transition events kept over time
+4. Detect drift from intent
 
 None of these are strictly required. They are just very useful. Still, trivially simplistic addons may forego them.
 
 Detecting drift means detecting changes for objects still managed by the platform. Detecting drift is not necessarily required, but it is a common feature of management products. If we detect drift, we have to detect changes, somehow, on any resources still managed.
 
-Then, something has to know how to diff the state it sees against the platform intents.
+Then, something has to know how to diff the observations it has against the platform intents.
 
 For OCM, drift is simply reprocessing manifests periodically and querying against desired state. For fleetshift, we could consider the same. Give addons a way to query what should be present at their targets (needed for fresh start sync). They may cache that as needed.
 
 These should all be achievable, generally, by adding two more steps to the protocol above:
 
-1. Ask for what active fulfillments (those not creating, deleting, or terminal) it should watch for state (drift) and conditions.
+1. Ask for what active fulfillments (those not creating, deleting, or terminal) it should watch for observations (drift) and conditions.
   - This can be done in one or more ways: either by asking for active fulfillments directly, or by asking for what targets the addon is currently fulfilling.
 2. Watch the implied resources for changes.
   - How this is done is implementation dependent. A target may have native, efficient change detection. Or, it may just poll.

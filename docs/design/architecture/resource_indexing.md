@@ -2,7 +2,7 @@
 
 ## What this doc covers
 
-The fleet-wide inventory and observed-state indexing model:
+The fleet-wide inventory and observation indexing model:
 
 - inventory scope
 - what gets indexed
@@ -16,7 +16,7 @@ The fleet-wide inventory and observed-state indexing model:
 
 ## When to read this
 
-Read this when you need the model for fleet-wide search, drift detection, target observation, or how observed state becomes queryable platform inventory.
+Read this when you need the model for fleet-wide search, drift detection, target observation, or how observations become queryable platform inventory.
 
 ## What is intentionally elsewhere
 
@@ -33,7 +33,7 @@ Read this when you need the model for fleet-wide search, drift detection, target
 
 ## Overview
 
-The platform continuously projects observed state into a fleet-wide inventory and search system. Managed targets are the most common source of observations, but the model is broader than target-local search. Inventory can also represent managed resources, discovered resources, sub-resources, and side-effect resources associated with deliveries.
+The platform continuously projects observations into a fleet-wide inventory and search system. Managed targets are the most common source of observations, but the model is broader than target-local search. Inventory can also represent managed resources, discovered resources, sub-resources, and side-effect resources associated with deliveries.
 
 This enables cross-target discovery and aggregation such as:
 
@@ -55,9 +55,9 @@ For Kubernetes targets, an indexer agent watches the local Kubernetes API server
 
 ```text
 Indexer Agent -> watches local K8s API server
-             -> batches deltas to Fleetlet
-             -> Platform Index Service
-             -> Index Store
+              -> batches deltas to Fleetlet
+              -> Platform Index Service
+              -> Index Store
 ```
 
 The indexer agent is itself deployed through the normal delivery pipeline. It is not built into the fleetlet. This preserves zero infrastructure coupling for the fleetlet while still letting the platform manage indexing as ordinary deployment infrastructure.
@@ -87,12 +87,13 @@ When a schema changes, the platform re-delivers the affected indexer-agent confi
 The shared inventory model is intentionally small:
 
 - **Identity**: resource type, name, and source association
-- **State**: opaque, addon-defined runtime or observed properties
-- **Conditions**: structured, platform-queryable health or lifecycle signals
+- **Outputs**: stable generated values (e.g. api_url, provider_id) produced once and rarely changed. Not historical. Lives on the inventory item because a single Fulfillment can target many objects, each with its own outputs.
+- **Observed**: opaque, addon-defined. The latest observation — runtime properties as seen by the observer. Historical observations are kept over time.
+- **Conditions**: structured, platform-queryable health and progress signals. A history of condition transition events is kept over time.
 
-This gives the platform a uniform query surface without requiring the platform to understand every domain-specific state payload.
+This gives the platform a uniform query surface without requiring the platform to understand every domain-specific observation payload.
 
-Condition transitions can also be retained historically as condition events. This document focuses on the current queryable projection and search surface; the fuller managed-resource discussion of condition-event history lives in [../managed_resources.md](../managed_resources.md).
+Condition transitions are retained historically as condition events. This document focuses on the current queryable projection and search surface; the fuller managed-resource discussion of observations and condition-event history lives in [../managed_resources.md](../managed_resources.md).
 
 ## What gets indexed
 
@@ -144,10 +145,10 @@ Initial syncs stay manageable as well. After an agent restart, a full resource d
 
 ## Relationship to fulfillment intent
 
-The platform knows what it intended through fulfillments and their delivery records. Inventory knows what is actually observed, including resources that may not map 1:1 to delivered manifests. Joining those two views enables:
+The platform knows what it intended through fulfillments and their delivery records. Inventory holds observations of what actually exists, including resources that may not map 1:1 to delivered manifests. Joining those two views enables:
 
 - intent-aware search (which fulfillment delivered what to where)
-- drift detection between delivered manifests and observed state
+- drift detection between delivered manifests and observations
 - richer status views for user-facing concepts (deployments, managed resources)
 - impact analysis for placement changes
 
@@ -176,4 +177,4 @@ POST /search
 
 Responses include inventory identity, resource metadata, and any requested aggregation summaries. Workspace scoping is still enforced by the platform, so users only see resources they are authorized to access.
 
-For full resource details, the platform falls back to the Kubernetes API proxy or addon-specific APIs. The inventory/search projection is for fast fleet-wide discovery and observed-state queries, not full object fidelity.
+For full resource details, the platform falls back to the Kubernetes API proxy or addon-specific APIs. The inventory/search projection is for fast fleet-wide discovery and observation queries, not full object fidelity.

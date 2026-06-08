@@ -5,7 +5,7 @@ This document is the entry point for the architecture. It is intentionally short
 ## What this doc covers
 
 - What the management plane is and is not
-- The core deployment abstraction
+- The core fulfillment abstraction
 - The delivery-authorization model
 - The major moving parts and how they relate
 - Where to read next for detailed design work
@@ -20,10 +20,10 @@ The management plane is a URL-addressable service, not a cluster. It provides:
 
 Zero infrastructure coupling remains a core property: no addon or fleetlet inherently depends on Kubernetes or any other specific infrastructure just to integrate with the platform. An addon may be a Kubernetes operator. It may be a standalone application. Kubernetes is the primary built-in target type, but the system is target-agnostic. Any endpoint that satisfies the delivery contract is a valid target.
 
-At the center of the model is a three-axis deployment abstraction:
+At the center of the model is a three-axis fulfillment abstraction:
 
 ```text
-Deployment = ManifestStrategy × PlacementStrategy × RolloutStrategy
+Fulfillment = ManifestStrategy × PlacementStrategy × RolloutStrategy
 ```
 
 - `ManifestStrategy`: what to deploy
@@ -32,7 +32,7 @@ Deployment = ManifestStrategy × PlacementStrategy × RolloutStrategy
 
 These are the orchestration axes. They describe how the platform computes and executes delivery. They are intentionally separate from delivery authorization.
 
-Internally, the orchestration axes live on the **Fulfillment** kernel primitive — a separate aggregate from the user-facing Deployment. A Deployment holds a `FulfillmentID` reference; orchestration operates on Fulfillment directly. This separation enables multiple user-facing concepts (deployments, managed resources, campaigns) to drive the same orchestration pipeline. See [managed_resources.md](managed_resources.md#architectural-layering) for the layering model.
+Orchestration operates on Fulfillment directly. This separation enables multiple user-facing concepts (deployments, managed resources, campaigns) to drive the same orchestration pipeline. See [managed_resources.md](managed_resources.md#architectural-layering) for the layering model.
 
 Delivery authorization is a first-class, cross-cutting concern:
 
@@ -117,7 +117,7 @@ The organizational model and permission boundary live in [docs/design/architectu
 
 ### Indexing and search
 
-The platform continuously indexes observed state from managed targets into a fleet-wide search index. The platform owns the indexing infrastructure; target types define what is indexable through schemas and agents.
+The platform continuously indexes observations from managed targets into a fleet-wide search index. The platform owns the indexing infrastructure; target types define what is indexable through schemas and agents.
 
 The indexing design lives in [docs/design/architecture/resource_indexing.md](architecture/resource_indexing.md).
 
