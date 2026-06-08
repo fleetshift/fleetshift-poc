@@ -12,7 +12,8 @@
   }
 
   &__menu {
-    overflow-y: auto;
+    // PF has a overflow hidden setup, we need important to override that
+    overflow-y: scroll !important;
 
     a {
       color: inherit;

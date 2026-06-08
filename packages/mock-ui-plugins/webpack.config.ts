@@ -93,6 +93,12 @@ const DayOnePlugin = new DynamicRemotePlugin({
         component: { $codeRef: "DayOnePage.default" },
         description: "Initial setup and onboarding",
         keywords: ["setup", "onboarding", "welcome"],
+        extensionPoints: {
+          steps: {
+            description: "Setup steps shown as cards on the Day One page",
+            type: "fleetshift.setup",
+          },
+        },
       },
     },
     {
@@ -100,6 +106,8 @@ const DayOnePlugin = new DynamicRemotePlugin({
       properties: {
         id: "auth-setup",
         label: "Authentication",
+        description:
+          "Configure authentication provider and backing store for your management engine.",
         path: "auth",
         component: { $codeRef: "InitialSetupForm.default" },
         requires: [],
@@ -111,7 +119,9 @@ const DayOnePlugin = new DynamicRemotePlugin({
       properties: {
         id: "cluster-deploy",
         label: "Deploy Cluster",
-        path: "deploy/*",
+        description:
+          "Select a cluster provider and deploy your first managed cluster.",
+        path: "deploy",
         component: { $codeRef: "SetupClusterDeploy.default" },
         requires: ["signing-key-enrollment"],
         requiresAuth: true,
@@ -203,6 +213,8 @@ const SigningPlugin = new DynamicRemotePlugin({
       properties: {
         id: "signing-key-enrollment",
         label: "Signing Key Enrollment",
+        description:
+          "Enroll signing keys for deployment verification and supply chain security.",
         path: "enroll",
         component: { $codeRef: "SigningKeyEnrollment.default" },
         requires: ["auth-setup"],
@@ -251,16 +263,6 @@ const RoutingPlugin = new DynamicRemotePlugin({
 const GcpHcpPlugin = new DynamicRemotePlugin({
   extensions: [
     {
-      type: "fleetshift.module",
-      properties: {
-        id: "gcphcp-clusters",
-        label: "GCP HCP Clusters",
-        component: { $codeRef: "GcpHcpClustersModule.default" },
-        description: "Manage GCP Hosted Control Plane clusters",
-        keywords: ["gcp", "google cloud", "hosted control plane", "hcp"],
-      },
-    },
-    {
       type: "fleetshift.cluster-provider",
       properties: {
         id: "gcphcp",
@@ -291,9 +293,6 @@ const GcpHcpPlugin = new DynamicRemotePlugin({
     name: "gcphcp-plugin",
     version: "1.0.0",
     exposedModules: {
-      GcpHcpClustersModule: p(
-        "./src/plugins/gcphcp-plugin/GcpHcpClustersModule.tsx",
-      ),
       GcpHcpProviderCard: p(
         "./src/plugins/gcphcp-plugin/GcpHcpProviderCard.tsx",
       ),

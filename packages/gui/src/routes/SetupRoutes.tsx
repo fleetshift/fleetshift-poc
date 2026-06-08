@@ -89,7 +89,7 @@ const SetupRoutes = () => {
         {nonAuthRoutes.map((ext) => (
           <Route
             key={ext.properties.id}
-            path={ext.properties.path}
+            path={`${ext.properties.path}/*`}
             element={
               <SetupStep
                 ext={ext}
@@ -111,7 +111,7 @@ const SetupRoutes = () => {
           {authRoutes.map((ext) => (
             <Route
               key={ext.properties.id}
-              path={ext.properties.path}
+              path={`${ext.properties.path}/*`}
               element={
                 <SetupStep
                   ext={ext}

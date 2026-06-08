@@ -1,75 +1,48 @@
-import { type ReactNode, lazy, Suspense, useState } from "react";
+import { type ReactNode, useMemo } from "react";
+import type { ComponentType } from "react";
 import { Routes, Route, useNavigate } from "react-router-dom";
+import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
+import type { CodeRef, Extension } from "@openshift/dynamic-plugin-sdk";
 import { PluginLink } from "@fleetshift/common";
-import CompletionModal from "../kind-plugin/CompletionModal";
 import {
   Breadcrumb,
   BreadcrumbItem,
-  Title,
+  Bullseye,
   Card,
   CardHeader,
   CardTitle,
   CardBody,
+  Content,
   Gallery,
   Label,
+  Spinner,
+  Stack,
+  StackItem,
+  Title,
 } from "@patternfly/react-core";
 
-const InitialSetupForm = lazy(() => import("./InitialSetupForm"));
-const WelcomePage = lazy(() => import("./WelcomePage"));
-const CreateClusterWizard = lazy(() => import("../kind-plugin/CreateClusterWizard"));
-
-interface ComponentCard {
-  title: string;
-  slug: string;
-  description: string;
-  status: "planned" | "in-progress" | "done";
-  element?: ReactNode;
+interface SetupComponentProps {
+  onSetupNext?: () => void;
+  onSetupSkip?: () => void;
 }
 
-const components: ComponentCard[] = [
+type SetupExtension = Extension<
+  "fleetshift.setup",
   {
-    title: "Initial Setup",
-    slug: "setup",
-    description:
-      "Day-one configuration form: backing store, auth provider, signing keys, and claim mapping.",
-    status: "in-progress",
-    element: (
-      <Suspense>
-        <InitialSetupForm />
-      </Suspense>
-    ),
-  },
-  {
-    title: "Welcome",
-    slug: "welcome",
-    description:
-      "Post-setup welcome screen: workload selection and first cluster creation.",
-    status: "in-progress",
-    element: (
-      <Suspense>
-        <WelcomePage />
-      </Suspense>
-    ),
-  },
-  {
-    title: "Create Cluster",
-    slug: "create-cluster",
-    description:
-      "Wizard to provision a new kind cluster via the deployment API.",
-    status: "in-progress",
-    element: (
-      <Suspense>
-        <CreateClusterWizard />
-      </Suspense>
-    ),
-  },
-];
+    id: string;
+    label: string;
+    description?: string;
+    path: string;
+    component: CodeRef<ComponentType<SetupComponentProps>>;
+    requires: string[];
+    requiresAuth: boolean;
+    priority?: number;
+  }
+>;
 
-const statusColor = {
-  planned: "blue" as const,
-  "in-progress": "orange" as const,
-  done: "green" as const,
-};
+function isSetupExtension(e: Extension): e is SetupExtension {
+  return e.type === "fleetshift.setup";
+}
 
 function SubPage({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -94,91 +67,112 @@ function SubPage({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function Placeholder({ title }: { title: string }) {
-  return (
-    <div>
-      <Title headingLevel="h1">{title}</Title>
-      <p>Component not yet implemented.</p>
-    </div>
-  );
-}
-
-function ComponentGallery() {
+function SetupGallery() {
+  const [extensions, loaded] = useResolvedExtensions(isSetupExtension);
   const navigate = useNavigate();
-  const [completionOpen, setCompletionOpen] = useState(false);
+
+  const sorted = useMemo(() => {
+    const cpy = [...extensions];
+    cpy.sort((a, b) => {
+      const pa = a.properties.priority ?? 100;
+      const pb = b.properties.priority ?? 100;
+      if (pa !== pb) return pa - pb;
+      return a.properties.label.localeCompare(b.properties.label);
+    });
+    return cpy;
+  }, [extensions]);
+
+  if (!loaded) {
+    return (
+      <Bullseye>
+        <Spinner size="xl" />
+      </Bullseye>
+    );
+  }
 
   return (
-    <div>
-      <Title
-        headingLevel="h1"
-        style={{ marginBottom: "var(--pf-t--global--spacer--lg)" }}
-      >
-        Day One
-      </Title>
-      <Gallery hasGutter minWidths={{ default: "300px" }}>
-        {components.map((c) => (
-          <Card
-            key={c.slug}
-            isFullHeight
-            isClickable
-            isSelectable
-            onClick={() => navigate(c.slug)}
-            style={{ cursor: "pointer" }}
-          >
-            <CardHeader
-              actions={{
-                actions: (
-                  <Label color={statusColor[c.status]}>{c.status}</Label>
-                ),
-              }}
-            >
-              <CardTitle>{c.title}</CardTitle>
-            </CardHeader>
-            <CardBody>{c.description}</CardBody>
-          </Card>
-        ))}
-        <Card
-          isFullHeight
-          isClickable
-          isSelectable
-          onClick={() => setCompletionOpen(true)}
-          style={{ cursor: "pointer" }}
-        >
-          <CardHeader
-            actions={{
-              actions: <Label color="orange">in-progress</Label>,
-            }}
-          >
-            <CardTitle>Completion</CardTitle>
-          </CardHeader>
-          <CardBody>
-            Success modal shown after the first cluster is created.
-          </CardBody>
-        </Card>
-      </Gallery>
-      <CompletionModal
-        isOpen={completionOpen}
-        onClose={() => setCompletionOpen(false)}
-      />
-    </div>
+    <Stack hasGutter>
+      <StackItem>
+        <Title headingLevel="h1">Day One</Title>
+        <Content component="p">
+          Complete the setup steps below to get your management engine running.
+        </Content>
+      </StackItem>
+      <StackItem>
+        <Gallery hasGutter minWidths={{ default: "300px" }}>
+          {sorted.map((ext) => {
+            const { id, label, description, requires, requiresAuth, path } =
+              ext.properties;
+            return (
+              <Card
+                key={id}
+                isFullHeight
+                isClickable
+                isSelectable
+                onClick={() => navigate(path)}
+                style={{ cursor: "pointer" }}
+              >
+                <CardHeader
+                  actions={{
+                    actions: (
+                      <>
+                        {requiresAuth && (
+                          <Label color="blue" isCompact>
+                            requires auth
+                          </Label>
+                        )}
+                        {requires.length > 0 && (
+                          <Label color="orange" isCompact>
+                            {requires.length} dep
+                            {requires.length > 1 ? "s" : ""}
+                          </Label>
+                        )}
+                      </>
+                    ),
+                  }}
+                >
+                  <CardTitle>{label}</CardTitle>
+                </CardHeader>
+                <CardBody>{description ?? `Navigate to ${label}`}</CardBody>
+              </Card>
+            );
+          })}
+        </Gallery>
+      </StackItem>
+    </Stack>
   );
 }
 
 export default function DayOnePage() {
+  const [extensions, loaded] = useResolvedExtensions(isSetupExtension);
+  const navigate = useNavigate();
+
+  const handleSetupNext = () => navigate("");
+
+  const routesSorted = useMemo(() => {
+    const cpy = [...extensions];
+    cpy.sort((a, b) => b.properties.path.length - a.properties.path.length);
+    return cpy;
+  }, [extensions]);
+
   return (
     <Routes>
-      <Route index element={<ComponentGallery />} />
-      {components.map((c) => (
-        <Route
-          key={c.slug}
-          path={c.slug}
-          element={
-            <SubPage title={c.title}>
-              {c.element ?? <Placeholder title={c.title} />}
-            </SubPage>
-          }
-        />
-      ))}
+      <Route index element={<SetupGallery />} />
+      {loaded &&
+        routesSorted.map((ext) => {
+          const Component = ext.properties.component;
+          return (
+            <Route
+              key={ext.properties.id}
+              path={`${ext.properties.path}/*`}
+              element={
+                <SubPage title={ext.properties.label}>
+                  <Component onSetupNext={handleSetupNext} />
+                </SubPage>
+              }
+            />
+          );
+        })}
     </Routes>
   );
 }

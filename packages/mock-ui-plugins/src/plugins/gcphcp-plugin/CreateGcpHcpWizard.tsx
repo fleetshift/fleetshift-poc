@@ -61,7 +61,7 @@ export default function CreateGcpHcpWizard({
   onSetupNext,
 }: CreateGcpHcpWizardProps) {
   const navigate = useNavigate();
-  const clusters = usePluginNavigate("gcphcp-plugin", "GcpHcpClustersModule");
+  const clusters = usePluginNavigate("core-plugin", "ClustersModule");
   const [formData, setFormData] = useState<GcpHcpFormData>(initialFormData);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);

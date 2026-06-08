@@ -10,6 +10,7 @@ import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
 import { useAppConfig } from "../../contexts/AppConfigContext";
 import { isModuleExtension } from "../../extensions/isModuleExtension";
 import { isClusterProviderExtension } from "../../extensions/isClusterProviderExtension";
+import { isSetupExtension } from "../../extensions/isSetupExtension";
 import type { SearchResultProps } from "../../extensions/searchTypes";
 import {
   createSearchDB,
@@ -112,6 +113,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const [cpExtensions, cpLoaded] = useResolvedExtensions(
     isClusterProviderExtension,
   );
+  const [setupExtensions, setupLoaded] =
+    useResolvedExtensions(isSetupExtension);
   const dbRef = useRef<SearchDB | null>(null);
   const componentMapRef = useRef(
     new Map<string, React.ComponentType<SearchResultProps>>(),
@@ -121,7 +124,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const builtRef = useRef(false);
 
   useEffect(() => {
-    if (!modulesLoaded || !cpLoaded || builtRef.current) return;
+    if (!modulesLoaded || !cpLoaded || !setupLoaded || builtRef.current) return;
     builtRef.current = true;
 
     const db = createSearchDB();
@@ -138,8 +141,10 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     }
 
     // Nav pages — skip any that have a module extension (those get richer entries below)
+    // Also skip detail pages whose path contains route params (e.g. ":id")
     for (const page of pluginPages) {
       if (modulePageIds.has(page.id)) continue;
+      if (page.path.includes(":")) continue;
 
       const navId = `nav-${page.id}`;
       const pathname = `/${page.path}`;
@@ -175,8 +180,14 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
     // Module extensions: feature entries with description, keywords, extensionPoints
     for (const ext of moduleExtensions) {
-      const { id, label, description, keywords, extensionPoints, searchResult } =
-        ext.properties;
+      const {
+        id,
+        label,
+        description,
+        keywords,
+        extensionPoints,
+        searchResult,
+      } = ext.properties;
 
       const page = pluginPages.find((p) => p.title === label);
       if (!page) continue;
@@ -219,17 +230,12 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
     // Scan cluster-provider extensions: link to parent via type
     for (const ext of cpExtensions) {
-      const {
-        id,
-        label,
-        description,
-        keywords,
-        to,
-        searchResult,
-        searchIcon,
-      } = ext.properties;
+      const { id, label, description, keywords, to, searchResult, searchIcon } =
+        ext.properties;
 
-      const parentFeatureId = typeToFeatureId.get("fleetshift.cluster-provider");
+      const parentFeatureId = typeToFeatureId.get(
+        "fleetshift.cluster-provider",
+      );
       const parent = parentFeatureId
         ? featureParentRef.current.get(parentFeatureId)
         : undefined;
@@ -262,7 +268,45 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         componentMapRef.current.set(entryId, searchResult);
       }
     }
-  }, [modulesLoaded, cpLoaded, moduleExtensions, cpExtensions, pluginPages]);
+
+    // Scan setup extensions: link to parent via type
+    for (const ext of setupExtensions) {
+      const { id, label, description, path } = ext.properties;
+
+      const parentFeatureId = typeToFeatureId.get("fleetshift.setup");
+      const parent = parentFeatureId
+        ? featureParentRef.current.get(parentFeatureId)
+        : undefined;
+
+      let resolvedPathname = "";
+      if (parent) {
+        const parts = [parent.pathname, path].filter(Boolean);
+        resolvedPathname = parts.join("/").replace(/\/+/g, "/");
+      }
+
+      const entryId = `ext-${id}`;
+
+      insertEntry(db, {
+        id: entryId,
+        title: label,
+        description: description ?? `Navigate to ${label}`,
+        category: parent?.category ?? "nav",
+        pathname: resolvedPathname,
+        icon: "CogIcon",
+        status: "",
+        meta: [label, id].join(" "),
+        feature: parentFeatureId,
+      });
+    }
+  }, [
+    modulesLoaded,
+    cpLoaded,
+    setupLoaded,
+    moduleExtensions,
+    cpExtensions,
+    setupExtensions,
+    pluginPages,
+  ]);
 
   const query = useCallback(async (term: string): Promise<GroupedResults> => {
     if (!dbRef.current) return {};

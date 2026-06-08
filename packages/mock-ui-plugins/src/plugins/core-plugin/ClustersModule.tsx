@@ -16,7 +16,7 @@ export default function ClustersModule() {
     <Suspense fallback={<Loading />}>
       <Routes>
         <Route index element={<ClustersPage />} />
-        <Route path=":deploymentId" element={<ClusterDetailPage />} />
+        <Route path=":clusterId" element={<ClusterDetailPage />} />
       </Routes>
     </Suspense>
   );

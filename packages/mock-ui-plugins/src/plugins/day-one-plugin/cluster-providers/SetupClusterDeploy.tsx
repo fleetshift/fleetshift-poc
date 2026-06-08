@@ -96,7 +96,11 @@ function ProviderGallery({ onSetupSkip }: ProviderGalleryProps) {
                   className="day-one-cluster-provider-gallery-item"
                   key={ext.properties.id}
                 >
-                  <CardComponent onSelect={() => navigate(ext.properties.id)} />
+                  <CardComponent
+                    onSelect={() =>
+                      navigate(ext.properties.id, { relative: "path" })
+                    }
+                  />
                 </GalleryItem>
               );
             })}

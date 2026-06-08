@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import {
+  Divider,
   Menu,
   MenuContent,
   MenuGroup,
@@ -174,15 +175,15 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   }, [isOpen, closeMenu]);
 
   useEffect(() => {
-    const handleResize = () => {
+    const recalc = () => {
       if (!menuRef.current) return;
-      const { height: bodyHeight } = document.body.getBoundingClientRect();
       const { top } = menuRef.current.getBoundingClientRect();
-      menuRef.current.style.maxHeight = `${bodyHeight - top - 4}px`;
+      if (top === 0) return;
+      menuRef.current.style.maxHeight = `${window.innerHeight - top - 4}px`;
     };
-    window.addEventListener("resize", handleResize);
-    handleResize();
-    return () => window.removeEventListener("resize", handleResize);
+    window.addEventListener("resize", recalc);
+    requestAnimationFrame(recalc);
+    return () => window.removeEventListener("resize", recalc);
   }, [isOpen, total]);
 
   const renderItem = (item: SearchResultItem) => {
@@ -237,7 +238,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
     <Menu ref={menuRef} className="fs-search__menu">
       <MenuContent>
         <MenuList>
-          {categoryOrder(results).map((cat) => {
+          {categoryOrder(results).map((cat, idx) => {
             const items = results[cat];
             if (!items || items.length === 0) return null;
 
@@ -271,33 +272,39 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
                 orphanChildren.push(...children);
               }
             }
-
+            const isLast = categoryOrder.length - 1 === idx;
             return (
-              <MenuGroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
-                {parents.map((parent) => {
-                  const featureId = toFeatureId(parent.id);
-                  const children = childrenByFeature.get(featureId) ?? [];
-                  return (
-                    <div key={parent.id} className="fs-search__tree-group">
-                      {renderItem(parent)}
-                      {children.length > 0 && (
-                        <div className="fs-search__tree-children" role="group">
-                          {children.map((child, idx) => (
-                            <div
-                              key={child.id}
-                              className={`fs-search__tree-child${idx === children.length - 1 ? " fs-search__tree-child--last" : ""}`}
-                            >
-                              {renderItem(child)}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-                {standalone.map((item) => renderItem(item))}
-                {orphanChildren.map((item) => renderItem(item))}
-              </MenuGroup>
+              <>
+                {!isLast ? <Divider /> : null}
+                <MenuGroup key={cat} label={CATEGORY_LABELS[cat] ?? cat}>
+                  {parents.map((parent) => {
+                    const featureId = toFeatureId(parent.id);
+                    const children = childrenByFeature.get(featureId) ?? [];
+                    return (
+                      <div key={parent.id} className="fs-search__tree-group">
+                        {renderItem(parent)}
+                        {children.length > 0 && (
+                          <div
+                            className="fs-search__tree-children"
+                            role="group"
+                          >
+                            {children.map((child, idx) => (
+                              <div
+                                key={child.id}
+                                className={`fs-search__tree-child${idx === children.length - 1 ? " fs-search__tree-child--last" : ""}`}
+                              >
+                                {renderItem(child)}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                  {standalone.map((item) => renderItem(item))}
+                  {orphanChildren.map((item) => renderItem(item))}
+                </MenuGroup>
+              </>
             );
           })}
           {total === 0 && searchValue && (

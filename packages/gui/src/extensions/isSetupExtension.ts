@@ -11,6 +11,7 @@ export type SetupExtension = Extension<
   {
     id: string;
     label: string;
+    description?: string;
     path: string;
     component: CodeRef<ComponentType<SetupComponentProps>>;
     requires: string[];

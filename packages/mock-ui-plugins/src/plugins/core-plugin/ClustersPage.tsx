@@ -8,6 +8,10 @@ import {
   EmptyStateBody,
   EmptyStateFooter,
   Label,
+  Modal,
+  ModalBody,
+  ModalFooter,
+  ModalHeader,
   Pagination,
   Stack,
   StackItem,
@@ -37,13 +41,16 @@ import { DataViewToolbar } from "@patternfly/react-data-view/dist/dynamic/DataVi
 import { DataViewFilters } from "@patternfly/react-data-view/dist/dynamic/DataViewFilters";
 import { DataViewTextFilter } from "@patternfly/react-data-view/dist/dynamic/DataViewTextFilter";
 
-import { listDeployments, deleteDeployment } from "../management-plugin/api";
 import {
-  STATE_LABELS,
-  toClusterRow,
+  listGcpHcpClusters,
+  deleteGcpHcpCluster,
+  extractClusterId,
+} from "../gcphcp-plugin/api";
+import {
+  stateLabel,
   formatTime,
-  type ClusterRow,
-} from "./clusterUtils";
+  type GcpHcpClusterRow,
+} from "../gcphcp-plugin/gcpHcpUtils";
 import ClusterSummaryCards from "./ClusterSummaryCards";
 
 interface ClusterFilters {
@@ -52,9 +59,9 @@ interface ClusterFilters {
 
 const columns: DataViewTh[] = [
   "Name",
-  "Type",
   "Status",
-  "Nodes",
+  "Version",
+  "Node Pools",
   "Created",
   "",
 ];
@@ -66,31 +73,34 @@ const PER_PAGE_OPTIONS = [
 ];
 
 export default function ClustersPage() {
-  const [rows, setRows] = useState<ClusterRow[]>([]);
+  const [rows, setRows] = useState<GcpHcpClusterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   const { filters, onSetFilters, clearAllFilters } =
     useDataViewFilters<ClusterFilters>({ initialFilters: { name: "" } });
   const pagination = useDataViewPagination({ perPage: 10 });
   const { page, perPage } = pagination;
 
-  const fetchClusters = useCallback(async () => {
-    setLoading(true);
+  const fetchClusters = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true);
     try {
-      const resp = await listDeployments();
-      const clusterDeps = (resp.deployments ?? []).filter((d) =>
-        d.manifestStrategy?.manifests?.some(
-          (m) => m.resourceType === "api.kind.cluster",
-        ),
+      const clusters = await listGcpHcpClusters();
+      setRows(
+        clusters.map((c) => ({
+          cluster: c,
+          id: extractClusterId(c.name),
+          nodePoolCount: c.spec.nodepools?.length ?? 0,
+        })),
       );
-      setRows(clusterDeps.map(toClusterRow));
       setError(null);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load clusters");
+      if (!silent)
+        setError(e instanceof Error ? e.message : "Failed to load clusters");
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, []);
 
@@ -98,20 +108,34 @@ export default function ClustersPage() {
     fetchClusters();
   }, [fetchClusters]);
 
+  const hasTransient = rows.some(
+    (r) =>
+      r.cluster.state === "CREATING" ||
+      r.cluster.state === "DELETING" ||
+      r.cluster.reconciling,
+  );
+  useEffect(() => {
+    if (!hasTransient) return;
+    const id = setInterval(() => fetchClusters(true), 5000);
+    return () => clearInterval(id);
+  }, [hasTransient, fetchClusters]);
+
   const filtered = useMemo(
     () =>
       rows.filter(
         (r) =>
           !filters.name ||
-          r.clusterName.toLowerCase().includes(filters.name.toLowerCase()),
+          r.id.toLowerCase().includes(filters.name.toLowerCase()),
       ),
     [rows, filters],
   );
 
-  const handleDelete = async (name: string) => {
-    setDeleting(name);
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(deleteTarget);
+    setDeleteTarget(null);
     try {
-      await deleteDeployment(name);
+      await deleteGcpHcpCluster(deleteTarget);
       await fetchClusters();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -125,48 +149,39 @@ export default function ClustersPage() {
       filtered
         .slice((page - 1) * perPage, (page - 1) * perPage + perPage)
         .map((r) => {
-          const depName = r.deployment.name.replace(/^deployments\//, "");
-          const stateLabel =
-            STATE_LABELS[r.deployment.state] ?? STATE_LABELS.STATE_UNSPECIFIED;
-          const isDeleting = deleting === depName;
-
+          const sl = stateLabel(r.cluster.state);
+          const isDeleting = deleting === r.id;
           return [
             {
               cell: (
                 <PluginLink
                   scope="core-plugin"
                   module="ClustersModule"
-                  to={depName}
+                  to={r.id}
                 >
-                  <strong>{r.clusterName}</strong>
+                  <strong>{r.id}</strong>
                 </PluginLink>
               ),
             },
             {
               cell: (
-                <Label color="blue" isCompact>
-                  Kind
+                <Label color={sl.color} isCompact>
+                  {sl.text}
+                  {r.cluster.reconciling ? " (reconciling)" : ""}
                 </Label>
               ),
             },
-            {
-              cell: (
-                <Label color={stateLabel.color} isCompact>
-                  {stateLabel.text}
-                  {r.deployment.reconciling ? " (reconciling)" : ""}
-                </Label>
-              ),
-            },
-            r.nodeCount,
-            formatTime(r.deployment.createTime),
+            r.cluster.spec.releaseVersion || "—",
+            r.nodePoolCount,
+            formatTime(r.cluster.createTime),
             {
               cell:
-                r.deployment.state !== "STATE_DELETING" ? (
+                r.cluster.state !== "DELETING" ? (
                   <ActionsColumn
                     items={[
                       {
-                        title: "Delete",
-                        onClick: () => handleDelete(depName),
+                        title: isDeleting ? "Deleting..." : "Delete",
+                        onClick: () => setDeleteTarget(r.id),
                         isDisabled: isDeleting,
                       },
                     ]}
@@ -237,7 +252,7 @@ export default function ClustersPage() {
             <EmptyStateBody>{error}</EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
-                <Button variant="primary" onClick={fetchClusters}>
+                <Button variant="primary" onClick={() => fetchClusters()}>
                   Try again
                 </Button>
               </EmptyStateActions>
@@ -332,6 +347,26 @@ export default function ClustersPage() {
           />
         </DataView>
       </StackItem>
+
+      <Modal
+        isOpen={deleteTarget !== null}
+        onClose={() => setDeleteTarget(null)}
+        variant="small"
+      >
+        <ModalHeader
+          title="Delete cluster"
+          description={`Are you sure you want to delete "${deleteTarget}"? This will terminate the provisioned cluster.`}
+        />
+        <ModalBody />
+        <ModalFooter>
+          <Button variant="danger" onClick={handleDelete}>
+            Delete
+          </Button>
+          <Button variant="link" onClick={() => setDeleteTarget(null)}>
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
     </Stack>
   );
 }
