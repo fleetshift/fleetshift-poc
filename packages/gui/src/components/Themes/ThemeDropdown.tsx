@@ -16,7 +16,15 @@ type Theme = "default" | "felt";
 type ColorScheme = "system" | "light" | "dark";
 type ContrastMode = "system" | "default" | "high-contrast" | "glass";
 
-const validThemes: Theme[] = ["default", "felt"];
+const validThemes: string[] = [
+  "default",
+  "felt",
+  "system",
+  "dark",
+  "light",
+  "glass",
+  "high-contrast",
+];
 
 const STORAGE_KEYS = {
   theme: "fleetshift_theme",
