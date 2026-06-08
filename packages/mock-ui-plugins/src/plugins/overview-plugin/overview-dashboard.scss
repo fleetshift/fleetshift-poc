@@ -1,0 +1,22 @@
+// ---------- Resize handles: bottom only, show on hover ----------
+.react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.15s ease;
+  background-image: none !important;
+
+  svg {
+    color: var(--pf-t--global--text--color--subtle);
+  }
+}
+
+.react-resizable-handle-n,
+.react-resizable-handle-ne,
+.react-resizable-handle-nw,
+.react-resizable-handle-e,
+.react-resizable-handle-w {
+  display: none !important;
+}
+
+.react-resizable:hover > .react-resizable-handle {
+  opacity: 1;
+}

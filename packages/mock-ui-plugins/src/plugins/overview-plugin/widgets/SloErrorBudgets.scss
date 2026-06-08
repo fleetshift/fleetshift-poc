@@ -1,0 +1,51 @@
+.ov-slo {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: flex-start;
+  gap: var(--pf-t--global--spacer--xl);
+
+  &__item {
+    text-align: center;
+  }
+
+  &__chart {
+    position: relative;
+    width: 175px;
+    height: 175px;
+    margin: 0 auto;
+  }
+
+  &__overlay {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    text-align: center;
+    pointer-events: none;
+  }
+
+  &__value {
+    display: block;
+    font-size: var(--pf-t--global--font--size--heading--h1);
+    font-weight: var(--pf-t--global--font--weight--heading--bold);
+    color: var(--pf-t--global--text--color--regular);
+    line-height: 1;
+  }
+
+  &__subtitle {
+    display: block;
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+  }
+
+  &__label {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+    margin-top: var(--pf-t--global--spacer--xs);
+  }
+
+  svg text {
+    fill: var(--pf-t--global--text--color--regular) !important;
+  }
+}

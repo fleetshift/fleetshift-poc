@@ -6,6 +6,7 @@ import {
 } from "@module-federation/enhanced";
 import { DynamicRemotePlugin } from "@openshift/dynamic-plugin-sdk-webpack";
 import { getDynamicModules, createTsLoaderRule } from "@fleetshift/build-utils";
+import webpack from "webpack";
 import type { Configuration } from "webpack";
 
 const monorepoRoot = path.resolve(__dirname, "../..");
@@ -273,7 +274,34 @@ const GcpHcpPlugin = new DynamicRemotePlugin({
   },
 });
 
+const OverviewPlugin = new DynamicRemotePlugin({
+  extensions: [
+    {
+      type: "fleetshift.module",
+      properties: {
+        label: "Overview",
+        component: { $codeRef: "OverviewDashboard.default" },
+      },
+    },
+  ],
+  sharedModules,
+  entryScriptFilename: "plugins/overview/overview-plugin.[contenthash].js",
+  pluginManifestFilename: "plugins/overview/overview-plugin-manifest.json",
+  // @ts-ignore
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "overview-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      OverviewDashboard: p(
+        "./src/plugins/overview-plugin/OverviewDashboard.tsx",
+      ),
+    },
+  },
+});
+
 const pluginConfigs = [
+  { plugin: OverviewPlugin, key: "overview" },
   { plugin: ManagementPlugin, key: "management" },
   { plugin: DayOnePlugin, key: "day-one" },
   { plugin: CorePlugin, key: "core" },
@@ -290,6 +318,7 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   output: {
     publicPath: "auto",
     chunkFilename: `plugins/${key}/[name].js`,
+    assetModuleFilename: `plugins/${key}/assets/[hash][ext]`,
     uniqueName: key,
   },
   mode: "development",
@@ -297,7 +326,12 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
     type: "filesystem",
     name: key,
   },
-  plugins: [plugin],
+  plugins: [
+    plugin,
+    new webpack.DefinePlugin({
+      "process.env.DRAGGABLE_DEBUG": "false",
+    }),
+  ],
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
   },

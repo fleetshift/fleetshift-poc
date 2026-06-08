@@ -1,5 +1,6 @@
 import path from "path";
 import * as mf from "@module-federation/enhanced";
+import webpack from "webpack";
 const { ModuleFederationPlugin: BaseMFPlugin } = mf;
 // Disable federated type generation (dts-plugin crashes in Docker containers)
 class ModuleFederationPlugin extends BaseMFPlugin {
@@ -80,6 +81,10 @@ const config: Configuration = {
       template: "./src/silent-renew.html",
       filename: "silent-renew.html",
       inject: false,
+    }),
+    new webpack.DefinePlugin({
+      // bug in draggable that is referencing process.env...
+      "process.env.DRAGGABLE_DEBUG": "false",
     }),
   ],
 };

@@ -1,0 +1,19 @@
+.ov-compliance-wrap {
+  padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--md);
+}
+
+.ov-compliance-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pf-t--global--spacer--sm);
+
+  &__framework {
+    font-weight: var(--pf-t--global--font--weight--heading--bold);
+    color: var(--pf-t--global--text--color--regular);
+  }
+
+  &__audit {
+    font-size: var(--pf-t--global--font--size--sm);
+    color: var(--pf-t--global--text--color--subtle);
+  }
+}
