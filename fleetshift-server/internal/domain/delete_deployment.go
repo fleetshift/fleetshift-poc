@@ -6,6 +6,14 @@ import (
 	"fmt"
 )
 
+// DeleteDeploymentInput identifies the deployment to delete and
+// carries fresh caller auth so retried deletes use current
+// credentials rather than stale create-time auth.
+type DeleteDeploymentInput struct {
+	ID   DeploymentID
+	Auth DeliveryAuth
+}
+
 // DeleteDeploymentWorkflowSpec transitions a fulfillment to
 // [FulfillmentStateDeleting], bumps its generation, starts a
 // background [DeleteDeploymentCleanupWorkflow], and runs a
@@ -29,15 +37,15 @@ func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment
 //
 // TODO: move delete transition rules onto Fulfillment so other mutations
 // cannot accidentally clear Deleting and effectively "undelete" later.
-func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID, deploymentMutationResult] {
-	return NewActivity("mutate-to-deleting", func(ctx context.Context, id DeploymentID) (deploymentMutationResult, error) {
+func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeleteDeploymentInput, deploymentMutationResult] {
+	return NewActivity("mutate-to-deleting", func(ctx context.Context, in DeleteDeploymentInput) (deploymentMutationResult, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return deploymentMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
-		dep, err := tx.Deployments().Get(ctx, id)
+		dep, err := tx.Deployments().Get(ctx, in.ID)
 		if err != nil {
 			return deploymentMutationResult{}, err
 		}
@@ -47,7 +55,7 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeploymentID,
 			return deploymentMutationResult{}, err
 		}
 
-		f.TransitionToDeleting(f.Auth())
+		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
@@ -103,14 +111,14 @@ func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteDeploymentC
 // orchestration picks up the new state. Returns the DELETING snapshot
 // immediately; the actual row deletion happens asynchronously in the
 // cleanup workflow.
-func (s *DeleteDeploymentWorkflowSpec) Run(record Record, deploymentID DeploymentID) (DeploymentView, error) {
-	mr, err := RunActivity(record, s.MutateToDeleting(), deploymentID)
+func (s *DeleteDeploymentWorkflowSpec) Run(record Record, input DeleteDeploymentInput) (DeploymentView, error) {
+	mr, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
 		return DeploymentView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
 
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteDeploymentCleanupInput{
-		DeploymentID:  deploymentID,
+		DeploymentID:  input.ID,
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
 		return DeploymentView{}, fmt.Errorf("start cleanup: %w", err)

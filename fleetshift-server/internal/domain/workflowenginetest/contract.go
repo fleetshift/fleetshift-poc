@@ -215,7 +215,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
 		fID := view.Deployment.FulfillmentID()
 
-		exec, err := wfs.DeleteDeployment.Start(ctx, "d1", 1)
+		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{ID: "d1"}, 1)
 		if err != nil {
 			t.Fatalf("Start delete workflow: %v", err)
 		}
@@ -742,7 +742,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 		awaitDeploymentState(ctx, t, infra, "d-delretry", domain.FulfillmentStateActive)
 
-		exec, err := wfs.DeleteDeployment.Start(ctx, "d-delretry", 1)
+		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{ID: "d-delretry"}, 1)
 		if err != nil {
 			t.Fatalf("Start delete workflow: %v", err)
 		}

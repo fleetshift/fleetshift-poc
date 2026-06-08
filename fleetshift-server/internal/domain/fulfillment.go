@@ -140,6 +140,7 @@ func (f *Fulfillment) Touch(now time.Time) {
 func (f *Fulfillment) TransitionToDeleting(auth DeliveryAuth) {
 	f.auth = auth
 	f.state = FulfillmentStateDeleting
+	f.pauseReason = ""
 	f.advanceGeneration()
 }
 

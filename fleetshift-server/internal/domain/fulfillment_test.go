@@ -337,6 +337,45 @@ func TestFulfillment_Resume_AcceptsProvenanceWhenNonePreviously(t *testing.T) {
 	}
 }
 
+func TestFulfillment_TransitionToDeleting_ClearsPauseReason(t *testing.T) {
+	tests := []struct {
+		name       string
+		startState FulfillmentState
+	}{
+		{"from active (first delete)", FulfillmentStateActive},
+		{"from deleting (retry delete)", FulfillmentStateDeleting},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := FulfillmentFromSnapshot(FulfillmentSnapshot{
+				ID:          "f1",
+				State:       tt.startState,
+				PauseReason: "delivery auth failed: broker auth exchange: caller token is empty",
+				Generation:  3,
+				Auth:        DeliveryAuth{Token: "old-token"},
+			})
+
+			f.TransitionToDeleting(DeliveryAuth{Token: "fresh-token"})
+
+			if f.Paused() {
+				t.Error("expected Paused() to be false after TransitionToDeleting")
+			}
+			if f.pauseReason != "" {
+				t.Errorf("pauseReason = %q, want empty", f.pauseReason)
+			}
+			if f.state != FulfillmentStateDeleting {
+				t.Errorf("State = %q, want %q", f.state, FulfillmentStateDeleting)
+			}
+			if f.auth.Token != "fresh-token" {
+				t.Errorf("Auth.Token = %q, want %q", f.auth.Token, "fresh-token")
+			}
+			if f.generation != 4 {
+				t.Errorf("Generation = %d, want 4", f.generation)
+			}
+		})
+	}
+}
+
 func TestFulfillment_Reconciling(t *testing.T) {
 	tests := []struct {
 		name        string

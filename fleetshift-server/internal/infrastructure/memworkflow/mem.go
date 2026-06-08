@@ -368,10 +368,10 @@ type deleteDeploymentWorkflow struct {
 	guard    guard
 }
 
-func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.ID, observedGen)
 	return startWorkflow(&w.guard, instanceID, ctx,
-		nil, w.spec.Run, deploymentID,
+		nil, w.spec.Run, input,
 	)
 }
 

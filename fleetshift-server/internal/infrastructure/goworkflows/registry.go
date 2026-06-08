@@ -165,8 +165,8 @@ func (r *Registry) RegisterDeleteDeployment(spec *domain.DeleteDeploymentWorkflo
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, deploymentID domain.DeploymentID) (domain.DeploymentView, error) {
-		return spec.Run(newBaseRecord(ctx, invokers), deploymentID)
+	wfFunc := func(ctx workflow.Context, input domain.DeleteDeploymentInput) (domain.DeploymentView, error) {
+		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
 	if err := r.Worker.RegisterWorkflow(wfFunc, goregistry.WithName(spec.Name())); err != nil {
@@ -609,11 +609,11 @@ type deleteDeploymentWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *deleteDeploymentWorkflow) Start(ctx context.Context, deploymentID domain.DeploymentID, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("delete-%s-gen-%d", deploymentID, observedGen)
+func (w *deleteDeploymentWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.ID, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
-	}, w.wfName, deploymentID)
+	}, w.wfName, input)
 	if errors.Is(err, backend.ErrInstanceAlreadyExists) {
 		return nil, domain.ErrAlreadyRunning
 	}

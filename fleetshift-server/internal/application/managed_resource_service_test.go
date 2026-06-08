@@ -552,6 +552,104 @@ func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	}
 }
 
+func TestManagedResourceService_DeletePausedAuth_RetryDeleteClearsPause(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent {
+		return &removeAuthFailThenSucceedAgent{reporter: reporter}
+	})
+	registerTestAddon(t, h.store, "clusters")
+
+	// Create with auth context (Deliver reports success via agent).
+	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "expired-token",
+	})
+
+	view, err := h.resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-1",
+		Spec:         json.RawMessage(`{"provider":"rosa"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+	fID := view.Fulfillment.ID()
+
+	awaitFulfillmentState(ctx, t, h.store, fID, domain.FulfillmentStateActive)
+
+	// First delete — Remove reports auth failure → paused.
+	_, err = h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	if err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+
+	awaitFulfillmentPaused(ctx, t, h.store, fID)
+
+	// Retry delete with fresh credentials — should skip the early
+	// return (paused), clear the pause, and re-run the workflow.
+	freshCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "fresh-token",
+	})
+
+	retryView, err := h.resourceSvc.Delete(freshCtx, "clusters", "prod-1")
+	if err != nil {
+		t.Fatalf("retry Delete: %v", err)
+	}
+	if retryView.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("retry Delete state = %q, want deleting", retryView.Fulfillment.State())
+	}
+	if retryView.Fulfillment.Paused() {
+		t.Error("fulfillment should not be paused after retry delete")
+	}
+	if retryView.Fulfillment.Auth().Token != "fresh-token" {
+		t.Errorf("Auth.Token = %q, want %q", retryView.Fulfillment.Auth().Token, "fresh-token")
+	}
+}
+
+func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
+	defer cancel()
+
+	h := setupManagedResources(t)
+	registerTestAddon(t, h.store, "clusters")
+
+	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "token",
+	})
+
+	view, err := h.resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
+		ResourceType: "clusters",
+		Name:         "prod-1",
+		Spec:         json.RawMessage(`{"provider":"rosa"}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
+
+	dep1, err := h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	if err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+	if dep1.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("first Delete state = %q, want deleting", dep1.Fulfillment.State())
+	}
+
+	// Second delete while not paused should be idempotent (early return).
+	dep2, err := h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	if err != nil {
+		t.Fatalf("second Delete (idempotent): %v", err)
+	}
+	if dep2.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("second Delete state = %q, want deleting", dep2.Fulfillment.State())
+	}
+}
+
 func awaitFulfillmentGone(ctx context.Context, t *testing.T, store domain.Store, id domain.FulfillmentID) {
 	t.Helper()
 	for {

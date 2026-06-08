@@ -228,7 +228,7 @@ type ProvisionIdPWorkflow interface {
 // parameter is used by the adapter to derive a generation-qualified
 // instance ID for same-type dedup.
 type DeleteDeploymentWorkflow interface {
-	Start(ctx context.Context, deploymentID DeploymentID, observedGen Generation) (Execution[DeploymentView], error)
+	Start(ctx context.Context, input DeleteDeploymentInput, observedGen Generation) (Execution[DeploymentView], error)
 }
 
 // DeleteDeploymentCleanupWorkflow is a registered deployment cleanup

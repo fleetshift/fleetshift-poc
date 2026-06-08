@@ -815,6 +815,106 @@ func TestResumeDeployment_PausedAuth_EndToEnd(t *testing.T) {
 	assertResolvedTargets(t, dep, "t1")
 }
 
+// removeAuthFailThenSucceedAgent reports auth failure on the first
+// Remove call, then reports success on subsequent Remove calls.
+// Deliver always succeeds immediately.
+type removeAuthFailThenSucceedAgent struct {
+	reporter domain.DeliveryReporter
+	mu       sync.Mutex
+	removes  int
+}
+
+func (a *removeAuthFailThenSucceedAgent) Deliver(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
+}
+
+func (a *removeAuthFailThenSucceedAgent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, _ []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
+	a.mu.Lock()
+	a.removes++
+	n := a.removes
+	a.mu.Unlock()
+
+	if n == 1 {
+		go func() {
+			_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateAuthFailed,
+				Message: "broker auth exchange: caller token is empty",
+			})
+		}()
+		return nil
+	}
+	go func() {
+		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{State: domain.DeliveryStateDelivered})
+	}()
+	return nil
+}
+
+func TestDeleteDeployment_PausedAuth_RetryDeleteClearsPause(t *testing.T) {
+	store := newStore(t)
+	agent := &removeAuthFailThenSucceedAgent{}
+	h := setupWithStoreAndAgent(t, store, agent)
+	agent.reporter = h.reporter
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	registerTargets(t, h, "t1")
+
+	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "expired-token",
+	})
+
+	// Create deployment (succeeds — Deliver reports success).
+	_, err := h.deployments.Create(authCtx, domain.CreateDeploymentInput{
+		ID: "d1",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"t1"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	awaitDeploymentState(ctx, t, h.store, "d1", domain.FulfillmentStateActive)
+
+	// First delete — Remove reports auth failure → fulfillment becomes paused.
+	_, err = h.deployments.Delete(authCtx, "d1")
+	if err != nil {
+		t.Fatalf("first Delete: %v", err)
+	}
+
+	awaitDeploymentPaused(ctx, t, h.store, "d1")
+
+	// Retry delete with fresh credentials — should clear pause and succeed.
+	freshCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
+		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
+		Token:   "fresh-token",
+	})
+
+	dep, err := h.deployments.Delete(freshCtx, "d1")
+	if err != nil {
+		t.Fatalf("retry Delete: %v", err)
+	}
+	if dep.Fulfillment.State() != domain.FulfillmentStateDeleting {
+		t.Fatalf("retry Delete state = %q, want deleting", dep.Fulfillment.State())
+	}
+	if dep.Fulfillment.Paused() {
+		t.Error("fulfillment should not be paused after retry delete")
+	}
+	if dep.Fulfillment.Auth().Token != "fresh-token" {
+		t.Errorf("Auth.Token = %q, want %q", dep.Fulfillment.Auth().Token, "fresh-token")
+	}
+}
+
 func must(t *testing.T, err error) {
 	t.Helper()
 	if err != nil {

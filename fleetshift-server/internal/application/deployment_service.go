@@ -171,9 +171,19 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 // Delete starts a durable delete-deployment workflow that transitions
 // the fulfillment to [domain.FulfillmentStateDeleting], bumps its
 // generation, and guarantees orchestration converges the delete. If
-// the fulfillment is already deleting, the current view is returned
-// without starting a new workflow (idempotent).
+// the fulfillment is already deleting and not paused, the current
+// view is returned without starting a new workflow (idempotent).
 func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
+	var auth domain.DeliveryAuth
+	ac := AuthFromContext(ctx)
+	if ac != nil && ac.Subject != nil {
+		auth = domain.DeliveryAuth{
+			Caller:   ac.Subject,
+			Audience: ac.Audience,
+			Token:    ac.Token,
+		}
+	}
+
 	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("begin read tx: %w", err)
@@ -192,11 +202,14 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 		return domain.DeploymentView{}, fmt.Errorf("commit read tx: %w", err)
 	}
 
-	if fulfillment.State() == domain.FulfillmentStateDeleting {
+	if fulfillment.State() == domain.FulfillmentStateDeleting && !fulfillment.Paused() {
 		return domain.DeploymentView{Deployment: dep, Fulfillment: *fulfillment}, nil
 	}
 
-	exec, err := s.DeleteWF.Start(ctx, id, fulfillment.Generation())
+	exec, err := s.DeleteWF.Start(ctx, domain.DeleteDeploymentInput{
+		ID:   id,
+		Auth: auth,
+	}, fulfillment.Generation())
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("start delete-deployment workflow: %w", err)
 	}
