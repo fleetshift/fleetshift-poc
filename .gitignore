@@ -7,3 +7,4 @@ playwright-report
 getting-started
 .env
 web
+.DS_Store

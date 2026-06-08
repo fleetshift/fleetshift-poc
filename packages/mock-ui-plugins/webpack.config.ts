@@ -104,10 +104,21 @@ const DayOnePlugin = new DynamicRemotePlugin({
       properties: {
         id: "cluster-deploy",
         label: "Deploy Cluster",
-        path: "deploy",
-        component: { $codeRef: "CreateClusterWizard.default" },
+        path: "deploy/*",
+        component: { $codeRef: "SetupClusterDeploy.default" },
         requires: ["signing-key-enrollment"],
         requiresAuth: true,
+      },
+    },
+    {
+      type: "fleetshift.cluster-provider",
+      properties: {
+        id: "kind",
+        label: "Kind",
+        description: "Create a local Kind cluster for development and testing.",
+        icon: { $codeRef: "KindProviderCard.KindIcon" },
+        card: { $codeRef: "KindProviderCard.default" },
+        wizard: { $codeRef: "CreateClusterWizard.default" },
       },
     },
   ],
@@ -124,6 +135,12 @@ const DayOnePlugin = new DynamicRemotePlugin({
       InitialSetupForm: p("./src/plugins/day-one-plugin/InitialSetupForm.tsx"),
       CreateClusterWizard: p(
         "./src/plugins/day-one-plugin/CreateClusterWizard.tsx",
+      ),
+      KindProviderCard: p(
+        "./src/plugins/day-one-plugin/cluster-providers/KindProviderCard.tsx",
+      ),
+      SetupClusterDeploy: p(
+        "./src/plugins/day-one-plugin/cluster-providers/SetupClusterDeploy.tsx",
       ),
     },
   },
@@ -212,12 +229,57 @@ const RoutingPlugin = new DynamicRemotePlugin({
   },
 });
 
+const GcpHcpPlugin = new DynamicRemotePlugin({
+  extensions: [
+    {
+      type: "fleetshift.module",
+      properties: {
+        label: "GCP HCP Clusters",
+        component: { $codeRef: "GcpHcpClustersModule.default" },
+      },
+    },
+    {
+      type: "fleetshift.cluster-provider",
+      properties: {
+        id: "gcphcp",
+        label: "GCP Hosted Control Plane",
+        description:
+          "Create a managed OpenShift cluster on Google Cloud Platform.",
+        icon: { $codeRef: "GcpHcpProviderCard.GcpHcpIcon" },
+        card: { $codeRef: "GcpHcpProviderCard.default" },
+        wizard: { $codeRef: "CreateGcpHcpWizard.default" },
+      },
+    },
+  ],
+  sharedModules,
+  entryScriptFilename: "plugins/gcphcp/gcphcp-plugin.[contenthash].js",
+  pluginManifestFilename: "plugins/gcphcp/gcphcp-plugin-manifest.json",
+  // @ts-ignore
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "gcphcp-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      GcpHcpClustersModule: p(
+        "./src/plugins/gcphcp-plugin/GcpHcpClustersModule.tsx",
+      ),
+      GcpHcpProviderCard: p(
+        "./src/plugins/gcphcp-plugin/GcpHcpProviderCard.tsx",
+      ),
+      CreateGcpHcpWizard: p(
+        "./src/plugins/gcphcp-plugin/CreateGcpHcpWizard.tsx",
+      ),
+    },
+  },
+});
+
 const pluginConfigs = [
   { plugin: ManagementPlugin, key: "management" },
   { plugin: DayOnePlugin, key: "day-one" },
   { plugin: CorePlugin, key: "core" },
   { plugin: SigningPlugin, key: "signing" },
   { plugin: RoutingPlugin, key: "routing" },
+  { plugin: GcpHcpPlugin, key: "gcphcp" },
 ] as const;
 
 const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
@@ -251,7 +313,7 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
         use: ["style-loader", "css-loader", "sass-loader"],
       },
       {
-        test: /\.(png|jpe?g|gif|svg)$/i,
+        test: /\.(png|jpe?g|gif|svg|webp)$/i,
         type: "asset/resource",
       },
     ],

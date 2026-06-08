@@ -16,3 +16,12 @@ export interface PluginRegistry {
   assetsHost: string;
   plugins: Record<string, PluginEntry>;
 }
+
+export interface ClusterProviderCardProps {
+  onSelect: () => void;
+}
+
+export interface ClusterProviderWizardProps {
+  onSetupNext?: () => void;
+  onSetupSkip?: () => void;
+}

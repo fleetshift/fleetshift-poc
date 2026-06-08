@@ -31,7 +31,6 @@ import { useAppConfig } from "../contexts/AppConfigContext";
 import type { PluginPage } from "../contexts/AppConfigContext";
 import ThemeDropdown from "../components/Themes/ThemeDropdown";
 import logo from "../assets/masthead.png";
-import "./AppLayout.scss";
 
 const AppMasthead = () => {
   const { user, logout } = useAuth();

@@ -32,40 +32,20 @@ import {
   TabTitleText,
   Title,
 } from "@patternfly/react-core";
-import { CubesIcon } from "@patternfly/react-icons";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 
 import {
-  getDeployment,
-  deleteDeployment,
-  resumeDeployment,
-  type MgmtDeployment,
-} from "../management-plugin/api";
-import {
-  STATE_LABELS,
-  decodeSpec,
-  formatTime,
-  type KindClusterSpec,
-} from "./clusterUtils";
+  type GcpHcpCluster,
+  getGcpHcpCluster,
+  deleteGcpHcpCluster,
+  resumeGcpHcpCluster,
+} from "./api";
+import { stateLabel, formatTime } from "./gcpHcpUtils";
+import GcpHcpDeliveryEventsTab from "./GcpHcpDeliveryEventsTab";
 
-function OverviewTab({
-  deployment,
-  spec,
-}: {
-  deployment: MgmtDeployment;
-  spec: KindClusterSpec | null;
-}) {
-  const nodeCount = spec?.nodes?.length ?? 0;
-  const roles = useMemo(() => {
-    if (!spec?.nodes) return "—";
-    const counts: Record<string, number> = {};
-    for (const n of spec.nodes) {
-      counts[n.role] = (counts[n.role] ?? 0) + 1;
-    }
-    return Object.entries(counts)
-      .map(([role, count]) => `${count} ${role}`)
-      .join(", ");
-  }, [spec]);
+function OverviewTab({ cluster }: { cluster: GcpHcpCluster }) {
+  const sl = stateLabel(cluster.state);
+  const { spec } = cluster;
 
   return (
     <div
@@ -81,21 +61,9 @@ function OverviewTab({
             <CardBody>
               <Content component="p">Status</Content>
               <div style={{ marginTop: "var(--pf-t--global--spacer--sm)" }}>
-                <Label
-                  color={
-                    (
-                      STATE_LABELS[deployment.state] ??
-                      STATE_LABELS.STATE_UNSPECIFIED
-                    ).color
-                  }
-                >
-                  {
-                    (
-                      STATE_LABELS[deployment.state] ??
-                      STATE_LABELS.STATE_UNSPECIFIED
-                    ).text
-                  }
-                  {deployment.reconciling ? " (reconciling)" : ""}
+                <Label color={sl.color}>
+                  {sl.text}
+                  {cluster.reconciling ? " (reconciling)" : ""}
                 </Label>
               </div>
             </CardBody>
@@ -104,9 +72,9 @@ function OverviewTab({
         <GridItem span={3}>
           <Card isCompact isFullHeight>
             <CardBody>
-              <Content component="p">Nodes</Content>
+              <Content component="p">Node Pools</Content>
               <Title headingLevel="h2" size="2xl">
-                {nodeCount}
+                {spec.nodepools?.length ?? 0}
               </Title>
             </CardBody>
           </Card>
@@ -114,20 +82,22 @@ function OverviewTab({
         <GridItem span={3}>
           <Card isCompact isFullHeight>
             <CardBody>
-              <Content component="p">Type</Content>
+              <Content component="p">Version</Content>
+              <Title headingLevel="h2" size="2xl">
+                {spec.releaseVersion || "—"}
+              </Title>
+            </CardBody>
+          </Card>
+        </GridItem>
+        <GridItem span={3}>
+          <Card isCompact isFullHeight>
+            <CardBody>
+              <Content component="p">Endpoint Access</Content>
               <div style={{ marginTop: "var(--pf-t--global--spacer--sm)" }}>
-                <Label color="blue">Kind</Label>
+                <Label color="blue" isCompact>
+                  {spec.endpointAccess || "—"}
+                </Label>
               </div>
-            </CardBody>
-          </Card>
-        </GridItem>
-        <GridItem span={3}>
-          <Card isCompact isFullHeight>
-            <CardBody>
-              <Content component="p">Targets</Content>
-              <Title headingLevel="h2" size="2xl">
-                {deployment.resolvedTargetIds?.length ?? 0}
-              </Title>
             </CardBody>
           </Card>
         </GridItem>
@@ -146,34 +116,27 @@ function OverviewTab({
             <GridItem span={6}>
               <DescriptionList>
                 <DescriptionListGroup>
-                  <DescriptionListTerm>Deployment ID</DescriptionListTerm>
+                  <DescriptionListTerm>Cluster ID</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {deployment.name.replace(/^deployments\//, "")}
+                    {cluster.name.replace(/^gCPHCPClusters\//, "")}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>UID</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {deployment.uid}
+                    {cluster.uid}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
                 <DescriptionListGroup>
                   <DescriptionListTerm>Created</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {formatTime(deployment.createTime)}
+                    {formatTime(cluster.createTime)}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
                 <DescriptionListGroup>
-                  <DescriptionListTerm>Node Roles</DescriptionListTerm>
+                  <DescriptionListTerm>Channel Group</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {roles}
-                  </DescriptionListDescription>
-                </DescriptionListGroup>
-                <DescriptionListGroup>
-                  <DescriptionListTerm>Placement</DescriptionListTerm>
-                  <DescriptionListDescription>
-                    {deployment.placementStrategy?.type?.replace("TYPE_", "") ??
-                      "—"}
+                    {spec.channelGroup || "—"}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
               </DescriptionList>
@@ -181,40 +144,33 @@ function OverviewTab({
             <GridItem span={6}>
               <DescriptionList>
                 <DescriptionListGroup>
-                  <DescriptionListTerm>Updated</DescriptionListTerm>
+                  <DescriptionListTerm>Version</DescriptionListTerm>
                   <DescriptionListDescription>
-                    {formatTime(deployment.updateTime)}
+                    {spec.releaseVersion || "—"}
                   </DescriptionListDescription>
                 </DescriptionListGroup>
-                {spec?.networking?.apiServerPort && (
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Updated</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {formatTime(cluster.updateTime)}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Endpoint Access</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {spec.endpointAccess || "—"}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+                {spec.nodepools?.length > 0 && (
                   <DescriptionListGroup>
-                    <DescriptionListTerm>API Server Port</DescriptionListTerm>
+                    <DescriptionListTerm>Node Pools</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {spec.networking.apiServerPort}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
-                {spec?.networking?.podSubnet && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Pod Subnet</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {spec.networking.podSubnet}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
-                {spec?.networking?.serviceSubnet && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Service Subnet</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {spec.networking.serviceSubnet}
-                    </DescriptionListDescription>
-                  </DescriptionListGroup>
-                )}
-                {deployment.resolvedTargetIds?.length > 0 && (
-                  <DescriptionListGroup>
-                    <DescriptionListTerm>Resolved Targets</DescriptionListTerm>
-                    <DescriptionListDescription>
-                      {deployment.resolvedTargetIds.join(", ")}
+                      {spec.nodepools
+                        .map(
+                          (np) =>
+                            `${np.id} (${np.replicas}x ${np.instanceType})`,
+                        )
+                        .join(", ")}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                 )}
@@ -227,27 +183,10 @@ function OverviewTab({
   );
 }
 
-function LogsTab() {
-  return (
-    <EmptyState
-      icon={CubesIcon}
-      titleText="Logs not available"
-      headingLevel="h2"
-    >
-      <EmptyStateBody>
-        A logs and audit trail API is not yet available on the backend. This tab
-        will show cluster provisioning and lifecycle events once the API is
-        implemented.
-      </EmptyStateBody>
-      <EmptyStateFooter />
-    </EmptyState>
-  );
-}
-
-export default function ClusterDetailPage() {
-  const { deploymentId } = useParams<{ deploymentId: string }>();
-  const clusters = usePluginNavigate("core-plugin", "ClustersModule");
-  const [deployment, setDeployment] = useState<MgmtDeployment | null>(null);
+export default function GcpHcpClusterDetailPage() {
+  const { clusterId } = useParams<{ clusterId: string }>();
+  const clusters = usePluginNavigate("gcphcp-plugin", "GcpHcpClustersModule");
+  const [cluster, setCluster] = useState<GcpHcpCluster | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string | number>("overview");
@@ -256,13 +195,13 @@ export default function ClusterDetailPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [isResuming, setIsResuming] = useState(false);
 
-  const fetchDeployment = useCallback(
+  const fetchCluster = useCallback(
     async (silent = false) => {
-      if (!deploymentId) return;
+      if (!clusterId) return;
       if (!silent) setError(null);
       try {
-        const dep = await getDeployment(deploymentId);
-        setDeployment(dep);
+        const data = await getGcpHcpCluster(clusterId);
+        setCluster(data);
       } catch (e) {
         if (!silent)
           setError(e instanceof Error ? e.message : "Failed to load cluster");
@@ -270,43 +209,35 @@ export default function ClusterDetailPage() {
         if (!silent) setLoading(false);
       }
     },
-    [deploymentId],
+    [clusterId],
   );
 
   useEffect(() => {
-    fetchDeployment();
-  }, [fetchDeployment]);
+    fetchCluster();
+  }, [fetchCluster]);
 
   const isTransient =
-    deployment?.state === "STATE_CREATING" ||
-    deployment?.state === "STATE_DELETING";
+    cluster?.state === "CREATING" ||
+    cluster?.state === "DELETING" ||
+    cluster?.reconciling;
   useEffect(() => {
     if (!isTransient) return;
-    const id = setInterval(() => fetchDeployment(true), 5000);
+    const id = setInterval(() => fetchCluster(true), 5000);
     return () => clearInterval(id);
-  }, [isTransient, fetchDeployment]);
+  }, [isTransient, fetchCluster]);
 
-  const spec = useMemo(
-    () => (deployment ? decodeSpec(deployment) : null),
-    [deployment],
-  );
-
-  const clusterName = useMemo(() => {
-    if (!deployment) return deploymentId ?? "";
-    return spec?.name ?? deployment.name.replace(/^deployments\//, "");
-  }, [deployment, spec, deploymentId]);
+  const clusterName = useMemo(() => clusterId ?? "", [clusterId]);
 
   const canResume =
-    deployment?.state === "STATE_PAUSED_AUTH" ||
-    deployment?.state === "STATE_FAILED";
-  const canDelete = deployment?.state !== "STATE_DELETING";
+    cluster?.state === "PAUSED_AUTH" || cluster?.state === "FAILED";
+  const canDelete = cluster?.state !== "DELETING";
 
   const handleDelete = async () => {
-    if (!deploymentId) return;
+    if (!clusterId) return;
     setIsDeleting(true);
     setShowDeleteModal(false);
     try {
-      await deleteDeployment(deploymentId);
+      await deleteGcpHcpCluster(clusterId);
       clusters.navigate();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -315,12 +246,12 @@ export default function ClusterDetailPage() {
   };
 
   const handleResume = async () => {
-    if (!deploymentId) return;
+    if (!clusterId) return;
     setIsResuming(true);
     setActionsOpen(false);
     try {
-      await resumeDeployment({ name: deploymentId });
-      await fetchDeployment();
+      await resumeGcpHcpCluster(clusterId);
+      await fetchCluster();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Resume failed");
     } finally {
@@ -332,23 +263,22 @@ export default function ClusterDetailPage() {
     return <Spinner aria-label="Loading cluster details" />;
   }
 
-  if (error || !deployment) {
+  if (error || !cluster) {
     return (
       <EmptyState titleText={error ?? "Cluster not found"} headingLevel="h1">
         <EmptyStateBody>
-          The requested cluster could not be loaded.
+          The requested GCP HCP cluster could not be loaded.
         </EmptyStateBody>
         <EmptyStateFooter>
-          <PluginLink scope="core-plugin" module="ClustersModule">
-            Back to Clusters
+          <PluginLink scope="gcphcp-plugin" module="GcpHcpClustersModule">
+            Back to GCP HCP Clusters
           </PluginLink>
         </EmptyStateFooter>
       </EmptyState>
     );
   }
 
-  const stateLabel =
-    STATE_LABELS[deployment.state] ?? STATE_LABELS.STATE_UNSPECIFIED;
+  const sl = stateLabel(cluster.state);
 
   return (
     <div
@@ -360,18 +290,19 @@ export default function ClusterDetailPage() {
     >
       <PageHeader
         title={clusterName}
-        subtitle={`Created ${formatTime(deployment.createTime)}`}
+        subtitle={`Created ${formatTime(cluster.createTime)}`}
         label={
           <>
             <Label
-              color={stateLabel.color}
+              color={sl.color}
               isCompact
               style={{ marginRight: "var(--pf-t--global--spacer--sm)" }}
             >
-              {stateLabel.text}
+              {sl.text}
+              {cluster.reconciling ? " (reconciling)" : ""}
             </Label>
             <Label color="blue" isCompact>
-              Kind
+              GCP HCP
             </Label>
           </>
         }
@@ -380,12 +311,12 @@ export default function ClusterDetailPage() {
             <BreadcrumbItem
               render={({ className, ariaCurrent }) => (
                 <PluginLink
-                  scope="core-plugin"
-                  module="ClustersModule"
+                  scope="gcphcp-plugin"
+                  module="GcpHcpClustersModule"
                   className={className}
                   aria-current={ariaCurrent}
                 >
-                  Clusters
+                  GCP HCP Clusters
                 </PluginLink>
               )}
             />
@@ -438,12 +369,12 @@ export default function ClusterDetailPage() {
       <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key)}>
         <Tab eventKey="overview" title={<TabTitleText>Overview</TabTitleText>}>
           <div style={{ paddingTop: "var(--pf-t--global--spacer--md)" }}>
-            <OverviewTab deployment={deployment} spec={spec} />
+            <OverviewTab cluster={cluster} />
           </div>
         </Tab>
-        <Tab eventKey="logs" title={<TabTitleText>Logs</TabTitleText>}>
+        <Tab eventKey="events" title={<TabTitleText>Events</TabTitleText>}>
           <div style={{ paddingTop: "var(--pf-t--global--spacer--md)" }}>
-            <LogsTab />
+            <GcpHcpDeliveryEventsTab />
           </div>
         </Tab>
       </Tabs>
@@ -455,7 +386,7 @@ export default function ClusterDetailPage() {
       >
         <ModalHeader
           title="Delete cluster"
-          description={`Are you sure you want to delete "${clusterName}"? This will terminate the provisioned cluster.`}
+          description={`Are you sure you want to delete "${clusterName}"? This will terminate the provisioned GCP HCP cluster.`}
         />
         <ModalBody />
         <ModalFooter>

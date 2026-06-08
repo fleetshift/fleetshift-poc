@@ -1,4 +1,10 @@
-export type { User, PluginEntry, PluginRegistry } from "./types.js";
+export type {
+  User,
+  PluginEntry,
+  PluginRegistry,
+  ClusterProviderCardProps,
+  ClusterProviderWizardProps,
+} from "./types.js";
 
 export {
   formatRelativeTime,

@@ -12,7 +12,6 @@ import {
 } from "@patternfly/react-core";
 import { MoonIcon, SunIcon, WineGlassIcon } from "@patternfly/react-icons";
 import logo from "../assets/masthead.png";
-import "./AppLayout.scss";
 import ThemeToggle, { ThemeToggleType } from "../components/Themes/ThemeToggle";
 
 import "./SetupLayout.scss";
