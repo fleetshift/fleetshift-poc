@@ -55,7 +55,7 @@ export default function WelcomePage() {
   const dayOne = usePluginNavigate("day-one-plugin", "DayOnePage");
 
   return (
-    <Stack hasGutter className="day-one-welcome">
+    <Stack hasGutter className="ome-day-one-welcome">
       <StackItem className="pf-v6-u-mb-lg">
         <Bullseye>
           <Stack hasGutter>

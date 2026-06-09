@@ -24,7 +24,7 @@ export default function VersionDistribution(_props: { widgetId: string }) {
   }, [clusters]);
 
   return (
-    <div className="ov-version-dist">
+    <div className="ome-overview-version-dist">
       <ChartDonut
         data={chartData}
         title={`${clusters.length}`}

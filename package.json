@@ -8,8 +8,9 @@
     "dev": "node scripts/dev.mjs",
     "dev:watch": "node scripts/dev.mjs --watch",
     "build:all": "npm run build -w packages/common && npm run build -w packages/mock-ui-plugins && node scripts/generate-plugin-registry.mjs && npm run build -w packages/gui && node scripts/merge-web.mjs",
-    "lint": "eslint packages/",
-    "lint:fix": "eslint packages/ --fix",
+    "lint": "eslint packages/ && stylelint 'packages/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+    "lint:fix": "eslint packages/ --fix && stylelint 'packages/**/*.{css,scss}' --fix --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
+    "lint:css": "stylelint 'packages/**/*.{css,scss}' --ignore-pattern '**/node_modules/**' --ignore-pattern '**/dist/**'",
     "test": "vitest run",
     "test:e2e": "npm test --workspace=packages/e2e"
   },
@@ -20,6 +21,8 @@
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.5",
     "prettier": "^3.8.1",
+    "stylelint": "^17.13.0",
+    "stylelint-config-standard-scss": "^17.0.0",
     "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   }

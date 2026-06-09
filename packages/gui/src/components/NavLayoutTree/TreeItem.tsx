@@ -44,24 +44,25 @@ export function TreeItem({
   return (
     <li
       ref={ref}
-      className={`fs-tree-item ${isDragSource ? "fs-tree-item--dragging" : ""}`}
+      className={`ome-tree-item ${isDragSource ? "ome-tree-item--dragging" : ""}`}
+      // eslint-disable-next-line no-restricted-syntax -- dynamic: depth-based indentation computed at runtime
       style={{ marginLeft: node.depth * INDENTATION }}
     >
       <div
-        className={`fs-tree-item__row fs-tree-item__row--${kindClass}${isDropTarget ? " fs-tree-item__row--drop-target" : ""}`}
+        className={`ome-tree-item__row ome-tree-item__row--${kindClass}${isDropTarget ? " ome-tree-item__row--drop-target" : ""}`}
       >
-        <span ref={handleRef} className="fs-tree-item__handle">
+        <span ref={handleRef} className="ome-tree-item__handle">
           <GripVerticalIcon className="pf-v6-u-icon-color-subtle" />
         </span>
 
         <span
-          className={`fs-tree-item__label fs-tree-item__label--${kindClass}`}
+          className={`ome-tree-item__label ome-tree-item__label--${kindClass}`}
         >
           {label}
         </span>
 
         {!isSection && pathSlug && (
-          <span className="fs-tree-item__path">/{pathSlug}</span>
+          <span className="ome-tree-item__path">/{pathSlug}</span>
         )}
 
         {isSection && (
@@ -109,15 +110,15 @@ export function TreeItemOverlay({
   const kindClass = isSection ? "section" : "page";
 
   return (
-    <div className={`fs-tree-overlay fs-tree-overlay--${kindClass}`}>
+    <div className={`ome-tree-overlay ome-tree-overlay--${kindClass}`}>
       <GripVerticalIcon className="pf-v6-u-icon-color-subtle" />
       <span
-        className={`fs-tree-overlay__label fs-tree-overlay__label--${kindClass}`}
+        className={`ome-tree-overlay__label ome-tree-overlay__label--${kindClass}`}
       >
         {label}
       </span>
       {descendantCount > 0 && (
-        <span className="fs-tree-overlay__badge">{descendantCount}</span>
+        <span className="ome-tree-overlay__badge">{descendantCount}</span>
       )}
     </div>
   );

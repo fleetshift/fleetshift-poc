@@ -1,11 +1,12 @@
-.ov-capacity-wrap {
+.ome-overview-capacity-wrap {
   padding: var(--pf-t--global--spacer--sm) var(--pf-t--global--spacer--lg);
+
   .pf-v6-l-stack__item:last-child {
    padding-bottom: 12px
   }
 }
 
-.ov-capacity-row {
+.ome-overview-capacity-row {
   &__name {
     font-weight: var(--pf-t--global--font--weight--heading--bold);
     color: var(--pf-t--global--text--color--regular);

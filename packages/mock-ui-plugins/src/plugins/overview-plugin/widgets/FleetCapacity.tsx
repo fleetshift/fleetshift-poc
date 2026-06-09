@@ -45,11 +45,11 @@ export default function FleetCapacity(_props: { widgetId: string }) {
   }, [clusters]);
 
   return (
-    <Stack hasGutter className="ov-capacity-wrap pf-v6-u-pb-lg">
+    <Stack hasGutter className="ome-overview-capacity-wrap pf-v6-u-pb-lg">
       {groups.map((g) => (
         <StackItem key={g.environment}>
-          <div className="ov-capacity-row__name">{g.environment}</div>
-          <div className="ov-capacity-row__bars">
+          <div className="ome-overview-capacity-row__name">{g.environment}</div>
+          <div className="ome-overview-capacity-row__bars">
             <Progress
               value={g.cpuPercent}
               title="CPU"

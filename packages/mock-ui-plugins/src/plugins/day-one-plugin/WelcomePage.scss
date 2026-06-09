@@ -1,10 +1,10 @@
-.day-one-welcome {
+.ome-day-one-welcome {
   max-width: 1200px;
   margin: auto;
 }
 
 // Workload cards - no PF card border, just a subtle outline
-.day-one-welcome__workload-card {
+.ome-day-one-welcome__workload-card {
   text-decoration: none;
   color: inherit;
 
@@ -12,6 +12,7 @@
     border: 1px solid var(--pf-t--global--border--color--default);
     box-shadow: none;
     transition: box-shadow 0.15s ease;
+
     &:hover {
       background-color: var(--pf-t--global--icon--color--on-brand--hover);
     }
@@ -19,7 +20,7 @@
 }
 
 // Icon badge with rounded background
-.day-one-welcome__icon-badge {
+.ome-day-one-welcome__icon-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -30,6 +31,7 @@
   &--blue {
     background-color: #dbedf9;
     color: var(--pf-t--global--color--brand--default);
+
     svg {
       fill: var(--pf-t--global--color--brand--300);
     }
@@ -38,6 +40,7 @@
   &--red {
     background-color: #fce4e4;
     color: var(--pf-t--global--color--status--danger--default);
+
     svg {
       fill: var(--pf-t--global--color--status--danger--200);
     }
@@ -53,6 +56,6 @@
   }
 }
 
-.day-one-welcome__workload-description {
+.ome-day-one-welcome__workload-description {
   color: var(--pf-t--global--text--color--subtle);
 }

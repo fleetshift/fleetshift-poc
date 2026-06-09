@@ -1,6 +1,6 @@
-.fs-m-poll {
-  --fs-m-blob-color: var(--pf-t--global--color--brand--default);
-  --fs-m-bg: var(--pf-t--global--background--color--primary--default);
+.ome-signing-poll {
+  --ome-signing-blob-color: var(--pf-t--global--color--brand--default);
+  --ome-signing-bg: var(--pf-t--global--background--color--primary--default);
 
   position: relative;
   margin-top: var(--pf-t--global--spacer--md);
@@ -20,7 +20,7 @@
   &__bg {
     position: absolute;
     inset: 0;
-    background-color: var(--fs-m-bg);
+    background-color: var(--ome-signing-bg);
   }
 
   &__goo {
@@ -29,12 +29,12 @@
     display: flex;
     justify-content: center;
     align-items: center;
-    filter: url(#goo);
+    filter: url("#goo");
   }
 
   &__pool {
     position: absolute;
-    background-color: var(--fs-m-blob-color);
+    background-color: var(--ome-signing-blob-color);
 
     &--left,
     &--right {
@@ -80,7 +80,7 @@
   &__blob {
     position: absolute;
     border-radius: 50%;
-    background-color: var(--fs-m-blob-color);
+    background-color: var(--ome-signing-blob-color);
     opacity: 0.7;
 
     &--shadow {
@@ -95,9 +95,9 @@
     font-size: var(--pf-t--global--font--size--sm);
     text-align: center;
   }
-}
 
-.pf-v6-theme-glass .fs-m-poll {
-  --fs-m-bg: transparent;
-  --fs-m-blob-color: var(--pf-t--global--color--brand--subtle--200);
+  .pf-v6-theme-glass & {
+    --ome-signing-bg: transparent;
+    --ome-signing-blob-color: var(--pf-t--global--color--brand--subtle--200);
+  }
 }

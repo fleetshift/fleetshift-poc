@@ -21,6 +21,8 @@ import {
   Title,
 } from "@patternfly/react-core";
 
+import "./DayOnePage.scss";
+
 interface SetupComponentProps {
   onSetupNext?: () => void;
   onSetupSkip?: () => void;
@@ -47,7 +49,7 @@ function isSetupExtension(e: Extension): e is SetupExtension {
 function SubPage({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div>
-      <Breadcrumb style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}>
+      <Breadcrumb className="pf-v6-u-mb-md">
         <BreadcrumbItem
           render={({ className, ariaCurrent }) => (
             <PluginLink
@@ -110,7 +112,7 @@ function SetupGallery() {
                 isClickable
                 isSelectable
                 onClick={() => navigate(path)}
-                style={{ cursor: "pointer" }}
+                className="ome-day-one-setup-card"
               >
                 <CardHeader
                   actions={{

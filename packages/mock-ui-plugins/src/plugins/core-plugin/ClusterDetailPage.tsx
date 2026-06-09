@@ -34,6 +34,8 @@ import {
 } from "@patternfly/react-core";
 import { PageHeader } from "@patternfly/react-component-groups/dist/dynamic/PageHeader";
 
+import "./ClusterDetailPage.scss";
+
 import {
   type GcpHcpCluster,
   getGcpHcpCluster,
@@ -48,19 +50,13 @@ function OverviewTab({ cluster }: { cluster: GcpHcpCluster }) {
   const { spec } = cluster;
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--pf-t--global--spacer--lg)",
-      }}
-    >
+    <div className="ome-core-overview-layout">
       <Grid hasGutter>
         <GridItem span={3}>
           <Card isCompact isFullHeight>
             <CardBody>
               <Content component="p">Status</Content>
-              <div style={{ marginTop: "var(--pf-t--global--spacer--sm)" }}>
+              <div className="pf-v6-u-mt-sm">
                 <Label color={sl.color}>
                   {sl.text}
                   {cluster.reconciling ? " (reconciling)" : ""}
@@ -93,7 +89,7 @@ function OverviewTab({ cluster }: { cluster: GcpHcpCluster }) {
           <Card isCompact isFullHeight>
             <CardBody>
               <Content component="p">Endpoint Access</Content>
-              <div style={{ marginTop: "var(--pf-t--global--spacer--sm)" }}>
+              <div className="pf-v6-u-mt-sm">
                 <Label color="blue" isCompact>
                   {spec.endpointAccess || "—"}
                 </Label>
@@ -105,11 +101,7 @@ function OverviewTab({ cluster }: { cluster: GcpHcpCluster }) {
 
       <Card>
         <CardBody>
-          <Title
-            headingLevel="h2"
-            size="lg"
-            style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}
-          >
+          <Title headingLevel="h2" size="lg" className="pf-v6-u-mb-md">
             Cluster Information
           </Title>
           <Grid hasGutter>
@@ -283,22 +275,12 @@ export default function ClusterDetailPage() {
   const sl = stateLabel(cluster.state);
 
   return (
-    <div
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        gap: "var(--pf-t--global--spacer--md)",
-      }}
-    >
+    <div className="ome-core-detail-layout">
       <PageHeader
         title={clusterName}
         subtitle={`Created ${formatTime(cluster.createTime)}`}
         label={
-          <Label
-            color={sl.color}
-            isCompact
-            style={{ marginRight: "var(--pf-t--global--spacer--sm)" }}
-          >
+          <Label color={sl.color} isCompact className="pf-v6-u-mr-sm">
             {sl.text}
             {cluster.reconciling ? " (reconciling)" : ""}
           </Label>
@@ -365,12 +347,12 @@ export default function ClusterDetailPage() {
 
       <Tabs activeKey={activeTab} onSelect={(_e, key) => setActiveTab(key)}>
         <Tab eventKey="overview" title={<TabTitleText>Overview</TabTitleText>}>
-          <div style={{ paddingTop: "var(--pf-t--global--spacer--md)" }}>
+          <div className="pf-v6-u-pt-md">
             <OverviewTab cluster={cluster} />
           </div>
         </Tab>
         <Tab eventKey="events" title={<TabTitleText>Events</TabTitleText>}>
-          <div style={{ paddingTop: "var(--pf-t--global--spacer--md)" }}>
+          <div className="pf-v6-u-pt-md">
             <GcpHcpDeliveryEventsTab />
           </div>
         </Tab>

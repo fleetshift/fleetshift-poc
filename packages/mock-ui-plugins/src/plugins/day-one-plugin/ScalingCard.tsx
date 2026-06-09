@@ -22,7 +22,7 @@ export default function ScalingCard({ onSetup }: ScalingCardProps) {
       <CardBody>
         <Split>
           <SplitItem className="pf-v6-u-mr-md">
-            <span className="day-one-welcome__icon-badge day-one-welcome__icon-badge--blue">
+            <span className="ome-day-one-welcome__icon-badge ome-day-one-welcome__icon-badge--blue">
               <Icon size="xl">
                 <NetworkWiredIcon />
               </Icon>

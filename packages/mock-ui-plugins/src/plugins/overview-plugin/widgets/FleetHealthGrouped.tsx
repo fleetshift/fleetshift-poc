@@ -34,12 +34,14 @@ export default function FleetHealthGrouped(_props: { widgetId: string }) {
   );
 
   return (
-    <Stack hasGutter className="ov-fleet-grouped-wrap">
+    <Stack hasGutter className="ome-overview-fleet-grouped-wrap">
       {groups.map((g) => (
         <StackItem key={g.name}>
-          <div className="ov-fleet-grouped-row">
-            <span className="ov-fleet-grouped-row__name">{g.name}</span>
-            <span className="ov-fleet-grouped-row__stats">
+          <div className="ome-overview-fleet-grouped-row">
+            <span className="ome-overview-fleet-grouped-row__name">
+              {g.name}
+            </span>
+            <span className="ome-overview-fleet-grouped-row__stats">
               <Label color="green" icon={<CheckCircleIcon />} isCompact>
                 {g.healthy}
               </Label>
@@ -52,7 +54,7 @@ export default function FleetHealthGrouped(_props: { widgetId: string }) {
                   {g.degraded}
                 </Label>
               )}
-              <span className="ov-fleet-grouped-row__total">
+              <span className="ome-overview-fleet-grouped-row__total">
                 {g.total} total
               </span>
             </span>

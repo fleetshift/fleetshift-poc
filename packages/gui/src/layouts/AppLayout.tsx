@@ -48,12 +48,7 @@ const AppMasthead = () => {
         </MastheadToggle>
         <MastheadBrand>
           <MastheadLogo component="a" href="/">
-            <img
-              src={logo}
-              alt="FleetShift"
-              className="fs-masthead-logo"
-              style={{ height: 36 }}
-            />
+            <img src={logo} alt="FleetShift" className="ome-masthead-logo" />
           </MastheadLogo>
         </MastheadBrand>
       </MastheadMain>
@@ -163,7 +158,12 @@ const Sidebar = () => (
 
 export const AppLayout = () => (
   <SearchProvider>
-    <Page masthead={<AppMasthead />} sidebar={<Sidebar />} isManagedSidebar>
+    <Page
+      masthead={<AppMasthead />}
+      sidebar={<Sidebar />}
+      isManagedSidebar
+      className="ome-app"
+    >
       <PageSection isFilled hasOverflowScroll>
         <Outlet />
       </PageSection>

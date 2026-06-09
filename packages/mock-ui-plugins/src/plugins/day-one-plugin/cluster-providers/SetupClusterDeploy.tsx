@@ -93,7 +93,7 @@ function ProviderGallery({ onSetupSkip }: ProviderGalleryProps) {
               const CardComponent = ext.properties.card;
               return (
                 <GalleryItem
-                  className="day-one-cluster-provider-gallery-item"
+                  className="ome-day-one-cluster-provider-gallery-item"
                   key={ext.properties.id}
                 >
                   <CardComponent

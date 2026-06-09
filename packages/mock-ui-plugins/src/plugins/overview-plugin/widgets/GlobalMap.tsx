@@ -47,7 +47,7 @@ export default function GlobalMap(_props: { widgetId: string }) {
       worldCopyJump
       attributionControl={false}
       zoomControl={false}
-      className="ov-global-map"
+      className="ome-overview-global-map"
     >
       <TileLayer
         key={isDark ? "dark" : "light"}

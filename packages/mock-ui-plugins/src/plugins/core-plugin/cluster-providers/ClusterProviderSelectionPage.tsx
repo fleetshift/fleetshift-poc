@@ -71,7 +71,7 @@ export default function ClusterProviderSelectionPage() {
         </StackItem>
         <StackItem>
           <Gallery
-            className="core-cluster-provider-gallery"
+            className="ome-core-cluster-provider-gallery"
             hasGutter
             minWidths={{ default: "300px" }}
           >

@@ -47,7 +47,7 @@ export const DebugPage = () => {
 
       <StackItem>
         <Card>
-          <CardBody style={{ padding: 0 }}>
+          <CardBody className="pf-v6-u-p-0">
             <Accordion
               isBordered
               asDefinitionList={false}

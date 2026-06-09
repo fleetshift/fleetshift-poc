@@ -7,8 +7,8 @@ export type EnrollmentErrorProps = {
 
 const EnrollmentError = ({ error, onRetry }: EnrollmentErrorProps) => {
   return (
-    <div className="fs-setup">
-      <Title headingLevel="h1" className="fs-setup__title">
+    <div className="ome-signing-setup">
+      <Title headingLevel="h1" className="ome-signing-setup__title">
         Signing Key Enrollment
       </Title>
       <Alert variant="danger" isInline title="Enrollment error">

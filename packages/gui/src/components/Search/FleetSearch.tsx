@@ -216,7 +216,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
         <HighlightedText html={item.title} />
         {item.status && (
           <span
-            className={`fs-search__status fs-search__status--${item.status}`}
+            className={`ome-search__status ome-search__status--${item.status}`}
           >
             {item.status}
           </span>
@@ -238,7 +238,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   );
 
   const menu = (
-    <Menu ref={menuRef} className="fs-search__menu">
+    <Menu ref={menuRef} className="ome-search__menu">
       <MenuContent>
         <MenuList>
           {categoryOrder(results).map((cat, idx) => {
@@ -284,17 +284,17 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
                     const featureId = toFeatureId(parent.id);
                     const children = childrenByFeature.get(featureId) ?? [];
                     return (
-                      <div key={parent.id} className="fs-search__tree-group">
+                      <div key={parent.id} className="ome-search__tree-group">
                         {renderItem(parent)}
                         {children.length > 0 && (
                           <div
-                            className="fs-search__tree-children"
+                            className="ome-search__tree-children"
                             role="group"
                           >
                             {children.map((child, idx) => (
                               <div
                                 key={child.id}
-                                className={`fs-search__tree-child${idx === children.length - 1 ? " fs-search__tree-child--last" : ""}`}
+                                className={`ome-search__tree-child${idx === children.length - 1 ? " ome-search__tree-child--last" : ""}`}
                               >
                                 {renderItem(child)}
                               </div>
@@ -319,7 +319,7 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
   );
 
   return (
-    <div ref={containerRef} className="fs-search">
+    <div ref={containerRef} className="ome-search">
       <Popper
         trigger={toggle}
         popper={menu}

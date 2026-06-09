@@ -43,6 +43,48 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, web
 - Prefer named function declarations for components (better DevTools + stack traces).
 - Never generate `.js`/`.d.ts` in `src/` — build artifacts go in `dist/`.
 
+## SCSS class naming
+
+All CSS classes are scoped with a prefix to prevent collisions across MF boundaries. BEM convention.
+
+| Scope | Prefix | Example |
+|-------|--------|---------|
+| Shell (gui) | `ome-` | `ome-search`, `ome-search__menu`, `ome-search__menu--open` |
+| Core plugin | `ome-core-` | `ome-core-clusters`, `ome-core-clusters__toolbar` |
+| Overview plugin | `ome-overview-` | `ome-overview-dashboard`, `ome-overview-capacity__bar` |
+| GCP HCP plugin | `ome-gcphcp-` | `ome-gcphcp-wizard`, `ome-gcphcp-wizard__step` |
+| Day One plugin | `ome-day-one-` | `ome-day-one-welcome`, `ome-day-one-welcome__card` |
+| Signing plugin | `ome-signing-` | `ome-signing-keys`, `ome-signing-keys__form` |
+| Management plugin | `ome-mgmt-` | `ome-mgmt-targets`, `ome-mgmt-targets__row` |
+| Kind plugin | `ome-kind-` | `ome-kind-wizard`, `ome-kind-wizard__step` |
+
+Enforced by stylelint (`stylelint.config.mjs`) with per-plugin overrides. Run `npm run lint:css` to check.
+
+**PF utility classes first.** For simple spacing, font, color, display, flex — use PF utility classes (`pf-v6-u-mb-md`, `pf-v6-u-font-size-sm`, `pf-v6-u-text-color-subtle`, `pf-v6-u-display-flex`, `pf-v6-u-flex-1`, etc.) directly in `className`. Don't create a custom SCSS class just to set `margin-bottom: var(--pf-t--global--spacer--md)`. Custom `ome-*` classes are for multi-property styles, component-specific layouts (gap, grid), or things PF utilities don't cover.
+
+**Conditional classes → `clsx`.** Use `clsx` (already in mock-ui-plugins) for combining className strings conditionally. No manual template literals or ternaries for class composition.
+
+```tsx
+// GOOD
+import clsx from "clsx";
+<div className={clsx("pf-v6-u-mb-md", isActive && "ome-core-active")} />
+
+// BAD
+<div className={`pf-v6-u-mb-md ${isActive ? "ome-core-active" : ""}`} />
+```
+
+**Vendor class overrides** (`pf-*`, `react-*`): allowed ONLY nested inside your own `ome-*` class — never as top-level selectors. Apply a custom `ome-*` className to the element, then nest the vendor override inside it.
+
+```scss
+// GOOD — scoped override
+.ome-core-clusters__toolbar {
+  .pf-v6-c-toolbar__item { flex-basis: auto; }
+}
+
+// BAD — unscoped top-level vendor selector
+.pf-v6-c-toolbar__item { flex-basis: auto; }
+```
+
 ## Plugins
 
 - Registered as `DynamicRemotePlugin` in `webpack.config.ts`.
@@ -63,8 +105,9 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, web
 
 ```bash
 npm run build:all          # common → plugins → GUI → merge
-npm run lint               # check
-npm run lint:fix           # auto-fix
+npm run lint               # eslint + stylelint
+npm run lint:fix           # auto-fix both
+npm run lint:css           # stylelint only
 npm test                   # vitest
 ```
 

@@ -109,18 +109,13 @@ export default function TargetsPage() {
       <Flex
         alignItems={{ default: "alignItemsBaseline" }}
         gap={{ default: "gapSm" }}
-        style={{ marginBottom: "var(--pf-t--global--spacer--lg)" }}
+        className="pf-v6-u-mb-lg"
       >
         <FlexItem>
           <Title headingLevel="h1">Targets</Title>
         </FlexItem>
         <FlexItem>
-          <span
-            style={{
-              fontSize: "var(--pf-t--global--font--size--sm)",
-              color: "var(--pf-t--global--text--color--subtle)",
-            }}
-          >
+          <span className="pf-v6-u-font-size-sm pf-v6-u-text-color-subtle">
             {targets.length} registered
           </span>
         </FlexItem>
@@ -131,7 +126,7 @@ export default function TargetsPage() {
           variant="warning"
           title={error}
           isInline
-          style={{ marginBottom: "var(--pf-t--global--spacer--md)" }}
+          className="pf-v6-u-mb-md"
         />
       )}
 
@@ -206,14 +201,7 @@ export default function TargetsPage() {
                       }}
                     />
                     <Td dataLabel="Target ID">
-                      <span
-                        style={{
-                          fontWeight:
-                            "var(--pf-t--global--font--weight--heading--default)",
-                        }}
-                      >
-                        {t.id}
-                      </span>
+                      <span className="pf-v6-u-font-weight-bold">{t.id}</span>
                     </Td>
                     <Td dataLabel="Type">
                       <Label color="blue" isCompact>
@@ -230,13 +218,7 @@ export default function TargetsPage() {
                           ))}
                         </LabelGroup>
                       ) : (
-                        <span
-                          style={{
-                            color: "var(--pf-t--global--text--color--subtle)",
-                          }}
-                        >
-                          None
-                        </span>
+                        <span className="pf-v6-u-text-color-subtle">None</span>
                       )}
                     </Td>
                   </Tr>
@@ -248,12 +230,7 @@ export default function TargetsPage() {
                           <DescriptionListGroup>
                             <DescriptionListTerm>Target ID</DescriptionListTerm>
                             <DescriptionListDescription>
-                              <span
-                                style={{
-                                  fontFamily:
-                                    "var(--pf-t--global--font--family--mono)",
-                                }}
-                              >
+                              <span className="pf-v6-u-font-family-monospace">
                                 {t.id}
                               </span>
                             </DescriptionListDescription>

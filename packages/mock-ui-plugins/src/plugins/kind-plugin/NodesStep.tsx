@@ -9,6 +9,7 @@ import {
 import TrashIcon from "@patternfly/react-icons/dist/dynamic/icons/trash-icon";
 import PlusCircleIcon from "@patternfly/react-icons/dist/dynamic/icons/plus-circle-icon";
 import type { ClusterFormData, NodeEntry } from "./CreateClusterWizard";
+import "./NodesStep.scss";
 
 interface NodesStepProps {
   formData: ClusterFormData;
@@ -43,13 +44,12 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
       {formData.nodes.map((node, i) => (
         <div
           key={i}
-          className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end"
-          style={{ gap: "var(--pf-t--global--spacer--md)" }}
+          className="pf-v6-u-display-flex pf-v6-u-align-items-flex-end ome-kind-node-row"
         >
           <FormGroup
             label={i === 0 ? "Role" : undefined}
             fieldId={`node-role-${i}`}
-            style={{ flex: 1 }}
+            className="pf-v6-u-flex-1"
           >
             <FormSelect
               id={`node-role-${i}`}
@@ -68,7 +68,7 @@ export default function NodesStep({ formData, onChange }: NodesStepProps) {
           <FormGroup
             label={i === 0 ? "Image (optional)" : undefined}
             fieldId={`node-image-${i}`}
-            style={{ flex: 2 }}
+            className="ome-kind-node-image"
           >
             <TextInput
               id={`node-image-${i}`}

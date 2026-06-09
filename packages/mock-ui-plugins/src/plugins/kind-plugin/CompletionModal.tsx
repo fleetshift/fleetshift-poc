@@ -15,6 +15,7 @@ import RocketIcon from "@patternfly/react-icons/dist/dynamic/icons/rocket-icon";
 import AngleRightIcon from "@patternfly/react-icons/dist/dynamic/icons/angle-right-icon";
 
 import successImage from "./assets/day-one-complete.png";
+import "./CompletionModal.scss";
 
 interface CompletionModalProps {
   isOpen: boolean;
@@ -43,7 +44,7 @@ export default function CompletionModal({
             <img
               src={successImage}
               alt="Success illustration"
-              style={{ width: 160 }}
+              className="ome-kind-completion-image"
             />
           </SplitItem>
           <SplitItem isFilled>

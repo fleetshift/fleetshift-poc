@@ -63,8 +63,8 @@ const SigningKeyEnrollment = ({
     step === EnrollStep.Verifying
   ) {
     return (
-      <div className="fs-setup">
-        <Title headingLevel="h1" className="fs-setup__title">
+      <div className="ome-signing-setup">
+        <Title headingLevel="h1" className="ome-signing-setup__title">
           Signing Key Enrollment
         </Title>
         <Spinner aria-label={messages[step]} />
@@ -78,8 +78,8 @@ const SigningKeyEnrollment = ({
   }
 
   return (
-    <AnimatedHeight className="fs-setup">
-      <Title headingLevel="h1" className="fs-setup__title">
+    <AnimatedHeight className="ome-signing-setup">
+      <Title headingLevel="h1" className="ome-signing-setup__title">
         Signing Key Enrollment
       </Title>
 
@@ -140,7 +140,7 @@ const SigningKeyEnrollment = ({
             exit={{ opacity: 0, y: -30, filter: "blur(10px)" }}
             transition={transition}
           >
-            <p className="fs-setup__subtitle">
+            <p className="ome-signing-setup__subtitle">
               Register your signing key to sign deployments and policies.
             </p>
 

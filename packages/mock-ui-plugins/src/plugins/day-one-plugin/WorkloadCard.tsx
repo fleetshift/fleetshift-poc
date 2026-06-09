@@ -24,14 +24,17 @@ interface WorkloadCardProps {
 
 export default function WorkloadCard({ workload }: WorkloadCardProps) {
   return (
-    <Link to={workload.href ?? "#"} className="day-one-welcome__workload-card">
+    <Link
+      to={workload.href ?? "#"}
+      className="ome-day-one-welcome__workload-card"
+    >
       <Card isClickable>
         <CardTitle>
           <Stack>
             <StackItem
               className={clsx(
-                "day-one-welcome__icon-badge",
-                `day-one-welcome__icon-badge--${workload.badgeVariant}`,
+                "ome-day-one-welcome__icon-badge",
+                `ome-day-one-welcome__icon-badge--${workload.badgeVariant}`,
                 "pf-v6-u-mb-md",
               )}
             >
@@ -43,7 +46,7 @@ export default function WorkloadCard({ workload }: WorkloadCardProps) {
         <CardBody>
           <Content
             component="p"
-            className="day-one-welcome__workload-description"
+            className="ome-day-one-welcome__workload-description"
           >
             {workload.description}
           </Content>

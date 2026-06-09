@@ -36,6 +36,15 @@ export default [
           ignoreRestSiblings: true,
         },
       ],
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "JSXOpeningElement[name.name=/^[a-z]/] > JSXAttribute[name.name='style']",
+          message:
+            "Inline styles on HTML elements are banned. Use PF utility classes or SCSS classes with the ome-* prefix. Exception: dynamic viewport-based sizing — disable with // eslint-disable-next-line and explain why.",
+        },
+      ],
     },
   },
 ];

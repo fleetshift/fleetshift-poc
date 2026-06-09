@@ -287,7 +287,7 @@ export default function ClustersPage() {
         <DataView activeState={activeState}>
           <DataViewToolbar
             clearAllFilters={clearAllFilters}
-            className="clusters-toolbar"
+            className="ome-core-clusters-toolbar"
             actions={
               <Button
                 variant="primary"
