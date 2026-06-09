@@ -1,9 +1,5 @@
 # Managed resources
 
-> **Naming note.** This document uses "managed resource" as the working term for addon-driven, consumer-facing resource types. Alternative names worth revisiting as the design matures: **offering** (captures the provider/consumer relationship with zero Kubernetes namespace collision). "Platform resource" was the original term but was retired because "platform" already refers to the management plane itself.
->
-> **Fulfillment** is the core kernel primitive — the internal orchestration unit that drives the reconciliation loop. It is not directly created or edited by users. User-facing concepts (managed resources, campaigns, deployments) create and drive Fulfillments. See [Architectural layering](#architectural-layering) below.
-
 ## Problem
 
 How do we offer an extensible core, but allow addons to offer "managed resource" like semantics, that incorporate decade+ of best practices?
@@ -72,7 +68,7 @@ POST /clusters
 }
 ```
 
-The consumer's agent signs this request. The platform validates the spec against the addon-registered schema, stores the resource, and returns it with platform-managed status fields:
+The consumer's agent signs this request. The platform validates the spec against the addon-registered schema, stores the resource, and returns it with platform-managed fields:
 
 ```json
 {
@@ -81,15 +77,13 @@ The consumer's agent signs this request. The platform validates the spec against
   "spec": { "..." },
   "state": "PROVISIONING",
   "reconciling": true,
-  "status": {
-    "conditions": [
-      {
-        "type": "Provisioning",
-        "status": "True",
-        "message": "Creating ROSA cluster infrastructure"
-      }
-    ]
-  },
+  "conditions": [
+    {
+      "type": "Provisioning",
+      "status": "True",
+      "message": "Creating ROSA cluster infrastructure"
+    }
+  ],
   "create_time": "2026-04-21T14:30:00Z",
   "provenance": {
     "signature": {
@@ -104,7 +98,7 @@ The consumer's agent signs this request. The platform validates the spec against
 }
 ```
 
-The `spec` is entirely addon-defined — the platform stores it opaquely but validates it against the addon's registered schema. The `state`, `reconciling`, `status`, `provenance`, and timestamps are platform-managed, following the same patterns as Deployment (AIP-128 declarative-friendly).
+The `spec` is entirely addon-defined — the platform stores it opaquely but validates it against the addon's registered schema. The `state`, `reconciling`, `conditions`, `provenance`, and timestamps are platform-managed, following the same patterns as Deployment (AIP-128 declarative-friendly).
 
 #### Derived Fulfillment
 
@@ -224,20 +218,23 @@ sequenceDiagram
     Addon->>Cloud: Create ROSA HostedCluster,<br/>configure networking, KMS, etc.
     Cloud-->>Addon: Cluster provisioning started
 
-    Addon-->>Fleetlet: Status: PROVISIONING
+    Addon-->>Fleetlet: State: PROVISIONING
     Fleetlet-->>Pipeline: Status channel
-    Pipeline-->>Store: Update managed resource status
+    Pipeline-->>Store: Update Fulfillment state
 
     Note over Addon, Cloud: Minutes later...
 
     Cloud-->>Addon: Cluster ready, API URL available
     Addon->>Platform: Register new target<br/>(the provisioned cluster)
-    Addon-->>Fleetlet: Status: READY,<br/>api_url, console_url
+    Addon-->>Fleetlet: State: ACTIVE
     Fleetlet-->>Pipeline: Status channel
-    Pipeline-->>Store: Update managed resource status
+    Pipeline-->>Store: Update Fulfillment state
+    Addon-->>Fleetlet: Outputs: {api_url, console_url}
+    Fleetlet-->>Pipeline: Index channel
+    Pipeline-->>Store: Update inventory item outputs
 
     User->>Platform: GET /clusters/prod-us-east-1
-    Platform-->>User: state: ACTIVE,<br/>api_url: https://...,<br/>console_url: https://...
+    Platform-->>User: state: ACTIVE,<br/>outputs: {api_url: https://...,<br/>console_url: https://...}
 ```
 
 
@@ -289,7 +286,6 @@ fulfillment:
   placement_strategy_version: 2
   rollout_strategy_version:   1
   generation: N
-  state:     {api_url, provider_id, ...}
 
 manifest_strategies:   (fulfillment_id, version, type, content, created_at)
 placement_strategies:  (fulfillment_id, version, type, content, created_at)
@@ -305,7 +301,7 @@ A managed resource spec change creates a new `resource_intent` version AND a new
 
 **Shared definitions.** Strategies can reference shared, reusable definitions through an additional layer of indirection — the same pattern as managed resources referencing `resource_intents`. A placement strategy version might reference a shared placement definition used across many Fulfillments. When the shared definition changes, each affected Fulfillment gets a new strategy version, which bumps generation and triggers reconciliation. The reusability lives in the referenced definition, not in the strategy version stream itself.
 
-The Fulfillment's `state` field carries mutable, non-historical outputs — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change. If history is needed for observed properties, it flows through inventory.
+Stable generated values — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change — are stored as inventory outputs on the inventory item for the managed resource (see [Inventory](#inventory)). A single Fulfillment can fan out to many targets, each producing its own outputs, so outputs are per-object rather than per-Fulfillment.
 
 ### Delivery model
 
@@ -352,15 +348,16 @@ Same pattern applies for inventory condition events.
 
 ### Inventory
 
-Inventory is the system for all historical observed state — the state of things as they are. It covers all resources comprehensively: managed resources, discovered resources, sub-resources, and ordinary K8s resources (Namespaces, ConfigMaps, RBAC). Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
+Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers all resources comprehensively: managed resources, discovered resources, sub-resources, and ordinary K8s resources (Namespaces, ConfigMaps, RBAC). Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
 
 Inventory is a projection, not a literal copy of the source resource. The addon extracts relevant fields, like ACM search collectors extract a subset of K8s fields.
 
 Each inventory item has:
 
 - **Identity**: resource type, name, source association (Fulfillment + target, optional manifest_key for intent-correlated resources, null for side-effect resources)
-- **State**: opaque, addon-defined. Runtime/observed properties (replica counts, image versions, allocatable resources, etc.)
-- **Conditions**: structured, platform-queryable. Historical transitions tracked via condition events. Gives the platform a uniform health query surface across all resource types without understanding state internals.
+- **Outputs**: stable generated values (api_url, provider_id, console_url) produced once and rarely changed. Not historical — the latest value is the only one that matters. Outputs are per-object because a single Fulfillment can target many objects, each with its own outputs.
+- **Observed**: opaque, addon-defined. The latest observation — runtime properties (replica counts, image versions, allocatable resources, etc.) as seen by the observer. Historical observations are kept over time.
+- **Conditions**: structured, platform-queryable health and progress signals. Historical transitions tracked via condition events. Gives the platform a uniform health query surface across all resource types without understanding observation internals.
 
 For managed resources, the managed thing itself is an inventory item. A single intent may explode into many inventory items — the managed resource plus sub-resources created by the addon (nodes under a cluster, operators, etc.). Side-effect resources associate with the delivery but have no manifest_key.
 
@@ -370,25 +367,28 @@ Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded con
 
 #### Managed resource API projection
 
-The managed resource consumer API projects from:
+The managed resource consumer API projects from three sources:
 
-- **Spec** → `resource_intents` (the version the managed resource tracks)
-- **Phase** → Fulfillment lifecycle enum
-- **Observed state** → inventory (conditions and state for the managed thing and its sub-resources)
+- **Spec** → `resource_intents` (the version the managed resource tracks). The user's declared intent.
+- **State** → Fulfillment lifecycle enum (PROVISIONING, ACTIVE, FAILED, DELETING). The AIP-compliant lifecycle state.
+- **Outputs** → inventory item for this managed resource (if present). Stable generated values (api_url, provider_id, console_url). Written once, rarely change, no history needed. Lives on the inventory item because a single Fulfillment can fan out to many objects, each with its own outputs.
+- **Observed** → inventory item for this managed resource (if present). The latest observation — a point-in-time report of what the observer saw. Historical observations are kept over time.
+- **Conditions** → always from Fulfillment (aggregated from delivery conditions via CEL), plus inventory conditions for this managed resource if a matching inventory item exists. Fulfillment conditions are always available because every managed resource has a Fulfillment; they provide the operational/management view ("is the delivery pipeline working?"). Inventory conditions, when present, add resource-health signals ("is the resource itself healthy?"). Both are merged into a single conditions list — condition types are self-describing, so the consumer doesn't need to distinguish the source.
 
 ```
 GET /clusters/prod-us-east-1
   spec:       → from resource_intents @current_version (managed resource HEAD)
-  phase:      → from Fulfillment (provisioning/active/failed/deleting)
-  conditions: → from inventory item for this managed resource
-  state:      → from inventory item for this managed resource
+  state:      → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
+  outputs:    → from inventory item (if present)
+  observed:   → from inventory item (if present)
+  conditions: → from Fulfillment (always) + inventory item (if present)
 ```
 
 > OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
 
 #### Managed resource HEAD table
 
-A thin identity/HEAD table provides the entry point for all managed resource queries. It holds only pointers — no denormalized state, no cached phase.
+A thin identity/HEAD table provides the entry point for all managed resource queries. It holds only pointers — no denormalized state, no cached lifecycle state.
 
 ```sql
 CREATE TABLE managed_resources (
@@ -404,10 +404,10 @@ CREATE TABLE managed_resources (
 );
 ```
 
-The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (`GET /clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for phase:
+The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (`GET /clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state:
 
 ```sql
-SELECT mr.*, ri.spec, ri.provenance, f.state AS phase
+SELECT mr.*, ri.spec, ri.provenance, f.state
 FROM managed_resources mr
 JOIN resource_intents ri
   ON ri.resource_type = mr.resource_type
@@ -418,7 +418,7 @@ WHERE mr.resource_type = 'clusters'
   AND mr.deleted_at IS NULL;
 ```
 
-Phase is not denormalized — the Fulfillment join is already required for Fulfillment-level state. Observed state (conditions, runtime properties) comes from a separate inventory query.
+State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present). Outputs and observed values come from inventory.
 
 Writes: `INSERT` on create, `UPDATE current_version` on spec change, `UPDATE deleted_at` on delete. Updating `current_version` is a managed resource layer operation; it triggers a corresponding manifest strategy version on the Fulfillment (see [Fulfillment strategy versioning](#fulfillment-strategy-versioning)), but the two version counters are independent.
 
@@ -503,8 +503,8 @@ When an addon [re]connects...
 ### What was eliminated
 
 - **Mutable managed_resources table** — replaced by versioned intent
-- **Separate managed resource status table** — observed state through inventory
-- `**state` field on Fulfillments as the sole observed-state mechanism** — stable outputs only; historical observed state through inventory
+- **Separate managed resource status table** — observations through inventory
+- **Single Fulfillment field as the sole observation mechanism** — per-object knowledge (outputs, observations) lives on inventory items; conditions are sourced from both Fulfillment (aggregated operational) and inventory (resource health); the Fulfillment owns lifecycle state and aggregated conditions
 - **Per-manifest condition layer on deliveries** — inventory is the per-resource condition system
 - **Three-level condition hierarchy** — two levels sufficient (delivery + Fulfillment)
 - **Multiple intent pointers per Fulfillment** — bundled intent preferred; strategy versioning is per strategy type, not per intent
@@ -514,7 +514,7 @@ When an addon [re]connects...
 
 ### Open questions
 
-#### Pre-Fulfillment lifecycle phases
+#### Pre-Fulfillment lifecycle states
 
 Can a managed resource exist before its Fulfillment (pending approval, schema validation)?
 
@@ -538,7 +538,7 @@ Completed in OME-43. The codebase now has `Fulfillment` as its own aggregate wit
 
 ### Phasing
 
-1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle (phase). No rich status. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
-2. **Phase 2:** Inventory as observation system. Inventory items with state + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
+1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle state. No outputs, observations, or conditions. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
+2. **Phase 2:** Inventory as the per-object knowledge system. Inventory items with outputs + observed + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
 3. **Phase 3:** CEL-based aggregation for multi-target. Fleet-wide condition and inventory queries. Campaign and deployment as user-facing concepts over Fulfillments.
 

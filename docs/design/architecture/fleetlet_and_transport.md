@@ -101,7 +101,7 @@ The delivery channel is request/response and per-target. The platform sends gene
 
 ### Index-channel role
 
-The index channel carries observed-state deltas to the platform. The indexing model itself is defined in [resource_indexing.md](resource_indexing.md).
+The index channel carries observation deltas to the platform. The indexing model itself is defined in [resource_indexing.md](resource_indexing.md).
 
 ## Channel isolation and connection classes
 
@@ -157,7 +157,7 @@ This lets addon backends scale without re-implementing their own control-plane l
 - **Access**: identity resolution and permission lookup
 - **Delivery**: manifest delivery to targets
 - **Status**: target health and delivery status
-- **Index**: observed-state deltas for fleet-wide search
+- **Index**: observation deltas for fleet-wide search
 
 ### Addon-defined traffic
 
