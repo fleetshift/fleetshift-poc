@@ -37,30 +37,6 @@ export interface AuthMethod {
   oidcConfig?: OIDCConfig;
 }
 
-export interface CreateAuthMethodRequest {
-  authMethodId: string;
-  authMethod: {
-    type: "TYPE_OIDC";
-    oidcConfig: {
-      issuerUrl: string;
-      audience: string;
-      keyEnrollmentAudience?: string;
-    };
-  };
-}
-
-export function createAuthMethod(
-  req: CreateAuthMethodRequest,
-): Promise<AuthMethod> {
-  const params = new URLSearchParams();
-  params.set("auth_method_id", req.authMethodId);
-  return mgmtFetch(`/authMethods?${params}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req.authMethod),
-  });
-}
-
 export function getAuthMethod(name: string): Promise<AuthMethod> {
   return mgmtFetch(`/authMethods/${encodeURIComponent(name)}`);
 }
@@ -120,10 +96,6 @@ export interface ListDeploymentsResponse {
 
 export function listDeployments(): Promise<ListDeploymentsResponse> {
   return mgmtFetch("/deployments");
-}
-
-export function getDeployment(name: string): Promise<MgmtDeployment> {
-  return mgmtFetch(`/deployments/${encodeURIComponent(name)}`);
 }
 
 export interface CreateDeploymentRequest {
@@ -190,39 +162,5 @@ export function createSignerEnrollment(
       identity_token: req.identityToken,
       ...(req.registryId && { registry_id: req.registryId }),
     }),
-  });
-}
-
-export function deleteSignerEnrollment(): Promise<void> {
-  return mgmtFetch("/signerEnrollments", { method: "DELETE" });
-}
-
-export function deleteDeployment(name: string): Promise<MgmtDeployment> {
-  return mgmtFetch(`/deployments/${encodeURIComponent(name)}`, {
-    method: "DELETE",
-  });
-}
-
-export interface ResumeDeploymentRequest {
-  name: string;
-  /** Base64-encoded ECDSA-P256-SHA256 ASN.1 DER signature for re-signing. */
-  userSignature?: string;
-  validUntil?: string;
-}
-
-export function resumeDeployment(
-  req: ResumeDeploymentRequest,
-): Promise<MgmtDeployment> {
-  const body: Record<string, unknown> = {};
-  if (req.validUntil) {
-    body.valid_until = req.validUntil;
-  }
-  if (req.userSignature) {
-    body.user_signature = req.userSignature;
-  }
-  return mgmtFetch(`/deployments/${encodeURIComponent(req.name)}:resume`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
   });
 }

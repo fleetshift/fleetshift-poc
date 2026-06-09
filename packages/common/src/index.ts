@@ -6,17 +6,6 @@ export type {
   PlacementStrategy,
 } from "./canonical.js";
 export { buildSignedInputEnvelope, hashIntent } from "./canonical.js";
-export type { ParsedCapacity } from "./format.js";
-export {
-  accessModeLabel,
-  formatAge,
-  formatCapacity,
-  formatDuration,
-  formatMemoryGiB,
-  formatRelativeTime,
-  parseCapacity,
-  truncate,
-} from "./format.js";
 export type { PluginLinkProps } from "./PluginLink.js";
 export { default as PluginLink } from "./PluginLink.js";
 export type { FleetShiftApi } from "./scalprum.js";
