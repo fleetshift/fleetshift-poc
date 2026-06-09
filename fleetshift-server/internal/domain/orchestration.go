@@ -403,14 +403,9 @@ func (s *OrchestrationWorkflowSpec) DeliverToTarget() Activity[DeliverInput, str
 						probe.Error(err)
 						return struct{}{}, fmt.Errorf("reset delivery %s for retry: %w", d.ID(), err)
 					}
-				} else if d.Generation() == in.Generation && !d.State().IsTerminal() {
-					// In-progress at current generation — already
-					// dispatched and acked. Return without re-dispatching;
-					// dispatchAndAwait will wait for the completion signal.
-					probe.SkippedAlreadyAcked()
-					return struct{}{}, nil
 				} else {
-					// Stale generation or other skip-worthy state.
+					// Delivery already progressed past Pending (addon received
+					// and acked). The ack signal is queued; no re-dispatch needed.
 					probe.SkippedAlreadyAcked()
 					return struct{}{}, nil
 				}
