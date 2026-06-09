@@ -171,6 +171,7 @@ var builtinPages = []pluginPage{
 }
 
 var slugRe = regexp.MustCompile(`[^a-z0-9]+`)
+var safeIDRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 
 func generatePluginPages(registry pluginRegistry) []pluginPage {
 	pages := make([]pluginPage, len(builtinPages))
@@ -199,18 +200,33 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 				}
 			}
 
-			slug := strings.Trim(slugRe.ReplaceAllString(strings.ToLower(label), "-"), "-")
-			if pathsSeen[slug] {
+			id, _ := ext.Properties["id"].(string)
+			if id != "" && !safeIDRe.MatchString(id) {
+				id = ""
+			}
+
+			var pagePath string
+			if id != "" {
+				pagePath = fmt.Sprintf("%s/%s", entry.Key, id)
+			} else {
+				pagePath = strings.Trim(slugRe.ReplaceAllString(strings.ToLower(label), "-"), "-")
+			}
+			if pathsSeen[pagePath] {
 				continue
 			}
-			pathsSeen[slug] = true
+			pathsSeen[pagePath] = true
 
-			pageID := fmt.Sprintf("%s-%s", entry.Key, strings.ToLower(moduleName))
+			var pageID string
+			if id != "" {
+				pageID = fmt.Sprintf("%s.%s", entry.Key, id)
+			} else {
+				pageID = fmt.Sprintf("%s-%s", entry.Key, strings.ToLower(moduleName))
+			}
 
 			pages = append(pages, pluginPage{
 				ID:        pageID,
 				Title:     label,
-				Path:      slug,
+				Path:      pagePath,
 				Scope:     entry.Name,
 				Module:    moduleName,
 				PluginKey: entry.Key,
