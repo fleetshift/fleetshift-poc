@@ -1131,7 +1131,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 		infra: infra,
 	}
 
-	output, err := reconciler.Reconcile(
+	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",
@@ -1231,7 +1231,7 @@ func TestReconcilerReconcile_UsesLocalSTSForwarderForCreatePrereqs(t *testing.T)
 		infra: infra,
 	}
 
-	output, err := reconciler.Reconcile(
+	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",
@@ -1342,7 +1342,7 @@ func TestReconcilerReconcile_CreateClusterCleanupUsesLocalSTSForwarder(t *testin
 		infra: infra,
 	}
 
-	_, err := reconciler.Reconcile(
+	_, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",
@@ -1857,7 +1857,7 @@ func TestReconcilerReconcile_UpdatePathSkipsCreateInfra(t *testing.T) {
 		infra: infra,
 	}
 
-	output, err := reconciler.Reconcile(
+	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",
@@ -1946,7 +1946,7 @@ func TestReconcilerReconcile_AuthExpiredReturnsAuthExpiredError(t *testing.T) {
 		infra: &fakeCleanupInfra{},
 	}
 
-	_, err := reconciler.Reconcile(
+	_, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",
@@ -2309,7 +2309,7 @@ func TestReconcilerReconcile_FailureSnapshotEmittedOnError(t *testing.T) {
 		infra:   infra,
 	}
 
-	_, reconcileErr := reconciler.Reconcile(
+	_, reconcileErr := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
 			Name:           "test-cluster",

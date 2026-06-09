@@ -287,7 +287,7 @@ func (a *Agent) deliverAsync(
 	runCtx, cancel := newReconcileContext(ctx)
 	defer cancel()
 
-	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, progress)
+	output, err := a.reconciler.Ensure(runCtx, spec, target, callerToken, progress)
 	if err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
 		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
