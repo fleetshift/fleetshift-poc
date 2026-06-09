@@ -114,9 +114,11 @@ function finishPool(partial: Partial<NodepoolEntry>): NodepoolEntry {
   return { ...DEFAULT_NODEPOOL, ...partial };
 }
 
-const VALID_INSTANCE_TYPES = new Set(INSTANCE_TYPES);
-const VALID_VOLUME_TYPES = new Set(VOLUME_TYPES);
-const VALID_UPGRADE_TYPES = new Set(UPGRADE_TYPES.map((t) => t.value));
+const VALID_INSTANCE_TYPES: Set<string> = new Set(INSTANCE_TYPES);
+const VALID_VOLUME_TYPES: Set<string> = new Set(VOLUME_TYPES);
+const VALID_UPGRADE_TYPES: Set<string> = new Set(
+  UPGRADE_TYPES.map((t) => t.value),
+);
 
 export function validatePools(pools: NodepoolEntry[]): string[] {
   const errors: string[] = [];
