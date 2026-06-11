@@ -4,7 +4,7 @@ FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, web
 
 ## Source of truth
 
-**Code > docs.** If they disagree, code wins — update the doc. Design docs live in `docs/`. Update/create when making design changes.
+**Code > docs > diagrams.** Disagree → code wins, update doc/diagram. Design docs: `docs/`. Architecture diagrams: `docs/diagrams/` (LikeC4 `.c4`). Update on design changes.
 
 ## Packages
 
@@ -109,6 +109,15 @@ npm run lint:fix           # auto-fix both
 npm run lint:css           # stylelint only
 npm test                   # vitest
 ```
+
+## Diagrams
+
+- `docs/diagrams/` — LikeC4 `.c4` files. Config: `docs/diagrams/likec4.config.json`.
+- **Code > diagrams.** Changed search/extensions/build/plugin code → validate `.c4` still matches. Diverged → update diagram.
+- **Generic, not specific.** Model pattern (modules → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
+- Current:
+  - `feature-contract.c4` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/webpack.config.ts`, `packages/gui/src/extensions/`.
+  - `search.c4` — indexing, extensionPoint linking, query/grouping. Trigger: `packages/gui/src/components/Search/`.
 
 ## Verification
 
