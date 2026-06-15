@@ -34,6 +34,14 @@ const (
 	DeliveryStateAuthFailed  DeliveryState = "auth_failed"
 )
 
+// DeliveryOperation indicates the type of delivery operation.
+type DeliveryOperation string
+
+const (
+	DeliveryOperationDeliver DeliveryOperation = "deliver"
+	DeliveryOperationRemove  DeliveryOperation = "remove"
+)
+
 // IsTerminal reports whether the state represents a completed delivery
 // that should not transition further.
 func (s DeliveryState) IsTerminal() bool {
@@ -66,13 +74,6 @@ var knownDeliveryStates = map[DeliveryState]struct{}{
 	DeliveryStatePartial:     {},
 	DeliveryStateAuthFailed:  {},
 }
-
-type DeliveryOperation string
-
-const (
-	DeliveryOperationDeliver DeliveryOperation = "deliver"
-	DeliveryOperationRemove  DeliveryOperation = "remove"
-)
 
 // Delivery is a first-class entity capturing a single
 // fulfillment-to-target delivery and its lifecycle.
