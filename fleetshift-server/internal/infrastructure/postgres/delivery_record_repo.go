@@ -24,16 +24,17 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO delivery_records (id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO delivery_records (id, fulfillment_id, target_id, manifests, generation, state, operation, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		 ON CONFLICT (fulfillment_id, target_id) DO UPDATE SET
 		   id = excluded.id,
 		   manifests = excluded.manifests,
 		   generation = excluded.generation,
 		   state = excluded.state,
+		   operation = excluded.operation,
 		   updated_at = excluded.updated_at`,
 		string(s.ID), string(s.FulfillmentID), string(s.TargetID),
-		string(manifests), int64(s.Generation), s.State,
+		string(manifests), int64(s.Generation), s.State, string(s.Operation),
 		s.CreatedAt.UTC().Format(time.RFC3339),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
@@ -45,7 +46,7 @@ func (r *DeliveryRepo) Put(ctx context.Context, d domain.Delivery) error {
 
 func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, operation, created_at, updated_at
 		 FROM delivery_records WHERE id = $1`,
 		string(id),
 	)
@@ -54,7 +55,7 @@ func (r *DeliveryRepo) Get(ctx context.Context, id domain.DeliveryID) (domain.De
 
 func (r *DeliveryRepo) GetByFulfillmentTarget(ctx context.Context, fID domain.FulfillmentID, tgtID domain.TargetID) (domain.Delivery, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, operation, created_at, updated_at
 		 FROM delivery_records WHERE fulfillment_id = $1 AND target_id = $2`,
 		string(fID), string(tgtID),
 	)
@@ -63,7 +64,7 @@ func (r *DeliveryRepo) GetByFulfillmentTarget(ctx context.Context, fID domain.Fu
 
 func (r *DeliveryRepo) ListByFulfillment(ctx context.Context, fID domain.FulfillmentID) ([]domain.Delivery, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
+		`SELECT id, fulfillment_id, target_id, manifests, generation, state, operation, created_at, updated_at
 		 FROM delivery_records WHERE fulfillment_id = $1`,
 		string(fID),
 	)
@@ -80,7 +81,7 @@ func (r *DeliveryRepo) ListActive(ctx context.Context, targetIDs []domain.Target
 		string(domain.DeliveryStateProgressing),
 	}
 
-	q := `SELECT id, fulfillment_id, target_id, manifests, generation, state, created_at, updated_at
+	q := `SELECT id, fulfillment_id, target_id, manifests, generation, state, operation, created_at, updated_at
 	      FROM delivery_records WHERE state IN ($1, $2, $3)`
 	if len(targetIDs) > 0 {
 		q += ` AND target_id IN (`
@@ -122,9 +123,9 @@ func scanDelivery(s scanner) (domain.Delivery, error) {
 
 func scanDeliverySnapshot(s scanner) (domain.DeliverySnapshot, error) {
 	var snap domain.DeliverySnapshot
-	var id, fID, tgtID, manifestsJSON, stateStr, createdAtStr, updatedAtStr string
+	var id, fID, tgtID, manifestsJSON, stateStr, operationStr, createdAtStr, updatedAtStr string
 	var generation int64
-	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &generation, &stateStr, &createdAtStr, &updatedAtStr); err != nil {
+	if err := s.Scan(&id, &fID, &tgtID, &manifestsJSON, &generation, &stateStr, &operationStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return snap, domain.ErrNotFound
 		}
@@ -135,6 +136,7 @@ func scanDeliverySnapshot(s scanner) (domain.DeliverySnapshot, error) {
 	snap.TargetID = domain.TargetID(tgtID)
 	snap.Generation = domain.Generation(generation)
 	snap.State = domain.DeliveryState(stateStr)
+	snap.Operation = domain.DeliveryOperation(operationStr)
 	if err := json.Unmarshal([]byte(manifestsJSON), &snap.Manifests); err != nil {
 		return snap, fmt.Errorf("unmarshal manifests: %w", err)
 	}
