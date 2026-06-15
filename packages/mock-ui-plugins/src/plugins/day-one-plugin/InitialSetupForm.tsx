@@ -40,7 +40,6 @@ interface SetupPageProps {
   onSetupSkip?: () => void;
 }
 
-type BackingStore = "sqlite" | "postgres";
 type KeyRegistry = "oidc" | "github";
 
 interface SetupWsCallbacks {
@@ -118,7 +117,6 @@ const AuthConfiguredBanner = ({ authMethod }: { authMethod: AuthMethod }) => {
 const SetupPage = ({ onSetupNext, onSetupSkip }: SetupPageProps) => {
   const [pageLoading, setPageLoading] = useState(true);
   const [authState, setAuthState] = useState<AuthState>({ status: "idle" });
-  const [backingStore, setBackingStore] = useState<BackingStore>("sqlite");
   const [issuerUrl, setIssuerUrl] = useState("");
   const [audience, setAudience] = useState("");
   const [keyRegistry, setKeyRegistry] = useState<KeyRegistry>("oidc");
@@ -168,31 +166,6 @@ const SetupPage = ({ onSetupNext, onSetupSkip }: SetupPageProps) => {
       </p>
 
       <Form>
-        <FormSection title="Backing store">
-          <p>
-            Select the database the console uses to persist configuration and
-            operational state.
-          </p>
-          <Radio
-            id="store-sqlite"
-            name="backing-store"
-            label="SQLite"
-            description="Lightweight embedded database, good for development and small deployments."
-            isChecked={backingStore === "sqlite"}
-            onChange={() => setBackingStore("sqlite")}
-          />
-          <Radio
-            id="store-postgres"
-            name="backing-store"
-            label="PostgreSQL"
-            description="Production-grade relational database for larger deployments."
-            isChecked={backingStore === "postgres"}
-            onChange={() => setBackingStore("postgres")}
-          />
-        </FormSection>
-
-        <Divider />
-
         <FormSection title="Authentication provider">
           <p>Configure your OIDC identity provider for user sign-in.</p>
 
