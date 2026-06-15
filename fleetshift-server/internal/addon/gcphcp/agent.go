@@ -152,7 +152,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 
 		lock := a.clusterLock(spec.Name)
 		lock.Lock()
-		if ad.FulfillmentState == domain.FulfillmentStateDeleting {
+		if ad.Delivery.Operation() == domain.DeliveryOperationRemove {
 			go func() {
 				defer lock.Unlock()
 				a.deleteAsync(ctx, spec, targetCfg, string(ad.Auth.Token), progress)
