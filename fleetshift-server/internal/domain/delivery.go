@@ -67,6 +67,13 @@ var knownDeliveryStates = map[DeliveryState]struct{}{
 	DeliveryStateAuthFailed:  {},
 }
 
+type DeliveryOperation string
+
+const (
+	DeliveryOperationDeliver DeliveryOperation = "deliver"
+	DeliveryOperationRemove  DeliveryOperation = "remove"
+)
+
 // Delivery is a first-class entity capturing a single
 // fulfillment-to-target delivery and its lifecycle.
 //
@@ -80,6 +87,7 @@ type Delivery struct {
 	manifests     []Manifest
 	generation    Generation // fulfillment generation at dispatch; used for stale-delivery fencing
 	state         DeliveryState
+	operation     DeliveryOperation
 	createdAt     time.Time
 	updatedAt     time.Time
 }
@@ -95,6 +103,7 @@ func NewDelivery(id DeliveryID, fulfillmentID FulfillmentID, targetID TargetID, 
 		manifests:     manifests,
 		generation:    generation,
 		state:         DeliveryStatePending,
+		operation:     DeliveryOperationDeliver,
 		createdAt:     now,
 		updatedAt:     now,
 	}
@@ -146,6 +155,7 @@ func (d *Delivery) Redispatch(manifests []Manifest, generation Generation, now t
 	d.manifests = manifests
 	d.generation = generation
 	d.state = DeliveryStatePending
+	d.operation = DeliveryOperationDeliver
 	d.updatedAt = now
 	return nil
 }
@@ -185,6 +195,7 @@ func (d *Delivery) Withdraw(generation Generation, now time.Time) (bool, error) 
 
 	d.state = DeliveryStatePending
 	d.generation = generation
+	d.operation = DeliveryOperationRemove
 	d.updatedAt = now
 	return true, nil
 }
@@ -251,6 +262,9 @@ func (d *Delivery) CreatedAt() time.Time { return d.createdAt }
 
 // UpdatedAt returns the last-updated timestamp.
 func (d *Delivery) UpdatedAt() time.Time { return d.updatedAt }
+
+// Operation returns the current delivery operation (deliver or remove).
+func (d *Delivery) Operation() DeliveryOperation { return d.operation }
 
 // ActiveDelivery is the enriched view of a [Delivery] returned by
 // [DeliveryReporter.ListActiveDeliveries]. It bundles the delivery

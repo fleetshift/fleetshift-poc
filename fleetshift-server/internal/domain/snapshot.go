@@ -64,6 +64,7 @@ type DeliverySnapshot struct {
 	Manifests     []Manifest
 	Generation    Generation
 	State         DeliveryState
+	Operation     DeliveryOperation
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
 }
@@ -188,6 +189,7 @@ func (d *Delivery) Snapshot() DeliverySnapshot {
 		Manifests:     d.manifests,
 		Generation:    d.generation,
 		State:         d.state,
+		Operation:     d.operation,
 		CreatedAt:     d.createdAt,
 		UpdatedAt:     d.updatedAt,
 	}
@@ -316,6 +318,7 @@ func DeliveryFromSnapshot(s DeliverySnapshot) Delivery {
 		manifests:     s.Manifests,
 		generation:    s.Generation,
 		state:         s.State,
+		operation:     s.Operation,
 		createdAt:     s.CreatedAt,
 		updatedAt:     s.UpdatedAt,
 	}

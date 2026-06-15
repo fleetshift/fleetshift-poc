@@ -381,6 +381,99 @@ func TestDelivery_Withdraw(t *testing.T) {
 	})
 }
 
+func TestDelivery_Operation_NewDelivery(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := NewDelivery("d1", "f1", "t1", nil, 1, now)
+	if d.Operation() != DeliveryOperationDeliver {
+		t.Errorf("Operation() = %q, want %q", d.Operation(), DeliveryOperationDeliver)
+	}
+}
+
+func TestDelivery_Operation_Redispatch(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := DeliveryFromSnapshot(DeliverySnapshot{
+		State:      DeliveryStateDelivered,
+		Generation: 1,
+		Operation:  DeliveryOperationRemove,
+	})
+	if err := d.Redispatch(nil, 2, now); err != nil {
+		t.Fatal(err)
+	}
+	if d.Operation() != DeliveryOperationDeliver {
+		t.Errorf("Operation() = %q, want %q", d.Operation(), DeliveryOperationDeliver)
+	}
+}
+
+func TestDelivery_Operation_Withdraw(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := DeliveryFromSnapshot(DeliverySnapshot{
+		State:      DeliveryStateDelivered,
+		Generation: 1,
+		Operation:  DeliveryOperationDeliver,
+	})
+	modified, err := d.Withdraw(2, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !modified {
+		t.Fatal("expected modified = true")
+	}
+	if d.Operation() != DeliveryOperationRemove {
+		t.Errorf("Operation() = %q, want %q", d.Operation(), DeliveryOperationRemove)
+	}
+}
+
+func TestDelivery_Operation_ResetForRetry_Preserves(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, op := range []DeliveryOperation{DeliveryOperationDeliver, DeliveryOperationRemove} {
+		t.Run(string(op), func(t *testing.T) {
+			d := DeliveryFromSnapshot(DeliverySnapshot{
+				State:     DeliveryStateFailed,
+				Operation: op,
+			})
+			if err := d.ResetForRetry(now); err != nil {
+				t.Fatal(err)
+			}
+			if d.Operation() != op {
+				t.Errorf("Operation() = %q, want %q (preserved)", d.Operation(), op)
+			}
+		})
+	}
+}
+
+func TestDelivery_Operation_Retry_Preserves(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for _, op := range []DeliveryOperation{DeliveryOperationDeliver, DeliveryOperationRemove} {
+		t.Run(string(op), func(t *testing.T) {
+			d := DeliveryFromSnapshot(DeliverySnapshot{
+				State:      DeliveryStatePending,
+				Generation: 1,
+				Operation:  op,
+			})
+			retried := d.Retry(1, now)
+			if !retried {
+				t.Fatal("expected retry = true")
+			}
+			if d.Operation() != op {
+				t.Errorf("Operation() = %q, want %q (preserved)", d.Operation(), op)
+			}
+		})
+	}
+}
+
+func TestDelivery_Operation_SnapshotRoundTrip(t *testing.T) {
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	d := NewDelivery("d1", "f1", "t1", nil, 1, now)
+	snap := d.Snapshot()
+	if snap.Operation != DeliveryOperationDeliver {
+		t.Errorf("Snapshot().Operation = %q, want %q", snap.Operation, DeliveryOperationDeliver)
+	}
+	restored := DeliveryFromSnapshot(snap)
+	if restored.Operation() != DeliveryOperationDeliver {
+		t.Errorf("restored Operation() = %q, want %q", restored.Operation(), DeliveryOperationDeliver)
+	}
+}
+
 func TestDelivery_ResetForRetry(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	later := now.Add(time.Hour)
