@@ -100,6 +100,11 @@ The consumer's agent signs this request. The platform validates the spec against
 
 The `spec` is entirely addon-defined — the platform stores it opaquely but validates it against the addon's registered schema. The `state`, `reconciling`, `conditions`, `provenance`, and timestamps are platform-managed, following the same patterns as Deployment (AIP-128 declarative-friendly).
 
+> [!WARNING]
+> We need to decide how namespacing works in the API.
+> Are all APIs under fleetshift services, or are extensions their own gRPC service?
+> Do they fight for resource type names under the same API?
+
 #### Derived Fulfillment
 
 The platform mechanically derives a Fulfillment from the managed resource. Because the addon is the target, the derivation is fixed — no configurable transformation:
@@ -477,7 +482,7 @@ Addons need to be able to integrate with each other.
 
 Managed resource types extend both the gRPC and HTTP API surface at runtime. When a schema is activated, the platform:
 
-1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/`*, `google/protobuf/*`) from a built-in registry.
+1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/`*, `google/protobuf/`*) from a built-in registry.
 2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the pattern `fleetshift.v1.{Singular}Service` (e.g. `fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
 3. **Registers** the service in the `DynamicServiceMux`, which is wired as the gRPC server's `UnknownServiceHandler`. Requests to services not registered at server creation time are routed here instead of being rejected. Composite reflection merges dynamic services with static ones so they are discoverable via `grpcurl`.
 4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/v1/{plural}` and `/v1/{plural}/{id}`.

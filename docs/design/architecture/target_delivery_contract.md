@@ -1,5 +1,39 @@
 # Target delivery contract
 
+## What this doc covers
+
+The detailed delivery protocol between the platform and targets:
+
+- what a target is and how it relates to addons
+- the fulfillment delivery protocol and its reliability guarantees
+- generation ordering and stale delivery prevention
+- delivery authorization at the target protocol level
+- idempotent removal
+- journaling for addon state continuity
+- reporting: drift detection, outputs, observations, and conditions
+
+## When to read this
+
+Read this when you need the full target-side delivery protocol — how targets accept, acknowledge, and report on fulfillment deliveries — or when you need to understand how observation and drift signals originate before reaching the platform index.
+
+## What is intentionally elsewhere
+
+- Core vocabulary, strategy axes, and the high-level delivery contract summary: [core_model.md](core_model.md)
+- Orchestration execution, invalidation, and rollout planning: [orchestration.md](orchestration.md)
+- Fleet-wide indexing of observations and inventory search: [resource_indexing.md](resource_indexing.md)
+- Fleetlet transport and channel model: [fleetlet_and_transport.md](fleetlet_and_transport.md)
+- Full authentication and trust design: [../authentication.md](../authentication.md)
+- Managed-resource projection and condition-event history: [../managed_resources.md](../managed_resources.md)
+
+## Related docs
+
+- [../architecture.md](../architecture.md)
+- [core_model.md](core_model.md)
+- [resource_indexing.md](resource_indexing.md)
+- [../managed_resources.md](../managed_resources.md)
+
+## Overview
+
 A fleetshift *Target* is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
@@ -118,11 +152,13 @@ It is possible the platform could eliminate the need for addon journaling due to
 
 **IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
-## Reporting: drift, outputs, observations, and conditions
+## Reporting: drift, properties, observations, and conditions
+
+> The observations, conditions, and properties reported by targets are the source data for the fleet-wide inventory and search system. See [resource_indexing.md](resource_indexing.md) for how these signals are indexed, stored, and queried at fleet scale.
 
 After fulfilling, there is work to do to consider what's happened since. This is looking at current state to:
 
-1. Report back **outputs** — stable generated values (e.g. computed IDs or URLs) that rarely change once produced
+1. Report back **properties** — stable generated values (e.g. computed IDs or URLs) that rarely change once produced
 2. Report back **observations** — point-in-time reports of what the observer sees about a resource, with history kept over time
 3. Report back **conditions** — structured health and progress signals, with a history of transition events kept over time
 4. Detect drift from intent
