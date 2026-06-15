@@ -282,11 +282,10 @@ func (d *Delivery) Operation() DeliveryOperation { return d.operation }
 // DeliverToTarget activity is in flight. Addons must deduplicate
 // by DeliveryID across both paths. See OME-77.
 type ActiveDelivery struct {
-	Delivery         Delivery
-	Target           TargetInfo
-	Auth             DeliveryAuth
-	Attestation      *Attestation     // nil for unsigned (token-passthrough) fulfillments
-	FulfillmentState FulfillmentState // lets recovery distinguish create vs delete
+	Delivery    Delivery
+	Target      TargetInfo
+	Auth        DeliveryAuth
+	Attestation *Attestation // nil for unsigned (token-passthrough) fulfillments
 }
 
 // DeliveryResult is the outcome of a single delivery attempt.
