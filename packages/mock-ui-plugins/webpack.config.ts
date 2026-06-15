@@ -347,6 +347,116 @@ const ConfigurationPlugin = new FleetshiftPlugin({
   },
 });
 
+const VirtualizationPlugin = new FleetshiftPlugin({
+  extensions: [
+    createModule({
+      id: "virtualization",
+      label: "Virtualization",
+      component: { $codeRef: "VirtualizationPage.default" },
+      icon: { $codeRef: "VirtualizationIcon.default" },
+      description:
+        "Run and manage virtual machines alongside containers across your fleet with live migration and snapshot support.",
+      keywords: [
+        "virtualization",
+        "vm",
+        "virtual machine",
+        "kubevirt",
+        "migration",
+      ],
+    }),
+  ],
+  sharedModules,
+  entryScriptFilename:
+    "plugins/virtualization/virtualization-plugin.[contenthash].js",
+  pluginManifestFilename:
+    "plugins/virtualization/virtualization-plugin-manifest.json",
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "virtualization-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      VirtualizationPage: p(
+        "./src/plugins/virtualization-plugin/VirtualizationPage.tsx",
+      ),
+      VirtualizationIcon: p(
+        "./src/plugins/virtualization-plugin/VirtualizationIcon.tsx",
+      ),
+    },
+  },
+});
+
+const SecurityPlugin = new FleetshiftPlugin({
+  extensions: [
+    createModule({
+      id: "security",
+      label: "Security",
+      component: { $codeRef: "SecurityPage.default" },
+      icon: { $codeRef: "SecurityIcon.default" },
+      description:
+        "Scan images, enforce admission policies, and monitor compliance across your fleet.",
+      keywords: [
+        "security",
+        "vulnerability",
+        "compliance",
+        "policy",
+        "admission",
+        "scan",
+      ],
+    }),
+  ],
+  sharedModules,
+  entryScriptFilename: "plugins/security/security-plugin.[contenthash].js",
+  pluginManifestFilename: "plugins/security/security-plugin-manifest.json",
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "security-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      SecurityPage: p("./src/plugins/security-plugin/SecurityPage.tsx"),
+      SecurityIcon: p("./src/plugins/security-plugin/SecurityIcon.tsx"),
+    },
+  },
+});
+
+const ObservabilityPlugin = new FleetshiftPlugin({
+  extensions: [
+    createModule({
+      id: "observability",
+      label: "Observability",
+      component: { $codeRef: "ObservabilityPage.default" },
+      icon: { $codeRef: "ObservabilityIcon.default" },
+      description:
+        "Unified metrics, logs, and traces across your fleet from a single pane of glass.",
+      keywords: [
+        "observability",
+        "monitoring",
+        "metrics",
+        "logs",
+        "traces",
+        "alerting",
+      ],
+    }),
+  ],
+  sharedModules,
+  entryScriptFilename:
+    "plugins/observability/observability-plugin.[contenthash].js",
+  pluginManifestFilename:
+    "plugins/observability/observability-plugin-manifest.json",
+  moduleFederationSettings: mfOverride,
+  pluginMetadata: {
+    name: "observability-plugin",
+    version: "1.0.0",
+    exposedModules: {
+      ObservabilityPage: p(
+        "./src/plugins/observability-plugin/ObservabilityPage.tsx",
+      ),
+      ObservabilityIcon: p(
+        "./src/plugins/observability-plugin/ObservabilityIcon.tsx",
+      ),
+    },
+  },
+});
+
 const pluginConfigs = [
   { plugin: OverviewPlugin, key: "overview" },
   { plugin: ManagementPlugin, key: "management" },
@@ -356,6 +466,9 @@ const pluginConfigs = [
   { plugin: GcpHcpPlugin, key: "gcphcp" },
   { plugin: KindPlugin, key: "kind" },
   { plugin: ConfigurationPlugin, key: "configuration" },
+  { plugin: VirtualizationPlugin, key: "virtualization" },
+  { plugin: SecurityPlugin, key: "security" },
+  { plugin: ObservabilityPlugin, key: "observability" },
   { plugin: SettingsPlugin, key: "settings" },
 ] as const;
 

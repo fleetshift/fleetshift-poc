@@ -33,7 +33,7 @@ import {
   ToolbarItem,
   Tooltip,
 } from "@patternfly/react-core";
-import { BarsIcon, BugIcon } from "@patternfly/react-icons";
+import { BarsIcon, BugIcon, PuzzlePieceIcon } from "@patternfly/react-icons";
 import clsx from "clsx";
 import type { ComponentType } from "react";
 import { useMemo, useState } from "react";
@@ -169,6 +169,8 @@ const AppNav = () => {
     const NavIcon = iconMap.get(page.title);
     const enabled = isInstalled(page.scope);
 
+    const DisplayIcon = enabled ? NavIcon : PuzzlePieceIcon;
+
     const link = (
       <Link
         to={fullPath}
@@ -176,9 +178,9 @@ const AppNav = () => {
           "pf-v6-u-text-color-disabled": !enabled,
         })}
       >
-        {NavIcon && (
+        {DisplayIcon && (
           <Icon isInline className="pf-v6-u-mr-sm">
-            <NavIcon />
+            <DisplayIcon />
           </Icon>
         )}
         {page.title}

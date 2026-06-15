@@ -11,6 +11,9 @@ export const CORE_EXTENSION_DEFAULTS: Record<string, boolean> = {
   "gcphcp-plugin": true,
   "kind-plugin": true,
   "configuration-plugin": false,
+  "virtualization-plugin": false,
+  "security-plugin": false,
+  "observability-plugin": false,
   "settings-plugin": true,
 };
 
@@ -22,6 +25,9 @@ export const CORE_EXTENSION_META: Record<string, CoreExtensionMeta> = {
   "gcphcp-plugin": { navSection: "main" },
   "kind-plugin": { navSection: "main" },
   "configuration-plugin": { navSection: "main" },
+  "virtualization-plugin": { navSection: "main" },
+  "security-plugin": { navSection: "main" },
+  "observability-plugin": { navSection: "main" },
   "settings-plugin": { navSection: "bottom" },
 };
 
