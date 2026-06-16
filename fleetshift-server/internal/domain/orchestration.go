@@ -477,10 +477,11 @@ func (s *OrchestrationWorkflowSpec) RemoveFromTarget() Activity[RemoveInput, Rem
 		}
 		if !modified {
 			if !delivery.Retry(in.Generation, s.now()) {
-				// Already progressed past Pending (addon acked the removal).
-				// Signal is queued; no re-dispatch needed.
+				// In-progress at current generation — already
+				// dispatched and acked. Return without re-dispatching;
+				// dispatchAndAwait will wait for the completion signal.
 				probe.AlreadyPending()
-				return RemoveOutput{Dispatched: false}, nil
+				return RemoveOutput{Dispatched: true}, nil
 			}
 		}
 		probe.Withdrawn()

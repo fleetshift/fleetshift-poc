@@ -152,10 +152,17 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 
 		lock := a.clusterLock(spec.Name)
 		lock.Lock()
-		go func() {
-			defer lock.Unlock()
-			a.deliverAsync(ctx, spec, targetCfg, string(ad.Auth.Token), progress)
-		}()
+		if ad.Delivery.Operation() == domain.DeliveryOperationRemove {
+			go func() {
+				defer lock.Unlock()
+				a.deleteAsync(ctx, spec, targetCfg, string(ad.Auth.Token), progress)
+			}()
+		} else {
+			go func() {
+				defer lock.Unlock()
+				a.deliverAsync(ctx, spec, targetCfg, string(ad.Auth.Token), progress)
+			}()
+		}
 	}
 	return nil
 }
@@ -280,7 +287,7 @@ func (a *Agent) deliverAsync(
 	runCtx, cancel := newReconcileContext(ctx)
 	defer cancel()
 
-	output, err := a.reconciler.Reconcile(runCtx, spec, target, callerToken, progress)
+	output, err := a.reconciler.Ensure(runCtx, spec, target, callerToken, progress)
 	if err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
 		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
@@ -300,6 +307,37 @@ func (a *Agent) deliverAsync(
 	a.observer.Info("cluster provisioned successfully", "cluster", spec.Name, "target_id", output.TargetID)
 	if reportErr := progress.Complete(ctx, result); reportErr != nil {
 		a.observer.Error("failed to report delivery result", "error", reportErr, "cluster", spec.Name)
+	}
+}
+
+// deleteAsync performs asynchronous cluster deletion for crash recovery.
+// It mirrors deliverAsync but calls reconciler.Delete instead of Reconcile.
+func (a *Agent) deleteAsync(
+	ctx context.Context,
+	spec ClusterSpec,
+	target TargetConfig,
+	callerToken string,
+	progress *deliveryProgress,
+) {
+	runCtx, cancel := newReconcileContext(ctx)
+	defer cancel()
+
+	a.observer.Info("deleting cluster", "cluster", spec.Name)
+	if err := a.reconciler.Delete(runCtx, spec, target, callerToken, progress); err != nil {
+		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
+		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
+			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.Name)
+		}
+		return
+	}
+
+	a.clusterMu.Lock()
+	delete(a.clusterGen, spec.Name)
+	a.clusterMu.Unlock()
+
+	a.observer.Info("cluster deleted successfully", "cluster", spec.Name)
+	if reportErr := progress.Complete(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered}); reportErr != nil {
+		a.observer.Error("failed to report removal result", "error", reportErr, "cluster", spec.Name)
 	}
 }
 

@@ -480,6 +480,7 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			ID:         domain.DeliveryID(id),
 			Generation: gen,
 			State:      domain.DeliveryStateProgressing,
+			Operation:  domain.DeliveryOperationDeliver,
 			Manifests: []domain.Manifest{{
 				ResourceType: gcphcp.ClusterResourceType,
 				Name:         domain.ResourceName(clusterName),
@@ -695,6 +696,33 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 		t.Fatalf("expected no result for invalid spec, got state=%q", result.State)
 	case <-time.After(200 * time.Millisecond):
 		// expected: invalid spec is logged and skipped
+	}
+}
+
+func TestAgent_RecoverActiveDeliveries_ResumesDeleteDelivery(t *testing.T) {
+	ad := makeActiveDelivery("recovery-del", "test-cls", 2, "caller-token")
+	ad.Delivery = domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID:         domain.DeliveryID("recovery-del"),
+		Generation: 2,
+		State:      domain.DeliveryStateProgressing,
+		Operation:  domain.DeliveryOperationRemove,
+		Manifests:  ad.Delivery.Manifests(),
+	})
+	reporter := newRecoveryReporter([]domain.ActiveDelivery{ad})
+	agent := newTestAgent(reporter)
+
+	err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"})
+	if err != nil {
+		t.Fatalf("RecoverActiveDeliveries() error = %v", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		if result.State == "" {
+			t.Fatal("expected non-empty delivery state from recovered delete delivery")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for recovered delete delivery result")
 	}
 }
 

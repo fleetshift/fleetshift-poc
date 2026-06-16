@@ -154,8 +154,9 @@ func (r *Reconciler) exchangeAndCreateClient(
 	return clsClient, authResult, nil
 }
 
-// Reconcile performs the full cluster creation flow:
-func (r *Reconciler) Reconcile(
+// Ensure performs the full cluster creation flow.
+// Ensure is idempotent and can be ran multiple times from any stage.
+func (r *Reconciler) Ensure(
 	ctx context.Context,
 	spec ClusterSpec,
 	target TargetConfig,
@@ -403,14 +404,8 @@ func (r *Reconciler) Reconcile(
 	return output, nil
 }
 
-// Delete performs the full cluster deletion flow:
-// 1. Exchange caller token for broker credentials
-// 2. Create CLS client
-// 3. Resolve cluster ID by name
-// 4. Delete cluster via CLS API
-// 5. Poll until deleted
-// 6. Destroy infrastructure
-// 7. Destroy IAM (best-effort)
+// Delete performs the full cluster deletion flow.
+// Delete is idempotent and can be ran multiple times from any stage.
 func (r *Reconciler) Delete(
 	ctx context.Context,
 	spec ClusterSpec,
