@@ -255,6 +255,20 @@ describe("validateOnboardingActionProperties", () => {
     );
   });
 
+  it("accepts onboarding action with overviewCta", () => {
+    expect(
+      validateOnboardingActionProperties({
+        ...validOnboardingAction,
+        overviewCta: "Integrate your first addon",
+      }),
+    ).toEqual([]);
+  });
+
+  it("accepts onboarding action without overviewCta", () => {
+    const { ...withoutCta } = validOnboardingAction;
+    expect(validateOnboardingActionProperties(withoutCta)).toEqual([]);
+  });
+
   it("validates all three required CodeRefs", () => {
     const errors = validateOnboardingActionProperties({
       ...validOnboardingAction,

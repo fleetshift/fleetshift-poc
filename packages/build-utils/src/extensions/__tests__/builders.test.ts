@@ -184,6 +184,29 @@ describe("createOnboardingAction", () => {
     expect(ext.properties.form).toEqual({ $codeRef: "Form.default" });
   });
 
+  it("preserves optional overviewCta", () => {
+    const ext = createOnboardingAction({
+      id: "gcphcp-connect",
+      label: "GCP HCP",
+      icon: { $codeRef: "Icon.default" },
+      card: { $codeRef: "Card.default" },
+      form: { $codeRef: "Form.default" },
+      overviewCta: "Integrate your first addon",
+    });
+    expect(ext.properties.overviewCta).toBe("Integrate your first addon");
+  });
+
+  it("omits overviewCta when not provided", () => {
+    const ext = createOnboardingAction({
+      id: "gcphcp-connect",
+      label: "GCP HCP",
+      icon: { $codeRef: "Icon.default" },
+      card: { $codeRef: "Card.default" },
+      form: { $codeRef: "Form.default" },
+    });
+    expect(ext.properties.overviewCta).toBeUndefined();
+  });
+
   it("throws on invalid form CodeRef", () => {
     expect(() =>
       createOnboardingAction({
