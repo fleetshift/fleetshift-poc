@@ -17,6 +17,7 @@ export type OnboardingActionExtension = Extension<
     icon: CodeRef<ComponentType>;
     card: CodeRef<ComponentType<OnboardingActionCardProps>>;
     form: CodeRef<ComponentType<OnboardingActionFormProps>>;
+    overviewCta?: string;
   } & SearchReservedProperties
 >;
 

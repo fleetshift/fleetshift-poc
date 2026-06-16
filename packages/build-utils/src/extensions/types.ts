@@ -58,6 +58,7 @@ export type OnboardingActionExtras = {
   icon: EncodedCodeRef;
   card: EncodedCodeRef;
   form: EncodedCodeRef;
+  overviewCta?: string;
 };
 
 export type ModuleProperties = BaseExtensionProperties & ModuleExtras;
