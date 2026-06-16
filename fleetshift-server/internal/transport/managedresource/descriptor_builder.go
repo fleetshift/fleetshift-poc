@@ -64,8 +64,8 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	if cfg == nil {
 		return nil, fmt.Errorf("resource type config is required")
 	}
-	if cfg.Singular == "" || cfg.Plural == "" || cfg.ProtoPackage == "" {
-		return nil, fmt.Errorf("singular, plural, and proto package are required")
+	if cfg.Singular == "" || cfg.Plural == "" || cfg.ProtoPackage == "" || cfg.CollectionID == "" {
+		return nil, fmt.Errorf("singular, plural, proto package, and collection ID are required")
 	}
 	if cfg.Singular[0] < 'A' || cfg.Singular[0] > 'Z' {
 		return nil, fmt.Errorf("singular %q must start with an uppercase letter (PascalCase)", cfg.Singular)
@@ -80,18 +80,19 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	singular := cfg.Singular
 	lower := strings.ToLower(singular[:1]) + singular[1:]
 	plural := cfg.Plural
-	collectionID := cfg.CollectionID()
+	collectionID := cfg.CollectionID
 	resourceStateEnumName := singular + "State"
 
 	specFullName := string(specDesc.FullName())
 	specFile := specDesc.ParentFile()
 
 	pkg := cfg.ProtoPackage
-	// fqn builds fully-qualified names within the package (e.g. "fleetshift.v1.Cluster")
+	// fqn builds fully-qualified names within the package (e.g. "kind.fleetshift.v1.Cluster")
 	fqn := func(name string) string { return pkg + "." + name }
 
+	pkgPath := strings.ReplaceAll(pkg, ".", "/")
 	fdp := &descriptorpb.FileDescriptorProto{
-		Name:       proto.String(fmt.Sprintf("dynamic/%s_service.proto", lower)),
+		Name:       proto.String(fmt.Sprintf("dynamic/%s/%s_service.proto", pkgPath, lower)),
 		Package:    proto.String(pkg),
 		Syntax:     proto.String("proto3"),
 		Dependency: []string{string(specFile.Path()), "google/protobuf/timestamp.proto", "fleetshift/v1/attestation.proto"},

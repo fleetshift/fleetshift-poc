@@ -22,7 +22,9 @@ import (
 // It keeps a content hash per service so that repeated Activate calls
 // with unchanged schemas skip recompilation. When the schema content
 // changes, the mux entry is atomically replaced — no deregister/register
-// gap.
+// gap. It also tracks the prior handle per service so that if the
+// transport identity changes (e.g. APIServiceName or Version), the old
+// HTTP prefix and descriptor path are cleaned up.
 type DynamicSchemaActivator struct {
 	GRPCMux      *DynamicServiceMux
 	HTTPMux      *DynamicHTTPMux
@@ -30,8 +32,9 @@ type DynamicSchemaActivator struct {
 	GRPCAddr     string
 	Deps         Deps
 
-	mu     sync.Mutex
-	hashes map[string][32]byte // service name → content hash
+	mu      sync.Mutex
+	hashes  map[string][32]byte                 // gRPC service name → content hash
+	handles map[string]application.SchemaHandle // gRPC service name → prior handle
 }
 
 var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
@@ -48,10 +51,15 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 
 	// Compute handle and content hash before expensive compilation so
 	// we can short-circuit when the schema is unchanged.
-	serviceName := "fleetshift.v1." + schema.Singular + "Service"
+	serviceName := schema.ProtoPackage + "." + schema.Singular + "Service"
+	pkgPath := strings.ReplaceAll(schema.ProtoPackage, ".", "/")
+	lower := strings.ToLower(schema.Singular[:1]) + schema.Singular[1:]
+	descriptorPath := fmt.Sprintf("dynamic/%s/%s_service.proto", pkgPath, lower)
+	canonicalPrefix := "/apis/" + schema.APIServiceName + "/" + schema.Version + "/" + schema.CollectionID
 	handle := application.SchemaHandle{
-		ServiceName: serviceName,
-		Plural:      schema.Plural,
+		GRPCServiceName: serviceName,
+		HTTPPrefix:      canonicalPrefix,
+		DescriptorPath:  descriptorPath,
 	}
 	hash := schemaContentHash(schema)
 
@@ -82,9 +90,12 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 
 	cfg := &ResourceTypeConfig{
 		ResourceType:   schema.ResourceType,
+		APIServiceName: schema.APIServiceName,
+		Version:        schema.Version,
+		CollectionID:   schema.CollectionID,
 		Singular:       schema.Singular,
 		Plural:         schema.Plural,
-		ProtoPackage:   "fleetshift.v1",
+		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: specDesc.Message,
 	}
@@ -103,17 +114,28 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		return handle, nil
 	}
 
+	if a.handles == nil {
+		a.handles = make(map[string]application.SchemaHandle)
+	}
+
 	// Either new or changed — register or atomically replace.
-	_, alreadyRegistered := a.hashes[serviceName]
+	oldHandle, alreadyRegistered := a.handles[serviceName]
 	if alreadyRegistered {
 		a.GRPCMux.Replace(svc)
 		if a.HTTPMux != nil && a.GRPCAddr != "" {
+			// If the HTTP prefix changed, remove the stale route before
+			// installing the new one so old paths don't leak.
+			if oldHandle.HTTPPrefix != handle.HTTPPrefix {
+				a.HTTPMux.DeregisterByPrefix(oldHandle.HTTPPrefix)
+			}
 			if err := a.HTTPMux.Replace(svc, a.GRPCAddr); err != nil {
-				// TODO: roll back gRPC replace for atomicity.
 				return application.SchemaHandle{}, fmt.Errorf("replace HTTP: %w", err)
 			}
 		}
 		if a.FileRegistry != nil {
+			if oldHandle.DescriptorPath != handle.DescriptorPath {
+				a.FileRegistry.Deregister(oldHandle.DescriptorPath)
+			}
 			a.FileRegistry.Replace(svc.Descriptors.File)
 		}
 	} else {
@@ -122,15 +144,15 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		}
 		if a.HTTPMux != nil && a.GRPCAddr != "" {
 			if err := a.HTTPMux.Register(svc, a.GRPCAddr); err != nil {
-				a.GRPCMux.Deregister(handle.ServiceName)
+				a.GRPCMux.Deregister(handle.GRPCServiceName)
 				return application.SchemaHandle{}, fmt.Errorf("register HTTP: %w", err)
 			}
 		}
 		if a.FileRegistry != nil {
 			if err := a.FileRegistry.Register(svc.Descriptors.File); err != nil {
-				a.GRPCMux.Deregister(handle.ServiceName)
+				a.GRPCMux.Deregister(handle.GRPCServiceName)
 				if a.HTTPMux != nil {
-					a.HTTPMux.Deregister(handle.Plural)
+					a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
 				}
 				return application.SchemaHandle{}, fmt.Errorf("register file descriptor: %w", err)
 			}
@@ -138,6 +160,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	}
 
 	a.hashes[serviceName] = hash
+	a.handles[serviceName] = handle
 	return handle, nil
 }
 
@@ -161,35 +184,34 @@ func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
 }
 
 // Deactivate removes the gRPC, HTTP, and file descriptor registrations
-// for the schema and clears the cached content hash.
+// for the schema and clears the cached content hash and handle.
 func (a *DynamicSchemaActivator) Deactivate(handle application.SchemaHandle) {
-	a.GRPCMux.Deregister(handle.ServiceName)
+	a.GRPCMux.Deregister(handle.GRPCServiceName)
 	if a.HTTPMux != nil {
-		a.HTTPMux.Deregister(handle.Plural)
+		a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
 	}
 	if a.FileRegistry != nil {
-		a.FileRegistry.Deregister(dynamicFilePath(handle.ServiceName))
+		a.FileRegistry.Deregister(handle.DescriptorPath)
 	}
 	a.mu.Lock()
-	delete(a.hashes, handle.ServiceName)
+	delete(a.hashes, handle.GRPCServiceName)
+	delete(a.handles, handle.GRPCServiceName)
 	a.mu.Unlock()
 }
 
-// dynamicFilePath derives the synthesized proto file path from a
-// service name. Must match the path used in [BuildServiceDescriptors].
-func dynamicFilePath(serviceName string) string {
-	const prefix = "fleetshift.v1."
-	const suffix = "Service"
-	singular := serviceName[len(prefix) : len(serviceName)-len(suffix)]
-	lower := strings.ToLower(singular[:1]) + singular[1:]
-	return "dynamic/" + lower + "_service.proto"
-}
-
 // schemaContentHash returns a deterministic SHA-256 over the schema's
-// proto files and spec message. Used to detect content changes across
-// reconnections.
+// transport identity and proto content. Used to detect content changes
+// across reconnections.
 func schemaContentHash(s domain.ManagedResourceSchema) [32]byte {
 	h := sha256.New()
+	h.Write([]byte(s.APIServiceName))
+	h.Write([]byte{0})
+	h.Write([]byte(s.ProtoPackage))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Version))
+	h.Write([]byte{0})
+	h.Write([]byte(s.CollectionID))
+	h.Write([]byte{0})
 	h.Write([]byte(s.SpecMessage))
 	h.Write([]byte{0})
 	h.Write([]byte(s.Singular))
@@ -213,11 +235,11 @@ func schemaContentHash(s domain.ManagedResourceSchema) [32]byte {
 	return [32]byte(h.Sum(nil))
 }
 
-// ContentHash exposes the hash for a service, for testing.
-func (a *DynamicSchemaActivator) ContentHash(serviceName string) ([32]byte, bool) {
+// ContentHash exposes the hash for a gRPC service name, for testing.
+func (a *DynamicSchemaActivator) ContentHash(grpcServiceName string) ([32]byte, bool) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	h, ok := a.hashes[serviceName]
+	h, ok := a.hashes[grpcServiceName]
 	return h, ok
 }
 

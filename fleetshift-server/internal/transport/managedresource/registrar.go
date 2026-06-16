@@ -81,7 +81,7 @@ func Build(cfg *ResourceTypeConfig, deps Deps) (*RegisteredService, error) {
 	}
 
 	grpcDesc := &grpc.ServiceDesc{
-		ServiceName: cfg.ServiceName(),
+		ServiceName: cfg.GRPCServiceName(),
 		HandlerType: (*any)(nil),
 		Methods: []grpc.MethodDesc{
 			{
@@ -149,7 +149,7 @@ func (h *dynamicHandler) handleCreate(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/Create" + h.cfg.Singular,
+			FullMethod: "/" + h.cfg.GRPCServiceName() + "/Create" + h.cfg.Singular,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doCreate(ctx, r.(proto.Message))
@@ -243,7 +243,7 @@ func (h *dynamicHandler) handleGet(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/Get" + h.cfg.Singular,
+			FullMethod: "/" + h.cfg.GRPCServiceName() + "/Get" + h.cfg.Singular,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doGet(ctx, r.(proto.Message))
@@ -282,7 +282,7 @@ func (h *dynamicHandler) handleList(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/List" + h.cfg.Plural,
+			FullMethod: "/" + h.cfg.GRPCServiceName() + "/List" + h.cfg.Plural,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doList(ctx, r.(proto.Message))
@@ -325,7 +325,7 @@ func (h *dynamicHandler) handleDelete(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/Delete" + h.cfg.Singular,
+			FullMethod: "/" + h.cfg.GRPCServiceName() + "/Delete" + h.cfg.Singular,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doDelete(ctx, r.(proto.Message))
@@ -364,7 +364,7 @@ func (h *dynamicHandler) handleResume(
 
 	if interceptor != nil {
 		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.ServiceName() + "/Resume" + h.cfg.Singular,
+			FullMethod: "/" + h.cfg.GRPCServiceName() + "/Resume" + h.cfg.Singular,
 		}
 		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
 			return h.doResume(ctx, r.(proto.Message))

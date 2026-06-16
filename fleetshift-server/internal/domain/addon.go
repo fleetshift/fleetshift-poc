@@ -88,13 +88,28 @@ func (DeliveryCapability) CapabilityType() string { return "delivery" }
 // sources with a built-in resolver for well-known imports.
 type ManagedResourceSchema struct {
 	ResourceType ResourceType
-	// Singular is the singular resource name in PascalCase (e.g. "KindCluster").
+
+	// APIServiceName is the versionless AIP service name used in full
+	// resource names and HTTP prefixes (e.g. "kind.fleetshift.io").
+	APIServiceName string
+
+	// ProtoPackage is the versioned proto package used by gRPC
+	// (e.g. "kind.fleetshift.v1").
+	ProtoPackage string
+
+	// Version is the HTTP API version segment (e.g. "v1").
+	Version string
+
+	// CollectionID is the AIP collection identifier used in resource
+	// names and HTTP paths (e.g. "clusters").
+	CollectionID string
+
+	// Singular is the PascalCase singular resource name used in RPC and
+	// message names (e.g. "Cluster").
 	Singular string
 
-	// Plural is the plural resource name in PascalCase (e.g. "KindClusters").
-	// The lowerCamelCase collection identifier for HTTP paths and proto field
-	// names (e.g. "kindClusters") is derived automatically by the transport
-	// layer via [managedresource.ResourceTypeConfig.CollectionID].
+	// Plural is the PascalCase plural resource name used in List RPC
+	// and response message names (e.g. "Clusters").
 	Plural string
 
 	// ProtoFiles maps virtual filenames to proto source content.

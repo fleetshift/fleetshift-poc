@@ -9,6 +9,8 @@ func newResourceCmd(ctx *cmdContext) *cobra.Command {
 		Short:   "Interact with addon-provided managed resources",
 	}
 
+	cmd.PersistentFlags().String("service", "", "gRPC service name to disambiguate when multiple services expose the same collection")
+
 	cmd.AddCommand(newResourceTypesCmd(ctx))
 	cmd.AddCommand(newResourceDescribeCmd(ctx))
 	cmd.AddCommand(newResourceCreateCmd(ctx))
@@ -17,4 +19,10 @@ func newResourceCmd(ctx *cmdContext) *cobra.Command {
 	cmd.AddCommand(newResourceDeleteCmd(ctx))
 
 	return cmd
+}
+
+// serviceFlag reads the --service persistent flag from a command.
+func serviceFlag(cmd *cobra.Command) string {
+	s, _ := cmd.Flags().GetString("service")
+	return s
 }

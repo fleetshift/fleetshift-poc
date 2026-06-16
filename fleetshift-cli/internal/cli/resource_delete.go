@@ -17,7 +17,7 @@ func newResourceDeleteCmd(ctx *cmdContext) *cobra.Command {
 			id := args[1]
 
 			client := dynamic.NewClient(ctx.conn)
-			rt, err := client.ResolveType(cmd.Context(), plural)
+			rt, err := client.ResolveType(cmd.Context(), plural, serviceFlag(cmd))
 			if err != nil {
 				return err
 			}

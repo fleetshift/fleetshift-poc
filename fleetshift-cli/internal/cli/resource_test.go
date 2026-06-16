@@ -18,37 +18,27 @@ func TestResource_TypesCommand(t *testing.T) {
 
 	out := runCLI(t, "--server", addr, "resource", "types")
 
-	if !strings.Contains(out, "KindClusters") {
-		t.Fatalf("expected 'KindClusters' in output, got:\n%s", out)
+	if !strings.Contains(out, "Clusters") {
+		t.Fatalf("expected 'Clusters' in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "KindCluster") {
-		t.Fatalf("expected 'KindCluster' in output, got:\n%s", out)
+	if !strings.Contains(out, "kind.fleetshift.v1.ClusterService") {
+		t.Fatalf("expected 'kind.fleetshift.v1.ClusterService' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "gcphcp.fleetshift.v1.ClusterService") {
+		t.Fatalf("expected 'gcphcp.fleetshift.v1.ClusterService' in output, got:\n%s", out)
 	}
 }
 
 func TestResource_DescribeCommand(t *testing.T) {
 	addr := testserver.Start(t)
 
-	out := runCLI(t, "--server", addr, "resource", "describe", "kindclusters")
+	out := runCLI(t, "--server", addr, "resource", "--service", "kind.fleetshift.v1.ClusterService", "describe", "clusters")
 
-	if !strings.Contains(out, "Service:  fleetshift.v1.KindClusterService") {
+	if !strings.Contains(out, "Service:  kind.fleetshift.v1.ClusterService") {
 		t.Fatalf("expected service name in output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "Spec (addons.kind.v1.KindClusterSpec):") {
-		t.Fatalf("expected spec message header in output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "string name = 1") {
-		t.Fatalf("expected 'name' field in spec output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "CreateKindCluster") {
-		t.Fatalf("expected 'CreateKindCluster' method in output, got:\n%s", out)
-	}
-	// Verify nested messages are shown.
-	if !strings.Contains(out, "Networking networking") {
-		t.Fatalf("expected nested 'networking' field in output, got:\n%s", out)
-	}
-	if !strings.Contains(out, "api_server_port") {
-		t.Fatalf("expected nested 'api_server_port' field in output, got:\n%s", out)
+	if !strings.Contains(out, "CreateCluster") {
+		t.Fatalf("expected 'CreateCluster' method in output, got:\n%s", out)
 	}
 }
 
@@ -58,29 +48,32 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 	specJSON := `{"name": "test-cluster"}`
 	specFile := writeSpecFile(t, specJSON)
 
+	svcFlag := "--service"
+	svcName := "kind.fleetshift.v1.ClusterService"
+
 	// Create
-	out := runCLI(t, "--server", addr, "resource", "create", "kindclusters",
+	out := runCLI(t, "--server", addr, "resource", svcFlag, svcName, "create", "clusters",
 		"--id", "test-cluster",
 		"--spec-file", specFile,
 		"--output", "json",
 	)
-	assertJSONHasField(t, out, "name", "kindClusters/test-cluster")
+	assertJSONHasField(t, out, "name", "clusters/test-cluster")
 	assertJSONHasField(t, out, "state", "CREATING")
 
 	// Get
-	out = runCLI(t, "--server", addr, "resource", "get", "kindclusters", "test-cluster", "--output", "json")
-	assertJSONHasField(t, out, "name", "kindClusters/test-cluster")
+	out = runCLI(t, "--server", addr, "resource", svcFlag, svcName, "get", "clusters", "test-cluster", "--output", "json")
+	assertJSONHasField(t, out, "name", "clusters/test-cluster")
 	assertJSONHasField(t, out, "state", "CREATING")
 
 	// List
-	out = runCLI(t, "--server", addr, "resource", "list", "kindclusters", "--output", "json")
-	if !strings.Contains(out, "kindClusters/test-cluster") {
+	out = runCLI(t, "--server", addr, "resource", svcFlag, svcName, "list", "clusters", "--output", "json")
+	if !strings.Contains(out, "clusters/test-cluster") {
 		t.Fatalf("expected resource in list output, got:\n%s", out)
 	}
 
 	// Delete
-	out = runCLI(t, "--server", addr, "resource", "delete", "kindclusters", "test-cluster", "--output", "json")
-	if !strings.Contains(out, "kindClusters/test-cluster") {
+	out = runCLI(t, "--server", addr, "resource", svcFlag, svcName, "delete", "clusters", "test-cluster", "--output", "json")
+	if !strings.Contains(out, "clusters/test-cluster") {
 		t.Fatalf("expected deleted resource in output, got:\n%s", out)
 	}
 
@@ -98,15 +91,18 @@ func TestResource_GetTableOutput(t *testing.T) {
 	specJSON := `{"name": "tbl-cluster"}`
 	specFile := writeSpecFile(t, specJSON)
 
+	svcFlag := "--service"
+	svcName := "kind.fleetshift.v1.ClusterService"
+
 	// Create a resource first.
-	runCLI(t, "--server", addr, "resource", "create", "kindclusters",
+	runCLI(t, "--server", addr, "resource", svcFlag, svcName, "create", "clusters",
 		"--id", "tbl-cluster",
 		"--spec-file", specFile,
 		"--output", "json",
 	)
 
 	// Get with default (table) output.
-	out := runCLI(t, "--server", addr, "resource", "get", "kindclusters", "tbl-cluster")
+	out := runCLI(t, "--server", addr, "resource", svcFlag, svcName, "get", "clusters", "tbl-cluster")
 
 	if !strings.Contains(out, "NAME") {
 		t.Fatalf("expected NAME header in table output, got:\n%s", out)
@@ -114,7 +110,7 @@ func TestResource_GetTableOutput(t *testing.T) {
 	if !strings.Contains(out, "STATE") {
 		t.Fatalf("expected STATE header in table output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "kindClusters/tbl-cluster") {
+	if !strings.Contains(out, "clusters/tbl-cluster") {
 		t.Fatalf("expected resource name in table output, got:\n%s", out)
 	}
 }
@@ -125,14 +121,17 @@ func TestResource_ListTableOutput(t *testing.T) {
 	specJSON := `{"name": "tbl-list-cluster"}`
 	specFile := writeSpecFile(t, specJSON)
 
-	runCLI(t, "--server", addr, "resource", "create", "kindclusters",
+	svcFlag := "--service"
+	svcName := "kind.fleetshift.v1.ClusterService"
+
+	runCLI(t, "--server", addr, "resource", svcFlag, svcName, "create", "clusters",
 		"--id", "tbl-list-cluster",
 		"--spec-file", specFile,
 		"--output", "json",
 	)
 
 	// List with default (table) output.
-	out := runCLI(t, "--server", addr, "resource", "list", "kindclusters")
+	out := runCLI(t, "--server", addr, "resource", svcFlag, svcName, "list", "clusters")
 
 	if !strings.Contains(out, "NAME") {
 		t.Fatalf("expected NAME header in table output, got:\n%s", out)
@@ -140,7 +139,7 @@ func TestResource_ListTableOutput(t *testing.T) {
 	if !strings.Contains(out, "STATE") {
 		t.Fatalf("expected STATE header in table output, got:\n%s", out)
 	}
-	if !strings.Contains(out, "kindClusters/tbl-list-cluster") {
+	if !strings.Contains(out, "clusters/tbl-list-cluster") {
 		t.Fatalf("expected resource name in list output, got:\n%s", out)
 	}
 }

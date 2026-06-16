@@ -210,36 +210,38 @@ func NewDynamicHTTPMux(mux *http.ServeMux) *DynamicHTTPMux {
 	}
 }
 
-// Register adds HTTP routes for a managed resource service. The
-// grpcAddr is the loopback address of the gRPC server (for proxying).
-// Returns an error if a service with the same plural is already
-// registered — use [Replace] for atomic updates.
+// Register adds HTTP routes for a managed resource service at its
+// canonical /apis/{service}/{version}/{collection} prefix. The grpcAddr
+// is the loopback address of the gRPC server (for proxying). Returns an
+// error if a service with the same canonical prefix is already
+// registered -- use [Replace] for atomic updates.
 func (m *DynamicHTTPMux) Register(svc *RegisteredService, grpcAddr string) error {
-	prefix := "/v1/" + svc.Config.CollectionID()
+	canonical := svc.Config.CanonicalHTTPPrefix()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	if _, exists := m.handlers[prefix]; exists {
-		return fmt.Errorf("dynamic http mux: routes for %q already registered", svc.Config.CollectionID())
+	if _, exists := m.handlers[canonical]; exists {
+		return fmt.Errorf("dynamic http mux: routes for %q already registered", canonical)
 	}
-	return m.setHandler(svc, grpcAddr, prefix)
+	return m.setHandler(svc, grpcAddr, canonical)
 }
 
 // Replace atomically swaps the HTTP handler for a service. If the
 // service is not currently registered it is added (same as [Register]).
 func (m *DynamicHTTPMux) Replace(svc *RegisteredService, grpcAddr string) error {
-	prefix := "/v1/" + svc.Config.CollectionID()
+	canonical := svc.Config.CanonicalHTTPPrefix()
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.setHandler(svc, grpcAddr, prefix)
+	return m.setHandler(svc, grpcAddr, canonical)
 }
 
-// setHandler builds the handler and installs it. If the prefix has
-// never been seen, a stable dispatcher is registered on the underlying
-// mux. Closes the previous entry's gRPC connection when replacing.
-// Must be called with m.mu held.
+// setHandler builds the handler and installs it for a single prefix.
+// If the prefix has never been seen, a stable dispatcher is registered
+// on the underlying mux. Closes the previous entry's gRPC connection
+// when replacing. Must be called with m.mu held.
 func (m *DynamicHTTPMux) setHandler(svc *RegisteredService, grpcAddr, prefix string) error {
-	entry, err := buildHTTPHandler(svc, grpcAddr)
+	entry, err := buildHTTPHandler(svc, grpcAddr, prefix)
 	if err != nil {
 		return err
 	}
@@ -258,12 +260,9 @@ func (m *DynamicHTTPMux) setHandler(svc *RegisteredService, grpcAddr, prefix str
 	return nil
 }
 
-// Deregister removes the HTTP handler for a service. plural is the
-// PascalCase plural (e.g. "KindClusters"); it is lowered to the
-// lowerCamelCase collection identifier for path matching.
-func (m *DynamicHTTPMux) Deregister(plural string) {
-	collectionID := strings.ToLower(plural[:1]) + plural[1:]
-	prefix := "/v1/" + collectionID
+// DeregisterByPrefix removes the HTTP handler registered under the
+// given exact prefix string.
+func (m *DynamicHTTPMux) DeregisterByPrefix(prefix string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if entry, ok := m.handlers[prefix]; ok && entry != nil && entry.conn != nil {

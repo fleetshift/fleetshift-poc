@@ -42,9 +42,13 @@ func Descriptor() domain.AddonDescriptor {
 // and route fulfillments to the GCP HCP delivery agent.
 func Schema(addonTargetID domain.TargetID) domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType: ClusterResourceType,
-		Singular:     "GCPHCPCluster",
-		Plural:       "GCPHCPClusters",
+		ResourceType:   ClusterResourceType,
+		APIServiceName: "gcphcp.fleetshift.io",
+		ProtoPackage:   "gcphcp.fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "clusters",
+		Singular:       "Cluster",
+		Plural:         "Clusters",
 		ProtoFiles: map[string]string{
 			specProtoPath: gcphcpClusterSpecProto,
 		},

@@ -34,15 +34,16 @@ var staticServices = map[string]bool{
 
 // ResourceType holds metadata for a discovered managed resource service.
 type ResourceType struct {
-	ServiceName string
-	Singular    string
-	Plural      string
+	ServiceName  string
+	Singular     string
+	Plural       string
+	ProtoPackage string // versioned proto package (e.g. "kind.fleetshift.v1")
+	CollectionID string // AIP collection identifier (e.g. "clusters")
 }
 
-// CollectionID returns the lowerCamelCase collection identifier derived
-// from Plural (e.g. "KindClusters" -> "kindClusters").
-func (rt ResourceType) CollectionID() string {
-	return strings.ToLower(rt.Plural[:1]) + rt.Plural[1:]
+// ResourceCollection returns the resource name prefix (e.g. "clusters/").
+func (rt ResourceType) ResourceCollection() string {
+	return rt.CollectionID + "/"
 }
 
 // Client wraps a gRPC connection and provides reflection-based
@@ -57,8 +58,10 @@ func NewClient(conn *grpc.ClientConn) *Client {
 }
 
 // ListResourceTypes discovers available managed resource services via
-// gRPC reflection. It filters out known static services and derives
-// singular/plural from the service method names.
+// gRPC reflection. It filters out known static services and detects
+// dynamic resource services by descriptor shape: the service name ends
+// in "Service" and has Create/Get/List/Delete methods following AIP
+// naming conventions.
 func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) {
 	services, err := c.listServices(ctx)
 	if err != nil {
@@ -70,31 +73,102 @@ func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) 
 		if staticServices[svcName] {
 			continue
 		}
-		if !strings.HasPrefix(svcName, "fleetshift.v1.") || !strings.HasSuffix(svcName, "Service") {
+		if !strings.HasSuffix(svcName, "Service") {
 			continue
 		}
 
-		singular := svcName[len("fleetshift.v1.") : len(svcName)-len("Service")]
-
-		plural, err := c.derivePlural(ctx, svcName, singular)
+		rt, err := c.probeResourceService(ctx, svcName)
 		if err != nil {
-			// Skip services whose descriptors can't be resolved.
-			// This can happen for statically registered services
-			// whose descriptors are in GlobalFiles on the server but
-			// not on this client.
 			continue
 		}
-		if plural == "" {
+		if rt == nil {
 			continue
 		}
-
-		types = append(types, ResourceType{
-			ServiceName: svcName,
-			Singular:    singular,
-			Plural:      plural,
-		})
+		types = append(types, *rt)
 	}
 	return types, nil
+}
+
+// probeResourceService uses reflection to determine whether a gRPC
+// service is a managed resource service by checking its method shape.
+// Returns nil if the service does not match the expected pattern.
+func (c *Client) probeResourceService(ctx context.Context, svcName string) (*ResourceType, error) {
+	descs, err := c.resolveServiceDescriptors(ctx, svcName)
+	if err != nil {
+		return nil, err
+	}
+
+	svcDesc := findService(descs, svcName)
+	if svcDesc == nil {
+		return nil, nil
+	}
+
+	// Extract proto package and singular from the service full name.
+	lastDot := strings.LastIndex(svcName, ".")
+	if lastDot < 0 {
+		return nil, nil
+	}
+	protoPackage := svcName[:lastDot]
+	localName := svcName[lastDot+1:]
+	if !strings.HasSuffix(localName, "Service") {
+		return nil, nil
+	}
+	singular := localName[:len(localName)-len("Service")]
+
+	// Verify the service has the expected CRUD methods.
+	methods := make(map[string]bool, svcDesc.Methods().Len())
+	for i := range svcDesc.Methods().Len() {
+		methods[string(svcDesc.Methods().Get(i).Name())] = true
+	}
+
+	if !methods["Create"+singular] || !methods["Get"+singular] || !methods["Delete"+singular] {
+		return nil, nil
+	}
+
+	// Find the List method to derive Plural and CollectionID.
+	var plural, collectionID string
+	for name := range methods {
+		if strings.HasPrefix(name, "List") && name != "List" {
+			plural = name[len("List"):]
+			break
+		}
+	}
+	if plural == "" {
+		return nil, nil
+	}
+
+	// Derive CollectionID from the List response's repeated field.
+	listRespName := protoPackage + ".List" + plural + "Response"
+	listRespDesc := findMessage(descs, listRespName)
+	if listRespDesc != nil {
+		for i := range listRespDesc.Fields().Len() {
+			f := listRespDesc.Fields().Get(i)
+			if f.IsList() && f.Message() != nil {
+				collectionID = string(f.Name())
+				break
+			}
+		}
+	}
+	if collectionID == "" {
+		collectionID = strings.ToLower(plural[:1]) + plural[1:]
+	}
+
+	// Verify the resource message has a spec field.
+	resourceMsgDesc := findMessage(descs, protoPackage+"."+singular)
+	if resourceMsgDesc == nil {
+		return nil, nil
+	}
+	if resourceMsgDesc.Fields().ByName("spec") == nil {
+		return nil, nil
+	}
+
+	return &ResourceType{
+		ServiceName:  svcName,
+		Singular:     singular,
+		Plural:       plural,
+		ProtoPackage: protoPackage,
+		CollectionID: collectionID,
+	}, nil
 }
 
 // FieldSchema describes a single field in a protobuf message,
@@ -144,7 +218,7 @@ func (c *Client) Describe(ctx context.Context, rt ResourceType) (*SchemaInfo, er
 		info.Methods = append(info.Methods, string(svcDesc.Methods().Get(i).Name()))
 	}
 
-	resourceMsgDesc := findMessage(descs, "fleetshift.v1."+rt.Singular)
+	resourceMsgDesc := findMessage(descs, rt.ProtoPackage+"."+rt.Singular)
 	if resourceMsgDesc == nil {
 		return info, nil
 	}
@@ -252,9 +326,9 @@ func (c *Client) Create(ctx context.Context, rt ResourceType, id string, specJSO
 		return nil, fmt.Errorf("service %s not found in descriptors", rt.ServiceName)
 	}
 
-	resourceMsgDesc := findMessage(descs, "fleetshift.v1."+rt.Singular)
+	resourceMsgDesc := findMessage(descs, rt.ProtoPackage+"."+rt.Singular)
 	if resourceMsgDesc == nil {
-		return nil, fmt.Errorf("resource message %s not found", rt.Singular)
+		return nil, fmt.Errorf("resource message %s.%s not found", rt.ProtoPackage, rt.Singular)
 	}
 
 	specField := resourceMsgDesc.Fields().ByName("spec")
@@ -271,7 +345,7 @@ func (c *Client) Create(ctx context.Context, rt ResourceType, id string, specJSO
 	resource := dynamicpb.NewMessage(resourceMsgDesc)
 	resource.Set(specField, protoreflect.ValueOfMessage(spec))
 
-	createReqName := "fleetshift.v1.Create" + rt.Singular + "Request"
+	createReqName := rt.ProtoPackage + ".Create" + rt.Singular + "Request"
 	createReqDesc := findMessage(descs, createReqName)
 	if createReqDesc == nil {
 		return nil, fmt.Errorf("create request message %s not found", createReqName)
@@ -296,12 +370,12 @@ func (c *Client) Get(ctx context.Context, rt ResourceType, id string) (proto.Mes
 		return nil, fmt.Errorf("resolve descriptors: %w", err)
 	}
 
-	resourceMsgDesc := findMessage(descs, "fleetshift.v1."+rt.Singular)
+	resourceMsgDesc := findMessage(descs, rt.ProtoPackage+"."+rt.Singular)
 	if resourceMsgDesc == nil {
-		return nil, fmt.Errorf("resource message %s not found", rt.Singular)
+		return nil, fmt.Errorf("resource message %s.%s not found", rt.ProtoPackage, rt.Singular)
 	}
 
-	getReqName := "fleetshift.v1.Get" + rt.Singular + "Request"
+	getReqName := rt.ProtoPackage + ".Get" + rt.Singular + "Request"
 	getReqDesc := findMessage(descs, getReqName)
 	if getReqDesc == nil {
 		return nil, fmt.Errorf("get request message %s not found", getReqName)
@@ -309,7 +383,7 @@ func (c *Client) Get(ctx context.Context, rt ResourceType, id string) (proto.Mes
 
 	req := dynamicpb.NewMessage(getReqDesc)
 	nameField := getReqDesc.Fields().ByName("name")
-	req.Set(nameField, protoreflect.ValueOfString(rt.CollectionID()+"/"+id))
+	req.Set(nameField, protoreflect.ValueOfString(rt.ResourceCollection()+id))
 
 	resp := dynamicpb.NewMessage(resourceMsgDesc)
 	method := "/" + rt.ServiceName + "/Get" + rt.Singular
@@ -326,13 +400,13 @@ func (c *Client) List(ctx context.Context, rt ResourceType, pageSize int32) ([]p
 		return nil, fmt.Errorf("resolve descriptors: %w", err)
 	}
 
-	listReqName := "fleetshift.v1.List" + rt.Plural + "Request"
+	listReqName := rt.ProtoPackage + ".List" + rt.Plural + "Request"
 	listReqDesc := findMessage(descs, listReqName)
 	if listReqDesc == nil {
 		return nil, fmt.Errorf("list request message %s not found", listReqName)
 	}
 
-	listRespName := "fleetshift.v1.List" + rt.Plural + "Response"
+	listRespName := rt.ProtoPackage + ".List" + rt.Plural + "Response"
 	listRespDesc := findMessage(descs, listRespName)
 	if listRespDesc == nil {
 		return nil, fmt.Errorf("list response message %s not found", listRespName)
@@ -351,10 +425,9 @@ func (c *Client) List(ctx context.Context, rt ResourceType, pageSize int32) ([]p
 		return nil, err
 	}
 
-	collectionID := rt.CollectionID()
-	resourcesField := listRespDesc.Fields().ByName(protoreflect.Name(collectionID))
+	resourcesField := listRespDesc.Fields().ByName(protoreflect.Name(rt.CollectionID))
 	if resourcesField == nil {
-		return nil, fmt.Errorf("resources field %q not found in list response", collectionID)
+		return nil, fmt.Errorf("resources field %q not found in list response", rt.CollectionID)
 	}
 
 	list := resp.Get(resourcesField).List()
@@ -372,12 +445,12 @@ func (c *Client) Delete(ctx context.Context, rt ResourceType, id string) (proto.
 		return nil, fmt.Errorf("resolve descriptors: %w", err)
 	}
 
-	resourceMsgDesc := findMessage(descs, "fleetshift.v1."+rt.Singular)
+	resourceMsgDesc := findMessage(descs, rt.ProtoPackage+"."+rt.Singular)
 	if resourceMsgDesc == nil {
-		return nil, fmt.Errorf("resource message %s not found", rt.Singular)
+		return nil, fmt.Errorf("resource message %s.%s not found", rt.ProtoPackage, rt.Singular)
 	}
 
-	deleteReqName := "fleetshift.v1.Delete" + rt.Singular + "Request"
+	deleteReqName := rt.ProtoPackage + ".Delete" + rt.Singular + "Request"
 	deleteReqDesc := findMessage(descs, deleteReqName)
 	if deleteReqDesc == nil {
 		return nil, fmt.Errorf("delete request message %s not found", deleteReqName)
@@ -385,7 +458,7 @@ func (c *Client) Delete(ctx context.Context, rt ResourceType, id string) (proto.
 
 	req := dynamicpb.NewMessage(deleteReqDesc)
 	nameField := deleteReqDesc.Fields().ByName("name")
-	req.Set(nameField, protoreflect.ValueOfString(rt.CollectionID()+"/"+id))
+	req.Set(nameField, protoreflect.ValueOfString(rt.ResourceCollection()+id))
 
 	resp := dynamicpb.NewMessage(resourceMsgDesc)
 	method := "/" + rt.ServiceName + "/Delete" + rt.Singular
@@ -395,19 +468,42 @@ func (c *Client) Delete(ctx context.Context, rt ResourceType, id string) (proto.
 	return resp, nil
 }
 
-// ResolveType finds a resource type by plural name among the available
-// types. Returns an error if no matching type is found.
-func (c *Client) ResolveType(ctx context.Context, plural string) (ResourceType, error) {
+// ResolveType finds a resource type by collection ID (or plural) among
+// the available types. If service is non-empty, it is used to
+// disambiguate when multiple services expose the same collection. If
+// service is empty and the collection is ambiguous, an error listing
+// the candidates is returned.
+func (c *Client) ResolveType(ctx context.Context, collection string, service string) (ResourceType, error) {
 	types, err := c.ListResourceTypes(ctx)
 	if err != nil {
 		return ResourceType{}, err
 	}
+
+	var matches []ResourceType
 	for _, rt := range types {
-		if strings.EqualFold(rt.Plural, plural) {
-			return rt, nil
+		if strings.EqualFold(rt.CollectionID, collection) || strings.EqualFold(rt.Plural, collection) {
+			if service != "" && rt.ServiceName != service {
+				continue
+			}
+			matches = append(matches, rt)
 		}
 	}
-	return ResourceType{}, fmt.Errorf("unknown resource type %q", plural)
+
+	switch len(matches) {
+	case 0:
+		return ResourceType{}, fmt.Errorf("unknown resource type %q", collection)
+	case 1:
+		return matches[0], nil
+	default:
+		var candidates []string
+		for _, rt := range matches {
+			candidates = append(candidates, rt.ServiceName)
+		}
+		return ResourceType{}, fmt.Errorf(
+			"ambiguous collection %q: multiple services match (%s); use --service to disambiguate",
+			collection, strings.Join(candidates, ", "),
+		)
+	}
 }
 
 func (c *Client) listServices(ctx context.Context) ([]string, error) {
@@ -441,29 +537,6 @@ func (c *Client) listServices(ctx context.Context) ([]string, error) {
 		names = append(names, svc.GetName())
 	}
 	return names, nil
-}
-
-// derivePlural uses reflection to find the List method and extract the
-// PascalCase plural from its name. Convention: List{Plural} → Plural.
-func (c *Client) derivePlural(ctx context.Context, serviceName, singular string) (string, error) {
-	descs, err := c.resolveServiceDescriptors(ctx, serviceName)
-	if err != nil {
-		return "", err
-	}
-
-	svcDesc := findService(descs, serviceName)
-	if svcDesc == nil {
-		return "", fmt.Errorf("service %s not found", serviceName)
-	}
-
-	for i := range svcDesc.Methods().Len() {
-		method := svcDesc.Methods().Get(i)
-		name := string(method.Name())
-		if strings.HasPrefix(name, "List") {
-			return name[len("List"):], nil
-		}
-	}
-	return singular + "s", nil
 }
 
 // resolveServiceDescriptors fetches the file descriptor(s) for a

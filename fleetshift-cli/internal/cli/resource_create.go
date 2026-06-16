@@ -28,7 +28,7 @@ func newResourceCreateCmd(ctx *cmdContext) *cobra.Command {
 			}
 
 			client := dynamic.NewClient(ctx.conn)
-			rt, err := client.ResolveType(cmd.Context(), plural)
+			rt, err := client.ResolveType(cmd.Context(), plural, serviceFlag(cmd))
 			if err != nil {
 				return err
 			}

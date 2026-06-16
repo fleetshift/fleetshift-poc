@@ -38,21 +38,23 @@ func (r *recordingActivator) Activate(_ context.Context, schema domain.ManagedRe
 		return application.SchemaHandle{}, err
 	}
 
+	grpcServiceName := schema.ProtoPackage + "." + schema.Singular + "Service"
 	handle := application.SchemaHandle{
-		ServiceName: fmt.Sprintf("fleetshift.v1.%sService", schema.Singular),
-		Plural:      schema.Plural,
+		GRPCServiceName: grpcServiceName,
+		HTTPPrefix:      fmt.Sprintf("/apis/%s/%s/%s", schema.APIServiceName, schema.Version, schema.CollectionID),
+		DescriptorPath:  "dynamic/" + schema.Singular + "_service.proto",
 	}
 
 	hash := testSchemaHash(schema)
 	if r.hashes == nil {
 		r.hashes = make(map[string][32]byte)
 	}
-	if prev, ok := r.hashes[handle.ServiceName]; ok && prev == hash {
+	if prev, ok := r.hashes[handle.GRPCServiceName]; ok && prev == hash {
 		return handle, nil
 	}
 
 	r.activated = append(r.activated, schema)
-	r.hashes[handle.ServiceName] = hash
+	r.hashes[handle.GRPCServiceName] = hash
 	return handle, nil
 }
 
@@ -60,7 +62,7 @@ func (r *recordingActivator) Deactivate(handle application.SchemaHandle) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.deactivated = append(r.deactivated, handle)
-	delete(r.hashes, handle.ServiceName)
+	delete(r.hashes, handle.GRPCServiceName)
 }
 
 func (r *recordingActivator) activatedCount() int {
@@ -77,6 +79,14 @@ func (r *recordingActivator) deactivatedCount() int {
 
 func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
 	h := sha256.New()
+	h.Write([]byte(s.APIServiceName))
+	h.Write([]byte{0})
+	h.Write([]byte(s.ProtoPackage))
+	h.Write([]byte{0})
+	h.Write([]byte(s.Version))
+	h.Write([]byte{0})
+	h.Write([]byte(s.CollectionID))
+	h.Write([]byte{0})
 	h.Write([]byte(s.SpecMessage))
 	h.Write([]byte{0})
 	h.Write([]byte(s.Singular))
@@ -184,12 +194,16 @@ func clusterMgmtDescriptor() domain.AddonDescriptor {
 
 func clusterSchema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType: "clusters",
-		Singular:     "Cluster",
-		Plural:       "Clusters",
-		ProtoFiles:   map[string]string{"fake.proto": "syntax = \"proto3\";"},
-		SpecMessage:  "fake.ClusterSpec",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+		ResourceType:   "clusters",
+		APIServiceName: "test.fleetshift.io",
+		ProtoPackage:   "test.fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "clusters",
+		Singular:       "Cluster",
+		Plural:         "Clusters",
+		ProtoFiles:     map[string]string{"fake.proto": "syntax = \"proto3\";"},
+		SpecMessage:    "fake.ClusterSpec",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 	}
 }
 
@@ -433,9 +447,9 @@ func TestAddonManager_DisableDeactivatesSchemas(t *testing.T) {
 	if env.activator.deactivatedCount() != 1 {
 		t.Fatalf("deactivated count = %d, want 1", env.activator.deactivatedCount())
 	}
-	if env.activator.deactivated[0].ServiceName != "fleetshift.v1.ClusterService" {
-		t.Errorf("deactivated service = %q, want fleetshift.v1.ClusterService",
-			env.activator.deactivated[0].ServiceName)
+	if env.activator.deactivated[0].GRPCServiceName != "test.fleetshift.v1.ClusterService" {
+		t.Errorf("deactivated service = %q, want test.fleetshift.v1.ClusterService",
+			env.activator.deactivated[0].GRPCServiceName)
 	}
 }
 
@@ -525,12 +539,16 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 
 	clusterS := clusterSchema()
 	databaseS := domain.ManagedResourceSchema{
-		ResourceType: "databases",
-		Singular:     "Database",
-		Plural:       "databases",
-		ProtoFiles:   map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
-		SpecMessage:  "fake.DatabaseSpec",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+		ResourceType:   "databases",
+		APIServiceName: "test.fleetshift.io",
+		ProtoPackage:   "test.fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "databases",
+		Singular:       "Database",
+		Plural:         "Databases",
+		ProtoFiles:     map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
+		SpecMessage:    "fake.DatabaseSpec",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 	}
 	if err := env.mgr.Connect(ctx, "multi-resource", application.ConnectInput{
 		Schemas: []domain.ManagedResourceSchema{clusterS, databaseS},
@@ -557,9 +575,9 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 	if env.activator.deactivatedCount() != 1 {
 		t.Fatalf("deactivated count = %d, want 1 (databases)", env.activator.deactivatedCount())
 	}
-	if env.activator.deactivated[0].ServiceName != "fleetshift.v1.DatabaseService" {
-		t.Errorf("deactivated service = %q, want fleetshift.v1.DatabaseService",
-			env.activator.deactivated[0].ServiceName)
+	if env.activator.deactivated[0].GRPCServiceName != "test.fleetshift.v1.DatabaseService" {
+		t.Errorf("deactivated service = %q, want test.fleetshift.v1.DatabaseService",
+			env.activator.deactivated[0].GRPCServiceName)
 	}
 
 	// Clusters should NOT have been re-activated — still 2 total.

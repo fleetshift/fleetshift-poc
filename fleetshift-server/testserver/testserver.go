@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -58,6 +59,7 @@ func Start(t *testing.T) string {
 	router := delivery.NewRoutingDeliveryService()
 	recording := &sqlite.RecordingDeliveryService{Store: store}
 	router.Register("test", recording)
+	router.Register(gcphcpaddon.TargetType, recording)
 
 	reg := &memworkflow.Registry{}
 	recording.Reporter = application.NewDeliveryReportService(store, reg)
@@ -233,6 +235,23 @@ func Start(t *testing.T) string {
 		Schemas: []domain.ManagedResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)
+	}
+
+	if err := addonMgr.Enable(ctx, gcphcpaddon.Descriptor()); err != nil {
+		t.Fatalf("enable gcphcp addon: %v", err)
+	}
+
+	gcpSchema := gcphcpaddon.Schema("gcphcp-test")
+	if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
+		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:                    "gcphcp-test",
+			Type:                  gcphcpaddon.TargetType,
+			Name:                  "Test GCP HCP Provider",
+			AcceptedResourceTypes: []domain.ResourceType{gcphcpaddon.ClusterResourceType},
+		})},
+		Schemas: []domain.ManagedResourceSchema{gcpSchema},
+	}); err != nil {
+		t.Fatalf("connect gcphcp addon: %v", err)
 	}
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")

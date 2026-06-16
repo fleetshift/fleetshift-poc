@@ -18,24 +18,24 @@ import (
 )
 
 // RegisterHTTP registers REST/JSON routes for the dynamic service on the
-// given HTTP mux. Routes follow the AIP HTTP binding pattern:
+// given HTTP mux. Routes follow the AIP HTTP binding pattern at the
+// canonical /apis/{service}/{version}/{collection} prefix:
 //
-//	POST   /v1/{collection}          -> Create
-//	GET    /v1/{collection}/{id}     -> Get
-//	GET    /v1/{collection}          -> List
-//	DELETE /v1/{collection}/{id}     -> Delete
+//	POST   {prefix}          -> Create
+//	GET    {prefix}/{id}     -> Get
+//	GET    {prefix}          -> List
+//	DELETE {prefix}/{id}     -> Delete
 //
 // The handler connects to the gRPC server at grpcAddr to forward requests.
 //
 // For dynamic (hot-swappable) registration, prefer [DynamicHTTPMux] which
 // uses handler indirection to support atomic replace and deregister.
 func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) error {
-	entry, err := buildHTTPHandler(svc, grpcAddr)
+	prefix := svc.Config.CanonicalHTTPPrefix()
+	entry, err := buildHTTPHandler(svc, grpcAddr, prefix)
 	if err != nil {
 		return err
 	}
-
-	prefix := "/v1/" + svc.Config.CollectionID()
 
 	// Register both the exact path and the subtree pattern so that
 	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
@@ -58,13 +58,11 @@ type httpHandlerEntry struct {
 // buildHTTPHandler creates the HTTP handler function for a managed
 // resource service without registering it on any mux. Used by both
 // [RegisterHTTP] (static) and [DynamicHTTPMux] (dynamic).
-func buildHTTPHandler(svc *RegisteredService, grpcAddr string) (*httpHandlerEntry, error) {
+func buildHTTPHandler(svc *RegisteredService, grpcAddr, prefix string) (*httpHandlerEntry, error) {
 	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	if err != nil {
 		return nil, err
 	}
-
-	prefix := "/v1/" + svc.Config.CollectionID()
 
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
@@ -120,7 +118,7 @@ func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	createReq.Set(resourceField, messageValue(resource))
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	method := "/" + svc.Config.ServiceName() + "/Create" + svc.Config.Singular
+	method := "/" + svc.Config.GRPCServiceName() + "/Create" + svc.Config.Singular
 	if err := conn.Invoke(grpcContext(r), method, createReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
@@ -135,7 +133,7 @@ func handleHTTPGet(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn
 	getReq.Set(nameField, stringValue(svc.Config.Collection()+id))
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	method := "/" + svc.Config.ServiceName() + "/Get" + svc.Config.Singular
+	method := "/" + svc.Config.GRPCServiceName() + "/Get" + svc.Config.Singular
 	if err := conn.Invoke(grpcContext(r), method, getReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
@@ -164,7 +162,7 @@ func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientCon
 	}
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.ListResponse)
-	method := "/" + svc.Config.ServiceName() + "/List" + svc.Config.Plural
+	method := "/" + svc.Config.GRPCServiceName() + "/List" + svc.Config.Plural
 	if err := conn.Invoke(grpcContext(r), method, listReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
@@ -179,7 +177,7 @@ func handleHTTPDelete(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	deleteReq.Set(nameField, stringValue(svc.Config.Collection()+id))
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	method := "/" + svc.Config.ServiceName() + "/Delete" + svc.Config.Singular
+	method := "/" + svc.Config.GRPCServiceName() + "/Delete" + svc.Config.Singular
 	if err := conn.Invoke(grpcContext(r), method, deleteReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
@@ -209,7 +207,7 @@ func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	}
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	method := "/" + svc.Config.ServiceName() + "/Resume" + svc.Config.Singular
+	method := "/" + svc.Config.GRPCServiceName() + "/Resume" + svc.Config.Singular
 	if err := conn.Invoke(grpcContext(r), method, resumeReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return

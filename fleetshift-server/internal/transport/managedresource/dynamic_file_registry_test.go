@@ -29,9 +29,12 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 
 	cfg := &managedresource.ResourceTypeConfig{
 		ResourceType:   kindaddon.ClusterResourceType,
+		APIServiceName: schema.APIServiceName,
+		Version:        schema.Version,
+		CollectionID:   schema.CollectionID,
 		Singular:       schema.Singular,
 		Plural:         schema.Plural,
-		ProtoPackage:   "fleetshift.v1",
+		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: spec.Message,
 	}
@@ -57,9 +60,12 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 
 	cfg := &managedresource.ResourceTypeConfig{
 		ResourceType:   gcphcpaddon.ClusterResourceType,
+		APIServiceName: schema.APIServiceName,
+		Version:        schema.Version,
+		CollectionID:   schema.CollectionID,
 		Singular:       schema.Singular,
 		Plural:         schema.Plural,
-		ProtoPackage:   "fleetshift.v1",
+		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: spec.Message,
 	}
@@ -87,7 +93,7 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 	}
 
 	// FindDescriptorByName should find the service.
-	svcName := protoreflect.FullName("fleetshift.v1.KindClusterService")
+	svcName := protoreflect.FullName("kind.fleetshift.v1.ClusterService")
 	desc, err := reg.FindDescriptorByName(svcName)
 	if err != nil {
 		t.Fatalf("FindDescriptorByName(%s): %v", svcName, err)
@@ -110,8 +116,8 @@ func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.
 	}
 
 	for _, svcName := range []protoreflect.FullName{
-		"fleetshift.v1.KindClusterService",
-		"fleetshift.v1.GCPHCPClusterService",
+		"kind.fleetshift.v1.ClusterService",
+		"gcphcp.fleetshift.v1.ClusterService",
 	} {
 		desc, err := reg.FindDescriptorByName(svcName)
 		if err != nil {
@@ -170,7 +176,7 @@ func TestDynamicFileRegistry_DeregisterRemovesDescriptor(t *testing.T) {
 		t.Fatal("expected error after Deregister, got nil")
 	}
 
-	svcName := protoreflect.FullName("fleetshift.v1.KindClusterService")
+	svcName := protoreflect.FullName("kind.fleetshift.v1.ClusterService")
 	_, err = reg.FindDescriptorByName(svcName)
 	if err == nil {
 		t.Fatal("expected error for FindDescriptorByName after Deregister, got nil")

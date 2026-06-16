@@ -104,17 +104,17 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if handle.ServiceName != "fleetshift.v1.KindClusterService" {
-		t.Errorf("handle.ServiceName = %q, want fleetshift.v1.KindClusterService", handle.ServiceName)
+	if handle.GRPCServiceName != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("handle.GRPCServiceName = %q, want kind.fleetshift.v1.ClusterService", handle.GRPCServiceName)
 	}
-	if handle.Plural != "KindClusters" {
-		t.Errorf("handle.Plural = %q, want KindClusters", handle.Plural)
+	if handle.HTTPPrefix != "/apis/kind.fleetshift.io/v1/clusters" {
+		t.Errorf("handle.HTTPPrefix = %q, want /apis/kind.fleetshift.io/v1/clusters", handle.HTTPPrefix)
 	}
 
 	info := mux.ServiceInfo()
-	si, ok := info["fleetshift.v1.KindClusterService"]
+	si, ok := info["kind.fleetshift.v1.ClusterService"]
 	if !ok {
-		t.Fatal("expected KindClusterService in mux ServiceInfo after Activate")
+		t.Fatal("expected ClusterService in mux ServiceInfo after Activate")
 	}
 	if len(si.Methods) != 5 {
 		t.Errorf("method count = %d, want 5", len(si.Methods))
@@ -132,11 +132,11 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 
 	activator.Deactivate(handle)
 
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; ok {
-		t.Error("expected KindClusterService removed from mux after Deactivate")
+	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; ok {
+		t.Error("expected ClusterService removed from mux after Deactivate")
 	}
 
-	if _, ok := activator.ContentHash("fleetshift.v1.KindClusterService"); ok {
+	if _, ok := activator.ContentHash("kind.fleetshift.v1.ClusterService"); ok {
 		t.Error("expected content hash cleared after Deactivate")
 	}
 }
@@ -169,7 +169,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	hash1, _ := activator.ContentHash(h1.ServiceName)
+	hash1, _ := activator.ContentHash(h1.GRPCServiceName)
 
 	schema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
@@ -182,17 +182,17 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 		t.Fatalf("second Activate: %v", err)
 	}
 
-	if h2.ServiceName != h1.ServiceName {
-		t.Errorf("service name changed: %q vs %q", h1.ServiceName, h2.ServiceName)
+	if h2.GRPCServiceName != h1.GRPCServiceName {
+		t.Errorf("service name changed: %q vs %q", h1.GRPCServiceName, h2.GRPCServiceName)
 	}
 
-	hash2, _ := activator.ContentHash(h2.ServiceName)
+	hash2, _ := activator.ContentHash(h2.GRPCServiceName)
 	if hash1 == hash2 {
 		t.Error("expected content hash to change after schema update")
 	}
 
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; !ok {
-		t.Error("expected KindClusterService still in mux after atomic swap")
+	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; !ok {
+		t.Error("expected ClusterService still in mux after atomic swap")
 	}
 }
 
@@ -210,11 +210,11 @@ func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-Activate: %v", err)
 	}
-	if h2.ServiceName != handle.ServiceName {
-		t.Errorf("service name changed: %q vs %q", handle.ServiceName, h2.ServiceName)
+	if h2.GRPCServiceName != handle.GRPCServiceName {
+		t.Errorf("service name changed: %q vs %q", handle.GRPCServiceName, h2.GRPCServiceName)
 	}
-	if _, ok := mux.ServiceInfo()["fleetshift.v1.KindClusterService"]; !ok {
-		t.Error("expected KindClusterService in mux after re-activation")
+	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; !ok {
+		t.Error("expected ClusterService in mux after re-activation")
 	}
 }
 
@@ -276,9 +276,24 @@ func TestDynamicSchemaActivator_ActivateRegistersHTTPRoutes(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	code := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
+	code := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code == http.StatusNotFound {
-		t.Fatal("expected route to exist after Activate, got 404")
+		t.Fatal("expected canonical route to exist after Activate, got 404")
+	}
+}
+
+func TestDynamicSchemaActivator_RegistersCanonicalHTTPRoute(t *testing.T) {
+	env := newActivatorWithHTTP(t)
+
+	schema := kindaddon.Schema()
+	_, err := env.activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	code := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
+	if code == http.StatusNotFound {
+		t.Fatal("expected /apis/kind.fleetshift.io/v1/clusters/test-id to route, got 404")
 	}
 }
 
@@ -293,9 +308,9 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 
 	env.activator.Deactivate(handle)
 
-	code := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
+	code := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code != http.StatusNotFound {
-		t.Errorf("expected 404 after Deactivate, got %d", code)
+		t.Errorf("expected 404 on canonical route after Deactivate, got %d", code)
 	}
 }
 
@@ -308,9 +323,9 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	code1 := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
+	code1 := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code1 == http.StatusNotFound {
-		t.Fatal("expected route to exist after first Activate")
+		t.Fatal("expected canonical route to exist after first Activate")
 	}
 
 	schema.ProtoFiles = map[string]string{
@@ -324,9 +339,51 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		t.Fatalf("second Activate (changed): %v", err)
 	}
 
-	code2 := httpStatus(t, env.httpURL+"/v1/kindClusters/test-id")
+	code2 := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code2 == http.StatusNotFound {
-		t.Fatal("expected route to survive atomic swap, got 404")
+		t.Fatal("expected canonical route to survive atomic swap, got 404")
+	}
+}
+
+func TestDynamicSchemaActivator_ReplaceWithChangedHTTPIdentity(t *testing.T) {
+	env := newActivatorWithHTTP(t)
+
+	schema := kindaddon.Schema()
+	_, err := env.activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate v1: %v", err)
+	}
+
+	oldPrefix := "/apis/kind.fleetshift.io/v1/clusters"
+	code := httpStatus(t, env.httpURL+oldPrefix+"/test-id")
+	if code == http.StatusNotFound {
+		t.Fatal("expected old canonical route to exist after first Activate, got 404")
+	}
+
+	// Change the API service name (and thus the HTTP prefix) while
+	// keeping the same gRPC service name. This simulates a transport
+	// identity change that previously leaked the old HTTP route.
+	schema.APIServiceName = "kindv2.fleetshift.io"
+	schema.ProtoFiles = map[string]string{
+		"cluster_spec.proto": `syntax = "proto3"; message KindClusterSpecV2 { string name = 1; }`,
+	}
+	schema.EntryFile = "cluster_spec.proto"
+	schema.SpecMessage = "KindClusterSpecV2"
+
+	_, err = env.activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate v2: %v", err)
+	}
+
+	newPrefix := "/apis/kindv2.fleetshift.io/v1/clusters"
+	newCode := httpStatus(t, env.httpURL+newPrefix+"/test-id")
+	if newCode == http.StatusNotFound {
+		t.Fatal("expected new canonical route to be routable after replace, got 404")
+	}
+
+	oldCode := httpStatus(t, env.httpURL+oldPrefix+"/test-id")
+	if oldCode != http.StatusNotFound {
+		t.Errorf("expected old canonical route to return 404 after replace, got %d", oldCode)
 	}
 }
 
@@ -455,9 +512,12 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 	}
 	descs, err := managedresource.BuildServiceDescriptors(&managedresource.ResourceTypeConfig{
 		ResourceType:   schema.ResourceType,
+		APIServiceName: schema.APIServiceName,
+		Version:        schema.Version,
+		CollectionID:   schema.CollectionID,
 		Singular:       schema.Singular,
 		Plural:         schema.Plural,
-		ProtoPackage:   "fleetshift.v1",
+		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    protoreflect.FullName(schema.SpecMessage),
 		SpecDescriptor: specDesc.Message,
 	}, specDesc.Message)
@@ -473,10 +533,14 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 
 	// v1: name is required.
 	v1 := domain.ManagedResourceSchema{
-		ResourceType: "widgets",
-		Singular:     "Widget",
-		Plural:       "Widgets",
-		SpecMessage:  "WidgetSpec",
+		ResourceType:   "widgets",
+		APIServiceName: "fleetshift.io",
+		ProtoPackage:   "fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "widgets",
+		Singular:       "Widget",
+		Plural:         "Widgets",
+		SpecMessage:    "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 import "buf/validate/validate.proto";
@@ -489,10 +553,14 @@ message WidgetSpec {
 
 	// v2: name is optional.
 	v2 := domain.ManagedResourceSchema{
-		ResourceType: "widgets",
-		Singular:     "Widget",
-		Plural:       "Widgets",
-		SpecMessage:  "WidgetSpec",
+		ResourceType:   "widgets",
+		APIServiceName: "fleetshift.io",
+		ProtoPackage:   "fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "widgets",
+		Singular:       "Widget",
+		Plural:         "Widgets",
+		SpecMessage:    "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 message WidgetSpec {

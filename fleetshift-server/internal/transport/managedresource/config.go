@@ -1,8 +1,6 @@
 package managedresource
 
 import (
-	"strings"
-
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -13,27 +11,35 @@ import (
 // carries everything needed to build and register a typed gRPC + HTTP
 // service at runtime without compile-time Go stubs.
 type ResourceTypeConfig struct {
-	// ResourceType is the domain identifier (e.g. "clusters").
+	// ResourceType is the domain identifier (e.g. "api.kind.cluster").
 	ResourceType domain.ResourceType
 
-	// Singular is the singular resource name in PascalCase (e.g. "Cluster",
-	// "KindCluster"). Used directly in RPC and message names like
-	// Create{Singular}, Get{Singular}Request, etc.
+	// APIServiceName is the versionless AIP service name used in full
+	// resource names and HTTP prefixes (e.g. "kind.fleetshift.io").
+	APIServiceName string
+
+	// Version is the HTTP API version segment (e.g. "v1").
+	Version string
+
+	// CollectionID is the AIP collection identifier used in resource
+	// names, HTTP paths, and proto field names (e.g. "clusters").
+	CollectionID string
+
+	// Singular is the PascalCase singular resource name used in RPC
+	// and message names like Create{Singular}, Get{Singular}Request
+	// (e.g. "Cluster").
 	Singular string
 
-	// Plural is the plural resource name in PascalCase (e.g. "Clusters",
-	// "KindClusters"). Used directly in the List RPC and message names
-	// (List{Plural}, List{Plural}Request). The lowerCamelCase collection
-	// identifier for HTTP paths and proto field names is derived via
-	// [CollectionID].
+	// Plural is the PascalCase plural resource name used in List RPC
+	// and message names (e.g. "Clusters").
 	Plural string
 
-	// ProtoPackage is the proto package for the generated service
-	// (e.g. "fleetshift.v1").
+	// ProtoPackage is the versioned proto package for the generated
+	// service (e.g. "kind.fleetshift.v1").
 	ProtoPackage string
 
 	// SpecMessage is the fully-qualified name of the addon spec message
-	// (e.g. "addons.cluster_mgmt.v1.ClusterSpec").
+	// (e.g. "addons.kind.v1.KindClusterSpec").
 	SpecMessage protoreflect.FullName
 
 	// SpecDescriptor is the pre-resolved spec message descriptor.
@@ -42,9 +48,10 @@ type ResourceTypeConfig struct {
 	SpecDescriptor protoreflect.MessageDescriptor
 }
 
-// ServiceName returns the gRPC service name (e.g. "fleetshift.v1.ClusterService").
-func (c *ResourceTypeConfig) ServiceName() string {
-	return string(c.ProtoPackage) + "." + c.Singular + "Service"
+// GRPCServiceName returns the fully-qualified gRPC service name
+// (e.g. "kind.fleetshift.v1.ClusterService").
+func (c *ResourceTypeConfig) GRPCServiceName() string {
+	return c.ProtoPackage + "." + c.Singular + "Service"
 }
 
 // ResourceMessageName returns the resource message name (e.g. "Cluster").
@@ -52,16 +59,14 @@ func (c *ResourceTypeConfig) ResourceMessageName() string {
 	return c.Singular
 }
 
-// CollectionID returns the lowerCamelCase collection identifier derived
-// from Plural, per AIP-122 (e.g. "KindClusters" -> "kindClusters").
-// Used for HTTP path segments, proto field names, and resource name
-// prefixes.
-func (c *ResourceTypeConfig) CollectionID() string {
-	return strings.ToLower(c.Plural[:1]) + c.Plural[1:]
+// CanonicalHTTPPrefix returns the canonical HTTP route prefix
+// (e.g. "/apis/kind.fleetshift.io/v1/clusters").
+func (c *ResourceTypeConfig) CanonicalHTTPPrefix() string {
+	return "/apis/" + c.APIServiceName + "/" + c.Version + "/" + c.CollectionID
 }
 
 // Collection returns the resource name collection prefix
-// (e.g. "kindClusters/").
+// (e.g. "clusters/").
 func (c *ResourceTypeConfig) Collection() string {
-	return c.CollectionID() + "/"
+	return c.CollectionID + "/"
 }

@@ -18,7 +18,7 @@ func newResourceDescribeCmd(ctx *cmdContext) *cobra.Command {
 			plural := args[0]
 
 			client := dynamic.NewClient(ctx.conn)
-			rt, err := client.ResolveType(cmd.Context(), plural)
+			rt, err := client.ResolveType(cmd.Context(), plural, serviceFlag(cmd))
 			if err != nil {
 				return err
 			}

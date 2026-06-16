@@ -2,6 +2,7 @@ package dynamic_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"google.golang.org/grpc"
@@ -26,24 +27,78 @@ func TestClient_ListResourceTypes(t *testing.T) {
 		t.Fatalf("ListResourceTypes: %v", err)
 	}
 
-	if len(types) == 0 {
-		t.Fatal("expected at least one resource type, got none")
+	if len(types) < 2 {
+		t.Fatalf("expected at least 2 resource types (Kind + GCP HCP), got %d: %v", len(types), types)
 	}
 
-	found := false
+	byService := make(map[string]dynamic.ResourceType, len(types))
 	for _, rt := range types {
-		if rt.ServiceName == "fleetshift.v1.KindClusterService" {
-			found = true
-			if rt.Singular != "KindCluster" {
-				t.Errorf("singular = %q, want KindCluster", rt.Singular)
-			}
-			if rt.Plural != "KindClusters" {
-				t.Errorf("plural = %q, want KindClusters", rt.Plural)
-			}
-		}
+		byService[rt.ServiceName] = rt
 	}
-	if !found {
-		t.Fatalf("KindClusterService not found in types: %v", types)
+
+	kind, ok := byService["kind.fleetshift.v1.ClusterService"]
+	if !ok {
+		t.Fatalf("kind.fleetshift.v1.ClusterService not found in types: %v", types)
+	}
+	if kind.Singular != "Cluster" {
+		t.Errorf("kind singular = %q, want Cluster", kind.Singular)
+	}
+	if kind.Plural != "Clusters" {
+		t.Errorf("kind plural = %q, want Clusters", kind.Plural)
+	}
+	if kind.ProtoPackage != "kind.fleetshift.v1" {
+		t.Errorf("kind proto_package = %q, want kind.fleetshift.v1", kind.ProtoPackage)
+	}
+	if kind.CollectionID != "clusters" {
+		t.Errorf("kind collection_id = %q, want clusters", kind.CollectionID)
+	}
+
+	gcp, ok := byService["gcphcp.fleetshift.v1.ClusterService"]
+	if !ok {
+		t.Fatalf("gcphcp.fleetshift.v1.ClusterService not found in types: %v", types)
+	}
+	if gcp.ProtoPackage != "gcphcp.fleetshift.v1" {
+		t.Errorf("gcphcp proto_package = %q, want gcphcp.fleetshift.v1", gcp.ProtoPackage)
+	}
+	if gcp.CollectionID != "clusters" {
+		t.Errorf("gcphcp collection_id = %q, want clusters", gcp.CollectionID)
+	}
+}
+
+func TestClient_ResolveType_AmbiguousCollection(t *testing.T) {
+	addr := testserver.Start(t)
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := dynamic.NewClient(conn)
+
+	// Resolving "clusters" without a service should fail because both
+	// Kind and GCP HCP expose the same collection.
+	_, err = client.ResolveType(context.Background(), "clusters", "")
+	if err == nil {
+		t.Fatal("expected ambiguity error, got nil")
+	}
+	if !strings.Contains(err.Error(), "ambiguous") {
+		t.Fatalf("expected ambiguity error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "kind.fleetshift.v1.ClusterService") {
+		t.Errorf("error should list Kind service, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gcphcp.fleetshift.v1.ClusterService") {
+		t.Errorf("error should list GCP HCP service, got: %v", err)
+	}
+
+	// Resolving with an explicit service should succeed.
+	rt, err := client.ResolveType(context.Background(), "clusters", "kind.fleetshift.v1.ClusterService")
+	if err != nil {
+		t.Fatalf("ResolveType with service: %v", err)
+	}
+	if rt.ServiceName != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("service = %q, want kind.fleetshift.v1.ClusterService", rt.ServiceName)
 	}
 }
 
@@ -57,7 +112,7 @@ func TestClient_CreateAndGet(t *testing.T) {
 	defer conn.Close()
 
 	client := dynamic.NewClient(conn)
-	rt, err := client.ResolveType(context.Background(), "kindclusters")
+	rt, err := client.ResolveType(context.Background(), "clusters", "kind.fleetshift.v1.ClusterService")
 	if err != nil {
 		t.Fatalf("ResolveType: %v", err)
 	}

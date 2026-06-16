@@ -13,11 +13,10 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
-const kindClusterServiceName = "fleetshift.v1.KindClusterService"
+const kindClusterServiceName = "kind.fleetshift.v1.ClusterService"
 
 func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchemaActivator, mux *managedresource.DynamicServiceMux, fileReg *managedresource.DynamicFileRegistry) *grpc.ClientConn {
 	t.Helper()
@@ -44,15 +43,7 @@ func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchem
 
 func activateKindCluster(t *testing.T, activator *managedresource.DynamicSchemaActivator) {
 	t.Helper()
-	schema := kindaddon.Schema()
-	_, err := activator.Activate(context.Background(), domain.ManagedResourceSchema{
-		ResourceType: schema.ResourceType,
-		Singular:     schema.Singular,
-		Plural:       schema.Plural,
-		ProtoFiles:   schema.ProtoFiles,
-		SpecMessage:  schema.SpecMessage,
-		EntryFile:    schema.EntryFile,
-	})
+	_, err := activator.Activate(context.Background(), kindaddon.Schema())
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -174,14 +165,14 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 	conn := startReflectionServer(t, activator, mux, fileReg)
 
 	// The resource message should also be resolvable.
-	resp := fileContainingSymbol(t, conn, "fleetshift.v1.KindCluster")
+	resp := fileContainingSymbol(t, conn, "kind.fleetshift.v1.Cluster")
 	fdResp := resp.GetFileDescriptorResponse()
 	if fdResp == nil {
 		errResp := resp.GetErrorResponse()
 		if errResp != nil {
-			t.Fatalf("FileContainingSymbol(KindCluster) error: %s", errResp.GetErrorMessage())
+			t.Fatalf("FileContainingSymbol(Cluster) error: %s", errResp.GetErrorMessage())
 		}
-		t.Fatalf("expected FileDescriptorResponse for KindCluster message")
+		t.Fatalf("expected FileDescriptorResponse for Cluster message")
 	}
 }
 
@@ -205,10 +196,10 @@ func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
 	}
 
 	// Deactivate.
-	schema := kindaddon.Schema()
 	activator.Deactivate(application.SchemaHandle{
-		ServiceName: kindClusterServiceName,
-		Plural:      schema.Plural,
+		GRPCServiceName: kindClusterServiceName,
+		HTTPPrefix:      "/apis/kind.fleetshift.io/v1/clusters",
+		DescriptorPath:  "dynamic/kind/fleetshift/v1/cluster_service.proto",
 	})
 
 	// Verify service is removed from listing.

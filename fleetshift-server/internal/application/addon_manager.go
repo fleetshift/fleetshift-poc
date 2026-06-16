@@ -22,9 +22,12 @@ type SchemaActivator interface {
 
 // SchemaHandle is an opaque token returned by [SchemaActivator.Activate]
 // that identifies the transport registrations so they can be torn down.
+// It carries enough information for [SchemaActivator.Deactivate] to
+// remove every handler installed by activation without re-deriving paths.
 type SchemaHandle struct {
-	ServiceName string
-	Plural      string
+	GRPCServiceName string
+	HTTPPrefix      string
+	DescriptorPath  string
 }
 
 // DeliveryAgentRegistry manages the mapping from [domain.TargetType] to
