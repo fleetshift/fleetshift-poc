@@ -1,5 +1,39 @@
 # Target delivery contract
 
+## What this doc covers
+
+The detailed delivery protocol between the platform and targets:
+
+- what a target is and how it relates to addons
+- the fulfillment delivery protocol and its reliability guarantees
+- generation ordering and stale delivery prevention
+- delivery authorization at the target protocol level
+- idempotent removal
+- journaling for addon state continuity
+- reporting: drift detection, properties, observations, and conditions
+
+## When to read this
+
+Read this when you need the full target-side delivery protocol — how targets accept, acknowledge, and report on fulfillment deliveries — or when you need to understand how observation and drift signals originate before reaching the platform index.
+
+## What is intentionally elsewhere
+
+- Core vocabulary, strategy axes, and the high-level delivery contract summary: [core_model.md](core_model.md)
+- Orchestration execution, invalidation, and rollout planning: [orchestration.md](orchestration.md)
+- Fleet-wide indexing of observations and inventory search: [resource_indexing.md](resource_indexing.md)
+- Fleetlet transport and channel model: [fleetlet_and_transport.md](fleetlet_and_transport.md)
+- Full authentication and trust design: [../authentication.md](../authentication.md)
+- Managed-resource projection and condition-event history: [../managed_resources.md](../managed_resources.md)
+
+## Related docs
+
+- [../architecture.md](../architecture.md)
+- [core_model.md](core_model.md)
+- [resource_indexing.md](resource_indexing.md)
+- [../managed_resources.md](../managed_resources.md)
+
+## Overview
+
 A fleetshift *Target* is a logical "location" that can fulfill manifest delivery, report inventory, or both. The output of a placement decision is targets. A rollout is a (potentially complex) sequencing of targets. Targets are supported by addons. An addon can support many targets. The properties and scope of a target are arbitrary and addon-defined. With the properties of a target alone, an addon SHOULD (for efficiency; it is not a must) be able to query what resources it is managing under the scope of that target (ignoring whether it has the authority on its own to run that query).
 
 Examples:
@@ -33,6 +67,8 @@ The targets interact with the platform through two directional interfaces:
 - **Addon → Platform (DeliveryReporter):** The addon pushes delivery lifecycle updates back to the platform: `ReportEvent` for non-terminal progress events, `ReportResult` for terminal outcomes, and `ListActiveDeliveries` to recover in-progress work after a restart.
 
 In-process addons receive the application-layer `DeliveryReportService` directly as their `DeliveryReporter`. Remote addons (via fleetlet) will receive a gRPC client stub implementing the same interface, backed by a bidirectional stream. This layering decouples addon code from platform internals: the addon interacts with client-style interfaces regardless of transport.
+
+Delivery lifecycle reporting is separate from inventory reporting. `ReportEvent` and `ReportResult` update delivery and fulfillment state.
 
 ### Guarantees
 
@@ -118,11 +154,13 @@ It is possible the platform could eliminate the need for addon journaling due to
 
 **IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
-## Reporting: drift, outputs, observations, and conditions
+## Reporting: drift, properties, observations, and conditions
+
+> The observations, conditions, and properties reported by targets are the source data for the fleet-wide inventory and search system. See [resource_indexing.md](resource_indexing.md) for how these signals are indexed, stored, and queried at fleet scale.
 
 After fulfilling, there is work to do to consider what's happened since. This is looking at current state to:
 
-1. Report back **outputs** — stable generated values (e.g. computed IDs or URLs) that rarely change once produced
+1. Report back **properties** — stable generated values (e.g. computed IDs or URLs) that rarely change once produced
 2. Report back **observations** — point-in-time reports of what the observer sees about a resource, with history kept over time
 3. Report back **conditions** — structured health and progress signals, with a history of transition events kept over time
 4. Detect drift from intent
@@ -147,7 +185,7 @@ These should all be achievable, generally, by adding two more steps to the proto
 
 ### Delivery lifecycle state mapping
 
-The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. This document's protocol uses "ack" without mapping it to those states. The mapping between the protocol concepts (ack, auth failure, partial apply) and the delivery entity states needs to be defined. Similarly, `DeliveryResult` carries structured outputs (`ProvisionedTargets`, `ProducedSecrets`) that the protocol should account for — when and how these are reported back during the protocol flow.
+The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. This document's protocol uses "ack" without mapping it to those states. The mapping between the protocol concepts (ack, auth failure, partial apply) and the delivery entity states needs to be defined. Similarly, `DeliveryResult` carries structured result fields (`ProvisionedTargets`, `ProducedSecrets`); the remaining question is which of those stay delivery-local and which should be projected into inventory as properties.
 
 ### Should manifests be able to opt out of drift repair?
 

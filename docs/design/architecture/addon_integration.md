@@ -25,6 +25,7 @@ Read this when you are designing or implementing an addon, extending the strateg
 - Fleetlet channels and request routing: [fleetlet_and_transport.md](fleetlet_and_transport.md)
 - Full managed-resource design: [../managed_resources.md](../managed_resources.md)
 - Full authentication and signing model: [../authentication.md](../authentication.md)
+- Two-layer API model, resource identity, and extension API packages: [resource_identity_and_api.md](resource_identity_and_api.md)
 
 ## Related docs
 
@@ -65,7 +66,7 @@ The transitions are:
 
 Each addon declares capabilities in its descriptor. The set of capabilities determines which lifecycle phases are meaningful and what each phase activates:
 
-- **`ManagedResourceCapability`**: declares that the addon will provide a managed resource type (e.g. `clusters`). The full schema — inline proto files, spec message name, singular/plural — comes from the workload at connect time via `ManagedResourceSchema`. The platform validates at connect time that every schema matches a declared capability. Requires Connect.
+- **`ManagedResourceCapability`**: declares that the addon will provide a managed resource type (e.g. `clusters`). The full schema — inline proto files, spec message name, singular/plural, proto package, and service name — comes from the workload at connect time via `ManagedResourceSchema`. Activation implies dual registration: both the extension resource type (in the addon's own package) and the corresponding platform resource type (for canonical identity). The platform validates at connect time that every schema matches a declared capability. Requires Connect.
 - **`DeliveryCapability`**: declares that the addon provides a `DeliveryAgent` for a target type (e.g. `kind`, `ocp`, `kubernetes`). The concrete agent is provided at connect time and registered in the delivery router. Requires Connect.
 - **UI plugin capability** (not yet implemented): declares that the addon ships a UI plugin. The manifest URL and asset base URL are provided in the descriptor. Active at Enable — no Connect needed. See [addon-ui-architecture.md](../addon-ui-architecture.md) for the distribution model.
 
@@ -75,8 +76,10 @@ An addon can declare multiple capabilities of different types. For example, a cl
 
 When an addon reconnects (after a disconnect), `Connect` receives the addon's current truth — the full set of schemas and agents it now provides. The manager reconciles against the previous state:
 
-1. Schemas that were active but are absent from the new input are deactivated (stale removal).
-2. Every schema in the new input is passed to the `SchemaActivator`. The activator uses content hashing (SHA-256 over proto files, spec message, singular, and plural) to determine whether the schema changed. Unchanged schemas are left in place (no recompilation). Changed schemas are atomically replaced — the gRPC and HTTP mux entries are swapped without a deregister/register gap.
+1. Schemas that were active but are absent from the new input are deactivated (stale removal). This deactivates both the extension service and the corresponding platform resource type service, should that type no longer be referenced by any addon. (TODO: possibly revisit this last note)
+2. Every schema in the new input is passed to the `SchemaActivator`. The activator uses content hashing (SHA-256 over proto files, spec message, singular, plural, proto package, and service name) to determine whether the schema changed. Unchanged schemas are left in place (no recompilation). Changed schemas are atomically replaced — both the extension service and platform service gRPC and HTTP mux entries are swapped without a deregister/register gap.
+
+The connect-time schema specifies the target package (`ProtoPackage`) and service name (`ServiceName`), which the activator uses for extension service registration. The platform resource type service is derived automatically from the resource type registration.
 
 This design pushes content-change detection into the transport layer (`DynamicSchemaActivator`), keeping the application layer (`AddonManager`) free of proto or hash concerns.
 
@@ -184,12 +187,17 @@ The UI plugin model follows the Scalprum dynamic-plugin pattern: the platform pr
 
 ### API extensibility — dynamic gRPC and HTTP
 
-Addons extend the platform's gRPC and HTTP API surface at runtime. When a managed resource schema is activated, the platform compiles inline proto sources, builds a dynamic gRPC service descriptor, and registers it in the `DynamicServiceMux`. HTTP routes are registered in the `DynamicHTTPMux` and proxy to the gRPC service for REST access.
+Addons extend the platform's gRPC and HTTP API surface at runtime. Each managed resource schema activation performs **dual registration** in the two-layer API model (see [resource_identity_and_api.md](resource_identity_and_api.md)):
+
+1. **Extension service**: registered under the addon's own proto package (e.g. `kind.fleetshift.v1.ClusterService`), providing the full typed API with addon-defined spec, observation schema, and extension-specific fields. HTTP routes are at `/apis/{service_name}/{version}/{resource_path}`, where `resource_path` uses the shared collection identifier for that identity domain (for example `clusters/{id}`).
+2. **Platform service**: registered under the platform package for the corresponding platform resource type, providing the generic canonical identity surface (labels, effective_labels, conditions, representations, aliases). HTTP routes are at `/apis/fleetshift.io/{version}/{resource_path}` for the same collection identifier.
+
+This means a single `ManagedResourceCapability` results in two dynamic gRPC services and two HTTP path prefixes. The extension service is the primary API for consumers; the platform service provides identity, aggregation, and cross-extension correlation.
 
 The key components:
 
 - **`DynamicServiceMux`**: wired as the gRPC server's `UnknownServiceHandler`. Requests to services that were not registered at server creation time are routed here. Services can be added, replaced (atomically), or removed at any time. Composite reflection merges dynamic services with statically registered ones so they are discoverable via `grpcurl` and similar tools.
-- **`DynamicHTTPMux`**: wraps an `http.ServeMux` with handler indirection. A stable dispatcher function is registered once per URL prefix; the actual handler is stored in an internal map and swapped atomically on replacement. This avoids Go 1.22's panic on duplicate `ServeMux` pattern registration and provides zero-downtime replacement.
-- **`DynamicSchemaActivator`**: the `SchemaActivator` implementation in the transport layer. It compiles inline proto, builds the service, and manages registration in both muxes. Content hashing (SHA-256) ensures that unchanged schemas skip recompilation and that changed schemas are atomically replaced rather than deregistered-then-registered.
+- **`DynamicHTTPMux`**: wraps an `http.ServeMux` with handler indirection. A stable dispatcher function is registered once per URL prefix; the actual handler is stored in an internal map and swapped atomically on replacement. This avoids Go 1.22's panic on duplicate `ServeMux` pattern registration and provides zero-downtime replacement. HTTP path routing uses the `/apis/{service_name}/{version}/` prefix to differentiate between extension services sharing resource type names.
+- **`DynamicSchemaActivator`**: the `SchemaActivator` implementation in the transport layer. It compiles inline proto, builds the service, and manages registration in both muxes. Content hashing (SHA-256) ensures that unchanged schemas skip recompilation and that changed schemas are atomically replaced rather than deregistered-then-registered. The activator now uses the addon-provided `ProtoPackage` and `ServiceName` rather than hardcoding `fleetshift.v1`.
 
-Proto schemas are transmitted as inline source content at addon connect time (see [addon lifecycle](#addon-lifecycle)). The platform's compiler combines inline sources with a built-in resolver for well-known imports (`google/protobuf/*`, `buf/validate/*`), so addon-defined specs can use `protovalidate` annotations that the platform enforces at the API boundary.
+Proto schemas are transmitted as inline source content at addon connect time (see [addon lifecycle](#addon-lifecycle)). The connect-time schema now specifies the target package (`ProtoPackage`) and service name (`ServiceName`) for the extension service registration. The platform's compiler combines inline sources with a built-in resolver for well-known imports (`google/protobuf/*`, `buf/validate/*`), so addon-defined specs can use `protovalidate` annotations that the platform enforces at the API boundary.

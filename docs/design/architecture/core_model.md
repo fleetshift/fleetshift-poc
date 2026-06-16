@@ -182,6 +182,8 @@ How those requirements are implemented is target-specific. Kubernetes targets us
 
 When a delivery agent supports provenance verification, it can independently verify that a real user authorized the operation before applying. Provenance verification is a target capability, not a universal requirement of the delivery contract.
 
+The detailed target-side protocol — reliability guarantees, generation ordering, journaling, and reporting — lives in [target_delivery_contract.md](target_delivery_contract.md).
+
 ## Target types and delivery agents
 
 ### Example target types

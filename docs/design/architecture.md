@@ -105,9 +105,9 @@ This invariant is specified in [docs/design/architecture/core_model.md](architec
 
 ### Addons and extension points
 
-Addons are the primary extension surface for non-trivial strategy logic, additional target types, managed-resource fulfillment, addon APIs, and UI extensions. They are separate processes not just for modularity, but also for trust and signature boundaries.
+Addons are the primary extension surface for non-trivial strategy logic, additional target types, managed-resource fulfillment, extension API packages, and UI extensions. They are separate processes not just for modularity, but also for trust and signature boundaries.
 
-The addon contract lives in [docs/design/architecture/addon_integration.md](architecture/addon_integration.md). The full managed-resource design lives in [docs/design/managed_resources.md](managed_resources.md).
+The addon contract lives in [docs/design/architecture/addon_integration.md](architecture/addon_integration.md). The full managed-resource design lives in [docs/design/managed_resources.md](managed_resources.md). The two-layer API model and extension API packaging lives in [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md).
 
 ### Tenancy and permissions
 
@@ -117,9 +117,9 @@ The organizational model and permission boundary live in [docs/design/architectu
 
 ### Indexing and search
 
-The platform continuously indexes observations from managed targets into a fleet-wide search index. The platform owns the indexing infrastructure; target types define what is indexable through schemas and agents.
+The platform continuously indexes observations from managed targets into a fleet-wide search index. Inventoried resources are extension API resources in their addon's package, linked to platform resource identities through the two-layer API model. The platform owns the indexing infrastructure; target types define what is indexable through schemas and agents.
 
-The indexing design lives in [docs/design/architecture/resource_indexing.md](architecture/resource_indexing.md).
+The indexing design lives in [docs/design/architecture/resource_indexing.md](architecture/resource_indexing.md). The resource identity model that underpins cross-extension correlation lives in [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md).
 
 ### Platform hierarchy, provisioning, and federation
 
@@ -132,10 +132,12 @@ That design lives in [docs/design/architecture/platform_hierarchy.md](architectu
 Start here when you need a fast map of the system. Then continue with the smallest document that matches your question:
 
 - Read [docs/design/architecture/core_model.md](architecture/core_model.md) for the core vocabulary, strategy axes, target model, delivery contract, and single-pod invariant.
+- Read [docs/design/architecture/target_delivery_contract.md](architecture/target_delivery_contract.md) for the detailed target-side delivery protocol, reliability guarantees, generation ordering, journaling, and observation reporting.
 - Read [docs/design/architecture/orchestration.md](architecture/orchestration.md) for how fulfillments execute, re-evaluate, and roll out over time.
 - Read [docs/design/architecture/fleetlet_and_transport.md](architecture/fleetlet_and_transport.md) for fleetlets, channels, proxying, routing, and data-path choices.
 - Read [docs/design/architecture/tenancy_and_permissions.md](architecture/tenancy_and_permissions.md) for the provider/tenant/workspace model and the generic permission boundary.
 - Read [docs/design/architecture/addon_integration.md](architecture/addon_integration.md) for capability registration, addon strategy contracts, managed-resource bridging, and UI/API extension points.
+- Read [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the two-layer API model, resource identity, platform resources, extension API packages, and how multiple extensions model the same logical resource.
 - Read [docs/design/architecture/resource_indexing.md](architecture/resource_indexing.md) for the fleet-wide indexing and search model.
 - Read [docs/design/architecture/platform_hierarchy.md](architecture/platform_hierarchy.md) for recursive platforms, federation, provisioning, bootstrap, and pivot.
 - Read [docs/design/architecture/open_questions.md](architecture/open_questions.md) for unresolved design areas that still need dedicated decisions.
