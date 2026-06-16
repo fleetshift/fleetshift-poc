@@ -35,12 +35,12 @@ These are the consumer-facing "nouns" of the platform, in contrast to the addon-
 
 Managed resources are driven by the core Fulfillment abstraction. A managed resource is a *registered resource type* (as in, a manifest resource type). An addon defines how Fulfillments are derived from managed resources. In a typical case, a managed resource maps to a single, immediate placement with the addon itself as the target.
 
-Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a ROSA cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the actual API shape. Field names, nesting, and conventions are assumed for readability.**)
+Example: a cluster management addon registers the `clusters` managed resource type. A consumer requests a ROSA cluster. (**These examples illustrate the structural relationships between managed resources, derived Fulfillments, and addon registration — not a specification of the exact API surface. Field names, nesting, and conventions are assumed for readability. In the two-layer API model, the consumer talks to the addon's extension API, for example `/apis/{addon_service}/v1/clusters`, while the shared platform identity lives separately at `//fleetshift.io/clusters/{id}`.**)
 
 #### Consumer-facing managed resource
 
 ```json
-POST /clusters
+POST /apis/kind.fleetshift.io/v1/clusters
 {
   "name": "prod-us-east-1",
   "spec": {
@@ -100,10 +100,10 @@ The consumer's agent signs this request. The platform validates the spec against
 
 The `spec` is entirely addon-defined — the platform stores it opaquely but validates it against the addon's registered schema. The `state`, `reconciling`, `conditions`, `provenance`, and timestamps are platform-managed, following the same patterns as Deployment (AIP-128 declarative-friendly).
 
-> [!WARNING]
-> We need to decide how namespacing works in the API.
-> Are all APIs under fleetshift services, or are extensions their own gRPC service?
-> Do they fight for resource type names under the same API?
+Within the extension API, the `name` field remains the relative resource name (`clusters/prod-us-east-1`). The corresponding full resource names are `//{addon_service}/clusters/prod-us-east-1` for the extension API and `//fleetshift.io/clusters/prod-us-east-1` for the shared platform identity.
+
+> [!NOTE]
+> **Resolved.** Extensions define their own gRPC services in addon-specific proto packages. Resource type names do not collide because each extension's service is differentiated at the transport level (gRPC package, HTTP path prefix). Multiple extensions can model the same logical resource identity through the two-layer API model. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the full design.
 
 #### Derived Fulfillment
 
@@ -111,12 +111,12 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
 
 ```json
 {
-  "name": "fulfillments/_managed/kindClusters/dev-cluster",
+  "name": "fulfillments/_managed/clusters/dev-cluster",
   "manifest_strategy": {
     "type": "MANAGED_RESOURCE",
     "managed_resource": {
       "resource_type": "api.kind.cluster",
-      "resource_name": "kindClusters/dev-cluster"
+      "resource_name": "clusters/dev-cluster"
     }
   },
   "placement_strategy": {
@@ -130,12 +130,12 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
   },
   "provenance": {
     "signature": { "..." },
-    "managed_resource_ref": "kindClusters/dev-cluster"
+    "managed_resource_ref": "clusters/dev-cluster"
   }
 }
 ```
 
-- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document as a `Manifest` with `ResourceType` matching the managed resource type. The addon interprets it — in this case, provisioning a kind cluster with the specified configuration.
+- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document as a `Manifest` with `ResourceType` matching the managed resource type. The addon interprets it — in this case, provisioning the requested cluster with the specified configuration.
 - **Placement**: a single static target — the addon's own delivery endpoint. The addon registered this target during capability registration. Since the addon is a delivery agent for its own target type, it receives the managed resource through the standard delivery channel.
 - **Rollout**: immediate. A single managed resource means a single target means a single delivery — rollout strategy is degenerate.
 - **Provenance**: derived from the original managed resource's signature. A verifier can chain from the Fulfillment's provenance back to the user's signed resource intent. The `managed_resource_ref` links the two, and the derivation rule is mechanically fixed (the addon is always the target), so a verifier can confirm the Fulfillment was correctly derived without trusting the platform.
@@ -164,17 +164,21 @@ Then at connect time, the workload provides the full schema:
 ```go
 domain.ManagedResourceSchema{
     ResourceType: "api.kind.cluster",
-    Singular:     "KindCluster",
-    Plural:       "KindClusters",
+    ServiceName:  "kind.fleetshift.io",
+    Singular:     "Cluster",
+    Plural:       "clusters",
+    ProtoPackage: "kind.fleetshift.v1",
     ProtoFiles: map[string]string{
         "addons/kind/v1/kind_cluster_spec.proto": kindClusterSpecProto,
     },
-    SpecMessage: "addons.kind.v1.KindClusterSpec",
+    SpecMessage: "kind.fleetshift.v1.ClusterSpec",
     Relation:    domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 }
 ```
 
-- `**Singular**` / `**Plural**`: PascalCase resource names. The platform derives gRPC method names directly (e.g. `CreateKindCluster`, `ListKindClusters`) and lowerCamelCase HTTP paths per AIP-122 (e.g. `POST /v1/kindClusters`, `GET /v1/kindClusters/{id}`).
+- `**ServiceName**`: the AIP-122 service name (versionless) used in full resource names (e.g. `//kind.fleetshift.io/clusters/dev-cluster`). The addon chooses this; the platform imposes no naming convention beyond uniqueness.
+- `**ProtoPackage**`: the versioned proto package for gRPC service registration (e.g. `kind.fleetshift.v1.ClusterService`). This replaces the previous hardcoded `fleetshift.v1` package.
+- `**Singular**` / `**Plural**`: `Singular` names the gRPC service and singular RPCs (e.g. `CreateCluster`). `Plural` is the shared AIP collection identifier used in relative resource names and HTTP paths (e.g. `clusters/dev-cluster`, `POST /apis/kind.fleetshift.io/v1/clusters`, `GET /apis/kind.fleetshift.io/v1/clusters/{id}`). Keeping the same collection identifier across extension and platform services preserves identity equivalence for `clusters/foo`.
 - `**ProtoFiles**`: inline proto source content, keyed by virtual filename. The platform's compiler resolves imports within this map first, then falls back to well-known types (`google/protobuf/*`, `buf/validate/*`). This means addon specs can use `protovalidate` annotations that the platform enforces at the API boundary.
 - `**SpecMessage**`: the fully qualified proto message name for the addon-defined spec. The platform compiles this message, wraps it in a generated `Resource` envelope (with platform-managed `uid`, `state`, `provenance`, etc.), and exposes CRUD operations.
 - `**Relation**`: the fulfillment derivation rule. `RegisteredSelfTarget` means the derived Fulfillment always targets the addon itself. This is the common case — and the only case where the derivation is fixed and the attestation chain is trivial (the addon is trusted by virtue of its registration, and the platform is a courier). Future relation types (CEL-based derivation, multi-target mappings) can be added to the typed union.
@@ -206,7 +210,7 @@ sequenceDiagram
     participant Cloud as Cloud Provider (ROSA API)
 
     User->>User: Sign managed resource spec
-    User->>Platform: POST /clusters (signed)
+    User->>Platform: POST /apis/kind.fleetshift.io/v1/clusters (signed)
     Platform->>Platform: Validate spec against<br/>addon-registered schema
     Platform->>Store: Store managed resource<br/>with provenance
 
@@ -234,12 +238,12 @@ sequenceDiagram
     Addon-->>Fleetlet: State: ACTIVE
     Fleetlet-->>Pipeline: Status channel
     Pipeline-->>Store: Update Fulfillment state
-    Addon-->>Fleetlet: Outputs: {api_url, console_url}
+    Addon-->>Fleetlet: Properties: {api_url, console_url}
     Fleetlet-->>Pipeline: Index channel
-    Pipeline-->>Store: Update inventory item outputs
+    Pipeline-->>Store: Update inventory item properties
 
-    User->>Platform: GET /clusters/prod-us-east-1
-    Platform-->>User: state: ACTIVE,<br/>outputs: {api_url: https://...,<br/>console_url: https://...}
+    User->>Platform: GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
+    Platform-->>User: state: ACTIVE,<br/>properties: {api_url: https://...,<br/>console_url: https://...}
 ```
 
 
@@ -306,7 +310,7 @@ A managed resource spec change creates a new `resource_intent` version AND a new
 
 **Shared definitions.** Strategies can reference shared, reusable definitions through an additional layer of indirection — the same pattern as managed resources referencing `resource_intents`. A placement strategy version might reference a shared placement definition used across many Fulfillments. When the shared definition changes, each affected Fulfillment gets a new strategy version, which bumps generation and triggers reconciliation. The reusability lives in the referenced definition, not in the strategy version stream itself.
 
-Stable generated values — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change — are stored as inventory outputs on the inventory item for the managed resource (see [Inventory](#inventory)). A single Fulfillment can fan out to many targets, each producing its own outputs, so outputs are per-object rather than per-Fulfillment.
+Stable generated values — things like `api_url`, `provider_id`, `oidc_issuer` that are produced once and rarely change — are stored as inventory properties on the inventory item for the managed resource (see [Inventory](#inventory)). A single Fulfillment can fan out to many targets, each producing its own properties, so properties are per-object rather than per-Fulfillment.
 
 ### Delivery model
 
@@ -355,16 +359,20 @@ Same pattern applies for inventory condition events.
 
 Inventory is the system for all historical observations — a point-in-time report of what an observer saw about a resource. It covers all resources comprehensively: managed resources, discovered resources, sub-resources, and ordinary K8s resources (Namespaces, ConfigMaps, RBAC). Comparable to ACM Search (stolostron/search-v2-api) in scope, but optimized for observation history and health querying.
 
+Inventory stores per-resource projections keyed by extension resource identity and linked to the platform resource via identity equivalence. Read-only extension resources that exist solely to report observed state are inventoried resources in the `inventory` representation role. Managed resources may also have associated inventory projections for their observed state, allowing them to expose properties, observations, and resource-health conditions through the common inventory model while remaining `managed` representations because they have a writable spec that drives a Fulfillment. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the resource identity model and representation roles.
+
 Inventory is a projection, not a literal copy of the source resource. The addon extracts relevant fields, like ACM search collectors extract a subset of K8s fields.
 
 Each inventory item has:
 
 - **Identity**: resource type, name, source association (Fulfillment + target, optional manifest_key for intent-correlated resources, null for side-effect resources)
-- **Outputs**: stable generated values (api_url, provider_id, console_url) produced once and rarely changed. Not historical — the latest value is the only one that matters. Outputs are per-object because a single Fulfillment can target many objects, each with its own outputs.
-- **Observed**: opaque, addon-defined. The latest observation — runtime properties (replica counts, image versions, allocatable resources, etc.) as seen by the observer. Historical observations are kept over time.
+- **Properties**: stable generated values (api_url, provider_id, console_url) produced once and rarely changed. Not historical — the latest value is the only one that matters. Properties are per-object because a single Fulfillment can target many objects, each with its own properties.
+- **Observations**: opaque, addon-defined. The latest point-in-time report of runtime state (replica counts, image versions, allocatable resources, etc.) as seen by the observer. Historical observations are kept over time.
 - **Conditions**: structured, platform-queryable health and progress signals. Historical transitions tracked via condition events. Gives the platform a uniform health query surface across all resource types without understanding observation internals.
 
-For managed resources, the managed thing itself is an inventory item. A single intent may explode into many inventory items — the managed resource plus sub-resources created by the addon (nodes under a cluster, operators, etc.). Side-effect resources associate with the delivery but have no manifest_key.
+Aliases and semantic relationships live on the linked platform resource identity. Inventory reporting may contribute them, but the platform resource remains the canonical owner of that aggregated identity data.
+
+For managed resources, the managed thing itself may have an inventory projection. A single intent may explode into many inventory items — the managed resource's own projection plus sub-resources created by the addon (nodes under a cluster, operators, etc.). Side-effect resources associate with the delivery but have no manifest_key.
 
 **Condition types** are both platform-defined and addon-defined. The platform defines conventional types (`Lifecycle`, `Healthy`) for universal fleet dashboards. Addons define domain-specific types (`ReplicationHealthy`, `KeyValid`, `Progressing`) without platform coordination. The platform defines conventions, not constraints — ecosystem conventions emerge from usage.
 
@@ -376,17 +384,17 @@ The managed resource consumer API projects from three sources:
 
 - **Spec** → `resource_intents` (the version the managed resource tracks). The user's declared intent.
 - **State** → Fulfillment lifecycle enum (PROVISIONING, ACTIVE, FAILED, DELETING). The AIP-compliant lifecycle state.
-- **Outputs** → inventory item for this managed resource (if present). Stable generated values (api_url, provider_id, console_url). Written once, rarely change, no history needed. Lives on the inventory item because a single Fulfillment can fan out to many objects, each with its own outputs.
-- **Observed** → inventory item for this managed resource (if present). The latest observation — a point-in-time report of what the observer saw. Historical observations are kept over time.
+- **Properties** → inventory item for this managed resource (if present). Stable generated values (api_url, provider_id, console_url). Written once, rarely change, no history needed. Lives on the inventory item because a single Fulfillment can fan out to many objects, each with its own properties.
+- **Observations** → inventory item for this managed resource (if present). The latest point-in-time report of what the observer saw. Historical observations are kept over time.
 - **Conditions** → always from Fulfillment (aggregated from delivery conditions via CEL), plus inventory conditions for this managed resource if a matching inventory item exists. Fulfillment conditions are always available because every managed resource has a Fulfillment; they provide the operational/management view ("is the delivery pipeline working?"). Inventory conditions, when present, add resource-health signals ("is the resource itself healthy?"). Both are merged into a single conditions list — condition types are self-describing, so the consumer doesn't need to distinguish the source.
 
 ```
-GET /clusters/prod-us-east-1
-  spec:       → from resource_intents @current_version (managed resource HEAD)
-  state:      → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
-  outputs:    → from inventory item (if present)
-  observed:   → from inventory item (if present)
-  conditions: → from Fulfillment (always) + inventory item (if present)
+GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
+  spec:         → from resource_intents @current_version (managed resource HEAD)
+  state:        → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
+  properties:   → from inventory item (if present)
+  observations: → from inventory item (if present)
+  conditions:   → from Fulfillment (always) + inventory item (if present)
 ```
 
 > OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
@@ -409,7 +417,7 @@ CREATE TABLE managed_resources (
 );
 ```
 
-The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (`GET /clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state:
+The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.fleetshift.io/v1/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state:
 
 ```sql
 SELECT mr.*, ri.spec, ri.provenance, f.state
@@ -423,7 +431,7 @@ WHERE mr.resource_type = 'clusters'
   AND mr.deleted_at IS NULL;
 ```
 
-State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present). Outputs and observed values come from inventory.
+State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present). Properties and observations come from inventory.
 
 Writes: `INSERT` on create, `UPDATE current_version` on spec change, `UPDATE deleted_at` on delete. Updating `current_version` is a managed resource layer operation; it triggers a corresponding manifest strategy version on the Fulfillment (see [Fulfillment strategy versioning](#fulfillment-strategy-versioning)), but the two version counters are independent.
 
@@ -480,14 +488,17 @@ Addons need to be able to integrate with each other.
 
 ### API (gRPC / REST)
 
-Managed resource types extend both the gRPC and HTTP API surface at runtime. When a schema is activated, the platform:
+Managed resource types extend both the gRPC and HTTP API surface at runtime. Schema activation performs **dual registration**: the extension resource type in the addon's own package, and a corresponding platform resource type in the platform package for the canonical identity layer. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the two-layer model.
+
+When a schema is activated, the platform:
 
 1. **Compiles** the addon's inline proto sources into a file descriptor set, resolving well-known imports (`buf/validate/`*, `google/protobuf/`*) from a built-in registry.
-2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the pattern `fleetshift.v1.{Singular}Service` (e.g. `fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
+2. **Builds** a dynamic gRPC `ServiceDesc` with Create, Get, List, and Delete methods. The service name follows the addon's proto package: `{proto_package}.{Singular}Service` (e.g. `kind.fleetshift.v1.ClusterService`). Request/response messages are constructed dynamically from the compiled spec descriptor.
 3. **Registers** the service in the `DynamicServiceMux`, which is wired as the gRPC server's `UnknownServiceHandler`. Requests to services not registered at server creation time are routed here instead of being rejected. Composite reflection merges dynamic services with static ones so they are discoverable via `grpcurl`.
-4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/v1/{plural}` and `/v1/{plural}/{id}`.
+4. **Registers HTTP routes** in the `DynamicHTTPMux` — a wrapper around `http.ServeMux` that uses handler indirection for zero-downtime replacement. HTTP handlers proxy to the gRPC service, providing REST access at `/apis/{service_name}/{version}/{plural}` and `/apis/{service_name}/{version}/{plural}/{id}`.
+5. **Registers the platform resource type** in the platform API layer (generic schema), enabling the canonical identity surface at `/apis/fleetshift.io/v1/{plural}/{id}`. For a cluster-capable addon this means the extension API is at `/apis/kind.fleetshift.io/v1/clusters/{id}`, while the shared identity surface is at `/apis/fleetshift.io/v1/clusters/{id}`.
 
-Atomic replacement is a first-class operation. When an addon reconnects with a changed schema, the `DynamicSchemaActivator` detects the change via content hashing (SHA-256 over proto files, spec message, singular, and plural), recompiles, and atomically swaps both the gRPC and HTTP service entries. In-flight requests that already resolved the old entry complete normally; new requests route to the replacement immediately. Unchanged schemas skip recompilation entirely.
+Atomic replacement is a first-class operation. When an addon reconnects with a changed schema, the `DynamicSchemaActivator` detects the change via content hashing (SHA-256 over proto files, spec message, singular, plural, proto package, and service name), recompiles, and atomically swaps both the gRPC and HTTP service entries. In-flight requests that already resolved the old entry complete normally; new requests route to the replacement immediately. Unchanged schemas skip recompilation entirely.
 
 The transport-layer components (`DynamicServiceMux`, `DynamicHTTPMux`, `DynamicSchemaActivator`) are documented in [addon_integration.md — API extensibility](architecture/addon_integration.md#api-extensibility--dynamic-grpc-and-http). See also [addon lifecycle](architecture/addon_integration.md#addon-lifecycle) for how schemas flow from addon connect to API registration.
 
@@ -509,7 +520,7 @@ When an addon [re]connects...
 
 - **Mutable managed_resources table** — replaced by versioned intent
 - **Separate managed resource status table** — observations through inventory
-- **Single Fulfillment field as the sole observation mechanism** — per-object knowledge (outputs, observations) lives on inventory items; conditions are sourced from both Fulfillment (aggregated operational) and inventory (resource health); the Fulfillment owns lifecycle state and aggregated conditions
+- **Single Fulfillment field as the sole observation mechanism** — per-object knowledge (properties, observations) lives on inventory items; conditions are sourced from both Fulfillment (aggregated operational) and inventory (resource health); the Fulfillment owns lifecycle state and aggregated conditions
 - **Per-manifest condition layer on deliveries** — inventory is the per-resource condition system
 - **Three-level condition hierarchy** — two levels sufficient (delivery + Fulfillment)
 - **Multiple intent pointers per Fulfillment** — bundled intent preferred; strategy versioning is per strategy type, not per intent
@@ -543,7 +554,7 @@ Completed in OME-43. The codebase now has `Fulfillment` as its own aggregate wit
 
 ### Phasing
 
-1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle state. No outputs, observations, or conditions. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
-2. **Phase 2:** Inventory as the per-object knowledge system. Inventory items with outputs + observed + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
+1. **Phase 1:** Versioned intent table (`resource_intents`) + per-Fulfillment strategy versioning (manifest, placement, rollout) + basic lifecycle state. No properties, observations, or conditions. Proves the managed resource → Fulfillment flow end-to-end with the two version histories cleanly separated.
+2. **Phase 2:** Inventory as the per-object knowledge system. Inventory items with properties + observations + conditions. Condition events for inventory. manifest_results on deliveries. Delivery conditions (addon-reported). Fulfillment conditions (CEL aggregation, single-target pass-through). Shared strategy definitions (reusable placement across Fulfillments).
 3. **Phase 3:** CEL-based aggregation for multi-target. Fleet-wide condition and inventory queries. Campaign and deployment as user-facing concepts over Fulfillments.
 

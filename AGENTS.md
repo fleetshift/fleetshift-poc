@@ -13,6 +13,7 @@ The architecture documentation lives in docs/design/ and is the primary source o
   - fleetlet_and_transport.md -- fleetlets, channels, proxying, routing, data paths
   - tenancy_and_permissions.md -- provider/tenant/workspace model, generic permission boundary
   - addon_integration.md -- capability registration, addon strategy contracts, managed-resource bridging, UI/API extensions
+  - resource_identity_and_api.md -- two-layer API model, resource identity, platform resources, extension API packages, HTTP transcoding
   - resource_indexing.md -- fleet-wide indexing and search
   - platform_hierarchy.md -- recursive platforms, federation, provisioning, bootstrap, pivot
   - open_questions.md -- unresolved design areas

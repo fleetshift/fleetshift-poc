@@ -10,7 +10,7 @@ The detailed delivery protocol between the platform and targets:
 - delivery authorization at the target protocol level
 - idempotent removal
 - journaling for addon state continuity
-- reporting: drift detection, outputs, observations, and conditions
+- reporting: drift detection, properties, observations, and conditions
 
 ## When to read this
 
@@ -67,6 +67,8 @@ The targets interact with the platform through two directional interfaces:
 - **Addon → Platform (DeliveryReporter):** The addon pushes delivery lifecycle updates back to the platform: `ReportEvent` for non-terminal progress events, `ReportResult` for terminal outcomes, and `ListActiveDeliveries` to recover in-progress work after a restart.
 
 In-process addons receive the application-layer `DeliveryReportService` directly as their `DeliveryReporter`. Remote addons (via fleetlet) will receive a gRPC client stub implementing the same interface, backed by a bidirectional stream. This layering decouples addon code from platform internals: the addon interacts with client-style interfaces regardless of transport.
+
+Delivery lifecycle reporting is separate from inventory reporting. `ReportEvent` and `ReportResult` update delivery and fulfillment state.
 
 ### Guarantees
 
@@ -183,7 +185,7 @@ These should all be achievable, generally, by adding two more steps to the proto
 
 ### Delivery lifecycle state mapping
 
-The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. This document's protocol uses "ack" without mapping it to those states. The mapping between the protocol concepts (ack, auth failure, partial apply) and the delivery entity states needs to be defined. Similarly, `DeliveryResult` carries structured outputs (`ProvisionedTargets`, `ProducedSecrets`) that the protocol should account for — when and how these are reported back during the protocol flow.
+The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. This document's protocol uses "ack" without mapping it to those states. The mapping between the protocol concepts (ack, auth failure, partial apply) and the delivery entity states needs to be defined. Similarly, `DeliveryResult` carries structured result fields (`ProvisionedTargets`, `ProducedSecrets`); the remaining question is which of those stay delivery-local and which should be projected into inventory as properties.
 
 ### Should manifests be able to opt out of drift repair?
 
