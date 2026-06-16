@@ -176,6 +176,40 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("ResourceIdentitiesAccessorPersists", func(t *testing.T) {
+		store := factory(t)
+		ctx := context.Background()
+		fixed := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
+
+		tx, err := store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		defer tx.Rollback()
+
+		r := domain.NewPlatformResource("plat-store-1", "clusters", "clusters/store-test", nil, fixed)
+		if err := tx.ResourceIdentities().CreatePlatformResource(ctx, r); err != nil {
+			t.Fatalf("ResourceIdentities().Create: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("Commit: %v", err)
+		}
+
+		tx2, err := store.Begin(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		defer tx2.Rollback()
+
+		got, err := tx2.ResourceIdentities().GetPlatformResourceByUID(ctx, "plat-store-1")
+		if err != nil {
+			t.Fatalf("Get after commit: %v", err)
+		}
+		if got.UID() != "plat-store-1" {
+			t.Errorf("UID = %q, want plat-store-1", got.UID())
+		}
+	})
+
 	t.Run("FulfillmentsAccessorPersists", func(t *testing.T) {
 		store := factory(t)
 		ctx := context.Background()

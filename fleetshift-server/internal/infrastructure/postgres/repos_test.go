@@ -10,6 +10,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/resourceidentityrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/storetest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
@@ -77,6 +78,13 @@ func TestStore(t *testing.T) {
 	t.Parallel()
 	storetest.Run(t, func(t *testing.T) domain.Store {
 		return newStore(t)
+	})
+}
+
+func TestResourceIdentityRepo(t *testing.T) {
+	t.Parallel()
+	resourceidentityrepotest.Run(t, func(t *testing.T) domain.ResourceIdentityRepository {
+		return newTxRepo(t, domain.Tx.ResourceIdentities)
 	})
 }
 

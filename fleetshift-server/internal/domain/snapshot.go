@@ -113,6 +113,52 @@ type SignerEnrollmentSnapshot struct {
 	ExpiresAt       time.Time
 }
 
+// PlatformResourceSnapshot is the persistence DTO for [PlatformResource].
+type PlatformResourceSnapshot struct {
+	UID          PlatformResourceUID
+	CollectionID CollectionID
+	RelativeName RelativeResourceName
+	Labels       map[string]string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
+// ResourceRepresentationSnapshot is the persistence DTO for
+// [ResourceRepresentation].
+type ResourceRepresentationSnapshot struct {
+	PlatformUID  PlatformResourceUID
+	ServiceName  ServiceName
+	Version      APIVersion
+	CollectionID CollectionID
+	RelativeName RelativeResourceName
+	Roles        []RepresentationRole
+	Labels       map[string]string
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
+	DeletedAt    *time.Time
+}
+
+// ResourceAliasSnapshot is the persistence DTO for an [Alias] bound
+// to a platform resource.
+type ResourceAliasSnapshot struct {
+	Namespace   AliasNamespace
+	Key         AliasKey
+	Value       AliasValue
+	PlatformUID PlatformResourceUID
+	CreatedAt   time.Time
+}
+
+// ResourceRelationshipSnapshot is the persistence DTO for
+// [ResourceRelationship].
+type ResourceRelationshipSnapshot struct {
+	SourceUID     PlatformResourceUID
+	Type          RelationshipType
+	TargetUID     PlatformResourceUID
+	SourceService ServiceName
+	CreatedAt     time.Time
+}
+
 // ManagedResourceSnapshot is the persistence DTO for [ManagedResource].
 //
 // It captures persisted state and pending intents. On the read path,
@@ -371,6 +417,25 @@ func SignerEnrollmentFromSnapshot(s SignerEnrollmentSnapshot) SignerEnrollment {
 		registryID:        s.RegistryID,
 		createdAt:         s.CreatedAt,
 		expiresAt:         s.ExpiresAt,
+	}
+}
+
+// PlatformResourceFromSnapshot constructs a [PlatformResource] from a
+// snapshot. Labels are shallow-copied to avoid sharing the map with
+// the caller.
+func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource {
+	labels := make(map[string]string, len(s.Labels))
+	for k, v := range s.Labels {
+		labels[k] = v
+	}
+	return &PlatformResource{
+		uid:          s.UID,
+		collectionID: s.CollectionID,
+		relativeName: s.RelativeName,
+		labels:       labels,
+		createdAt:    s.CreatedAt,
+		updatedAt:    s.UpdatedAt,
+		deletedAt:    s.DeletedAt,
 	}
 }
 

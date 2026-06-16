@@ -49,6 +49,9 @@ func (t *storeTx) ManagedResources() domain.ManagedResourceRepository {
 func (t *storeTx) SignerEnrollments() domain.SignerEnrollmentRepository {
 	return &SignerEnrollmentRepo{DB: t.tx}
 }
+func (t *storeTx) ResourceIdentities() domain.ResourceIdentityRepository {
+	return &ResourceIdentityRepo{DB: t.tx}
+}
 
 func (t *storeTx) Commit() error {
 	if t.done {

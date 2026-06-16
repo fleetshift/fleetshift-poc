@@ -408,6 +408,52 @@ func TestManagedResource_DrainPendingIntents(t *testing.T) {
 	}
 }
 
+func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
+	deletedAt := refTime.Add(2 * time.Hour)
+	snap := PlatformResourceSnapshot{
+		UID:          "plat-1",
+		CollectionID: "clusters",
+		RelativeName: "clusters/prod",
+		Labels:       map[string]string{"env": "prod"},
+		CreatedAt:    refTime,
+		UpdatedAt:    refTime.Add(time.Hour),
+		DeletedAt:    &deletedAt,
+	}
+
+	r := PlatformResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	assertEq(t, "UID", got.UID, snap.UID)
+	assertEq(t, "CollectionID", got.CollectionID, snap.CollectionID)
+	assertEq(t, "RelativeName", got.RelativeName, snap.RelativeName)
+	assertEq(t, "Labels[env]", got.Labels["env"], snap.Labels["env"])
+	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
+	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
+	if got.DeletedAt == nil {
+		t.Fatal("DeletedAt is nil, want non-nil")
+	}
+	assertEq(t, "DeletedAt", *got.DeletedAt, *snap.DeletedAt)
+}
+
+func TestPlatformResourceSnapshot_RoundTrip_NilDeletedAt(t *testing.T) {
+	snap := PlatformResourceSnapshot{
+		UID:          "plat-2",
+		CollectionID: "clusters",
+		RelativeName: "clusters/staging",
+		Labels:       map[string]string{},
+		CreatedAt:    refTime,
+		UpdatedAt:    refTime,
+	}
+
+	r := PlatformResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	assertEq(t, "UID", got.UID, snap.UID)
+	if got.DeletedAt != nil {
+		t.Errorf("DeletedAt = %v, want nil", got.DeletedAt)
+	}
+}
+
 // assertEq is a generic test helper that compares two comparable values.
 func assertEq[T comparable](t *testing.T, field string, got, want T) {
 	t.Helper()

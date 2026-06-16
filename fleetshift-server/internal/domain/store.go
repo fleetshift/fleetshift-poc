@@ -37,6 +37,7 @@ type Tx interface {
 	Inventory() InventoryRepository
 	ManagedResources() ManagedResourceRepository
 	SignerEnrollments() SignerEnrollmentRepository
+	ResourceIdentities() ResourceIdentityRepository
 	Commit() error
 	Rollback() error
 }
