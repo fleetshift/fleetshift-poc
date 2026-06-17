@@ -283,7 +283,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		later := now.Add(time.Hour)
-		if err := loaded.TombstoneRepresentation("kind.fleetshift.io", "clusters", "clusters/tomb", later); err != nil {
+		if err := loaded.TombstoneRepresentation("kind.fleetshift.io", "clusters/tomb", later); err != nil {
 			t.Fatalf("Tombstone: %v", err)
 		}
 		if err := repo.Update(ctx, loaded); err != nil {

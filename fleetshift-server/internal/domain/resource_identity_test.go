@@ -360,7 +360,7 @@ func TestPlatformResource_TombstoneRepresentation(t *testing.T) {
 	}
 
 	later := now.Add(time.Hour)
-	err = r.TombstoneRepresentation("kind.fleetshift.io", "clusters", "clusters/prod", later)
+	err = r.TombstoneRepresentation("kind.fleetshift.io", "clusters/prod", later)
 	if err != nil {
 		t.Fatalf("tombstone: %v", err)
 	}
@@ -384,7 +384,7 @@ func TestPlatformResource_TombstoneRepresentation_NotFound(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
-	err := r.TombstoneRepresentation("missing.io", "clusters", "clusters/prod", now)
+	err := r.TombstoneRepresentation("missing.io", "clusters/prod", now)
 	if !errors.Is(err, ErrNotFound) {
 		t.Errorf("tombstone missing: got %v, want ErrNotFound", err)
 	}
@@ -571,7 +571,7 @@ func TestPlatformResource_EffectiveLabels_ExcludesTombstoned(t *testing.T) {
 		Labels:       map[string]string{"version": "1.29"},
 	}, now)
 
-	_ = r.TombstoneRepresentation("kind.fleetshift.io", "clusters", "clusters/prod", now.Add(time.Hour))
+	_ = r.TombstoneRepresentation("kind.fleetshift.io", "clusters/prod", now.Add(time.Hour))
 
 	got := r.EffectiveLabels()
 	if _, ok := got["kind.fleetshift.io/version"]; ok {

@@ -395,7 +395,6 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 
 	for i, existing := range r.representations {
 		if existing.ServiceName == in.ServiceName &&
-			existing.CollectionID == in.CollectionID &&
 			existing.RelativeName == in.RelativeName {
 			rep.CreatedAt = existing.CreatedAt
 			rep.DeletedAt = nil
@@ -411,12 +410,11 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 }
 
 // TombstoneRepresentation marks the representation matching the given
-// service, collection, and relative name as deleted. Returns
-// [ErrNotFound] if no active representation matches.
-func (r *PlatformResource) TombstoneRepresentation(service ServiceName, collection CollectionID, name RelativeResourceName, now time.Time) error {
+// service and relative name as deleted. Returns [ErrNotFound] if no
+// active representation matches.
+func (r *PlatformResource) TombstoneRepresentation(service ServiceName, name RelativeResourceName, now time.Time) error {
 	for i, rep := range r.representations {
 		if rep.ServiceName == service &&
-			rep.CollectionID == collection &&
 			rep.RelativeName == name &&
 			rep.DeletedAt == nil {
 			r.representations[i].DeletedAt = &now
@@ -425,7 +423,7 @@ func (r *PlatformResource) TombstoneRepresentation(service ServiceName, collecti
 			return nil
 		}
 	}
-	return fmt.Errorf("representation %s/%s/%s: %w", service, collection, name, ErrNotFound)
+	return fmt.Errorf("representation %s/%s: %w", service, name, ErrNotFound)
 }
 
 // AddAlias appends an alias to the platform resource. Duplicate aliases
