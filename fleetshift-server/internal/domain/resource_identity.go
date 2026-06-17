@@ -151,14 +151,6 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 	return Alias{Namespace: ns, Key: key, Value: value}, nil
 }
 
-// Relationship records a typed edge from one platform resource to
-// another, reported by a particular extension service.
-type Relationship struct {
-	Type          RelationshipType
-	TargetUID     PlatformResourceUID
-	SourceService ServiceName
-}
-
 // NewRelativeResourceName constructs a [RelativeResourceName] from a
 // collection and resource ID. It validates the id segment; the
 // collection is assumed valid because it is already a [CollectionID].
@@ -444,10 +436,14 @@ func (r *PlatformResource) AddAlias(alias Alias) error {
 }
 
 // AddRelationship adds a typed relationship from this platform resource
-// to another. Validates that the relationship type is non-empty. If a
-// relationship with the same (type, targetUID) already exists, it is
-// updated in place.
+// to another. Validates that the relationship type is non-empty and
+// that the source UID matches this aggregate. If a relationship with
+// the same (type, targetUID) already exists, it is updated in place.
 func (r *PlatformResource) AddRelationship(rel ResourceRelationship) error {
+	if rel.SourceUID != r.uid {
+		return fmt.Errorf("relationship source UID %q does not match resource UID %q: %w",
+			rel.SourceUID, r.uid, ErrInvalidArgument)
+	}
 	if rel.Type == "" {
 		return fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
 	}
@@ -592,6 +588,13 @@ func (rr ResourceRepresentation) Snapshot() ResourceRepresentationSnapshot {
 // ResourceRelationship records a directed relationship from one
 // platform resource to another, reported by a particular extension
 // service.
+//
+// TODO: Relationships currently reference resources by UID. Resource
+// names (RelativeResourceName) are stable, human-readable, and the
+// canonical AIP reference mechanism. UIDs force an extra lookup to
+// understand what a relationship points to. Consider switching to
+// names, possibly with deferred resolution for cases where the target
+// resource doesn't exist yet.
 type ResourceRelationship struct {
 	SourceUID     PlatformResourceUID
 	Type          RelationshipType

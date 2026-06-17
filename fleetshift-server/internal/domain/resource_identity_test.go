@@ -488,6 +488,25 @@ func TestPlatformResource_AddRelationship_RejectsEmptyType(t *testing.T) {
 	}
 }
 
+func TestPlatformResource_AddRelationship_RejectsForeignSourceUID(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
+
+	err := r.AddRelationship(ResourceRelationship{
+		SourceUID:     "uid-999",
+		Type:          "runs-on",
+		TargetUID:     "uid-2",
+		SourceService: "kind.fleetshift.io",
+		CreatedAt:     now,
+	})
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("foreign source UID: got %v, want ErrInvalidArgument", err)
+	}
+	if len(r.Relationships()) != 0 {
+		t.Error("relationship should not have been added")
+	}
+}
+
 func TestPlatformResource_EffectiveLabels(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod", "team": "infra"}, now)
