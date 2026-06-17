@@ -99,5 +99,5 @@ type ResourceIdentityRepository interface {
 
 	// Cross-resource lookups (can't live on the aggregate).
 	ResolveAlias(ctx context.Context, alias Alias) (PlatformResourceUID, error)
-	GetRepresentation(ctx context.Context, service ServiceName, collection CollectionID, name RelativeResourceName) (ResourceRepresentation, error)
+	GetRepresentation(ctx context.Context, name FullResourceName) (ResourceRepresentation, error)
 }

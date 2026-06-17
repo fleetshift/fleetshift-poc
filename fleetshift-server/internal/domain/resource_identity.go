@@ -408,21 +408,20 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 	return nil
 }
 
-// TombstoneRepresentation marks the representation matching the given
-// service and relative name as deleted. Returns [ErrNotFound] if no
-// active representation matches.
-func (r *PlatformResource) TombstoneRepresentation(service ServiceName, name RelativeResourceName, now time.Time) error {
+// TombstoneRepresentation marks the representation from the given
+// service as deleted. Since the relative resource name is identity-
+// equivalent across services, the match is by ServiceName only.
+// Returns [ErrNotFound] if no active representation matches.
+func (r *PlatformResource) TombstoneRepresentation(service ServiceName, now time.Time) error {
 	for i, rep := range r.representations {
-		if rep.ServiceName == service &&
-			rep.RelativeName == name &&
-			rep.DeletedAt == nil {
+		if rep.ServiceName == service && rep.DeletedAt == nil {
 			r.representations[i].DeletedAt = &now
 			r.representations[i].UpdatedAt = now
 			r.updatedAt = now
 			return nil
 		}
 	}
-	return fmt.Errorf("representation %s/%s: %w", service, name, ErrNotFound)
+	return fmt.Errorf("representation from %s on %s: %w", service, r.relativeName, ErrNotFound)
 }
 
 // AddAlias appends an alias to the platform resource. Duplicate aliases
@@ -545,6 +544,12 @@ type ResourceRepresentation struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+}
+
+// FullResourceName returns the full resource name for this
+// representation: "//{service}/{relative_name}".
+func (rr ResourceRepresentation) FullResourceName() FullResourceName {
+	return NewFullResourceName(rr.ServiceName, rr.RelativeName)
 }
 
 // ResourceRepresentationFromSnapshot constructs a

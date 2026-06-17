@@ -243,7 +243,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		later := now.Add(time.Hour)
-		if err := loaded.TombstoneRepresentation("kind.fleetshift.io", "clusters/tomb", later); err != nil {
+		if err := loaded.TombstoneRepresentation("kind.fleetshift.io", later); err != nil {
 			t.Fatalf("Tombstone: %v", err)
 		}
 		if err := repo.Update(ctx, loaded); err != nil {
@@ -259,7 +259,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		// Direct GetRepresentation should still return it (with DeletedAt set).
-		rep, err := repo.GetRepresentation(ctx, "kind.fleetshift.io", "clusters", "clusters/tomb")
+		rep, err := repo.GetRepresentation(ctx, "//kind.fleetshift.io/clusters/tomb")
 		if err != nil {
 			t.Fatalf("GetRepresentation: %v", err)
 		}
@@ -398,7 +398,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Errorf("GetByName: got %v, want ErrNotFound", err)
 		}
 
-		_, err = repo.GetRepresentation(ctx, "missing.svc", "clusters", "clusters/missing")
+		_, err = repo.GetRepresentation(ctx, "//missing.svc/clusters/missing")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("GetRepresentation: got %v, want ErrNotFound", err)
 		}

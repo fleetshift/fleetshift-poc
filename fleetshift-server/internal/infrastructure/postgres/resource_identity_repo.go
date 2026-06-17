@@ -180,12 +180,14 @@ func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Al
 	return domain.PlatformResourceUID(uid), nil
 }
 
-func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, service domain.ServiceName, collection domain.CollectionID, name domain.RelativeResourceName) (domain.ResourceRepresentation, error) {
+func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domain.FullResourceName) (domain.ResourceRepresentation, error) {
+	service := name.ServiceName()
+	relative := name.RelativeName()
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT platform_uid, service_name, version, collection_id, relative_name, roles, labels, created_at, updated_at, deleted_at
 		 FROM resource_representations
-		 WHERE service_name = $1 AND collection_id = $2 AND relative_name = $3`,
-		service, collection, name,
+		 WHERE service_name = $1 AND relative_name = $2`,
+		service, relative,
 	)
 	return scanRepresentation(row)
 }
