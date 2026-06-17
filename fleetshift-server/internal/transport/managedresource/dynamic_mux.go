@@ -228,12 +228,27 @@ func (m *DynamicHTTPMux) Register(svc *RegisteredService, grpcAddr string) error
 
 // Replace atomically swaps the HTTP handler for a service. If the
 // service is not currently registered it is added (same as [Register]).
-func (m *DynamicHTTPMux) Replace(svc *RegisteredService, grpcAddr string) error {
+// Any deprecatedPrefixes are removed in the same lock hold after the
+// new handler is successfully installed, so the old route remains live
+// if handler construction fails.
+func (m *DynamicHTTPMux) Replace(svc *RegisteredService, grpcAddr string, deprecatedPrefixes ...string) error {
 	canonical := svc.Config.CanonicalHTTPPrefix()
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.setHandler(svc, grpcAddr, canonical)
+	if err := m.setHandler(svc, grpcAddr, canonical); err != nil {
+		return err
+	}
+	for _, prefix := range deprecatedPrefixes {
+		if prefix == canonical {
+			continue // don't remove the route we just installed
+		}
+		if entry, ok := m.handlers[prefix]; ok && entry != nil && entry.conn != nil {
+			go entry.conn.Close()
+		}
+		delete(m.handlers, prefix)
+	}
+	return nil
 }
 
 // setHandler builds the handler and installs it for a single prefix.

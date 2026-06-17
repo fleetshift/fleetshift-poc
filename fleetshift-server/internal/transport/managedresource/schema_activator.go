@@ -123,12 +123,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	if alreadyRegistered {
 		a.GRPCMux.Replace(svc)
 		if a.HTTPMux != nil && a.GRPCAddr != "" {
-			// If the HTTP prefix changed, remove the stale route before
-			// installing the new one so old paths don't leak.
-			if oldHandle.HTTPPrefix != handle.HTTPPrefix {
-				a.HTTPMux.DeregisterByPrefix(oldHandle.HTTPPrefix)
-			}
-			if err := a.HTTPMux.Replace(svc, a.GRPCAddr); err != nil {
+			if err := a.HTTPMux.Replace(svc, a.GRPCAddr, oldHandle.HTTPPrefix); err != nil {
 				return application.SchemaHandle{}, fmt.Errorf("replace HTTP: %w", err)
 			}
 		}
