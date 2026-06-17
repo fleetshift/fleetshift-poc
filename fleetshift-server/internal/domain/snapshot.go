@@ -114,6 +114,7 @@ type SignerEnrollmentSnapshot struct {
 }
 
 // PlatformResourceSnapshot is the persistence DTO for [PlatformResource].
+// It captures the aggregate's full state including child entities.
 type PlatformResourceSnapshot struct {
 	UID          PlatformResourceUID
 	CollectionID CollectionID
@@ -122,6 +123,10 @@ type PlatformResourceSnapshot struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 	DeletedAt    *time.Time
+
+	Representations []ResourceRepresentationSnapshot
+	Aliases         []ResourceAliasSnapshot
+	Relationships   []ResourceRelationshipSnapshot
 }
 
 // ResourceRepresentationSnapshot is the persistence DTO for
@@ -422,20 +427,40 @@ func SignerEnrollmentFromSnapshot(s SignerEnrollmentSnapshot) SignerEnrollment {
 
 // PlatformResourceFromSnapshot constructs a [PlatformResource] from a
 // snapshot. Labels are shallow-copied to avoid sharing the map with
-// the caller.
+// the caller. Child entities (representations, aliases, relationships)
+// are reconstituted from their snapshot slices.
 func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource {
 	labels := make(map[string]string, len(s.Labels))
 	for k, v := range s.Labels {
 		labels[k] = v
 	}
+
+	reps := make([]ResourceRepresentation, len(s.Representations))
+	for i, rs := range s.Representations {
+		reps[i] = ResourceRepresentationFromSnapshot(rs)
+	}
+
+	aliases := make([]Alias, len(s.Aliases))
+	for i, as := range s.Aliases {
+		aliases[i] = Alias{Namespace: as.Namespace, Key: as.Key, Value: as.Value}
+	}
+
+	rels := make([]ResourceRelationship, len(s.Relationships))
+	for i, rs := range s.Relationships {
+		rels[i] = ResourceRelationshipFromSnapshot(rs)
+	}
+
 	return &PlatformResource{
-		uid:          s.UID,
-		collectionID: s.CollectionID,
-		relativeName: s.RelativeName,
-		labels:       labels,
-		createdAt:    s.CreatedAt,
-		updatedAt:    s.UpdatedAt,
-		deletedAt:    s.DeletedAt,
+		uid:             s.UID,
+		collectionID:    s.CollectionID,
+		relativeName:    s.RelativeName,
+		labels:          labels,
+		createdAt:       s.CreatedAt,
+		updatedAt:       s.UpdatedAt,
+		deletedAt:       s.DeletedAt,
+		representations: reps,
+		aliases:         aliases,
+		relationships:   rels,
 	}
 }
 
@@ -570,5 +595,18 @@ func (mr *ManagedResource) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*mr = *ManagedResourceFromSnapshot(s)
+	return nil
+}
+
+func (r PlatformResource) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.Snapshot())
+}
+
+func (r *PlatformResource) UnmarshalJSON(data []byte) error {
+	var s PlatformResourceSnapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*r = *PlatformResourceFromSnapshot(s)
 	return nil
 }

@@ -6,6 +6,8 @@ Logic should be pushed down as much as possible, without creating undue coupling
 
 Logic about an object, like its state transitions, should be pushed to that struct. A struct's fields should almost never be manipulated directly, except by that struct's methods, if that struct lives in the domain model. Encode invariants in these methods to help reduce bugs and security issues in the code.
 
+Value objects, where possible, are preferred, and must be self-validating through constructors (even when they are just type definitions over existing value objects).
+
 ## Snapshots and persistence
 
 Every domain aggregate that participates in a repository has a corresponding

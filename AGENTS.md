@@ -1,6 +1,6 @@
 # Rules for Agents
 
-This is the monorepo for FleetShift, a fleet management platform. It contains the management-plane server, CLI, proto definitions, and proof-of-concept experiments.
+This is the monorepo for FleetShift, a fleet management platform. It contains the management-plane server, CLI, proto definitions, and proof-of-concept experiments. Please follow these rules very closely. It is very important.
 
 ## Understanding the domain
 

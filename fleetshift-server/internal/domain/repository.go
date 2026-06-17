@@ -2,7 +2,6 @@ package domain
 
 import (
 	"context"
-	"time"
 )
 
 // TargetRepository persists and retrieves target metadata.
@@ -88,27 +87,17 @@ type ManagedResourceRepository interface {
 }
 
 // ResourceIdentityRepository persists and retrieves canonical platform
-// resource identities, representations, aliases, and relationships.
+// resource identities. The [PlatformResource] aggregate owns its child
+// entities (representations, aliases, relationships); the repository
+// reconciles the full aggregate state on Create/Update.
 type ResourceIdentityRepository interface {
-	// Platform resources
-	CreatePlatformResource(ctx context.Context, r *PlatformResource) error
-	GetPlatformResourceByUID(ctx context.Context, uid PlatformResourceUID) (*PlatformResource, error)
-	GetPlatformResourceByName(ctx context.Context, name RelativeResourceName) (*PlatformResource, error)
-	ListPlatformResourcesByCollection(ctx context.Context, collection CollectionID) ([]PlatformResource, error)
-	UpdatePlatformResourceLabels(ctx context.Context, r *PlatformResource) error
+	Create(ctx context.Context, r *PlatformResource) error
+	Get(ctx context.Context, uid PlatformResourceUID) (*PlatformResource, error)
+	GetByName(ctx context.Context, name RelativeResourceName) (*PlatformResource, error)
+	Update(ctx context.Context, r *PlatformResource) error
+	ListByCollection(ctx context.Context, collection CollectionID) ([]*PlatformResource, error)
 
-	// Representations
-	PutRepresentation(ctx context.Context, rep ResourceRepresentation) error
-	TombstoneRepresentation(ctx context.Context, service ServiceName, collection CollectionID, name RelativeResourceName, now time.Time) error
-	ListRepresentationsByPlatformUID(ctx context.Context, uid PlatformResourceUID) ([]ResourceRepresentation, error)
-	GetRepresentation(ctx context.Context, service ServiceName, collection CollectionID, name RelativeResourceName) (ResourceRepresentation, error)
-
-	// Aliases
-	PutAlias(ctx context.Context, uid PlatformResourceUID, alias Alias, now time.Time) error
+	// Cross-resource lookups (can't live on the aggregate).
 	ResolveAlias(ctx context.Context, alias Alias) (PlatformResourceUID, error)
-	ListAliasesByPlatformUID(ctx context.Context, uid PlatformResourceUID) ([]Alias, error)
-
-	// Relationships
-	PutRelationship(ctx context.Context, rel ResourceRelationship) error
-	ListRelationshipsBySourceUID(ctx context.Context, uid PlatformResourceUID) ([]ResourceRelationship, error)
+	GetRepresentation(ctx context.Context, service ServiceName, collection CollectionID, name RelativeResourceName) (ResourceRepresentation, error)
 }

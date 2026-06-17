@@ -18,11 +18,73 @@ import (
 // (e.g. "kind.fleetshift.io").
 type ServiceName string
 
+// NewServiceName validates and returns a [ServiceName]. It rejects empty
+// values and values containing '/'.
+func NewServiceName(s string) (ServiceName, error) {
+	if s == "" {
+		return "", fmt.Errorf("service name: %w: must not be empty", ErrInvalidArgument)
+	}
+	if strings.Contains(s, "/") {
+		return "", fmt.Errorf("service name: %w: must not contain '/'", ErrInvalidArgument)
+	}
+	return ServiceName(s), nil
+}
+
+// ValidateServiceName returns an error if s is empty or contains '/'.
+// Prefer [NewServiceName] at construction boundaries; this remains for
+// validating values already held as [ServiceName].
+func ValidateServiceName(s ServiceName) error {
+	_, err := NewServiceName(string(s))
+	return err
+}
+
 // APIVersion is the version of the extension API surface (e.g. "v1alpha1").
 type APIVersion string
 
+// NewAPIVersion validates and returns an [APIVersion]. It rejects empty
+// values and values that do not start with 'v'.
+func NewAPIVersion(v string) (APIVersion, error) {
+	if v == "" {
+		return "", fmt.Errorf("api version: %w: must not be empty", ErrInvalidArgument)
+	}
+	if !strings.HasPrefix(v, "v") {
+		return "", fmt.Errorf("api version: %w: must start with 'v'", ErrInvalidArgument)
+	}
+	return APIVersion(v), nil
+}
+
+// ValidateAPIVersion returns an error if v is empty or does not start
+// with 'v'. Prefer [NewAPIVersion] at construction boundaries.
+func ValidateAPIVersion(v APIVersion) error {
+	_, err := NewAPIVersion(string(v))
+	return err
+}
+
 // CollectionID identifies a resource collection (e.g. "clusters").
 type CollectionID string
+
+// NewCollectionID validates and returns a [CollectionID]. It rejects
+// empty values, non-lower-case values, and values containing '/'.
+func NewCollectionID(s string) (CollectionID, error) {
+	if s == "" {
+		return "", fmt.Errorf("collection id: %w: must not be empty", ErrInvalidArgument)
+	}
+	if s != strings.ToLower(s) {
+		return "", fmt.Errorf("collection id: %w: must be lower-case", ErrInvalidArgument)
+	}
+	if strings.Contains(s, "/") {
+		return "", fmt.Errorf("collection id: %w: must not contain '/'", ErrInvalidArgument)
+	}
+	return CollectionID(s), nil
+}
+
+// ValidateCollectionID returns an error if c is empty or not
+// lower-case/path-safe. Prefer [NewCollectionID] at construction
+// boundaries.
+func ValidateCollectionID(c CollectionID) error {
+	_, err := NewCollectionID(string(c))
+	return err
+}
 
 // RelativeResourceName is a collection-qualified, path-safe resource name
 // (e.g. "clusters/prod"). It takes the form "{collection}/{id}".
@@ -53,6 +115,22 @@ type RepresentationRole string
 // resources (e.g. "runs-on", "member-of").
 type RelationshipType string
 
+// NewRelationshipType validates and returns a [RelationshipType]. It
+// rejects empty values.
+func NewRelationshipType(s string) (RelationshipType, error) {
+	if s == "" {
+		return "", fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
+	}
+	return RelationshipType(s), nil
+}
+
+// ValidateRelationshipType returns an error if t is empty. Prefer
+// [NewRelationshipType] at construction boundaries.
+func ValidateRelationshipType(t RelationshipType) error {
+	_, err := NewRelationshipType(string(t))
+	return err
+}
+
 const (
 	// RepresentationRoleManaged marks a representation as managed by the
 	// platform (e.g. a managed Kind cluster).
@@ -80,10 +158,34 @@ var knownRoles = map[RepresentationRole]bool{
 
 // Alias is a cross-reference from an external naming scheme to a
 // platform resource (e.g. GCP project ID -> platform UID).
+//
+// Construct with [NewAlias] to enforce invariants.
 type Alias struct {
 	Namespace AliasNamespace
 	Key       AliasKey
 	Value     AliasValue
+}
+
+// NewAlias validates and returns an [Alias]. All three fields must be
+// non-empty.
+func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) {
+	if ns == "" {
+		return Alias{}, fmt.Errorf("alias namespace: %w: must not be empty", ErrInvalidArgument)
+	}
+	if key == "" {
+		return Alias{}, fmt.Errorf("alias key: %w: must not be empty", ErrInvalidArgument)
+	}
+	if value == "" {
+		return Alias{}, fmt.Errorf("alias value: %w: must not be empty", ErrInvalidArgument)
+	}
+	return Alias{Namespace: ns, Key: key, Value: value}, nil
+}
+
+// ValidateAlias returns an error if any field of a is empty. Prefer
+// [NewAlias] at construction boundaries.
+func ValidateAlias(a Alias) error {
+	_, err := NewAlias(a.Namespace, a.Key, a.Value)
+	return err
 }
 
 // Relationship records a typed edge from one platform resource to
@@ -97,45 +199,6 @@ type Relationship struct {
 // ---------------------------------------------------------------------------
 // Validation helpers
 // ---------------------------------------------------------------------------
-
-// ValidateServiceName returns an error if s is empty or contains '/'.
-func ValidateServiceName(s ServiceName) error {
-	if s == "" {
-		return fmt.Errorf("service name: %w: must not be empty", ErrInvalidArgument)
-	}
-	if strings.Contains(string(s), "/") {
-		return fmt.Errorf("service name: %w: must not contain '/'", ErrInvalidArgument)
-	}
-	return nil
-}
-
-// ValidateAPIVersion returns an error if v is empty or does not start
-// with 'v'.
-func ValidateAPIVersion(v APIVersion) error {
-	if v == "" {
-		return fmt.Errorf("api version: %w: must not be empty", ErrInvalidArgument)
-	}
-	if !strings.HasPrefix(string(v), "v") {
-		return fmt.Errorf("api version: %w: must start with 'v'", ErrInvalidArgument)
-	}
-	return nil
-}
-
-// ValidateCollectionID returns an error if c is empty or not
-// lower-case/path-safe.
-func ValidateCollectionID(c CollectionID) error {
-	if c == "" {
-		return fmt.Errorf("collection id: %w: must not be empty", ErrInvalidArgument)
-	}
-	s := string(c)
-	if s != strings.ToLower(s) {
-		return fmt.Errorf("collection id: %w: must be lower-case", ErrInvalidArgument)
-	}
-	if strings.Contains(s, "/") {
-		return fmt.Errorf("collection id: %w: must not contain '/'", ErrInvalidArgument)
-	}
-	return nil
-}
 
 // NewRelativeResourceName constructs a [RelativeResourceName] from a
 // collection and resource ID. It validates both segments.
@@ -215,28 +278,6 @@ func (n FullResourceName) RelativeName() RelativeResourceName {
 	return RelativeResourceName(parts[1])
 }
 
-// ValidateAlias returns an error if any field of a is empty.
-func ValidateAlias(a Alias) error {
-	if a.Namespace == "" {
-		return fmt.Errorf("alias namespace: %w: must not be empty", ErrInvalidArgument)
-	}
-	if a.Key == "" {
-		return fmt.Errorf("alias key: %w: must not be empty", ErrInvalidArgument)
-	}
-	if a.Value == "" {
-		return fmt.Errorf("alias value: %w: must not be empty", ErrInvalidArgument)
-	}
-	return nil
-}
-
-// ValidateRelationshipType returns an error if t is empty.
-func ValidateRelationshipType(t RelationshipType) error {
-	if t == "" {
-		return fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
-	}
-	return nil
-}
-
 // ValidateRepresentationRoles checks that roles is non-empty, all
 // values are known, and "managed" and "inventory" are not combined.
 func ValidateRepresentationRoles(roles []RepresentationRole) error {
@@ -271,8 +312,9 @@ func ValidateRepresentationRoles(roles []RepresentationRole) error {
 // services, aliases, and relationships.
 //
 // Construct new instances with [NewPlatformResource]; reconstitute from
-// persistence with [PlatformResourceFromSnapshot]. Read via accessor
-// methods.
+// persistence with [PlatformResourceFromSnapshot]. Mutate via domain
+// methods ([PlatformResource.SetLabels], [PlatformResource.AttachRepresentation],
+// etc.). Read via accessor methods.
 type PlatformResource struct {
 	uid          PlatformResourceUID
 	collectionID CollectionID
@@ -281,6 +323,10 @@ type PlatformResource struct {
 	createdAt    time.Time
 	updatedAt    time.Time
 	deletedAt    *time.Time
+
+	representations []ResourceRepresentation
+	aliases         []Alias
+	relationships   []ResourceRelationship
 }
 
 // NewPlatformResource creates a brand-new [PlatformResource]. Use this
@@ -330,17 +376,207 @@ func (r *PlatformResource) SetLabels(labels map[string]string, now time.Time) {
 	r.updatedAt = now
 }
 
+// ---------------------------------------------------------------------------
+// Child entity accessors
+// ---------------------------------------------------------------------------
+
+// Representations returns the active (non-tombstoned) representations.
+func (r *PlatformResource) Representations() []ResourceRepresentation {
+	var active []ResourceRepresentation
+	for _, rep := range r.representations {
+		if rep.DeletedAt == nil {
+			active = append(active, rep)
+		}
+	}
+	return active
+}
+
+// AllRepresentations returns all representations including tombstoned
+// ones. Used by the repository to reconcile the full state to storage.
+func (r *PlatformResource) AllRepresentations() []ResourceRepresentation {
+	return r.representations
+}
+
+// Aliases returns the aliases attached to this platform resource.
+func (r *PlatformResource) Aliases() []Alias {
+	return r.aliases
+}
+
+// Relationships returns the outgoing relationships from this platform
+// resource.
+func (r *PlatformResource) Relationships() []ResourceRelationship {
+	return r.relationships
+}
+
+// ---------------------------------------------------------------------------
+// Aggregate mutation methods
+// ---------------------------------------------------------------------------
+
+// AttachRepresentationInput is the input for
+// [PlatformResource.AttachRepresentation].
+type AttachRepresentationInput struct {
+	ServiceName  ServiceName
+	Version      APIVersion
+	CollectionID CollectionID
+	RelativeName RelativeResourceName
+	Roles        []RepresentationRole
+	Labels       map[string]string
+}
+
+// AttachRepresentation adds or updates an extension representation on
+// this platform resource. It validates cross-entity invariants:
+// collection must match the aggregate, and managed+inventory must not
+// be combined. Value-object invariants (service name, version, etc.)
+// are assumed to be enforced at construction time by callers.
+func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, now time.Time) error {
+	if in.CollectionID != r.collectionID {
+		return fmt.Errorf("collection_id %q does not match resource collection %q: %w",
+			in.CollectionID, r.collectionID, ErrInvalidArgument)
+	}
+	if err := ValidateRepresentationRoles(in.Roles); err != nil {
+		return err
+	}
+
+	rep := ResourceRepresentation{
+		PlatformUID:  r.uid,
+		ServiceName:  in.ServiceName,
+		Version:      in.Version,
+		CollectionID: in.CollectionID,
+		RelativeName: in.RelativeName,
+		Roles:        in.Roles,
+		Labels:       in.Labels,
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
+
+	for i, existing := range r.representations {
+		if existing.ServiceName == in.ServiceName &&
+			existing.CollectionID == in.CollectionID &&
+			existing.RelativeName == in.RelativeName {
+			rep.CreatedAt = existing.CreatedAt
+			rep.DeletedAt = nil
+			r.representations[i] = rep
+			r.updatedAt = now
+			return nil
+		}
+	}
+
+	r.representations = append(r.representations, rep)
+	r.updatedAt = now
+	return nil
+}
+
+// TombstoneRepresentation marks the representation matching the given
+// service, collection, and relative name as deleted. Returns
+// [ErrNotFound] if no active representation matches.
+func (r *PlatformResource) TombstoneRepresentation(service ServiceName, collection CollectionID, name RelativeResourceName, now time.Time) error {
+	for i, rep := range r.representations {
+		if rep.ServiceName == service &&
+			rep.CollectionID == collection &&
+			rep.RelativeName == name &&
+			rep.DeletedAt == nil {
+			r.representations[i].DeletedAt = &now
+			r.representations[i].UpdatedAt = now
+			r.updatedAt = now
+			return nil
+		}
+	}
+	return fmt.Errorf("representation %s/%s/%s: %w", service, collection, name, ErrNotFound)
+}
+
+// AddAlias appends an alias to the platform resource. Duplicate aliases
+// (same namespace+key+value) are silently ignored (idempotent). Cross-
+// resource alias uniqueness is enforced by the repository on save.
+func (r *PlatformResource) AddAlias(alias Alias) {
+	for _, existing := range r.aliases {
+		if existing.Namespace == alias.Namespace &&
+			existing.Key == alias.Key &&
+			existing.Value == alias.Value {
+			return
+		}
+	}
+	r.aliases = append(r.aliases, alias)
+}
+
+// AddRelationship adds a typed relationship from this platform resource
+// to another. Validates that the relationship type is non-empty. If a
+// relationship with the same (type, targetUID) already exists, it is
+// updated in place.
+func (r *PlatformResource) AddRelationship(rel ResourceRelationship) error {
+	if rel.Type == "" {
+		return fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
+	}
+
+	for i, existing := range r.relationships {
+		if existing.Type == rel.Type && existing.TargetUID == rel.TargetUID {
+			r.relationships[i] = rel
+			return nil
+		}
+	}
+	r.relationships = append(r.relationships, rel)
+	return nil
+}
+
+// EffectiveLabels computes the merged label set. Platform labels remain
+// unprefixed; active representation labels are prefixed with
+// "{service_name}/{key}". Platform labels take priority in the event of
+// a key collision with a prefixed representation label.
+func (r *PlatformResource) EffectiveLabels() map[string]string {
+	result := make(map[string]string)
+	for _, rep := range r.representations {
+		if rep.DeletedAt != nil {
+			continue
+		}
+		prefix := string(rep.ServiceName) + "/"
+		for k, v := range rep.Labels {
+			result[prefix+k] = v
+		}
+	}
+	for k, v := range r.labels {
+		result[k] = v
+	}
+	return result
+}
+
 // Snapshot returns a [PlatformResourceSnapshot] capturing all persisted
-// state.
+// state including child entities.
 func (r *PlatformResource) Snapshot() PlatformResourceSnapshot {
+	repSnaps := make([]ResourceRepresentationSnapshot, len(r.representations))
+	for i, rep := range r.representations {
+		repSnaps[i] = rep.Snapshot()
+	}
+
+	aliasSnaps := make([]ResourceAliasSnapshot, len(r.aliases))
+	for i, a := range r.aliases {
+		aliasSnaps[i] = ResourceAliasSnapshot{
+			Namespace: a.Namespace,
+			Key:       a.Key,
+			Value:     a.Value,
+		}
+	}
+
+	relSnaps := make([]ResourceRelationshipSnapshot, len(r.relationships))
+	for i, rel := range r.relationships {
+		relSnaps[i] = ResourceRelationshipSnapshot{
+			SourceUID:     rel.SourceUID,
+			Type:          rel.Type,
+			TargetUID:     rel.TargetUID,
+			SourceService: rel.SourceService,
+			CreatedAt:     rel.CreatedAt,
+		}
+	}
+
 	return PlatformResourceSnapshot{
-		UID:          r.uid,
-		CollectionID: r.collectionID,
-		RelativeName: r.relativeName,
-		Labels:       r.labels,
-		CreatedAt:    r.createdAt,
-		UpdatedAt:    r.updatedAt,
-		DeletedAt:    r.deletedAt,
+		UID:             r.uid,
+		CollectionID:    r.collectionID,
+		RelativeName:    r.relativeName,
+		Labels:          r.labels,
+		CreatedAt:       r.createdAt,
+		UpdatedAt:       r.updatedAt,
+		DeletedAt:       r.deletedAt,
+		Representations: repSnaps,
+		Aliases:         aliasSnaps,
+		Relationships:   relSnaps,
 	}
 }
 
@@ -423,42 +659,4 @@ func ResourceRelationshipFromSnapshot(s ResourceRelationshipSnapshot) ResourceRe
 		SourceService: s.SourceService,
 		CreatedAt:     s.CreatedAt,
 	}
-}
-
-// ---------------------------------------------------------------------------
-// PlatformResourceView -- read-model join DTO
-// ---------------------------------------------------------------------------
-
-// PlatformResourceView is a read-model DTO that joins a platform
-// resource with its representations, aliases, relationships, and
-// computed effective labels. It is assembled by the application service
-// on read paths and is never persisted directly.
-type PlatformResourceView struct {
-	Resource        *PlatformResource
-	Representations []ResourceRepresentation
-	Aliases         []Alias
-	Relationships   []ResourceRelationship
-	EffectiveLabels map[string]string
-}
-
-// ---------------------------------------------------------------------------
-// EffectiveLabels -- merge platform and representation labels
-// ---------------------------------------------------------------------------
-
-// EffectiveLabels computes the merged label set for a platform resource.
-// Platform labels remain unprefixed; representation labels are prefixed
-// with "{service_name}/{key}". Platform labels take priority in the
-// event of a key collision with a prefixed representation label.
-func EffectiveLabels(platformLabels map[string]string, representations []ResourceRepresentation) map[string]string {
-	result := make(map[string]string)
-	for _, rep := range representations {
-		prefix := string(rep.ServiceName) + "/"
-		for k, v := range rep.Labels {
-			result[prefix+k] = v
-		}
-	}
-	for k, v := range platformLabels {
-		result[k] = v
-	}
-	return result
 }

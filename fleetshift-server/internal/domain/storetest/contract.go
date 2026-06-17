@@ -188,7 +188,7 @@ func Run(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 
 		r := domain.NewPlatformResource("plat-store-1", "clusters", "clusters/store-test", nil, fixed)
-		if err := tx.ResourceIdentities().CreatePlatformResource(ctx, r); err != nil {
+		if err := tx.ResourceIdentities().Create(ctx, r); err != nil {
 			t.Fatalf("ResourceIdentities().Create: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -201,7 +201,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx2.Rollback()
 
-		got, err := tx2.ResourceIdentities().GetPlatformResourceByUID(ctx, "plat-store-1")
+		got, err := tx2.ResourceIdentities().Get(ctx, "plat-store-1")
 		if err != nil {
 			t.Fatalf("Get after commit: %v", err)
 		}
