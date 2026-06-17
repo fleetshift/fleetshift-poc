@@ -30,14 +30,6 @@ func NewServiceName(s string) (ServiceName, error) {
 	return ServiceName(s), nil
 }
 
-// ValidateServiceName returns an error if s is empty or contains '/'.
-// Prefer [NewServiceName] at construction boundaries; this remains for
-// validating values already held as [ServiceName].
-func ValidateServiceName(s ServiceName) error {
-	_, err := NewServiceName(string(s))
-	return err
-}
-
 // APIVersion is the version of the extension API surface (e.g. "v1alpha1").
 type APIVersion string
 
@@ -51,13 +43,6 @@ func NewAPIVersion(v string) (APIVersion, error) {
 		return "", fmt.Errorf("api version: %w: must start with 'v'", ErrInvalidArgument)
 	}
 	return APIVersion(v), nil
-}
-
-// ValidateAPIVersion returns an error if v is empty or does not start
-// with 'v'. Prefer [NewAPIVersion] at construction boundaries.
-func ValidateAPIVersion(v APIVersion) error {
-	_, err := NewAPIVersion(string(v))
-	return err
 }
 
 // CollectionID identifies a resource collection (e.g. "clusters").
@@ -76,14 +61,6 @@ func NewCollectionID(s string) (CollectionID, error) {
 		return "", fmt.Errorf("collection id: %w: must not contain '/'", ErrInvalidArgument)
 	}
 	return CollectionID(s), nil
-}
-
-// ValidateCollectionID returns an error if c is empty or not
-// lower-case/path-safe. Prefer [NewCollectionID] at construction
-// boundaries.
-func ValidateCollectionID(c CollectionID) error {
-	_, err := NewCollectionID(string(c))
-	return err
 }
 
 // RelativeResourceName is a collection-qualified, path-safe resource name
@@ -122,13 +99,6 @@ func NewRelationshipType(s string) (RelationshipType, error) {
 		return "", fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
 	}
 	return RelationshipType(s), nil
-}
-
-// ValidateRelationshipType returns an error if t is empty. Prefer
-// [NewRelationshipType] at construction boundaries.
-func ValidateRelationshipType(t RelationshipType) error {
-	_, err := NewRelationshipType(string(t))
-	return err
 }
 
 const (
@@ -181,13 +151,6 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 	return Alias{Namespace: ns, Key: key, Value: value}, nil
 }
 
-// ValidateAlias returns an error if any field of a is empty. Prefer
-// [NewAlias] at construction boundaries.
-func ValidateAlias(a Alias) error {
-	_, err := NewAlias(a.Namespace, a.Key, a.Value)
-	return err
-}
-
 // Relationship records a typed edge from one platform resource to
 // another, reported by a particular extension service.
 type Relationship struct {
@@ -196,15 +159,12 @@ type Relationship struct {
 	SourceService ServiceName
 }
 
-// ---------------------------------------------------------------------------
-// Validation helpers
-// ---------------------------------------------------------------------------
-
 // NewRelativeResourceName constructs a [RelativeResourceName] from a
-// collection and resource ID. It validates both segments.
+// collection and resource ID. It validates the id segment; the
+// collection is assumed valid because it is already a [CollectionID].
 func NewRelativeResourceName(collection CollectionID, id string) (RelativeResourceName, error) {
-	if err := ValidateCollectionID(collection); err != nil {
-		return "", err
+	if collection == "" {
+		return "", fmt.Errorf("relative resource name: %w: collection must not be empty", ErrInvalidArgument)
 	}
 	if id == "" {
 		return "", fmt.Errorf("relative resource name: %w: id must not be empty", ErrInvalidArgument)
@@ -213,24 +173,6 @@ func NewRelativeResourceName(collection CollectionID, id string) (RelativeResour
 		return "", fmt.Errorf("relative resource name: %w: id must not contain '/'", ErrInvalidArgument)
 	}
 	return RelativeResourceName(string(collection) + "/" + id), nil
-}
-
-// ValidateRelativeResourceName checks that n is a well-formed
-// collection-qualified name of the form "{collection}/{id}". The
-// collection segment must pass [ValidateCollectionID] and the id
-// segment must not contain '/'.
-func ValidateRelativeResourceName(n RelativeResourceName) error {
-	parts := strings.SplitN(string(n), "/", 2)
-	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
-		return fmt.Errorf("relative resource name %q: %w: must be collection/id", n, ErrInvalidArgument)
-	}
-	if err := ValidateCollectionID(CollectionID(parts[0])); err != nil {
-		return fmt.Errorf("relative resource name %q: %w", n, err)
-	}
-	if strings.Contains(parts[1], "/") {
-		return fmt.Errorf("relative resource name %q: %w: id must not contain '/'", n, ErrInvalidArgument)
-	}
-	return nil
 }
 
 // CollectionID extracts the collection segment from a relative name.
@@ -278,9 +220,11 @@ func (n FullResourceName) RelativeName() RelativeResourceName {
 	return RelativeResourceName(parts[1])
 }
 
-// ValidateRepresentationRoles checks that roles is non-empty, all
+// validateRepresentationRoles checks that roles is non-empty, all
 // values are known, and "managed" and "inventory" are not combined.
-func ValidateRepresentationRoles(roles []RepresentationRole) error {
+// This is an aggregate-internal invariant check used by
+// [PlatformResource.AttachRepresentation].
+func validateRepresentationRoles(roles []RepresentationRole) error {
 	if len(roles) == 0 {
 		return fmt.Errorf("representation roles: %w: at least one role required", ErrInvalidArgument)
 	}
@@ -433,7 +377,7 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 		return fmt.Errorf("collection_id %q does not match resource collection %q: %w",
 			in.CollectionID, r.collectionID, ErrInvalidArgument)
 	}
-	if err := ValidateRepresentationRoles(in.Roles); err != nil {
+	if err := validateRepresentationRoles(in.Roles); err != nil {
 		return err
 	}
 

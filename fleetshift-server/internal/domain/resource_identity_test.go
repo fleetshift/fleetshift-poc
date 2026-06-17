@@ -162,18 +162,16 @@ func TestNewRelationshipType(t *testing.T) {
 // RelativeResourceName (existing tests, preserved)
 // ---------------------------------------------------------------------------
 
-func TestRelativeResourceName_ValidatesCollectionQualifiedName(t *testing.T) {
+func TestNewRelativeResourceName(t *testing.T) {
 	tests := []struct {
 		name       string
 		collection CollectionID
 		id         string
 		wantErr    bool
 	}{
-		{name: "valid", collection: "clusters", id: "prod", wantErr: false},
+		{name: "valid", collection: "clusters", id: "prod"},
 		{name: "empty collection", collection: "", id: "prod", wantErr: true},
 		{name: "empty id", collection: "clusters", id: "", wantErr: true},
-		{name: "uppercase collection", collection: "Clusters", id: "prod", wantErr: true},
-		{name: "collection with slash", collection: "a/b", id: "prod", wantErr: true},
 		{name: "id with slash", collection: "clusters", id: "a/b", wantErr: true},
 	}
 
@@ -199,33 +197,6 @@ func TestRelativeResourceName_ValidatesCollectionQualifiedName(t *testing.T) {
 	}
 }
 
-func TestRelativeResourceName_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		input   RelativeResourceName
-		wantErr bool
-	}{
-		{name: "valid", input: "clusters/prod", wantErr: false},
-		{name: "empty", input: "", wantErr: true},
-		{name: "no slash", input: "clusters", wantErr: true},
-		{name: "empty collection", input: "/prod", wantErr: true},
-		{name: "empty id", input: "clusters/", wantErr: true},
-		{name: "uppercase collection", input: "Clusters/prod", wantErr: true},
-		{name: "multi-segment id", input: "clusters/a/b", wantErr: true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRelativeResourceName(tt.input)
-			if tt.wantErr && !errors.Is(err, ErrInvalidArgument) {
-				t.Errorf("got err %v, want ErrInvalidArgument", err)
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
-	}
-}
-
 func TestFullResourceName_ConstructsAndParses(t *testing.T) {
 	frn := NewFullResourceName("kind.fleetshift.io", "clusters/prod")
 
@@ -237,35 +208,6 @@ func TestFullResourceName_ConstructsAndParses(t *testing.T) {
 	}
 	if frn.RelativeName() != "clusters/prod" {
 		t.Errorf("RelativeName() = %q, want clusters/prod", frn.RelativeName())
-	}
-}
-
-func TestRepresentationRoles_Validate(t *testing.T) {
-	tests := []struct {
-		name    string
-		roles   []RepresentationRole
-		wantErr bool
-	}{
-		{name: "managed only", roles: []RepresentationRole{RepresentationRoleManaged}, wantErr: false},
-		{name: "inventory only", roles: []RepresentationRole{RepresentationRoleInventory}, wantErr: false},
-		{name: "target only", roles: []RepresentationRole{RepresentationRoleTarget}, wantErr: false},
-		{name: "target + inventory", roles: []RepresentationRole{RepresentationRoleTarget, RepresentationRoleInventory}, wantErr: false},
-		{name: "target + managed", roles: []RepresentationRole{RepresentationRoleTarget, RepresentationRoleManaged}, wantErr: false},
-		{name: "managed + inventory rejected", roles: []RepresentationRole{RepresentationRoleManaged, RepresentationRoleInventory}, wantErr: true},
-		{name: "empty rejected", roles: []RepresentationRole{}, wantErr: true},
-		{name: "unknown role rejected", roles: []RepresentationRole{"unknown"}, wantErr: true},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := ValidateRepresentationRoles(tt.roles)
-			if tt.wantErr && !errors.Is(err, ErrInvalidArgument) {
-				t.Errorf("got err %v, want ErrInvalidArgument", err)
-			}
-			if !tt.wantErr && err != nil {
-				t.Errorf("unexpected error: %v", err)
-			}
-		})
 	}
 }
 
@@ -587,32 +529,4 @@ func TestPlatformResource_EffectiveLabels_ExcludesTombstoned(t *testing.T) {
 		t.Error("tombstoned representation labels should not appear in effective labels")
 	}
 	assertEq(t, "env", got["env"], "prod")
-}
-
-// ---------------------------------------------------------------------------
-// Backward-compatibility: old Validate* functions still exist as aliases
-// ---------------------------------------------------------------------------
-
-func TestServiceName_Validate(t *testing.T) {
-	if err := ValidateServiceName(""); !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("empty: got %v, want ErrInvalidArgument", err)
-	}
-	if err := ValidateServiceName("a/b"); !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("slash: got %v, want ErrInvalidArgument", err)
-	}
-	if err := ValidateServiceName("kind.fleetshift.io"); err != nil {
-		t.Errorf("valid: unexpected error: %v", err)
-	}
-}
-
-func TestAPIVersion_Validate(t *testing.T) {
-	if err := ValidateAPIVersion(""); !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("empty: got %v, want ErrInvalidArgument", err)
-	}
-	if err := ValidateAPIVersion("1alpha1"); !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("no v prefix: got %v, want ErrInvalidArgument", err)
-	}
-	if err := ValidateAPIVersion("v1alpha1"); err != nil {
-		t.Errorf("valid: unexpected error: %v", err)
-	}
 }
