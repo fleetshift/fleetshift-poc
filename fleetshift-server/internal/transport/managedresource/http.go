@@ -9,7 +9,6 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
@@ -26,45 +25,29 @@ import (
 //	GET    {prefix}          -> List
 //	DELETE {prefix}/{id}     -> Delete
 //
-// The handler connects to the gRPC server at grpcAddr to forward requests.
+// The conn is a gRPC client connection to the server hosting the service.
 //
 // For dynamic (hot-swappable) registration, prefer [DynamicHTTPMux] which
 // uses handler indirection to support atomic replace and deregister.
-func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, grpcAddr string) error {
+func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, conn *grpc.ClientConn) {
 	prefix := svc.Config.CanonicalHTTPPrefix()
-	entry, err := buildHTTPHandler(svc, grpcAddr, prefix)
-	if err != nil {
-		return err
-	}
+	handler := buildHTTPHandler(svc, conn, prefix)
 
 	// Register both the exact path and the subtree pattern so that
 	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
 	// delete) are both routed here instead of falling through to the
 	// grpc-gateway catch-all on /v1/.
-	mux.HandleFunc(prefix, entry.handler)
-	mux.HandleFunc(prefix+"/", entry.handler)
-
-	return nil
-}
-
-// httpHandlerEntry pairs an HTTP handler with its gRPC client
-// connection so the connection can be closed when the handler is
-// replaced or deregistered.
-type httpHandlerEntry struct {
-	handler http.HandlerFunc
-	conn    *grpc.ClientConn
+	mux.HandleFunc(prefix, handler)
+	mux.HandleFunc(prefix+"/", handler)
 }
 
 // buildHTTPHandler creates the HTTP handler function for a managed
-// resource service without registering it on any mux. Used by both
-// [RegisterHTTP] (static) and [DynamicHTTPMux] (dynamic).
-func buildHTTPHandler(svc *RegisteredService, grpcAddr, prefix string) (*httpHandlerEntry, error) {
-	conn, err := grpc.NewClient(grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
-	if err != nil {
-		return nil, err
-	}
-
-	handler := func(w http.ResponseWriter, r *http.Request) {
+// resource service without registering it on any mux. The conn is a
+// shared gRPC client connection to the server's own loopback — routing
+// to the correct service is handled by method name, not connection
+// identity.
+func buildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
 
 		switch {
@@ -86,7 +69,6 @@ func buildHTTPHandler(svc *RegisteredService, grpcAddr, prefix string) (*httpHan
 			http.NotFound(w, r)
 		}
 	}
-	return &httpHandlerEntry{handler: handler, conn: conn}, nil
 }
 
 func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {

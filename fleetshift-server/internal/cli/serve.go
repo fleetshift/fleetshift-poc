@@ -523,7 +523,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Store:         store,
 		ProvenanceSvc: provenanceSvc,
 	})
-	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux)
+	dynamicHTTPConn, err := grpc.NewClient(f.grpcAddr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		return fmt.Errorf("dynamic http mux grpc client: %w", err)
+	}
+	defer dynamicHTTPConn.Close()
+	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
 
 	if f.webDir != "" {
 		uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
@@ -549,7 +554,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
 		FileRegistry: fileRegistry,
-		GRPCAddr:     f.grpcAddr,
 		Deps: managedresource.Deps{
 			Resources: managedResourceSvc,
 			Validator: specValidator,

@@ -29,7 +29,6 @@ type DynamicSchemaActivator struct {
 	GRPCMux      *DynamicServiceMux
 	HTTPMux      *DynamicHTTPMux
 	FileRegistry *DynamicFileRegistry
-	GRPCAddr     string
 	Deps         Deps
 
 	mu      sync.Mutex
@@ -122,10 +121,8 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	oldHandle, alreadyRegistered := a.handles[serviceName]
 	if alreadyRegistered {
 		a.GRPCMux.Replace(svc)
-		if a.HTTPMux != nil && a.GRPCAddr != "" {
-			if err := a.HTTPMux.Replace(svc, a.GRPCAddr, oldHandle.HTTPPrefix); err != nil {
-				return application.SchemaHandle{}, fmt.Errorf("replace HTTP: %w", err)
-			}
+		if a.HTTPMux != nil {
+			a.HTTPMux.Replace(svc, oldHandle.HTTPPrefix)
 		}
 		if a.FileRegistry != nil {
 			if oldHandle.DescriptorPath != handle.DescriptorPath {
@@ -137,8 +134,8 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		if err := a.GRPCMux.Register(svc); err != nil {
 			return application.SchemaHandle{}, fmt.Errorf("register gRPC: %w", err)
 		}
-		if a.HTTPMux != nil && a.GRPCAddr != "" {
-			if err := a.HTTPMux.Register(svc, a.GRPCAddr); err != nil {
+		if a.HTTPMux != nil {
+			if err := a.HTTPMux.Register(svc); err != nil {
 				a.GRPCMux.Deregister(handle.GRPCServiceName)
 				return application.SchemaHandle{}, fmt.Errorf("register HTTP: %w", err)
 			}

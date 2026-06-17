@@ -52,7 +52,6 @@ type activatorHTTPEnv struct {
 func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	t.Helper()
 	grpcMux := managedresource.NewDynamicServiceMux()
-	httpMux := managedresource.NewDynamicHTTPMux(nil)
 
 	validator, err := protovalidate.New()
 	if err != nil {
@@ -79,15 +78,22 @@ func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	go func() { _ = srv.Serve(lis) }()
 	t.Cleanup(srv.GracefulStop)
 
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial grpc: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	httpMux := managedresource.NewDynamicHTTPMux(nil, conn)
+
 	ts := httptest.NewServer(httpMux.ServeMux())
 	t.Cleanup(ts.Close)
 
 	return activatorHTTPEnv{
 		activator: &managedresource.DynamicSchemaActivator{
-			GRPCMux:  grpcMux,
-			HTTPMux:  httpMux,
-			GRPCAddr: lis.Addr().String(),
-			Deps:     managedresource.Deps{Validator: validator},
+			GRPCMux: grpcMux,
+			HTTPMux: httpMux,
+			Deps:    managedresource.Deps{Validator: validator},
 		},
 		grpcMux: grpcMux,
 		httpMux: httpMux,
