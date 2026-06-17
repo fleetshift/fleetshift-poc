@@ -511,18 +511,22 @@ func TestPlatformResource_EffectiveLabels(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod", "team": "infra"}, now)
 
-	_ = r.AttachRepresentation(AttachRepresentationInput{
+	if err := r.AttachRepresentation(AttachRepresentationInput{
 		ServiceName: "kind.fleetshift.io",
 		Version:     "v1",
 		Roles:       []RepresentationRole{RepresentationRoleManaged},
 		Labels:      map[string]string{"version": "1.29", "runtime": "containerd"},
-	}, now)
-	_ = r.AttachRepresentation(AttachRepresentationInput{
+	}, now); err != nil {
+		t.Fatalf("attach kind: %v", err)
+	}
+	if err := r.AttachRepresentation(AttachRepresentationInput{
 		ServiceName: "gcp.fleetshift.io",
 		Version:     "v1",
 		Roles:       []RepresentationRole{RepresentationRoleInventory},
 		Labels:      map[string]string{"project": "my-proj"},
-	}, now)
+	}, now); err != nil {
+		t.Fatalf("attach gcp: %v", err)
+	}
 
 	got := r.EffectiveLabels()
 
@@ -540,12 +544,14 @@ func TestPlatformResource_EffectiveLabels_PlatformOverrides(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"kind.fleetshift.io/version": "override"}, now)
 
-	_ = r.AttachRepresentation(AttachRepresentationInput{
+	if err := r.AttachRepresentation(AttachRepresentationInput{
 		ServiceName: "kind.fleetshift.io",
 		Version:     "v1",
 		Roles:       []RepresentationRole{RepresentationRoleManaged},
 		Labels:      map[string]string{"version": "1.29"},
-	}, now)
+	}, now); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
 
 	got := r.EffectiveLabels()
 	assertEq(t, "override", got["kind.fleetshift.io/version"], "override")
@@ -555,14 +561,18 @@ func TestPlatformResource_EffectiveLabels_ExcludesTombstoned(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod"}, now)
 
-	_ = r.AttachRepresentation(AttachRepresentationInput{
+	if err := r.AttachRepresentation(AttachRepresentationInput{
 		ServiceName: "kind.fleetshift.io",
 		Version:     "v1",
 		Roles:       []RepresentationRole{RepresentationRoleManaged},
 		Labels:      map[string]string{"version": "1.29"},
-	}, now)
+	}, now); err != nil {
+		t.Fatalf("attach: %v", err)
+	}
 
-	_ = r.TombstoneRepresentation("kind.fleetshift.io", now.Add(time.Hour))
+	if err := r.TombstoneRepresentation("kind.fleetshift.io", now.Add(time.Hour)); err != nil {
+		t.Fatalf("tombstone: %v", err)
+	}
 
 	got := r.EffectiveLabels()
 	if _, ok := got["kind.fleetshift.io/version"]; ok {
