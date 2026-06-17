@@ -314,7 +314,9 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource("uid-a1", "clusters", "clusters/aliased", nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "my-proj-123")
-		r.AddAlias(alias)
+		if err := r.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias: %v", err)
+		}
 
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -343,7 +345,9 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource("uid-ai1", "clusters", "clusters/alias-idem", nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "proj-1")
-		r.AddAlias(alias)
+		if err := r.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias: %v", err)
+		}
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -352,7 +356,9 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		loaded.AddAlias(alias)
+		if err := loaded.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias (idempotent): %v", err)
+		}
 		if err := repo.Update(ctx, loaded); err != nil {
 			t.Fatalf("Update (idempotent alias): %v", err)
 		}
@@ -364,13 +370,17 @@ func Run(t *testing.T, factory Factory) {
 
 		r1 := domain.NewPlatformResource("uid-ac1", "clusters", "clusters/ac1", nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "contested")
-		r1.AddAlias(alias)
+		if err := r1.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias r1: %v", err)
+		}
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create r1: %v", err)
 		}
 
 		r2 := domain.NewPlatformResource("uid-ac2", "clusters", "clusters/ac2", nil, now)
-		r2.AddAlias(alias)
+		if err := r2.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias r2: %v", err)
+		}
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("got %v, want ErrAlreadyExists", err)

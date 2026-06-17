@@ -395,7 +395,9 @@ func TestPlatformResource_AddAlias(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
 	alias, _ := NewAlias("gcp", "project_id", "my-proj")
-	r.AddAlias(alias)
+	if err := r.AddAlias(alias); err != nil {
+		t.Fatalf("AddAlias: %v", err)
+	}
 
 	aliases := r.Aliases()
 	if len(aliases) != 1 {
@@ -411,11 +413,58 @@ func TestPlatformResource_AddAlias_Idempotent(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
 	alias, _ := NewAlias("gcp", "project_id", "my-proj")
-	r.AddAlias(alias)
-	r.AddAlias(alias)
+	if err := r.AddAlias(alias); err != nil {
+		t.Fatalf("first AddAlias: %v", err)
+	}
+	if err := r.AddAlias(alias); err != nil {
+		t.Fatalf("second AddAlias (idempotent): %v", err)
+	}
 
 	if len(r.Aliases()) != 1 {
 		t.Errorf("len(Aliases) = %d, want 1 (idempotent)", len(r.Aliases()))
+	}
+}
+
+func TestPlatformResource_AddAlias_RejectsConflictingValue(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
+
+	first, _ := NewAlias("gcp", "project_id", "proj-a")
+	if err := r.AddAlias(first); err != nil {
+		t.Fatalf("first AddAlias: %v", err)
+	}
+
+	conflicting, _ := NewAlias("gcp", "project_id", "proj-b")
+	err := r.AddAlias(conflicting)
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("conflicting alias: got %v, want ErrInvalidArgument", err)
+	}
+
+	// Original alias should be unchanged.
+	aliases := r.Aliases()
+	if len(aliases) != 1 {
+		t.Fatalf("len(Aliases) = %d, want 1", len(aliases))
+	}
+	if aliases[0].Value != "proj-a" {
+		t.Errorf("Value = %q, want proj-a (unchanged)", aliases[0].Value)
+	}
+}
+
+func TestPlatformResource_AddAlias_AllowsDifferentKeysInSameNamespace(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
+
+	a1, _ := NewAlias("gcp", "project_id", "proj-a")
+	a2, _ := NewAlias("gcp", "zone", "us-central1-a")
+	if err := r.AddAlias(a1); err != nil {
+		t.Fatalf("first AddAlias: %v", err)
+	}
+	if err := r.AddAlias(a2); err != nil {
+		t.Fatalf("second AddAlias: %v", err)
+	}
+
+	if len(r.Aliases()) != 2 {
+		t.Errorf("len(Aliases) = %d, want 2", len(r.Aliases()))
 	}
 }
 

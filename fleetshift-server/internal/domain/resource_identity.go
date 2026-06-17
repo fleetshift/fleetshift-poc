@@ -429,17 +429,22 @@ func (r *PlatformResource) TombstoneRepresentation(service ServiceName, collecti
 }
 
 // AddAlias appends an alias to the platform resource. Duplicate aliases
-// (same namespace+key+value) are silently ignored (idempotent). Cross-
-// resource alias uniqueness is enforced by the repository on save.
-func (r *PlatformResource) AddAlias(alias Alias) {
+// (same namespace+key+value) are silently ignored (idempotent). An alias
+// whose namespace+key matches an existing alias but with a different
+// value is rejected as an invariant violation. Cross-resource alias
+// uniqueness is enforced by the repository on save.
+func (r *PlatformResource) AddAlias(alias Alias) error {
 	for _, existing := range r.aliases {
-		if existing.Namespace == alias.Namespace &&
-			existing.Key == alias.Key &&
-			existing.Value == alias.Value {
-			return
+		if existing.Namespace == alias.Namespace && existing.Key == alias.Key {
+			if existing.Value == alias.Value {
+				return nil // idempotent
+			}
+			return fmt.Errorf("alias %s/%s already has value %q, cannot set %q: %w",
+				existing.Namespace, existing.Key, existing.Value, alias.Value, ErrInvalidArgument)
 		}
 	}
 	r.aliases = append(r.aliases, alias)
+	return nil
 }
 
 // AddRelationship adds a typed relationship from this platform resource
