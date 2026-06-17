@@ -336,7 +336,7 @@ func (r *PlatformResource) Representations() []ResourceRepresentation {
 }
 
 // AllRepresentations returns all representations including tombstoned
-// ones. Used by the repository to reconcile the full state to storage.
+// ones.
 func (r *PlatformResource) AllRepresentations() []ResourceRepresentation {
 	return r.representations
 }
@@ -358,25 +358,25 @@ func (r *PlatformResource) Relationships() []ResourceRelationship {
 
 // AttachRepresentationInput is the input for
 // [PlatformResource.AttachRepresentation].
+//
+// CollectionID and RelativeName are not included because the relative
+// resource name is identity-equivalent across services (see
+// resource_identity_and_api.md). The aggregate stamps them from its own
+// canonical identity.
 type AttachRepresentationInput struct {
-	ServiceName  ServiceName
-	Version      APIVersion
-	CollectionID CollectionID
-	RelativeName RelativeResourceName
-	Roles        []RepresentationRole
-	Labels       map[string]string
+	ServiceName ServiceName
+	Version     APIVersion
+	Roles       []RepresentationRole
+	Labels      map[string]string
 }
 
 // AttachRepresentation adds or updates an extension representation on
-// this platform resource. It validates cross-entity invariants:
-// collection must match the aggregate, and managed+inventory must not
-// be combined. Value-object invariants (service name, version, etc.)
-// are assumed to be enforced at construction time by callers.
+// this platform resource. The representation inherits the aggregate's
+// canonical CollectionID and RelativeName because the relative resource
+// name is identity-equivalent across services. It validates that
+// managed+inventory roles are not combined; other value-object
+// invariants are assumed enforced at construction time by callers.
 func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, now time.Time) error {
-	if in.CollectionID != r.collectionID {
-		return fmt.Errorf("collection_id %q does not match resource collection %q: %w",
-			in.CollectionID, r.collectionID, ErrInvalidArgument)
-	}
 	if err := validateRepresentationRoles(in.Roles); err != nil {
 		return err
 	}
@@ -385,8 +385,8 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 		PlatformUID:  r.uid,
 		ServiceName:  in.ServiceName,
 		Version:      in.Version,
-		CollectionID: in.CollectionID,
-		RelativeName: in.RelativeName,
+		CollectionID: r.collectionID,
+		RelativeName: r.relativeName,
 		Roles:        in.Roles,
 		Labels:       in.Labels,
 		CreatedAt:    now,
@@ -394,8 +394,7 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 	}
 
 	for i, existing := range r.representations {
-		if existing.ServiceName == in.ServiceName &&
-			existing.RelativeName == in.RelativeName {
+		if existing.ServiceName == in.ServiceName {
 			rep.CreatedAt = existing.CreatedAt
 			rep.DeletedAt = nil
 			r.representations[i] = rep

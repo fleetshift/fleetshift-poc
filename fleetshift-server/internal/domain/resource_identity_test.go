@@ -242,12 +242,10 @@ func TestPlatformResource_AttachRepresentation(t *testing.T) {
 
 	later := now.Add(time.Hour)
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1alpha1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-		Labels:       map[string]string{"runtime": "containerd"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1alpha1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		Labels:      map[string]string{"runtime": "containerd"},
 	}, later)
 	if err != nil {
 		t.Fatalf("AttachRepresentation: %v", err)
@@ -269,6 +267,12 @@ func TestPlatformResource_AttachRepresentation(t *testing.T) {
 	if reps[0].PlatformUID != "uid-1" {
 		t.Errorf("PlatformUID = %q, want uid-1", reps[0].PlatformUID)
 	}
+	if reps[0].CollectionID != "clusters" {
+		t.Errorf("CollectionID = %q, want clusters (inherited from aggregate)", reps[0].CollectionID)
+	}
+	if reps[0].RelativeName != "clusters/prod" {
+		t.Errorf("RelativeName = %q, want clusters/prod (inherited from aggregate)", reps[0].RelativeName)
+	}
 }
 
 func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
@@ -276,12 +280,10 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1alpha1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-		Labels:       map[string]string{"v": "1"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1alpha1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		Labels:      map[string]string{"v": "1"},
 	}, now)
 	if err != nil {
 		t.Fatalf("first attach: %v", err)
@@ -289,12 +291,10 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 
 	later := now.Add(time.Hour)
 	err = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1beta1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged, RepresentationRoleTarget},
-		Labels:       map[string]string{"v": "2"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1beta1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged, RepresentationRoleTarget},
+		Labels:      map[string]string{"v": "2"},
 	}, later)
 	if err != nil {
 		t.Fatalf("second attach: %v", err)
@@ -312,32 +312,14 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 	}
 }
 
-func TestPlatformResource_AttachRepresentation_RejectsCollectionMismatch(t *testing.T) {
-	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
-
-	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "nodes",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-	}, now)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("mismatched collection: got %v, want ErrInvalidArgument", err)
-	}
-}
-
 func TestPlatformResource_AttachRepresentation_RejectsInvalidRoles(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged, RepresentationRoleInventory},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged, RepresentationRoleInventory},
 	}, now)
 	if !errors.Is(err, ErrInvalidArgument) {
 		t.Errorf("managed+inventory: got %v, want ErrInvalidArgument", err)
@@ -349,11 +331,9 @@ func TestPlatformResource_TombstoneRepresentation(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
 
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
 	}, now)
 	if err != nil {
 		t.Fatalf("attach: %v", err)
@@ -513,20 +493,16 @@ func TestPlatformResource_EffectiveLabels(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod", "team": "infra"}, now)
 
 	_ = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-		Labels:       map[string]string{"version": "1.29", "runtime": "containerd"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		Labels:      map[string]string{"version": "1.29", "runtime": "containerd"},
 	}, now)
 	_ = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "gcp.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleInventory},
-		Labels:       map[string]string{"project": "my-proj"},
+		ServiceName: "gcp.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleInventory},
+		Labels:      map[string]string{"project": "my-proj"},
 	}, now)
 
 	got := r.EffectiveLabels()
@@ -546,12 +522,10 @@ func TestPlatformResource_EffectiveLabels_PlatformOverrides(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"kind.fleetshift.io/version": "override"}, now)
 
 	_ = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-		Labels:       map[string]string{"version": "1.29"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		Labels:      map[string]string{"version": "1.29"},
 	}, now)
 
 	got := r.EffectiveLabels()
@@ -563,12 +537,10 @@ func TestPlatformResource_EffectiveLabels_ExcludesTombstoned(t *testing.T) {
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod"}, now)
 
 	_ = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName:  "kind.fleetshift.io",
-		Version:      "v1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Roles:        []RepresentationRole{RepresentationRoleManaged},
-		Labels:       map[string]string{"version": "1.29"},
+		ServiceName: "kind.fleetshift.io",
+		Version:     "v1",
+		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		Labels:      map[string]string{"version": "1.29"},
 	}, now)
 
 	_ = r.TombstoneRepresentation("kind.fleetshift.io", "clusters/prod", now.Add(time.Hour))

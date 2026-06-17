@@ -151,20 +151,16 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource("uid-r1", "clusters", "clusters/multi", nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1alpha1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/multi",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged},
-			Labels:       map[string]string{"runtime": "containerd"},
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1alpha1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			Labels:      map[string]string{"runtime": "containerd"},
 		}, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "gcp.fleetshift.io",
-			Version:      "v1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/multi",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleInventory},
-			Labels:       map[string]string{"project": "my-proj"},
+			ServiceName: "gcp.fleetshift.io",
+			Version:     "v1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleInventory},
+			Labels:      map[string]string{"project": "my-proj"},
 		}, now)
 
 		if err := repo.Create(ctx, r); err != nil {
@@ -186,12 +182,10 @@ func Run(t *testing.T, factory Factory) {
 
 		r := domain.NewPlatformResource("uid-pu1", "clusters", "clusters/update-rep", nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1alpha1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/update-rep",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged},
-			Labels:       map[string]string{"v": "1"},
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1alpha1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			Labels:      map[string]string{"v": "1"},
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -204,12 +198,10 @@ func Run(t *testing.T, factory Factory) {
 
 		later := now.Add(time.Hour)
 		_ = loaded.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1beta1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/update-rep",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged, domain.RepresentationRoleTarget},
-			Labels:       map[string]string{"v": "2"},
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1beta1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged, domain.RepresentationRoleTarget},
+			Labels:      map[string]string{"v": "2"},
 		}, later)
 		if err := repo.Update(ctx, loaded); err != nil {
 			t.Fatalf("Update: %v", err)
@@ -231,47 +223,15 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("RepresentationConflictingPlatformUID", func(t *testing.T) {
-		repo := factory(t)
-		ctx := context.Background()
-
-		r1 := domain.NewPlatformResource("uid-c1", "clusters", "clusters/c1", nil, now)
-		_ = r1.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/shared-name",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged},
-		}, now)
-		if err := repo.Create(ctx, r1); err != nil {
-			t.Fatalf("Create r1: %v", err)
-		}
-
-		r2 := domain.NewPlatformResource("uid-c2", "clusters", "clusters/c2", nil, now)
-		_ = r2.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/shared-name",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged},
-		}, now)
-		err := repo.Create(ctx, r2)
-		if !errors.Is(err, domain.ErrAlreadyExists) {
-			t.Fatalf("got %v, want ErrAlreadyExists", err)
-		}
-	})
-
 	t.Run("TombstoneRepresentation", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
 		r := domain.NewPlatformResource("uid-ts1", "clusters", "clusters/tomb", nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName:  "kind.fleetshift.io",
-			Version:      "v1",
-			CollectionID: "clusters",
-			RelativeName: "clusters/tomb",
-			Roles:        []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
