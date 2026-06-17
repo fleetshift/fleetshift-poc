@@ -51,6 +51,29 @@ All of the commands and queries which can be invoked directly from outside the p
 
 This layer makes the end to end use cases of an application testable, without any coupling to the I/O concerns of external process communication (e.g. CLI input or requests over the network) that exist with presentation layers. It makes the use cases reusable from different protocols.
 
+### Method signatures
+
+Application service methods accept **values and command DTOs**, never domain
+aggregates or entities. The transport layer constructs validated value objects
+and command structs from raw protocol input; the application service receives
+these and internally loads, mutates, and persists the aggregate. This keeps the
+aggregate lifecycle encapsulated — callers never hold a mutable aggregate and
+"save it back."
+
+For queries, returning domain aggregates (or projections of them) is fine —
+they are read-only from the caller's perspective.
+
+### When to introduce a service
+
+An application service method earns its existence when it coordinates something
+the aggregate cannot do alone: spanning multiple aggregates, combining several
+composable aggregate operations into a higher-level use case, or managing a
+transactional boundary. If all the logic lives in one aggregate method and the
+only work the service does is open a transaction, load, call, and save — that
+is fine, but consider whether the caller (e.g. another service or workflow that
+already holds a transaction) can call the repository directly. Premature
+application services add indirection without value.
+
 ### Tests
 
 Tests here focus on the use cases of the application. They may not hit every branch in the domain model, but should hit nearly every branch possible from the external API. Use fakes for I/O (e.g. repositories).

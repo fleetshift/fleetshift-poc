@@ -6,7 +6,62 @@ Logic should be pushed down as much as possible, without creating undue coupling
 
 Logic about an object, like its state transitions, should be pushed to that struct. A struct's fields should almost never be manipulated directly, except by that struct's methods, if that struct lives in the domain model. Encode invariants in these methods to help reduce bugs and security issues in the code.
 
-Value objects, where possible, are preferred, and must be self-validating through constructors (even when they are just type definitions over existing value objects).
+## Aggregates, entities, and value objects
+
+There are three kinds of domain objects, each with different ownership and
+identity semantics.
+
+**Value objects** are the simplest and most preferred. A value is defined
+entirely by its data — two values with the same fields are equal. Values have
+no lifecycle and are freely copied. They enforce their own invariants through
+constructors, even when they are just type aliases over primitives (e.g.
+`NewServiceName`, `NewCollectionID`). Prefer values wherever possible.
+
+**Entities** have identity and a lifecycle but do not form a consistency
+boundary on their own. They are always owned by an aggregate and accessed
+through it. For example, `ResourceRepresentation` is an entity within the
+`PlatformResource` aggregate — it has identity (service + collection + name)
+and mutable state, but is never loaded or persisted independently.
+
+**Aggregates** are consistency boundaries. An aggregate owns its entities and
+values, and all mutations go through the aggregate root's methods. External
+code never reaches into an aggregate to mutate a child entity directly. The
+aggregate enforces invariants that span multiple fields or child entities (e.g.
+"a representation's collection must match the aggregate's collection"). The
+repository loads and saves entire aggregates, not individual child entities.
+
+### Where logic belongs
+
+- **Value object constructors** enforce the invariant of that single value
+  (format, non-emptiness, allowed characters). Callers must use the
+  constructor; the type system prevents constructing invalid values.
+- **Aggregate methods** enforce invariants that require looking across multiple
+  fields or entities within the aggregate. For example, role exclusivity rules,
+  cross-entity uniqueness within the aggregate, or collection matching.
+- **Repositories** enforce storage-level constraints: cross-aggregate
+  uniqueness (e.g. alias ownership across different platform resources),
+  referential integrity, and transactional consistency. Repository logic should
+  be storage-oriented — translating aggregate state into SQL, handling
+  conflicts, reconciling — not business logic.
+- **Application services** coordinate work that spans an aggregate and
+  something else, or orchestrate several composable aggregate methods into a
+  higher-level use case (e.g. claim-or-get with alias attachment). Services
+  should not duplicate logic that the aggregate already enforces.
+
+If logic can live in a value constructor, it should. If it requires aggregate
+context, it belongs on the aggregate. Only when it truly spans aggregates or
+requires external coordination does it belong in a service.
+
+### Self-enforcing invariants at each layer
+
+Each layer trusts that layers below it have already enforced their invariants.
+A value object, once constructed, is known to be valid. An aggregate method
+does not re-validate value objects passed to it — it only checks cross-field
+invariants that the values cannot enforce alone. An application service does
+not re-validate what the aggregate already checks — it only enforces cross-
+aggregate or coordination-level invariants. The transport layer constructs
+value objects and commands from raw input, and those constructors are the first
+line of validation.
 
 ## Snapshots and persistence
 
