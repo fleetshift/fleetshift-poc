@@ -414,10 +414,15 @@ func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, no
 // TombstoneRepresentation marks the representation from the given
 // service as deleted. Since the relative resource name is identity-
 // equivalent across services, the match is by ServiceName only.
-// Returns [ErrNotFound] if no active representation matches.
+// Already-tombstoned representations are a no-op (idempotent) so
+// that delete retries don't fail on re-entry. Returns [ErrNotFound]
+// if no representation from the service exists at all.
 func (r *PlatformResource) TombstoneRepresentation(service ServiceName, now time.Time) error {
 	for i, rep := range r.representations {
-		if rep.ServiceName == service && rep.DeletedAt == nil {
+		if rep.ServiceName == service {
+			if rep.DeletedAt != nil {
+				return nil // already tombstoned — idempotent
+			}
 			r.representations[i].DeletedAt = &now
 			r.representations[i].UpdatedAt = now
 			r.updatedAt = now

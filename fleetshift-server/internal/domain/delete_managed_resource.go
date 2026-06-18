@@ -93,13 +93,10 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		}
 
 		// Identity integration: tombstone the managed representation,
-		// atomic with the fulfillment state transition. Skipped for
-		// type defs with no API identity metadata.
-		if in.TypeDef.APIServiceName != "" {
-			if err := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name, now); err != nil {
-				probe.Error(err)
-				return managedResourceMutationResult{}, fmt.Errorf("tombstone representation: %w", err)
-			}
+		// atomic with the fulfillment state transition.
+		if err := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name, now); err != nil {
+			probe.Error(err)
+			return managedResourceMutationResult{}, fmt.Errorf("tombstone representation: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {

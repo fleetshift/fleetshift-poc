@@ -78,23 +78,20 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 
 		// Identity integration: claim/create the platform resource and
 		// attach a managed representation, atomic with the managed
-		// resource persistence. Skipped for legacy type defs that
-		// predate API identity metadata.
-		if in.TypeDef.APIServiceName != "" {
-			pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), PlatformResourceUID(uuid.New().String()), in.TypeDef.CollectionID, string(in.Name), nil, now)
-			if err != nil {
-				return ManagedResourceView{}, fmt.Errorf("claim identity: %w", err)
-			}
-			if err := pr.AttachRepresentation(AttachRepresentationInput{
-				ServiceName: in.TypeDef.APIServiceName,
-				Version:     in.TypeDef.APIVersion,
-				Roles:       []RepresentationRole{RepresentationRoleManaged},
-			}, now); err != nil {
-				return ManagedResourceView{}, fmt.Errorf("attach representation: %w", err)
-			}
-			if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
-				return ManagedResourceView{}, fmt.Errorf("update platform resource: %w", err)
-			}
+		// resource persistence.
+		pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), PlatformResourceUID(uuid.New().String()), in.TypeDef.CollectionID, string(in.Name), nil, now)
+		if err != nil {
+			return ManagedResourceView{}, fmt.Errorf("claim identity: %w", err)
+		}
+		if err := pr.AttachRepresentation(AttachRepresentationInput{
+			ServiceName: in.TypeDef.APIServiceName,
+			Version:     in.TypeDef.APIVersion,
+			Roles:       []RepresentationRole{RepresentationRoleManaged},
+		}, now); err != nil {
+			return ManagedResourceView{}, fmt.Errorf("attach representation: %w", err)
+		}
+		if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
+			return ManagedResourceView{}, fmt.Errorf("update platform resource: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {

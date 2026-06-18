@@ -229,9 +229,12 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 	}
 
 	if _, err := typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
-		Signature:    domain.Signature{},
+		ResourceType:   "clusters",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		Signature:      domain.Signature{},
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 	}); err != nil {
 		t.Fatalf("CreateType: %v", err)
 	}

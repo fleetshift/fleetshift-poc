@@ -229,7 +229,10 @@ func setupWithDelivery(
 		Relation: domain.RegisteredSelfTarget{
 			AddonTarget: "kind-local",
 		},
-		Signature: domain.Signature{},
+		Signature:      domain.Signature{},
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 	}); err != nil {
 		t.Fatalf("register cluster type: %v", err)
 	}

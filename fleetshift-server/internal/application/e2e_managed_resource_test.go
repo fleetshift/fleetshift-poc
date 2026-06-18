@@ -119,9 +119,12 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
-		Signature:    addonSig,
+		ResourceType:   "clusters",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		Signature:      addonSig,
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 	})
 	if err != nil {
 		t.Fatalf("RegisterType: %v", err)

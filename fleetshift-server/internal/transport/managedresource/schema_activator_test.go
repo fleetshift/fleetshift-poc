@@ -579,9 +579,12 @@ message WidgetSpec {
 
 	// Register the widget type in the store so Create can look it up.
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "widgets",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
-		Signature:    domain.Signature{},
+		ResourceType:   "widgets",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Signature:      domain.Signature{},
+		APIServiceName: "fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "widgets",
 	}); err != nil {
 		t.Fatalf("register widget type: %v", err)
 	}
@@ -1163,65 +1166,6 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 	listField := platDescs.ListResponse.Fields().ByNumber(1)
 	if listResp.Get(listField).List().Len() != 1 {
 		t.Errorf("ListPlatformWidgets after delete = %d resources, want 1 (resource survives representation tombstone)",
-			listResp.Get(listField).List().Len())
-	}
-}
-
-// TestExtensionCreate_NoIdentityMetadata_InvisibleInPlatformAPI verifies
-// that when a type definition lacks API identity metadata (the legacy
-// path), creating a managed resource through the extension gRPC service
-// does NOT produce a platform resource. The platform service is still
-// routable (the schema has CollectionID), but the resource is absent.
-func TestExtensionCreate_NoIdentityMetadata_InvisibleInPlatformAPI(t *testing.T) {
-	env := newActivatorWithResourcesAndPlatform(t)
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
-	defer cancel()
-
-	schema := platformTestWidgetSchema()
-
-	// Register type WITHOUT identity metadata — legacy path.
-	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "widgets",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
-		Signature:    domain.Signature{},
-	}); err != nil {
-		t.Fatalf("register widget type: %v", err)
-	}
-
-	if _, err := env.activator.Activate(ctx, schema); err != nil {
-		t.Fatalf("Activate: %v", err)
-	}
-
-	createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
-
-	platDescs := platformWidgetDescs(t)
-
-	// Platform Get: should return NotFound because no identity was claimed.
-	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
-	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
-		protoreflect.ValueOfString("widgets/widget-1"))
-	getResp := dynamicpb.NewMessage(platDescs.Resource)
-	err := env.conn.Invoke(ctx,
-		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
-	if err == nil {
-		t.Fatal("expected NotFound from platform Get when type lacks identity metadata, got nil")
-	}
-	st, ok := status.FromError(err)
-	if !ok || st.Code() != codes.NotFound {
-		t.Fatalf("platform Get = code %v, want NotFound", st.Code())
-	}
-
-	// Platform List: should return empty.
-	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
-	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
-	if err := env.conn.Invoke(ctx,
-		"/fleetshift.v1.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
-		t.Fatalf("ListPlatformWidgets: %v", err)
-	}
-
-	listField := platDescs.ListResponse.Fields().ByNumber(1)
-	if listResp.Get(listField).List().Len() != 0 {
-		t.Errorf("ListPlatformWidgets = %d resources, want 0 (no identity claimed)",
 			listResp.Get(listField).List().Len())
 	}
 }

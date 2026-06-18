@@ -24,9 +24,10 @@ func setupManagedResources(t *testing.T) mrTestHarness {
 }
 
 // registerTestAddon seeds a delivery target and managed resource type
-// definition for the given resource type. This mirrors what
-// [AddonManager.Connect] does in production (target + type def) without
-// needing proto compilation or schema activation.
+// definition (with API identity metadata) for the given resource type.
+// This mirrors what [AddonManager.Connect] does in production
+// (target + type def) without needing proto compilation or schema
+// activation.
 func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.ResourceType) domain.TargetID {
 	t.Helper()
 	ctx := context.Background()
@@ -49,8 +50,11 @@ func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.Res
 	}
 
 	if err := tx.ManagedResources().CreateType(ctx, domain.ManagedResourceTypeDef{
-		ResourceType: resourceType,
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: targetID},
+		ResourceType:   resourceType,
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: targetID},
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   domain.CollectionID(resourceType),
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "test-addon-svc", Issuer: "https://test-addon.internal"},
 			ContentHash:    []byte("test-hash"),
@@ -650,59 +654,12 @@ func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
 	}
 }
 
-// registerTestAddonWithIdentity is like registerTestAddon but also sets
-// the API identity metadata fields on the type def so identity integration
-// kicks in during create/delete.
-func registerTestAddonWithIdentity(t *testing.T, store domain.Store, resourceType domain.ResourceType) domain.TargetID {
-	t.Helper()
-	ctx := context.Background()
-
-	targetID := domain.TargetID("test-addon-" + string(resourceType))
-
-	tx, err := store.Begin(ctx)
-	if err != nil {
-		t.Fatalf("registerTestAddonWithIdentity: begin tx: %v", err)
-	}
-	defer tx.Rollback()
-
-	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-		ID:                    targetID,
-		Name:                  "Test Addon (" + string(resourceType) + ")",
-		Type:                  "test",
-		AcceptedResourceTypes: []domain.ResourceType{resourceType},
-	})); err != nil {
-		t.Fatalf("registerTestAddonWithIdentity: create target: %v", err)
-	}
-
-	if err := tx.ManagedResources().CreateType(ctx, domain.ManagedResourceTypeDef{
-		ResourceType:   resourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: targetID},
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "test-addon-svc", Issuer: "https://test-addon.internal"},
-			ContentHash:    []byte("test-hash"),
-			SignatureBytes: []byte("test-sig"),
-		},
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatalf("registerTestAddonWithIdentity: create type def: %v", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("registerTestAddonWithIdentity: commit: %v", err)
-	}
-	return targetID
-}
-
 func TestManagedResourceService_Create_ClaimsIdentityAndAttachesRepresentation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddonWithIdentity(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "clusters")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: "clusters",
@@ -746,44 +703,12 @@ func TestManagedResourceService_Create_ClaimsIdentityAndAttachesRepresentation(t
 	}
 }
 
-func TestManagedResourceService_Create_SkipsIdentityWhenNoAPIMetadata(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
-	defer cancel()
-	h := setupManagedResources(t)
-
-	// Use the legacy registerTestAddon (no API identity metadata).
-	registerTestAddon(t, h.store, "clusters")
-
-	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "legacy-prod",
-		Spec:         json.RawMessage(`{"provider":"kind"}`),
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
-
-	// Platform resource should NOT exist.
-	tx, err := h.store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("begin read tx: %v", err)
-	}
-	defer tx.Rollback()
-
-	_, err = tx.ResourceIdentities().GetByName(ctx, "clusters/legacy-prod")
-	if !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("GetByName: got %v, want ErrNotFound (legacy path should skip identity)", err)
-	}
-}
-
 func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddonWithIdentity(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "clusters")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: "clusters",
@@ -827,33 +752,6 @@ func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 	if allReps[0].DeletedAt == nil {
 		t.Error("representation.DeletedAt is nil, want non-nil (tombstoned)")
 	}
-}
-
-func TestManagedResourceService_Delete_SkipsIdentityWhenNoAPIMetadata(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
-	defer cancel()
-	h := setupManagedResources(t)
-
-	registerTestAddon(t, h.store, "clusters")
-
-	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "legacy-del",
-		Spec:         json.RawMessage(`{"provider":"kind"}`),
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
-
-	// Delete should succeed even without identity metadata.
-	_, err = h.resourceSvc.Delete(ctx, "clusters", "legacy-del")
-	if err != nil {
-		t.Fatalf("Delete (legacy): %v", err)
-	}
-
-	awaitFulfillmentGone(ctx, t, h.store, view.Fulfillment.ID())
 }
 
 func awaitFulfillmentGone(ctx context.Context, t *testing.T, store domain.Store, id domain.FulfillmentID) {

@@ -125,9 +125,12 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 
 	typeSvc := &application.ManagedResourceTypeService{Store: store}
 	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
-		ResourceType: kindaddon.ClusterResourceType,
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
-		Signature:    domain.Signature{},
+		ResourceType:   kindaddon.ClusterResourceType,
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+		Signature:      domain.Signature{},
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 	}); err != nil {
 		t.Fatalf("register cluster type: %v", err)
 	}
