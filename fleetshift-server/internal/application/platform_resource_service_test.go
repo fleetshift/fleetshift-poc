@@ -2,6 +2,7 @@ package application_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -37,6 +38,30 @@ func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 	}
 	if len(pr.Representations()) != 0 {
 		t.Errorf("Representations len = %d, want 0", len(pr.Representations()))
+	}
+}
+
+func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
+	store := newStore(t)
+	svc := &application.PlatformResourceService{Store: store}
+	ctx := context.Background()
+
+	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
+		CollectionID: "clusters",
+		ID:           "prod-us-east-1",
+		Labels:       map[string]string{"env": "prod"},
+	})
+	if err != nil {
+		t.Fatalf("first Create: %v", err)
+	}
+
+	_, err = svc.Create(ctx, application.CreatePlatformResourceInput{
+		CollectionID: "clusters",
+		ID:           "prod-us-east-1",
+		Labels:       map[string]string{"env": "staging"},
+	})
+	if !errors.Is(err, domain.ErrAlreadyExists) {
+		t.Fatalf("second Create err = %v, want %v", err, domain.ErrAlreadyExists)
 	}
 }
 

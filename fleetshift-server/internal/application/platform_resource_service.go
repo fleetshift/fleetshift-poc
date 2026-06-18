@@ -25,16 +25,22 @@ type CreatePlatformResourceInput struct {
 	Labels       map[string]string
 }
 
-// Create opens a read-write transaction, calls ClaimOrGetIdentity to
-// idempotently create or retrieve the platform resource identity, and
-// commits. If the resource already existed, labels are updated to the
-// provided values.
+// Create opens a read-write transaction, creates a new platform
+// resource identity, and commits. The repository's unique constraint
+// on relative_name surfaces [domain.ErrAlreadyExists] if the name is
+// already taken (per AIP-133: Create must not silently update an
+// existing resource).
 func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformResourceInput) (*domain.PlatformResource, error) {
 	if in.CollectionID == "" {
 		return nil, fmt.Errorf("%w: collection ID is required", domain.ErrInvalidArgument)
 	}
 	if in.ID == "" {
 		return nil, fmt.Errorf("%w: resource ID is required", domain.ErrInvalidArgument)
+	}
+
+	name, err := domain.NewRelativeResourceName(in.CollectionID, in.ID)
+	if err != nil {
+		return nil, err
 	}
 
 	tx, err := s.Store.Begin(ctx)
@@ -45,9 +51,10 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 
 	now := time.Now().UTC()
 	uid := domain.PlatformResourceUID(uuid.New().String())
-	pr, err := domain.ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), uid, in.CollectionID, in.ID, in.Labels, now)
-	if err != nil {
-		return nil, fmt.Errorf("claim identity: %w", err)
+	pr := domain.NewPlatformResource(uid, in.CollectionID, name, in.Labels, now)
+
+	if err := tx.ResourceIdentities().Create(ctx, pr); err != nil {
+		return nil, fmt.Errorf("create: %w", err)
 	}
 
 	if err := tx.Commit(); err != nil {
