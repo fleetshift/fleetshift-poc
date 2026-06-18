@@ -228,30 +228,6 @@ func TestDeleteObserver_MutateDeploymentProbe_ErrorLogsAtErrorLevel(t *testing.T
 	}
 }
 
-func TestDeleteObserver_MutateManagedResourceStarted_TombstoneError(t *testing.T) {
-	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
-	obs := observability.NewDeleteObserver(slog.New(handler))
-
-	_, probe := obs.MutateManagedResourceStarted(context.Background(), "clusters", "my-cluster")
-	probe.TombstoneError(errors.New("platform resource not found"))
-	probe.End()
-
-	records := handler.Records()
-	var tombRecord *slog.Record
-	for i := range records {
-		if records[i].Message == "tombstone representation failed" {
-			tombRecord = &records[i]
-			break
-		}
-	}
-	if tombRecord == nil {
-		t.Fatal("expected 'tombstone representation failed' log record")
-	}
-	if tombRecord.Level != slog.LevelWarn {
-		t.Errorf("level = %v, want %v", tombRecord.Level, slog.LevelWarn)
-	}
-}
-
 func TestDeleteObserver_MutateManagedResourceProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
 	obs := observability.NewDeleteObserver(slog.New(handler))

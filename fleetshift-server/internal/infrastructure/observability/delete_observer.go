@@ -236,12 +236,6 @@ type mutateManagedResourceProbe struct {
 	err       error
 }
 
-func (p *mutateManagedResourceProbe) TombstoneError(err error) {
-	p.logger.LogAttrs(p.ctx, slog.LevelWarn, "tombstone representation failed",
-		slog.String("error", err.Error()),
-	)
-}
-
 func (p *mutateManagedResourceProbe) Error(err error) {
 	p.err = err
 }

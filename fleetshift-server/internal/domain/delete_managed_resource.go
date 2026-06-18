@@ -31,6 +31,14 @@ type DeleteManagedResourceWorkflowSpec struct {
 	Orchestration OrchestrationWorkflow
 	Cleanup       DeleteManagedResourceCleanupWorkflow
 	Observer      DeleteObserver
+	Now           func() time.Time
+}
+
+func (s *DeleteManagedResourceWorkflowSpec) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 func (s *DeleteManagedResourceWorkflowSpec) deleteObserver() DeleteObserver {
@@ -49,6 +57,8 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (managedResourceMutationResult, error) {
 		ctx, probe := s.deleteObserver().MutateManagedResourceStarted(ctx, in.ResourceType, in.Name)
 		defer probe.End()
+
+		now := s.now()
 
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
@@ -84,12 +94,11 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 
 		// Identity integration: tombstone the managed representation,
 		// atomic with the fulfillment state transition. Skipped for
-		// legacy type defs that predate API identity metadata. Errors
-		// do not fail the delete — the fulfillment state transition is
-		// the primary concern — but are observed for diagnostics.
+		// type defs with no API identity metadata.
 		if in.TypeDef.APIServiceName != "" {
-			if tombErr := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name); tombErr != nil {
-				probe.TombstoneError(tombErr)
+			if err := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name, now); err != nil {
+				probe.Error(err)
+				return managedResourceMutationResult{}, fmt.Errorf("tombstone representation: %w", err)
 			}
 		}
 
@@ -183,7 +192,7 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 // tombstoneRepresentation looks up the platform resource by name and
 // tombstones the managed representation. Called within MutateToDeleting's
 // transaction so it is atomic with the fulfillment state transition.
-func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName) error {
+func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName, now time.Time) error {
 	relName, err := NewRelativeResourceName(typeDef.CollectionID, string(name))
 	if err != nil {
 		return fmt.Errorf("build relative name: %w", err)
@@ -194,7 +203,7 @@ func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResource
 		return fmt.Errorf("get platform resource %s: %w", relName, err)
 	}
 
-	if err := pr.TombstoneRepresentation(typeDef.APIServiceName, time.Now()); err != nil {
+	if err := pr.TombstoneRepresentation(typeDef.APIServiceName, now); err != nil {
 		return fmt.Errorf("tombstone representation: %w", err)
 	}
 

@@ -105,11 +105,6 @@ type MutateDeploymentProbe interface {
 // mutate-to-deleting activity. Implementations should embed
 // [NoOpMutateManagedResourceProbe] for forward compatibility.
 type MutateManagedResourceProbe interface {
-	// TombstoneError is called when tombstoning the managed
-	// representation fails. This error is tolerated (the fulfillment
-	// state transition is the primary concern), but should be observed.
-	TombstoneError(err error)
-
 	// Error is called when a fatal error occurs.
 	Error(err error)
 
@@ -175,6 +170,5 @@ func (NoOpMutateDeploymentProbe) End()        {}
 // discards all calls.
 type NoOpMutateManagedResourceProbe struct{}
 
-func (NoOpMutateManagedResourceProbe) TombstoneError(error) {}
-func (NoOpMutateManagedResourceProbe) Error(error)          {}
-func (NoOpMutateManagedResourceProbe) End()                 {}
+func (NoOpMutateManagedResourceProbe) Error(error) {}
+func (NoOpMutateManagedResourceProbe) End()        {}
