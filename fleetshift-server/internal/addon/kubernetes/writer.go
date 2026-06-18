@@ -169,7 +169,7 @@ func (w *Writer) flush(
 
 // sendResync sends a Resync call for the given GVR.
 func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
-	entry := w.schema[rs.GVR]
+	entry := w.schema[rs.GVR] // zero-value SchemaEntry if not in schema — base extraction only
 
 	var items []domain.InventoryItem
 	for _, r := range rs.Resources {
@@ -177,12 +177,18 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		items = append(items, item)
 	}
 
-	// Compute inventoryType from the schema entry's GVR and Kind.
+	// Derive the Kind for the inventory type. Prefer the schema entry's Kind,
+	// but fall back to the first resource's Kind for resources without a schema entry.
+	kind := entry.Kind
+	if kind == "" && len(rs.Resources) > 0 {
+		kind = rs.Resources[0].GetKind()
+	}
+
 	var invType domain.InventoryType
 	if rs.GVR.Group != "" {
-		invType = domain.InventoryType(rs.GVR.Group + "/" + rs.GVR.Version + "/" + entry.Kind)
+		invType = domain.InventoryType(rs.GVR.Group + "/" + rs.GVR.Version + "/" + kind)
 	} else {
-		invType = domain.InventoryType(rs.GVR.Version + "/" + entry.Kind)
+		invType = domain.InventoryType(rs.GVR.Version + "/" + kind)
 	}
 
 	if w.writer == nil {

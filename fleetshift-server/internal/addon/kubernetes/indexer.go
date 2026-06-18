@@ -13,24 +13,24 @@ import (
 
 // IndexConfig holds configuration for the indexer delegate.
 type IndexConfig struct {
-	Schema        IndexSchema
-	DenyList      []Resource
-	AllowList     []Resource
-	BatchInterval time.Duration
+	Schema          IndexSchema
+	DenyList        []Resource
+	AllowList       []Resource
+	NamespaceFilter *NamespaceFilterConfig
+	BatchInterval   time.Duration
 }
 
 // indexerDelegate holds indexing-specific state for an Agent.
 // It manages the informer-to-writer pipeline that watches Kubernetes
 // resources and writes inventory items via an InventoryWriter.
 type indexerDelegate struct {
-	targetID      string
-	dynClient     dynamic.Interface
-	discClient    discovery.DiscoveryInterface
-	writer        domain.InventoryWriter
-	schema        IndexSchema
-	batchInterval time.Duration
-	logger        *slog.Logger
-	done          chan struct{}
+	targetID   string
+	dynClient  dynamic.Interface
+	discClient discovery.DiscoveryInterface
+	writer     domain.InventoryWriter
+	cfg        IndexConfig
+	logger     *slog.Logger
+	done       chan struct{}
 }
 
 // newIndexerDelegate creates an indexerDelegate. A zero batchInterval
@@ -43,36 +43,41 @@ func newIndexerDelegate(
 	cfg IndexConfig,
 	logger *slog.Logger,
 ) *indexerDelegate {
-	batchInterval := cfg.BatchInterval
-	if batchInterval == 0 {
-		batchInterval = 5 * time.Second
+	if cfg.BatchInterval == 0 {
+		cfg.BatchInterval = 5 * time.Second
 	}
 	return &indexerDelegate{
-		targetID:      targetID,
-		dynClient:     dynClient,
-		discClient:    discClient,
-		writer:        writer,
-		schema:        cfg.Schema,
-		batchInterval: batchInterval,
-		logger:        logger,
-		done:          make(chan struct{}),
+		targetID:   targetID,
+		dynClient:  dynClient,
+		discClient: discClient,
+		writer:     writer,
+		cfg:        cfg,
+		logger:     logger,
+		done:       make(chan struct{}),
 	}
 }
 
 // start runs the informer manager and writer until ctx is cancelled.
+// It discovers all supported GVRs, filters them through deny/allow lists,
+// and uses RunContinuous to watch for CRD changes and re-reconcile.
 func (ic *indexerDelegate) start(ctx context.Context) {
 	defer close(ic.done)
 
-	schemaMap := ic.schema.Entries
-	desiredGVRs := ic.schema.GVRs()
+	schemaMap := ic.cfg.Schema.Entries
 
-	w := NewWriter(ic.targetID, ic.writer, schemaMap, ic.batchInterval)
+	var nsFilter *NamespaceFilter
+	if ic.cfg.NamespaceFilter != nil {
+		nsFilter = NewNamespaceFilter(*ic.cfg.NamespaceFilter)
+	}
+
+	w := NewWriter(ic.targetID, ic.writer, schemaMap, ic.cfg.BatchInterval)
 
 	mgr := NewInformerManager(
 		ic.dynClient,
 		ic.discClient,
 		w.EventCh(),
 		w.ResyncCh(),
+		nsFilter,
 		ic.logger,
 	)
 
@@ -85,11 +90,12 @@ func (ic *indexerDelegate) start(ctx context.Context) {
 		w.Run(writerCtx)
 	}()
 
-	mgr.Reconcile(ctx, desiredGVRs)
-	defer mgr.StopAll()
+	// RunContinuous blocks until ctx is cancelled, performing initial
+	// reconciliation and re-reconciling when CRDs change.
+	mgr.RunContinuous(ctx, ic.cfg.DenyList, ic.cfg.AllowList)
 
-	// Block until context is cancelled.
-	<-ctx.Done()
+	// Context is done; clean up informers and writer.
+	mgr.StopAll()
 	writerCancel()
 	<-writerDone
 }

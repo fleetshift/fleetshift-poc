@@ -224,6 +224,53 @@ func TestDedup(t *testing.T) {
 	}
 }
 
+func TestResync_MissingSchemaEntry(t *testing.T) {
+	mock := &mockInventoryWriter{}
+	// Schema has no entry for configmaps — tests base-only extraction.
+	w := NewWriter("target-1", mock, testSchema, 10*time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	cmGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
+	w.ResyncCh() <- ResyncEvent{
+		GVR: cmGVR,
+		Resources: []*unstructured.Unstructured{
+			{
+				Object: map[string]any{
+					"apiVersion": "v1",
+					"kind":       "ConfigMap",
+					"metadata": map[string]any{
+						"uid":               "uid-cm1",
+						"name":              "my-config",
+						"namespace":         "default",
+						"resourceVersion":   "400",
+						"creationTimestamp": "2025-06-01T12:00:00Z",
+					},
+				},
+			},
+		},
+	}
+
+	time.Sleep(100 * time.Millisecond)
+
+	resyncs := mock.getResyncs()
+	if len(resyncs) == 0 {
+		t.Fatal("expected at least one resync, got none")
+	}
+
+	rs := resyncs[0]
+	// Kind should be derived from the resource object, not the schema.
+	if rs.inventoryType != "v1/ConfigMap" {
+		t.Errorf("expected inventoryType=v1/ConfigMap, got %s", rs.inventoryType)
+	}
+	if len(rs.items) != 1 {
+		t.Fatalf("expected 1 item in resync, got %d", len(rs.items))
+	}
+}
+
 func TestLateDeleteProtection(t *testing.T) {
 	mock := &mockInventoryWriter{}
 	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)

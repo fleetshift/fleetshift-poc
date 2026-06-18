@@ -66,6 +66,35 @@ func IsResourceMatchingList(resourceList []Resource, group, kind string) (string
 	return "", "", false
 }
 
+// DefaultDenyList contains resource types that should never be watched by default.
+// These are high-volume or low-value resources that would waste bandwidth and storage.
+var DefaultDenyList = []Resource{
+	{ApiGroups: []string{""}, Resources: []string{"events"}},
+	{ApiGroups: []string{"events.k8s.io"}, Resources: []string{"events"}},
+	{ApiGroups: []string{"coordination.k8s.io"}, Resources: []string{"leases"}},
+	{ApiGroups: []string{""}, Resources: []string{"endpoints"}},
+	{ApiGroups: []string{"discovery.k8s.io"}, Resources: []string{"endpointslices"}},
+	{ApiGroups: []string{""}, Resources: []string{"componentstatuses"}},
+	{ApiGroups: []string{"oauth.openshift.io"}, Resources: []string{"oauthaccesstokens"}},
+	{ApiGroups: []string{"oauth.openshift.io"}, Resources: []string{"oauthauthorizetokens"}},
+	{ApiGroups: []string{"project.openshift.io"}, Resources: []string{"projects"}},
+	{ApiGroups: []string{"packages.operators.coreos.com"}, Resources: []string{"packagemanifests"}},
+}
+
+// FilterSupportedResources filters discovered GVRs through the combined deny list
+// (default + user-specified) and the allow list. It returns only GVRs that pass
+// the IsResourceAllowed check.
+func FilterSupportedResources(supported map[schema.GroupVersionResource]struct{}, denyList, allowList []Resource) []schema.GroupVersionResource {
+	combinedDeny := append(DefaultDenyList, denyList...)
+	var result []schema.GroupVersionResource
+	for gvr := range supported {
+		if IsResourceAllowed(gvr.Group, gvr.Resource, allowList, combinedDeny) {
+			result = append(result, gvr)
+		}
+	}
+	return result
+}
+
 // SupportedResources returns all GVRs on the cluster that support the WATCH verb.
 // It uses ServerPreferredResources to get the preferred API version for each resource.
 func SupportedResources(client discovery.DiscoveryInterface) (map[schema.GroupVersionResource]struct{}, error) {

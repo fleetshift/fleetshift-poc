@@ -207,7 +207,7 @@ func TestInformerManager_Reconcile_StartNew(t *testing.T) {
 	})
 
 	dynClient := newFakeDynamicClient(podsGVR, svcsGVR)
-	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, logger)
+	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, nil, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -242,7 +242,7 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 		},
 	})
 
-	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, logger)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, logger)
 
 	// Pre-populate stoppers to simulate previously-running informers.
 	stopped := false
@@ -285,7 +285,7 @@ func TestInformerManager_Reconcile_UnsupportedFilteredOut(t *testing.T) {
 	})
 
 	dynClient := newFakeDynamicClient(podsGVR)
-	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, logger)
+	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, nil, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -307,7 +307,7 @@ func TestInformerManager_StopAll(t *testing.T) {
 	logger := slog.Default()
 
 	disc := newFakeDiscovery(nil)
-	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, logger)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, logger)
 
 	called := 0
 	mgr.stoppers[schema.GroupVersionResource{Resource: "a"}] = func() { called++ }
@@ -320,5 +320,88 @@ func TestInformerManager_StopAll(t *testing.T) {
 	}
 	if len(mgr.stoppers) != 0 {
 		t.Errorf("expected empty stoppers map, got %d entries", len(mgr.stoppers))
+	}
+}
+
+// --- FilterSupportedResources tests ---
+
+func TestFilterSupportedResources_DefaultDenyApplied(t *testing.T) {
+	supported := map[schema.GroupVersionResource]struct{}{
+		{Group: "", Version: "v1", Resource: "pods"}:                         {},
+		{Group: "", Version: "v1", Resource: "events"}:                       {},
+		{Group: "apps", Version: "v1", Resource: "deployments"}:              {},
+		{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}:    {},
+		{Group: "events.k8s.io", Version: "v1", Resource: "events"}:          {},
+		{Group: "discovery.k8s.io", Version: "v1", Resource: "endpointslices"}: {},
+	}
+
+	result := FilterSupportedResources(supported, nil, nil)
+
+	// Should only contain pods and deployments. Events, leases, endpointslices
+	// are in DefaultDenyList.
+	resultMap := make(map[schema.GroupVersionResource]struct{})
+	for _, gvr := range result {
+		resultMap[gvr] = struct{}{}
+	}
+
+	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}]; !ok {
+		t.Error("expected pods to pass filter")
+	}
+	if _, ok := resultMap[schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"}]; !ok {
+		t.Error("expected deployments to pass filter")
+	}
+	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "events"}]; ok {
+		t.Error("expected core events to be denied")
+	}
+	if _, ok := resultMap[schema.GroupVersionResource{Group: "coordination.k8s.io", Version: "v1", Resource: "leases"}]; ok {
+		t.Error("expected leases to be denied")
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 results, got %d", len(result))
+	}
+}
+
+func TestFilterSupportedResources_UserDenyMergedWithDefault(t *testing.T) {
+	supported := map[schema.GroupVersionResource]struct{}{
+		{Group: "", Version: "v1", Resource: "pods"}:               {},
+		{Group: "", Version: "v1", Resource: "secrets"}:            {},
+		{Group: "apps", Version: "v1", Resource: "deployments"}:    {},
+	}
+
+	// User denies secrets in addition to default deny list.
+	userDeny := []Resource{{ApiGroups: []string{""}, Resources: []string{"secrets"}}}
+
+	result := FilterSupportedResources(supported, userDeny, nil)
+
+	resultMap := make(map[schema.GroupVersionResource]struct{})
+	for _, gvr := range result {
+		resultMap[gvr] = struct{}{}
+	}
+
+	if _, ok := resultMap[schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}]; ok {
+		t.Error("expected secrets to be denied by user deny list")
+	}
+	if len(result) != 2 {
+		t.Errorf("expected 2 results (pods, deployments), got %d", len(result))
+	}
+}
+
+func TestFilterSupportedResources_AllowListRestricts(t *testing.T) {
+	supported := map[schema.GroupVersionResource]struct{}{
+		{Group: "", Version: "v1", Resource: "pods"}:               {},
+		{Group: "", Version: "v1", Resource: "configmaps"}:         {},
+		{Group: "apps", Version: "v1", Resource: "deployments"}:    {},
+	}
+
+	// Only allow pods.
+	allow := []Resource{{ApiGroups: []string{""}, Resources: []string{"pods"}}}
+
+	result := FilterSupportedResources(supported, nil, allow)
+
+	if len(result) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(result))
+	}
+	if result[0].Resource != "pods" {
+		t.Errorf("expected pods, got %s", result[0].Resource)
 	}
 }

@@ -24,17 +24,20 @@ type GenericInformer struct {
 	retries       int64
 	eventCh       chan<- ResourceEvent
 	resyncCh      chan<- ResyncEvent
+	nsFilter      *NamespaceFilter
 	listRV        string // saved resourceVersion from last LIST for watch continuity
 	logger        *slog.Logger
 }
 
 // NewInformer creates a GenericInformer for the given GVR. Events are sent to
-// eventCh and resync snapshots to resyncCh.
+// eventCh and resync snapshots to resyncCh. If nsFilter is non-nil, only
+// resources in allowed namespaces are forwarded.
 func NewInformer(
 	client dynamic.Interface,
 	gvr schema.GroupVersionResource,
 	eventCh chan<- ResourceEvent,
 	resyncCh chan<- ResyncEvent,
+	nsFilter *NamespaceFilter,
 	logger *slog.Logger,
 ) *GenericInformer {
 	return &GenericInformer{
@@ -43,6 +46,7 @@ func NewInformer(
 		resourceIndex: make(map[string]string),
 		eventCh:       eventCh,
 		resyncCh:      resyncCh,
+		nsFilter:      nsFilter,
 		logger:        logger.With("gvr", gvr.String()),
 	}
 }
@@ -115,6 +119,12 @@ func (i *GenericInformer) listAndResync(ctx context.Context) error {
 
 		for idx := range resources.Items {
 			item := &resources.Items[idx]
+
+			// Namespace filtering: skip resources in disallowed namespaces.
+			if i.nsFilter != nil && !i.nsFilter.IsNamespaceAllowed(item.GetNamespace()) {
+				continue
+			}
+
 			uid := string(item.GetUID())
 			rv := item.GetResourceVersion()
 
@@ -205,6 +215,9 @@ func (i *GenericInformer) watch(ctx context.Context) {
 					i.logger.Warn("cannot convert ADDED event object to Unstructured")
 					continue
 				}
+				if i.nsFilter != nil && !i.nsFilter.IsNamespaceAllowed(obj.GetNamespace()) {
+					continue
+				}
 				i.eventCh <- ResourceEvent{
 					Op:       EventAdd,
 					Resource: obj,
@@ -218,6 +231,9 @@ func (i *GenericInformer) watch(ctx context.Context) {
 					i.logger.Warn("cannot convert MODIFIED event object to Unstructured")
 					continue
 				}
+				if i.nsFilter != nil && !i.nsFilter.IsNamespaceAllowed(obj.GetNamespace()) {
+					continue
+				}
 				i.eventCh <- ResourceEvent{
 					Op:       EventUpdate,
 					Resource: obj,
@@ -229,6 +245,9 @@ func (i *GenericInformer) watch(ctx context.Context) {
 				obj, ok := event.Object.(*unstructured.Unstructured)
 				if !ok {
 					i.logger.Warn("cannot convert DELETED event object to Unstructured")
+					continue
+				}
+				if i.nsFilter != nil && !i.nsFilter.IsNamespaceAllowed(obj.GetNamespace()) {
 					continue
 				}
 				i.eventCh <- ResourceEvent{
@@ -250,16 +269,20 @@ func (i *GenericInformer) watch(ctx context.Context) {
 	}
 }
 
-// WaitUntilInitialized blocks until the informer has completed its initial LIST
-// or until the timeout expires.
-func (i *GenericInformer) WaitUntilInitialized(timeout time.Duration) {
+// WaitUntilInitialized blocks until the informer has completed its initial LIST,
+// the context is cancelled, or the timeout expires.
+func (i *GenericInformer) WaitUntilInitialized(ctx context.Context, timeout time.Duration) {
 	start := time.Now()
 	for !i.initialized.Load() {
 		if time.Since(start) > timeout {
 			i.logger.Debug("timed out waiting for initialization", "timeout", timeout)
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(10 * time.Millisecond):
+		}
 	}
 }
 
@@ -271,16 +294,19 @@ type InformerManager struct {
 	discovery discovery.DiscoveryInterface
 	eventCh   chan<- ResourceEvent
 	resyncCh  chan<- ResyncEvent
+	nsFilter  *NamespaceFilter
 	stoppers  map[schema.GroupVersionResource]context.CancelFunc
 	logger    *slog.Logger
 }
 
-// NewInformerManager creates an InformerManager.
+// NewInformerManager creates an InformerManager. If nsFilter is non-nil it is
+// passed to each GenericInformer to restrict events by namespace.
 func NewInformerManager(
 	client dynamic.Interface,
 	disc discovery.DiscoveryInterface,
 	eventCh chan<- ResourceEvent,
 	resyncCh chan<- ResyncEvent,
+	nsFilter *NamespaceFilter,
 	logger *slog.Logger,
 ) *InformerManager {
 	return &InformerManager{
@@ -288,6 +314,7 @@ func NewInformerManager(
 		discovery: disc,
 		eventCh:   eventCh,
 		resyncCh:  resyncCh,
+		nsFilter:  nsFilter,
 		stoppers:  make(map[schema.GroupVersionResource]context.CancelFunc),
 		logger:    logger,
 	}
@@ -335,12 +362,12 @@ func (m *InformerManager) Reconcile(ctx context.Context, desired []schema.GroupV
 	// Start new informers for the remaining effective GVRs.
 	for gvr := range effective {
 		m.logger.Debug("starting informer", "gvr", gvr.String())
-		informer := NewInformer(m.client, gvr, m.eventCh, m.resyncCh, m.logger)
+		informer := NewInformer(m.client, gvr, m.eventCh, m.resyncCh, m.nsFilter, m.logger)
 		informerCtx, cancel := context.WithCancel(ctx)
 		m.stoppers[gvr] = cancel
 		go informer.Run(informerCtx)
 		// Serialize startup to avoid memory spikes.
-		informer.WaitUntilInitialized(10 * time.Second)
+		informer.WaitUntilInitialized(ctx, 10*time.Second)
 	}
 
 	m.logger.Debug("reconcile complete", "running", len(m.stoppers))
@@ -352,5 +379,106 @@ func (m *InformerManager) StopAll() {
 		m.logger.Debug("stopping informer", "gvr", gvr.String())
 		stopper()
 		delete(m.stoppers, gvr)
+	}
+}
+
+// crdGVR is the GVR for CustomResourceDefinitions.
+var crdGVR = schema.GroupVersionResource{
+	Group:    "apiextensions.k8s.io",
+	Version:  "v1",
+	Resource: "customresourcedefinitions",
+}
+
+// RunContinuous performs initial discovery + reconciliation, then starts a CRD
+// informer that triggers throttled re-reconciliation whenever CRDs change.
+// It blocks until ctx is cancelled.
+func (m *InformerManager) RunContinuous(ctx context.Context, denyList, allowList []Resource) {
+	// Initial discovery and reconcile.
+	m.discoverAndReconcile(ctx, denyList, allowList)
+
+	// Start a CRD informer to detect custom resource changes.
+	crdEventCh := make(chan ResourceEvent, 64)
+	crdResyncCh := make(chan ResyncEvent, 4)
+	crdInformer := NewInformer(m.client, crdGVR, crdEventCh, crdResyncCh, nil, m.logger)
+
+	crdCtx, crdCancel := context.WithCancel(ctx)
+	defer crdCancel()
+	go crdInformer.Run(crdCtx)
+	crdInformer.WaitUntilInitialized(ctx, 10*time.Second)
+
+	// Throttled re-reconciliation: minimum 10s between cycles.
+	const minReconcileInterval = 10 * time.Second
+	lastReconcile := time.Now()
+	pending := false
+
+	// Timer for throttled reconcile — initially stopped.
+	reconcileTimer := time.NewTimer(0)
+	if !reconcileTimer.Stop() {
+		<-reconcileTimer.C
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			reconcileTimer.Stop()
+			return
+
+		case <-crdEventCh:
+			// CRD changed — schedule a throttled re-reconcile.
+			sinceLastReconcile := time.Since(lastReconcile)
+			if sinceLastReconcile >= minReconcileInterval {
+				m.discoverAndReconcile(ctx, denyList, allowList)
+				lastReconcile = time.Now()
+				pending = false
+			} else if !pending {
+				pending = true
+				reconcileTimer.Reset(minReconcileInterval - sinceLastReconcile)
+			}
+			// Drain any other CRD events that arrived simultaneously.
+			drainChannel(crdEventCh)
+
+		case <-crdResyncCh:
+			// CRD resync (initial list complete) — trigger reconcile.
+			sinceLastReconcile := time.Since(lastReconcile)
+			if sinceLastReconcile >= minReconcileInterval {
+				m.discoverAndReconcile(ctx, denyList, allowList)
+				lastReconcile = time.Now()
+				pending = false
+			} else if !pending {
+				pending = true
+				reconcileTimer.Reset(minReconcileInterval - sinceLastReconcile)
+			}
+
+		case <-reconcileTimer.C:
+			m.discoverAndReconcile(ctx, denyList, allowList)
+			lastReconcile = time.Now()
+			pending = false
+		}
+	}
+}
+
+// discoverAndReconcile discovers all supported GVRs, filters them, and
+// reconciles the running informers.
+func (m *InformerManager) discoverAndReconcile(ctx context.Context, denyList, allowList []Resource) {
+	supported, err := SupportedResources(m.discovery)
+	if err != nil {
+		m.logger.Error("failed to discover supported resources", "error", err)
+		if supported == nil {
+			return
+		}
+	}
+
+	desiredGVRs := FilterSupportedResources(supported, denyList, allowList)
+	m.Reconcile(ctx, desiredGVRs)
+}
+
+// drainChannel reads and discards any pending items in a ResourceEvent channel.
+func drainChannel(ch <-chan ResourceEvent) {
+	for {
+		select {
+		case <-ch:
+		default:
+			return
+		}
 	}
 }
