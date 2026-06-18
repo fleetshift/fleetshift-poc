@@ -11,10 +11,18 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// indexerComponent holds indexing-specific state for a TargetAgent.
+// IndexConfig holds configuration for the indexer delegate.
+type IndexConfig struct {
+	Schema        IndexSchema
+	DenyList      []Resource
+	AllowList     []Resource
+	BatchInterval time.Duration
+}
+
+// indexerDelegate holds indexing-specific state for an Agent.
 // It manages the informer-to-writer pipeline that watches Kubernetes
 // resources and writes inventory items via an InventoryWriter.
-type indexerComponent struct {
+type indexerDelegate struct {
 	targetID      string
 	dynClient     dynamic.Interface
 	discClient    discovery.DiscoveryInterface
@@ -25,26 +33,26 @@ type indexerComponent struct {
 	done          chan struct{}
 }
 
-// newIndexerComponent creates an indexerComponent. A zero batchInterval
-// defaults to 5 seconds.
-func newIndexerComponent(
+// newIndexerDelegate creates an indexerDelegate. A zero batchInterval
+// in cfg defaults to 5 seconds.
+func newIndexerDelegate(
 	targetID string,
 	dynClient dynamic.Interface,
 	discClient discovery.DiscoveryInterface,
 	writer domain.InventoryWriter,
-	schema IndexSchema,
-	batchInterval time.Duration,
+	cfg IndexConfig,
 	logger *slog.Logger,
-) *indexerComponent {
+) *indexerDelegate {
+	batchInterval := cfg.BatchInterval
 	if batchInterval == 0 {
 		batchInterval = 5 * time.Second
 	}
-	return &indexerComponent{
+	return &indexerDelegate{
 		targetID:      targetID,
 		dynClient:     dynClient,
 		discClient:    discClient,
 		writer:        writer,
-		schema:        schema,
+		schema:        cfg.Schema,
 		batchInterval: batchInterval,
 		logger:        logger,
 		done:          make(chan struct{}),
@@ -52,7 +60,7 @@ func newIndexerComponent(
 }
 
 // start runs the informer manager and writer until ctx is cancelled.
-func (ic *indexerComponent) start(ctx context.Context) {
+func (ic *indexerDelegate) start(ctx context.Context) {
 	defer close(ic.done)
 
 	schemaMap := ic.schema.Entries

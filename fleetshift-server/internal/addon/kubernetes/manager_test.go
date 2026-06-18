@@ -81,9 +81,9 @@ func TestHandleTargetReady_StartsAgent(t *testing.T) {
 		t.Fatalf("HandleTargetReady: %v", err)
 	}
 
-	ta := mgr.GetTarget("test-target")
+	ta := mgr.GetAgent("test-target")
 	if ta == nil {
-		t.Fatal("expected GetTarget to return agent, got nil")
+		t.Fatal("expected GetAgent to return agent, got nil")
 	}
 	if ta.TargetID() != "test-target" {
 		t.Errorf("TargetID = %q, want %q", ta.TargetID(), "test-target")
@@ -106,9 +106,9 @@ func TestHandleTargetReady_Idempotent(t *testing.T) {
 		t.Fatalf("second HandleTargetReady: %v", err)
 	}
 
-	ta := mgr.GetTarget("test-target")
+	ta := mgr.GetAgent("test-target")
 	if ta == nil {
-		t.Fatal("expected GetTarget to return agent, got nil")
+		t.Fatal("expected GetAgent to return agent, got nil")
 	}
 }
 
@@ -122,7 +122,7 @@ func TestHandleTargetTerminated_StopsAgent(t *testing.T) {
 		t.Fatalf("HandleTargetReady: %v", err)
 	}
 
-	ta := mgr.GetTarget("test-target")
+	ta := mgr.GetAgent("test-target")
 	if ta == nil {
 		t.Fatal("expected agent to be running")
 	}
@@ -132,8 +132,8 @@ func TestHandleTargetTerminated_StopsAgent(t *testing.T) {
 	}
 
 	// Agent should be stopped and removed.
-	if mgr.GetTarget("test-target") != nil {
-		t.Error("expected GetTarget to return nil after termination")
+	if mgr.GetAgent("test-target") != nil {
+		t.Error("expected GetAgent to return nil after termination")
 	}
 
 	// Done channel should be closed.
@@ -145,10 +145,10 @@ func TestHandleTargetTerminated_StopsAgent(t *testing.T) {
 	}
 }
 
-func TestGetTarget_UnknownReturnsNil(t *testing.T) {
+func TestGetAgent_UnknownReturnsNil(t *testing.T) {
 	mgr := newTestManager(t)
 
-	if ta := mgr.GetTarget("nonexistent"); ta != nil {
+	if ta := mgr.GetAgent("nonexistent"); ta != nil {
 		t.Errorf("expected nil for unknown target, got %v", ta)
 	}
 }
@@ -166,7 +166,7 @@ func TestStopAll_StopsAllAgents(t *testing.T) {
 
 	// Verify all are running.
 	for _, id := range []string{"target-a", "target-b", "target-c"} {
-		if mgr.GetTarget(domain.TargetID(id)) == nil {
+		if mgr.GetAgent(domain.TargetID(id)) == nil {
 			t.Fatalf("expected agent %s to be running", id)
 		}
 	}
@@ -175,7 +175,7 @@ func TestStopAll_StopsAllAgents(t *testing.T) {
 
 	// All should be gone.
 	for _, id := range []string{"target-a", "target-b", "target-c"} {
-		if mgr.GetTarget(domain.TargetID(id)) != nil {
+		if mgr.GetAgent(domain.TargetID(id)) != nil {
 			t.Errorf("expected agent %s to be stopped after StopAll", id)
 		}
 	}

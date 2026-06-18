@@ -7,9 +7,9 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// TestTargetAgent_Properties verifies that the TargetAgent created by
+// TestAgent_Properties verifies that the Agent created by
 // HandleTargetReady exposes the correct API server and K8s clients.
-func TestTargetAgent_Properties(t *testing.T) {
+func TestAgent_Properties(t *testing.T) {
 	mgr := newTestManager(t)
 	t.Cleanup(mgr.StopAll)
 
@@ -31,7 +31,7 @@ func TestTargetAgent_Properties(t *testing.T) {
 		t.Fatalf("HandleTargetReady: %v", err)
 	}
 
-	ta := mgr.GetTarget("prop-test")
+	ta := mgr.GetAgent("prop-test")
 	if ta == nil {
 		t.Fatal("expected agent, got nil")
 	}

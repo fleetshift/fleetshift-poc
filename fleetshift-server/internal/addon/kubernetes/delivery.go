@@ -13,9 +13,9 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// deliveryComponent holds delivery-specific state for a TargetAgent.
+// deliveryDelegate holds delivery-specific state for an Agent.
 // It handles attested and passthrough delivery to Kubernetes clusters.
-type deliveryComponent struct {
+type deliveryDelegate struct {
 	reporter    domain.DeliveryReporter
 	keyResolver *domain.KeyResolver
 	httpClient  *http.Client
@@ -24,11 +24,11 @@ type deliveryComponent struct {
 	verifiers map[string]*attestation.Verifier
 }
 
-// newDeliveryComponent creates a deliveryComponent with the given
+// newDeliveryDelegate creates a deliveryDelegate with the given
 // reporter, key resolver, and HTTP client. The key resolver and HTTP
 // client may be nil when attestation verification is not needed.
-func newDeliveryComponent(reporter domain.DeliveryReporter, keyResolver *domain.KeyResolver, httpClient *http.Client) *deliveryComponent {
-	return &deliveryComponent{
+func newDeliveryDelegate(reporter domain.DeliveryReporter, keyResolver *domain.KeyResolver, httpClient *http.Client) *deliveryDelegate {
+	return &deliveryDelegate{
 		reporter:    reporter,
 		keyResolver: keyResolver,
 		httpClient:  httpClient,
@@ -38,9 +38,9 @@ func newDeliveryComponent(reporter domain.DeliveryReporter, keyResolver *domain.
 
 // deliver validates the target and auth synchronously then dispatches
 // the actual SSA apply in a background goroutine. platformCfg is the
-// shared REST config owned by the TargetAgent; for passthrough delivery
+// shared REST config owned by the Agent; for passthrough delivery
 // a clone is made with the caller's bearer token swapped in.
-func (d *deliveryComponent) deliver(ctx context.Context, platformCfg *rest.Config, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+func (d *deliveryDelegate) deliver(ctx context.Context, platformCfg *rest.Config, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	if target.Properties()["api_server"] == "" {
 		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
@@ -80,7 +80,7 @@ func (d *deliveryComponent) deliver(ctx context.Context, platformCfg *rest.Confi
 // When an attestation is provided the component verifies it against the
 // target's trust bundle and uses platformCfg directly. Otherwise a
 // clone is made with the caller's bearer token swapped in.
-func (d *deliveryComponent) remove(ctx context.Context, platformCfg *rest.Config, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+func (d *deliveryDelegate) remove(ctx context.Context, platformCfg *rest.Config, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	if target.Properties()["api_server"] == "" {
 		return fmt.Errorf("%w: target %q missing api_server property", domain.ErrInvalidArgument, target.ID())
 	}
@@ -141,7 +141,7 @@ func (d *deliveryComponent) remove(ctx context.Context, platformCfg *rest.Config
 
 // verifierForTarget builds or retrieves a cached [attestation.Verifier]
 // from the target's trust_bundle property.
-func (d *deliveryComponent) verifierForTarget(target domain.TargetInfo) (*attestation.Verifier, error) {
+func (d *deliveryDelegate) verifierForTarget(target domain.TargetInfo) (*attestation.Verifier, error) {
 	trustJSON := target.Properties()["trust_bundle"]
 	if trustJSON == "" {
 		return nil, fmt.Errorf("target %q has no trust_bundle property", target.ID())
@@ -187,19 +187,19 @@ func (d *deliveryComponent) verifierForTarget(target domain.TargetInfo) (*attest
 
 // deliverAsyncPlatform applies manifests using the pre-built platform
 // REST config. Called after attestation verification passes.
-func (d *deliveryComponent) deliverAsyncPlatform(ctx context.Context, cfg *rest.Config, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest) {
+func (d *deliveryDelegate) deliverAsyncPlatform(ctx context.Context, cfg *rest.Config, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest) {
 	d.applyManifests(ctx, deliveryID, generation, cfg, manifests)
 }
 
 // deliverAsync applies manifests using a pre-built REST config (already
 // cloned with the caller's bearer token by the caller).
-func (d *deliveryComponent) deliverAsync(ctx context.Context, cfg *rest.Config, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest) {
+func (d *deliveryDelegate) deliverAsync(ctx context.Context, cfg *rest.Config, deliveryID domain.DeliveryID, generation domain.Generation, manifests []domain.Manifest) {
 	d.applyManifests(ctx, deliveryID, generation, cfg, manifests)
 }
 
 // applyManifests applies each manifest via server-side apply, reporting
 // progress events and the final result through the delivery reporter.
-func (d *deliveryComponent) applyManifests(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, cfg *rest.Config, manifests []domain.Manifest) {
+func (d *deliveryDelegate) applyManifests(ctx context.Context, deliveryID domain.DeliveryID, generation domain.Generation, cfg *rest.Config, manifests []domain.Manifest) {
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
 		_ = d.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
@@ -229,7 +229,7 @@ func (d *deliveryComponent) applyManifests(ctx context.Context, deliveryID domai
 
 // deleteManifests deletes Kubernetes resources described by manifests.
 // Resources that are already gone (404) are silently skipped.
-func (d *deliveryComponent) deleteManifests(ctx context.Context, cfg *rest.Config, manifests []domain.Manifest) error {
+func (d *deliveryDelegate) deleteManifests(ctx context.Context, cfg *rest.Config, manifests []domain.Manifest) error {
 	ap, err := newApplierFromConfig(cfg)
 	if err != nil {
 		return fmt.Errorf("build kubernetes client: %w", err)

@@ -16,7 +16,7 @@ const ManifestResourceType domain.ResourceType = "kubernetes"
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
 		ID:   "kubernetes",
-		Name: "Kubernetes Delivery Agent",
+		Name: "Kubernetes Agent",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
 		},

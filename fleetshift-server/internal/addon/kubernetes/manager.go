@@ -22,10 +22,10 @@ const (
 	PropServiceAccountTokenRef = "service_account_token_ref"
 )
 
-// Manager manages the lifecycle of TargetAgents — one per ready target.
+// Manager manages the lifecycle of Agents — one per ready target.
 // It builds K8s clients from target properties + vault, creates
-// TargetAgents with delivery and indexer components, and implements
-// [domain.DeliveryAgent] by routing to the appropriate TargetAgent.
+// Agents with delivery and indexer delegates, and implements
+// [domain.DeliveryAgent] by routing to the appropriate Agent.
 type Manager struct {
 	store            domain.Store
 	vault            domain.Vault
@@ -36,7 +36,7 @@ type Manager struct {
 	logger           *slog.Logger
 
 	mu     sync.Mutex
-	agents map[domain.TargetID]*TargetAgent
+	agents map[domain.TargetID]*Agent
 }
 
 // NewManager creates a Manager.
@@ -57,12 +57,12 @@ func NewManager(
 		keyResolver:      keyResolver,
 		httpClient:       httpClient,
 		logger:           logger,
-		agents:           make(map[domain.TargetID]*TargetAgent),
+		agents:           make(map[domain.TargetID]*Agent),
 	}
 }
 
-// HandleTargetReady builds K8s clients, creates a TargetAgent with both
-// delivery and indexer components, and starts it in a goroutine. It is
+// HandleTargetReady builds K8s clients, creates an Agent with both
+// delivery and indexer delegates, and starts it in a goroutine. It is
 // idempotent: if an agent for the given target is already running, it
 // returns nil without starting a duplicate.
 func (m *Manager) HandleTargetReady(ctx context.Context, target domain.TargetInfo) error {
@@ -91,29 +91,19 @@ func (m *Manager) HandleTargetReady(ctx context.Context, target domain.TargetInf
 	}
 
 	logger := m.logger.With("target", string(id))
-	agentCtx, cancel := context.WithCancel(ctx)
 
-	dc := newDeliveryComponent(m.deliveryReporter, m.keyResolver, m.httpClient)
-	ic := newIndexerComponent(string(id), dynClient, discClient, m.inventoryWriter, DefaultKubernetesSchema(), 0, logger)
+	dc := newDeliveryDelegate(m.deliveryReporter, m.keyResolver, m.httpClient)
+	ic := newIndexerDelegate(string(id), dynClient, discClient, m.inventoryWriter, IndexConfig{
+		Schema: DefaultKubernetesSchema(),
+	}, logger)
 
-	ta := &TargetAgent{
-		targetID:   id,
-		restConfig: cfg,
-		dynClient:  dynClient,
-		discClient: discClient,
-		logger:     logger,
-		delivery:   dc,
-		indexer:    ic,
-		ctx:        agentCtx,
-		cancel:     cancel,
-		done:       make(chan struct{}),
-	}
+	ta := NewAgent(ctx, id, cfg, dynClient, discClient, dc, ic, logger)
 
 	// Re-check under lock to handle races.
 	m.mu.Lock()
 	if _, ok := m.agents[id]; ok {
 		m.mu.Unlock()
-		cancel()
+		ta.Stop()
 		return nil
 	}
 	m.agents[id] = ta
@@ -148,9 +138,9 @@ func (m *Manager) HandleTargetTerminated(ctx context.Context, targetID domain.Ta
 	return tx.Commit()
 }
 
-// GetTarget returns the running TargetAgent for the given ID, or nil if
+// GetAgent returns the running Agent for the given ID, or nil if
 // no agent is running.
-func (m *Manager) GetTarget(id domain.TargetID) *TargetAgent {
+func (m *Manager) GetAgent(id domain.TargetID) *Agent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.agents[id]
@@ -159,11 +149,11 @@ func (m *Manager) GetTarget(id domain.TargetID) *TargetAgent {
 // StopAll stops all running agents.
 func (m *Manager) StopAll() {
 	m.mu.Lock()
-	agents := make(map[domain.TargetID]*TargetAgent, len(m.agents))
+	agents := make(map[domain.TargetID]*Agent, len(m.agents))
 	for id, ta := range m.agents {
 		agents[id] = ta
 	}
-	m.agents = make(map[domain.TargetID]*TargetAgent)
+	m.agents = make(map[domain.TargetID]*Agent)
 	m.mu.Unlock()
 
 	for _, ta := range agents {
@@ -172,9 +162,9 @@ func (m *Manager) StopAll() {
 }
 
 // Deliver implements [domain.DeliveryAgent] by routing to the
-// appropriate TargetAgent.
+// appropriate Agent.
 func (m *Manager) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	ta := m.GetTarget(target.ID())
+	ta := m.GetAgent(target.ID())
 	if ta == nil {
 		return fmt.Errorf("no agent for target %s", target.ID())
 	}
@@ -182,9 +172,9 @@ func (m *Manager) Deliver(ctx context.Context, target domain.TargetInfo, deliver
 }
 
 // Remove implements [domain.DeliveryAgent] by routing to the
-// appropriate TargetAgent.
+// appropriate Agent.
 func (m *Manager) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
-	ta := m.GetTarget(target.ID())
+	ta := m.GetAgent(target.ID())
 	if ta == nil {
 		return fmt.Errorf("no agent for target %s", target.ID())
 	}
