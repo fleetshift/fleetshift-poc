@@ -9,8 +9,15 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testharness"
 )
+
+// buildReporter constructs a [application.DeliveryReportService] wired
+// to a [memworkflow.Registry] for integration tests.
+func buildReporter(store domain.Store, reg *memworkflow.Registry) *application.DeliveryReportService {
+	return application.NewDeliveryReportService(store, reg)
+}
 
 // TestKindAddon_EndToEnd exercises the full addon lifecycle:
 //
