@@ -279,8 +279,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register create-deployment: %w", err)
 	}
 
+	deleteObs := observability.NewDeleteObserver(logger)
+
 	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{
-		Store: store,
+		Store:    store,
+		Observer: deleteObs,
 	}
 	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
 	if err != nil {
@@ -291,6 +294,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Store:         store,
 		Orchestration: orchWf,
 		Cleanup:       cleanupWf,
+		Observer:      deleteObs,
 	}
 	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
 	if err != nil {
@@ -309,7 +313,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	mrCleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{
-		Store: store,
+		Store:    store,
+		Observer: deleteObs,
 	}
 	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(mrCleanupSpec)
 	if err != nil {
@@ -320,6 +325,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Store:         store,
 		Orchestration: orchWf,
 		Cleanup:       mrCleanupWf,
+		Observer:      deleteObs,
 	}
 	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
 	if err != nil {

@@ -28,6 +28,14 @@ type DeleteDeploymentWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
 	Cleanup       DeleteDeploymentCleanupWorkflow
+	Observer      DeleteObserver
+}
+
+func (s *DeleteDeploymentWorkflowSpec) deleteObserver() DeleteObserver {
+	if s.Observer != nil {
+		return s.Observer
+	}
+	return NoOpDeleteObserver{}
 }
 
 func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment" }
@@ -39,27 +47,35 @@ func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment
 // cannot accidentally clear Deleting and effectively "undelete" later.
 func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeleteDeploymentInput, deploymentMutationResult] {
 	return NewActivity("mutate-to-deleting", func(ctx context.Context, in DeleteDeploymentInput) (deploymentMutationResult, error) {
+		ctx, probe := s.deleteObserver().MutateDeploymentStarted(ctx, in.ID)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return deploymentMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		dep, err := tx.Deployments().Get(ctx, in.ID)
 		if err != nil {
+			probe.Error(err)
 			return deploymentMutationResult{}, err
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, dep.FulfillmentID())
 		if err != nil {
+			probe.Error(err)
 			return deploymentMutationResult{}, err
 		}
 
 		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
+			probe.Error(err)
 			return deploymentMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return deploymentMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 		return deploymentMutationResult{
@@ -112,19 +128,27 @@ func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteDeploymentC
 // immediately; the actual row deletion happens asynchronously in the
 // cleanup workflow.
 func (s *DeleteDeploymentWorkflowSpec) Run(record Record, input DeleteDeploymentInput) (DeploymentView, error) {
+	_, probe := s.deleteObserver().DeleteDeploymentStarted(record.Context(), input.ID)
+	defer probe.End()
+
 	mr, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
+		probe.Error(err)
 		return DeploymentView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
+	probe.Mutated(mr.FulfillmentID, mr.MyGen)
 
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteDeploymentCleanupInput{
 		DeploymentID:  input.ID,
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
+		probe.Error(err)
 		return DeploymentView{}, fmt.Errorf("start cleanup: %w", err)
 	}
+	probe.CleanupStarted()
 
 	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
+		probe.Error(err)
 		return DeploymentView{}, err
 	}
 

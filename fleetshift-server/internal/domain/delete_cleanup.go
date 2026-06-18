@@ -14,7 +14,15 @@ import (
 // Pass this spec to [Registry.RegisterDeleteDeploymentCleanup] to
 // obtain a [DeleteDeploymentCleanupWorkflow] that can start instances.
 type DeleteDeploymentCleanupWorkflowSpec struct {
-	Store Store
+	Store    Store
+	Observer DeleteObserver
+}
+
+func (s *DeleteDeploymentCleanupWorkflowSpec) deleteObserver() DeleteObserver {
+	if s.Observer != nil {
+		return s.Observer
+	}
+	return NoOpDeleteObserver{}
 }
 
 func (s *DeleteDeploymentCleanupWorkflowSpec) Name() string { return "delete-deployment-cleanup" }
@@ -45,13 +53,20 @@ func (s *DeleteDeploymentCleanupWorkflowSpec) DeleteDeploymentAndFulfillment() A
 // orchestration, then atomically delete the deployment and fulfillment
 // rows.
 func (s *DeleteDeploymentCleanupWorkflowSpec) Run(record Record, input DeleteDeploymentCleanupInput) (struct{}, error) {
+	_, probe := s.deleteObserver().DeploymentCleanupStarted(record.Context(), input)
+	defer probe.End()
+
 	if _, err := AwaitSignal(record, DeleteCleanupCompleteSignal); err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("await delete-cleanup-complete: %w", err)
 	}
+	probe.SignalReceived()
 
 	if _, err := RunActivity(record, s.DeleteDeploymentAndFulfillment(), input); err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("delete deployment and fulfillment: %w", err)
 	}
+	probe.RowsDeleted()
 
 	return struct{}{}, nil
 }

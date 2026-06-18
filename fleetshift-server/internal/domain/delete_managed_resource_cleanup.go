@@ -15,7 +15,15 @@ import (
 // obtain a [DeleteManagedResourceCleanupWorkflow] that can start
 // instances.
 type DeleteManagedResourceCleanupWorkflowSpec struct {
-	Store Store
+	Store    Store
+	Observer DeleteObserver
+}
+
+func (s *DeleteManagedResourceCleanupWorkflowSpec) deleteObserver() DeleteObserver {
+	if s.Observer != nil {
+		return s.Observer
+	}
+	return NoOpDeleteObserver{}
 }
 
 func (s *DeleteManagedResourceCleanupWorkflowSpec) Name() string {
@@ -53,13 +61,20 @@ func (s *DeleteManagedResourceCleanupWorkflowSpec) DeleteManagedResourceAndFulfi
 // orchestration, then delete the managed resource and fulfillment
 // rows.
 func (s *DeleteManagedResourceCleanupWorkflowSpec) Run(record Record, input DeleteManagedResourceCleanupInput) (struct{}, error) {
+	_, probe := s.deleteObserver().ManagedResourceCleanupStarted(record.Context(), input)
+	defer probe.End()
+
 	if _, err := AwaitSignal(record, DeleteCleanupCompleteSignal); err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("await delete-cleanup-complete: %w", err)
 	}
+	probe.SignalReceived()
 
 	if _, err := RunActivity(record, s.DeleteManagedResourceAndFulfillment(), input); err != nil {
+		probe.Error(err)
 		return struct{}{}, fmt.Errorf("delete managed resource and fulfillment: %w", err)
 	}
+	probe.RowsDeleted()
 
 	return struct{}{}, nil
 }

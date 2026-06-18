@@ -30,6 +30,14 @@ type DeleteManagedResourceWorkflowSpec struct {
 	Store         Store
 	Orchestration OrchestrationWorkflow
 	Cleanup       DeleteManagedResourceCleanupWorkflow
+	Observer      DeleteObserver
+}
+
+func (s *DeleteManagedResourceWorkflowSpec) deleteObserver() DeleteObserver {
+	if s.Observer != nil {
+		return s.Observer
+	}
+	return NoOpDeleteObserver{}
 }
 
 func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-managed-resource" }
@@ -39,46 +47,54 @@ func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-manag
 // bumps its generation inside a serialized write transaction.
 func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, managedResourceMutationResult] {
 	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (managedResourceMutationResult, error) {
+		ctx, probe := s.deleteObserver().MutateManagedResourceStarted(ctx, in.ResourceType, in.Name)
+		defer probe.End()
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
 
 		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
 		if err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, err
 		}
 
 		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion())
 		if err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
 		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
 		if err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, err
 		}
 
 		// Delete retries read auth from fulfillment state, not the RPC context.
 		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 
 		// Identity integration: tombstone the managed representation,
 		// atomic with the fulfillment state transition. Skipped for
 		// legacy type defs that predate API identity metadata. Errors
-		// are logged but do not fail the delete — the fulfillment
-		// state transition is the primary concern.
+		// do not fail the delete — the fulfillment state transition is
+		// the primary concern — but are observed for diagnostics.
 		if in.TypeDef.APIServiceName != "" {
 			if tombErr := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name); tombErr != nil {
-				// Log but don't fail: the fulfillment transition is primary.
-				_ = tombErr
+				probe.TombstoneError(tombErr)
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
+			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("commit: %w", err)
 		}
 
@@ -136,20 +152,28 @@ func (s *DeleteManagedResourceWorkflowSpec) StartCleanup() Activity[DeleteManage
 // immediately; the actual row deletion happens asynchronously in the
 // cleanup workflow.
 func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManagedResourceInput) (ManagedResourceView, error) {
+	_, probe := s.deleteObserver().DeleteManagedResourceStarted(record.Context(), input.ResourceType, input.Name)
+	defer probe.End()
+
 	mr, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
+		probe.Error(err)
 		return ManagedResourceView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
+	probe.Mutated(mr.FulfillmentID, mr.MyGen)
 
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteManagedResourceCleanupInput{
 		ResourceType:  input.ResourceType,
 		Name:          input.Name,
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
+		probe.Error(err)
 		return ManagedResourceView{}, fmt.Errorf("start cleanup: %w", err)
 	}
+	probe.CleanupStarted()
 
 	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
+		probe.Error(err)
 		return ManagedResourceView{}, err
 	}
 

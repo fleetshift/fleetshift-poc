@@ -13,6 +13,7 @@ Use when adding observability to domain or application components. Inspired by [
 - Observer: `{Component}Observer` (e.g., `WriteObserver`)
 - Probe: `{Operation}Probe` (e.g., `WriteProbe`)
 - NoOp: `NoOp{Component}Observer`, `NoOp{Operation}Probe`
+- Variable at call site: `probe` (e.g., `ctx, probe := ...`). Each probe lives in its own scope, so there should be no need to disambiguate.
 
 ## Interface Pattern
 
