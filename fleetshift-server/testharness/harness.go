@@ -25,6 +25,7 @@ type Harness struct {
 	Targets         *application.TargetService
 	ManagedResources *application.ManagedResourceService
 	AddonMgr        *application.AddonManager
+	Registry        *memworkflow.Registry
 }
 
 // Option configures a Harness.
@@ -163,5 +164,6 @@ func New(t *testing.T, opts ...Option) *Harness {
 			ResumeWF: resumeMRWf,
 		},
 		AddonMgr: addonMgr,
+		Registry: reg,
 	}
 }
