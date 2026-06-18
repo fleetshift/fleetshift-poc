@@ -11,14 +11,15 @@ const TargetType domain.TargetType = "kubernetes"
 const ManifestResourceType domain.ResourceType = "kubernetes"
 
 // Descriptor returns the addon descriptor for the Kubernetes addon.
-// It declares a delivery capability for Kubernetes targets connected
-// directly (no fleetlet).
+// It declares delivery and indexing capabilities for Kubernetes targets
+// connected directly (no fleetlet).
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
 		ID:   "kubernetes",
 		Name: "Kubernetes Agent",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
+			domain.IndexCapability{TargetType: TargetType},
 		},
 	}
 }

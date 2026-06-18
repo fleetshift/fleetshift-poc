@@ -70,7 +70,7 @@ func (ic *indexerDelegate) start(ctx context.Context) {
 		nsFilter = NewNamespaceFilter(*ic.cfg.NamespaceFilter)
 	}
 
-	w := NewWriter(ic.targetID, ic.writer, schemaMap, ic.cfg.BatchInterval)
+	w := NewWriter(ic.targetID, ic.writer, schemaMap, ic.cfg.BatchInterval, ic.logger)
 
 	mgr := NewInformerManager(
 		ic.dynClient,

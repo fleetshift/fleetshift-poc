@@ -27,12 +27,19 @@ type resyncCall struct {
 }
 
 type mockInventoryWriter struct {
-	mu      sync.Mutex
-	deltas  []deltaCall
-	resyncs []resyncCall
+	mu             sync.Mutex
+	deltas         []deltaCall
+	resyncs        []resyncCall
+	applyDeltaFunc func(context.Context, domain.TargetID, []domain.InventoryItem, []domain.InventoryItemID, []domain.InventoryEdge, []domain.InventoryEdge) error
 }
 
-func (m *mockInventoryWriter) ApplyDelta(_ context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID, edgeAdds []domain.InventoryEdge, edgeDels []domain.InventoryEdge) error {
+func (m *mockInventoryWriter) ApplyDelta(ctx context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID, edgeAdds []domain.InventoryEdge, edgeDels []domain.InventoryEdge) error {
+	if m.applyDeltaFunc != nil {
+		err := m.applyDeltaFunc(ctx, targetID, upserts, deletedIDs, edgeAdds, edgeDels)
+		if err != nil {
+			return err
+		}
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.deltas = append(m.deltas, deltaCall{targetID: targetID, upserts: upserts, deletedIDs: deletedIDs, edgeAdds: edgeAdds, edgeDels: edgeDels})
@@ -89,7 +96,7 @@ func makeResource(uid, name, rv string) *unstructured.Unstructured {
 
 func TestBatching(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -134,7 +141,7 @@ func TestBatching(t *testing.T) {
 
 func TestDelete(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -161,7 +168,7 @@ func TestDelete(t *testing.T) {
 
 func TestResync(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 10*time.Second)
+	w := NewWriter("target-1", mock, testSchema, 10*time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -197,7 +204,7 @@ func TestResync(t *testing.T) {
 
 func TestDedup(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -227,7 +234,7 @@ func TestDedup(t *testing.T) {
 func TestResync_MissingSchemaEntry(t *testing.T) {
 	mock := &mockInventoryWriter{}
 	// Schema has no entry for configmaps — tests base-only extraction.
-	w := NewWriter("target-1", mock, testSchema, 10*time.Second)
+	w := NewWriter("target-1", mock, testSchema, 10*time.Second, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -273,7 +280,7 @@ func TestResync_MissingSchemaEntry(t *testing.T) {
 
 func TestLateDeleteProtection(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -298,7 +305,7 @@ func TestLateDeleteProtection(t *testing.T) {
 
 func TestEdgeComputation_OwnedBy(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -367,7 +374,7 @@ func TestEdgeComputation_OwnedBy(t *testing.T) {
 
 func TestEdgeComputation_DeleteRemovesEdges(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -434,7 +441,7 @@ func TestEdgeComputation_DeleteRemovesEdges(t *testing.T) {
 
 func TestEdgeComputation_DiffAcrossFlushes(t *testing.T) {
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -508,6 +515,80 @@ func TestEdgeComputation_DiffAcrossFlushes(t *testing.T) {
 	}
 }
 
+func TestHeartbeat(t *testing.T) {
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchema, 10*time.Second, nil)
+	// Override heartbeat interval for faster test.
+	w.heartbeatInterval = 100 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Wait for 2 heartbeat intervals without sending any events.
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) == 0 {
+		t.Fatal("expected at least one heartbeat delta, got none")
+	}
+
+	// Verify that at least one delta is empty (heartbeat).
+	var foundHeartbeat bool
+	for _, d := range deltas {
+		if len(d.upserts) == 0 && len(d.deletedIDs) == 0 && len(d.edgeAdds) == 0 && len(d.edgeDels) == 0 {
+			foundHeartbeat = true
+			break
+		}
+	}
+	if !foundHeartbeat {
+		t.Fatal("expected at least one empty delta (heartbeat), got none")
+	}
+}
+
+func TestErrorRecovery(t *testing.T) {
+	// Mock that fails the first 2 times, then succeeds.
+	var attemptCount int
+	var mu sync.Mutex
+	mock := &mockInventoryWriter{
+		applyDeltaFunc: func(_ context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID, edgeAdds []domain.InventoryEdge, edgeDels []domain.InventoryEdge) error {
+			mu.Lock()
+			defer mu.Unlock()
+			attemptCount++
+			if attemptCount <= 2 {
+				return context.DeadlineExceeded
+			}
+			return nil
+		},
+	}
+
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Send an event to trigger flush.
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-retry", "deploy-retry", "100"), GVR: testGVR}
+
+	// Wait long enough for retries (backoff: 1s, 2s).
+	time.Sleep(4 * time.Second)
+
+	mu.Lock()
+	finalAttemptCount := attemptCount
+	mu.Unlock()
+
+	if finalAttemptCount < 3 {
+		t.Fatalf("expected at least 3 attempts (initial + 2 retries), got %d", finalAttemptCount)
+	}
+
+	if w.consecutiveFailures != 0 {
+		t.Errorf("expected consecutiveFailures=0 after success, got %d", w.consecutiveFailures)
+	}
+}
+
 func TestEdgeComputation_BuildEdges(t *testing.T) {
 	// Define test GVR and schema with BuildEdges factory.
 	testGVRWithEdges := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
@@ -531,7 +612,7 @@ func TestEdgeComputation_BuildEdges(t *testing.T) {
 	}
 
 	mock := &mockInventoryWriter{}
-	w := NewWriter("target-1", mock, testSchemaWithEdges, 100*time.Millisecond)
+	w := NewWriter("target-1", mock, testSchemaWithEdges, 100*time.Millisecond, nil)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

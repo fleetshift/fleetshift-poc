@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"log/slog"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -35,35 +36,43 @@ type ResyncEvent struct {
 // Writer batches informer events and writes them as domain inventory
 // items via an InventoryWriter.
 type Writer struct {
-	targetID      string
-	writer        domain.InventoryWriter
-	schema        map[schema.GroupVersionResource]SchemaEntry
-	eventCh       chan ResourceEvent
-	resyncCh      chan ResyncEvent
-	batchInterval time.Duration
-	currentNodes  map[string]inventoryNode
-	edgeFuncs     map[string]func(NodeStore) []Edge
-	previousEdges map[string]map[string]Edge // sourceUID -> destUID -> Edge
+	targetID            string
+	writer              domain.InventoryWriter
+	schema              map[schema.GroupVersionResource]SchemaEntry
+	eventCh             chan ResourceEvent
+	resyncCh            chan ResyncEvent
+	batchInterval       time.Duration
+	heartbeatInterval   time.Duration
+	currentNodes        map[string]inventoryNode
+	edgeFuncs           map[string]func(NodeStore) []Edge
+	previousEdges       map[string]map[string]Edge // sourceUID -> destUID -> Edge
+	logger              *slog.Logger
+	consecutiveFailures int
 }
 
 // NewWriter creates a Writer that batches events over batchInterval and
-// writes them via the given InventoryWriter.
+// writes them via the given InventoryWriter. A zero heartbeatInterval
+// defaults to 60 seconds.
 func NewWriter(
 	targetID string,
 	writer domain.InventoryWriter,
 	schema map[schema.GroupVersionResource]SchemaEntry,
 	batchInterval time.Duration,
+	logger *slog.Logger,
 ) *Writer {
+	heartbeatInterval := 60 * time.Second
 	return &Writer{
-		targetID:      targetID,
-		writer:        writer,
-		schema:        schema,
-		eventCh:       make(chan ResourceEvent, 256),
-		resyncCh:      make(chan ResyncEvent, 16),
-		batchInterval: batchInterval,
-		currentNodes:  make(map[string]inventoryNode),
-		edgeFuncs:     make(map[string]func(NodeStore) []Edge),
-		previousEdges: make(map[string]map[string]Edge),
+		targetID:          targetID,
+		writer:            writer,
+		schema:            schema,
+		eventCh:           make(chan ResourceEvent, 256),
+		resyncCh:          make(chan ResyncEvent, 16),
+		batchInterval:     batchInterval,
+		heartbeatInterval: heartbeatInterval,
+		currentNodes:      make(map[string]inventoryNode),
+		edgeFuncs:         make(map[string]func(NodeStore) []Edge),
+		previousEdges:     make(map[string]map[string]Edge),
+		logger:            logger,
 	}
 }
 
@@ -78,6 +87,11 @@ func (w *Writer) ResyncCh() chan<- ResyncEvent { return w.resyncCh }
 func (w *Writer) Run(ctx context.Context) {
 	batchTicker := time.NewTicker(w.batchInterval)
 	defer batchTicker.Stop()
+
+	heartbeatTicker := time.NewTicker(w.heartbeatInterval)
+	defer heartbeatTicker.Stop()
+
+	lastActivity := time.Now()
 
 	// Pending batch state.
 	pendingUpserts := make(map[string]*unstructured.Unstructured) // UID -> resource
@@ -94,6 +108,7 @@ func (w *Writer) Run(ctx context.Context) {
 			return
 
 		case ev := <-w.eventCh:
+			lastActivity = time.Now()
 			uid := string(ev.Resource.GetUID())
 
 			switch ev.Op {
@@ -120,14 +135,24 @@ func (w *Writer) Run(ctx context.Context) {
 			}
 
 		case rs := <-w.resyncCh:
+			lastActivity = time.Now()
 			w.sendResync(ctx, rs)
 
 		case <-batchTicker.C:
+			if len(pendingUpserts) > 0 || len(pendingDeletes) > 0 {
+				lastActivity = time.Now()
+			}
 			w.flush(ctx, pendingUpserts, pendingUpsertGVR, pendingDeletes, sentVersions)
 			// Reset batch state.
 			pendingUpserts = make(map[string]*unstructured.Unstructured)
 			pendingUpsertGVR = make(map[string]schema.GroupVersionResource)
 			pendingDeletes = make(map[string]struct{})
+
+		case <-heartbeatTicker.C:
+			if time.Since(lastActivity) >= w.heartbeatInterval {
+				w.applyWithRetry(ctx, nil, nil, nil, nil)
+				lastActivity = time.Now()
+			}
 		}
 	}
 }
@@ -240,7 +265,55 @@ func (w *Writer) flush(
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs, edgeAdds, edgeDels)
+	w.applyWithRetry(ctx, items, deletedIDs, edgeAdds, edgeDels)
+}
+
+// applyWithRetry applies a delta with exponential backoff retry.
+// It retries up to 3 times with 1s, 2s, 4s backoff (capped at 30s).
+// After 3 failures, it logs the error and increments consecutiveFailures.
+func (w *Writer) applyWithRetry(
+	ctx context.Context,
+	items []domain.InventoryItem,
+	deletedIDs []domain.InventoryItemID,
+	edgeAdds, edgeDels []domain.InventoryEdge,
+) {
+	if w.writer == nil {
+		return
+	}
+
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		err = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs, edgeAdds, edgeDels)
+		if err == nil {
+			w.consecutiveFailures = 0
+			return
+		}
+
+		backoff := time.Duration(1<<attempt) * time.Second
+		if backoff > 30*time.Second {
+			backoff = 30 * time.Second
+		}
+
+		if w.logger != nil {
+			w.logger.Warn("ApplyDelta failed, retrying",
+				"attempt", attempt+1,
+				"backoff", backoff,
+				"error", err)
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+	}
+
+	w.consecutiveFailures++
+	if w.logger != nil {
+		w.logger.Error("ApplyDelta failed after retries",
+			"error", err,
+			"consecutiveFailures", w.consecutiveFailures)
+	}
 }
 
 // sendResync sends a Resync call for the given GVR.
