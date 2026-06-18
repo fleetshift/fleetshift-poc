@@ -163,7 +163,7 @@ func (w *Writer) flush(
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs)
+	_ = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs, nil, nil)
 }
 
 // sendResync sends a Resync call for the given GVR.
@@ -186,5 +186,5 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items)
+	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items, nil)
 }

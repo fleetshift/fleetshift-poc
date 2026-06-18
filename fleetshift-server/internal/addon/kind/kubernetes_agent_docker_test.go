@@ -32,11 +32,11 @@ import (
 // don't need indexing.
 type mockInventoryWriter struct{}
 
-func (mockInventoryWriter) ApplyDelta(_ context.Context, _ domain.TargetID, _ []domain.InventoryItem, _ []domain.InventoryItemID) error {
+func (mockInventoryWriter) ApplyDelta(_ context.Context, _ domain.TargetID, _ []domain.InventoryItem, _ []domain.InventoryItemID, _ []domain.InventoryEdge, _ []domain.InventoryEdge) error {
 	return nil
 }
 
-func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain.InventoryType, _ []domain.InventoryItem) error {
+func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain.InventoryType, _ []domain.InventoryItem, _ []domain.InventoryEdge) error {
 	return nil
 }
 

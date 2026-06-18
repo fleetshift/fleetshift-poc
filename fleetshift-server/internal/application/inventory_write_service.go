@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -21,7 +22,7 @@ func NewInventoryWriteService(store domain.Store) *InventoryWriteService {
 }
 
 // ApplyDelta upserts and deletes inventory items in a single transaction.
-func (s *InventoryWriteService) ApplyDelta(ctx context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID) error {
+func (s *InventoryWriteService) ApplyDelta(ctx context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID, edgeAdds []domain.InventoryEdge, edgeDels []domain.InventoryEdge) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
@@ -42,19 +43,53 @@ func (s *InventoryWriteService) ApplyDelta(ctx context.Context, targetID domain.
 		}
 	}
 
+	if len(edgeAdds) > 0 {
+		if err := repo.UpsertEdges(ctx, targetID, edgeAdds); err != nil {
+			return fmt.Errorf("upsert edges: %w", err)
+		}
+	}
+
+	if len(edgeDels) > 0 {
+		if err := repo.DeleteEdges(ctx, targetID, edgeDels); err != nil {
+			return fmt.Errorf("delete edges: %w", err)
+		}
+	}
+
 	return tx.Commit()
 }
 
 // Resync atomically replaces all items for a target+type.
-func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem) error {
+func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem, edges []domain.InventoryEdge) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	if err := tx.Inventory().ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
+	repo := tx.Inventory()
+
+	if err := repo.ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
 		return fmt.Errorf("replace by target and type: %w", err)
+	}
+
+	// Scope edge replacement to the source UIDs of the resynced items.
+	if len(items) > 0 {
+		sourceUIDs := make([]string, 0, len(items))
+		for _, item := range items {
+			parts := strings.SplitN(string(item.ID()), "/", 2)
+			if len(parts) == 2 {
+				sourceUIDs = append(sourceUIDs, parts[1])
+			}
+		}
+		if err := repo.DeleteEdgesBySourceUIDs(ctx, targetID, sourceUIDs); err != nil {
+			return fmt.Errorf("delete edges for resync: %w", err)
+		}
+	}
+
+	if len(edges) > 0 {
+		if err := repo.UpsertEdges(ctx, targetID, edges); err != nil {
+			return fmt.Errorf("upsert edges for resync: %w", err)
+		}
 	}
 
 	return tx.Commit()

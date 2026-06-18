@@ -15,12 +15,15 @@ type deltaCall struct {
 	targetID   domain.TargetID
 	upserts    []domain.InventoryItem
 	deletedIDs []domain.InventoryItemID
+	edgeAdds   []domain.InventoryEdge
+	edgeDels   []domain.InventoryEdge
 }
 
 type resyncCall struct {
 	targetID      domain.TargetID
 	inventoryType domain.InventoryType
 	items         []domain.InventoryItem
+	edges         []domain.InventoryEdge
 }
 
 type mockInventoryWriter struct {
@@ -29,17 +32,17 @@ type mockInventoryWriter struct {
 	resyncs []resyncCall
 }
 
-func (m *mockInventoryWriter) ApplyDelta(_ context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID) error {
+func (m *mockInventoryWriter) ApplyDelta(_ context.Context, targetID domain.TargetID, upserts []domain.InventoryItem, deletedIDs []domain.InventoryItemID, edgeAdds []domain.InventoryEdge, edgeDels []domain.InventoryEdge) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.deltas = append(m.deltas, deltaCall{targetID: targetID, upserts: upserts, deletedIDs: deletedIDs})
+	m.deltas = append(m.deltas, deltaCall{targetID: targetID, upserts: upserts, deletedIDs: deletedIDs, edgeAdds: edgeAdds, edgeDels: edgeDels})
 	return nil
 }
 
-func (m *mockInventoryWriter) Resync(_ context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem) error {
+func (m *mockInventoryWriter) Resync(_ context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem, edges []domain.InventoryEdge) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.resyncs = append(m.resyncs, resyncCall{targetID: targetID, inventoryType: inventoryType, items: items})
+	m.resyncs = append(m.resyncs, resyncCall{targetID: targetID, inventoryType: inventoryType, items: items, edges: edges})
 	return nil
 }
 

@@ -22,7 +22,7 @@ func TestInventoryWriteService_ApplyDelta_UpsertAndDelete(t *testing.T) {
 		domain.NewObservedInventoryItem("target-a/uid-2", "v1/Service", "nginx-svc", nil, nil, "target-a", nil, nil, now),
 	}
 
-	if err := svc.ApplyDelta(ctx, "target-a", items, nil); err != nil {
+	if err := svc.ApplyDelta(ctx, "target-a", items, nil, nil, nil); err != nil {
 		t.Fatalf("ApplyDelta upsert: %v", err)
 	}
 
@@ -41,7 +41,7 @@ func TestInventoryWriteService_ApplyDelta_UpsertAndDelete(t *testing.T) {
 	tx.Rollback()
 
 	// Now delete uid-2.
-	if err := svc.ApplyDelta(ctx, "target-a", nil, []domain.InventoryItemID{"target-a/uid-2"}); err != nil {
+	if err := svc.ApplyDelta(ctx, "target-a", nil, []domain.InventoryItemID{"target-a/uid-2"}, nil, nil); err != nil {
 		t.Fatalf("ApplyDelta delete: %v", err)
 	}
 
@@ -90,7 +90,7 @@ func TestInventoryWriteService_Resync_ReplacesExisting(t *testing.T) {
 		domain.NewObservedInventoryItem("target-b/uid-b", "apps/v1/Deployment", "deploy-b", nil, nil, "target-b", nil, nil, now),
 	}
 
-	if err := svc.Resync(ctx, "target-b", "apps/v1/Deployment", newItems); err != nil {
+	if err := svc.Resync(ctx, "target-b", "apps/v1/Deployment", newItems, nil); err != nil {
 		t.Fatalf("Resync: %v", err)
 	}
 
@@ -119,5 +119,26 @@ func TestInventoryWriteService_Resync_ReplacesExisting(t *testing.T) {
 	}
 	if names["old-deploy"] {
 		t.Error("expected old-deploy to be replaced by resync")
+	}
+}
+
+func TestInventoryWriteService_ApplyDelta_Edges(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+	svc := application.NewInventoryWriteService(store)
+	ctx := context.Background()
+
+	edges := []domain.InventoryEdge{
+		{EdgeType: "ownedBy", SourceUID: "pod-1", DestUID: "rs-1", SourceKind: "Pod", DestKind: "ReplicaSet"},
+		{EdgeType: "runsOn", SourceUID: "pod-1", DestUID: "node-1", SourceKind: "Pod", DestKind: "Node"},
+	}
+
+	if err := svc.ApplyDelta(ctx, "target-a", nil, nil, edges, nil); err != nil {
+		t.Fatalf("ApplyDelta edges: %v", err)
+	}
+
+	// Delete one edge.
+	if err := svc.ApplyDelta(ctx, "target-a", nil, nil, nil, edges[:1]); err != nil {
+		t.Fatalf("ApplyDelta edge delete: %v", err)
 	}
 }

@@ -16,6 +16,16 @@ type InventoryCondition struct {
 	LastTransitionTime *time.Time
 }
 
+// InventoryEdge represents a relationship between two inventory items
+// (e.g. Pod → ReplicaSet, Pod → Node).
+type InventoryEdge struct {
+	EdgeType   string
+	SourceUID  string
+	DestUID    string
+	SourceKind string
+	DestKind   string
+}
+
 // InventoryItem is an entry in the platform's universal catalog.
 // Addons report inventory items with typed, addon-defined properties.
 // Some inventory items are also targets (e.g. clusters); most are
@@ -127,10 +137,10 @@ type InventoryWriter interface {
 	// ApplyDelta upserts and deletes inventory items in a single
 	// transaction. This is the incremental update path — the addon
 	// sends only what changed since the last delta.
-	ApplyDelta(ctx context.Context, targetID TargetID, upserts []InventoryItem, deletedIDs []InventoryItemID) error
+	ApplyDelta(ctx context.Context, targetID TargetID, upserts []InventoryItem, deletedIDs []InventoryItemID, edgeAdds []InventoryEdge, edgeDels []InventoryEdge) error
 
 	// Resync atomically replaces all items for a target+type. This
 	// is the full-sync path — used on initial list and after errors
 	// to guarantee the platform's view matches the source of truth.
-	Resync(ctx context.Context, targetID TargetID, inventoryType InventoryType, items []InventoryItem) error
+	Resync(ctx context.Context, targetID TargetID, inventoryType InventoryType, items []InventoryItem, edges []InventoryEdge) error
 }
