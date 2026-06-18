@@ -12,6 +12,7 @@ import (
 	reflectionpb "google.golang.org/grpc/reflection/grpc_reflection_v1"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -195,7 +196,7 @@ func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
 	}
 
 	// Deactivate.
-	activator.Deactivate(kindClusterServiceName)
+	activator.Deactivate(application.SchemaRegistrationID(kindClusterServiceName))
 
 	// Verify service is removed from listing.
 	services = listServices(t, conn)

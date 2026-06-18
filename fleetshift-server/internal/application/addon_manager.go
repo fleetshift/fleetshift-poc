@@ -10,30 +10,20 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+// SchemaRegistrationID is an opaque token returned by
+// [SchemaActivator.Activate] that identifies a schema registration.
+// The application layer stores it and passes it back to Deactivate;
+// it must not interpret or parse the value.
+type SchemaRegistrationID string
+
 // SchemaActivator compiles and registers the transport-layer API
 // surface for a managed resource schema. The application layer calls
 // this without knowing about proto compilation, gRPC service
 // descriptors, or HTTP muxes — the implementation lives in the
 // transport layer.
 type SchemaActivator interface {
-	Activate(ctx context.Context, schema domain.ManagedResourceSchema) (SchemaHandle, error)
-
-	// Deactivate removes all registrations (gRPC, HTTP, file
-	// descriptor, and platform refcount) for the extension identified
-	// by its gRPC service name. The activator looks up the current
-	// registration state internally — callers do not need to pass back
-	// the full [SchemaHandle].
-	Deactivate(grpcServiceName string)
-}
-
-// SchemaHandle is a receipt returned by [SchemaActivator.Activate]
-// describing what was registered. [SchemaActivator.Deactivate] only
-// needs the GRPCServiceName to tear down all registrations — the
-// activator owns the canonical state internally.
-type SchemaHandle struct {
-	GRPCServiceName string
-	HTTPPrefix      string
-	DescriptorPath  string
+	Activate(ctx context.Context, schema domain.ManagedResourceSchema) (SchemaRegistrationID, error)
+	Deactivate(id SchemaRegistrationID)
 }
 
 // DeliveryAgentRegistry manages the mapping from [domain.TargetType] to
@@ -72,8 +62,8 @@ type addonRecord struct {
 	// Keyed by resource type so connectSchemas can reconcile the new
 	// input against existing state and deactivate stale schemas.
 	// Content-change detection is handled by the SchemaActivator itself.
-	schemaHandles      map[domain.ResourceType]SchemaHandle
-	registeredTypeDefs map[domain.ResourceType]struct{}
+	schemaRegistrations map[domain.ResourceType]SchemaRegistrationID
+	registeredTypeDefs  map[domain.ResourceType]struct{}
 }
 
 // NewAddonManager creates a new manager with the given dependencies.
@@ -195,7 +185,7 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		newTypes[s.ResourceType] = struct{}{}
 	}
 
-	for rt := range rec.schemaHandles {
+	for rt := range rec.schemaRegistrations {
 		if _, stillPresent := newTypes[rt]; !stillPresent {
 			m.deactivateSchema(ctx, rec, rt)
 		}
@@ -213,9 +203,9 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 }
 
 func (m *AddonManager) deactivateSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
-	if handle, ok := rec.schemaHandles[rt]; ok {
-		m.activator.Deactivate(handle.GRPCServiceName)
-		delete(rec.schemaHandles, rt)
+	if id, ok := rec.schemaRegistrations[rt]; ok {
+		m.activator.Deactivate(id)
+		delete(rec.schemaRegistrations, rt)
 	}
 	if _, ok := rec.registeredTypeDefs[rt]; ok {
 		_ = m.typeSvc.Delete(ctx, rt)
@@ -298,7 +288,7 @@ func (m *AddonManager) Disable(ctx context.Context, addonID domain.AddonID) erro
 		rec.agent = nil
 	}
 
-	for rt := range rec.schemaHandles {
+	for rt := range rec.schemaRegistrations {
 		m.deactivateSchema(ctx, rec, rt)
 	}
 
@@ -334,16 +324,16 @@ func validateSchemaCapability(rec *addonRecord, schema domain.ManagedResourceSch
 }
 
 // activateSchema delegates to the SchemaActivator and records the
-// resulting handle and type def.
+// resulting registration ID and type def.
 func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ManagedResourceSchema) error {
-	handle, err := m.activator.Activate(ctx, schema)
+	id, err := m.activator.Activate(ctx, schema)
 	if err != nil {
 		return err
 	}
-	if rec.schemaHandles == nil {
-		rec.schemaHandles = make(map[domain.ResourceType]SchemaHandle)
+	if rec.schemaRegistrations == nil {
+		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
 	}
-	rec.schemaHandles[schema.ResourceType] = handle
+	rec.schemaRegistrations[schema.ResourceType] = id
 
 	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
 		if _, err := m.typeSvc.Create(ctx, CreateTypeInput{

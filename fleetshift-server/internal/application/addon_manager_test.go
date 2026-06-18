@@ -24,45 +24,40 @@ import (
 type recordingActivator struct {
 	mu          sync.Mutex
 	activated   []domain.ManagedResourceSchema
-	deactivated []string // gRPC service names
+	deactivated []application.SchemaRegistrationID
 	nextErr     error
 	hashes      map[string][32]byte
 }
 
-func (r *recordingActivator) Activate(_ context.Context, schema domain.ManagedResourceSchema) (application.SchemaHandle, error) {
+func (r *recordingActivator) Activate(_ context.Context, schema domain.ManagedResourceSchema) (application.SchemaRegistrationID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.nextErr != nil {
 		err := r.nextErr
 		r.nextErr = nil
-		return application.SchemaHandle{}, err
+		return "", err
 	}
 
-	grpcServiceName := schema.ProtoPackage + "." + schema.Singular + "Service"
-	handle := application.SchemaHandle{
-		GRPCServiceName: grpcServiceName,
-		HTTPPrefix:      fmt.Sprintf("/apis/%s/%s/%s", schema.APIServiceName, schema.Version, schema.CollectionID),
-		DescriptorPath:  "dynamic/" + schema.Singular + "_service.proto",
-	}
+	serviceName := schema.ProtoPackage + "." + schema.Singular + "Service"
 
 	hash := testSchemaHash(schema)
 	if r.hashes == nil {
 		r.hashes = make(map[string][32]byte)
 	}
-	if prev, ok := r.hashes[handle.GRPCServiceName]; ok && prev == hash {
-		return handle, nil
+	if prev, ok := r.hashes[serviceName]; ok && prev == hash {
+		return application.SchemaRegistrationID(serviceName), nil
 	}
 
 	r.activated = append(r.activated, schema)
-	r.hashes[handle.GRPCServiceName] = hash
-	return handle, nil
+	r.hashes[serviceName] = hash
+	return application.SchemaRegistrationID(serviceName), nil
 }
 
-func (r *recordingActivator) Deactivate(grpcServiceName string) {
+func (r *recordingActivator) Deactivate(id application.SchemaRegistrationID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.deactivated = append(r.deactivated, grpcServiceName)
-	delete(r.hashes, grpcServiceName)
+	r.deactivated = append(r.deactivated, id)
+	delete(r.hashes, string(id))
 }
 
 func (r *recordingActivator) activatedCount() int {

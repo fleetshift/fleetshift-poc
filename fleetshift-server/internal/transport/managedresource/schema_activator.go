@@ -32,13 +32,22 @@ type DynamicSchemaActivator struct {
 	Deps         Deps
 	PlatformDeps PlatformDeps
 
-	mu      sync.Mutex
-	hashes  map[string][32]byte                 // gRPC service name → content hash
-	handles map[string]application.SchemaHandle // gRPC service name → prior handle
+	mu     sync.Mutex
+	hashes map[string][32]byte               // service name → content hash
+	regs   map[string]*extensionRegistration // service name → registration state
 
 	platformRefs    map[string]int                   // platform key → refcount
 	platformHandles map[string]*platformRegistration // platform key → registration
 	extensionKeys   map[string]string                // gRPC service name → platform key
+}
+
+// extensionRegistration tracks the transport details for one activated
+// extension schema. Purely internal — the application layer only sees
+// an opaque [application.SchemaRegistrationID].
+type extensionRegistration struct {
+	grpcServiceName string
+	httpPrefix      string
+	descriptorPath  string
 }
 
 // platformRegistration tracks what was registered for a platform
@@ -53,16 +62,16 @@ var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
 
 // Activate compiles the schema's inline proto, builds a dynamic gRPC
 // service, and registers it in the mux. If the schema is already active
-// with identical content, the existing handle is returned without
-// recompilation. If the content has changed, the mux entry is
+// with identical content, the existing registration ID is returned
+// without recompilation. If the content has changed, the mux entry is
 // atomically replaced.
-func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ManagedResourceSchema) (application.SchemaHandle, error) {
+func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ManagedResourceSchema) (application.SchemaRegistrationID, error) {
 	if len(schema.ProtoFiles) == 0 {
-		return application.SchemaHandle{}, fmt.Errorf("schema for %q has no proto files", schema.ResourceType)
+		return "", fmt.Errorf("schema for %q has no proto files", schema.ResourceType)
 	}
 
-	// Compute handle and content hash before expensive compilation so
-	// we can short-circuit when the schema is unchanged.
+	// Compute registration identity and content hash before expensive
+	// compilation so we can short-circuit when the schema is unchanged.
 	serviceName := schema.ProtoPackage + "." + schema.Singular + "Service"
 	pkgPath := strings.ReplaceAll(schema.ProtoPackage, ".", "/")
 	lower := strings.ToLower(schema.Singular[:1]) + schema.Singular[1:]
@@ -73,27 +82,27 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		platformKey = PlatformServiceName + "/" + schema.Version + "/" + schema.CollectionID
 	}
 
-	handle := application.SchemaHandle{
-		GRPCServiceName: serviceName,
-		HTTPPrefix:      canonicalPrefix,
-		DescriptorPath:  descriptorPath,
+	reg := &extensionRegistration{
+		grpcServiceName: serviceName,
+		httpPrefix:      canonicalPrefix,
+		descriptorPath:  descriptorPath,
 	}
 	hash := schemaContentHash(schema)
+	id := application.SchemaRegistrationID(serviceName)
 
 	a.mu.Lock()
 	if a.hashes == nil {
 		a.hashes = make(map[string][32]byte)
 	}
 	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
-		h := a.handles[serviceName]
 		a.mu.Unlock()
-		return h, nil
+		return id, nil
 	}
 	a.mu.Unlock()
 
 	entryFile, err := resolveEntryFile(schema)
 	if err != nil {
-		return application.SchemaHandle{}, err
+		return "", err
 	}
 
 	specDesc, err := CompileInline(
@@ -103,7 +112,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		protoreflect.FullName(schema.SpecMessage),
 	)
 	if err != nil {
-		return application.SchemaHandle{}, fmt.Errorf("compile proto: %w", err)
+		return "", fmt.Errorf("compile proto: %w", err)
 	}
 
 	cfg := &ResourceTypeConfig{
@@ -122,7 +131,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 
 	svc, err := Build(cfg, a.Deps)
 	if err != nil {
-		return application.SchemaHandle{}, fmt.Errorf("build service: %w", err)
+		return "", fmt.Errorf("build service: %w", err)
 	}
 
 	a.mu.Lock()
@@ -131,43 +140,43 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	// Re-check after compilation in case a concurrent Activate completed
 	// between our initial check and now.
 	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
-		return a.handles[serviceName], nil
+		return id, nil
 	}
 
-	if a.handles == nil {
-		a.handles = make(map[string]application.SchemaHandle)
+	if a.regs == nil {
+		a.regs = make(map[string]*extensionRegistration)
 	}
 
 	// Either new or changed — register or atomically replace.
-	oldHandle, alreadyRegistered := a.handles[serviceName]
+	oldReg, alreadyRegistered := a.regs[serviceName]
 	if alreadyRegistered {
 		a.GRPCMux.Replace(svc)
 		if a.HTTPMux != nil {
-			a.HTTPMux.Replace(svc, oldHandle.HTTPPrefix)
+			a.HTTPMux.Replace(svc, oldReg.httpPrefix)
 		}
 		if a.FileRegistry != nil {
-			if oldHandle.DescriptorPath != handle.DescriptorPath {
-				a.FileRegistry.Deregister(oldHandle.DescriptorPath)
+			if oldReg.descriptorPath != reg.descriptorPath {
+				a.FileRegistry.Deregister(oldReg.descriptorPath)
 			}
 			a.FileRegistry.Replace(svc.Descriptors.File)
 		}
 	} else {
 		if err := a.GRPCMux.Register(svc); err != nil {
-			return application.SchemaHandle{}, fmt.Errorf("register gRPC: %w", err)
+			return "", fmt.Errorf("register gRPC: %w", err)
 		}
 		if a.HTTPMux != nil {
 			if err := a.HTTPMux.Register(svc); err != nil {
-				a.GRPCMux.Deregister(handle.GRPCServiceName)
-				return application.SchemaHandle{}, fmt.Errorf("register HTTP: %w", err)
+				a.GRPCMux.Deregister(reg.grpcServiceName)
+				return "", fmt.Errorf("register HTTP: %w", err)
 			}
 		}
 		if a.FileRegistry != nil {
 			if err := a.FileRegistry.Register(svc.Descriptors.File); err != nil {
-				a.GRPCMux.Deregister(handle.GRPCServiceName)
+				a.GRPCMux.Deregister(reg.grpcServiceName)
 				if a.HTTPMux != nil {
-					a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
+					a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
 				}
-				return application.SchemaHandle{}, fmt.Errorf("register file descriptor: %w", err)
+				return "", fmt.Errorf("register file descriptor: %w", err)
 			}
 		}
 	}
@@ -193,23 +202,23 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 					a.platformRefs[platformKey]--
 					delete(a.extensionKeys, serviceName)
 					if !alreadyRegistered {
-						a.GRPCMux.Deregister(handle.GRPCServiceName)
+						a.GRPCMux.Deregister(reg.grpcServiceName)
 						if a.HTTPMux != nil {
-							a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
+							a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
 						}
 						if a.FileRegistry != nil {
-							a.FileRegistry.Deregister(handle.DescriptorPath)
+							a.FileRegistry.Deregister(reg.descriptorPath)
 						}
 					}
-					return application.SchemaHandle{}, fmt.Errorf("register platform service: %w", err)
+					return "", fmt.Errorf("register platform service: %w", err)
 				}
 			}
 		}
 	}
 
 	a.hashes[serviceName] = hash
-	a.handles[serviceName] = handle
-	return handle, nil
+	a.regs[serviceName] = reg
+	return id, nil
 }
 
 func (a *DynamicSchemaActivator) initPlatformMaps() {
@@ -313,35 +322,33 @@ func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
 }
 
 // Deactivate removes the gRPC, HTTP, and file descriptor registrations
-// for the extension identified by its gRPC service name, and clears the
-// cached content hash and handle. If this was the last extension
-// referencing a platform service, the platform service is deregistered
-// as well.
-//
-// The activator looks up all registration details from its internal
-// state — callers only need to provide the stable service name.
-func (a *DynamicSchemaActivator) Deactivate(grpcServiceName string) {
+// for the extension identified by its registration ID, and clears the
+// cached content hash. If this was the last extension referencing a
+// platform service, the platform service is deregistered as well.
+func (a *DynamicSchemaActivator) Deactivate(id application.SchemaRegistrationID) {
+	serviceName := string(id)
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	handle, ok := a.handles[grpcServiceName]
+	reg, ok := a.regs[serviceName]
 	if !ok {
 		return
 	}
 
-	a.GRPCMux.Deregister(handle.GRPCServiceName)
+	a.GRPCMux.Deregister(reg.grpcServiceName)
 	if a.HTTPMux != nil {
-		a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
+		a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
 	}
 	if a.FileRegistry != nil {
-		a.FileRegistry.Deregister(handle.DescriptorPath)
+		a.FileRegistry.Deregister(reg.descriptorPath)
 	}
 
-	delete(a.hashes, grpcServiceName)
-	delete(a.handles, grpcServiceName)
+	delete(a.hashes, serviceName)
+	delete(a.regs, serviceName)
 
-	if platformKey, hasPlatform := a.extensionKeys[grpcServiceName]; hasPlatform {
-		delete(a.extensionKeys, grpcServiceName)
+	if platformKey, hasPlatform := a.extensionKeys[serviceName]; hasPlatform {
+		delete(a.extensionKeys, serviceName)
 		a.decrementPlatform(platformKey)
 	}
 }

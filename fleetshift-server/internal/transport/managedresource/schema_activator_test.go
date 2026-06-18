@@ -106,16 +106,13 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	activator, mux := newActivator(t)
 
 	schema := kindaddon.Schema()
-	handle, err := activator.Activate(context.Background(), schema)
+	id, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	if handle.GRPCServiceName != "kind.fleetshift.v1.ClusterService" {
-		t.Errorf("handle.GRPCServiceName = %q, want kind.fleetshift.v1.ClusterService", handle.GRPCServiceName)
-	}
-	if handle.HTTPPrefix != "/apis/kind.fleetshift.io/v1/clusters" {
-		t.Errorf("handle.HTTPPrefix = %q, want /apis/kind.fleetshift.io/v1/clusters", handle.HTTPPrefix)
+	if id != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("registration ID = %q, want kind.fleetshift.v1.ClusterService", id)
 	}
 
 	info := mux.ServiceInfo()
@@ -132,12 +129,12 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 	activator, mux := newActivator(t)
 
 	schema := kindaddon.Schema()
-	handle, err := activator.Activate(context.Background(), schema)
+	id, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	activator.Deactivate(handle.GRPCServiceName)
+	activator.Deactivate(id)
 
 	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; ok {
 		t.Error("expected ClusterService removed from mux after Deactivate")
@@ -171,12 +168,12 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 	activator, mux := newActivator(t)
 
 	schema := kindaddon.Schema()
-	h1, err := activator.Activate(context.Background(), schema)
+	id1, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("first Activate: %v", err)
 	}
 
-	hash1, _ := activator.ContentHash(h1.GRPCServiceName)
+	hash1, _ := activator.ContentHash(string(id1))
 
 	schema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
@@ -184,16 +181,16 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 	schema.EntryFile = "cluster_spec.proto"
 	schema.SpecMessage = "ClusterSpecV2"
 
-	h2, err := activator.Activate(context.Background(), schema)
+	id2, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("second Activate: %v", err)
 	}
 
-	if h2.GRPCServiceName != h1.GRPCServiceName {
-		t.Errorf("service name changed: %q vs %q", h1.GRPCServiceName, h2.GRPCServiceName)
+	if id2 != id1 {
+		t.Errorf("registration ID changed: %q vs %q", id1, id2)
 	}
 
-	hash2, _ := activator.ContentHash(h2.GRPCServiceName)
+	hash2, _ := activator.ContentHash(string(id2))
 	if hash1 == hash2 {
 		t.Error("expected content hash to change after schema update")
 	}
@@ -207,18 +204,18 @@ func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	activator, mux := newActivator(t)
 
 	schema := kindaddon.Schema()
-	handle, err := activator.Activate(context.Background(), schema)
+	id, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	activator.Deactivate(handle.GRPCServiceName)
+	activator.Deactivate(id)
 
-	h2, err := activator.Activate(context.Background(), schema)
+	id2, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("re-Activate: %v", err)
 	}
-	if h2.GRPCServiceName != handle.GRPCServiceName {
-		t.Errorf("service name changed: %q vs %q", handle.GRPCServiceName, h2.GRPCServiceName)
+	if id2 != id {
+		t.Errorf("registration ID changed: %q vs %q", id, id2)
 	}
 	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; !ok {
 		t.Error("expected ClusterService in mux after re-activation")
@@ -308,12 +305,12 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 	env := newActivatorWithHTTP(t)
 
 	schema := kindaddon.Schema()
-	handle, err := env.activator.Activate(context.Background(), schema)
+	id, err := env.activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	env.activator.Deactivate(handle.GRPCServiceName)
+	env.activator.Deactivate(id)
 
 	code := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code != http.StatusNotFound {
@@ -679,7 +676,7 @@ func TestDualRegistration(t *testing.T) {
 	activator, mux := newActivatorWithPlatform(t)
 
 	schema := kindaddon.Schema()
-	handle, err := activator.Activate(context.Background(), schema)
+	id, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -696,8 +693,8 @@ func TestDualRegistration(t *testing.T) {
 		t.Error("expected PlatformClusterService in mux after Activate")
 	}
 
-	if handle.GRPCServiceName != "kind.fleetshift.v1.ClusterService" {
-		t.Errorf("handle.GRPCServiceName = %q, want kind.fleetshift.v1.ClusterService", handle.GRPCServiceName)
+	if id != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("registration ID = %q, want kind.fleetshift.v1.ClusterService", id)
 	}
 }
 
@@ -707,7 +704,7 @@ func TestPlatformRefCounting(t *testing.T) {
 	const platformSvc = "fleetshift.v1.PlatformClusterService"
 
 	// Step 1: activate Kind (collection: "clusters")
-	kindHandle, err := activator.Activate(ctx, kindaddon.Schema())
+	kindID, err := activator.Activate(ctx, kindaddon.Schema())
 	if err != nil {
 		t.Fatalf("Activate Kind: %v", err)
 	}
@@ -716,7 +713,7 @@ func TestPlatformRefCounting(t *testing.T) {
 	}
 
 	// Step 2: activate GCP HCP (same collection: "clusters")
-	gcpHandle, err := activator.Activate(ctx, gcphcpaddon.Schema("gcphcp-test"))
+	gcpID, err := activator.Activate(ctx, gcphcpaddon.Schema("gcphcp-test"))
 	if err != nil {
 		t.Fatalf("Activate GCPHCP: %v", err)
 	}
@@ -727,13 +724,13 @@ func TestPlatformRefCounting(t *testing.T) {
 	}
 
 	// Step 4: deactivate Kind → platform still alive (refcount 2→1)
-	activator.Deactivate(kindHandle.GRPCServiceName)
+	activator.Deactivate(kindID)
 	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
 		t.Fatal("platform service should survive after deactivating one of two extensions")
 	}
 
 	// Step 5: deactivate GCP HCP → platform removed (refcount 1→0)
-	activator.Deactivate(gcpHandle.GRPCServiceName)
+	activator.Deactivate(gcpID)
 
 	// Step 6: platform no longer routable
 	if _, ok := mux.ServiceInfo()[platformSvc]; ok {
@@ -790,7 +787,7 @@ func TestPlatformReflection(t *testing.T) {
 	}
 
 	schema := kindaddon.Schema()
-	handle, err := activator.Activate(context.Background(), schema)
+	id, err := activator.Activate(context.Background(), schema)
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
@@ -804,7 +801,7 @@ func TestPlatformReflection(t *testing.T) {
 		t.Errorf("descriptor path = %q, want %q", fd.Path(), platDescPath)
 	}
 
-	activator.Deactivate(handle.GRPCServiceName)
+	activator.Deactivate(id)
 
 	if _, err := fileReg.FindFileByPath(platDescPath); err == nil {
 		t.Error("platform file descriptor should not be resolvable after Deactivate")
