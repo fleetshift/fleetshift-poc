@@ -319,3 +319,434 @@ func queryEdgesTo(t *testing.T, store domain.Store, targetID domain.TargetID, de
 	}
 	return edges
 }
+
+// parseObserved unmarshals the Observed field of an inventory item.
+func parseObserved(t *testing.T, item domain.InventoryItem) map[string]any {
+	t.Helper()
+	var m map[string]any
+	if err := json.Unmarshal(item.Observed(), &m); err != nil {
+		t.Fatalf("unmarshal observed for %s: %v", item.ID(), err)
+	}
+	return m
+}
+
+// uidFromItemID extracts the UID from an inventory item ID of the form "targetID/UID".
+func uidFromItemID(id domain.InventoryItemID) string {
+	parts := strings.SplitN(string(id), "/", 2)
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return string(id)
+}
+
+// findUID returns the UID for an item matching the given type and name.
+func findUID(t *testing.T, items []domain.InventoryItem, invType domain.InventoryType, name string) string {
+	t.Helper()
+	for _, item := range items {
+		if item.Type() == invType && item.Name() == name {
+			return uidFromItemID(item.ID())
+		}
+	}
+	t.Fatalf("item not found: type=%s name=%s", invType, name)
+	return ""
+}
+
+// awaitBootstrap waits for v1/Node to appear in inventory.
+func awaitBootstrap(t *testing.T, f *e2eFixture) {
+	t.Helper()
+	awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Node" {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second)
+}
+
+// TestE2E_ClusterBootstrap verifies that cluster bootstrap inventory is indexed.
+func TestE2E_ClusterBootstrap(t *testing.T) {
+	f := setupE2E(t)
+
+	// Wait for nodes to appear in inventory.
+	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Node" {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second)
+
+	// Verify nodes have enriched fields.
+	var foundNode bool
+	for _, item := range items {
+		if item.Type() != "v1/Node" {
+			continue
+		}
+		foundNode = true
+		observed := parseObserved(t, item)
+		if _, ok := observed["kubeletVersion"]; !ok {
+			t.Error("node missing kubeletVersion")
+		}
+		if _, ok := observed["role"]; !ok {
+			t.Error("node missing role")
+		}
+		if len(item.Conditions()) == 0 {
+			t.Error("node missing conditions")
+		}
+	}
+	if !foundNode {
+		t.Fatal("no Node inventory items found")
+	}
+
+	// Verify namespaces.
+	nsNames := map[string]bool{}
+	for _, item := range items {
+		if item.Type() == "v1/Namespace" {
+			nsNames[item.Name()] = true
+		}
+	}
+	for _, ns := range []string{"default", "kube-system", "kube-public"} {
+		if !nsNames[ns] {
+			t.Errorf("missing namespace %q", ns)
+		}
+	}
+}
+
+// TestE2E_DeployWorkload verifies deploying a workload via the platform pipeline.
+func TestE2E_DeployWorkload(t *testing.T) {
+	f := setupE2E(t)
+
+	// Wait for initial indexing to settle.
+	awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Node" {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	// Deploy nginx via the platform pipeline.
+	manifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "apps/v1",
+		"kind": "Deployment",
+		"metadata": {"name": "nginx-e2e", "namespace": "%s"},
+		"spec": {
+			"replicas": 1,
+			"selector": {"matchLabels": {"app": "nginx-e2e"}},
+			"template": {
+				"metadata": {"labels": {"app": "nginx-e2e"}},
+				"spec": {"containers": [{"name": "nginx", "image": "nginx:alpine"}]}
+			}
+		}
+	}`, f.namespace))
+
+	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "nginx-e2e-deploy",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{
+				ResourceType: kubeaddon.ManifestResourceType,
+				Raw:          manifest,
+			}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{f.targetID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create deployment: %v", err)
+	}
+
+	// Wait for Pod to appear (proves Deployment → ReplicaSet → Pod chain was indexed).
+	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Pod" && item.Name() != "" && strings.HasPrefix(item.Name(), "nginx-e2e-") {
+				observed := map[string]any{}
+				_ = json.Unmarshal(item.Observed(), &observed)
+				if phase, _ := observed["phase"].(string); phase == "Running" {
+					return true
+				}
+			}
+		}
+		return false
+	}, 90*time.Second)
+
+	// Find the Pod, ReplicaSet, Deployment UIDs.
+	var podUID, rsUID, deployUID, nodeUID string
+	for _, item := range items {
+		switch {
+		case item.Type() == "v1/Pod" && strings.HasPrefix(item.Name(), "nginx-e2e-"):
+			podUID = uidFromItemID(item.ID())
+		case item.Type() == "apps/v1/ReplicaSet" && strings.HasPrefix(item.Name(), "nginx-e2e-"):
+			rsUID = uidFromItemID(item.ID())
+		case item.Type() == "apps/v1/Deployment" && item.Name() == "nginx-e2e":
+			deployUID = uidFromItemID(item.ID())
+		}
+	}
+
+	if podUID == "" || rsUID == "" || deployUID == "" {
+		t.Fatalf("missing resources: pod=%q rs=%q deploy=%q", podUID, rsUID, deployUID)
+	}
+
+	// Verify ownedBy edges: Pod→RS, RS→Deployment.
+	podEdges := queryEdgesFrom(t, f.harness.Store, f.targetID, podUID)
+	hasOwnedByRS := false
+	for _, e := range podEdges {
+		if e.EdgeType == "ownedBy" && e.DestUID == rsUID {
+			hasOwnedByRS = true
+		}
+		if e.EdgeType == "runsOn" {
+			nodeUID = e.DestUID
+		}
+	}
+	if !hasOwnedByRS {
+		t.Error("missing ownedBy edge: Pod→ReplicaSet")
+	}
+	if nodeUID == "" {
+		t.Error("missing runsOn edge: Pod→Node")
+	}
+
+	rsEdges := queryEdgesFrom(t, f.harness.Store, f.targetID, rsUID)
+	hasOwnedByDeploy := false
+	for _, e := range rsEdges {
+		if e.EdgeType == "ownedBy" && e.DestUID == deployUID {
+			hasOwnedByDeploy = true
+		}
+	}
+	if !hasOwnedByDeploy {
+		t.Error("missing ownedBy edge: ReplicaSet→Deployment")
+	}
+}
+
+// TestE2E_PodAttachmentEdges verifies pod attachment edges (ConfigMap, Secret).
+func TestE2E_PodAttachmentEdges(t *testing.T) {
+	f := setupE2E(t)
+	awaitBootstrap(t, f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	cmManifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "v1", "kind": "ConfigMap",
+		"metadata": {"name": "e2e-cm", "namespace": "%s"},
+		"data": {"key": "value"}
+	}`, f.namespace))
+
+	secretManifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "v1", "kind": "Secret",
+		"metadata": {"name": "e2e-secret", "namespace": "%s"},
+		"stringData": {"password": "test"}
+	}`, f.namespace))
+
+	podManifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": {"name": "e2e-attach-pod", "namespace": "%s"},
+		"spec": {
+			"containers": [{
+				"name": "busybox", "image": "busybox:latest",
+				"command": ["sleep", "3600"],
+				"env": [{"name": "SECRET_VAL", "valueFrom": {"secretKeyRef": {"name": "e2e-secret", "key": "password"}}}]
+			}],
+			"volumes": [{"name": "cm-vol", "configMap": {"name": "e2e-cm"}}]
+		}
+	}`, f.namespace))
+
+	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "attach-deploy",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{ResourceType: kubeaddon.ManifestResourceType, Raw: cmManifest},
+				{ResourceType: kubeaddon.ManifestResourceType, Raw: secretManifest},
+				{ResourceType: kubeaddon.ManifestResourceType, Raw: podManifest},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{f.targetID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create deployment: %v", err)
+	}
+
+	// Wait for the pod to appear.
+	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Pod" && item.Name() == "e2e-attach-pod" {
+				return true
+			}
+		}
+		return false
+	}, 90*time.Second)
+
+	podUID := findUID(t, items, "v1/Pod", "e2e-attach-pod")
+	cmUID := findUID(t, items, "v1/ConfigMap", "e2e-cm")
+	secretUID := findUID(t, items, "v1/Secret", "e2e-secret")
+
+	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, podUID)
+	hasCM, hasSecret := false, false
+	for _, e := range edges {
+		if e.EdgeType == "attachedTo" && e.DestUID == cmUID {
+			hasCM = true
+		}
+		if e.EdgeType == "attachedTo" && e.DestUID == secretUID {
+			hasSecret = true
+		}
+	}
+	if !hasCM {
+		t.Error("missing attachedTo edge: Pod→ConfigMap")
+	}
+	if !hasSecret {
+		t.Error("missing attachedTo edge: Pod→Secret")
+	}
+}
+
+// TestE2E_ServiceSelectorEdges verifies service selector edges to pods.
+func TestE2E_ServiceSelectorEdges(t *testing.T) {
+	f := setupE2E(t)
+	awaitBootstrap(t, f)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+
+	deployManifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "apps/v1", "kind": "Deployment",
+		"metadata": {"name": "e2e-svc-deploy", "namespace": "%s"},
+		"spec": {
+			"replicas": 1,
+			"selector": {"matchLabels": {"app": "e2e-svc"}},
+			"template": {
+				"metadata": {"labels": {"app": "e2e-svc"}},
+				"spec": {"containers": [{"name": "nginx", "image": "nginx:alpine"}]}
+			}
+		}
+	}`, f.namespace))
+
+	svcManifest := json.RawMessage(fmt.Sprintf(`{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": {"name": "e2e-svc", "namespace": "%s"},
+		"spec": {
+			"selector": {"app": "e2e-svc"},
+			"ports": [{"port": 80, "targetPort": 80}]
+		}
+	}`, f.namespace))
+
+	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
+		ID: "svc-deploy",
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type: domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{
+				{ResourceType: kubeaddon.ManifestResourceType, Raw: deployManifest},
+				{ResourceType: kubeaddon.ManifestResourceType, Raw: svcManifest},
+			},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{f.targetID},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Create deployment: %v", err)
+	}
+
+	// Wait for pod to be running.
+	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/Pod" && strings.HasPrefix(item.Name(), "e2e-svc-deploy-") {
+				observed := map[string]any{}
+				_ = json.Unmarshal(item.Observed(), &observed)
+				if phase, _ := observed["phase"].(string); phase == "Running" {
+					return true
+				}
+			}
+		}
+		return false
+	}, 90*time.Second)
+
+	svcUID := findUID(t, items, "v1/Service", "e2e-svc")
+	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, svcUID)
+	hasSelects := false
+	for _, e := range edges {
+		if e.EdgeType == "selects" && e.DestKind == "Pod" {
+			hasSelects = true
+		}
+	}
+	if !hasSelects {
+		t.Error("missing selects edge: Service→Pod")
+	}
+}
+
+// TestE2E_PVCPVEdge verifies PVC→PV attachment edge.
+func TestE2E_PVCPVEdge(t *testing.T) {
+	f := setupE2E(t)
+	awaitBootstrap(t, f)
+
+	ctx := context.Background()
+	pvGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
+	pvcGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+	pv := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolume",
+		"metadata": map[string]any{"name": "e2e-pv"},
+		"spec": map[string]any{
+			"capacity":         map[string]any{"storage": "1Gi"},
+			"accessModes":      []any{"ReadWriteOnce"},
+			"hostPath":         map[string]any{"path": "/tmp/e2e-pv"},
+			"storageClassName": "manual",
+		},
+	}}
+	_, err := f.dynClient.Resource(pvGVR).Create(ctx, pv, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create PV: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = f.dynClient.Resource(pvGVR).Delete(context.Background(), "e2e-pv", metav1.DeleteOptions{})
+	})
+
+	pvc := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+		"metadata": map[string]any{"name": "e2e-pvc", "namespace": f.namespace},
+		"spec": map[string]any{
+			"accessModes":      []any{"ReadWriteOnce"},
+			"resources":        map[string]any{"requests": map[string]any{"storage": "1Gi"}},
+			"volumeName":       "e2e-pv",
+			"storageClassName": "manual",
+		},
+	}}
+	_, err = f.dynClient.Resource(pvcGVR).Namespace(f.namespace).Create(ctx, pvc, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("create PVC: %v", err)
+	}
+
+	// Wait for PVC to appear in inventory.
+	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		for _, item := range items {
+			if item.Type() == "v1/PersistentVolumeClaim" && item.Name() == "e2e-pvc" {
+				return true
+			}
+		}
+		return false
+	}, 60*time.Second)
+
+	pvcUID := findUID(t, items, "v1/PersistentVolumeClaim", "e2e-pvc")
+	pvUID := findUID(t, items, "v1/PersistentVolume", "e2e-pv")
+
+	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, pvcUID)
+	hasPVEdge := false
+	for _, e := range edges {
+		if e.EdgeType == "attachedTo" && e.DestUID == pvUID {
+			hasPVEdge = true
+		}
+	}
+	if !hasPVEdge {
+		t.Error("missing attachedTo edge: PVC→PV")
+	}
+}
