@@ -24,6 +24,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -809,3 +810,465 @@ func TestPlatformReflection(t *testing.T) {
 }
 
 var _ application.SchemaActivator = (*managedresource.DynamicSchemaActivator)(nil)
+
+// ---------------------------------------------------------------------------
+// Cross-API contract: extension create → platform API visibility
+// ---------------------------------------------------------------------------
+
+type activatorPlatformResourceEnv struct {
+	activator *managedresource.DynamicSchemaActivator
+	conn      *grpc.ClientConn
+	typeSvc   *application.ManagedResourceTypeService
+	store     domain.Store
+}
+
+// newActivatorWithResourcesAndPlatform creates an activator wired with
+// both a ManagedResourceService and a PlatformResourceService backed
+// by the same SQLite store. This lets tests exercise the cross-API
+// contract: creating a managed resource through the extension gRPC
+// service should make it visible through the platform resource API.
+func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourceEnv {
+	t.Helper()
+
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	recordingAgent := &sqlite.RecordingDeliveryService{
+		Store: store,
+		Now:   func() time.Time { return time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC) },
+	}
+	router := delivery.NewRoutingDeliveryService()
+	router.Register(widgetTargetType, recordingAgent)
+
+	reg := &memworkflow.Registry{}
+	recordingAgent.Reporter = application.NewDeliveryReportService(store, reg)
+	orchWf, err := reg.RegisterOrchestration(domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+	))
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+	createWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
+		Store: store, Orchestration: orchWf,
+	})
+	if err != nil {
+		t.Fatalf("RegisterCreateManagedResource: %v", err)
+	}
+	cleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store})
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
+	}
+	deleteWf, err := reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
+		Store: store, Orchestration: orchWf, Cleanup: cleanupWf,
+	})
+	if err != nil {
+		t.Fatalf("RegisterDeleteManagedResource: %v", err)
+	}
+
+	resourceSvc := &application.ManagedResourceService{
+		Store: store, CreateWF: createWf, DeleteWF: deleteWf,
+	}
+	platformResourceSvc := &application.PlatformResourceService{Store: store}
+
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("protovalidate.New: %v", err)
+	}
+
+	grpcMux := managedresource.NewDynamicServiceMux()
+
+	lis := bufconn.Listen(1 << 20)
+	srv := grpc.NewServer(grpc.UnknownServiceHandler(grpcMux.Handle))
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.GracefulStop)
+
+	conn, err := grpc.NewClient("passthrough:///bufconn",
+		grpc.WithContextDialer(func(ctx context.Context, _ string) (net.Conn, error) {
+			return lis.DialContext(ctx)
+		}),
+		grpc.WithTransportCredentials(insecure.NewCredentials()),
+	)
+	if err != nil {
+		t.Fatalf("dial bufconn: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	targetSvc := &application.TargetService{Store: store}
+	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "widget-addon", Type: widgetTargetType, Name: "Widget Addon",
+		AcceptedResourceTypes: []domain.ResourceType{"widgets"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+
+	return activatorPlatformResourceEnv{
+		activator: &managedresource.DynamicSchemaActivator{
+			GRPCMux: grpcMux,
+			Deps: managedresource.Deps{
+				Resources: resourceSvc,
+				Validator: validator,
+			},
+			PlatformDeps: managedresource.PlatformDeps{
+				Resources: platformResourceSvc,
+			},
+		},
+		conn:    conn,
+		typeSvc: &application.ManagedResourceTypeService{Store: store},
+		store:   store,
+	}
+}
+
+// --- Shared helpers for cross-API contract tests ---
+
+func platformTestWidgetSchema() domain.ManagedResourceSchema {
+	return domain.ManagedResourceSchema{
+		ResourceType:   "widgets",
+		APIServiceName: "fleetshift.io",
+		ProtoPackage:   "fleetshift.v1",
+		Version:        "v1",
+		CollectionID:   "widgets",
+		Singular:       "Widget",
+		Plural:         "Widgets",
+		SpecMessage:    "WidgetSpec",
+		ProtoFiles: map[string]string{
+			"widget_spec.proto": `syntax = "proto3";
+message WidgetSpec {
+  string name = 1;
+}`,
+		},
+		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+	}
+}
+
+func platformWidgetDescs(t *testing.T) *managedresource.PlatformServiceDescriptors {
+	t.Helper()
+	descs, err := managedresource.BuildPlatformServiceDescriptors(
+		&managedresource.PlatformResourceConfig{
+			CollectionConfig: managedresource.CollectionConfig{
+				Version:      "v1",
+				CollectionID: "widgets",
+				Singular:     "Widget",
+				Plural:       "Widgets",
+			},
+		})
+	if err != nil {
+		t.Fatalf("BuildPlatformServiceDescriptors: %v", err)
+	}
+	return descs
+}
+
+// createWidgetViaExtension sends a CreateWidget gRPC request through the
+// extension service and returns the extension descriptors for follow-up
+// requests (e.g. delete).
+func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.ClientConn, schema domain.ManagedResourceSchema, id string) *managedresource.ServiceDescriptors {
+	t.Helper()
+	descs := widgetDescriptors(t, schema)
+
+	req := dynamicpb.NewMessage(descs.CreateRequest)
+	req.Set(descs.CreateRequest.Fields().ByNumber(1),
+		protoreflect.ValueOfString(id))
+	resource := dynamicpb.NewMessage(descs.Resource)
+	spec := dynamicpb.NewMessage(descs.Spec)
+	spec.Set(descs.Spec.Fields().ByName("name"),
+		protoreflect.ValueOfString("test-"+id))
+	resource.Set(descs.Resource.Fields().ByName("spec"),
+		protoreflect.ValueOfMessage(spec))
+	req.Set(descs.CreateRequest.Fields().ByNumber(2),
+		protoreflect.ValueOfMessage(resource))
+
+	resp := dynamicpb.NewMessage(descs.Resource)
+	if err := conn.Invoke(ctx,
+		"/fleetshift.v1.WidgetService/CreateWidget", req, resp); err != nil {
+		t.Fatalf("CreateWidget(%s): %v", id, err)
+	}
+	return descs
+}
+
+func awaitFulfillmentActive(ctx context.Context, t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName) {
+	t.Helper()
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		view, err := tx.ManagedResources().GetView(ctx, rt, name)
+		tx.Rollback()
+		if err == nil && view.Fulfillment.State() == domain.FulfillmentStateActive {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s/%s fulfillment to reach active", rt, name)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
+// --- Cross-API contract tests ---
+
+// TestExtensionCreate_VisibleInPlatformAPI exercises the transport-level
+// contract that creating a managed resource through an addon's extension
+// gRPC service makes it visible in the platform resource API with the
+// correct representation metadata.
+func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
+	env := newActivatorWithResourcesAndPlatform(t)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
+	defer cancel()
+
+	schema := platformTestWidgetSchema()
+
+	// Register the widget type with API identity metadata so the
+	// create workflow claims a platform resource identity.
+	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType:   "widgets",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Signature:      domain.Signature{},
+		APIServiceName: "fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "widgets",
+	}); err != nil {
+		t.Fatalf("register widget type: %v", err)
+	}
+
+	if _, err := env.activator.Activate(ctx, schema); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
+
+	platDescs := platformWidgetDescs(t)
+
+	// Get via the platform API.
+	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
+	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("widgets/widget-1"))
+	getResp := dynamicpb.NewMessage(platDescs.Resource)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp); err != nil {
+		t.Fatalf("GetPlatformWidget: %v", err)
+	}
+
+	repsField := platDescs.Resource.Fields().ByName("representations")
+	repList := getResp.Get(repsField).List()
+	if repList.Len() != 1 {
+		t.Fatalf("representations len = %d, want 1", repList.Len())
+	}
+
+	rep := repList.Get(0).Message()
+	repDesc := repsField.Message()
+	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "fleetshift.io" {
+		t.Errorf("representation service_name = %q, want %q", got, "fleetshift.io")
+	}
+	if got := rep.Get(repDesc.Fields().ByName("version")).String(); got != "v1" {
+		t.Errorf("representation version = %q, want %q", got, "v1")
+	}
+	roles := rep.Get(repDesc.Fields().ByName("roles")).List()
+	if roles.Len() != 1 || roles.Get(0).String() != string(domain.RepresentationRoleManaged) {
+		var got []string
+		for i := range roles.Len() {
+			got = append(got, roles.Get(i).String())
+		}
+		t.Errorf("representation roles = %v, want [managed]", got)
+	}
+
+	// Also verify the resource appears in the platform List.
+	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
+	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
+		t.Fatalf("ListPlatformWidgets: %v", err)
+	}
+
+	listField := platDescs.ListResponse.Fields().ByNumber(1)
+	resourceList := listResp.Get(listField).List()
+	if resourceList.Len() != 1 {
+		t.Fatalf("ListPlatformWidgets returned %d resources, want 1", resourceList.Len())
+	}
+
+	listedName := resourceList.Get(0).Message().Get(platDescs.Resource.Fields().ByName("name")).String()
+	if listedName != "widgets/widget-1" {
+		t.Errorf("listed name = %q, want %q", listedName, "widgets/widget-1")
+	}
+}
+
+// TestExtensionDelete_TombstonesPlatformRepresentation verifies that
+// deleting a managed resource through the extension gRPC service
+// tombstones its representation in the platform resource API. The
+// platform resource itself survives — only the active representation
+// list becomes empty.
+func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
+	env := newActivatorWithResourcesAndPlatform(t)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
+	defer cancel()
+
+	schema := platformTestWidgetSchema()
+
+	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType:   "widgets",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Signature:      domain.Signature{},
+		APIServiceName: "fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "widgets",
+	}); err != nil {
+		t.Fatalf("register widget type: %v", err)
+	}
+
+	if _, err := env.activator.Activate(ctx, schema); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	extDescs := createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
+
+	awaitFulfillmentActive(ctx, t, env.store, "widgets", "widget-1")
+
+	// Delete via extension gRPC.
+	deleteReq := dynamicpb.NewMessage(extDescs.DeleteRequest)
+	deleteReq.Set(extDescs.DeleteRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("widgets/widget-1"))
+	deleteResp := dynamicpb.NewMessage(extDescs.Resource)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.WidgetService/DeleteWidget", deleteReq, deleteResp); err != nil {
+		t.Fatalf("DeleteWidget: %v", err)
+	}
+
+	// Platform Get: resource exists but representation is tombstoned.
+	platDescs := platformWidgetDescs(t)
+
+	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
+	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("widgets/widget-1"))
+	getResp := dynamicpb.NewMessage(platDescs.Resource)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp); err != nil {
+		t.Fatalf("GetPlatformWidget after delete: %v", err)
+	}
+
+	repsField := platDescs.Resource.Fields().ByName("representations")
+	if getResp.Get(repsField).List().Len() != 0 {
+		t.Errorf("representations len = %d after delete, want 0 (tombstoned)",
+			getResp.Get(repsField).List().Len())
+	}
+
+	// Platform List: resource still appears (not soft-deleted at the
+	// platform level — only the representation is tombstoned).
+	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
+	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
+		t.Fatalf("ListPlatformWidgets after delete: %v", err)
+	}
+
+	listField := platDescs.ListResponse.Fields().ByNumber(1)
+	if listResp.Get(listField).List().Len() != 1 {
+		t.Errorf("ListPlatformWidgets after delete = %d resources, want 1 (resource survives representation tombstone)",
+			listResp.Get(listField).List().Len())
+	}
+}
+
+// TestExtensionCreate_NoIdentityMetadata_InvisibleInPlatformAPI verifies
+// that when a type definition lacks API identity metadata (the legacy
+// path), creating a managed resource through the extension gRPC service
+// does NOT produce a platform resource. The platform service is still
+// routable (the schema has CollectionID), but the resource is absent.
+func TestExtensionCreate_NoIdentityMetadata_InvisibleInPlatformAPI(t *testing.T) {
+	env := newActivatorWithResourcesAndPlatform(t)
+	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
+	defer cancel()
+
+	schema := platformTestWidgetSchema()
+
+	// Register type WITHOUT identity metadata — legacy path.
+	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
+		ResourceType: "widgets",
+		Relation:     domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Signature:    domain.Signature{},
+	}); err != nil {
+		t.Fatalf("register widget type: %v", err)
+	}
+
+	if _, err := env.activator.Activate(ctx, schema); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
+
+	platDescs := platformWidgetDescs(t)
+
+	// Platform Get: should return NotFound because no identity was claimed.
+	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
+	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("widgets/widget-1"))
+	getResp := dynamicpb.NewMessage(platDescs.Resource)
+	err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
+	if err == nil {
+		t.Fatal("expected NotFound from platform Get when type lacks identity metadata, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.NotFound {
+		t.Fatalf("platform Get = code %v, want NotFound", st.Code())
+	}
+
+	// Platform List: should return empty.
+	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
+	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
+	if err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/ListPlatformWidgets", listReq, listResp); err != nil {
+		t.Fatalf("ListPlatformWidgets: %v", err)
+	}
+
+	listField := platDescs.ListResponse.Fields().ByNumber(1)
+	if listResp.Get(listField).List().Len() != 0 {
+		t.Errorf("ListPlatformWidgets = %d resources, want 0 (no identity claimed)",
+			listResp.Get(listField).List().Len())
+	}
+}
+
+// TestSchemaDeactivate_PlatformAPIUnroutable verifies that after a
+// schema is deactivated (simulating addon disable), the platform gRPC
+// service is removed from the mux and calls return Unimplemented.
+func TestSchemaDeactivate_PlatformAPIUnroutable(t *testing.T) {
+	env := newActivatorWithResourcesAndPlatform(t)
+	ctx := context.Background()
+
+	schema := platformTestWidgetSchema()
+
+	id, err := env.activator.Activate(ctx, schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	platDescs := platformWidgetDescs(t)
+
+	// Before deactivation: the platform service is routable. A Get for a
+	// nonexistent resource returns NotFound (not Unimplemented).
+	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
+	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
+		protoreflect.ValueOfString("widgets/nonexistent"))
+	getResp := dynamicpb.NewMessage(platDescs.Resource)
+	err = env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
+	if err == nil {
+		t.Fatal("expected error for nonexistent resource, got nil")
+	}
+	st, ok := status.FromError(err)
+	if !ok || st.Code() != codes.NotFound {
+		t.Fatalf("before deactivation: platform Get = code %v, want NotFound (proves service is routable)", st.Code())
+	}
+
+	env.activator.Deactivate(id)
+
+	// After deactivation: the platform service is gone.
+	getResp2 := dynamicpb.NewMessage(platDescs.Resource)
+	err = env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp2)
+	if err == nil {
+		t.Fatal("expected Unimplemented after deactivation, got nil")
+	}
+	st2, ok := status.FromError(err)
+	if !ok || st2.Code() != codes.Unimplemented {
+		t.Fatalf("after deactivation: platform Get = code %v, want Unimplemented", st2.Code())
+	}
+}
