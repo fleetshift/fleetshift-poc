@@ -137,7 +137,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	activator.Deactivate(handle)
+	activator.Deactivate(handle.GRPCServiceName)
 
 	if _, ok := mux.ServiceInfo()["kind.fleetshift.v1.ClusterService"]; ok {
 		t.Error("expected ClusterService removed from mux after Deactivate")
@@ -211,7 +211,7 @@ func TestDynamicSchemaActivator_ReactivateAfterDeactivate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Activate: %v", err)
 	}
-	activator.Deactivate(handle)
+	activator.Deactivate(handle.GRPCServiceName)
 
 	h2, err := activator.Activate(context.Background(), schema)
 	if err != nil {
@@ -313,7 +313,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesHTTPRoutes(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	env.activator.Deactivate(handle)
+	env.activator.Deactivate(handle.GRPCServiceName)
 
 	code := httpStatus(t, env.httpURL+"/apis/kind.fleetshift.io/v1/clusters/test-id")
 	if code != http.StatusNotFound {
@@ -696,17 +696,8 @@ func TestDualRegistration(t *testing.T) {
 		t.Error("expected PlatformClusterService in mux after Activate")
 	}
 
-	if want := "fleetshift.io/v1/clusters"; handle.PlatformKey != want {
-		t.Errorf("handle.PlatformKey = %q, want %q", handle.PlatformKey, want)
-	}
-
-	if handle.PlatformHandle == nil {
-		t.Fatal("handle.PlatformHandle is nil, expected non-nil for first activation")
-	}
-
-	if handle.PlatformHandle.GRPCServiceName != "fleetshift.v1.PlatformClusterService" {
-		t.Errorf("PlatformHandle.GRPCServiceName = %q, want fleetshift.v1.PlatformClusterService",
-			handle.PlatformHandle.GRPCServiceName)
+	if handle.GRPCServiceName != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("handle.GRPCServiceName = %q, want kind.fleetshift.v1.ClusterService", handle.GRPCServiceName)
 	}
 }
 
@@ -720,7 +711,7 @@ func TestPlatformRefCounting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Activate Kind: %v", err)
 	}
-	if kindHandle.PlatformHandle == nil {
+	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
 		t.Fatal("Kind activation should create the platform service (refcount 0→1)")
 	}
 
@@ -729,11 +720,6 @@ func TestPlatformRefCounting(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Activate GCPHCP: %v", err)
 	}
-	// Second extension joining the same collection should NOT create
-	// a new platform service (refcount 1→2).
-	if gcpHandle.PlatformHandle != nil {
-		t.Error("GCP HCP activation should not create a new platform service (refcount was already 1)")
-	}
 
 	// Step 3: one platform service exists
 	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
@@ -741,13 +727,13 @@ func TestPlatformRefCounting(t *testing.T) {
 	}
 
 	// Step 4: deactivate Kind → platform still alive (refcount 2→1)
-	activator.Deactivate(kindHandle)
+	activator.Deactivate(kindHandle.GRPCServiceName)
 	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
 		t.Fatal("platform service should survive after deactivating one of two extensions")
 	}
 
 	// Step 5: deactivate GCP HCP → platform removed (refcount 1→0)
-	activator.Deactivate(gcpHandle)
+	activator.Deactivate(gcpHandle.GRPCServiceName)
 
 	// Step 6: platform no longer routable
 	if _, ok := mux.ServiceInfo()[platformSvc]; ok {
@@ -776,17 +762,13 @@ func TestReplaceDoesNotDropPlatform(t *testing.T) {
 		modified.ProtoFiles[k] = "// replaced for test\n" + v
 	}
 
-	h2, err := activator.Activate(ctx, modified)
+	_, err = activator.Activate(ctx, modified)
 	if err != nil {
 		t.Fatalf("Activate (replace): %v", err)
 	}
 
 	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
 		t.Error("platform service should survive a content-only schema replace")
-	}
-
-	if h2.PlatformKey != "fleetshift.io/v1/clusters" {
-		t.Errorf("PlatformKey after replace = %q, want fleetshift.io/v1/clusters", h2.PlatformKey)
 	}
 }
 
@@ -822,7 +804,7 @@ func TestPlatformReflection(t *testing.T) {
 		t.Errorf("descriptor path = %q, want %q", fd.Path(), platDescPath)
 	}
 
-	activator.Deactivate(handle)
+	activator.Deactivate(handle.GRPCServiceName)
 
 	if _, err := fileReg.FindFileByPath(platDescPath); err == nil {
 		t.Error("platform file descriptor should not be resolvable after Deactivate")

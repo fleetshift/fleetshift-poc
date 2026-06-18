@@ -17,34 +17,20 @@ import (
 // transport layer.
 type SchemaActivator interface {
 	Activate(ctx context.Context, schema domain.ManagedResourceSchema) (SchemaHandle, error)
-	Deactivate(handle SchemaHandle)
+
+	// Deactivate removes all registrations (gRPC, HTTP, file
+	// descriptor, and platform refcount) for the extension identified
+	// by its gRPC service name. The activator looks up the current
+	// registration state internally — callers do not need to pass back
+	// the full [SchemaHandle].
+	Deactivate(grpcServiceName string)
 }
 
-// SchemaHandle is an opaque token returned by [SchemaActivator.Activate]
-// that identifies the transport registrations so they can be torn down.
-// It carries enough information for [SchemaActivator.Deactivate] to
-// remove every handler installed by activation without re-deriving paths.
+// SchemaHandle is a receipt returned by [SchemaActivator.Activate]
+// describing what was registered. [SchemaActivator.Deactivate] only
+// needs the GRPCServiceName to tear down all registrations — the
+// activator owns the canonical state internally.
 type SchemaHandle struct {
-	GRPCServiceName string
-	HTTPPrefix      string
-	DescriptorPath  string
-
-	// PlatformKey identifies the platform service this extension
-	// participates in (e.g. "fleetshift.io/v1/clusters"). Empty if
-	// the extension has no API identity metadata.
-	PlatformKey string
-
-	// PlatformHandle is non-nil when this extension's activation
-	// caused a new platform service to be registered (refcount went
-	// 0→1). The activator uses it during Deactivate to clean up the
-	// platform registration when the last extension is removed.
-	PlatformHandle *PlatformSchemaHandle
-}
-
-// PlatformSchemaHandle carries the transport registration details for
-// the platform-canonical service that was co-registered alongside one
-// or more extension services.
-type PlatformSchemaHandle struct {
 	GRPCServiceName string
 	HTTPPrefix      string
 	DescriptorPath  string
@@ -228,7 +214,7 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 
 func (m *AddonManager) deactivateSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
 	if handle, ok := rec.schemaHandles[rt]; ok {
-		m.activator.Deactivate(handle)
+		m.activator.Deactivate(handle.GRPCServiceName)
 		delete(rec.schemaHandles, rt)
 	}
 	if _, ok := rec.registeredTypeDefs[rt]; ok {

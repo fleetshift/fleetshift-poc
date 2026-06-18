@@ -24,7 +24,7 @@ import (
 type recordingActivator struct {
 	mu          sync.Mutex
 	activated   []domain.ManagedResourceSchema
-	deactivated []application.SchemaHandle
+	deactivated []string // gRPC service names
 	nextErr     error
 	hashes      map[string][32]byte
 }
@@ -58,11 +58,11 @@ func (r *recordingActivator) Activate(_ context.Context, schema domain.ManagedRe
 	return handle, nil
 }
 
-func (r *recordingActivator) Deactivate(handle application.SchemaHandle) {
+func (r *recordingActivator) Deactivate(grpcServiceName string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.deactivated = append(r.deactivated, handle)
-	delete(r.hashes, handle.GRPCServiceName)
+	r.deactivated = append(r.deactivated, grpcServiceName)
+	delete(r.hashes, grpcServiceName)
 }
 
 func (r *recordingActivator) activatedCount() int {
@@ -447,9 +447,9 @@ func TestAddonManager_DisableDeactivatesSchemas(t *testing.T) {
 	if env.activator.deactivatedCount() != 1 {
 		t.Fatalf("deactivated count = %d, want 1", env.activator.deactivatedCount())
 	}
-	if env.activator.deactivated[0].GRPCServiceName != "test.fleetshift.v1.ClusterService" {
+	if env.activator.deactivated[0] != "test.fleetshift.v1.ClusterService" {
 		t.Errorf("deactivated service = %q, want test.fleetshift.v1.ClusterService",
-			env.activator.deactivated[0].GRPCServiceName)
+			env.activator.deactivated[0])
 	}
 }
 
@@ -575,9 +575,9 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 	if env.activator.deactivatedCount() != 1 {
 		t.Fatalf("deactivated count = %d, want 1 (databases)", env.activator.deactivatedCount())
 	}
-	if env.activator.deactivated[0].GRPCServiceName != "test.fleetshift.v1.DatabaseService" {
+	if env.activator.deactivated[0] != "test.fleetshift.v1.DatabaseService" {
 		t.Errorf("deactivated service = %q, want test.fleetshift.v1.DatabaseService",
-			env.activator.deactivated[0].GRPCServiceName)
+			env.activator.deactivated[0])
 	}
 
 	// Clusters should NOT have been re-activated — still 2 total.
