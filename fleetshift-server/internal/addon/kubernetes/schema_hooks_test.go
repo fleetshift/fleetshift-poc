@@ -349,52 +349,20 @@ func TestBuildServiceEdges(t *testing.T) {
 	// Create pods with various labels
 	ns := buildNodeStore(map[string]inventoryNode{
 		"pod-1": {
-			UID:       "pod-1",
-			Kind:      "Pod",
-			Name:      "pod-1",
-			Namespace: "default",
-			Properties: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "frontend",
-				},
-			},
+			UID: "pod-1", Kind: "Pod", Name: "pod-1", Namespace: "default",
+			Labels: map[string]string{"app": "web", "tier": "frontend"},
 		},
 		"pod-2": {
-			UID:       "pod-2",
-			Kind:      "Pod",
-			Name:      "pod-2",
-			Namespace: "default",
-			Properties: map[string]any{
-				"labels": map[string]any{
-					"app": "web",
-					// Missing "tier" label
-				},
-			},
+			UID: "pod-2", Kind: "Pod", Name: "pod-2", Namespace: "default",
+			Labels: map[string]string{"app": "web"}, // missing "tier"
 		},
 		"pod-3": {
-			UID:       "pod-3",
-			Kind:      "Pod",
-			Name:      "pod-3",
-			Namespace: "default",
-			Properties: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "backend", // Wrong tier value
-				},
-			},
+			UID: "pod-3", Kind: "Pod", Name: "pod-3", Namespace: "default",
+			Labels: map[string]string{"app": "web", "tier": "backend"}, // wrong tier
 		},
 		"pod-4": {
-			UID:       "pod-4",
-			Kind:      "Pod",
-			Name:      "pod-4",
-			Namespace: "other",
-			Properties: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "frontend",
-				},
-			},
+			UID: "pod-4", Kind: "Pod", Name: "pod-4", Namespace: "other",
+			Labels: map[string]string{"app": "web", "tier": "frontend"}, // wrong namespace
 		},
 	})
 
@@ -565,79 +533,43 @@ func TestComputeNodeRoles(t *testing.T) {
 func TestMatchesSelector(t *testing.T) {
 	tests := []struct {
 		name     string
-		props    map[string]any
+		labels   map[string]string
 		selector map[string]string
 		expected bool
 	}{
 		{
-			name: "Exact match",
-			props: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "frontend",
-				},
-			},
-			selector: map[string]string{
-				"app":  "web",
-				"tier": "frontend",
-			},
+			name:     "Exact match",
+			labels:   map[string]string{"app": "web", "tier": "frontend"},
+			selector: map[string]string{"app": "web", "tier": "frontend"},
 			expected: true,
 		},
 		{
-			name: "Subset match",
-			props: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "frontend",
-					"env":  "prod",
-				},
-			},
-			selector: map[string]string{
-				"app":  "web",
-				"tier": "frontend",
-			},
+			name:     "Subset match",
+			labels:   map[string]string{"app": "web", "tier": "frontend", "env": "prod"},
+			selector: map[string]string{"app": "web", "tier": "frontend"},
 			expected: true,
 		},
 		{
-			name: "Missing label",
-			props: map[string]any{
-				"labels": map[string]any{
-					"app": "web",
-				},
-			},
-			selector: map[string]string{
-				"app":  "web",
-				"tier": "frontend",
-			},
+			name:     "Missing label",
+			labels:   map[string]string{"app": "web"},
+			selector: map[string]string{"app": "web", "tier": "frontend"},
 			expected: false,
 		},
 		{
-			name: "Wrong value",
-			props: map[string]any{
-				"labels": map[string]any{
-					"app":  "web",
-					"tier": "backend",
-				},
-			},
-			selector: map[string]string{
-				"app":  "web",
-				"tier": "frontend",
-			},
+			name:     "Wrong value",
+			labels:   map[string]string{"app": "web", "tier": "backend"},
+			selector: map[string]string{"app": "web", "tier": "frontend"},
 			expected: false,
 		},
 		{
-			name: "Empty selector",
-			props: map[string]any{
-				"labels": map[string]any{
-					"app": "web",
-				},
-			},
+			name:     "Empty selector",
+			labels:   map[string]string{"app": "web"},
 			selector: map[string]string{},
 			expected: false,
 		},
 		{
 			name:     "No labels",
-			props:    map[string]any{},
+			labels:   nil,
 			selector: map[string]string{"app": "web"},
 			expected: false,
 		},
@@ -645,11 +577,126 @@ func TestMatchesSelector(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := matchesSelector(tt.props, tt.selector)
+			result := matchesSelector(tt.labels, tt.selector)
 			if result != tt.expected {
 				t.Errorf("expected %v, got %v", tt.expected, result)
 			}
 		})
+	}
+}
+
+// TestServiceEdges_ThroughExtraction exercises the full extraction→edge
+// pipeline: build real inventoryNodes via ExtractObservedResource, then
+// run the Service edge closure against them. This catches type mismatches
+// between what extraction produces and what edge builders expect.
+func TestServiceEdges_ThroughExtraction(t *testing.T) {
+	svcGVR := schema.GroupVersionResource{Version: "v1", Resource: "services"}
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	schemaEntries := map[schema.GroupVersionResource]SchemaEntry{
+		svcGVR: {GVR: svcGVR, Kind: "Service", BuildEdges: buildServiceEdges},
+		podGVR: {GVR: podGVR, Kind: "Pod"},
+	}
+
+	svc := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": map[string]any{
+			"uid": "svc-uid", "name": "my-svc", "namespace": "default",
+			"resourceVersion": "1", "creationTimestamp": "2025-01-01T00:00:00Z",
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{"app": "web"},
+			"ports":    []any{map[string]any{"port": int64(80)}},
+		},
+	}}
+
+	matchingPod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "pod-match", "name": "web-pod", "namespace": "default",
+			"resourceVersion": "2", "creationTimestamp": "2025-01-01T00:00:00Z",
+			"labels": map[string]any{"app": "web", "version": "v1"},
+		},
+	}}
+
+	nonMatchingPod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "pod-other", "name": "db-pod", "namespace": "default",
+			"resourceVersion": "3", "creationTimestamp": "2025-01-01T00:00:00Z",
+			"labels": map[string]any{"app": "db"},
+		},
+	}}
+
+	_, svcNode := ExtractObservedResource(svc, schemaEntries[svcGVR], "t1")
+	_, podNode1 := ExtractObservedResource(matchingPod, schemaEntries[podGVR], "t1")
+	_, podNode2 := ExtractObservedResource(nonMatchingPod, schemaEntries[podGVR], "t1")
+
+	ns := buildNodeStore(map[string]inventoryNode{
+		svcNode.UID:  svcNode,
+		podNode1.UID: podNode1,
+		podNode2.UID: podNode2,
+	})
+
+	edgeFn := buildServiceEdges(svc, svcNode.UID)
+	edges := edgeFn(ns)
+
+	if len(edges) != 1 {
+		t.Fatalf("expected 1 selects edge, got %d", len(edges))
+	}
+	if edges[0].DestUID != "pod-match" {
+		t.Errorf("expected edge to pod-match, got %s", edges[0].DestUID)
+	}
+	if edges[0].EdgeType != EdgeSelects {
+		t.Errorf("expected EdgeSelects, got %s", edges[0].EdgeType)
+	}
+}
+
+// TestServiceEdges_ThroughExtraction_NoMatch verifies that a Service with
+// a selector that doesn't match any pod labels produces no edges when
+// going through the real extraction pipeline.
+func TestServiceEdges_ThroughExtraction_NoMatch(t *testing.T) {
+	svcGVR := schema.GroupVersionResource{Version: "v1", Resource: "services"}
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	schemaEntries := map[schema.GroupVersionResource]SchemaEntry{
+		svcGVR: {GVR: svcGVR, Kind: "Service", BuildEdges: buildServiceEdges},
+		podGVR: {GVR: podGVR, Kind: "Pod"},
+	}
+
+	svc := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Service",
+		"metadata": map[string]any{
+			"uid": "svc-uid", "name": "my-svc", "namespace": "default",
+			"resourceVersion": "1", "creationTimestamp": "2025-01-01T00:00:00Z",
+		},
+		"spec": map[string]any{
+			"selector": map[string]any{"app": "web"},
+		},
+	}}
+
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "pod-1", "name": "db-pod", "namespace": "default",
+			"resourceVersion": "2", "creationTimestamp": "2025-01-01T00:00:00Z",
+			"labels": map[string]any{"app": "db"},
+		},
+	}}
+
+	_, svcNode := ExtractObservedResource(svc, schemaEntries[svcGVR], "t1")
+	_, podNode := ExtractObservedResource(pod, schemaEntries[podGVR], "t1")
+
+	ns := buildNodeStore(map[string]inventoryNode{
+		svcNode.UID: svcNode,
+		podNode.UID: podNode,
+	})
+
+	edgeFn := buildServiceEdges(svc, svcNode.UID)
+	edges := edgeFn(ns)
+
+	if len(edges) != 0 {
+		t.Fatalf("expected 0 edges for non-matching pod, got %d", len(edges))
 	}
 }
 

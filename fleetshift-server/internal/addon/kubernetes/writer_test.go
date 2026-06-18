@@ -23,7 +23,6 @@ type resyncCall struct {
 	targetID      domain.TargetID
 	inventoryType domain.InventoryType
 	items         []domain.InventoryItem
-	edges         []domain.InventoryEdge
 }
 
 type mockInventoryWriter struct {
@@ -46,10 +45,10 @@ func (m *mockInventoryWriter) ApplyDelta(ctx context.Context, targetID domain.Ta
 	return nil
 }
 
-func (m *mockInventoryWriter) Resync(_ context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem, edges []domain.InventoryEdge) error {
+func (m *mockInventoryWriter) Resync(_ context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.resyncs = append(m.resyncs, resyncCall{targetID: targetID, inventoryType: inventoryType, items: items, edges: edges})
+	m.resyncs = append(m.resyncs, resyncCall{targetID: targetID, inventoryType: inventoryType, items: items})
 	return nil
 }
 
@@ -663,5 +662,361 @@ func TestEdgeComputation_BuildEdges(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("expected runsOn edge from uid-pod-1 to node-1, not found")
+	}
+}
+
+func TestResync_DoesNotClobberFlushEdges(t *testing.T) {
+	// Regression test: flush correctly produces cross-GVR edges, then a
+	// resync for the source GVR must NOT delete them. Resync is items-only
+	// (no edge parameter), so edges are untouched in the database. Verify
+	// that no edge deletions appear in subsequent flush deltas.
+	pvGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
+	pvcGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+	crossSchema := map[schema.GroupVersionResource]SchemaEntry{
+		pvGVR: {GVR: pvGVR, Kind: "PersistentVolume"},
+		pvcGVR: {
+			GVR:  pvcGVR,
+			Kind: "PersistentVolumeClaim",
+			BuildEdges: func(r *unstructured.Unstructured, uid string) func(NodeStore) []Edge {
+				volName, _, _ := unstructured.NestedString(r.Object, "spec", "volumeName")
+				return func(ns NodeStore) []Edge {
+					if volName == "" {
+						return nil
+					}
+					if pvMap, ok := ns.ByKindNamespaceName["PersistentVolume"]["_NONE"]; ok {
+						if pv, ok := pvMap[volName]; ok {
+							return []Edge{{
+								EdgeType:   EdgeAttachedTo,
+								SourceUID:  uid,
+								DestUID:    pv.UID,
+								SourceKind: "PersistentVolumeClaim",
+								DestKind:   "PersistentVolume",
+							}}
+						}
+					}
+					return nil
+				}
+			},
+		},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, crossSchema, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	pv := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolume",
+		"metadata": map[string]any{
+			"uid": "uid-pv", "name": "my-pv",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+	pvc := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+		"metadata": map[string]any{
+			"uid": "uid-pvc", "name": "my-pvc", "namespace": "default",
+			"resourceVersion": "200", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+		"spec": map[string]any{"volumeName": "my-pv"},
+	}}
+
+	// Step 1: Flush produces the edge.
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pv, GVR: pvGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pvc, GVR: pvcGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	var flushHasEdge bool
+	for _, d := range deltas {
+		for _, e := range d.edgeAdds {
+			if e.EdgeType == "attachedTo" && e.SourceUID == "uid-pvc" && e.DestUID == "uid-pv" {
+				flushHasEdge = true
+			}
+		}
+	}
+	if !flushHasEdge {
+		t.Fatal("flush should have produced PVC→PV edge")
+	}
+
+	// Step 2: Resync PVCs — items-only, edges untouched.
+	w.ResyncCh() <- ResyncEvent{GVR: pvcGVR, Resources: []*unstructured.Unstructured{pvc}}
+	time.Sleep(100 * time.Millisecond)
+
+	resyncs := mock.getResyncs()
+	if len(resyncs) == 0 {
+		t.Fatal("expected resync call")
+	}
+
+	// Step 3: Verify no edge deletions were emitted in any delta after the resync.
+	deltasAfter := mock.getDeltas()
+	for _, d := range deltasAfter {
+		for _, e := range d.edgeDels {
+			if e.EdgeType == "attachedTo" && e.SourceUID == "uid-pvc" {
+				t.Fatal("resync should not cause PVC→PV edge deletion in subsequent flush")
+			}
+		}
+	}
+}
+
+func TestResync_UpdatesWriterState(t *testing.T) {
+	// Verify that resources arriving via resync are visible to subsequent
+	// flush edge computation (i.e. sendResync merges into w.currentNodes).
+	pvGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumes"}
+	pvcGVR := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
+
+	testSchemaCrossGVR := map[schema.GroupVersionResource]SchemaEntry{
+		pvGVR: {GVR: pvGVR, Kind: "PersistentVolume"},
+		pvcGVR: {
+			GVR:  pvcGVR,
+			Kind: "PersistentVolumeClaim",
+			BuildEdges: func(r *unstructured.Unstructured, uid string) func(NodeStore) []Edge {
+				volName, _, _ := unstructured.NestedString(r.Object, "spec", "volumeName")
+				return func(ns NodeStore) []Edge {
+					if volName == "" {
+						return nil
+					}
+					if pvMap, ok := ns.ByKindNamespaceName["PersistentVolume"]["_NONE"]; ok {
+						if pv, ok := pvMap[volName]; ok {
+							return []Edge{{
+								EdgeType:   EdgeAttachedTo,
+								SourceUID:  uid,
+								DestUID:    pv.UID,
+								SourceKind: "PersistentVolumeClaim",
+								DestKind:   "PersistentVolume",
+							}}
+						}
+					}
+					return nil
+				}
+			},
+		},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchemaCrossGVR, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Step 1: Resync PVs (no events, only resync).
+	pv := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolume",
+		"metadata": map[string]any{
+			"uid": "uid-pv", "name": "my-pv",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+	w.ResyncCh() <- ResyncEvent{GVR: pvGVR, Resources: []*unstructured.Unstructured{pv}}
+	time.Sleep(100 * time.Millisecond)
+
+	// Step 2: Add a PVC via event — the subsequent flush must find the
+	// resynced PV in w.currentNodes to build the edge.
+	pvc := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "PersistentVolumeClaim",
+		"metadata": map[string]any{
+			"uid": "uid-pvc", "name": "my-pvc", "namespace": "default",
+			"resourceVersion": "200", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+		"spec": map[string]any{"volumeName": "my-pv"},
+	}}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pvc, GVR: pvcGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	var found bool
+	for _, d := range deltas {
+		for _, e := range d.edgeAdds {
+			if e.EdgeType == "attachedTo" && e.SourceUID == "uid-pvc" && e.DestUID == "uid-pv" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("flush after resync should see resynced PV in currentNodes and produce PVC→PV edge")
+	}
+}
+
+func TestResync_OwnedByEdgesAfterCrossGVRResync(t *testing.T) {
+	// Regression test for the startup ordering race: ReplicaSet arrives via
+	// resync, then Pod (with ownerReference to RS) arrives via event.
+	// The flush must produce the ownedBy edge even though the RS was never
+	// seen through the event path.
+	rsGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	testSchemaOwnedBy := map[schema.GroupVersionResource]SchemaEntry{
+		rsGVR:  {GVR: rsGVR, Kind: "ReplicaSet"},
+		podGVR: {GVR: podGVR, Kind: "Pod"},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchemaOwnedBy, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Step 1: ReplicaSet arrives via resync only.
+	rs := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1", "kind": "ReplicaSet",
+		"metadata": map[string]any{
+			"uid": "uid-rs", "name": "nginx-rs", "namespace": "default",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+	w.ResyncCh() <- ResyncEvent{GVR: rsGVR, Resources: []*unstructured.Unstructured{rs}}
+	time.Sleep(100 * time.Millisecond)
+
+	// Step 2: Pod with ownerReference to RS arrives via event.
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "uid-pod", "name": "nginx-pod", "namespace": "default",
+			"resourceVersion": "200", "creationTimestamp": "2025-06-01T12:00:00Z",
+			"ownerReferences": []any{
+				map[string]any{
+					"apiVersion": "apps/v1", "kind": "ReplicaSet",
+					"name": "nginx-rs", "uid": "uid-rs", "controller": true,
+				},
+			},
+		},
+	}}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pod, GVR: podGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	var found bool
+	for _, d := range deltas {
+		for _, e := range d.edgeAdds {
+			if e.EdgeType == "ownedBy" && e.SourceUID == "uid-pod" && e.DestUID == "uid-rs" {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatal("flush should produce ownedBy edge from Pod to ReplicaSet (RS arrived via resync)")
+	}
+}
+
+func TestResync_DoesNotClobberOwnedByEdges(t *testing.T) {
+	// Regression test: flush correctly produces Pod→RS ownedBy edge, then
+	// a Pod resync fires. The ownedBy edge must survive — resync is
+	// items-only and must not cause edge deletion.
+	rsGVR := schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"}
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	testSchemaOwnedBy := map[schema.GroupVersionResource]SchemaEntry{
+		rsGVR:  {GVR: rsGVR, Kind: "ReplicaSet"},
+		podGVR: {GVR: podGVR, Kind: "Pod"},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchemaOwnedBy, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	rs := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "apps/v1", "kind": "ReplicaSet",
+		"metadata": map[string]any{
+			"uid": "uid-rs", "name": "nginx-rs", "namespace": "default",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "uid-pod", "name": "nginx-pod", "namespace": "default",
+			"resourceVersion": "200", "creationTimestamp": "2025-06-01T12:00:00Z",
+			"ownerReferences": []any{
+				map[string]any{
+					"apiVersion": "apps/v1", "kind": "ReplicaSet",
+					"name": "nginx-rs", "uid": "uid-rs", "controller": true,
+				},
+			},
+		},
+	}}
+
+	// Step 1: Both arrive via events — flush produces ownedBy edge.
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: rs, GVR: rsGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pod, GVR: podGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	var flushHasEdge bool
+	for _, d := range deltas {
+		for _, e := range d.edgeAdds {
+			if e.EdgeType == "ownedBy" && e.SourceUID == "uid-pod" && e.DestUID == "uid-rs" {
+				flushHasEdge = true
+			}
+		}
+	}
+	if !flushHasEdge {
+		t.Fatal("flush should have produced Pod→RS ownedBy edge")
+	}
+
+	// Step 2: Pod resync fires — must not destroy the edge.
+	w.ResyncCh() <- ResyncEvent{GVR: podGVR, Resources: []*unstructured.Unstructured{pod}}
+	time.Sleep(100 * time.Millisecond)
+
+	// Step 3: Verify no ownedBy edge deletions in any subsequent delta.
+	deltasAfter := mock.getDeltas()
+	for _, d := range deltasAfter {
+		for _, e := range d.edgeDels {
+			if e.EdgeType == "ownedBy" && e.SourceUID == "uid-pod" {
+				t.Fatal("Pod resync must not cause ownedBy edge deletion")
+			}
+		}
+	}
+}
+
+func TestShutdownFlush_PersistsPendingEvents(t *testing.T) {
+	// Regression test: when the context is cancelled, the Writer must
+	// flush pending events using an uncancelled context so data is
+	// persisted. A long batch interval ensures the timer doesn't fire
+	// before shutdown — only the shutdown flush path runs.
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchema, 10*time.Second, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		w.Run(ctx)
+	}()
+
+	// Send events. The 10s batch interval means the timer won't fire.
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-1", "deploy-1", "100"), GVR: testGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: makeResource("uid-2", "deploy-2", "101"), GVR: testGVR}
+	time.Sleep(50 * time.Millisecond) // let events drain from channel
+
+	// Cancel the context — triggers shutdown flush.
+	cancel()
+	<-done
+
+	deltas := mock.getDeltas()
+	if len(deltas) == 0 {
+		t.Fatal("shutdown flush should have persisted pending events, got 0 deltas")
+	}
+
+	names := make(map[string]bool)
+	for _, d := range deltas {
+		for _, item := range d.upserts {
+			names[item.Name()] = true
+		}
+	}
+	if !names["deploy-1"] || !names["deploy-2"] {
+		t.Fatalf("shutdown flush missing events: got %v", names)
 	}
 }

@@ -90,7 +90,7 @@ func TestInventoryWriteService_Resync_ReplacesExisting(t *testing.T) {
 		domain.NewObservedInventoryItem("target-b/uid-b", "apps/v1/Deployment", "deploy-b", nil, nil, "target-b", nil, nil, now),
 	}
 
-	if err := svc.Resync(ctx, "target-b", "apps/v1/Deployment", newItems, nil); err != nil {
+	if err := svc.Resync(ctx, "target-b", "apps/v1/Deployment", newItems); err != nil {
 		t.Fatalf("Resync: %v", err)
 	}
 

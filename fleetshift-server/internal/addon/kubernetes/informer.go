@@ -112,7 +112,9 @@ func (i *GenericInformer) listAndResync(ctx context.Context) error {
 	for {
 		resources, err := i.client.Resource(i.gvr).List(ctx, opts)
 		if err != nil {
-			i.logger.Warn("error listing resources", "error", err)
+			if ctx.Err() == nil {
+				i.logger.Warn("error listing resources", "error", err)
+			}
 			i.retries++
 			return err
 		}
@@ -462,7 +464,9 @@ func (m *InformerManager) RunContinuous(ctx context.Context, denyList, allowList
 func (m *InformerManager) discoverAndReconcile(ctx context.Context, denyList, allowList []Resource) {
 	supported, err := SupportedResources(m.discovery)
 	if err != nil {
-		m.logger.Error("failed to discover supported resources", "error", err)
+		if ctx.Err() == nil {
+			m.logger.Error("failed to discover supported resources", "error", err)
+		}
 		if supported == nil {
 			return
 		}

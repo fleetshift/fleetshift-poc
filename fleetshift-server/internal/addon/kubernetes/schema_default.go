@@ -408,18 +408,15 @@ func buildServiceEdges(r *unstructured.Unstructured, uid string) func(ns NodeSto
 
 	return func(ns NodeStore) []Edge {
 		var edges []Edge
-		sourceKind := "Service"
 
-		// Find pods in the same namespace
 		if podMap, ok := ns.ByKindNamespaceName["Pod"][namespace]; ok {
 			for _, pod := range podMap {
-				// Check if pod labels match selector
-				if matchesSelector(pod.Properties, selector) {
+				if matchesSelector(pod.Labels, selector) {
 					edges = append(edges, Edge{
 						EdgeType:   EdgeSelects,
 						SourceUID:  uid,
 						DestUID:    pod.UID,
-						SourceKind: sourceKind,
+						SourceKind: "Service",
 						DestKind:   "Pod",
 					})
 				}
@@ -430,35 +427,16 @@ func buildServiceEdges(r *unstructured.Unstructured, uid string) func(ns NodeSto
 	}
 }
 
-// matchesSelector checks if the pod's labels match the service selector.
-func matchesSelector(podProps map[string]any, selector map[string]string) bool {
-	if len(selector) == 0 {
+// matchesSelector checks if labels satisfy every key/value in selector.
+func matchesSelector(labels map[string]string, selector map[string]string) bool {
+	if len(selector) == 0 || len(labels) == 0 {
 		return false
 	}
-
-	// Get pod labels from properties
-	labelsRaw, ok := podProps["labels"]
-	if !ok {
-		return false
-	}
-
-	labels, ok := labelsRaw.(map[string]any)
-	if !ok {
-		return false
-	}
-
-	// All selector keys must match
 	for key, value := range selector {
-		labelValue, ok := labels[key]
-		if !ok {
-			return false
-		}
-		labelValueStr, ok := labelValue.(string)
-		if !ok || labelValueStr != value {
+		if labels[key] != value {
 			return false
 		}
 	}
-
 	return true
 }
 

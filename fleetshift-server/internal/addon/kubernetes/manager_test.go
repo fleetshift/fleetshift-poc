@@ -34,25 +34,13 @@ func (v *fakeVault) Delete(_ context.Context, ref domain.SecretRef) error {
 	return nil
 }
 
-// mockInventoryWriter is a no-op InventoryWriter for tests that don't
-// need to observe inventory writes.
-type mockInventoryWriter struct{}
-
-func (mockInventoryWriter) ApplyDelta(_ context.Context, _ domain.TargetID, _ []domain.InventoryItem, _ []domain.InventoryItemID, _ []domain.InventoryEdge, _ []domain.InventoryEdge) error {
-	return nil
-}
-
-func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain.InventoryType, _ []domain.InventoryItem, _ []domain.InventoryEdge) error {
-	return nil
-}
-
 func newTestManager(t *testing.T) *kubernetes.Manager {
 	t.Helper()
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	vault := &fakeVault{secrets: make(map[domain.SecretRef][]byte)}
 	logger := slog.Default()
-	return kubernetes.NewManager(store, vault, mockInventoryWriter{}, nopReporter{}, nil, nil, logger)
+	return kubernetes.NewManager(store, vault, nil, nopReporter{}, nil, nil, logger)
 }
 
 func testTarget(id string) domain.TargetInfo {

@@ -36,7 +36,7 @@ func (mockInventoryWriter) ApplyDelta(_ context.Context, _ domain.TargetID, _ []
 	return nil
 }
 
-func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain.InventoryType, _ []domain.InventoryItem, _ []domain.InventoryEdge) error {
+func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain.InventoryType, _ []domain.InventoryItem) error {
 	return nil
 }
 

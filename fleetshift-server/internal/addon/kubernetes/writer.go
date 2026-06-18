@@ -104,7 +104,9 @@ func (w *Writer) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			w.flush(ctx, pendingUpserts, pendingUpsertGVR, pendingDeletes, sentVersions)
+			shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			w.flush(shutdownCtx, pendingUpserts, pendingUpsertGVR, pendingDeletes, sentVersions)
+			shutdownCancel()
 			return
 
 		case ev := <-w.eventCh:
@@ -288,6 +290,9 @@ func (w *Writer) applyWithRetry(
 			w.consecutiveFailures = 0
 			return
 		}
+		if ctx.Err() != nil {
+			return
+		}
 
 		backoff := time.Duration(1<<attempt) * time.Second
 		if backoff > 30*time.Second {
@@ -317,27 +322,30 @@ func (w *Writer) applyWithRetry(
 }
 
 // sendResync sends a Resync call for the given GVR.
+//
+// Resync handles items only — edges are nil, which tells the
+// InventoryWriter to leave existing edges untouched.  Edge computation
+// is deferred to the flush path, which runs ALL edge closures against
+// the full w.currentNodes on every tick.  This avoids a class of race
+// where a GVR resync runs before cross-GVR dependencies are in
+// w.currentNodes (e.g. Pod resync before ReplicaSets are known),
+// which would delete correct edges and fail to re-create them.
 func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
-	entry := w.schema[rs.GVR] // zero-value SchemaEntry if not in schema — base extraction only
+	entry := w.schema[rs.GVR]
 
 	var items []domain.InventoryItem
-	nodes := make(map[string]inventoryNode)
-	edgeFuncs := make(map[string]func(NodeStore) []Edge)
 
 	for _, r := range rs.Resources {
 		item, node := ExtractObservedResource(r, entry, w.targetID)
 		items = append(items, item)
 		uid := string(r.GetUID())
-		nodes[uid] = node
 
-		// Store edge computation closure if the schema entry has BuildEdges.
+		w.currentNodes[uid] = node
 		if entry.BuildEdges != nil {
-			edgeFuncs[uid] = entry.BuildEdges(r, uid)
+			w.edgeFuncs[uid] = entry.BuildEdges(r, uid)
 		}
 	}
 
-	// Derive the Kind for the inventory type. Prefer the schema entry's Kind,
-	// but fall back to the first resource's Kind for resources without a schema entry.
 	kind := entry.Kind
 	if kind == "" && len(rs.Resources) > 0 {
 		kind = rs.Resources[0].GetKind()
@@ -350,38 +358,8 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		invType = domain.InventoryType(rs.GVR.Version + "/" + kind)
 	}
 
-	// Compute edges for the resynced set.
-	ns := buildNodeStore(nodes)
-	var edges []domain.InventoryEdge
-
-	// Type-specific edges from BuildEdges closures.
-	for _, edgeFn := range edgeFuncs {
-		for _, e := range edgeFn(ns) {
-			edges = append(edges, domain.InventoryEdge{
-				EdgeType:   string(e.EdgeType),
-				SourceUID:  e.SourceUID,
-				DestUID:    e.DestUID,
-				SourceKind: e.SourceKind,
-				DestKind:   e.DestKind,
-			})
-		}
-	}
-
-	// Common edges (ownedBy traversal) for ALL nodes.
-	for uid := range nodes {
-		for _, e := range commonEdges(uid, ns) {
-			edges = append(edges, domain.InventoryEdge{
-				EdgeType:   string(e.EdgeType),
-				SourceUID:  e.SourceUID,
-				DestUID:    e.DestUID,
-				SourceKind: e.SourceKind,
-				DestKind:   e.DestKind,
-			})
-		}
-	}
-
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items, edges)
+	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items)
 }

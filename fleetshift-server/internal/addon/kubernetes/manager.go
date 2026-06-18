@@ -93,9 +93,12 @@ func (m *Manager) HandleTargetReady(ctx context.Context, target domain.TargetInf
 	logger := m.logger.With("target", string(id))
 
 	dc := newDeliveryDelegate(m.deliveryReporter, m.keyResolver, m.httpClient)
-	ic := newIndexerDelegate(string(id), dynClient, discClient, m.inventoryWriter, IndexConfig{
-		Schema: DefaultKubernetesSchema(),
-	}, logger)
+	var ic *indexerDelegate
+	if m.inventoryWriter != nil {
+		ic = newIndexerDelegate(string(id), dynClient, discClient, m.inventoryWriter, IndexConfig{
+			Schema: DefaultKubernetesSchema(),
+		}, logger)
+	}
 
 	ta := NewAgent(ctx, id, cfg, dynClient, discClient, dc, ic, logger)
 

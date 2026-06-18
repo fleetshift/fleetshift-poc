@@ -146,6 +146,7 @@ type e2eFixture struct {
 	typedK8s  *kubernetes.Clientset
 	namespace string
 	targetID  domain.TargetID
+	auth      domain.DeliveryAuth
 }
 
 func setupE2E(t *testing.T) *e2eFixture {
@@ -195,7 +196,7 @@ func setupE2E(t *testing.T) *e2eFixture {
 	}
 
 	// Create a test-specific namespace.
-	ns := "e2e-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
+	ns := "e2e-" + strings.ToLower(strings.NewReplacer("/", "-", "_", "-").Replace(t.Name()))
 	if len(ns) > 63 {
 		ns = ns[:63]
 	}
@@ -224,6 +225,7 @@ func setupE2E(t *testing.T) *e2eFixture {
 		typedK8s:  fixture.adminK8s,
 		namespace: ns,
 		targetID:  targetID,
+		auth:      domain.DeliveryAuth{Token: domain.RawToken(fixture.saToken)},
 	}
 }
 
@@ -267,6 +269,23 @@ func awaitNoInventoryItem(t *testing.T, store domain.Store, id domain.InventoryI
 		}
 		if time.Now().After(deadline) {
 			t.Fatalf("timed out waiting for item %s to disappear", id)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+// awaitEdgeFrom polls until at least one outgoing edge from sourceUID
+// matches the predicate, returning all edges from that source.
+func awaitEdgeFrom(t *testing.T, store domain.Store, targetID domain.TargetID, sourceUID string, predicate func([]domain.InventoryEdge) bool, timeout time.Duration) []domain.InventoryEdge {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for {
+		edges := queryEdgesFrom(t, store, targetID, sourceUID)
+		if predicate(edges) {
+			return edges
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for edge match from source %s (%d edges)", sourceUID, len(edges))
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -350,14 +369,19 @@ func awaitBootstrap(t *testing.T, f *e2eFixture) {
 func TestE2E_ClusterBootstrap(t *testing.T) {
 	f := setupE2E(t)
 
-	// Wait for nodes to appear in inventory.
+	// Wait for nodes and core namespaces to appear in inventory.
 	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		var hasNode bool
+		nsNames := map[string]bool{}
 		for _, item := range items {
 			if item.Type() == "v1/Node" {
-				return true
+				hasNode = true
+			}
+			if item.Type() == "v1/Namespace" {
+				nsNames[item.Name()] = true
 			}
 		}
-		return false
+		return hasNode && nsNames["default"] && nsNames["kube-system"] && nsNames["kube-public"]
 	}, 60*time.Second)
 
 	// Verify nodes have enriched fields.
@@ -380,19 +404,6 @@ func TestE2E_ClusterBootstrap(t *testing.T) {
 	}
 	if !foundNode {
 		t.Fatal("no Node inventory items found")
-	}
-
-	// Verify namespaces.
-	nsNames := map[string]bool{}
-	for _, item := range items {
-		if item.Type() == "v1/Namespace" {
-			nsNames[item.Name()] = true
-		}
-	}
-	for _, ns := range []string{"default", "kube-system", "kube-public"} {
-		if !nsNames[ns] {
-			t.Errorf("missing namespace %q", ns)
-		}
 	}
 }
 
@@ -429,7 +440,8 @@ func TestE2E_DeployWorkload(t *testing.T) {
 	}`, f.namespace))
 
 	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "nginx-e2e-deploy",
+		ID:   "nginx-e2e-deploy",
+		Auth: f.auth,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
@@ -477,34 +489,33 @@ func TestE2E_DeployWorkload(t *testing.T) {
 		t.Fatalf("missing resources: pod=%q rs=%q deploy=%q", podUID, rsUID, deployUID)
 	}
 
-	// Verify ownedBy edges: Pod→RS, RS→Deployment.
-	podEdges := queryEdgesFrom(t, f.harness.Store, f.targetID, podUID)
-	hasOwnedByRS := false
-	for _, e := range podEdges {
-		if e.EdgeType == "ownedBy" && e.DestUID == rsUID {
-			hasOwnedByRS = true
+	// Wait for ownedBy edges (edges arrive via flush, may lag items).
+	podEdges := awaitEdgeFrom(t, f.harness.Store, f.targetID, podUID, func(edges []domain.InventoryEdge) bool {
+		for _, e := range edges {
+			if e.EdgeType == "ownedBy" && e.DestUID == rsUID {
+				return true
+			}
 		}
+		return false
+	}, 30*time.Second)
+
+	for _, e := range podEdges {
 		if e.EdgeType == "runsOn" {
 			nodeUID = e.DestUID
 		}
-	}
-	if !hasOwnedByRS {
-		t.Error("missing ownedBy edge: Pod→ReplicaSet")
 	}
 	if nodeUID == "" {
 		t.Error("missing runsOn edge: Pod→Node")
 	}
 
-	rsEdges := queryEdgesFrom(t, f.harness.Store, f.targetID, rsUID)
-	hasOwnedByDeploy := false
-	for _, e := range rsEdges {
-		if e.EdgeType == "ownedBy" && e.DestUID == deployUID {
-			hasOwnedByDeploy = true
+	awaitEdgeFrom(t, f.harness.Store, f.targetID, rsUID, func(edges []domain.InventoryEdge) bool {
+		for _, e := range edges {
+			if e.EdgeType == "ownedBy" && e.DestUID == deployUID {
+				return true
+			}
 		}
-	}
-	if !hasOwnedByDeploy {
-		t.Error("missing ownedBy edge: ReplicaSet→Deployment")
-	}
+		return false
+	}, 30*time.Second)
 }
 
 // TestE2E_PodAttachmentEdges verifies pod attachment edges (ConfigMap, Secret).
@@ -541,7 +552,8 @@ func TestE2E_PodAttachmentEdges(t *testing.T) {
 	}`, f.namespace))
 
 	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "attach-deploy",
+		ID:   "attach-deploy",
+		Auth: f.auth,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{
@@ -559,22 +571,41 @@ func TestE2E_PodAttachmentEdges(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	// Wait for the pod to appear.
+	// Wait for the pod, configmap, and secret to all appear.
 	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		var pod, cm, secret bool
 		for _, item := range items {
-			if item.Type() == "v1/Pod" && item.Name() == "e2e-attach-pod" {
-				return true
+			switch {
+			case item.Type() == "v1/Pod" && item.Name() == "e2e-attach-pod":
+				pod = true
+			case item.Type() == "v1/ConfigMap" && item.Name() == "e2e-cm":
+				cm = true
+			case item.Type() == "v1/Secret" && item.Name() == "e2e-secret":
+				secret = true
 			}
 		}
-		return false
+		return pod && cm && secret
 	}, 90*time.Second)
 
 	podUID := findUID(t, items, "v1/Pod", "e2e-attach-pod")
 	cmUID := findUID(t, items, "v1/ConfigMap", "e2e-cm")
 	secretUID := findUID(t, items, "v1/Secret", "e2e-secret")
 
-	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, podUID)
-	hasCM, hasSecret := false, false
+	// Wait for attachment edges (edges arrive via flush, may lag items).
+	edges := awaitEdgeFrom(t, f.harness.Store, f.targetID, podUID, func(edges []domain.InventoryEdge) bool {
+		var hasCM, hasSecret bool
+		for _, e := range edges {
+			if e.EdgeType == "attachedTo" && e.DestUID == cmUID {
+				hasCM = true
+			}
+			if e.EdgeType == "attachedTo" && e.DestUID == secretUID {
+				hasSecret = true
+			}
+		}
+		return hasCM && hasSecret
+	}, 30*time.Second)
+
+	var hasCM, hasSecret bool
 	for _, e := range edges {
 		if e.EdgeType == "attachedTo" && e.DestUID == cmUID {
 			hasCM = true
@@ -622,7 +653,8 @@ func TestE2E_ServiceSelectorEdges(t *testing.T) {
 	}`, f.namespace))
 
 	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "svc-deploy",
+		ID:   "svc-deploy",
+		Auth: f.auth,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{
@@ -639,31 +671,33 @@ func TestE2E_ServiceSelectorEdges(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	// Wait for pod to be running.
+	// Wait for pod to be running AND service to appear.
 	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		var podRunning, svcFound bool
 		for _, item := range items {
 			if item.Type() == "v1/Pod" && strings.HasPrefix(item.Name(), "e2e-svc-deploy-") {
 				observed := map[string]any{}
 				_ = json.Unmarshal(item.Observed(), &observed)
 				if phase, _ := observed["phase"].(string); phase == "Running" {
-					return true
+					podRunning = true
 				}
 			}
+			if item.Type() == "v1/Service" && item.Name() == "e2e-svc" {
+				svcFound = true
+			}
 		}
-		return false
+		return podRunning && svcFound
 	}, 90*time.Second)
 
 	svcUID := findUID(t, items, "v1/Service", "e2e-svc")
-	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, svcUID)
-	hasSelects := false
-	for _, e := range edges {
-		if e.EdgeType == "selects" && e.DestKind == "Pod" {
-			hasSelects = true
+	awaitEdgeFrom(t, f.harness.Store, f.targetID, svcUID, func(edges []domain.InventoryEdge) bool {
+		for _, e := range edges {
+			if e.EdgeType == "selects" && e.DestKind == "Pod" {
+				return true
+			}
 		}
-	}
-	if !hasSelects {
-		t.Error("missing selects edge: Service→Pod")
-	}
+		return false
+	}, 30*time.Second)
 }
 
 // TestE2E_PVCPVEdge verifies PVC→PV attachment edge.
@@ -708,29 +742,32 @@ func TestE2E_PVCPVEdge(t *testing.T) {
 		t.Fatalf("create PVC: %v", err)
 	}
 
-	// Wait for PVC to appear in inventory.
+	// Wait for both PVC and PV to appear in inventory.
 	items := awaitInventoryMatch(t, f.harness.Store, func(items []domain.InventoryItem) bool {
+		var pvc, pv bool
 		for _, item := range items {
 			if item.Type() == "v1/PersistentVolumeClaim" && item.Name() == "e2e-pvc" {
-				return true
+				pvc = true
+			}
+			if item.Type() == "v1/PersistentVolume" && item.Name() == "e2e-pv" {
+				pv = true
 			}
 		}
-		return false
+		return pvc && pv
 	}, 60*time.Second)
 
 	pvcUID := findUID(t, items, "v1/PersistentVolumeClaim", "e2e-pvc")
 	pvUID := findUID(t, items, "v1/PersistentVolume", "e2e-pv")
 
-	edges := queryEdgesFrom(t, f.harness.Store, f.targetID, pvcUID)
-	hasPVEdge := false
-	for _, e := range edges {
-		if e.EdgeType == "attachedTo" && e.DestUID == pvUID {
-			hasPVEdge = true
+	// Wait for attachment edge (edges arrive via flush, may lag items).
+	awaitEdgeFrom(t, f.harness.Store, f.targetID, pvcUID, func(edges []domain.InventoryEdge) bool {
+		for _, e := range edges {
+			if e.EdgeType == "attachedTo" && e.DestUID == pvUID {
+				return true
+			}
 		}
-	}
-	if !hasPVEdge {
-		t.Error("missing attachedTo edge: PVC→PV")
-	}
+		return false
+	}, 30*time.Second)
 }
 
 // TestE2E_UpdateReindex verifies that resource updates trigger re-indexing.
@@ -755,7 +792,8 @@ func TestE2E_UpdateReindex(t *testing.T) {
 	}`, f.namespace))
 
 	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "scale-deploy",
+		ID:   "scale-deploy",
+		Auth: f.auth,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{ResourceType: kubeaddon.ManifestResourceType, Raw: manifest}},
@@ -803,20 +841,20 @@ func TestE2E_UpdateReindex(t *testing.T) {
 		return count >= 2
 	}, 90*time.Second)
 
-	// Verify both pods have ownedBy edges.
+	// Wait for both pods to have ownedBy edges (edges arrive via flush, may lag items).
 	for _, item := range items {
 		if item.Type() == "v1/Pod" && strings.HasPrefix(item.Name(), "e2e-scale-") {
 			uid := uidFromItemID(item.ID())
-			edges := queryEdgesFrom(t, f.harness.Store, f.targetID, uid)
-			hasOwner := false
-			for _, e := range edges {
-				if e.EdgeType == "ownedBy" {
-					hasOwner = true
+			name := item.Name()
+			awaitEdgeFrom(t, f.harness.Store, f.targetID, uid, func(edges []domain.InventoryEdge) bool {
+				for _, e := range edges {
+					if e.EdgeType == "ownedBy" {
+						return true
+					}
 				}
-			}
-			if !hasOwner {
-				t.Errorf("pod %s missing ownedBy edge", item.Name())
-			}
+				return false
+			}, 30*time.Second)
+			_ = name // used for debug context in awaitEdgeFrom timeout
 		}
 	}
 }
@@ -843,7 +881,8 @@ func TestE2E_RemoveCleanup(t *testing.T) {
 	}`, f.namespace))
 
 	_, err := f.harness.Deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID: "remove-deploy",
+		ID:   "remove-deploy",
+		Auth: f.auth,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{ResourceType: kubeaddon.ManifestResourceType, Raw: manifest}},

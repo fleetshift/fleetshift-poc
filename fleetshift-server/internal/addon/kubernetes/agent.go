@@ -84,9 +84,12 @@ func (a *Agent) Remove(ctx context.Context, target domain.TargetInfo, deliveryID
 }
 
 // start runs the indexer delegate until the agent's context is cancelled.
+// If no indexer is configured (delivery-only mode), it closes done immediately.
 func (a *Agent) start() {
 	defer close(a.done)
-	a.indexer.start(a.ctx)
+	if a.indexer != nil {
+		a.indexer.start(a.ctx)
+	}
 }
 
 // Stop cancels the agent's context and waits for it to finish.

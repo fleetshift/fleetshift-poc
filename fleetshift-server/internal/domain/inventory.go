@@ -142,5 +142,7 @@ type InventoryWriter interface {
 	// Resync atomically replaces all items for a target+type. This
 	// is the full-sync path — used on initial list and after errors
 	// to guarantee the platform's view matches the source of truth.
-	Resync(ctx context.Context, targetID TargetID, inventoryType InventoryType, items []InventoryItem, edges []InventoryEdge) error
+	// Edges are not affected — edge management is handled exclusively
+	// by the incremental ApplyDelta path.
+	Resync(ctx context.Context, targetID TargetID, inventoryType InventoryType, items []InventoryItem) error
 }

@@ -95,7 +95,7 @@ func newTestManagerWithReporter(t *testing.T, reporter domain.DeliveryReporter) 
 	store := &sqlite.Store{DB: db}
 	vault := &fakeVault{secrets: make(map[domain.SecretRef][]byte)}
 	logger := slog.Default()
-	return kubernetes.NewManager(store, vault, mockInventoryWriter{}, reporter, nil, nil, logger)
+	return kubernetes.NewManager(store, vault, nil, reporter, nil, nil, logger)
 }
 
 // deliveryTarget builds a TargetInfo with the given properties for

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
@@ -60,38 +59,17 @@ func (s *InventoryWriteService) ApplyDelta(ctx context.Context, targetID domain.
 }
 
 // Resync atomically replaces all items for a target+type.
-func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem, edges []domain.InventoryEdge) error {
+// Edges are not affected — edge management is handled exclusively
+// by the incremental ApplyDelta path.
+func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.TargetID, inventoryType domain.InventoryType, items []domain.InventoryItem) error {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	itemRepo := tx.Inventory()
-	edgeRepo := tx.Edges()
-
-	if err := itemRepo.ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
+	if err := tx.Inventory().ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
 		return fmt.Errorf("replace by target and type: %w", err)
-	}
-
-	// Scope edge replacement to the source UIDs of the resynced items.
-	if len(items) > 0 {
-		sourceUIDs := make([]string, 0, len(items))
-		for _, item := range items {
-			parts := strings.SplitN(string(item.ID()), "/", 2)
-			if len(parts) == 2 {
-				sourceUIDs = append(sourceUIDs, parts[1])
-			}
-		}
-		if err := edgeRepo.DeleteBySourceUIDs(ctx, targetID, sourceUIDs); err != nil {
-			return fmt.Errorf("delete edges for resync: %w", err)
-		}
-	}
-
-	if len(edges) > 0 {
-		if err := edgeRepo.CreateOrUpdate(ctx, targetID, edges); err != nil {
-			return fmt.Errorf("upsert edges for resync: %w", err)
-		}
 	}
 
 	return tx.Commit()

@@ -1,5 +1,7 @@
 package kubernetes
 
+import "slices"
+
 // EdgeType identifies the kind of relationship between two resources.
 type EdgeType string
 
@@ -24,6 +26,7 @@ type inventoryNode struct {
 	Name       string
 	Namespace  string
 	OwnerUID   string
+	Labels     map[string]string
 	Properties map[string]any
 }
 
@@ -79,11 +82,9 @@ func commonEdges(uid string, ns NodeStore) []Edge {
 	var walk func(ownerUID string)
 	walk = func(ownerUID string) {
 		// Cycle detection
-		for _, seenUID := range seen {
-			if seenUID == ownerUID {
+		if slices.Contains(seen, ownerUID) {
 				return
 			}
-		}
 
 		if ownerUID == "" {
 			return

@@ -248,7 +248,9 @@ Edge computation closures receive the NodeStore so they can efficiently find rel
 
 ### Edge computation timing
 
-Edges are computed lazily, at flush time in the Writer, not on every event. When a resource arrives, its edge computation closure is stored alongside it. At flush, the Writer builds the NodeStore from current state, runs all closures, and diffs edges against the previous set to produce add/delete edge deltas. This matches search-collector's pattern — edges are recomputed from scratch each cycle because any resource change can affect edges involving other resources.
+Edges are computed lazily, at flush time in the Writer, not on every event or on resync. When a resource arrives (via event or resync), its edge computation closure is stored alongside it. At flush, the Writer builds the NodeStore from all known resources across all GVRs, runs all closures, and diffs edges against the previous set to produce add/delete edge deltas. This matches search-collector's pattern — edges are recomputed from scratch each cycle because any resource change can affect edges involving other resources.
+
+The flush path is the single owner of edge computation because it has a complete view of all resources. Cross-GVR edges — Pod→Node (`runsOn`), Service→Pod (`selects`), PVC→PV (`attachedTo`) — require the NodeStore to contain resources from multiple GVRs simultaneously. The resync path operates on a single GVR at a time and cannot guarantee that dependent GVRs have been processed yet, so it delegates edge management to flush.
 
 ### Edge persistence
 
@@ -256,7 +258,7 @@ Edges are written through the `InventoryWriter` interface alongside inventory it
 
 The edge table is keyed by target ID, source UID, destination UID, and edge type. A source can have multiple edge types to the same destination. A secondary index on destination UID enables efficient incoming-edge queries such as "which pods run on this node."
 
-`ApplyDelta` includes edge add and edge delete parameters alongside item upserts and deletes, all within a single transaction. `Resync` scopes edge replacement to the source UIDs of the items being resynced — it deletes edges for those sources, then inserts the new set. This avoids needing a type-mapping between inventory types and edge source kinds.
+`ApplyDelta` includes edge add and edge delete parameters alongside item upserts and deletes, all within a single transaction. `Resync` atomically replaces items only — it does not touch edges. Edge management is handled exclusively by the `ApplyDelta` path.
 
 Edge persistence is handled by a dedicated `EdgeRepository`, separate from the `InventoryRepository` that handles items. Both repositories are accessed through the same transaction, ensuring atomicity. The `EdgeRepository` supports creating or updating edges in batch, deleting specific edges, deleting edges by source UIDs (for resync scoping), and deleting all edges for a target (for termination cleanup). Target termination calls cleanup on both repositories — edges first, then items.
 
@@ -330,7 +332,7 @@ The Writer batches informer events, performs two-tier extraction, computes edges
 5. Diff edges against the previous edge set to produce add/delete edge deltas
 6. Call `InventoryWriter.ApplyDelta` with item upserts, deleted IDs, edge adds, and edge deletes
 
-**Resync** (on `ResyncEvent`): extract all resources for the GVR, compute edges, and call `InventoryWriter.Resync` to atomically replace all items and edges for the target+type. The resync path bypasses the batch timer and writes immediately.
+**Resync** (on `ResyncEvent`): extract all resources for the GVR, merge the extracted nodes and edge closures into the Writer's state, and call `InventoryWriter.Resync` to atomically replace all items for the target+type. The resync handles items only — it passes nil edges so existing edges are left untouched. Edge closures registered during resync are picked up by the next flush cycle, which recomputes all edges with a complete cross-GVR view. The resync path bypasses the batch timer and writes immediately.
 
 **Error recovery**: on `ApplyDelta` failure, the Writer retries with exponential backoff capped at a configurable maximum. After repeated failures, the Writer falls back to a full `Resync` for all affected GVRs, rebuilding state from scratch.
 
@@ -342,8 +344,8 @@ All event processing is serialized on a single goroutine for ordering safety. La
 
 The `InventoryWriter` interface models the addon-to-platform direction of the indexing protocol:
 
-- **ApplyDelta**: upserts and deletes items, adds and deletes edges, in a single transaction. This is the incremental update path.
-- **Resync**: atomically replaces all items and edges for a target+type. This is the full-sync path used on initial list and after errors.
+- **ApplyDelta**: upserts and deletes items, adds and deletes edges, in a single transaction. This is the incremental update path and the sole path for edge persistence.
+- **Resync**: atomically replaces all items for a target+type. Does not touch edges — edge computation requires a cross-GVR view that the single-GVR resync path cannot provide. Edges are managed exclusively by the flush/`ApplyDelta` path.
 
 In-process, the `InventoryWriteService` wraps each operation in a store transaction. In the external model, a fleetlet channel adapter would implement the same interface.
 
@@ -439,9 +441,9 @@ Edges are persisted in a dedicated table alongside inventory items, but the plat
 
 ### Resync write amplification on watch reconnection
 
-The informer sends a full Resync after every LIST — both on initial startup and on every watch reconnection. Watch reconnections are routine (API server timeouts, network blips, 410 Gone errors). Each Resync deletes and re-inserts all items and edges for the affected GVR, even when nothing on the cluster has changed. The informer also sends individual Add and Delete events from the same LIST, which would produce a correct ApplyDelta diff on their own — the Resync is a redundant safety net.
+The informer sends a full Resync after every LIST — both on initial startup and on every watch reconnection. Watch reconnections are routine (API server timeouts, network blips, 410 Gone errors). Each Resync replaces all items for the affected GVR, even when nothing on the cluster has changed. Edges are not affected — the resync passes nil edges, leaving edge management to the flush path. The informer also sends individual Add and Delete events from the same LIST, which would produce a correct ApplyDelta diff on their own — the Resync is a redundant safety net for items.
 
-For a single target with SQLite this is negligible. At scale with Postgres and frequent watch reconnections across many targets, the write amplification could matter. The mitigation is for the Writer to distinguish first-sync Resyncs (which must hit the database) from watch-reconnection Resyncs (which can be skipped, letting the individual events flow through ApplyDelta as normal diffs). The Resync path would only hit the database on initial startup and after repeated ApplyDelta failures.
+For a single target with SQLite the item-only Resync is negligible. At scale with Postgres and frequent watch reconnections across many targets, the write amplification could matter. The mitigation is for the Writer to distinguish first-sync Resyncs (which must hit the database) from watch-reconnection Resyncs (which can be skipped, letting the individual events flow through ApplyDelta as normal diffs). The Resync path would only hit the database on initial startup and after repeated ApplyDelta failures.
 
 ### Informer startup serialization at scale
 
