@@ -491,7 +491,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 			},
 		},
 		conn:    conn,
-		typeSvc: &application.ManagedResourceTypeService{Store: store},
+		typeSvc: application.NewManagedResourceTypeService(store),
 	}
 }
 
@@ -672,7 +672,7 @@ func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActiv
 	return &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		Deps:         managedresource.Deps{Validator: validator},
-		PlatformDeps: managedresource.PlatformDeps{Resources: &application.PlatformResourceService{Store: store}},
+		PlatformDeps: managedresource.PlatformDeps{Resources: application.NewPlatformResourceService(store)},
 	}, mux
 }
 
@@ -787,7 +787,7 @@ func TestPlatformReflection(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{Validator: validator},
-		PlatformDeps: managedresource.PlatformDeps{Resources: &application.PlatformResourceService{Store: store}},
+		PlatformDeps: managedresource.PlatformDeps{Resources: application.NewPlatformResourceService(store)},
 	}
 
 	schema := kindaddon.Schema()
@@ -872,7 +872,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 	resourceSvc := &application.ManagedResourceService{
 		Store: store, CreateWF: createWf, DeleteWF: deleteWf,
 	}
-	platformResourceSvc := &application.PlatformResourceService{Store: store}
+	platformResourceSvc := application.NewPlatformResourceService(store)
 
 	validator, err := protovalidate.New()
 	if err != nil {
@@ -917,7 +917,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 			},
 		},
 		conn:    conn,
-		typeSvc: &application.ManagedResourceTypeService{Store: store},
+		typeSvc: application.NewManagedResourceTypeService(store),
 		store:   store,
 	}
 }

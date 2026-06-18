@@ -14,7 +14,31 @@ import (
 // identities: create, get, list, and delete. This is the thin
 // application-layer entry point used by platform API handlers.
 type PlatformResourceService struct {
-	Store domain.Store
+	store domain.Store
+	now   func() time.Time
+}
+
+// PlatformResourceServiceOption configures a [PlatformResourceService].
+type PlatformResourceServiceOption func(*PlatformResourceService)
+
+// WithPlatformResourceClock overrides the wall-clock used for
+// timestamps (e.g. creation and deletion times). Defaults to
+// [time.Now].
+func WithPlatformResourceClock(fn func() time.Time) PlatformResourceServiceOption {
+	return func(s *PlatformResourceService) { s.now = fn }
+}
+
+// NewPlatformResourceService creates a service with the given store
+// and options.
+func NewPlatformResourceService(store domain.Store, opts ...PlatformResourceServiceOption) *PlatformResourceService {
+	s := &PlatformResourceService{
+		store: store,
+		now:   time.Now,
+	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
 }
 
 // CreatePlatformResourceInput carries the fields needed to create or
@@ -43,13 +67,13 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 		return nil, err
 	}
 
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	now := time.Now().UTC()
+	now := s.now()
 	uid := domain.PlatformResourceUID(uuid.New().String())
 	pr := domain.NewPlatformResource(uid, in.CollectionID, name, in.Labels, now)
 
@@ -65,7 +89,7 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 
 // Get retrieves a platform resource by its collection and ID.
 func (s *PlatformResourceService) Get(ctx context.Context, collection domain.CollectionID, id string) (*domain.PlatformResource, error) {
-	tx, err := s.Store.BeginReadOnly(ctx)
+	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -85,7 +109,7 @@ func (s *PlatformResourceService) Get(ctx context.Context, collection domain.Col
 
 // List returns all active (non-deleted) platform resources in a collection.
 func (s *PlatformResourceService) List(ctx context.Context, collection domain.CollectionID) ([]*domain.PlatformResource, error) {
-	tx, err := s.Store.BeginReadOnly(ctx)
+	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -107,7 +131,7 @@ func (s *PlatformResourceService) List(ctx context.Context, collection domain.Co
 
 // Delete soft-deletes a platform resource by its collection and ID.
 func (s *PlatformResourceService) Delete(ctx context.Context, collection domain.CollectionID, id string) (*domain.PlatformResource, error) {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -123,7 +147,7 @@ func (s *PlatformResourceService) Delete(ctx context.Context, collection domain.
 		return nil, err
 	}
 
-	now := time.Now().UTC()
+	now := s.now()
 	if err := pr.SoftDelete(now); err != nil {
 		return nil, err
 	}

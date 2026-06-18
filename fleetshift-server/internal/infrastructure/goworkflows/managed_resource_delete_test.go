@@ -205,7 +205,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	resourceSvc := &application.ManagedResourceService{
 		Store:    store,
 		CreateWF: createWf,

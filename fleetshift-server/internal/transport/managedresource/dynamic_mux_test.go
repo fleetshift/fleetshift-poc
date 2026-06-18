@@ -123,7 +123,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 		t.Fatalf("register target: %v", err)
 	}
 
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
 		ResourceType:   kindaddon.ClusterResourceType,
 		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local"},

@@ -89,9 +89,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
-	typeSvc := &application.ManagedResourceTypeService{
-		Store: store,
-	}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	resourceSvc := &application.ManagedResourceService{
 		Store:         store,
 		CreateWF:      createWf,

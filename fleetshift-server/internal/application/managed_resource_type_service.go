@@ -12,8 +12,38 @@ import (
 // type definitions. These are metadata records registered by addons to
 // declare ownership of a resource type and its fulfillment relation.
 type ManagedResourceTypeService struct {
-	Store domain.Store
+	store domain.Store
+	now   func() time.Time
 }
+
+// ManagedResourceTypeServiceOption configures a
+// [ManagedResourceTypeService].
+type ManagedResourceTypeServiceOption func(*ManagedResourceTypeService)
+
+// WithManagedResourceTypeClock overrides the wall-clock used for
+// timestamps (e.g. CreatedAt / UpdatedAt on type definitions).
+// Defaults to [time.Now].
+func WithManagedResourceTypeClock(fn func() time.Time) ManagedResourceTypeServiceOption {
+	return func(s *ManagedResourceTypeService) { s.now = fn }
+}
+
+// NewManagedResourceTypeService creates a service with the given store
+// and options.
+func NewManagedResourceTypeService(store domain.Store, opts ...ManagedResourceTypeServiceOption) *ManagedResourceTypeService {
+	s := &ManagedResourceTypeService{
+		store: store,
+		now:   time.Now,
+	}
+	for _, o := range opts {
+		o(s)
+	}
+	return s
+}
+
+// Store returns the underlying store. This accessor exists so that
+// dependents (e.g. [AddonManager]) can share the store without
+// coupling to the service's internal layout.
+func (s *ManagedResourceTypeService) Store() domain.Store { return s.store }
 
 // CreateTypeInput carries the fields needed to register a new managed
 // resource type.
@@ -35,7 +65,7 @@ func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeIn
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: relation is required", domain.ErrInvalidArgument)
 	}
 
-	now := time.Now().UTC()
+	now := s.now()
 	def := domain.ManagedResourceTypeDef{
 		ResourceType:   in.ResourceType,
 		Relation:       in.Relation,
@@ -47,7 +77,7 @@ func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeIn
 		UpdatedAt:      now,
 	}
 
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("begin tx: %w", err)
 	}
@@ -64,7 +94,7 @@ func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeIn
 
 // Get retrieves a managed resource type definition by resource type.
 func (s *ManagedResourceTypeService) Get(ctx context.Context, rt domain.ResourceType) (domain.ManagedResourceTypeDef, error) {
-	tx, err := s.Store.BeginReadOnly(ctx)
+	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("begin tx: %w", err)
 	}
@@ -79,7 +109,7 @@ func (s *ManagedResourceTypeService) Get(ctx context.Context, rt domain.Resource
 
 // List returns all registered managed resource type definitions.
 func (s *ManagedResourceTypeService) List(ctx context.Context) ([]domain.ManagedResourceTypeDef, error) {
-	tx, err := s.Store.BeginReadOnly(ctx)
+	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -94,7 +124,7 @@ func (s *ManagedResourceTypeService) List(ctx context.Context) ([]domain.Managed
 
 // Delete removes a managed resource type definition.
 func (s *ManagedResourceTypeService) Delete(ctx context.Context, rt domain.ResourceType) error {
-	tx, err := s.Store.Begin(ctx)
+	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}

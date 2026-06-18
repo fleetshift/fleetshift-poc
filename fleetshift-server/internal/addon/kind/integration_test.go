@@ -187,7 +187,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 		t.Fatalf("RegisterCreateManagedResource: %v", err)
 	}
 
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	resourceSvc := &application.ManagedResourceService{
 		Store:    store,
 		CreateWF: createMRWf,

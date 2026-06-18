@@ -212,7 +212,7 @@ func Start(t *testing.T) string {
 	// Use the AddonManager lifecycle (Enable → Connect) to match
 	// production wiring in serve.go. This registers targets, creates
 	// managed resource type definitions, and activates schemas.
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router:    router,
 		TypeSvc:   typeSvc,

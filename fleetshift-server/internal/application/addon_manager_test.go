@@ -154,7 +154,7 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 		Store: store, CreateWF: createMRWf, DeleteWF: deleteMRWf,
 	}
 
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	typeSvc := application.NewManagedResourceTypeService(store)
 	targetSvc := &application.TargetService{Store: store}
 
 	activator := &recordingActivator{}
@@ -784,7 +784,7 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		}
 		_ = createMRWf
 
-		typeSvc := &application.ManagedResourceTypeService{Store: store}
+		typeSvc := application.NewManagedResourceTypeService(store)
 		targetSvc := &application.TargetService{Store: store}
 		activator := &recordingActivator{}
 

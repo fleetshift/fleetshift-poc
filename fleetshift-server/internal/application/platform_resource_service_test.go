@@ -12,7 +12,7 @@ import (
 
 func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 	store := newStore(t)
-	svc := &application.PlatformResourceService{Store: store}
+	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
 	pr, err := svc.Create(ctx, application.CreatePlatformResourceInput{
@@ -43,7 +43,7 @@ func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 
 func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
 	store := newStore(t)
-	svc := &application.PlatformResourceService{Store: store}
+	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
@@ -67,7 +67,7 @@ func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
 
 func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	store := newStore(t)
-	svc := &application.PlatformResourceService{Store: store}
+	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
 	pr, err := svc.Create(ctx, application.CreatePlatformResourceInput{
@@ -129,7 +129,7 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 
 func TestPlatformResourceService_ListByCollection(t *testing.T) {
 	store := newStore(t)
-	svc := &application.PlatformResourceService{Store: store}
+	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
 	// Create two resources in the same collection.
@@ -180,7 +180,7 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 
 func TestPlatformResourceService_DeleteSoftDeletes(t *testing.T) {
 	store := newStore(t)
-	svc := &application.PlatformResourceService{Store: store}
+	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{

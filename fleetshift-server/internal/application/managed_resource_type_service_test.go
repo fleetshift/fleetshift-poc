@@ -11,9 +11,7 @@ import (
 
 func newTypeService(t *testing.T) *application.ManagedResourceTypeService {
 	t.Helper()
-	return &application.ManagedResourceTypeService{
-		Store: newStore(t),
-	}
+	return application.NewManagedResourceTypeService(newStore(t))
 }
 
 func TestManagedResourceTypeService_CRUD(t *testing.T) {

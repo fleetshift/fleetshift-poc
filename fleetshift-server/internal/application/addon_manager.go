@@ -49,10 +49,21 @@ type AddonManagerDeps struct {
 type AddonManager struct {
 	mu     sync.RWMutex
 	addons map[domain.AddonID]*addonRecord
+	now    func() time.Time
 
 	router    DeliveryAgentRegistry
 	typeSvc   *ManagedResourceTypeService
 	activator SchemaActivator
+}
+
+// AddonManagerOption configures an [AddonManager].
+type AddonManagerOption func(*AddonManager)
+
+// WithAddonManagerClock overrides the wall-clock used for addon
+// lifecycle timestamps (e.g. EnabledAt, ConnectedAt). Defaults to
+// [time.Now].
+func WithAddonManagerClock(fn func() time.Time) AddonManagerOption {
+	return func(m *AddonManager) { m.now = fn }
 }
 
 // addonRecord is the in-memory state for an addon within the manager.
@@ -66,14 +77,20 @@ type addonRecord struct {
 	registeredTypeDefs  map[domain.ResourceType]struct{}
 }
 
-// NewAddonManager creates a new manager with the given dependencies.
-func NewAddonManager(deps AddonManagerDeps) *AddonManager {
-	return &AddonManager{
+// NewAddonManager creates a new manager with the given dependencies
+// and options.
+func NewAddonManager(deps AddonManagerDeps, opts ...AddonManagerOption) *AddonManager {
+	m := &AddonManager{
 		addons:    make(map[domain.AddonID]*addonRecord),
+		now:       time.Now,
 		router:    deps.Router,
 		typeSvc:   deps.TypeSvc,
 		activator: deps.Activator,
 	}
+	for _, o := range opts {
+		o(m)
+	}
+	return m
 }
 
 // Enable authorizes and records an addon's declared capabilities.
@@ -93,11 +110,11 @@ func (m *AddonManager) Enable(_ context.Context, desc domain.AddonDescriptor) er
 		rec.addon.Name = desc.Name
 		rec.addon.State = domain.AddonStateEnabled
 		rec.addon.Capabilities = desc.Capabilities
-		rec.addon.EnabledAt = time.Now().UTC()
+		rec.addon.EnabledAt = m.now()
 		return nil
 	}
 
-	now := time.Now().UTC()
+	now := m.now()
 	m.addons[desc.ID] = &addonRecord{
 		addon: domain.Addon{
 			ID:           desc.ID,
@@ -167,7 +184,7 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 		return err
 	}
 
-	now := time.Now().UTC()
+	now := m.now()
 	rec.addon.State = domain.AddonStateConnected
 	rec.addon.ConnectedAt = &now
 	return nil
@@ -227,7 +244,7 @@ func (m *AddonManager) connectDeliveryAgent(rec *addonRecord, agent domain.Deliv
 }
 
 func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, targets []domain.TargetInfo) error {
-	targetSvc := &TargetService{Store: m.typeSvc.Store}
+	targetSvc := &TargetService{Store: m.typeSvc.Store()}
 	for _, t := range targets {
 		if err := targetSvc.Register(ctx, t); err != nil {
 			if errors.Is(err, domain.ErrAlreadyExists) {
