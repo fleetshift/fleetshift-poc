@@ -41,6 +41,9 @@ type Writer struct {
 	eventCh       chan ResourceEvent
 	resyncCh      chan ResyncEvent
 	batchInterval time.Duration
+	currentNodes  map[string]inventoryNode
+	edgeFuncs     map[string]func(NodeStore) []Edge
+	previousEdges map[string]map[string]Edge // sourceUID -> destUID -> Edge
 }
 
 // NewWriter creates a Writer that batches events over batchInterval and
@@ -58,6 +61,9 @@ func NewWriter(
 		eventCh:       make(chan ResourceEvent, 256),
 		resyncCh:      make(chan ResyncEvent, 16),
 		batchInterval: batchInterval,
+		currentNodes:  make(map[string]inventoryNode),
+		edgeFuncs:     make(map[string]func(NodeStore) []Edge),
+		previousEdges: make(map[string]map[string]Edge),
 	}
 }
 
@@ -108,6 +114,9 @@ func (w *Writer) Run(ctx context.Context) {
 				// Clear sent version so a future add for this UID is not
 				// deduped against the deleted resource.
 				delete(sentVersions, uid)
+				// Remove from edge state.
+				delete(w.currentNodes, uid)
+				delete(w.edgeFuncs, uid)
 			}
 
 		case rs := <-w.resyncCh:
@@ -147,9 +156,17 @@ func (w *Writer) flush(
 
 		gvr := upsertGVR[uid]
 		entry := w.schema[gvr]
-		item, _ := ExtractObservedResource(r, entry, w.targetID)
+		item, node := ExtractObservedResource(r, entry, w.targetID)
 		items = append(items, item)
 		sentVersions[uid] = rv
+
+		// Track inventory node for edge computation.
+		w.currentNodes[uid] = node
+
+		// Store edge computation closure if the schema entry has BuildEdges.
+		if entry.BuildEdges != nil {
+			w.edgeFuncs[uid] = entry.BuildEdges(r, uid)
+		}
 	}
 
 	var deletedIDs []domain.InventoryItemID
@@ -161,10 +178,69 @@ func (w *Writer) flush(
 		return
 	}
 
+	// Compute edges for all current nodes.
+	ns := buildNodeStore(w.currentNodes)
+	newEdges := make(map[string]map[string]Edge)
+
+	// Type-specific edges from BuildEdges closures.
+	for _, edgeFn := range w.edgeFuncs {
+		for _, e := range edgeFn(ns) {
+			if newEdges[e.SourceUID] == nil {
+				newEdges[e.SourceUID] = make(map[string]Edge)
+			}
+			newEdges[e.SourceUID][e.DestUID] = e
+		}
+	}
+
+	// Common edges (ownedBy traversal) for ALL nodes.
+	for uid := range w.currentNodes {
+		for _, e := range commonEdges(uid, ns) {
+			if newEdges[e.SourceUID] == nil {
+				newEdges[e.SourceUID] = make(map[string]Edge)
+			}
+			newEdges[e.SourceUID][e.DestUID] = e
+		}
+	}
+
+	// Diff edges to produce adds and deletes.
+	var edgeAdds, edgeDels []domain.InventoryEdge
+
+	// Edges in new but not previous → adds.
+	for srcUID, destMap := range newEdges {
+		for destUID, edge := range destMap {
+			if _, ok := w.previousEdges[srcUID][destUID]; !ok {
+				edgeAdds = append(edgeAdds, domain.InventoryEdge{
+					EdgeType:   string(edge.EdgeType),
+					SourceUID:  edge.SourceUID,
+					DestUID:    edge.DestUID,
+					SourceKind: edge.SourceKind,
+					DestKind:   edge.DestKind,
+				})
+			}
+		}
+	}
+
+	// Edges in previous but not new → deletes.
+	for srcUID, destMap := range w.previousEdges {
+		for destUID, edge := range destMap {
+			if _, ok := newEdges[srcUID][destUID]; !ok {
+				edgeDels = append(edgeDels, domain.InventoryEdge{
+					EdgeType:   string(edge.EdgeType),
+					SourceUID:  edge.SourceUID,
+					DestUID:    edge.DestUID,
+					SourceKind: edge.SourceKind,
+					DestKind:   edge.DestKind,
+				})
+			}
+		}
+	}
+
+	w.previousEdges = newEdges
+
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs, nil, nil)
+	_ = w.writer.ApplyDelta(ctx, domain.TargetID(w.targetID), items, deletedIDs, edgeAdds, edgeDels)
 }
 
 // sendResync sends a Resync call for the given GVR.
@@ -172,9 +248,19 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	entry := w.schema[rs.GVR] // zero-value SchemaEntry if not in schema — base extraction only
 
 	var items []domain.InventoryItem
+	nodes := make(map[string]inventoryNode)
+	edgeFuncs := make(map[string]func(NodeStore) []Edge)
+
 	for _, r := range rs.Resources {
-		item, _ := ExtractObservedResource(r, entry, w.targetID)
+		item, node := ExtractObservedResource(r, entry, w.targetID)
 		items = append(items, item)
+		uid := string(r.GetUID())
+		nodes[uid] = node
+
+		// Store edge computation closure if the schema entry has BuildEdges.
+		if entry.BuildEdges != nil {
+			edgeFuncs[uid] = entry.BuildEdges(r, uid)
+		}
 	}
 
 	// Derive the Kind for the inventory type. Prefer the schema entry's Kind,
@@ -191,8 +277,38 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 		invType = domain.InventoryType(rs.GVR.Version + "/" + kind)
 	}
 
+	// Compute edges for the resynced set.
+	ns := buildNodeStore(nodes)
+	var edges []domain.InventoryEdge
+
+	// Type-specific edges from BuildEdges closures.
+	for _, edgeFn := range edgeFuncs {
+		for _, e := range edgeFn(ns) {
+			edges = append(edges, domain.InventoryEdge{
+				EdgeType:   string(e.EdgeType),
+				SourceUID:  e.SourceUID,
+				DestUID:    e.DestUID,
+				SourceKind: e.SourceKind,
+				DestKind:   e.DestKind,
+			})
+		}
+	}
+
+	// Common edges (ownedBy traversal) for ALL nodes.
+	for uid := range nodes {
+		for _, e := range commonEdges(uid, ns) {
+			edges = append(edges, domain.InventoryEdge{
+				EdgeType:   string(e.EdgeType),
+				SourceUID:  e.SourceUID,
+				DestUID:    e.DestUID,
+				SourceKind: e.SourceKind,
+				DestKind:   e.DestKind,
+			})
+		}
+	}
+
 	if w.writer == nil {
 		return
 	}
-	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items, nil)
+	_ = w.writer.Resync(ctx, domain.TargetID(w.targetID), invType, items, edges)
 }

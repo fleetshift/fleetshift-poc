@@ -295,3 +295,215 @@ func TestLateDeleteProtection(t *testing.T) {
 		}
 	}
 }
+
+func TestEdgeComputation_OwnedBy(t *testing.T) {
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Create a Deployment with an owner reference.
+	deploy := makeResource("uid-child", "child-deploy", "100")
+	deploy.Object["metadata"].(map[string]any)["ownerReferences"] = []any{
+		map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"name":       "parent-rs",
+			"uid":        "uid-parent",
+			"controller": true,
+		},
+	}
+
+	// Also add the parent resource so the edge can be resolved.
+	parent := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"metadata": map[string]any{
+				"uid":               "uid-parent",
+				"name":              "parent-rs",
+				"namespace":         "default",
+				"resourceVersion":   "200",
+				"creationTimestamp": "2025-06-01T12:00:00Z",
+			},
+		},
+	}
+
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: deploy, GVR: testGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: parent, GVR: testGVR}
+
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) == 0 {
+		t.Fatal("expected at least one delta, got none")
+	}
+
+	first := deltas[0]
+	if len(first.edgeAdds) == 0 {
+		t.Fatal("expected at least one edge add, got none")
+	}
+
+	// Verify ownedBy edge from child to parent.
+	var found bool
+	for _, e := range first.edgeAdds {
+		if e.EdgeType == "ownedBy" && e.SourceUID == "uid-child" && e.DestUID == "uid-parent" {
+			found = true
+			if e.SourceKind != "Deployment" {
+				t.Errorf("expected SourceKind=Deployment, got %s", e.SourceKind)
+			}
+			if e.DestKind != "ReplicaSet" {
+				t.Errorf("expected DestKind=ReplicaSet, got %s", e.DestKind)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected ownedBy edge from uid-child to uid-parent, not found")
+	}
+}
+
+func TestEdgeComputation_DeleteRemovesEdges(t *testing.T) {
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Create a Deployment with an owner reference.
+	deploy := makeResource("uid-child", "child-deploy", "100")
+	deploy.Object["metadata"].(map[string]any)["ownerReferences"] = []any{
+		map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"name":       "parent-rs",
+			"uid":        "uid-parent",
+			"controller": true,
+		},
+	}
+
+	parent := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"metadata": map[string]any{
+				"uid":               "uid-parent",
+				"name":              "parent-rs",
+				"namespace":         "default",
+				"resourceVersion":   "200",
+				"creationTimestamp": "2025-06-01T12:00:00Z",
+			},
+		},
+	}
+
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: deploy, GVR: testGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: parent, GVR: testGVR}
+
+	time.Sleep(250 * time.Millisecond)
+
+	// Delete the child — should remove the edge.
+	w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: deploy, GVR: testGVR}
+
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) < 2 {
+		t.Fatalf("expected at least 2 deltas, got %d", len(deltas))
+	}
+
+	// Second delta should have the edge delete.
+	second := deltas[1]
+	if len(second.edgeDels) == 0 {
+		t.Fatal("expected at least one edge delete, got none")
+	}
+
+	var found bool
+	for _, e := range second.edgeDels {
+		if e.EdgeType == "ownedBy" && e.SourceUID == "uid-child" && e.DestUID == "uid-parent" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("expected ownedBy edge delete from uid-child to uid-parent, not found")
+	}
+}
+
+func TestEdgeComputation_DiffAcrossFlushes(t *testing.T) {
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, testSchema, 100*time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	// Create a Deployment with an owner reference.
+	deploy := makeResource("uid-child", "child-deploy", "100")
+	deploy.Object["metadata"].(map[string]any)["ownerReferences"] = []any{
+		map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"name":       "parent-rs",
+			"uid":        "uid-parent",
+			"controller": true,
+		},
+	}
+
+	parent := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"metadata": map[string]any{
+				"uid":               "uid-parent",
+				"name":              "parent-rs",
+				"namespace":         "default",
+				"resourceVersion":   "200",
+				"creationTimestamp": "2025-06-01T12:00:00Z",
+			},
+		},
+	}
+
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: deploy, GVR: testGVR}
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: parent, GVR: testGVR}
+
+	time.Sleep(250 * time.Millisecond)
+
+	// Send an update for the parent (no edge change).
+	parent2 := &unstructured.Unstructured{
+		Object: map[string]any{
+			"apiVersion": "apps/v1",
+			"kind":       "ReplicaSet",
+			"metadata": map[string]any{
+				"uid":               "uid-parent",
+				"name":              "parent-rs",
+				"namespace":         "default",
+				"resourceVersion":   "201",
+				"creationTimestamp": "2025-06-01T12:00:00Z",
+			},
+		},
+	}
+	w.EventCh() <- ResourceEvent{Op: EventUpdate, Resource: parent2, GVR: testGVR}
+
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) < 2 {
+		t.Fatalf("expected at least 2 deltas, got %d", len(deltas))
+	}
+
+	// First delta should have the edge add.
+	first := deltas[0]
+	if len(first.edgeAdds) == 0 {
+		t.Fatal("expected at least one edge add in first delta, got none")
+	}
+
+	// Second delta should have no edge adds (edge already exists).
+	second := deltas[1]
+	if len(second.edgeAdds) > 0 {
+		t.Errorf("expected no edge adds in second delta (edge unchanged), got %d", len(second.edgeAdds))
+	}
+}
