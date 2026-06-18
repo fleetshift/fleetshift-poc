@@ -550,6 +550,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- addon lifecycle ---
 
 	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	platformResourceSvc := &application.PlatformResourceService{Store: store}
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
@@ -557,6 +558,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		Deps: managedresource.Deps{
 			Resources: managedResourceSvc,
 			Validator: specValidator,
+		},
+		PlatformDeps: managedresource.PlatformDeps{
+			Resources: platformResourceSvc,
 		},
 	}
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{

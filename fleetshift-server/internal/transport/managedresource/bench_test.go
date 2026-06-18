@@ -50,12 +50,14 @@ func setupBench(b *testing.B) *benchEnv {
 	}
 
 	cfg := &managedresource.ResourceTypeConfig{
+		CollectionConfig: managedresource.CollectionConfig{
+			Version:      schema.Version,
+			CollectionID: schema.CollectionID,
+			Singular:     schema.Singular,
+			Plural:       schema.Plural,
+		},
 		ResourceType:   kindaddon.ClusterResourceType,
 		APIServiceName: schema.APIServiceName,
-		Version:        schema.Version,
-		CollectionID:   schema.CollectionID,
-		Singular:       schema.Singular,
-		Plural:         schema.Plural,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: desc.Message,

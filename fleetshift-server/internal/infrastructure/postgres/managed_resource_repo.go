@@ -30,9 +30,10 @@ func (r *ManagedResourceRepo) CreateType(ctx context.Context, def domain.Managed
 		return fmt.Errorf("marshal signature: %w", err)
 	}
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO managed_resource_types (resource_type, relation, signature, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5)`,
+		`INSERT INTO managed_resource_types (resource_type, relation, signature, api_service_name, api_version, collection_id, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		def.ResourceType, relJSON, sigJSON,
+		string(def.APIServiceName), string(def.APIVersion), string(def.CollectionID),
 		def.CreatedAt.UTC().Format(time.RFC3339),
 		def.UpdatedAt.UTC().Format(time.RFC3339))
 	if err != nil {
@@ -46,14 +47,14 @@ func (r *ManagedResourceRepo) CreateType(ctx context.Context, def domain.Managed
 
 func (r *ManagedResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ManagedResourceTypeDef, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, relation, signature, created_at, updated_at
+		`SELECT resource_type, relation, signature, api_service_name, api_version, collection_id, created_at, updated_at
 		 FROM managed_resource_types WHERE resource_type = $1`, rt)
 	return scanTypeDef(row)
 }
 
 func (r *ManagedResourceRepo) ListTypes(ctx context.Context) ([]domain.ManagedResourceTypeDef, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_type, relation, signature, created_at, updated_at
+		`SELECT resource_type, relation, signature, api_service_name, api_version, collection_id, created_at, updated_at
 		 FROM managed_resource_types ORDER BY resource_type`)
 	if err != nil {
 		return nil, err
@@ -216,8 +217,9 @@ func (r *ManagedResourceRepo) DeleteInstance(ctx context.Context, rt domain.Reso
 func scanTypeDef(s interface{ Scan(...any) error }) (domain.ManagedResourceTypeDef, error) {
 	var def domain.ManagedResourceTypeDef
 	var relJSON, sigJSON []byte
+	var apiServiceName, apiVersion, collectionID string
 	var createdAt, updatedAt string
-	if err := s.Scan(&def.ResourceType, &relJSON, &sigJSON, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&def.ResourceType, &relJSON, &sigJSON, &apiServiceName, &apiVersion, &collectionID, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ManagedResourceTypeDef{}, domain.ErrNotFound
 		}
@@ -231,6 +233,9 @@ func scanTypeDef(s interface{ Scan(...any) error }) (domain.ManagedResourceTypeD
 	if err := json.Unmarshal(sigJSON, &def.Signature); err != nil {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("unmarshal signature: %w", err)
 	}
+	def.APIServiceName = domain.ServiceName(apiServiceName)
+	def.APIVersion = domain.APIVersion(apiVersion)
+	def.CollectionID = domain.CollectionID(collectionID)
 	if t, err := time.Parse(time.RFC3339, createdAt); err == nil {
 		def.CreatedAt = t
 	}

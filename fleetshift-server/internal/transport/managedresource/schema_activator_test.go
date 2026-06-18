@@ -17,6 +17,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
+	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -517,12 +518,14 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		t.Fatalf("CompileInline: %v", err)
 	}
 	descs, err := managedresource.BuildServiceDescriptors(&managedresource.ResourceTypeConfig{
+		CollectionConfig: managedresource.CollectionConfig{
+			Version:      schema.Version,
+			CollectionID: schema.CollectionID,
+			Singular:     schema.Singular,
+			Plural:       schema.Plural,
+		},
 		ResourceType:   schema.ResourceType,
 		APIServiceName: schema.APIServiceName,
-		Version:        schema.Version,
-		CollectionID:   schema.CollectionID,
-		Singular:       schema.Singular,
-		Plural:         schema.Plural,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    protoreflect.FullName(schema.SpecMessage),
 		SpecDescriptor: specDesc.Message,
@@ -646,6 +649,183 @@ message WidgetSpec {
 	nameField := v2Descs.Resource.Fields().ByName("name")
 	if got := resp2.Get(nameField).String(); got != "widgets/widget-1" {
 		t.Errorf("name = %q, want widgets/widget-1", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Platform refcounting tests
+// ---------------------------------------------------------------------------
+
+// newActivatorWithPlatform creates an activator wired with a real
+// PlatformResourceService backed by an in-memory SQLite store. This is
+// the minimal setup needed for the platform refcounting code path.
+func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActivator, *managedresource.DynamicServiceMux) {
+	t.Helper()
+	mux := managedresource.NewDynamicServiceMux()
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("protovalidate.New: %v", err)
+	}
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+	return &managedresource.DynamicSchemaActivator{
+		GRPCMux:      mux,
+		Deps:         managedresource.Deps{Validator: validator},
+		PlatformDeps: managedresource.PlatformDeps{Resources: &application.PlatformResourceService{Store: store}},
+	}, mux
+}
+
+func TestDualRegistration(t *testing.T) {
+	activator, mux := newActivatorWithPlatform(t)
+
+	schema := kindaddon.Schema()
+	handle, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	info := mux.ServiceInfo()
+
+	// Extension gRPC service must be routable.
+	if _, ok := info["kind.fleetshift.v1.ClusterService"]; !ok {
+		t.Error("expected extension ClusterService in mux after Activate")
+	}
+
+	// Platform gRPC service must also be routable.
+	if _, ok := info["fleetshift.v1.PlatformClusterService"]; !ok {
+		t.Error("expected PlatformClusterService in mux after Activate")
+	}
+
+	if want := "fleetshift.io/v1/clusters"; handle.PlatformKey != want {
+		t.Errorf("handle.PlatformKey = %q, want %q", handle.PlatformKey, want)
+	}
+
+	if handle.PlatformHandle == nil {
+		t.Fatal("handle.PlatformHandle is nil, expected non-nil for first activation")
+	}
+
+	if handle.PlatformHandle.GRPCServiceName != "fleetshift.v1.PlatformClusterService" {
+		t.Errorf("PlatformHandle.GRPCServiceName = %q, want fleetshift.v1.PlatformClusterService",
+			handle.PlatformHandle.GRPCServiceName)
+	}
+}
+
+func TestPlatformRefCounting(t *testing.T) {
+	activator, mux := newActivatorWithPlatform(t)
+	ctx := context.Background()
+	const platformSvc = "fleetshift.v1.PlatformClusterService"
+
+	// Step 1: activate Kind (collection: "clusters")
+	kindHandle, err := activator.Activate(ctx, kindaddon.Schema())
+	if err != nil {
+		t.Fatalf("Activate Kind: %v", err)
+	}
+	if kindHandle.PlatformHandle == nil {
+		t.Fatal("Kind activation should create the platform service (refcount 0→1)")
+	}
+
+	// Step 2: activate GCP HCP (same collection: "clusters")
+	gcpHandle, err := activator.Activate(ctx, gcphcpaddon.Schema("gcphcp-test"))
+	if err != nil {
+		t.Fatalf("Activate GCPHCP: %v", err)
+	}
+	// Second extension joining the same collection should NOT create
+	// a new platform service (refcount 1→2).
+	if gcpHandle.PlatformHandle != nil {
+		t.Error("GCP HCP activation should not create a new platform service (refcount was already 1)")
+	}
+
+	// Step 3: one platform service exists
+	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
+		t.Fatal("platform service should be routable after two extensions activated")
+	}
+
+	// Step 4: deactivate Kind → platform still alive (refcount 2→1)
+	activator.Deactivate(kindHandle)
+	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
+		t.Fatal("platform service should survive after deactivating one of two extensions")
+	}
+
+	// Step 5: deactivate GCP HCP → platform removed (refcount 1→0)
+	activator.Deactivate(gcpHandle)
+
+	// Step 6: platform no longer routable
+	if _, ok := mux.ServiceInfo()[platformSvc]; ok {
+		t.Error("platform service should be removed after all extensions deactivated")
+	}
+}
+
+func TestReplaceDoesNotDropPlatform(t *testing.T) {
+	activator, mux := newActivatorWithPlatform(t)
+	ctx := context.Background()
+	const platformSvc = "fleetshift.v1.PlatformClusterService"
+
+	// Activate Kind.
+	_, err := activator.Activate(ctx, kindaddon.Schema())
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
+		t.Fatal("platform service should exist after initial activation")
+	}
+
+	// Replace: modify a proto file comment so content hash changes, but
+	// keep the same CollectionID.
+	modified := kindaddon.Schema()
+	for k, v := range modified.ProtoFiles {
+		modified.ProtoFiles[k] = "// replaced for test\n" + v
+	}
+
+	h2, err := activator.Activate(ctx, modified)
+	if err != nil {
+		t.Fatalf("Activate (replace): %v", err)
+	}
+
+	if _, ok := mux.ServiceInfo()[platformSvc]; !ok {
+		t.Error("platform service should survive a content-only schema replace")
+	}
+
+	if h2.PlatformKey != "fleetshift.io/v1/clusters" {
+		t.Errorf("PlatformKey after replace = %q, want fleetshift.io/v1/clusters", h2.PlatformKey)
+	}
+}
+
+func TestPlatformReflection(t *testing.T) {
+	mux := managedresource.NewDynamicServiceMux()
+	fileReg := managedresource.NewDynamicFileRegistry()
+	validator, err := protovalidate.New()
+	if err != nil {
+		t.Fatalf("protovalidate.New: %v", err)
+	}
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	activator := &managedresource.DynamicSchemaActivator{
+		GRPCMux:      mux,
+		FileRegistry: fileReg,
+		Deps:         managedresource.Deps{Validator: validator},
+		PlatformDeps: managedresource.PlatformDeps{Resources: &application.PlatformResourceService{Store: store}},
+	}
+
+	schema := kindaddon.Schema()
+	handle, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	const platDescPath = "dynamic/fleetshift/v1/platform_cluster_service.proto"
+	fd, err := fileReg.FindFileByPath(platDescPath)
+	if err != nil {
+		t.Fatalf("platform file descriptor not resolvable after Activate: %v", err)
+	}
+	if string(fd.Path()) != platDescPath {
+		t.Errorf("descriptor path = %q, want %q", fd.Path(), platDescPath)
+	}
+
+	activator.Deactivate(handle)
+
+	if _, err := fileReg.FindFileByPath(platDescPath); err == nil {
+		t.Error("platform file descriptor should not be resolvable after Deactivate")
 	}
 }
 

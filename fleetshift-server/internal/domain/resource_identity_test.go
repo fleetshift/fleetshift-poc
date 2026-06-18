@@ -557,6 +557,40 @@ func TestPlatformResource_EffectiveLabels_PlatformOverrides(t *testing.T) {
 	assertEq(t, "override", got["kind.fleetshift.io/version"], "override")
 }
 
+func TestPlatformResource_SoftDelete(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
+
+	later := now.Add(time.Hour)
+	if err := r.SoftDelete(later); err != nil {
+		t.Fatalf("SoftDelete: %v", err)
+	}
+
+	if r.DeletedAt() == nil {
+		t.Fatal("DeletedAt is nil after SoftDelete")
+	}
+	if !r.DeletedAt().Equal(later) {
+		t.Errorf("DeletedAt = %v, want %v", r.DeletedAt(), later)
+	}
+	if !r.UpdatedAt().Equal(later) {
+		t.Errorf("UpdatedAt = %v, want %v", r.UpdatedAt(), later)
+	}
+}
+
+func TestPlatformResource_SoftDelete_AlreadyDeleted(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", nil, now)
+
+	if err := r.SoftDelete(now.Add(time.Hour)); err != nil {
+		t.Fatalf("first SoftDelete: %v", err)
+	}
+
+	err := r.SoftDelete(now.Add(2 * time.Hour))
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("double SoftDelete: got %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestPlatformResource_EffectiveLabels_ExcludesTombstoned(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	r := NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod"}, now)

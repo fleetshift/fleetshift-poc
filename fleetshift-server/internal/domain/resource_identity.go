@@ -312,6 +312,17 @@ func (r *PlatformResource) SetLabels(labels map[string]string, now time.Time) {
 	r.updatedAt = now
 }
 
+// SoftDelete marks this platform resource as deleted. Returns
+// [ErrInvalidArgument] if already deleted.
+func (r *PlatformResource) SoftDelete(now time.Time) error {
+	if r.deletedAt != nil {
+		return fmt.Errorf("platform resource %s: %w: already deleted", r.relativeName, ErrInvalidArgument)
+	}
+	r.deletedAt = &now
+	r.updatedAt = now
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Child entity accessors
 // ---------------------------------------------------------------------------

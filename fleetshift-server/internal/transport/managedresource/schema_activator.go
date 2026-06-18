@@ -30,10 +30,15 @@ type DynamicSchemaActivator struct {
 	HTTPMux      *DynamicHTTPMux
 	FileRegistry *DynamicFileRegistry
 	Deps         Deps
+	PlatformDeps PlatformDeps
 
 	mu      sync.Mutex
 	hashes  map[string][32]byte                 // gRPC service name → content hash
 	handles map[string]application.SchemaHandle // gRPC service name → prior handle
+
+	platformRefs    map[string]int                               // platform key → refcount
+	platformHandles map[string]*application.PlatformSchemaHandle // platform key → handle
+	extensionKeys   map[string]string                            // gRPC service name → platform key
 }
 
 var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
@@ -55,10 +60,16 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	lower := strings.ToLower(schema.Singular[:1]) + schema.Singular[1:]
 	descriptorPath := fmt.Sprintf("dynamic/%s/%s_service.proto", pkgPath, lower)
 	canonicalPrefix := "/apis/" + schema.APIServiceName + "/" + schema.Version + "/" + schema.CollectionID
+	var platformKey string
+	if schema.CollectionID != "" && schema.Version != "" {
+		platformKey = PlatformServiceName + "/" + schema.Version + "/" + schema.CollectionID
+	}
+
 	handle := application.SchemaHandle{
 		GRPCServiceName: serviceName,
 		HTTPPrefix:      canonicalPrefix,
 		DescriptorPath:  descriptorPath,
+		PlatformKey:     platformKey,
 	}
 	hash := schemaContentHash(schema)
 
@@ -67,8 +78,9 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		a.hashes = make(map[string][32]byte)
 	}
 	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
+		h := a.handles[serviceName]
 		a.mu.Unlock()
-		return handle, nil
+		return h, nil
 	}
 	a.mu.Unlock()
 
@@ -88,12 +100,14 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	}
 
 	cfg := &ResourceTypeConfig{
+		CollectionConfig: CollectionConfig{
+			Version:      schema.Version,
+			CollectionID: schema.CollectionID,
+			Singular:     schema.Singular,
+			Plural:       schema.Plural,
+		},
 		ResourceType:   schema.ResourceType,
 		APIServiceName: schema.APIServiceName,
-		Version:        schema.Version,
-		CollectionID:   schema.CollectionID,
-		Singular:       schema.Singular,
-		Plural:         schema.Plural,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: specDesc.Message,
@@ -110,7 +124,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	// Re-check after compilation in case a concurrent Activate completed
 	// between our initial check and now.
 	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
-		return handle, nil
+		return a.handles[serviceName], nil
 	}
 
 	if a.handles == nil {
@@ -151,9 +165,127 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		}
 	}
 
+	// Platform service refcounting.
+	if platformKey != "" {
+		a.initPlatformMaps()
+
+		prevKey := a.extensionKeys[serviceName]
+		needIncrement := prevKey != platformKey
+
+		if needIncrement {
+			if prevKey != "" {
+				a.decrementPlatform(prevKey)
+			}
+
+			a.platformRefs[platformKey]++
+			a.extensionKeys[serviceName] = platformKey
+
+			if a.platformRefs[platformKey] == 1 {
+				platHandle, err := a.registerPlatformService(schema)
+				if err != nil {
+					// Rollback: undo extension registration and refcount.
+					a.platformRefs[platformKey]--
+					delete(a.extensionKeys, serviceName)
+					if !alreadyRegistered {
+						a.GRPCMux.Deregister(handle.GRPCServiceName)
+						if a.HTTPMux != nil {
+							a.HTTPMux.DeregisterByPrefix(handle.HTTPPrefix)
+						}
+						if a.FileRegistry != nil {
+							a.FileRegistry.Deregister(handle.DescriptorPath)
+						}
+					}
+					return application.SchemaHandle{}, fmt.Errorf("register platform service: %w", err)
+				}
+				handle.PlatformHandle = platHandle
+			}
+		}
+	}
+
 	a.hashes[serviceName] = hash
 	a.handles[serviceName] = handle
 	return handle, nil
+}
+
+func (a *DynamicSchemaActivator) initPlatformMaps() {
+	if a.platformRefs == nil {
+		a.platformRefs = make(map[string]int)
+	}
+	if a.platformHandles == nil {
+		a.platformHandles = make(map[string]*application.PlatformSchemaHandle)
+	}
+	if a.extensionKeys == nil {
+		a.extensionKeys = make(map[string]string)
+	}
+}
+
+// registerPlatformService builds and registers the platform-canonical
+// service for the schema's collection. Must be called with a.mu held.
+func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ManagedResourceSchema) (*application.PlatformSchemaHandle, error) {
+	platCfg := &PlatformResourceConfig{
+		CollectionConfig: CollectionConfig{
+			Version:      schema.Version,
+			CollectionID: schema.CollectionID,
+			Singular:     schema.Singular,
+			Plural:       schema.Plural,
+		},
+	}
+
+	platSvc, err := BuildPlatformService(platCfg, a.PlatformDeps)
+	if err != nil {
+		return nil, fmt.Errorf("build: %w", err)
+	}
+
+	platHandle := &application.PlatformSchemaHandle{
+		GRPCServiceName: platCfg.GRPCServiceName(),
+		HTTPPrefix:      platCfg.HTTPPrefix(),
+		DescriptorPath:  string(platSvc.Descriptors.File.Path()),
+	}
+
+	if err := a.GRPCMux.RegisterDesc(platSvc.Desc); err != nil {
+		return nil, fmt.Errorf("gRPC: %w", err)
+	}
+	if a.HTTPMux != nil {
+		prefix := platCfg.HTTPPrefix()
+		handler := buildPlatformHTTPHandler(platSvc, a.HTTPMux.Conn(), prefix)
+		if err := a.HTTPMux.RegisterPrefixHandler(prefix, handler); err != nil {
+			a.GRPCMux.Deregister(platHandle.GRPCServiceName)
+			return nil, fmt.Errorf("HTTP: %w", err)
+		}
+	}
+	if a.FileRegistry != nil {
+		if err := a.FileRegistry.Register(platSvc.Descriptors.File); err != nil {
+			a.GRPCMux.Deregister(platHandle.GRPCServiceName)
+			if a.HTTPMux != nil {
+				a.HTTPMux.DeregisterByPrefix(platHandle.HTTPPrefix)
+			}
+			return nil, fmt.Errorf("file descriptor: %w", err)
+		}
+	}
+
+	platformKey := PlatformServiceName + "/" + schema.Version + "/" + schema.CollectionID
+	a.platformHandles[platformKey] = platHandle
+	return platHandle, nil
+}
+
+// decrementPlatform reduces the refcount for a platform key and
+// deregisters the platform service when it reaches zero. Must be
+// called with a.mu held.
+func (a *DynamicSchemaActivator) decrementPlatform(platformKey string) {
+	a.platformRefs[platformKey]--
+	if a.platformRefs[platformKey] <= 0 {
+		delete(a.platformRefs, platformKey)
+		if h, ok := a.platformHandles[platformKey]; ok {
+			a.GRPCMux.Deregister(h.GRPCServiceName)
+			if a.HTTPMux != nil {
+				a.HTTPMux.DeregisterByPrefix(h.HTTPPrefix)
+			}
+			if a.FileRegistry != nil {
+				a.FileRegistry.Deregister(h.DescriptorPath)
+			}
+			delete(a.platformHandles, platformKey)
+		}
+	}
 }
 
 // resolveEntryFile determines the compiler entry file for a schema.
@@ -176,7 +308,9 @@ func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
 }
 
 // Deactivate removes the gRPC, HTTP, and file descriptor registrations
-// for the schema and clears the cached content hash and handle.
+// for the schema and clears the cached content hash and handle. If this
+// was the last extension referencing a platform service, the platform
+// service is deregistered as well.
 func (a *DynamicSchemaActivator) Deactivate(handle application.SchemaHandle) {
 	a.GRPCMux.Deregister(handle.GRPCServiceName)
 	if a.HTTPMux != nil {
@@ -188,6 +322,12 @@ func (a *DynamicSchemaActivator) Deactivate(handle application.SchemaHandle) {
 	a.mu.Lock()
 	delete(a.hashes, handle.GRPCServiceName)
 	delete(a.handles, handle.GRPCServiceName)
+
+	if handle.PlatformKey != "" {
+		a.initPlatformMaps()
+		delete(a.extensionKeys, handle.GRPCServiceName)
+		a.decrementPlatform(handle.PlatformKey)
+	}
 	a.mu.Unlock()
 }
 

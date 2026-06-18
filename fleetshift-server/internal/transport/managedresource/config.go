@@ -33,7 +33,30 @@ import (
 // The resource hierarchy is currently flat: resource names are
 // {CollectionID}/{leaf_id} with no parent segments. Workspace and tenant
 // scoping will introduce parent collections in the future.
+// CollectionConfig describes the identity and naming of a resource
+// collection. This is the shared vocabulary between extension and
+// platform APIs that participate in the same identity domain — the
+// CollectionID binds them to the same platform resource type.
+type CollectionConfig struct {
+	// Version is the HTTP API version segment (e.g. "v1").
+	Version string
+
+	// CollectionID is the AIP collection identifier that establishes
+	// platform identity domain membership (e.g. "clusters").
+	CollectionID string
+
+	// Singular is the PascalCase singular resource name used in RPC
+	// and message names (e.g. "Cluster").
+	Singular string
+
+	// Plural is the PascalCase plural resource name used in List RPC
+	// and message names (e.g. "Clusters").
+	Plural string
+}
+
 type ResourceTypeConfig struct {
+	CollectionConfig
+
 	// ResourceType is the addon-scoped domain identifier used for
 	// internal dispatch (e.g. "api.kind.cluster"). This identifies
 	// the addon's specific implementation of the resource type — it is
@@ -49,31 +72,6 @@ type ResourceTypeConfig struct {
 	// HTTP path prefixes. The addon chooses this; the platform imposes
 	// no convention beyond uniqueness.
 	APIServiceName string
-
-	// Version is the HTTP API version segment (e.g. "v1"). Independent
-	// of APIServiceName — the service name is versionless and stable
-	// across API version evolution.
-	Version string
-
-	// CollectionID is the AIP collection identifier that establishes
-	// platform identity domain membership. All extensions sharing the
-	// same CollectionID participate in the same platform identity domain:
-	// the relative resource name "{CollectionID}/{id}" refers to the same
-	// logical resource regardless of which extension's API is used.
-	//
-	// This is used in resource names, HTTP paths, and proto field names
-	// (e.g. "clusters"). It must be consistent across all extensions
-	// that model the same platform resource type.
-	CollectionID string
-
-	// Singular is the PascalCase singular resource name used in RPC
-	// and message names like Create{Singular}, Get{Singular}Request
-	// (e.g. "Cluster").
-	Singular string
-
-	// Plural is the PascalCase plural resource name used in List RPC
-	// and message names (e.g. "Clusters").
-	Plural string
 
 	// ProtoPackage is the versioned proto package for the generated
 	// service (e.g. "kind.fleetshift.v1"). Combined with Singular to
@@ -121,5 +119,40 @@ func (c *ResourceTypeConfig) CanonicalHTTPPrefix() string {
 // the same platform resource regardless of which extension service
 // produced it.
 func (c *ResourceTypeConfig) Collection() string {
+	return c.CollectionID + "/"
+}
+
+// PlatformResourceConfig describes a platform-canonical resource
+// service. Unlike [ResourceTypeConfig] (which is extension-specific),
+// the platform config uses the fixed service name "fleetshift.io" and
+// proto package "fleetshift.v1". It only needs the [CollectionConfig]
+// to know the collection shape.
+type PlatformResourceConfig struct {
+	CollectionConfig
+}
+
+// PlatformProtoPackage is the fixed proto package for all
+// platform-canonical resource services.
+const PlatformProtoPackage = "fleetshift.v1"
+
+// PlatformServiceName is the fixed AIP-122 service name for the
+// platform API surface.
+const PlatformServiceName = "fleetshift.io"
+
+// GRPCServiceName returns the fully-qualified gRPC service name for
+// the platform resource (e.g. "fleetshift.v1.PlatformClusterService").
+func (c *PlatformResourceConfig) GRPCServiceName() string {
+	return PlatformProtoPackage + ".Platform" + c.Singular + "Service"
+}
+
+// HTTPPrefix returns the platform-canonical HTTP route prefix
+// (e.g. "/apis/fleetshift.io/v1/clusters").
+func (c *PlatformResourceConfig) HTTPPrefix() string {
+	return "/apis/" + PlatformServiceName + "/" + c.Version + "/" + c.CollectionID
+}
+
+// Collection returns the relative resource name collection prefix
+// (e.g. "clusters/").
+func (c *PlatformResourceConfig) Collection() string {
 	return c.CollectionID + "/"
 }

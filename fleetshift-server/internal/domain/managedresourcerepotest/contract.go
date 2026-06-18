@@ -138,6 +138,35 @@ func runTypeTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("CreateAndGetWithAPIIdentity", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ManagedResources()
+
+		def := sampleTypeDef("api-id-test")
+		def.APIServiceName = "kind.fleetshift.io"
+		def.APIVersion = "v1"
+		def.CollectionID = "clusters"
+
+		if err := repo.CreateType(ctx, def); err != nil {
+			t.Fatalf("CreateType: %v", err)
+		}
+
+		got, err := repo.GetType(ctx, "api-id-test")
+		if err != nil {
+			t.Fatalf("GetType: %v", err)
+		}
+		if got.APIServiceName != "kind.fleetshift.io" {
+			t.Errorf("APIServiceName = %q, want %q", got.APIServiceName, "kind.fleetshift.io")
+		}
+		if got.APIVersion != "v1" {
+			t.Errorf("APIVersion = %q, want %q", got.APIVersion, "v1")
+		}
+		if got.CollectionID != "clusters" {
+			t.Errorf("CollectionID = %q, want %q", got.CollectionID, "clusters")
+		}
+	})
+
 	t.Run("DeleteType", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()

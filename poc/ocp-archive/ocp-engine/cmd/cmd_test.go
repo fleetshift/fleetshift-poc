@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
-
 )
 
 func projectRoot() string {
@@ -191,4 +190,3 @@ func TestExtractKubeconfigData_Empty(t *testing.T) {
 		t.Errorf("caCert = %v, want nil", caCert)
 	}
 }
-

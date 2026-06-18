@@ -95,10 +95,17 @@ func (r *ResourceIdentityRepo) Update(ctx context.Context, pr *domain.PlatformRe
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
+	var deletedAt *string
+	if s.DeletedAt != nil {
+		v := s.DeletedAt.UTC().Format(time.RFC3339)
+		deletedAt = &v
+	}
+
 	res, err := r.DB.ExecContext(ctx,
-		`UPDATE platform_resources SET labels = $1, updated_at = $2 WHERE uid = $3`,
+		`UPDATE platform_resources SET labels = $1, updated_at = $2, deleted_at = $3 WHERE uid = $4`,
 		string(labels),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
+		deletedAt,
 		s.UID,
 	)
 	if err != nil {

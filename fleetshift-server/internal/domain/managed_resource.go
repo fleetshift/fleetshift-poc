@@ -25,11 +25,14 @@ type IntentVersion int64
 // using buf.validate annotations from the addon's spec proto. No schema
 // is stored in the type definition.
 type ManagedResourceTypeDef struct {
-	ResourceType ResourceType
-	Relation     FulfillmentRelation
-	Signature    Signature
-	CreatedAt    time.Time
-	UpdatedAt    time.Time
+	ResourceType   ResourceType
+	Relation       FulfillmentRelation
+	Signature      Signature
+	APIServiceName ServiceName
+	APIVersion     APIVersion
+	CollectionID   CollectionID
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
 }
 
 // MarshalJSON implements json.Marshaler so the interface-typed Relation
@@ -40,29 +43,38 @@ func (d ManagedResourceTypeDef) MarshalJSON() ([]byte, error) {
 		return nil, err
 	}
 	type alias struct {
-		ResourceType ResourceType       `json:"ResourceType"`
-		Relation     fulfillmentRelJSON `json:"Relation"`
-		Signature    Signature          `json:"Signature"`
-		CreatedAt    time.Time          `json:"CreatedAt"`
-		UpdatedAt    time.Time          `json:"UpdatedAt"`
+		ResourceType   ResourceType       `json:"ResourceType"`
+		Relation       fulfillmentRelJSON `json:"Relation"`
+		Signature      Signature          `json:"Signature"`
+		APIServiceName ServiceName        `json:"APIServiceName,omitempty"`
+		APIVersion     APIVersion         `json:"APIVersion,omitempty"`
+		CollectionID   CollectionID       `json:"CollectionID,omitempty"`
+		CreatedAt      time.Time          `json:"CreatedAt"`
+		UpdatedAt      time.Time          `json:"UpdatedAt"`
 	}
 	return json.Marshal(alias{
-		ResourceType: d.ResourceType,
-		Relation:     rel,
-		Signature:    d.Signature,
-		CreatedAt:    d.CreatedAt,
-		UpdatedAt:    d.UpdatedAt,
+		ResourceType:   d.ResourceType,
+		Relation:       rel,
+		Signature:      d.Signature,
+		APIServiceName: d.APIServiceName,
+		APIVersion:     d.APIVersion,
+		CollectionID:   d.CollectionID,
+		CreatedAt:      d.CreatedAt,
+		UpdatedAt:      d.UpdatedAt,
 	})
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (d *ManagedResourceTypeDef) UnmarshalJSON(data []byte) error {
 	type alias struct {
-		ResourceType ResourceType       `json:"ResourceType"`
-		Relation     fulfillmentRelJSON `json:"Relation"`
-		Signature    Signature          `json:"Signature"`
-		CreatedAt    time.Time          `json:"CreatedAt"`
-		UpdatedAt    time.Time          `json:"UpdatedAt"`
+		ResourceType   ResourceType       `json:"ResourceType"`
+		Relation       fulfillmentRelJSON `json:"Relation"`
+		Signature      Signature          `json:"Signature"`
+		APIServiceName ServiceName        `json:"APIServiceName,omitempty"`
+		APIVersion     APIVersion         `json:"APIVersion,omitempty"`
+		CollectionID   CollectionID       `json:"CollectionID,omitempty"`
+		CreatedAt      time.Time          `json:"CreatedAt"`
+		UpdatedAt      time.Time          `json:"UpdatedAt"`
 	}
 	var a alias
 	if err := json.Unmarshal(data, &a); err != nil {
@@ -70,6 +82,9 @@ func (d *ManagedResourceTypeDef) UnmarshalJSON(data []byte) error {
 	}
 	d.ResourceType = a.ResourceType
 	d.Signature = a.Signature
+	d.APIServiceName = a.APIServiceName
+	d.APIVersion = a.APIVersion
+	d.CollectionID = a.CollectionID
 	d.CreatedAt = a.CreatedAt
 	d.UpdatedAt = a.UpdatedAt
 	rel, err := unmarshalFulfillmentRelation(a.Relation)

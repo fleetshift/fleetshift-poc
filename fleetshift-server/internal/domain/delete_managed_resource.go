@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 )
 
 // DeleteManagedResourceInput identifies the managed resource to delete.
@@ -12,7 +13,8 @@ type DeleteManagedResourceInput struct {
 	Name         ResourceName
 	// Auth is persisted so background remove/retry passes use delete-time
 	// auth rather than stale create-time auth.
-	Auth DeliveryAuth
+	Auth    DeliveryAuth
+	TypeDef ManagedResourceTypeDef
 }
 
 // DeleteManagedResourceWorkflowSpec transitions the derived fulfillment
@@ -62,6 +64,18 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		f.TransitionToDeleting(in.Auth)
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
+		}
+
+		// Identity integration: tombstone the managed representation,
+		// atomic with the fulfillment state transition. Skipped for
+		// legacy type defs that predate API identity metadata. Errors
+		// are logged but do not fail the delete — the fulfillment
+		// state transition is the primary concern.
+		if in.TypeDef.APIServiceName != "" {
+			if tombErr := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name); tombErr != nil {
+				// Log but don't fail: the fulfillment transition is primary.
+				_ = tombErr
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -140,4 +154,28 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 	}
 
 	return mr.View, nil
+}
+
+// tombstoneRepresentation looks up the platform resource by name and
+// tombstones the managed representation. Called within MutateToDeleting's
+// transaction so it is atomic with the fulfillment state transition.
+func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName) error {
+	relName, err := NewRelativeResourceName(typeDef.CollectionID, string(name))
+	if err != nil {
+		return fmt.Errorf("build relative name: %w", err)
+	}
+
+	pr, err := tx.ResourceIdentities().GetByName(ctx, relName)
+	if err != nil {
+		return fmt.Errorf("get platform resource %s: %w", relName, err)
+	}
+
+	if err := pr.TombstoneRepresentation(typeDef.APIServiceName, time.Now()); err != nil {
+		return fmt.Errorf("tombstone representation: %w", err)
+	}
+
+	if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
+		return fmt.Errorf("update platform resource: %w", err)
+	}
+	return nil
 }

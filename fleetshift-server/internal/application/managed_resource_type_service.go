@@ -18,9 +18,12 @@ type ManagedResourceTypeService struct {
 // CreateTypeInput carries the fields needed to register a new managed
 // resource type.
 type CreateTypeInput struct {
-	ResourceType domain.ResourceType
-	Relation     domain.FulfillmentRelation
-	Signature    domain.Signature
+	ResourceType   domain.ResourceType
+	Relation       domain.FulfillmentRelation
+	Signature      domain.Signature
+	APIServiceName domain.ServiceName
+	APIVersion     domain.APIVersion
+	CollectionID   domain.CollectionID
 }
 
 // Create registers a new managed resource type.
@@ -34,11 +37,14 @@ func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeIn
 
 	now := time.Now().UTC()
 	def := domain.ManagedResourceTypeDef{
-		ResourceType: in.ResourceType,
-		Relation:     in.Relation,
-		Signature:    in.Signature,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ResourceType:   in.ResourceType,
+		Relation:       in.Relation,
+		Signature:      in.Signature,
+		APIServiceName: in.APIServiceName,
+		APIVersion:     in.APIVersion,
+		CollectionID:   in.CollectionID,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 
 	tx, err := s.Store.Begin(ctx)

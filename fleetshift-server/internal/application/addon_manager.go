@@ -28,6 +28,26 @@ type SchemaHandle struct {
 	GRPCServiceName string
 	HTTPPrefix      string
 	DescriptorPath  string
+
+	// PlatformKey identifies the platform service this extension
+	// participates in (e.g. "fleetshift.io/v1/clusters"). Empty if
+	// the extension has no API identity metadata.
+	PlatformKey string
+
+	// PlatformHandle is non-nil when this extension's activation
+	// caused a new platform service to be registered (refcount went
+	// 0→1). The activator uses it during Deactivate to clean up the
+	// platform registration when the last extension is removed.
+	PlatformHandle *PlatformSchemaHandle
+}
+
+// PlatformSchemaHandle carries the transport registration details for
+// the platform-canonical service that was co-registered alongside one
+// or more extension services.
+type PlatformSchemaHandle struct {
+	GRPCServiceName string
+	HTTPPrefix      string
+	DescriptorPath  string
 }
 
 // DeliveryAgentRegistry manages the mapping from [domain.TargetType] to
@@ -341,9 +361,12 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 
 	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
 		if _, err := m.typeSvc.Create(ctx, CreateTypeInput{
-			ResourceType: schema.ResourceType,
-			Relation:     schema.Relation,
-			Signature:    domain.Signature{},
+			ResourceType:   schema.ResourceType,
+			Relation:       schema.Relation,
+			Signature:      domain.Signature{},
+			APIServiceName: domain.ServiceName(schema.APIServiceName),
+			APIVersion:     domain.APIVersion(schema.Version),
+			CollectionID:   domain.CollectionID(schema.CollectionID),
 		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
 			return fmt.Errorf("create type def: %w", err)
 		}

@@ -175,6 +175,12 @@ func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceT
 	if err != nil {
 		return domain.ManagedResourceView{}, err
 	}
+
+	typeDef, err := tx.ManagedResources().GetType(ctx, rt)
+	if err != nil {
+		return domain.ManagedResourceView{}, fmt.Errorf("lookup type %q: %w", rt, err)
+	}
+
 	if err := tx.Commit(); err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("commit read tx: %w", err)
 	}
@@ -187,6 +193,7 @@ func (s *ManagedResourceService) Delete(ctx context.Context, rt domain.ResourceT
 		ResourceType: rt,
 		Name:         name,
 		Auth:         auth,
+		TypeDef:      typeDef,
 	})
 	if err != nil {
 		return domain.ManagedResourceView{}, fmt.Errorf("start delete workflow: %w", err)
