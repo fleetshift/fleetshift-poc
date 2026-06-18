@@ -29,28 +29,29 @@ func (s *InventoryWriteService) ApplyDelta(ctx context.Context, targetID domain.
 	}
 	defer tx.Rollback()
 
-	repo := tx.Inventory()
+	itemRepo := tx.Inventory()
+	edgeRepo := tx.Edges()
 
 	for _, item := range upserts {
-		if err := repo.CreateOrUpdate(ctx, item); err != nil {
+		if err := itemRepo.CreateOrUpdate(ctx, item); err != nil {
 			return fmt.Errorf("upsert %s: %w", item.ID(), err)
 		}
 	}
 
 	for _, id := range deletedIDs {
-		if err := repo.Delete(ctx, id); err != nil && !errors.Is(err, domain.ErrNotFound) {
+		if err := itemRepo.Delete(ctx, id); err != nil && !errors.Is(err, domain.ErrNotFound) {
 			return fmt.Errorf("delete %s: %w", id, err)
 		}
 	}
 
 	if len(edgeAdds) > 0 {
-		if err := repo.UpsertEdges(ctx, targetID, edgeAdds); err != nil {
+		if err := edgeRepo.UpsertEdges(ctx, targetID, edgeAdds); err != nil {
 			return fmt.Errorf("upsert edges: %w", err)
 		}
 	}
 
 	if len(edgeDels) > 0 {
-		if err := repo.DeleteEdges(ctx, targetID, edgeDels); err != nil {
+		if err := edgeRepo.DeleteEdges(ctx, targetID, edgeDels); err != nil {
 			return fmt.Errorf("delete edges: %w", err)
 		}
 	}
@@ -66,9 +67,10 @@ func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.Targ
 	}
 	defer tx.Rollback()
 
-	repo := tx.Inventory()
+	itemRepo := tx.Inventory()
+	edgeRepo := tx.Edges()
 
-	if err := repo.ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
+	if err := itemRepo.ReplaceByTargetAndType(ctx, targetID, inventoryType, items); err != nil {
 		return fmt.Errorf("replace by target and type: %w", err)
 	}
 
@@ -81,13 +83,13 @@ func (s *InventoryWriteService) Resync(ctx context.Context, targetID domain.Targ
 				sourceUIDs = append(sourceUIDs, parts[1])
 			}
 		}
-		if err := repo.DeleteEdgesBySourceUIDs(ctx, targetID, sourceUIDs); err != nil {
+		if err := edgeRepo.DeleteEdgesBySourceUIDs(ctx, targetID, sourceUIDs); err != nil {
 			return fmt.Errorf("delete edges for resync: %w", err)
 		}
 	}
 
 	if len(edges) > 0 {
-		if err := repo.UpsertEdges(ctx, targetID, edges); err != nil {
+		if err := edgeRepo.UpsertEdges(ctx, targetID, edges); err != nil {
 			return fmt.Errorf("upsert edges for resync: %w", err)
 		}
 	}

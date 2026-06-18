@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -306,11 +305,7 @@ func marshalConditions(conditions []domain.InventoryCondition) (json.RawMessage,
 }
 
 func (r *InventoryRepo) DeleteByTarget(ctx context.Context, targetID domain.TargetID) error {
-	_, err := r.DB.ExecContext(ctx, `DELETE FROM inventory_edges WHERE target_id = ?`, string(targetID))
-	if err != nil {
-		return fmt.Errorf("delete edges by target: %w", err)
-	}
-	_, err = r.DB.ExecContext(ctx, `DELETE FROM inventory_items WHERE target_id = ?`, string(targetID))
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM inventory_items WHERE target_id = ?`, string(targetID))
 	if err != nil {
 		return fmt.Errorf("delete items by target: %w", err)
 	}
@@ -326,52 +321,6 @@ func (r *InventoryRepo) ReplaceByTargetAndType(ctx context.Context, targetID dom
 		if err := r.Create(ctx, item); err != nil {
 			return fmt.Errorf("insert replacement: %w", err)
 		}
-	}
-	return nil
-}
-
-func (r *InventoryRepo) UpsertEdges(ctx context.Context, targetID domain.TargetID, edges []domain.InventoryEdge) error {
-	for _, e := range edges {
-		_, err := r.DB.ExecContext(ctx,
-			`INSERT OR REPLACE INTO inventory_edges (target_id, source_uid, dest_uid, edge_type, source_kind, dest_kind)
-			 VALUES (?, ?, ?, ?, ?, ?)`,
-			string(targetID), e.SourceUID, e.DestUID, e.EdgeType, e.SourceKind, e.DestKind)
-		if err != nil {
-			return fmt.Errorf("upsert edge: %w", err)
-		}
-	}
-	return nil
-}
-
-func (r *InventoryRepo) DeleteEdges(ctx context.Context, targetID domain.TargetID, edges []domain.InventoryEdge) error {
-	for _, e := range edges {
-		_, err := r.DB.ExecContext(ctx,
-			`DELETE FROM inventory_edges WHERE target_id = ? AND source_uid = ? AND dest_uid = ? AND edge_type = ?`,
-			string(targetID), e.SourceUID, e.DestUID, e.EdgeType)
-		if err != nil {
-			return fmt.Errorf("delete edge: %w", err)
-		}
-	}
-	return nil
-}
-
-func (r *InventoryRepo) DeleteEdgesBySourceUIDs(ctx context.Context, targetID domain.TargetID, sourceUIDs []string) error {
-	if len(sourceUIDs) == 0 {
-		return nil
-	}
-	placeholders := make([]string, len(sourceUIDs))
-	args := make([]any, 0, len(sourceUIDs)+1)
-	args = append(args, string(targetID))
-	for i, uid := range sourceUIDs {
-		placeholders[i] = "?"
-		args = append(args, uid)
-	}
-	query := fmt.Sprintf(
-		`DELETE FROM inventory_edges WHERE target_id = ? AND source_uid IN (%s)`,
-		strings.Join(placeholders, ","))
-	_, err := r.DB.ExecContext(ctx, query, args...)
-	if err != nil {
-		return fmt.Errorf("delete edges by source UIDs: %w", err)
 	}
 	return nil
 }

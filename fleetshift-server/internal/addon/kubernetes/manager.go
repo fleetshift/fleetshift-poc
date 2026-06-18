@@ -132,6 +132,9 @@ func (m *Manager) HandleTargetTerminated(ctx context.Context, targetID domain.Ta
 	}
 	defer tx.Rollback()
 
+	if err := tx.Edges().DeleteByTarget(ctx, targetID); err != nil {
+		return fmt.Errorf("delete edges for target %s: %w", targetID, err)
+	}
 	if err := tx.Inventory().DeleteByTarget(ctx, targetID); err != nil {
 		return fmt.Errorf("delete inventory for target %s: %w", targetID, err)
 	}
