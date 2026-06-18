@@ -41,14 +41,19 @@ func ExtractObservedResource(r *unstructured.Unstructured, entry SchemaEntry, ta
 		labels = l
 	}
 
+	// Schema-defined observed fields plus base metadata fields.
+	fields := make(map[string]any)
+
+	// Add labels to fields for edge computation in BuildEdges hooks
+	if labels != nil {
+		fields["labels"] = labels
+	}
+
 	// Conditions.
 	var conditions []domain.InventoryCondition
 	if entry.ExtractConditions {
 		conditions = extractConditions(r)
 	}
-
-	// Schema-defined observed fields plus base metadata fields.
-	fields := make(map[string]any)
 
 	// Extract schema-defined fields first
 	if len(entry.Fields) > 0 {

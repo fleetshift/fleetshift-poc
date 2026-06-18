@@ -72,7 +72,7 @@ func TestComputePodStatus(t *testing.T) {
 					},
 				},
 			},
-			expected: "Error",
+			expected: "Init:Error",
 		},
 		{
 			name: "Terminating pod",
@@ -522,7 +522,7 @@ func TestComputeNodeRoles(t *testing.T) {
 					},
 				},
 			},
-			expected: "control-plane,master", // Note: order may vary, we'll check both
+			expected: "control-plane,master", // Sorted alphabetically
 		},
 		{
 			name: "No role labels",
@@ -535,7 +535,7 @@ func TestComputeNodeRoles(t *testing.T) {
 					},
 				},
 			},
-			expected: "",
+			expected: "worker",
 		},
 	}
 
@@ -545,13 +545,6 @@ func TestComputeNodeRoles(t *testing.T) {
 			computeNodeRoles(tt.node, fields)
 
 			role, ok := fields["role"]
-			if tt.expected == "" {
-				if ok {
-					t.Errorf("expected no role field, got %v", role)
-				}
-				return
-			}
-
 			if !ok {
 				t.Fatalf("role field not set")
 			}
@@ -561,12 +554,8 @@ func TestComputeNodeRoles(t *testing.T) {
 				t.Fatalf("role field is not a string: %T", role)
 			}
 
-			// For multiple roles, check that both are present (order may vary)
-			if tt.name == "Multiple roles" {
-				if !((roleStr == "control-plane,master") || (roleStr == "master,control-plane")) {
-					t.Errorf("expected roles to contain both control-plane and master, got %q", roleStr)
-				}
-			} else if roleStr != tt.expected {
+			// Roles are now sorted, so we can check exact match
+			if roleStr != tt.expected {
 				t.Errorf("expected role=%q, got %q", tt.expected, roleStr)
 			}
 		})

@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -180,13 +181,17 @@ func computePodStatus(r *unstructured.Unstructured, fields map[string]any) {
 		if terminated, found, _ := unstructured.NestedMap(cs, "state", "terminated"); found {
 			if exitCode, _, _ := unstructured.NestedInt64(terminated, "exitCode"); exitCode != 0 {
 				if r, _, _ := unstructured.NestedString(terminated, "reason"); r != "" {
-					reason = r
+					reason = "Init:" + r
+				} else {
+					reason = fmt.Sprintf("Init:ExitCode:%d", exitCode)
 				}
 				break
 			}
 			if signal, found, _ := unstructured.NestedInt64(terminated, "signal"); found && signal != 0 {
 				if r, _, _ := unstructured.NestedString(terminated, "reason"); r != "" {
-					reason = r
+					reason = "Init:" + r
+				} else {
+					reason = fmt.Sprintf("Init:Signal:%d", signal)
 				}
 				break
 			}
@@ -195,7 +200,7 @@ func computePodStatus(r *unstructured.Unstructured, fields map[string]any) {
 		// Check waiting state
 		if waiting, found, _ := unstructured.NestedMap(cs, "state", "waiting"); found {
 			if r, _, _ := unstructured.NestedString(waiting, "reason"); r != "" {
-				reason = r
+				reason = "Init:" + r
 				break
 			}
 		}
@@ -499,8 +504,8 @@ func computeNodeRoles(r *unstructured.Unstructured, fields map[string]any) {
 	var roles []string
 	rolePrefix := "node-role.kubernetes.io/"
 
-	for key := range labels {
-		if strings.HasPrefix(key, rolePrefix) {
+	for key, value := range labels {
+		if strings.HasPrefix(key, rolePrefix) && value == "" {
 			role := strings.TrimPrefix(key, rolePrefix)
 			if role != "" {
 				roles = append(roles, role)
@@ -508,7 +513,13 @@ func computeNodeRoles(r *unstructured.Unstructured, fields map[string]any) {
 		}
 	}
 
-	if len(roles) > 0 {
-		fields["role"] = strings.Join(roles, ",")
+	// Default to "worker" if no roles found
+	if len(roles) == 0 {
+		roles = []string{"worker"}
 	}
+
+	// Sort roles for consistent output
+	sort.Strings(roles)
+
+	fields["role"] = strings.Join(roles, ",")
 }
