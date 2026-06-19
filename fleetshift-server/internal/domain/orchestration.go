@@ -597,6 +597,14 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 			}
 		}
 
+		if s.ProvisionedTargets != nil {
+			for _, targetID := range plan.targetIDs {
+				if err := s.ProvisionedTargets.HandleTargetTerminated(ctx, targetID); err != nil {
+					return struct{}{}, fmt.Errorf("notify target handler for termination of %s: %w", targetID, err)
+				}
+			}
+		}
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
@@ -757,6 +765,19 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 			probe.Error(err)
 			return struct{}{}, err
 		}
+
+		if s.ProvisionedTargets != nil {
+			for _, pt := range in.Result.ProvisionedTargets {
+				target := NewTargetInfo(pt.ID, pt.Type, pt.Name, "", pt.Labels, pt.Properties, pt.AcceptedResourceTypes)
+				if target.State() == TargetStateReady || target.State() == "" {
+					if err := s.ProvisionedTargets.HandleTargetReady(ctx, target); err != nil {
+						probe.Error(err)
+						return struct{}{}, fmt.Errorf("notify target handler for %q: %w", pt.ID, err)
+					}
+				}
+			}
+		}
+
 		return struct{}{}, nil
 	})
 }

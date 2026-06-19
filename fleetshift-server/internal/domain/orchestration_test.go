@@ -952,6 +952,139 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 	}
 }
 
+// recordingTargetHandler records HandleTargetReady and HandleTargetTerminated calls.
+type recordingTargetHandler struct {
+	readyTargets     []domain.TargetInfo
+	terminatedIDs    []domain.TargetID
+	readyErr         error
+	terminatedErr    error
+}
+
+func (r *recordingTargetHandler) HandleTargetReady(_ context.Context, target domain.TargetInfo) error {
+	r.readyTargets = append(r.readyTargets, target)
+	return r.readyErr
+}
+
+func (r *recordingTargetHandler) HandleTargetTerminated(_ context.Context, id domain.TargetID) error {
+	r.terminatedIDs = append(r.terminatedIDs, id)
+	return r.terminatedErr
+}
+
+func TestOrchestration_DeliveryOutputs_NotifiesProvisionedTargetHandler(t *testing.T) {
+	store, vault := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
+
+	handler := &recordingTargetHandler{}
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, &outputProducingDelivery{
+		events: events,
+		targets: []domain.ProvisionedTarget{{
+			ID: "k8s-test", Type: "kubernetes", Name: "test-cluster",
+			Properties: map[string]string{"api_server": "https://test:6443"},
+		}},
+	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Vault = vault
+		wf.ProvisionedTargets = handler
+	})
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(handler.readyTargets) != 1 {
+		t.Fatalf("expected 1 HandleTargetReady call, got %d", len(handler.readyTargets))
+	}
+	if handler.readyTargets[0].ID() != "k8s-test" {
+		t.Errorf("target ID = %q, want k8s-test", handler.readyTargets[0].ID())
+	}
+	if handler.readyTargets[0].Type() != "kubernetes" {
+		t.Errorf("target type = %q, want kubernetes", handler.readyTargets[0].Type())
+	}
+}
+
+func TestOrchestration_DeletePipeline_NotifiesProvisionedTargetHandler(t *testing.T) {
+	store, vault := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:      2,
+		ResolvedTargets: []domain.TargetID{"provisioner"},
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"guest"}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"provisioner"},
+		},
+		State: domain.FulfillmentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
+
+	deliveryID := domain.DeliveryID("d1:provisioner")
+	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID:            deliveryID,
+		FulfillmentID: "d1",
+		TargetID:      "provisioner",
+		Manifests:     []domain.Manifest{{Raw: json.RawMessage(`{"name":"guest"}`)}},
+		State:         domain.DeliveryStateDelivered,
+	}))
+
+	ctx := testContext(t)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := tx.Inventory().Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
+		ID:               "target:k8s-guest",
+		Type:             "kubernetes",
+		Name:             "guest",
+		Properties:       json.RawMessage(`{}`),
+		SourceDeliveryID: &deliveryID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})); err != nil {
+		t.Fatalf("seed inventory: %v", err)
+	}
+	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-guest",
+		Name: "guest",
+		Type: "kubernetes",
+	})); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	handler := &recordingTargetHandler{}
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Vault = vault
+		wf.ProvisionedTargets = handler
+	})
+
+	rec := &simpleRecord{ctx: ctx, events: events}
+	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(handler.terminatedIDs) != 1 {
+		t.Fatalf("expected 1 HandleTargetTerminated call, got %d", len(handler.terminatedIDs))
+	}
+	if handler.terminatedIDs[0] != "k8s-guest" {
+		t.Errorf("terminated target ID = %q, want k8s-guest", handler.terminatedIDs[0])
+	}
+}
+
 func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
