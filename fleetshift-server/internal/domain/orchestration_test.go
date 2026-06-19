@@ -1085,6 +1085,157 @@ func TestOrchestration_DeletePipeline_NotifiesProvisionedTargetHandler(t *testin
 	}
 }
 
+func TestOrchestration_DeliveryOutputs_HandlerError_FailsActivity(t *testing.T) {
+	store, vault := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
+
+	handler := &recordingTargetHandler{readyErr: fmt.Errorf("connection refused")}
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, &outputProducingDelivery{
+		events: events,
+		targets: []domain.ProvisionedTarget{{
+			ID: "k8s-fail", Type: "kubernetes", Name: "fail-cluster",
+			Properties: map[string]string{"api_server": "https://fail:6443"},
+		}},
+	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Vault = vault
+		wf.ProvisionedTargets = handler
+	})
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	if err == nil {
+		t.Fatal("expected error from Run when handler fails, got nil")
+	}
+
+	// Target should still be persisted — handler is called after tx.Commit().
+	_ = getTarget(t, store, "k8s-fail")
+}
+
+func TestOrchestration_DeletePipeline_HandlerError_FailsActivity(t *testing.T) {
+	store, vault := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:      2,
+		ResolvedTargets: []domain.TargetID{"provisioner"},
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"guest"}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"provisioner"},
+		},
+		State: domain.FulfillmentStateDeleting,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
+
+	deliveryID := domain.DeliveryID("d1:provisioner")
+	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+		ID:            deliveryID,
+		FulfillmentID: "d1",
+		TargetID:      "provisioner",
+		Manifests:     []domain.Manifest{{Raw: json.RawMessage(`{"name":"guest"}`)}},
+		State:         domain.DeliveryStateDelivered,
+	}))
+
+	ctx := testContext(t)
+	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	if err := tx.Inventory().Create(ctx, domain.InventoryItemFromSnapshot(domain.InventoryItemSnapshot{
+		ID:               "target:k8s-guest",
+		Type:             "kubernetes",
+		Name:             "guest",
+		Properties:       json.RawMessage(`{}`),
+		SourceDeliveryID: &deliveryID,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})); err != nil {
+		t.Fatalf("seed inventory: %v", err)
+	}
+	if err := tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-guest",
+		Name: "guest",
+		Type: "kubernetes",
+	})); err != nil {
+		t.Fatalf("seed target: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	handler := &recordingTargetHandler{terminatedErr: fmt.Errorf("cleanup failed")}
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Vault = vault
+		wf.ProvisionedTargets = handler
+	})
+
+	rec := &simpleRecord{ctx: ctx, events: events}
+	_, err = wf.Run(rec, domain.FulfillmentID("d1"))
+	if err == nil {
+		t.Fatal("expected error from Run when termination handler fails, got nil")
+	}
+
+	// Target should NOT have been deleted — handler failed before the delete tx.
+	_ = getTarget(t, store, "k8s-guest")
+}
+
+func TestWithProvisionedTargetHandler_MultipleHandlers(t *testing.T) {
+	store, vault := setupStore(t)
+	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+		Generation:        1,
+		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
+		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
+		State:             domain.FulfillmentStateCreating,
+	})
+	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
+
+	h1 := &recordingTargetHandler{}
+	h2 := &recordingTargetHandler{}
+
+	events := make(chan domain.FulfillmentEvent, 16)
+	wf := newTestWorkflow(store, &outputProducingDelivery{
+		events: events,
+		targets: []domain.ProvisionedTarget{{
+			ID: "k8s-multi", Type: "kubernetes", Name: "multi-cluster",
+			Properties: map[string]string{"api_server": "https://multi:6443"},
+		}},
+	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
+		wf.Vault = vault
+		domain.WithProvisionedTargetHandler(h1)(wf)
+		domain.WithProvisionedTargetHandler(h2)(wf)
+	})
+
+	rec := &simpleRecord{ctx: testContext(t), events: events}
+	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if len(h1.readyTargets) != 1 {
+		t.Fatalf("handler 1: expected 1 HandleTargetReady call, got %d", len(h1.readyTargets))
+	}
+	if len(h2.readyTargets) != 1 {
+		t.Fatalf("handler 2: expected 1 HandleTargetReady call, got %d", len(h2.readyTargets))
+	}
+	if h1.readyTargets[0].ID() != "k8s-multi" {
+		t.Errorf("handler 1: target ID = %q, want k8s-multi", h1.readyTargets[0].ID())
+	}
+	if h2.readyTargets[0].ID() != "k8s-multi" {
+		t.Errorf("handler 2: target ID = %q, want k8s-multi", h2.readyTargets[0].ID())
+	}
+}
+
 func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
