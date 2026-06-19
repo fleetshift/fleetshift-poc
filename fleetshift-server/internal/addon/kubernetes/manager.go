@@ -124,9 +124,10 @@ func (m *Manager) HandleTargetTerminated(ctx context.Context, targetID domain.Ta
 	delete(m.agents, targetID)
 	m.mu.Unlock()
 
-	if ok {
-		ta.Stop()
+	if !ok {
+		return nil
 	}
+	ta.Stop()
 
 	// Clean up inventory for this target.
 	tx, err := m.store.Begin(ctx)
