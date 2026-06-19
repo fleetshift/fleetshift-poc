@@ -1,5 +1,5 @@
 import { DynamicRemotePlugin } from "@openshift/dynamic-plugin-sdk-webpack";
-import type { Compiler } from "webpack";
+import type { Compiler } from "@rspack/core";
 
 import type { FleetshiftExtension } from "./types";
 import { validateExtensionSet } from "./validate";

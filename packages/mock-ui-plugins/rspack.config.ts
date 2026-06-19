@@ -2,25 +2,33 @@ import {
   createClusterProvider,
   createModule,
   createOnboardingAction,
+  createPfModuleReplacementPlugin,
+  createPfTransformImport,
   createSetup,
-  createTsLoaderRule,
   FleetshiftPlugin,
   getDynamicModules,
 } from "@fleetshift/build-utils";
-import {
-  ContainerPlugin,
-  ModuleFederationPlugin as BaseMFPlugin,
-} from "@module-federation/enhanced";
+import { ModuleFederationPlugin as BaseMFPlugin } from "@module-federation/enhanced/rspack";
+import type { Configuration } from "@rspack/core";
+import rspack from "@rspack/core";
 import path from "path";
-import type { Configuration } from "webpack";
-import webpack from "webpack";
 
 const monorepoRoot = path.resolve(__dirname, "../..");
-const nodeModulesRoot = path.resolve(monorepoRoot, "node_modules");
 const pfSharedModules = getDynamicModules(__dirname, monorepoRoot);
-const tsLoaderRule = {
-  ...createTsLoaderRule({ nodeModulesRoot }),
+const pfTransformImport = createPfTransformImport();
+
+const swcLoaderRule = {
+  test: /\.tsx?$/,
   exclude: [/node_modules/, /packages\/common\/dist/],
+  loader: "builtin:swc-loader" as const,
+  options: {
+    jsc: {
+      parser: { syntax: "typescript" as const, tsx: true },
+      transform: { react: { runtime: "automatic" as const } },
+    },
+    transformImport: pfTransformImport,
+  },
+  type: "javascript/auto" as const,
 };
 
 const sharedModules = {
@@ -44,10 +52,9 @@ const sharedModules = {
   ...pfSharedModules,
 };
 
-// Wrap MF plugin to disable federated type generation (dts-plugin crashes in Docker)
 class ModuleFederationPlugin extends BaseMFPlugin {
   constructor(options: ConstructorParameters<typeof BaseMFPlugin>[0]) {
-    super({ ...options, dts: false });
+    super({ ...options, dts: false, manifest: false });
   }
 }
 
@@ -55,7 +62,6 @@ const mfOverride = {
   libraryType: "global",
   pluginOverride: {
     ModuleFederationPlugin,
-    ContainerPlugin,
   },
 };
 
@@ -554,17 +560,21 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
     assetModuleFilename: `plugins/${key}/assets/[hash][ext]`,
     uniqueName: key,
   },
-  mode: "development",
-  cache: {
-    type: "filesystem",
-    name: key,
+  mode: "development" as const,
+  ignoreWarnings: [/Plugin base URL/, /Plugin has no extensions/],
+  stats: {
+    preset: "normal",
+    colors: true,
+    timings: true,
+    modules: false,
   },
   plugins: [
     plugin,
-    new webpack.DefinePlugin({
+    new rspack.DefinePlugin({
       "process.env.DRAGGABLE_DEBUG": "false",
     }),
-    new webpack.NormalModuleReplacementPlugin(
+    createPfModuleReplacementPlugin(monorepoRoot),
+    new rspack.NormalModuleReplacementPlugin(
       /^@patternfly\/react-core\/dist\/esm\/(components|helpers|layouts)(\/|$)/,
       (resource) => {
         const compMatch = resource.request.match(
@@ -584,11 +594,14 @@ const configs: Configuration[] = pluginConfigs.map(({ plugin, key }) => ({
   ],
   resolve: {
     extensions: [".ts", ".tsx", ".js", ".jsx"],
-    alias: {},
+    fallback: {
+      cookie: false,
+      "set-cookie-parser": false,
+    },
   },
   module: {
     rules: [
-      tsLoaderRule,
+      swcLoaderRule,
       {
         test: /\.css$/,
         use: ["style-loader", "css-loader"],

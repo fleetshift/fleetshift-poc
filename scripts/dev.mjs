@@ -10,7 +10,7 @@ const guiDist = resolve(root, "packages/gui/dist");
 const pluginsDist = resolve(root, "packages/mock-ui-plugins/dist");
 const watchOnly = process.argv.includes("--watch");
 
-// Always rebuild common — it's fast (tsc only) and webpack depends on its dist
+// Always rebuild common — it's fast (tsc only) and rspack depends on its dist
 console.log("Building @fleetshift/common...");
 execSync("npm run build -w packages/common", { cwd: root, stdio: "inherit" });
 
@@ -41,14 +41,14 @@ if (!watchOnly) {
 
 console.log("\nStarting watch mode...\n");
 
-function spawnWebpack(cwd) {
+function spawnRspack(cwd) {
   return spawn(
     "npx",
-    ["webpack", "--watch", "--config", "webpack.config.ts"],
+    ["rspack", "build", "--watch"],
     {
       cwd,
       stdio: "inherit",
-      env: { ...process.env, NODE_OPTIONS: "--loader ts-node/esm --max-old-space-size=8192" },
+      env: { ...process.env, NODE_OPTIONS: "--max-old-space-size=8192" },
     },
   );
 }
@@ -56,17 +56,17 @@ function spawnWebpack(cwd) {
 const pluginsCwd = resolve(root, "packages/mock-ui-plugins");
 const guiCwd = resolve(root, "packages/gui");
 
-let pluginsWatch = spawnWebpack(pluginsCwd);
-const guiWatch = spawnWebpack(guiCwd);
+let pluginsWatch = spawnRspack(pluginsCwd);
+const guiWatch = spawnRspack(guiCwd);
 
 const configWatcher = new Watchpack({ aggregateTimeout: 300 });
-configWatcher.watch({ files: [resolve(pluginsCwd, "webpack.config.ts")] });
+configWatcher.watch({ files: [resolve(pluginsCwd, "rspack.config.ts")] });
 configWatcher.on("change", () => {
-  console.log("\nwebpack.config.ts changed — restarting plugins build...\n");
+  console.log("\nrspack.config.ts changed — restarting plugins build...\n");
   const prev = pluginsWatch;
   prev.kill();
   prev.on("close", () => {
-    pluginsWatch = spawnWebpack(pluginsCwd);
+    pluginsWatch = spawnRspack(pluginsCwd);
   });
 });
 

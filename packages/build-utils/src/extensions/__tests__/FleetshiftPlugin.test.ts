@@ -146,7 +146,7 @@ describe("FleetshiftPlugin", () => {
       ...baseOptions,
       extensions: [],
     });
-    const mockCompiler = {} as unknown as import("webpack").Compiler;
+    const mockCompiler = {} as unknown as import("@rspack/core").Compiler;
     plugin.apply(mockCompiler);
     expect(applySpy).toHaveBeenCalledTimes(1);
     expect(applySpy).toHaveBeenCalledWith(mockCompiler);

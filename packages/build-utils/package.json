@@ -1,8 +1,9 @@
 {
   "name": "@fleetshift/build-utils",
-  "description": "Shared webpack helpers — PatternFly dynamic module sharing and ts-loader import transforms.",
+  "description": "Shared rspack helpers — PatternFly dynamic module sharing and FleetShift extension plugin.",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "scripts": {
@@ -14,6 +15,6 @@
   },
   "peerDependencies": {
     "@openshift/dynamic-plugin-sdk-webpack": ">=4.0.0",
-    "webpack": ">=5.0.0"
+    "@rspack/core": ">=2.0.0"
   }
 }

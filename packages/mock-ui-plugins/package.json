@@ -1,12 +1,13 @@
 {
   "name": "@fleetshift/mock-ui-plugins",
-  "description": "Webpack Module Federation remote plugins — built and served by the Go backend.",
+  "description": "Rspack Module Federation remote plugins — built and served by the Go backend.",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "rm -rf dist node_modules/.cache && webpack",
-    "build:ci": "rm -rf dist node_modules/.cache && for name in overview management core signing routing gcphcp kind setup configuration virtualization security observability settings; do echo \"--- $name ---\" && webpack --config-name $name || exit 1; done",
-    "watch": "webpack --watch"
+    "build": "rm -rf dist node_modules/.cache && rspack build",
+    "build:ci": "rm -rf dist node_modules/.cache && for name in overview management core signing routing gcphcp kind setup configuration virtualization security observability settings; do echo \"--- $name ---\" && rspack build --config-name $name || exit 1; done",
+    "watch": "rspack build --watch"
   },
   "dependencies": {
     "@fleetshift/common": "*",
@@ -38,15 +39,13 @@
     "@module-federation/enhanced": "^2.0.1",
     "@openshift/dynamic-plugin-sdk": "^8.0.0",
     "@openshift/dynamic-plugin-sdk-webpack": "^5.0.0",
+    "@rspack/cli": "^2.0.8",
+    "@rspack/core": "^2.0.8",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "css-loader": "^7.1.4",
     "sass": "^1.97.3",
     "sass-loader": "^16.0.7",
-    "style-loader": "^4.0.0",
-    "ts-loader": "^9.5.4",
-    "ts-node": "^10.9.2",
-    "webpack": "^5.98.0",
-    "webpack-cli": "^5.1.4"
+    "style-loader": "^4.0.0"
   }
 }

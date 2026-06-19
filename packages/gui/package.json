@@ -3,8 +3,9 @@
   "description": "React SPA shell — composable dashboard with Module Federation and Scalprum plugin loading.",
   "version": "0.0.0",
   "private": true,
+  "type": "module",
   "scripts": {
-    "build": "webpack build",
+    "build": "rspack build",
     "test": "vitest run --root ../.. packages/gui/"
   },
   "dependencies": {
@@ -26,19 +27,15 @@
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-oidc-context": "^3.3.0",
-    "react-router-dom": "^6.30.3"
+    "react-router-dom": "^7.13.1"
   },
   "devDependencies": {
+    "@rspack/cli": "^2.0.8",
+    "@rspack/core": "^2.0.8",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "css-loader": "^7.1.4",
-    "html-webpack-plugin": "^5.6.6",
-    "mini-css-extract-plugin": "^2.10.0",
     "sass": "^1.97.3",
-    "sass-loader": "^16.0.7",
-    "ts-loader": "^9.5.4",
-    "ts-node": "^10.9.2",
-    "webpack": "^5.105.3",
-    "webpack-cli": "^6.0.1"
+    "sass-loader": "^16.0.7"
   }
 }

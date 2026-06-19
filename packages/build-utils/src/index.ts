@@ -1,3 +1,7 @@
+export {
+  createPfModuleReplacementPlugin,
+  createPfTransformImport,
+} from "./createPfImportConfig";
 export type {
   BaseExtensionProperties,
   ClusterProviderProperties,
@@ -16,5 +20,3 @@ export {
   FleetshiftPlugin,
 } from "./extensions";
 export { default as getDynamicModules } from "./getDynamicModules";
-export { createTransformer } from "./tsc-transform-imports";
-export { default as createTsLoaderRule } from "./tsLoaderRule";

@@ -1,6 +1,6 @@
 # Rules for Agents
 
-FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, webpack + Module Federation.
+FleetShift UI monorepo — React 18 shell + Scalprum micro-frontend plugins, rspack + Module Federation.
 
 ## Source of truth
 
@@ -87,7 +87,7 @@ import clsx from "clsx";
 
 ## Plugins
 
-- Registered as `DynamicRemotePlugin` in `webpack.config.ts`.
+- Registered as `DynamicRemotePlugin` in `rspack.config.ts`.
 - Directory: `src/plugins/<name>-plugin/` — components, `api.ts`, hooks.
 - Extensions declare UI capabilities; Go backend reads manifests for navigation.
 - Shared deps (react, PF, scalprum, oidc) are MF singletons. New shared dep → update `sharedModules`.
@@ -95,9 +95,8 @@ import clsx from "clsx";
 
 ## Build & MF
 
-- Webpack only (not rspack). Rspack MF breaks Scalprum cold start.
-- `ts-loader` via `createTsLoaderRule` from `@fleetshift/build-utils`.
-- PF imports: barrel → dynamic paths via AST transformer. `getDynamicModules` + `createTransformer`.
+- Rspack 2.x with `builtin:swc-loader` (not webpack, not ts-loader).
+- PF imports: barrel → granular dynamic paths via SWC `transformImport` templates + `PfModuleReplacementPlugin` (corrects naive paths using `dynamic-modules.json`). `getDynamicModules` for MF shared entries, `createPfTransformImport` + `createPfModuleReplacementPlugin` from `@fleetshift/build-utils`.
 - `@fleetshift/common` in plugins → must be in MF `sharedModules`.
 - Entry point: async boundary (`index.ts` → `import("./bootstrap")`).
 
@@ -117,7 +116,7 @@ npm test                   # vitest
 - **Code > diagrams.** Changed search/extensions/build/plugin code → validate `.c4` still matches. Diverged → update diagram.
 - **Generic, not specific.** Model pattern (modules → extensionPoints → extensions), not instances. Specific types = examples in descriptions only.
 - Current:
-  - `feature-contract.c4` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/webpack.config.ts`, `packages/gui/src/extensions/`.
+  - `feature-contract.c4` — build validation, extension model, Go backend manifests, shell rendering. Trigger: `packages/build-utils/src/extensions/`, `packages/mock-ui-plugins/rspack.config.ts`, `packages/gui/src/extensions/`.
   - `search.c4` — indexing, extensionPoint linking, query/grouping. Trigger: `packages/gui/src/components/Search/`.
 
 ## Verification
