@@ -161,6 +161,11 @@ type OrchestrationWorkflowSpec struct {
 	// duplicate deliveries and compounding goroutine scheduling
 	// pressure.
 	AckRetryInterval time.Duration
+
+	// ProvisionedTargets is notified when the orchestration creates
+	// or removes targets as delivery side effects. Optional — nil means
+	// no notifications are sent.
+	ProvisionedTargets ProvisionedTargetHandler
 }
 
 // OrchestrationWorkflowOption configures optional fields on
@@ -192,6 +197,53 @@ func WithNow(fn func() time.Time) OrchestrationWorkflowOption {
 // before redispatching unacked deliveries.
 func WithAckRetryInterval(d time.Duration) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) { s.AckRetryInterval = d }
+}
+
+// ProvisionedTargetHandler is notified when the orchestration creates
+// or removes targets as delivery side effects. Optional — nil means
+// no notifications are sent.
+type ProvisionedTargetHandler interface {
+	HandleTargetReady(ctx context.Context, target TargetInfo) error
+	HandleTargetTerminated(ctx context.Context, targetID TargetID) error
+}
+
+// WithProvisionedTargetHandler registers a handler that is notified
+// when the orchestration provisions or removes targets as delivery
+// outputs. The option is additive — multiple calls compose handlers.
+func WithProvisionedTargetHandler(h ProvisionedTargetHandler) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) {
+		if s.ProvisionedTargets == nil {
+			s.ProvisionedTargets = h
+			return
+		}
+		if multi, ok := s.ProvisionedTargets.(multiTargetHandler); ok {
+			s.ProvisionedTargets = append(multi, h)
+		} else {
+			s.ProvisionedTargets = multiTargetHandler{s.ProvisionedTargets, h}
+		}
+	}
+}
+
+// multiTargetHandler dispatches target lifecycle events to multiple
+// handlers. Each handler filters internally for targets it manages.
+type multiTargetHandler []ProvisionedTargetHandler
+
+func (m multiTargetHandler) HandleTargetReady(ctx context.Context, target TargetInfo) error {
+	for _, h := range m {
+		if err := h.HandleTargetReady(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m multiTargetHandler) HandleTargetTerminated(ctx context.Context, targetID TargetID) error {
+	for _, h := range m {
+		if err := h.HandleTargetTerminated(ctx, targetID); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // NewOrchestrationWorkflowSpec creates an [OrchestrationWorkflowSpec]
