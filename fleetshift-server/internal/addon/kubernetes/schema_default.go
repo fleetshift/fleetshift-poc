@@ -33,9 +33,8 @@ var defaultEntries = []SchemaEntry{
 			{Name: "containerImages", JSONPath: ".status.containerStatuses[*].image", DataType: DataTypeSlice},
 			{Name: "restartCount", JSONPath: ".status.containerStatuses[*].restartCount", DataType: DataTypeSlice},
 		},
-		ExtractConditions: true,
-		ComputeExtra:      computePodStatus,
-		BuildEdges:        buildPodEdges,
+		ComputeExtra: computePodStatus,
+		BuildEdges:   buildPodEdges,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"},
@@ -66,8 +65,7 @@ var defaultEntries = []SchemaEntry{
 			{Name: "cpuCapacity", JSONPath: ".status.capacity.cpu"},
 			{Name: "ipAddress", JSONPath: `.status.addresses[?(@.type=="InternalIP")].address`},
 		},
-		ExtractConditions: true,
-		ComputeExtra:      computeNodeRoles,
+		ComputeExtra: computeNodeRoles,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "", Version: "v1", Resource: "persistentvolumeclaims"},
@@ -100,7 +98,6 @@ var defaultEntries = []SchemaEntry{
 			{Name: "availableReplicas", JSONPath: ".status.availableReplicas", DataType: DataTypeNumber},
 			{Name: "updatedReplicas", JSONPath: ".status.updatedReplicas", DataType: DataTypeNumber},
 		},
-		ExtractConditions: true,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "statefulsets"},
@@ -109,7 +106,6 @@ var defaultEntries = []SchemaEntry{
 			{Name: "replicas", JSONPath: ".spec.replicas", DataType: DataTypeNumber},
 			{Name: "readyReplicas", JSONPath: ".status.readyReplicas", DataType: DataTypeNumber},
 		},
-		ExtractConditions: true,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "daemonsets"},
@@ -118,7 +114,6 @@ var defaultEntries = []SchemaEntry{
 			{Name: "desiredNumberScheduled", JSONPath: ".status.desiredNumberScheduled", DataType: DataTypeNumber},
 			{Name: "numberReady", JSONPath: ".status.numberReady", DataType: DataTypeNumber},
 		},
-		ExtractConditions: true,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "replicasets"},
@@ -136,7 +131,6 @@ var defaultEntries = []SchemaEntry{
 			{Name: "failed", JSONPath: ".status.failed", DataType: DataTypeNumber},
 			{Name: "succeeded", JSONPath: ".status.succeeded", DataType: DataTypeNumber},
 		},
-		ExtractConditions: true,
 	},
 	{
 		GVR:  schema.GroupVersionResource{Group: "batch", Version: "v1", Resource: "cronjobs"},

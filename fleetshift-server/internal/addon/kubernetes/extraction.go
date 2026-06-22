@@ -45,10 +45,7 @@ func ExtractObservedResource(r *unstructured.Unstructured, entry SchemaEntry, ta
 	fields := make(map[string]any)
 
 	// Conditions.
-	var conditions []domain.InventoryCondition
-	if entry.ExtractConditions {
-		conditions = extractConditions(r)
-	}
+	conditions := extractConditions(r)
 
 	// Extract schema-defined fields first
 	if len(entry.Fields) > 0 {

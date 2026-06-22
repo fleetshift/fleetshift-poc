@@ -32,7 +32,6 @@ type SchemaEntry struct {
 	GVR                schema.GroupVersionResource
 	Kind               string
 	Fields             []FieldExtraction
-	ExtractConditions  bool
 	ExtractAnnotations bool
 	AnnotationSizeCap  int
 	ComputeExtra       func(r *unstructured.Unstructured, fields map[string]any)

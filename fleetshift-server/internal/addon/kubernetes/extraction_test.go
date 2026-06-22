@@ -89,7 +89,7 @@ func TestExtractIdentityFields_CoreAPIGroup(t *testing.T) {
 	}
 }
 
-func TestExtractConditions_Enabled(t *testing.T) {
+func TestExtractConditions(t *testing.T) {
 	r := &unstructured.Unstructured{
 		Object: map[string]any{
 			"apiVersion": "apps/v1",
@@ -118,7 +118,7 @@ func TestExtractConditions_Enabled(t *testing.T) {
 		},
 	}
 
-	entry := SchemaEntry{Kind: "Deployment", ExtractConditions: true}
+	entry := SchemaEntry{Kind: "Deployment"}
 	item, _ := ExtractObservedResource(r, entry, "target-1")
 
 	conds := item.Conditions()
@@ -154,35 +154,6 @@ func TestExtractConditions_Enabled(t *testing.T) {
 	}
 	if c1.LastTransitionTime != nil {
 		t.Errorf("Conditions[1].LastTransitionTime should be nil when not present, got %v", *c1.LastTransitionTime)
-	}
-}
-
-func TestExtractConditions_Disabled(t *testing.T) {
-	r := &unstructured.Unstructured{
-		Object: map[string]any{
-			"apiVersion": "apps/v1",
-			"kind":       "Deployment",
-			"metadata": map[string]any{
-				"uid":               "no-cond-uid",
-				"name":              "no-cond-deploy",
-				"creationTimestamp": "2025-01-01T00:00:00Z",
-			},
-			"status": map[string]any{
-				"conditions": []any{
-					map[string]any{
-						"type":   "Available",
-						"status": "True",
-					},
-				},
-			},
-		},
-	}
-
-	entry := SchemaEntry{Kind: "Deployment", ExtractConditions: false}
-	item, _ := ExtractObservedResource(r, entry, "target-1")
-
-	if len(item.Conditions()) != 0 {
-		t.Errorf("Conditions should be empty when ExtractConditions=false, got %d", len(item.Conditions()))
 	}
 }
 
