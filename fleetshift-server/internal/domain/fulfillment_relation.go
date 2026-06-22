@@ -24,7 +24,8 @@ type FulfillmentRelation interface {
 // Produces: managed-resource manifests (resolved by intent reference),
 // static placement to the addon target, immediate rollout.
 type RegisteredSelfTarget struct {
-	AddonTarget TargetID `json:"addon_target"`
+	AddonTarget  TargetID     `json:"addon_target"`
+	ManifestType ManifestType `json:"manifest_type"`
 }
 
 func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestStrategySpec, PlacementStrategySpec, *RolloutStrategySpec) {
@@ -34,6 +35,7 @@ func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestS
 			ResourceType: intent.ResourceType,
 			Name:         intent.Name,
 			Version:      intent.Version,
+			ManifestType: r.ManifestType,
 		},
 	}
 	ps := PlacementStrategySpec{

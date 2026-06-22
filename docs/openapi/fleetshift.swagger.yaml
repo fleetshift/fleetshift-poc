@@ -482,16 +482,16 @@ definitions:
   v1Manifest:
     type: object
     properties:
-      resourceType:
+      manifestType:
         type: string
-        description: Identifies the kind of resource (e.g. "api.kind.cluster").
+        description: Opaque dispatch label identifying the manifest kind (e.g. "api.kind.cluster").
       raw:
         type: string
         format: byte
         description: Opaque content of the manifest.
     description: Manifest is an opaque declarative payload delivered to a target.
     required:
-      - resourceType
+      - manifestType
       - raw
   v1ManifestStrategy:
     type: object

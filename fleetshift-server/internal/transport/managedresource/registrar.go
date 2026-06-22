@@ -195,9 +195,17 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 		return nil, status.Errorf(codes.Internal, "marshal spec: %v", err)
 	}
 
+	resourceName, err := domain.NewResourceName(
+		domain.NewCollectionName(domain.CollectionID(h.cfg.CollectionID)),
+		domain.ResourceID(id),
+	)
+	if err != nil {
+		return nil, status.Errorf(codes.InvalidArgument, "invalid resource name: %v", err)
+	}
+
 	in := application.CreateManagedResourceInput{
 		ResourceType: h.cfg.ResourceType,
-		Name:         domain.ResourceName(id),
+		Name:         resourceName,
 		Spec:         json.RawMessage(specJSON),
 	}
 
@@ -434,7 +442,10 @@ func (h *dynamicHandler) parseName(name string) (domain.ResourceName, error) {
 	if !ok || id == "" {
 		return "", fmt.Errorf("name must have format %s{id}", h.collection)
 	}
-	return domain.ResourceName(id), nil
+	return domain.NewResourceName(
+		domain.NewCollectionName(domain.CollectionID(h.cfg.CollectionID)),
+		domain.ResourceID(id),
+	)
 }
 
 // viewToResource converts a domain ManagedResourceView into a dynamic
@@ -445,13 +456,13 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	resource := dynamicpb.NewMessage(h.descs.Resource)
 
-	// name
+	// name — ResourceName is already collection-qualified (e.g. "widgets/widget-1")
 	nameField := h.descs.Resource.Fields().ByName("name")
-	resource.Set(nameField, protoreflect.ValueOfString(h.collection+string(mr.Name())))
+	resource.Set(nameField, protoreflect.ValueOfString(string(mr.Name())))
 
 	// uid
 	uidField := h.descs.Resource.Fields().ByName("uid")
-	resource.Set(uidField, protoreflect.ValueOfString(mr.UID()))
+	resource.Set(uidField, protoreflect.ValueOfString(mr.UID().String()))
 
 	// spec
 	specField := h.descs.Resource.Fields().ByName("spec")

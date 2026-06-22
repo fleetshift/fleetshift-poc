@@ -230,7 +230,7 @@ func Start(t *testing.T) string {
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
-			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		})},
 		Schemas: []domain.ManagedResourceSchema{schema},
 	}); err != nil {
@@ -247,7 +247,7 @@ func Start(t *testing.T) string {
 			ID:                    "gcphcp-test",
 			Type:                  gcphcpaddon.TargetType,
 			Name:                  "Test GCP HCP Provider",
-			AcceptedResourceTypes: []domain.ResourceType{gcphcpaddon.ClusterResourceType},
+			AcceptedManifestTypes: []domain.ManifestType{gcphcpaddon.ClusterManifestType},
 		})},
 		Schemas: []domain.ManagedResourceSchema{gcpSchema},
 	}); err != nil {

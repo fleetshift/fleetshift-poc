@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"strings"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -15,7 +14,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-const deploymentCollection = "deployments/"
+const deploymentCollectionID = "deployments"
 
 // DeploymentServer implements [pb.DeploymentServiceServer].
 type DeploymentServer struct {
@@ -33,7 +32,7 @@ func (s *DeploymentServer) CreateDeployment(ctx context.Context, req *pb.CreateD
 
 	input, err := createInputFromProto(req)
 	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid deployment: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "%v", err)
 	}
 
 	view, err := s.Deployments.Create(ctx, input)
@@ -45,12 +44,12 @@ func (s *DeploymentServer) CreateDeployment(ctx context.Context, req *pb.CreateD
 }
 
 func (s *DeploymentServer) GetDeployment(ctx context.Context, req *pb.GetDeploymentRequest) (*pb.Deployment, error) {
-	id, err := parseDeploymentName(req.GetName())
+	name, err := parseDeploymentName(req.GetName())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	view, err := s.Deployments.Get(ctx, id)
+	view, err := s.Deployments.Get(ctx, name)
 	if err != nil {
 		return nil, domainError(err)
 	}
@@ -59,13 +58,13 @@ func (s *DeploymentServer) GetDeployment(ctx context.Context, req *pb.GetDeploym
 }
 
 func (s *DeploymentServer) ResumeDeployment(ctx context.Context, req *pb.ResumeDeploymentRequest) (*pb.Deployment, error) {
-	id, err := parseDeploymentName(req.GetName())
+	name, err := parseDeploymentName(req.GetName())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
 	in := application.ResumeInput{
-		ID:                 id,
+		Name:               name,
 		UserSignature:      req.GetUserSignature(),
 		Etag:               domain.Etag(req.GetEtag()),
 		ExpectedGeneration: domain.Generation(req.GetExpectedGeneration()),
@@ -97,12 +96,12 @@ func (s *DeploymentServer) ListDeployments(ctx context.Context, _ *pb.ListDeploy
 }
 
 func (s *DeploymentServer) DeleteDeployment(ctx context.Context, req *pb.DeleteDeploymentRequest) (*pb.Deployment, error) {
-	id, err := parseDeploymentName(req.GetName())
+	name, err := parseDeploymentName(req.GetName())
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	view, err := s.Deployments.Delete(ctx, id)
+	view, err := s.Deployments.Delete(ctx, name)
 	if err != nil {
 		return nil, domainError(err)
 	}
@@ -112,21 +111,33 @@ func (s *DeploymentServer) DeleteDeployment(ctx context.Context, req *pb.DeleteD
 
 // --- resource name helpers ---
 
-func deploymentName(id domain.DeploymentID) string {
-	return deploymentCollection + string(id)
+func parseDeploymentName(raw string) (domain.ResourceName, error) {
+	name, err := domain.ParseResourceName(raw)
+	if err != nil {
+		return "", fmt.Errorf("deployment name: %w", err)
+	}
+	if name.CollectionID() != domain.CollectionID(deploymentCollectionID) {
+		return "", fmt.Errorf("deployment name: collection must be %q, got %q", deploymentCollectionID, name.CollectionID())
+	}
+	return name, nil
 }
 
-func parseDeploymentName(name string) (domain.DeploymentID, error) {
-	id, ok := strings.CutPrefix(name, deploymentCollection)
-	if !ok || id == "" {
-		return "", fmt.Errorf("name must have format %s{id}", deploymentCollection)
+func buildDeploymentName(id string) (domain.ResourceName, error) {
+	rid, err := domain.NewResourceID(id)
+	if err != nil {
+		return "", fmt.Errorf("deployment id: %w", err)
 	}
-	return domain.DeploymentID(id), nil
+	return domain.NewResourceName(domain.NewCollectionName(domain.CollectionID(deploymentCollectionID)), rid)
 }
 
 // --- proto <-> domain mapping ---
 
 func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploymentInput, error) {
+	name, err := buildDeploymentName(req.GetDeploymentId())
+	if err != nil {
+		return domain.CreateDeploymentInput{}, err
+	}
+
 	d := req.GetDeployment()
 	ms, err := manifestStrategyFromProto(d.GetManifestStrategy())
 	if err != nil {
@@ -145,7 +156,7 @@ func createInputFromProto(req *pb.CreateDeploymentRequest) (domain.CreateDeploym
 		rs = &v
 	}
 	in := domain.CreateDeploymentInput{
-		ID:                domain.DeploymentID(req.GetDeploymentId()),
+		Name:              name,
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		RolloutStrategy:   rs,
@@ -166,7 +177,7 @@ func manifestStrategyFromProto(p *pb.ManifestStrategy) (domain.ManifestStrategyS
 		manifests := make([]domain.Manifest, len(p.GetManifests()))
 		for i, m := range p.GetManifests() {
 			manifests[i] = domain.Manifest{
-				ResourceType: domain.ResourceType(m.GetResourceType()),
+				ManifestType: domain.ManifestType(m.GetManifestType()),
 				Raw:          m.GetRaw(),
 			}
 		}
@@ -222,7 +233,7 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 	d := v.Deployment
 	f := v.Fulfillment
 	dep := &pb.Deployment{
-		Name:  deploymentName(d.ID()),
+		Name:  string(d.Name()),
 		State: fulfillmentStateToProto(f.State()),
 	}
 
@@ -251,7 +262,7 @@ func deploymentToProto(v domain.DeploymentView) *pb.Deployment {
 	if !d.UpdatedAt().IsZero() {
 		dep.UpdateTime = timestamppb.New(d.UpdatedAt())
 	}
-	dep.Uid = d.UID()
+	dep.Uid = d.UID().String()
 	dep.Etag = string(v.Etag())
 
 	if prov := f.Provenance(); prov != nil {
@@ -315,7 +326,7 @@ func manifestStrategyToProto(s domain.ManifestStrategySpec) *pb.ManifestStrategy
 		ms.Manifests = make([]*pb.Manifest, len(s.Manifests))
 		for i, m := range s.Manifests {
 			ms.Manifests[i] = &pb.Manifest{
-				ResourceType: string(m.ResourceType),
+				ManifestType: string(m.ManifestType),
 				Raw:          m.Raw,
 			}
 		}

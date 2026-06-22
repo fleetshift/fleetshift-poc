@@ -9,9 +9,9 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-func seedPausedDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID, gen domain.Generation) {
+func seedPausedDeployment(t *testing.T, store domain.Store, depName domain.ResourceName, gen domain.Generation) {
 	t.Helper()
-	seedFulfillmentAndDeployment(t, store, depID, domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, depName, domain.FulfillmentSnapshot{
 		Generation: gen,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -33,12 +33,12 @@ func newResumeSpec(store domain.Store) *domain.ResumeDeploymentWorkflowSpec {
 
 func TestResumeDeployment_StaleEtag_Aborted(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 
 	_, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:   "d1",
+		Name: "deployments/d1",
 		Auth: domain.DeliveryAuth{Token: "tok"},
 		Etag: domain.Etag("clearly-wrong"),
 	})
@@ -52,14 +52,14 @@ func TestResumeDeployment_StaleEtag_Aborted(t *testing.T) {
 
 func TestResumeDeployment_CorrectEtag_Succeeds(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 
 	// Compute the current etag by reading the view.
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	view, err := tx.Deployments().GetView(context.Background(), "d1")
+	view, err := tx.Deployments().GetView(context.Background(), "deployments/d1")
 	if err != nil {
 		t.Fatalf("get view: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestResumeDeployment_CorrectEtag_Succeeds(t *testing.T) {
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 	result, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:   "d1",
+		Name: "deployments/d1",
 		Auth: domain.DeliveryAuth{Token: "tok"},
 		Etag: currentEtag,
 	})
@@ -83,12 +83,12 @@ func TestResumeDeployment_CorrectEtag_Succeeds(t *testing.T) {
 
 func TestResumeDeployment_StaleExpectedGeneration_Aborted(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 
 	_, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:                 "d1",
+		Name:               "deployments/d1",
 		Auth:               domain.DeliveryAuth{Token: "tok"},
 		ExpectedGeneration: 99,
 	})
@@ -102,12 +102,12 @@ func TestResumeDeployment_StaleExpectedGeneration_Aborted(t *testing.T) {
 
 func TestResumeDeployment_CorrectExpectedGeneration_Succeeds(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 
 	result, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:                 "d1",
+		Name:               "deployments/d1",
 		Auth:               domain.DeliveryAuth{Token: "tok"},
 		ExpectedGeneration: 4,
 	})
@@ -121,7 +121,7 @@ func TestResumeDeployment_CorrectExpectedGeneration_Succeeds(t *testing.T) {
 
 func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation: 3,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -140,7 +140,7 @@ func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(
 	// Using only expected_generation (no etag) — should succeed even
 	// though non-generation state (UpdatedAt) differs from the original.
 	result, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:                 "d1",
+		Name:               "deployments/d1",
 		Auth:               domain.DeliveryAuth{Token: "tok"},
 		ExpectedGeneration: 4,
 	})
@@ -154,12 +154,12 @@ func TestResumeDeployment_ExpectedGenerationOnly_SucceedsWhenNonGenStateChanged(
 
 func TestResumeDeployment_SignatureRequiresExpectedGeneration(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 
 	_, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:            "d1",
+		Name:          "deployments/d1",
 		Auth:          domain.DeliveryAuth{Token: "tok"},
 		UserSignature: []byte("some-sig"),
 		ValidUntil:    time.Now().Add(time.Hour),
@@ -174,12 +174,12 @@ func TestResumeDeployment_SignatureRequiresExpectedGeneration(t *testing.T) {
 
 func TestResumeDeployment_UnsignedLegacy_NoEtagNoGeneration(t *testing.T) {
 	store, _ := setupStore(t)
-	seedPausedDeployment(t, store, "d1", 3)
+	seedPausedDeployment(t, store, "deployments/d1", 3)
 	spec := newResumeSpec(store)
 	rec := &stubRecord{ctx: context.Background()}
 
 	result, err := spec.Run(rec, domain.ResumeDeploymentInput{
-		ID:   "d1",
+		Name: "deployments/d1",
 		Auth: domain.DeliveryAuth{Token: "tok"},
 	})
 	if err != nil {

@@ -565,7 +565,7 @@ type createDeploymentWorkflow struct {
 
 func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
-		InstanceID: "create-" + string(input.ID),
+		InstanceID: "create-" + string(input.Name),
 	}, w.wfName, input)
 	if err != nil {
 		return nil, fmt.Errorf("create workflow instance: %w", err)
@@ -610,7 +610,7 @@ type deleteDeploymentWorkflow struct {
 }
 
 func (w *deleteDeploymentWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.ID, observedGen)
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.Name, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)
@@ -691,7 +691,7 @@ type resumeDeploymentWorkflow struct {
 }
 
 func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
+	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.Name, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)

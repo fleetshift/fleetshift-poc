@@ -53,7 +53,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 	sampleTypeDef := func(rt domain.ResourceType) domain.ManagedResourceTypeDef {
 		return domain.ManagedResourceTypeDef{
 			ResourceType: rt,
-			Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-" + domain.TargetID(rt)},
+			Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-" + domain.TargetID(rt.TypeName())},
 			Signature: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
 				ContentHash:    []byte("hash"),
@@ -69,25 +69,25 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ManagedResources()
 
-		def := sampleTypeDef("clusters")
+		def := sampleTypeDef("test.fleetshift.io/Cluster")
 
 		if err := repo.CreateType(ctx, def); err != nil {
 			t.Fatalf("CreateType: %v", err)
 		}
 
-		got, err := repo.GetType(ctx, "clusters")
+		got, err := repo.GetType(ctx, "test.fleetshift.io/Cluster")
 		if err != nil {
 			t.Fatalf("GetType: %v", err)
 		}
-		if got.ResourceType != "clusters" {
-			t.Errorf("ResourceType = %q, want %q", got.ResourceType, "clusters")
+		if got.ResourceType != "test.fleetshift.io/Cluster" {
+			t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.fleetshift.io/Cluster")
 		}
 		rst, ok := got.Relation.(domain.RegisteredSelfTarget)
 		if !ok {
 			t.Fatalf("Relation type = %T, want RegisteredSelfTarget", got.Relation)
 		}
-		if rst.AddonTarget != "addon-clusters" {
-			t.Errorf("AddonTarget = %q, want %q", rst.AddonTarget, "addon-clusters")
+		if rst.AddonTarget != "addon-Cluster" {
+			t.Errorf("AddonTarget = %q, want %q", rst.AddonTarget, "addon-Cluster")
 		}
 		if !got.CreatedAt.Equal(fixedTime) {
 			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, fixedTime)
@@ -208,9 +208,9 @@ func runIntentTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
-			ResourceType:  "clusters",
+			ResourceType:  "test.fleetshift.io/Cluster",
 			Name:          "prod-1",
-			UID:           "uid-intent-1",
+			UID:           domain.NewManagedResourceUID(),
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
@@ -221,7 +221,7 @@ func runIntentTests(t *testing.T, factory Factory) {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
-		got, err := repo.GetIntent(ctx, "clusters", "prod-1", 1)
+		got, err := repo.GetIntent(ctx, "test.fleetshift.io/Cluster", "prod-1", 1)
 		if err != nil {
 			t.Fatalf("GetIntent: %v", err)
 		}
@@ -240,7 +240,7 @@ func runIntentTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ManagedResources().GetIntent(ctx, "clusters", "nope", 99)
+		_, err := tx.ManagedResources().GetIntent(ctx, "test.fleetshift.io/Cluster", "nope", 99)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -255,9 +255,9 @@ func runIntentTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
-			ResourceType:  "clusters",
+			ResourceType:  "test.fleetshift.io/Cluster",
 			Name:          "prod-delete",
-			UID:           "uid-intent-delete",
+			UID:           domain.NewManagedResourceUID(),
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
@@ -267,19 +267,19 @@ func runIntentTests(t *testing.T, factory Factory) {
 		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
-		if err := repo.DeleteInstance(ctx, "clusters", "prod-delete"); err != nil {
+		if err := repo.DeleteInstance(ctx, "test.fleetshift.io/Cluster", "prod-delete"); err != nil {
 			t.Fatalf("DeleteInstance: %v", err)
 		}
-		if err := repo.DeleteIntents(ctx, "clusters", "prod-delete"); err != nil {
+		if err := repo.DeleteIntents(ctx, "test.fleetshift.io/Cluster", "prod-delete"); err != nil {
 			t.Fatalf("DeleteIntents: %v", err)
 		}
 
-		_, err := repo.GetIntent(ctx, "clusters", "prod-delete", 1)
+		_, err := repo.GetIntent(ctx, "test.fleetshift.io/Cluster", "prod-delete", 1)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("GetIntent after DeleteIntents: got %v, want ErrNotFound", err)
 		}
 
-		if err := repo.DeleteIntents(ctx, "clusters", "prod-delete"); err != nil {
+		if err := repo.DeleteIntents(ctx, "test.fleetshift.io/Cluster", "prod-delete"); err != nil {
 			t.Fatalf("DeleteIntents second call: %v", err)
 		}
 	})
@@ -291,11 +291,11 @@ func runInstanceTests(t *testing.T, factory Factory) {
 
 	// newMR constructs a ManagedResource with a single recorded intent,
 	// ready for CreateInstance to drain.
-	newMR := func(rt domain.ResourceType, name domain.ResourceName, uid string, fID domain.FulfillmentID) *domain.ManagedResource {
+	newMR := func(rt domain.ResourceType, name domain.ResourceName, fID domain.FulfillmentID) *domain.ManagedResource {
 		mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 			ResourceType:  rt,
 			Name:          name,
-			UID:           uid,
+			UID:           domain.NewManagedResourceUID(),
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
@@ -312,17 +312,17 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-mr-create")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := newMR("clusters", "prod-1", "uid-001", fID)
+		mr := newMR("test.fleetshift.io/Cluster", "prod-1", fID)
 		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
-		got, err := repo.GetInstance(ctx, "clusters", "prod-1")
+		got, err := repo.GetInstance(ctx, "test.fleetshift.io/Cluster", "prod-1")
 		if err != nil {
 			t.Fatalf("GetInstance: %v", err)
 		}
-		if got.UID() != "uid-001" {
-			t.Errorf("UID = %q, want %q", got.UID(), "uid-001")
+		if got.UID().IsZero() {
+			t.Error("UID is zero, want non-zero")
 		}
 		if got.FulfillmentID() != fID {
 			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID(), fID)
@@ -340,14 +340,14 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-mr-dup")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := newMR("clusters", "dup-res", "uid-dup", fID)
+		mr := newMR("test.fleetshift.io/Cluster", "dup-res", fID)
 		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("first: %v", err)
 		}
 		mr2 := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
-			ResourceType:  "clusters",
+			ResourceType:  "test.fleetshift.io/Cluster",
 			Name:          "dup-res",
-			UID:           "uid-dup-2",
+			UID:           domain.NewManagedResourceUID(),
 			FulfillmentID: fID,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
@@ -363,7 +363,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ManagedResources().GetInstance(ctx, "clusters", "ghost")
+		_, err := tx.ManagedResources().GetInstance(ctx, "test.fleetshift.io/Cluster", "ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -377,12 +377,12 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-mr-view")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := newMR("clusters", "view-res", "uid-view", fID)
+		mr := newMR("test.fleetshift.io/Cluster", "view-res", fID)
 		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
 
-		v, err := repo.GetView(ctx, "clusters", "view-res")
+		v, err := repo.GetView(ctx, "test.fleetshift.io/Cluster", "view-res")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -408,13 +408,13 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		for i, name := range []domain.ResourceName{"a-res", "b-res"} {
 			fID := domain.FulfillmentID(fmt.Sprintf("f-list-%d", i))
 			seedFulfillment(t, tx, fID, fixedTime)
-			mr := newMR("clusters", name, fmt.Sprintf("uid-list-%d", i), fID)
+			mr := newMR("test.fleetshift.io/Cluster", name, fID)
 			if err := repo.CreateInstance(ctx, mr); err != nil {
 				t.Fatalf("CreateInstance %s: %v", name, err)
 			}
 		}
 
-		views, err := repo.ListViewsByType(ctx, "clusters")
+		views, err := repo.ListViewsByType(ctx, "test.fleetshift.io/Cluster")
 		if err != nil {
 			t.Fatalf("ListViewsByType: %v", err)
 		}
@@ -434,14 +434,14 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		fID := domain.FulfillmentID("f-mr-del")
 		seedFulfillment(t, tx, fID, fixedTime)
 
-		mr := newMR("clusters", "del-res", "uid-del", fID)
+		mr := newMR("test.fleetshift.io/Cluster", "del-res", fID)
 		if err := repo.CreateInstance(ctx, mr); err != nil {
 			t.Fatalf("CreateInstance: %v", err)
 		}
-		if err := repo.DeleteInstance(ctx, "clusters", "del-res"); err != nil {
+		if err := repo.DeleteInstance(ctx, "test.fleetshift.io/Cluster", "del-res"); err != nil {
 			t.Fatalf("DeleteInstance: %v", err)
 		}
-		_, err := repo.GetInstance(ctx, "clusters", "del-res")
+		_, err := repo.GetInstance(ctx, "test.fleetshift.io/Cluster", "del-res")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("GetInstance after delete: got %v, want ErrNotFound", err)
 		}
@@ -451,7 +451,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		err := tx.ManagedResources().DeleteInstance(ctx, "clusters", "ghost")
+		err := tx.ManagedResources().DeleteInstance(ctx, "test.fleetshift.io/Cluster", "ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}

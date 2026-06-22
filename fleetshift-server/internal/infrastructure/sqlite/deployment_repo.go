@@ -18,27 +18,27 @@ type DeploymentRepo struct {
 func (r *DeploymentRepo) Create(ctx context.Context, d domain.Deployment) error {
 	s := d.Snapshot()
 	_, err := r.DB.ExecContext(ctx,
-		`INSERT INTO deployments (id, uid, fulfillment_id, created_at, updated_at)
+		`INSERT INTO deployments (name, uid, fulfillment_id, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?)`,
-		string(s.ID), s.UID, string(s.FulfillmentID),
+		string(s.Name), s.UID, string(s.FulfillmentID),
 		s.CreatedAt.UTC().Format(time.RFC3339),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("deployment %q: %w", s.ID, domain.ErrAlreadyExists)
+			return fmt.Errorf("deployment %q: %w", s.Name, domain.ErrAlreadyExists)
 		}
 		return fmt.Errorf("insert deployment: %w", err)
 	}
 	return nil
 }
 
-const thinDeploymentColumns = `id, uid, fulfillment_id, created_at, updated_at`
+const thinDeploymentColumns = `name, uid, fulfillment_id, created_at, updated_at`
 
-func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domain.Deployment, error) {
+func (r *DeploymentRepo) Get(ctx context.Context, name domain.ResourceName) (domain.Deployment, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT `+thinDeploymentColumns+` FROM deployments WHERE id = ?`,
-		string(id),
+		`SELECT `+thinDeploymentColumns+` FROM deployments WHERE name = ?`,
+		string(name),
 	)
 	s, err := scanDeploymentSnapshot(row)
 	if err != nil {
@@ -47,22 +47,22 @@ func (r *DeploymentRepo) Get(ctx context.Context, id domain.DeploymentID) (domai
 	return domain.DeploymentFromSnapshot(s), nil
 }
 
-func (r *DeploymentRepo) GetView(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
+func (r *DeploymentRepo) GetView(ctx context.Context, name domain.ResourceName) (domain.DeploymentView, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
+		`SELECT d.name, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
 		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
 		 JOIN fulfillments f ON f.id = d.fulfillment_id
 		 `+strategyJoins("f")+`
-		 WHERE d.id = ?`,
-		string(id),
+		 WHERE d.name = ?`,
+		string(name),
 	)
 	return scanDeploymentView(row)
 }
 
 func (r *DeploymentRepo) ListView(ctx context.Context) ([]domain.DeploymentView, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT d.id, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
+		`SELECT d.name, d.uid, d.fulfillment_id, d.created_at, d.updated_at,
 		        `+fulfillmentColumnsJoined("f")+`
 		 FROM deployments d
 		 JOIN fulfillments f ON f.id = d.fulfillment_id
@@ -84,38 +84,37 @@ func (r *DeploymentRepo) ListView(ctx context.Context) ([]domain.DeploymentView,
 	return views, rows.Err()
 }
 
-func (r *DeploymentRepo) Delete(ctx context.Context, id domain.DeploymentID) error {
-	res, err := r.DB.ExecContext(ctx, `DELETE FROM deployments WHERE id = ?`, string(id))
+func (r *DeploymentRepo) Delete(ctx context.Context, name domain.ResourceName) error {
+	res, err := r.DB.ExecContext(ctx, `DELETE FROM deployments WHERE name = ?`, string(name))
 	if err != nil {
 		return fmt.Errorf("delete deployment: %w", err)
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("deployment %q: %w", id, domain.ErrNotFound)
+		return fmt.Errorf("deployment %q: %w", name, domain.ErrNotFound)
 	}
 	return nil
 }
 
 func scanDeploymentSnapshot(s scanner) (domain.DeploymentSnapshot, error) {
 	var snap domain.DeploymentSnapshot
-	var id, uid, fID, createdAtStr, updatedAtStr string
-	if err := s.Scan(&id, &uid, &fID, &createdAtStr, &updatedAtStr); err != nil {
+	var name, fID, createdAtStr, updatedAtStr string
+	if err := s.Scan(&name, &snap.UID, &fID, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return snap, fmt.Errorf("%w", domain.ErrNotFound)
 		}
 		return snap, fmt.Errorf("scan deployment: %w", err)
 	}
-	snap.ID = domain.DeploymentID(id)
-	snap.UID = uid
+	snap.Name = domain.ResourceName(name)
 	snap.FulfillmentID = domain.FulfillmentID(fID)
 	t, err := time.Parse(time.RFC3339, createdAtStr)
 	if err != nil {
-		return snap, fmt.Errorf("parse deployment.created_at for %q: %w", id, err)
+		return snap, fmt.Errorf("parse deployment.created_at for %q: %w", name, err)
 	}
 	snap.CreatedAt = t
 	t, err = time.Parse(time.RFC3339, updatedAtStr)
 	if err != nil {
-		return snap, fmt.Errorf("parse deployment.updated_at for %q: %w", id, err)
+		return snap, fmt.Errorf("parse deployment.updated_at for %q: %w", name, err)
 	}
 	snap.UpdatedAt = t
 	return snap, nil
@@ -123,11 +122,12 @@ func scanDeploymentSnapshot(s scanner) (domain.DeploymentSnapshot, error) {
 
 func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	var v domain.DeploymentView
-	var dID, uid, fRefID, dCreatedAtStr, dUpdatedAtStr string
+	var dName, fRefID, dCreatedAtStr, dUpdatedAtStr string
+	var uid domain.DeploymentUID
 	var fCols fulfillmentScanColumns
 
 	if err := s.Scan(append([]any{
-		&dID, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr,
+		&dName, &uid, &fRefID, &dCreatedAtStr, &dUpdatedAtStr,
 	}, fCols.dests()...)...); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return v, fmt.Errorf("%w", domain.ErrNotFound)
@@ -136,18 +136,18 @@ func scanDeploymentView(s scanner) (domain.DeploymentView, error) {
 	}
 
 	ds := domain.DeploymentSnapshot{
-		ID:            domain.DeploymentID(dID),
+		Name:          domain.ResourceName(dName),
 		UID:           uid,
 		FulfillmentID: domain.FulfillmentID(fRefID),
 	}
 	t, err := time.Parse(time.RFC3339, dCreatedAtStr)
 	if err != nil {
-		return v, fmt.Errorf("parse deployment.created_at for %q: %w", dID, err)
+		return v, fmt.Errorf("parse deployment.created_at for %q: %w", dName, err)
 	}
 	ds.CreatedAt = t
 	t, err = time.Parse(time.RFC3339, dUpdatedAtStr)
 	if err != nil {
-		return v, fmt.Errorf("parse deployment.updated_at for %q: %w", dID, err)
+		return v, fmt.Errorf("parse deployment.updated_at for %q: %w", dName, err)
 	}
 	ds.UpdatedAt = t
 	v.Deployment = domain.DeploymentFromSnapshot(ds)

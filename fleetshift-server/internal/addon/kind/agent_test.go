@@ -164,7 +164,7 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
@@ -186,7 +186,7 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
@@ -208,7 +208,7 @@ func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{}`),
 	}}
 
@@ -230,7 +230,7 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
@@ -308,8 +308,8 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
 	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -331,7 +331,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
@@ -355,7 +355,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
 	}}
 
@@ -399,8 +399,8 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "cluster-a"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "cluster-b"}`)},
 	}
 
 	err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -486,7 +486,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "default-cfg"}`),
 	}}
 
@@ -522,7 +522,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "custom-cfg", "nodes": [{"role": "control-plane"}, {"role": "worker"}]}`),
 	}}
 
@@ -577,7 +577,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 	}
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "verified-cluster"}`),
 	}}
 
@@ -616,7 +616,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 	}
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "rejected-cluster"}`),
 	}}
 
@@ -650,7 +650,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "no-token-cluster"}`),
 	}}
 
@@ -673,8 +673,8 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "a"}`)},
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "b"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "a"}`)},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "b"}`)},
 	}
 
 	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -717,7 +717,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	}
 
 	manifests := []domain.Manifest{{
-		ResourceType: domain.TrustBundleResourceType,
+		ManifestType: domain.TrustBundleManifestType,
 		Raw:          raw,
 	}}
 
@@ -757,7 +757,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 
 	// First deliver a trust bundle.
 	trustManifests := []domain.Manifest{{
-		ResourceType: domain.TrustBundleResourceType,
+		ManifestType: domain.TrustBundleManifestType,
 		Raw:          trustRaw,
 	}}
 	_ = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-trust", trustManifests, domain.DeliveryAuth{}, nil, 1)
@@ -768,7 +768,7 @@ func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 	spec := kind.ClusterSpec{Name: "trust-test"}
 	specRaw, _ := json.Marshal(spec)
 	clusterManifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          specRaw,
 	}}
 	err := agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-cluster", clusterManifests, domain.DeliveryAuth{}, nil, 1)
@@ -838,7 +838,7 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 	})
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "retry-cluster"}`),
 	}}
 
@@ -926,8 +926,8 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	trustRaw, _ := json.Marshal(trustEntry)
 
 	manifests := []domain.Manifest{
-		{ResourceType: domain.TrustBundleResourceType, Raw: trustRaw},
-		{ResourceType: kind.ClusterResourceType, Raw: json.RawMessage(`{"name": "tb-retry-cluster"}`)},
+		{ManifestType: domain.TrustBundleManifestType, Raw: trustRaw},
+		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "tb-retry-cluster"}`)},
 	}
 
 	// First deliver — trust bundle is stored, cluster Create blocks.

@@ -135,7 +135,7 @@ func TestCreateThenGet(t *testing.T) {
 			ManifestStrategy: &pb.ManifestStrategy{
 				Type: pb.ManifestStrategy_TYPE_INLINE,
 				Manifests: []*pb.Manifest{{
-					ResourceType: "test.resource",
+					ManifestType: "test.resource",
 					Raw:          raw,
 				}},
 			},
@@ -203,7 +203,7 @@ func TestCreateThenList(t *testing.T) {
 			Deployment: &pb.Deployment{
 				ManifestStrategy: &pb.ManifestStrategy{
 					Type:      pb.ManifestStrategy_TYPE_INLINE,
-					Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+					Manifests: []*pb.Manifest{{ManifestType: "t", Raw: raw}},
 				},
 				PlacementStrategy: &pb.PlacementStrategy{
 					Type:      pb.PlacementStrategy_TYPE_STATIC,
@@ -250,7 +250,7 @@ func TestCreateDuplicate(t *testing.T) {
 		Deployment: &pb.Deployment{
 			ManifestStrategy: &pb.ManifestStrategy{
 				Type:      pb.ManifestStrategy_TYPE_INLINE,
-				Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+				Manifests: []*pb.Manifest{{ManifestType: "t", Raw: raw}},
 			},
 			PlacementStrategy: &pb.PlacementStrategy{
 				Type:      pb.PlacementStrategy_TYPE_STATIC,
@@ -298,7 +298,7 @@ func TestCreateStateAndReconciling(t *testing.T) {
 		Deployment: &pb.Deployment{
 			ManifestStrategy: &pb.ManifestStrategy{
 				Type:      pb.ManifestStrategy_TYPE_INLINE,
-				Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+				Manifests: []*pb.Manifest{{ManifestType: "t", Raw: raw}},
 			},
 			PlacementStrategy: &pb.PlacementStrategy{
 				Type:      pb.PlacementStrategy_TYPE_STATIC,
@@ -329,7 +329,7 @@ func TestDeleteDeployment(t *testing.T) {
 		Deployment: &pb.Deployment{
 			ManifestStrategy: &pb.ManifestStrategy{
 				Type:      pb.ManifestStrategy_TYPE_INLINE,
-				Manifests: []*pb.Manifest{{ResourceType: "t", Raw: raw}},
+				Manifests: []*pb.Manifest{{ManifestType: "t", Raw: raw}},
 			},
 			PlacementStrategy: &pb.PlacementStrategy{
 				Type:      pb.PlacementStrategy_TYPE_STATIC,

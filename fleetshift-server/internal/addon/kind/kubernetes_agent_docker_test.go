@@ -262,7 +262,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		configMap := json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"attested-vault-test","namespace":"default"},"data":{"mode":"attested-vault"}}`)
 		manifests := []domain.Manifest{{ResourceType: kubeaddon.ManifestResourceType, Raw: configMap}}
 
-		att := buildTestAttestation(t, "attested-dep", manifests)
+		att := buildTestAttestation(t, "deployments/attested-dep", manifests)
 
 		reporter := newChannelReporter()
 		agent := kubeaddon.NewAgent(reporter,
@@ -346,7 +346,7 @@ type testAttestationBundle struct {
 	trustBundleJSON string
 }
 
-func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []domain.Manifest) testAttestationBundle {
+func buildTestAttestation(t *testing.T, name domain.ResourceName, manifests []domain.Manifest) testAttestationBundle {
 	t.Helper()
 
 	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
@@ -379,7 +379,7 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 	validUntil := time.Now().Add(24 * time.Hour)
 	gen := domain.Generation(1)
 
-	envelope, err := domain.BuildSignedInputEnvelope(depID, ms, ps, validUntil, nil, gen)
+	envelope, err := domain.BuildSignedInputEnvelope(name, ms, ps, validUntil, nil, gen)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
 	}
@@ -395,7 +395,7 @@ func buildTestAttestation(t *testing.T, depID domain.DeploymentID, manifests []d
 		Input: domain.SignedInput{
 			Provenance: domain.Provenance{
 				Content: domain.DeploymentContent{
-					DeploymentID:      depID,
+					Name:              name,
 					ManifestStrategy:  ms,
 					PlacementStrategy: ps,
 				},

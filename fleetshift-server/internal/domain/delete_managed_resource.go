@@ -190,14 +190,9 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 // tombstones the managed representation. Called within MutateToDeleting's
 // transaction so it is atomic with the fulfillment state transition.
 func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName, now time.Time) error {
-	relName, err := NewRelativeResourceName(typeDef.CollectionID, string(name))
+	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
 	if err != nil {
-		return fmt.Errorf("build relative name: %w", err)
-	}
-
-	pr, err := tx.ResourceIdentities().GetByName(ctx, relName)
-	if err != nil {
-		return fmt.Errorf("get platform resource %s: %w", relName, err)
+		return fmt.Errorf("get platform resource %s: %w", name, err)
 	}
 
 	if err := pr.TombstoneRepresentation(typeDef.APIServiceName, now); err != nil {

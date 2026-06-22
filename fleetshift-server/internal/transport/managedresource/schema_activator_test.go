@@ -237,7 +237,7 @@ func TestDynamicSchemaActivator_EmptyProtoFilesReturnsError(t *testing.T) {
 
 func TestSchemaContentHash_Deterministic(t *testing.T) {
 	s := domain.ManagedResourceSchema{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Singular:     "Cluster",
 		Plural:       "Clusters",
 		SpecMessage:  "ClusterSpec",
@@ -477,7 +477,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "widget-addon", Type: widgetTargetType, Name: "Widget Addon",
-		AcceptedResourceTypes: []domain.ResourceType{"widgets"},
+		AcceptedManifestTypes: []domain.ManifestType{"widgets"},
 	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
@@ -540,7 +540,7 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 
 	// v1: name is required.
 	v1 := domain.ManagedResourceSchema{
-		ResourceType:   "widgets",
+		ResourceType:   "test.fleetshift.io/Widget",
 		APIServiceName: "fleetshift.io",
 		ProtoPackage:   "fleetshift.v1",
 		Version:        "v1",
@@ -555,12 +555,12 @@ message WidgetSpec {
   string name = 1 [(buf.validate.field).required = true];
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 	}
 
 	// v2: name is optional.
 	v2 := domain.ManagedResourceSchema{
-		ResourceType:   "widgets",
+		ResourceType:   "test.fleetshift.io/Widget",
 		APIServiceName: "fleetshift.io",
 		ProtoPackage:   "fleetshift.v1",
 		Version:        "v1",
@@ -574,13 +574,13 @@ message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 	}
 
 	// Register the widget type in the store so Create can look it up.
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "widgets",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		ResourceType:   "test.fleetshift.io/Widget",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",
@@ -900,7 +900,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "widget-addon", Type: widgetTargetType, Name: "Widget Addon",
-		AcceptedResourceTypes: []domain.ResourceType{"widgets"},
+		AcceptedManifestTypes: []domain.ManifestType{"widgets"},
 	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
@@ -926,7 +926,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 
 func platformTestWidgetSchema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType:   "widgets",
+		ResourceType:   "test.fleetshift.io/Widget",
 		APIServiceName: "fleetshift.io",
 		ProtoPackage:   "fleetshift.v1",
 		Version:        "v1",
@@ -940,7 +940,7 @@ message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 	}
 }
 
@@ -1024,8 +1024,8 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 	// Register the widget type with API identity metadata so the
 	// create workflow claims a platform resource identity.
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "widgets",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		ResourceType:   "test.fleetshift.io/Widget",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",
@@ -1108,8 +1108,8 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 	schema := platformTestWidgetSchema()
 
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "widgets",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon"},
+		ResourceType:   "test.fleetshift.io/Widget",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",
@@ -1124,7 +1124,7 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 
 	extDescs := createWidgetViaExtension(t, ctx, env.conn, schema, "widget-1")
 
-	awaitFulfillmentActive(ctx, t, env.store, "widgets", "widget-1")
+	awaitFulfillmentActive(ctx, t, env.store, "test.fleetshift.io/Widget", "widgets/widget-1")
 
 	// Delete via extension gRPC.
 	deleteReq := dynamicpb.NewMessage(extDescs.DeleteRequest)

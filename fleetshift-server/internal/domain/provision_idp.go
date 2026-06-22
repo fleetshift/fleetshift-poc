@@ -111,11 +111,11 @@ func (s *ProvisionIdPWorkflowSpec) DeployTrustBundle() Activity[AuthMethod, stru
 		}
 
 		input := CreateDeploymentInput{
-			ID: DeploymentID("idp-trust-" + string(method.ID())),
+			Name: ResourceName("deployments/idp-trust-" + string(method.ID())),
 			ManifestStrategy: ManifestStrategySpec{
 				Type: ManifestStrategyInline,
 				Manifests: []Manifest{{
-					ResourceType: TrustBundleResourceType,
+					ManifestType: TrustBundleManifestType,
 					Raw:          raw,
 				}},
 			},

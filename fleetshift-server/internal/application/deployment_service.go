@@ -20,8 +20,8 @@ type DeploymentService struct {
 // Create starts the durable create-deployment workflow, which persists
 // the deployment and launches orchestration as a child workflow.
 func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeploymentInput) (domain.DeploymentView, error) {
-	if in.ID == "" {
-		return domain.DeploymentView{}, fmt.Errorf("%w: deployment ID is required", domain.ErrInvalidArgument)
+	if in.Name == "" {
+		return domain.DeploymentView{}, fmt.Errorf("%w: deployment name is required", domain.ErrInvalidArgument)
 	}
 
 	ac := AuthFromContext(ctx)
@@ -46,7 +46,7 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 		defer tx.Rollback()
 		prov, err := s.ProvenanceSvc.BuildDeploymentProvenance(
 			ctx, tx.SignerEnrollments(), ac.Subject,
-			in.ID, in.ManifestStrategy, in.PlacementStrategy,
+			in.Name, in.ManifestStrategy, in.PlacementStrategy,
 			1, in.UserSignature, in.ValidUntil,
 		)
 		if err != nil {
@@ -73,15 +73,15 @@ func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeployme
 	return view, nil
 }
 
-// Get retrieves a deployment by ID.
-func (s *DeploymentService) Get(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
+// Get retrieves a deployment by resource name.
+func (s *DeploymentService) Get(ctx context.Context, name domain.ResourceName) (domain.DeploymentView, error) {
 	tx, err := s.Store.BeginReadOnly(ctx)
 	if err != nil {
 		return domain.DeploymentView{}, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
 
-	view, err := tx.Deployments().GetView(ctx, id)
+	view, err := tx.Deployments().GetView(ctx, name)
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
@@ -107,7 +107,7 @@ func (s *DeploymentService) List(ctx context.Context) ([]domain.DeploymentView, 
 // a deployment. When UserSignature is non-empty, the server constructs
 // fresh provenance for the resuming user.
 type ResumeInput struct {
-	ID                 domain.DeploymentID
+	Name               domain.ResourceName
 	UserSignature      []byte
 	ValidUntil         time.Time
 	Etag               domain.Etag
@@ -131,7 +131,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 	}
 	defer tx.Rollback()
 
-	dep, err := tx.Deployments().Get(ctx, in.ID)
+	dep, err := tx.Deployments().Get(ctx, in.Name)
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
@@ -145,7 +145,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 	}
 
 	exec, err := s.ResumeWF.Start(ctx, domain.ResumeDeploymentInput{
-		ID: in.ID,
+		Name: in.Name,
 		Auth: domain.DeliveryAuth{
 			Caller:   ac.Subject,
 			Audience: ac.Audience,
@@ -173,7 +173,7 @@ func (s *DeploymentService) Resume(ctx context.Context, in ResumeInput) (domain.
 // generation, and guarantees orchestration converges the delete. If
 // the fulfillment is already deleting and not paused, the current
 // view is returned without starting a new workflow (idempotent).
-func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) (domain.DeploymentView, error) {
+func (s *DeploymentService) Delete(ctx context.Context, name domain.ResourceName) (domain.DeploymentView, error) {
 	var auth domain.DeliveryAuth
 	ac := AuthFromContext(ctx)
 	if ac != nil && ac.Subject != nil {
@@ -190,7 +190,7 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	}
 	defer tx.Rollback()
 
-	dep, err := tx.Deployments().Get(ctx, id)
+	dep, err := tx.Deployments().Get(ctx, name)
 	if err != nil {
 		return domain.DeploymentView{}, err
 	}
@@ -207,7 +207,7 @@ func (s *DeploymentService) Delete(ctx context.Context, id domain.DeploymentID) 
 	}
 
 	exec, err := s.DeleteWF.Start(ctx, domain.DeleteDeploymentInput{
-		ID:   id,
+		Name: name,
 		Auth: auth,
 	}, fulfillment.Generation())
 	if err != nil {

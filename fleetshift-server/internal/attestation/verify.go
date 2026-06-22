@@ -187,7 +187,7 @@ func (v *Verifier) verifySignedInput(ctx context.Context, input *domain.SignedIn
 		return fmt.Errorf("signed input content: %w", err)
 	}
 	envelope, err := domain.BuildSignedInputEnvelope(
-		dc.DeploymentID,
+		dc.Name,
 		dc.ManifestStrategy,
 		dc.PlacementStrategy,
 		prov.ValidUntil,
@@ -242,8 +242,8 @@ func verifyOutput(input *domain.SignedInput, output domain.DeliveryOutput) error
 	switch o := output.(type) {
 	case *domain.PutManifests:
 		return verifyPutManifests(input, o)
-	case *domain.RemoveByDeploymentId:
-		return verifyRemoveByDeploymentId(input, o)
+	case *domain.RemoveByDeploymentName:
+		return verifyRemoveByDeploymentName(input, o)
 	default:
 		return fmt.Errorf("unsupported delivery output type %T", output)
 	}
@@ -271,9 +271,9 @@ func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) err
 		return fmt.Errorf("manifest count mismatch: expected %d, got %d", len(expected), len(actual))
 	}
 	for i := range expected {
-		if expected[i].ResourceType != actual[i].ResourceType {
-			return fmt.Errorf("manifest[%d] resource type mismatch: expected %q, got %q",
-				i, expected[i].ResourceType, actual[i].ResourceType)
+		if expected[i].ManifestType != actual[i].ManifestType {
+			return fmt.Errorf("manifest[%d] manifest type mismatch: expected %q, got %q",
+				i, expected[i].ManifestType, actual[i].ManifestType)
 		}
 		if !jsonEqual(expected[i].Raw, actual[i].Raw) {
 			return fmt.Errorf("manifest[%d] content mismatch", i)
@@ -293,14 +293,14 @@ func jsonEqual(a, b json.RawMessage) bool {
 	return reflect.DeepEqual(va, vb)
 }
 
-func verifyRemoveByDeploymentId(input *domain.SignedInput, remove *domain.RemoveByDeploymentId) error {
+func verifyRemoveByDeploymentName(input *domain.SignedInput, remove *domain.RemoveByDeploymentName) error {
 	dc, err := asDeploymentContent(input.Provenance.Content)
 	if err != nil {
 		return err
 	}
-	if remove.DeploymentID != dc.DeploymentID {
-		return fmt.Errorf("remove deployment_id mismatch: output %q, input %q",
-			remove.DeploymentID, dc.DeploymentID)
+	if remove.Name != dc.Name {
+		return fmt.Errorf("remove deployment name mismatch: output %q, input %q",
+			remove.Name, dc.Name)
 	}
 	return nil
 }

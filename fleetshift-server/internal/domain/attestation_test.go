@@ -14,7 +14,7 @@ func TestBuildSignedInputEnvelope_Deterministic(t *testing.T) {
 	ms := domain.ManifestStrategySpec{
 		Type: domain.ManifestStrategyInline,
 		Manifests: []domain.Manifest{{
-			ResourceType: "api.kind.cluster",
+			ManifestType: "api.kind.cluster",
 			Raw:          json.RawMessage(`{"name":"test-cluster"}`),
 		}},
 	}
@@ -23,11 +23,11 @@ func TestBuildSignedInputEnvelope_Deterministic(t *testing.T) {
 		Targets: []domain.TargetID{"t1", "t2"},
 	}
 
-	a, err := domain.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
+	a, err := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	b, err := domain.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
+	b, err := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -41,11 +41,11 @@ func TestBuildSignedInputEnvelope_DifferentInputs(t *testing.T) {
 	ms := domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline}
 	ps := domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll}
 
-	a, _ := domain.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
-	b, _ := domain.BuildSignedInputEnvelope("dep-2", ms, ps, testValidUntil, nil, 1)
+	a, _ := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
+	b, _ := domain.BuildSignedInputEnvelope("deployments/dep-2", ms, ps, testValidUntil, nil, 1)
 
 	if string(a) == string(b) {
-		t.Error("different deployment IDs should produce different envelopes")
+		t.Error("different resource names should produce different envelopes")
 	}
 }
 
@@ -53,7 +53,7 @@ func TestBuildSignedInputEnvelope_OmitsZeroGeneration(t *testing.T) {
 	ms := domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline}
 	ps := domain.PlacementStrategySpec{Type: domain.PlacementStrategyAll}
 
-	env, _ := domain.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 0)
+	env, _ := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 0)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(env, &parsed); err != nil {
@@ -84,7 +84,7 @@ func TestBuildManagedResourceEnvelope_Deterministic(t *testing.T) {
 func TestSignedInput_ComposesProvenanceAndSigner(t *testing.T) {
 	prov := domain.Provenance{
 		Content: domain.DeploymentContent{
-			DeploymentID: "dep-42",
+			Name: "deployments/dep-42",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type: domain.ManifestStrategyInline,
 			},
@@ -112,7 +112,7 @@ func TestSignedInput_ComposesProvenanceAndSigner(t *testing.T) {
 		Signer:     signer,
 	}
 
-	if si.Provenance.Content.ContentID() != "dep-42" {
+	if si.Provenance.Content.ContentID() != "deployments/dep-42" {
 		t.Errorf("Content accessible through Provenance: got %q", si.Provenance.Content.ContentID())
 	}
 	if si.Signer.RegistrySubject != "alice-gh" {
@@ -124,7 +124,7 @@ func TestSignedInput_JSONRoundTrip(t *testing.T) {
 	si := domain.SignedInput{
 		Provenance: domain.Provenance{
 			Content: domain.DeploymentContent{
-				DeploymentID: "dep-rt",
+				Name: "deployments/dep-rt",
 				ManifestStrategy: domain.ManifestStrategySpec{
 					Type: domain.ManifestStrategyInline,
 				},
@@ -157,8 +157,8 @@ func TestSignedInput_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if got.Provenance.Content.ContentID() != "dep-rt" {
-		t.Errorf("Content.ContentID = %q, want dep-rt", got.Provenance.Content.ContentID())
+	if got.Provenance.Content.ContentID() != "deployments/dep-rt" {
+		t.Errorf("Content.ContentID = %q, want deployments/dep-rt", got.Provenance.Content.ContentID())
 	}
 	if got.Provenance.Sig.Signer.Subject != "bob" {
 		t.Errorf("Sig.Signer.Subject = %q, want bob", got.Provenance.Sig.Signer.Subject)
@@ -179,10 +179,10 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 		Input: domain.SignedInput{
 			Provenance: domain.Provenance{
 				Content: domain.DeploymentContent{
-					DeploymentID: "dep-att",
+					Name: "deployments/dep-att",
 					ManifestStrategy: domain.ManifestStrategySpec{
 						Type:      domain.ManifestStrategyInline,
-						Manifests: []domain.Manifest{{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
+						Manifests: []domain.Manifest{{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
 					},
 					PlacementStrategy: domain.PlacementStrategySpec{
 						Type: domain.PlacementStrategyAll,
@@ -207,7 +207,7 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 			Signature: domain.Signature{Signer: domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://addon.example.com"}},
 		},
 		Output: &domain.PutManifests{
-			Manifests: []domain.Manifest{{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
+			Manifests: []domain.Manifest{{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{}`)}},
 		},
 	}
 
@@ -221,8 +221,8 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 		t.Fatalf("unmarshal: %v", err)
 	}
 
-	if got.Input.Provenance.Content.ContentID() != "dep-att" {
-		t.Errorf("Input.Provenance.Content.ContentID = %q, want dep-att", got.Input.Provenance.Content.ContentID())
+	if got.Input.Provenance.Content.ContentID() != "deployments/dep-att" {
+		t.Errorf("Input.Provenance.Content.ContentID = %q, want deployments/dep-att", got.Input.Provenance.Content.ContentID())
 	}
 	if got.Input.Signer.RegistrySubject != "carol-gh" {
 		t.Errorf("Input.Signer = %q, want carol-gh", got.Input.Signer.RegistrySubject)
@@ -243,7 +243,7 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 }
 
 func TestHashIntent_ProducesFixedLength(t *testing.T) {
-	data := []byte(`{"content":{"deployment_id":"test"}}`)
+	data := []byte(`{"content":{"name":"deployments/test"}}`)
 	hash := domain.HashIntent(data)
 	if len(hash) != 32 {
 		t.Fatalf("hash should be 32 bytes (SHA-256), got %d", len(hash))
@@ -251,7 +251,7 @@ func TestHashIntent_ProducesFixedLength(t *testing.T) {
 }
 
 func TestHashIntent_Deterministic(t *testing.T) {
-	data := []byte(`{"content":{"deployment_id":"test"}}`)
+	data := []byte(`{"content":{"name":"deployments/test"}}`)
 	a := domain.HashIntent(data)
 	b := domain.HashIntent(data)
 

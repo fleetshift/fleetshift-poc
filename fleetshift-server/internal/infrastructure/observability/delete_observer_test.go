@@ -14,7 +14,7 @@ func TestDeleteObserver_DeleteDeploymentStarted_LogsAndReturnsProbe(t *testing.T
 	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
-	ctx, probe := obs.DeleteDeploymentStarted(context.Background(), "dep-1")
+	ctx, probe := obs.DeleteDeploymentStarted(context.Background(), "deployments/dep-1")
 	if ctx == nil {
 		t.Fatal("expected non-nil context")
 	}
@@ -39,7 +39,7 @@ func TestDeleteObserver_DeleteDeploymentProbe_ErrorLogsAtErrorLevel(t *testing.T
 	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
-	_, probe := obs.DeleteDeploymentStarted(context.Background(), "dep-err")
+	_, probe := obs.DeleteDeploymentStarted(context.Background(), "deployments/dep-err")
 	probe.Error(errors.New("mutation failed"))
 	probe.End()
 
@@ -108,7 +108,7 @@ func TestDeleteObserver_DeploymentCleanupStarted_FullLifecycle(t *testing.T) {
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
 	ctx, probe := obs.DeploymentCleanupStarted(context.Background(), domain.DeleteDeploymentCleanupInput{
-		DeploymentID:  "dep-1",
+		Name:          "deployments/dep-1",
 		FulfillmentID: "ful-1",
 	})
 	if ctx == nil {
@@ -138,7 +138,7 @@ func TestDeleteObserver_ManagedResourceCleanupStarted_FullLifecycle(t *testing.T
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
 	ctx, probe := obs.ManagedResourceCleanupStarted(context.Background(), domain.DeleteManagedResourceCleanupInput{
-		ResourceType:  "clusters",
+		ResourceType:  "test.fleetshift.io/Cluster",
 		Name:          "my-cluster",
 		FulfillmentID: "ful-2",
 	})
@@ -169,7 +169,7 @@ func TestDeleteObserver_CleanupProbe_ErrorLogsAtErrorLevel(t *testing.T) {
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
 	_, probe := obs.DeploymentCleanupStarted(context.Background(), domain.DeleteDeploymentCleanupInput{
-		DeploymentID:  "dep-err",
+		Name:          "deployments/dep-err",
 		FulfillmentID: "ful-err",
 	})
 	probe.Error(errors.New("signal timeout"))
@@ -195,7 +195,7 @@ func TestDeleteObserver_MutateDeploymentProbe_Success(t *testing.T) {
 	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
-	_, probe := obs.MutateDeploymentStarted(context.Background(), "dep-1")
+	_, probe := obs.MutateDeploymentStarted(context.Background(), "deployments/dep-1")
 	probe.End()
 
 	records := handler.Records()
@@ -208,7 +208,7 @@ func TestDeleteObserver_MutateDeploymentProbe_ErrorLogsAtErrorLevel(t *testing.T
 	handler := newRecordingHandler(&slog.HandlerOptions{Level: slog.LevelDebug})
 	obs := observability.NewDeleteObserver(slog.New(handler))
 
-	_, probe := obs.MutateDeploymentStarted(context.Background(), "dep-err")
+	_, probe := obs.MutateDeploymentStarted(context.Background(), "deployments/dep-err")
 	probe.Error(errors.New("begin tx failed"))
 	probe.End()
 

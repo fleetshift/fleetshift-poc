@@ -25,9 +25,9 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 	if err != nil {
 		return fmt.Errorf("marshal properties: %w", err)
 	}
-	art, err := marshalResourceTypes(s.AcceptedResourceTypes)
+	art, err := marshalManifestTypes(s.AcceptedManifestTypes)
 	if err != nil {
-		return fmt.Errorf("marshal accepted_resource_types: %w", err)
+		return fmt.Errorf("marshal accepted_manifest_types: %w", err)
 	}
 
 	state := s.State
@@ -36,7 +36,7 @@ func (r *TargetRepo) Create(ctx context.Context, t domain.TargetInfo) error {
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
 		string(s.ID), string(s.Type), s.Name, string(state), string(labels), string(props), string(s.InventoryItemID), art,
 	)
 	if err != nil {
@@ -58,9 +58,9 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 	if err != nil {
 		return fmt.Errorf("marshal properties: %w", err)
 	}
-	art, err := marshalResourceTypes(s.AcceptedResourceTypes)
+	art, err := marshalManifestTypes(s.AcceptedManifestTypes)
 	if err != nil {
-		return fmt.Errorf("marshal accepted_resource_types: %w", err)
+		return fmt.Errorf("marshal accepted_manifest_types: %w", err)
 	}
 
 	state := s.State
@@ -69,7 +69,7 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 	}
 
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types)
+		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   type = excluded.type,
@@ -78,7 +78,7 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 		   labels = excluded.labels,
 		   properties = excluded.properties,
 		   inventory_item_id = excluded.inventory_item_id,
-		   accepted_resource_types = excluded.accepted_resource_types`,
+		   accepted_manifest_types = excluded.accepted_manifest_types`,
 		string(s.ID), string(s.Type), s.Name, string(state), string(labels), string(props), string(s.InventoryItemID), art,
 	)
 	if err != nil {
@@ -89,7 +89,7 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 
 func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types FROM targets WHERE id = ?`,
+		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types FROM targets WHERE id = ?`,
 		string(id),
 	)
 	s, err := scanTargetInfoSnapshot(row)
@@ -100,7 +100,7 @@ func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.Target
 }
 
 func (r *TargetRepo) List(ctx context.Context) ([]domain.TargetInfo, error) {
-	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_resource_types FROM targets`)
+	rows, err := r.DB.QueryContext(ctx, `SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types FROM targets`)
 	if err != nil {
 		return nil, fmt.Errorf("list targets: %w", err)
 	}
@@ -152,27 +152,27 @@ func scanTargetInfoSnapshot(s scanner) (domain.TargetInfoSnapshot, error) {
 	if err := json.Unmarshal([]byte(propsJSON), &snap.Properties); err != nil {
 		return snap, fmt.Errorf("unmarshal properties: %w", err)
 	}
-	art, err := unmarshalResourceTypes(artJSON)
+	art, err := unmarshalManifestTypes(artJSON)
 	if err != nil {
-		return snap, fmt.Errorf("unmarshal accepted_resource_types: %w", err)
+		return snap, fmt.Errorf("unmarshal accepted_manifest_types: %w", err)
 	}
-	snap.AcceptedResourceTypes = art
+	snap.AcceptedManifestTypes = art
 	return snap, nil
 }
 
-func marshalResourceTypes(rts []domain.ResourceType) (string, error) {
-	if len(rts) == 0 {
+func marshalManifestTypes(mts []domain.ManifestType) (string, error) {
+	if len(mts) == 0 {
 		return "[]", nil
 	}
-	raw := make([]string, len(rts))
-	for i, rt := range rts {
-		raw[i] = string(rt)
+	raw := make([]string, len(mts))
+	for i, mt := range mts {
+		raw[i] = string(mt)
 	}
 	b, err := json.Marshal(raw)
 	return string(b), err
 }
 
-func unmarshalResourceTypes(s string) ([]domain.ResourceType, error) {
+func unmarshalManifestTypes(s string) ([]domain.ManifestType, error) {
 	var raw []string
 	if err := json.Unmarshal([]byte(s), &raw); err != nil {
 		return nil, err
@@ -180,9 +180,9 @@ func unmarshalResourceTypes(s string) ([]domain.ResourceType, error) {
 	if len(raw) == 0 {
 		return nil, nil
 	}
-	out := make([]domain.ResourceType, len(raw))
+	out := make([]domain.ManifestType, len(raw))
 	for i, v := range raw {
-		out[i] = domain.ResourceType(v)
+		out[i] = domain.ManifestType(v)
 	}
 	return out, nil
 }

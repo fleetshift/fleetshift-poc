@@ -308,7 +308,7 @@ type ProvisionedTarget struct {
 	Name                  string
 	Labels                map[string]string
 	Properties            map[string]string
-	AcceptedResourceTypes []ResourceType
+	AcceptedManifestTypes []ManifestType
 }
 
 // ProducedSecret declares a secret that a delivery produced and that

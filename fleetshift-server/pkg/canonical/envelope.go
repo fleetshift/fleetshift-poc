@@ -20,8 +20,8 @@ type ManifestStrategy struct {
 
 // Manifest is a single manifest entry for canonical serialization.
 type Manifest struct {
-	ResourceType string
-	Raw          json.RawMessage
+	Type string
+	Raw  json.RawMessage
 }
 
 // PlacementStrategy is the canonical representation of a placement strategy.
@@ -45,13 +45,13 @@ type OutputConstraint struct {
 // The envelope structure is:
 //
 //	{
-//	    "content": {"deployment_id": ..., "manifest_strategy": ..., "placement_strategy": ...},
+//	    "content": {"name": ..., "manifest_strategy": ..., "placement_strategy": ...},
 //	    "output_constraints": [...],
 //	    "valid_until": <unix_timestamp_float>,
 //	    "expected_generation": <int>  // omitted when zero
 //	}
 func BuildSignedInputEnvelope(
-	deploymentID string,
+	name string,
 	ms ManifestStrategy,
 	ps PlacementStrategy,
 	validUntil time.Time,
@@ -59,7 +59,7 @@ func BuildSignedInputEnvelope(
 	expectedGeneration int64,
 ) ([]byte, error) {
 	content := envelopeContent{
-		DeploymentID:      deploymentID,
+		Name:              name,
 		ManifestStrategy:  marshalManifestStrategy(ms),
 		PlacementStrategy: marshalPlacementStrategy(ps),
 	}
@@ -128,7 +128,7 @@ type managedResourceSignedInputEnvelope struct {
 }
 
 type envelopeContent struct {
-	DeploymentID      string                    `json:"deployment_id"`
+	Name              string                    `json:"name"`
 	ManifestStrategy  envelopeManifestStrategy  `json:"manifest_strategy"`
 	PlacementStrategy envelopePlacementStrategy `json:"placement_strategy"`
 }
@@ -161,13 +161,13 @@ func marshalManifestStrategy(ms ManifestStrategy) envelopeManifestStrategy {
 	}
 	if len(ms.Manifests) > 0 {
 		type manifestDoc struct {
-			ResourceType string          `json:"resource_type"`
+			ManifestType string          `json:"manifest_type"`
 			Content      json.RawMessage `json:"content"`
 		}
 		docs := make([]manifestDoc, len(ms.Manifests))
 		for i, m := range ms.Manifests {
 			docs[i] = manifestDoc{
-				ResourceType: m.ResourceType,
+				ManifestType: m.Type,
 				Content:      m.Raw,
 			}
 		}

@@ -20,5 +20,5 @@ message ProvisionedTarget {
 
   map<string, string> properties = 5;
 
-  repeated string accepted_resource_types = 6;
+  repeated string accepted_manifest_types = 6;
 }

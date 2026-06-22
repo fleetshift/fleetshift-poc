@@ -115,7 +115,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 		manifests := ad.Delivery.Manifests()
 		var clusterManifest *domain.Manifest
 		for i, m := range manifests {
-			if m.ResourceType == ClusterResourceType {
+			if m.ManifestType == ClusterManifestType {
 				clusterManifest = &manifests[i]
 				break
 			}
@@ -129,7 +129,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec.Name = string(clusterManifest.Name)
+		spec.Name = string(clusterManifest.ManifestID)
 
 		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation()) {
 			continue
@@ -189,7 +189,7 @@ func (a *Agent) Deliver(
 	var clusterManifests []domain.Manifest
 
 	for _, m := range manifests {
-		if m.ResourceType == domain.TrustBundleResourceType {
+		if m.ManifestType == domain.TrustBundleManifestType {
 			trustBundles = append(trustBundles, m)
 		} else {
 			clusterManifests = append(clusterManifests, m)
@@ -230,7 +230,7 @@ func (a *Agent) Deliver(
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to parse cluster spec: %v", err))
 		return nil
 	}
-	spec.Name = string(clusterManifest.Name)
+	spec.Name = string(clusterManifest.ManifestID)
 	if err := ValidateClusterName(spec.Name); err != nil {
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("invalid cluster name: %v", err))
 		return nil
@@ -362,7 +362,7 @@ func (a *Agent) Remove(
 
 	// Process each cluster manifest
 	for _, m := range manifests {
-		if m.ResourceType == domain.TrustBundleResourceType {
+		if m.ManifestType == domain.TrustBundleManifestType {
 			entry, err := a.removeTrustBundle(m)
 			if err != nil {
 				a.observer.Error("failed to remove trust bundle", "error", err)
@@ -371,7 +371,7 @@ func (a *Agent) Remove(
 			a.observer.Info("removed trust bundle", "issuer", entry.IssuerURL)
 			continue
 		}
-		if m.ResourceType != ClusterResourceType {
+		if m.ManifestType != ClusterManifestType {
 			continue
 		}
 
@@ -381,7 +381,7 @@ func (a *Agent) Remove(
 			a.observer.Error("failed to parse cluster spec for removal", "error", err)
 			return fmt.Errorf("failed to parse cluster spec: %w", err)
 		}
-		spec.Name = string(m.Name)
+		spec.Name = string(m.ManifestID)
 
 		if !a.acceptGeneration(spec.Name, generation) {
 			a.observer.Info("rejecting stale removal", "cluster", spec.Name, "generation", generation)

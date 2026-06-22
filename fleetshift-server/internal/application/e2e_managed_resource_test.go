@@ -104,7 +104,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 			ID:                    "addon-cluster-mgmt",
 			Name:                  "Cluster Management Addon",
 			Type:                  "addon",
-			AcceptedResourceTypes: []domain.ResourceType{"clusters"},
+			AcceptedManifestTypes: []domain.ManifestType{"clusters"},
 		}))
 		_ = tx.Commit()
 	}
@@ -117,8 +117,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "clusters",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		ResourceType:   "test.fleetshift.io/Cluster",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt", ManifestType: "clusters"},
 		Signature:      addonSig,
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",
@@ -134,7 +134,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	privateKey := enrollSigner(t, store, fakeReg, subjectID, issuer)
 	validSpec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
 	validUntil := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
-	sig := signManagedResourceEnvelope(t, privateKey, "clusters", "prod-us-east-1", validSpec, validUntil, 1)
+	sig := signManagedResourceEnvelope(t, privateKey, "test.fleetshift.io/Cluster", "prod-us-east-1", validSpec, validUntil, 1)
 
 	signedCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
@@ -142,7 +142,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	})
 
 	view, err := resourceSvc.Create(signedCtx, application.CreateManagedResourceInput{
-		ResourceType:  "clusters",
+		ResourceType:  "test.fleetshift.io/Cluster",
 		Name:          "prod-us-east-1",
 		Spec:          validSpec,
 		UserSignature: sig,
@@ -161,8 +161,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if view.Fulfillment.ManifestStrategy().Type != domain.ManifestStrategyManagedResource {
 		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy().Type, domain.ManifestStrategyManagedResource)
 	}
-	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "clusters" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "clusters")
+	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "test.fleetshift.io/Cluster")
 	}
 	if view.Fulfillment.ManifestStrategy().IntentRef.Version != 1 {
 		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy().IntentRef.Version)
@@ -173,8 +173,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if view.Fulfillment.AttestationRef() == nil {
 		t.Fatal("expected AttestationRef on signed managed resource fulfillment")
 	}
-	if view.Fulfillment.AttestationRef().RelationRef == nil || *view.Fulfillment.AttestationRef().RelationRef != "clusters" {
-		t.Errorf("AttestationRef.RelationRef = %v, want clusters", view.Fulfillment.AttestationRef().RelationRef)
+	if view.Fulfillment.AttestationRef().RelationRef == nil || *view.Fulfillment.AttestationRef().RelationRef != "test.fleetshift.io/Cluster" {
+		t.Errorf("AttestationRef.RelationRef = %v, want test.fleetshift.io/Cluster", view.Fulfillment.AttestationRef().RelationRef)
 	}
 
 	// --- Step 4: Wait for delivery (orchestration runs async) ---
@@ -195,8 +195,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if !ok {
 		t.Fatalf("Attestation.Input.Provenance.Content = %T, want ManagedResourceContent", att.Input.Provenance.Content)
 	}
-	if content.ResourceType != "clusters" {
-		t.Errorf("ManagedResourceContent.ResourceType = %q, want clusters", content.ResourceType)
+	if content.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("ManagedResourceContent.ResourceType = %q, want test.fleetshift.io/Cluster", content.ResourceType)
 	}
 	if content.ResourceName != "prod-us-east-1" {
 		t.Errorf("ManagedResourceContent.ResourceName = %q, want prod-us-east-1", content.ResourceName)
@@ -222,8 +222,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if len(manifests) == 0 {
 		t.Fatal("no manifests delivered")
 	}
-	if manifests[0].ResourceType != "clusters" {
-		t.Errorf("Manifest.ResourceType = %q, want %q", manifests[0].ResourceType, "clusters")
+	if manifests[0].ManifestType != "clusters" {
+		t.Errorf("Manifest.ResourceType = %q, want %q", manifests[0].ManifestType, "clusters")
 	}
 	if string(manifests[0].Raw) != string(validSpec) {
 		t.Errorf("Manifest.Raw = %s, want %s", manifests[0].Raw, validSpec)
@@ -245,7 +245,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 
 	// --- Step 6: Verify the resource is retrievable from the service ---
-	got, err := resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
+	got, err := resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

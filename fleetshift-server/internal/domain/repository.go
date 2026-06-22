@@ -30,10 +30,10 @@ type FulfillmentRepository interface {
 // [FulfillmentRepository].
 type DeploymentRepository interface {
 	Create(ctx context.Context, d Deployment) error
-	Get(ctx context.Context, id DeploymentID) (Deployment, error)
-	GetView(ctx context.Context, id DeploymentID) (DeploymentView, error)
+	Get(ctx context.Context, name ResourceName) (Deployment, error)
+	GetView(ctx context.Context, name ResourceName) (DeploymentView, error)
 	ListView(ctx context.Context) ([]DeploymentView, error)
-	Delete(ctx context.Context, id DeploymentID) error
+	Delete(ctx context.Context, name ResourceName) error
 }
 
 // InventoryRepository persists and retrieves inventory items.
@@ -93,9 +93,9 @@ type ManagedResourceRepository interface {
 type ResourceIdentityRepository interface {
 	Create(ctx context.Context, r *PlatformResource) error
 	Get(ctx context.Context, uid PlatformResourceUID) (*PlatformResource, error)
-	GetByName(ctx context.Context, name RelativeResourceName) (*PlatformResource, error)
+	GetByName(ctx context.Context, name ResourceName) (*PlatformResource, error)
 	Update(ctx context.Context, r *PlatformResource) error
-	ListByCollection(ctx context.Context, collection CollectionID) ([]*PlatformResource, error)
+	ListByCollection(ctx context.Context, collection CollectionName) ([]*PlatformResource, error)
 
 	// Cross-resource lookups (can't live on the aggregate).
 	ResolveAlias(ctx context.Context, alias Alias) (PlatformResourceUID, error)

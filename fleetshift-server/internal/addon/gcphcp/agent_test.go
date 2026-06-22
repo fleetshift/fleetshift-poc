@@ -57,7 +57,7 @@ func TestAgent_Deliver_RejectsMissingName(t *testing.T) {
 	agent := newTestAgent(reporter)
 
 	manifest := domain.Manifest{
-		ResourceType: gcphcp.ClusterResourceType,
+		ManifestType: gcphcp.ClusterManifestType,
 		Raw:          json.RawMessage(`{}`),
 	}
 
@@ -102,7 +102,7 @@ func TestAgent_Deliver_TrustBundleOnly(t *testing.T) {
 	}
 
 	manifest := domain.Manifest{
-		ResourceType: domain.TrustBundleResourceType,
+		ManifestType: domain.TrustBundleManifestType,
 		Raw:          json.RawMessage(trustBundleJSON),
 	}
 
@@ -159,7 +159,7 @@ func TestAgent_Deliver_TrustBundleOnly_CompletesEvenIfRequestContextCanceled(t *
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
 		domain.DeliveryID("test-delivery"),
 		[]domain.Manifest{{
-			ResourceType: domain.TrustBundleResourceType,
+			ManifestType: domain.TrustBundleManifestType,
 			Raw:          json.RawMessage(trustBundleJSON),
 		}},
 		domain.DeliveryAuth{},
@@ -269,8 +269,8 @@ func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 
 	spec := validClusterSpecJSON(t)
 	manifest := domain.Manifest{
-		ResourceType: gcphcp.ClusterResourceType,
-		Name:         "test-cls",
+		ManifestType: gcphcp.ClusterManifestType,
+		ManifestID:   "test-cls",
 		Raw:          spec,
 	}
 
@@ -328,8 +328,8 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 
 	spec := validClusterSpecJSON(t)
 	manifest := domain.Manifest{
-		ResourceType: gcphcp.ClusterResourceType,
-		Name:         "test-cls",
+		ManifestType: gcphcp.ClusterManifestType,
+		ManifestID:   "test-cls",
 		Raw:          spec,
 	}
 
@@ -445,7 +445,7 @@ func trustBundleManifest(t *testing.T, entry domain.TrustBundleEntry) domain.Man
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	return domain.Manifest{
-		ResourceType: domain.TrustBundleResourceType,
+		ManifestType: domain.TrustBundleManifestType,
 		Raw:          json.RawMessage(raw),
 	}
 }
@@ -482,8 +482,8 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			State:      domain.DeliveryStateProgressing,
 			Operation:  domain.DeliveryOperationDeliver,
 			Manifests: []domain.Manifest{{
-				ResourceType: gcphcp.ClusterResourceType,
-				Name:         domain.ResourceName(clusterName),
+				ManifestType: gcphcp.ClusterManifestType,
+				ManifestID:   domain.ManifestID(clusterName),
 				Raw:          spec,
 			}},
 		}),
@@ -579,8 +579,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsNonClusterManifests(t *testing.T) {
 			Generation: 1,
 			State:      domain.DeliveryStateProgressing,
 			Manifests: []domain.Manifest{{
-				ResourceType: "some.other.type",
-				Name:         "something",
+				ManifestType: "some.other.type",
+				ManifestID:   "something",
 				Raw:          json.RawMessage(`{}`),
 			}},
 		}),
@@ -614,8 +614,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 		domain.TargetInfo{},
 		domain.DeliveryID("seed"),
 		[]domain.Manifest{{
-			ResourceType: gcphcp.ClusterResourceType,
-			Name:         "test-cls",
+			ManifestType: gcphcp.ClusterManifestType,
+			ManifestID:   "test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "token"},
@@ -640,8 +640,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 		domain.TargetInfo{},
 		domain.DeliveryID("seed2"),
 		[]domain.Manifest{{
-			ResourceType: gcphcp.ClusterResourceType,
-			Name:         "test-cls",
+			ManifestType: gcphcp.ClusterManifestType,
+			ManifestID:   "test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "token"},
@@ -675,8 +675,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 			Generation: 1,
 			State:      domain.DeliveryStateProgressing,
 			Manifests: []domain.Manifest{{
-				ResourceType: gcphcp.ClusterResourceType,
-				Name:         "test-cls",
+				ManifestType: gcphcp.ClusterManifestType,
+				ManifestID:   "test-cls",
 				Raw:          json.RawMessage(`{{{not json`),
 			}},
 		}),

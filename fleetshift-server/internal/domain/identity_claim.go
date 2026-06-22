@@ -7,31 +7,24 @@ import (
 	"time"
 )
 
-// ClaimOrGetIdentity claims a platform resource name for a collection,
-// creating the resource if it does not yet exist. If the name is
-// already claimed, the existing resource is returned (idempotent).
+// ClaimOrGetIdentity claims a platform resource name, creating the
+// resource if it does not yet exist. If the name is already claimed,
+// the existing resource is returned (idempotent).
 //
 // This is a domain service function — it accepts a
 // [ResourceIdentityRepository] from an existing transaction so callers
-// control the transaction boundary. The caller provides the UID for
-// new resources (typically from uuid.NewString()).
+// control the transaction boundary. A new [PlatformResourceUID] is
+// generated only when a resource must be created.
 //
 // If [ResourceIdentityRepository.Create] returns [ErrAlreadyExists]
 // (race with a concurrent claim), the function retries via GetByName.
 func ClaimOrGetIdentity(
 	ctx context.Context,
 	repo ResourceIdentityRepository,
-	uid PlatformResourceUID,
-	collectionID CollectionID,
-	id string,
+	name ResourceName,
 	labels map[string]string,
 	now time.Time,
 ) (*PlatformResource, error) {
-	name, err := NewRelativeResourceName(collectionID, id)
-	if err != nil {
-		return nil, fmt.Errorf("claim identity: %w", err)
-	}
-
 	existing, err := repo.GetByName(ctx, name)
 	if err == nil {
 		return existing, nil
@@ -40,7 +33,7 @@ func ClaimOrGetIdentity(
 		return nil, fmt.Errorf("claim identity: get by name: %w", err)
 	}
 
-	pr := NewPlatformResource(uid, collectionID, name, labels, now)
+	pr := NewPlatformResource(NewPlatformResourceUID(), name, labels, now)
 	if err := repo.Create(ctx, pr); err != nil {
 		if errors.Is(err, ErrAlreadyExists) {
 			existing, retryErr := repo.GetByName(ctx, name)

@@ -10,7 +10,7 @@ import (
 
 // CreateDeploymentInput is the specification for creating a new deployment.
 type CreateDeploymentInput struct {
-	ID                DeploymentID
+	Name              ResourceName
 	ManifestStrategy  ManifestStrategySpec
 	PlacementStrategy PlacementStrategySpec
 	RolloutStrategy   *RolloutStrategySpec
@@ -53,7 +53,7 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 		defer tx.Rollback()
 
 		now := s.now()
-		uid := uuid.New().String()
+		uid := NewDeploymentUID()
 		fID := FulfillmentID(uuid.New().String())
 
 		f := NewFulfillment(fID, in.Auth, in.Provenance, nil, now)
@@ -65,7 +65,7 @@ func (s *CreateDeploymentWorkflowSpec) PersistDeployment() Activity[CreateDeploy
 			return DeploymentView{}, err
 		}
 
-		dep := NewDeployment(in.ID, uid, fID, now)
+		dep := NewDeployment(in.Name, uid, fID, now)
 		if err := tx.Deployments().Create(ctx, dep); err != nil {
 			return DeploymentView{}, err
 		}

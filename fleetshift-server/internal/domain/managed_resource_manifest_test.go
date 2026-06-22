@@ -13,10 +13,10 @@ import (
 func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	store, _ := setupStore(t)
 	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
-	seedIntent(t, store, "clusters", "prod-us-east-1", spec)
+	seedIntent(t, store, "test.fleetshift.io/Cluster", "prod-us-east-1", spec)
 
 	s := &domain.ManagedResourceManifestStrategy{
-		Ref:   domain.IntentRef{ResourceType: "clusters", Name: "prod-us-east-1", Version: 1},
+		Ref:   domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "prod-us-east-1", Version: 1, ManifestType: "clusters"},
 		Store: store,
 	}
 
@@ -29,8 +29,8 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 manifest, got %d", len(got))
 	}
-	if got[0].ResourceType != "clusters" {
-		t.Errorf("ResourceType = %q, want %q", got[0].ResourceType, "clusters")
+	if got[0].ManifestType != "clusters" {
+		t.Errorf("ManifestType = %q, want %q", got[0].ManifestType, "clusters")
 	}
 	if string(got[0].Raw) != string(spec) {
 		t.Errorf("Raw = %s, want %s", got[0].Raw, spec)
@@ -41,7 +41,7 @@ func TestManagedResourceManifestStrategy_IntentNotFound(t *testing.T) {
 	store, _ := setupStore(t)
 
 	s := &domain.ManagedResourceManifestStrategy{
-		Ref:   domain.IntentRef{ResourceType: "clusters", Name: "missing", Version: 99},
+		Ref:   domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "missing", Version: 99},
 		Store: store,
 	}
 
@@ -95,7 +95,7 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
 		ResourceType:  rt,
 		Name:          name,
-		UID:           "uid-" + string(name),
+		UID:           domain.NewManagedResourceUID(),
 		FulfillmentID: f.ID(),
 		CreatedAt:     now,
 		UpdatedAt:     now,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -32,7 +33,11 @@ func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.Res
 	t.Helper()
 	ctx := context.Background()
 
-	targetID := domain.TargetID("test-addon-" + string(resourceType))
+	targetID := domain.TargetID("test-addon-" + resourceType.TypeName())
+	serviceName := resourceType.ServiceName()
+	typeName := strings.ToLower(resourceType.TypeName())
+	collectionID := domain.CollectionID(typeName + "s")
+	manifestType := domain.ManifestType(typeName + "s")
 
 	tx, err := store.Begin(ctx)
 	if err != nil {
@@ -44,17 +49,17 @@ func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.Res
 		ID:                    targetID,
 		Name:                  "Test Addon (" + string(resourceType) + ")",
 		Type:                  "test",
-		AcceptedResourceTypes: []domain.ResourceType{resourceType},
+		AcceptedManifestTypes: []domain.ManifestType{manifestType},
 	})); err != nil {
 		t.Fatalf("registerTestAddon: create target: %v", err)
 	}
 
 	if err := tx.ManagedResources().CreateType(ctx, domain.ManagedResourceTypeDef{
 		ResourceType:   resourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: targetID},
-		APIServiceName: "kind.fleetshift.io",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: targetID, ManifestType: manifestType},
+		APIServiceName: serviceName,
 		APIVersion:     "v1",
-		CollectionID:   domain.CollectionID(resourceType),
+		CollectionID:   collectionID,
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "test-addon-svc", Issuer: "https://test-addon.internal"},
 			ContentHash:    []byte("test-hash"),
@@ -220,11 +225,11 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	targetID := registerTestAddon(t, h.store, "clusters")
+	targetID := registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	// Create with valid spec.
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
@@ -243,8 +248,8 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	if view.Fulfillment.ManifestStrategy().Type != domain.ManifestStrategyManagedResource {
 		t.Errorf("ManifestStrategy.Type = %q, want %q", view.Fulfillment.ManifestStrategy().Type, domain.ManifestStrategyManagedResource)
 	}
-	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "clusters" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "clusters")
+	if view.Fulfillment.ManifestStrategy().IntentRef.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", view.Fulfillment.ManifestStrategy().IntentRef.ResourceType, "test.fleetshift.io/Cluster")
 	}
 	if view.Fulfillment.ManifestStrategy().IntentRef.Version != 1 {
 		t.Errorf("IntentRef.Version = %d, want 1", view.Fulfillment.ManifestStrategy().IntentRef.Version)
@@ -256,7 +261,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	// Get the resource.
-	got, err := h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
+	got, err := h.resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -265,7 +270,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	}
 
 	// List resources.
-	views, err := h.resourceSvc.List(ctx, "clusters")
+	views, err := h.resourceSvc.List(ctx, "test.fleetshift.io/Cluster")
 	if err != nil {
 		t.Fatalf("List: %v", err)
 	}
@@ -274,7 +279,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	}
 
 	// Delete.
-	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	deleted, err := h.resourceSvc.Delete(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -285,7 +290,7 @@ func TestManagedResourceService_CreateReadDelete(t *testing.T) {
 	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID())
 
 	// Verify gone after cleanup completes.
-	_, err = h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
+	_, err = h.resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 	}
@@ -302,10 +307,10 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 		return blocker
 	})
 
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
@@ -315,7 +320,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 
 	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
-	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	deleted, err := h.resourceSvc.Delete(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -329,7 +334,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 		t.Fatal("timed out waiting for remove to start")
 	}
 
-	got, err := h.resourceSvc.Get(ctx, "clusters", "prod-us-east-1")
+	got, err := h.resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get during delete: %v", err)
 	}
@@ -337,7 +342,7 @@ func TestManagedResourceService_DeleteKeepsResourceVisibleDuringCleanup(t *testi
 		t.Fatalf("Get state during delete = %q, want deleting", got.Fulfillment.State())
 	}
 
-	views, err := h.resourceSvc.List(ctx, "clusters")
+	views, err := h.resourceSvc.List(ctx, "test.fleetshift.io/Cluster")
 	if err != nil {
 		t.Fatalf("List during delete: %v", err)
 	}
@@ -357,10 +362,10 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	first, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
@@ -370,7 +375,7 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 
 	awaitFulfillmentState(ctx, t, h.store, first.Fulfillment.ID(), domain.FulfillmentStateActive)
 
-	deleted, err := h.resourceSvc.Delete(ctx, "clusters", "prod-us-east-1")
+	deleted, err := h.resourceSvc.Delete(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -378,7 +383,7 @@ func TestManagedResourceService_DeleteAllowsRecreateSameName(t *testing.T) {
 	awaitFulfillmentGone(ctx, t, h.store, deleted.Fulfillment.ID())
 
 	recreated, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.17.0"}`),
 	})
@@ -434,7 +439,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 		ResumeWF: resumeWf,
 	}
 
-	registerTestAddon(t, store, "clusters")
+	registerTestAddon(t, store, "test.fleetshift.io/Cluster")
 
 	// Create a managed resource with auth context (delivery will fail with auth error).
 	createCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
@@ -443,7 +448,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 	})
 
 	view, err := resourceSvc.Create(createCtx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
@@ -461,7 +466,7 @@ func TestManagedResourceService_Resume_PausedAuth_EndToEnd(t *testing.T) {
 	})
 
 	resumed, err := resourceSvc.Resume(resumeCtx, application.ResumeManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 	})
 	if err != nil {
@@ -487,11 +492,11 @@ func TestManagedResourceService_Resume_NotPaused(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	// Create a resource that succeeds (becomes active, not paused).
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
@@ -506,7 +511,7 @@ func TestManagedResourceService_Resume_NotPaused(t *testing.T) {
 		Token:   "token",
 	})
 	_, err = h.resourceSvc.Resume(resumeCtx, application.ResumeManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -518,7 +523,7 @@ func TestManagedResourceService_Resume_NoAuth(t *testing.T) {
 	h := setupManagedResources(t)
 
 	_, err := h.resourceSvc.Resume(context.Background(), application.ResumeManagedResourceInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -534,8 +539,8 @@ func TestManagedResourceService_Resume_NotFound(t *testing.T) {
 	})
 
 	_, err := h.resourceSvc.Resume(ctx, application.ResumeManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "nonexistent",
+		ResourceType: "test.fleetshift.io/Cluster",
+		Name:         "clusters/nonexistent",
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected ErrNotFound for nonexistent resource, got: %v", err)
@@ -547,7 +552,7 @@ func TestManagedResourceService_CreateTypeNotFound(t *testing.T) {
 	h := setupManagedResources(t)
 
 	_, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "nonexistent",
+		ResourceType: "test.fleetshift.io/Nonexistent",
 		Name:         "x",
 		Spec:         json.RawMessage(`{}`),
 	})
@@ -563,7 +568,7 @@ func TestManagedResourceService_DeletePausedAuth_RetryDeleteClearsPause(t *testi
 	h := setupManagedResourcesWithDelivery(t, func(store domain.Store, reporter domain.DeliveryReporter) domain.DeliveryAgent {
 		return &removeAuthFailThenSucceedAgent{reporter: reporter}
 	})
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	// Create with auth context (Deliver reports success via agent).
 	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
@@ -572,8 +577,8 @@ func TestManagedResourceService_DeletePausedAuth_RetryDeleteClearsPause(t *testi
 	})
 
 	view, err := h.resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "prod-1",
+		ResourceType: "test.fleetshift.io/Cluster",
+		Name:         "clusters/prod-1",
 		Spec:         json.RawMessage(`{"provider":"rosa"}`),
 	})
 	if err != nil {
@@ -584,7 +589,7 @@ func TestManagedResourceService_DeletePausedAuth_RetryDeleteClearsPause(t *testi
 	awaitFulfillmentState(ctx, t, h.store, fID, domain.FulfillmentStateActive)
 
 	// First delete — Remove reports auth failure → paused.
-	_, err = h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	_, err = h.resourceSvc.Delete(authCtx, "test.fleetshift.io/Cluster", "clusters/prod-1")
 	if err != nil {
 		t.Fatalf("first Delete: %v", err)
 	}
@@ -598,7 +603,7 @@ func TestManagedResourceService_DeletePausedAuth_RetryDeleteClearsPause(t *testi
 		Token:   "fresh-token",
 	})
 
-	retryView, err := h.resourceSvc.Delete(freshCtx, "clusters", "prod-1")
+	retryView, err := h.resourceSvc.Delete(freshCtx, "test.fleetshift.io/Cluster", "clusters/prod-1")
 	if err != nil {
 		t.Fatalf("retry Delete: %v", err)
 	}
@@ -618,7 +623,7 @@ func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
 	defer cancel()
 
 	h := setupManagedResources(t)
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: "user-1", Issuer: "https://issuer.example.com"}},
@@ -626,8 +631,8 @@ func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
 	})
 
 	view, err := h.resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "prod-1",
+		ResourceType: "test.fleetshift.io/Cluster",
+		Name:         "clusters/prod-1",
 		Spec:         json.RawMessage(`{"provider":"rosa"}`),
 	})
 	if err != nil {
@@ -636,7 +641,7 @@ func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
 
 	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
-	dep1, err := h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	dep1, err := h.resourceSvc.Delete(authCtx, "test.fleetshift.io/Cluster", "clusters/prod-1")
 	if err != nil {
 		t.Fatalf("first Delete: %v", err)
 	}
@@ -645,7 +650,7 @@ func TestManagedResourceService_DeleteIdempotentWhileDeleting(t *testing.T) {
 	}
 
 	// Second delete while not paused should be idempotent (early return).
-	dep2, err := h.resourceSvc.Delete(authCtx, "clusters", "prod-1")
+	dep2, err := h.resourceSvc.Delete(authCtx, "test.fleetshift.io/Cluster", "clusters/prod-1")
 	if err != nil {
 		t.Fatalf("second Delete (idempotent): %v", err)
 	}
@@ -659,11 +664,11 @@ func TestManagedResourceService_Create_ClaimsIdentityAndAttachesRepresentation(t
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "prod",
+		ResourceType: "test.fleetshift.io/Cluster",
+		Name:         "clusters/prod",
 		Spec:         json.RawMessage(`{"provider":"kind"}`),
 	})
 	if err != nil {
@@ -684,16 +689,16 @@ func TestManagedResourceService_Create_ClaimsIdentityAndAttachesRepresentation(t
 		t.Fatalf("GetByName: %v", err)
 	}
 
-	if pr.CollectionID() != "clusters" {
-		t.Errorf("CollectionID = %q, want clusters", pr.CollectionID())
+	if pr.Collection() != "clusters" {
+		t.Errorf("Collection = %q, want clusters", pr.Collection())
 	}
 
 	reps := pr.Representations()
 	if len(reps) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(reps))
 	}
-	if reps[0].ServiceName != "kind.fleetshift.io" {
-		t.Errorf("ServiceName = %q, want kind.fleetshift.io", reps[0].ServiceName)
+	if reps[0].ServiceName != "test.fleetshift.io" {
+		t.Errorf("ServiceName = %q, want test.fleetshift.io", reps[0].ServiceName)
 	}
 	if reps[0].Version != "v1" {
 		t.Errorf("Version = %q, want v1", reps[0].Version)
@@ -708,11 +713,11 @@ func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 	defer cancel()
 	h := setupManagedResources(t)
 
-	registerTestAddon(t, h.store, "clusters")
+	registerTestAddon(t, h.store, "test.fleetshift.io/Cluster")
 
 	view, err := h.resourceSvc.Create(ctx, application.CreateManagedResourceInput{
-		ResourceType: "clusters",
-		Name:         "prod-del",
+		ResourceType: "test.fleetshift.io/Cluster",
+		Name:         "clusters/prod-del",
 		Spec:         json.RawMessage(`{"provider":"kind"}`),
 	})
 	if err != nil {
@@ -721,7 +726,7 @@ func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 
 	awaitFulfillmentState(ctx, t, h.store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
-	_, err = h.resourceSvc.Delete(ctx, "clusters", "prod-del")
+	_, err = h.resourceSvc.Delete(ctx, "test.fleetshift.io/Cluster", "clusters/prod-del")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}

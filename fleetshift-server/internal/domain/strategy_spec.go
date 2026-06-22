@@ -15,6 +15,7 @@ type IntentRef struct {
 	ResourceType ResourceType
 	Name         ResourceName
 	Version      IntentVersion
+	ManifestType ManifestType
 }
 
 // ManifestStrategySpec is the user-provided specification for manifest generation.

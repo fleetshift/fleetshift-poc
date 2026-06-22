@@ -342,7 +342,7 @@ type createDeploymentWorkflow struct {
 }
 
 func (w *createDeploymentWorkflow) Start(ctx context.Context, input domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
-	return startWorkflow(&w.guard, "create-"+string(input.ID), ctx,
+	return startWorkflow(&w.guard, "create-"+string(input.Name), ctx,
 		nil, w.spec.Run, input,
 	)
 }
@@ -369,7 +369,7 @@ type deleteDeploymentWorkflow struct {
 }
 
 func (w *deleteDeploymentWorkflow) Start(ctx context.Context, input domain.DeleteDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.ID, observedGen)
+	instanceID := fmt.Sprintf("delete-%s-gen-%d", input.Name, observedGen)
 	return startWorkflow(&w.guard, instanceID, ctx,
 		nil, w.spec.Run, input,
 	)
@@ -384,7 +384,7 @@ type resumeDeploymentWorkflow struct {
 }
 
 func (w *resumeDeploymentWorkflow) Start(ctx context.Context, input domain.ResumeDeploymentInput, observedGen domain.Generation) (domain.Execution[domain.DeploymentView], error) {
-	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.ID, observedGen)
+	instanceID := fmt.Sprintf("resume-%s-gen-%d", input.Name, observedGen)
 	return startWorkflow(&w.guard, instanceID, ctx,
 		nil, w.spec.Run, input,
 	)

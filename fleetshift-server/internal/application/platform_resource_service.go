@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/google/uuid"
-
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -44,27 +42,18 @@ func NewPlatformResourceService(store domain.Store, opts ...PlatformResourceServ
 // CreatePlatformResourceInput carries the fields needed to create or
 // claim a platform resource identity.
 type CreatePlatformResourceInput struct {
-	CollectionID domain.CollectionID
-	ID           string
-	Labels       map[string]string
+	Name   domain.ResourceName
+	Labels map[string]string
 }
 
 // Create opens a read-write transaction, creates a new platform
 // resource identity, and commits. The repository's unique constraint
-// on relative_name surfaces [domain.ErrAlreadyExists] if the name is
+// on resource_name surfaces [domain.ErrAlreadyExists] if the name is
 // already taken (per AIP-133: Create must not silently update an
 // existing resource).
 func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformResourceInput) (*domain.PlatformResource, error) {
-	if in.CollectionID == "" {
-		return nil, fmt.Errorf("%w: collection ID is required", domain.ErrInvalidArgument)
-	}
-	if in.ID == "" {
-		return nil, fmt.Errorf("%w: resource ID is required", domain.ErrInvalidArgument)
-	}
-
-	name, err := domain.NewRelativeResourceName(in.CollectionID, in.ID)
-	if err != nil {
-		return nil, err
+	if in.Name == "" {
+		return nil, fmt.Errorf("%w: resource name is required", domain.ErrInvalidArgument)
 	}
 
 	tx, err := s.store.Begin(ctx)
@@ -74,8 +63,8 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 	defer tx.Rollback()
 
 	now := s.now()
-	uid := domain.PlatformResourceUID(uuid.New().String())
-	pr := domain.NewPlatformResource(uid, in.CollectionID, name, in.Labels, now)
+	uid := domain.NewPlatformResourceUID()
+	pr := domain.NewPlatformResource(uid, in.Name, in.Labels, now)
 
 	if err := tx.ResourceIdentities().Create(ctx, pr); err != nil {
 		return nil, fmt.Errorf("create: %w", err)
@@ -87,18 +76,13 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 	return pr, nil
 }
 
-// Get retrieves a platform resource by its collection and ID.
-func (s *PlatformResourceService) Get(ctx context.Context, collection domain.CollectionID, id string) (*domain.PlatformResource, error) {
+// Get retrieves a platform resource by its resource name.
+func (s *PlatformResourceService) Get(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
 	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
-
-	name, err := domain.NewRelativeResourceName(collection, id)
-	if err != nil {
-		return nil, err
-	}
 
 	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
 	if err != nil {
@@ -108,7 +92,7 @@ func (s *PlatformResourceService) Get(ctx context.Context, collection domain.Col
 }
 
 // List returns all active (non-deleted) platform resources in a collection.
-func (s *PlatformResourceService) List(ctx context.Context, collection domain.CollectionID) ([]*domain.PlatformResource, error) {
+func (s *PlatformResourceService) List(ctx context.Context, collection domain.CollectionName) ([]*domain.PlatformResource, error) {
 	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -129,18 +113,13 @@ func (s *PlatformResourceService) List(ctx context.Context, collection domain.Co
 	return active, tx.Commit()
 }
 
-// Delete soft-deletes a platform resource by its collection and ID.
-func (s *PlatformResourceService) Delete(ctx context.Context, collection domain.CollectionID, id string) (*domain.PlatformResource, error) {
+// Delete soft-deletes a platform resource by its resource name.
+func (s *PlatformResourceService) Delete(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
 	defer tx.Rollback()
-
-	name, err := domain.NewRelativeResourceName(collection, id)
-	if err != nil {
-		return nil, err
-	}
 
 	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
 	if err != nil {

@@ -621,7 +621,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				domain.TargetStateReady,
 				nil,
 				nil,
-				[]domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
+				[]domain.ManifestType{kindaddon.ClusterManifestType, domain.TrustBundleManifestType},
 			)},
 			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
 		}); err != nil {
@@ -649,7 +649,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				domain.TargetStateReady,
 				nil,
 				activeTarget.TargetProperties(),
-				[]domain.ResourceType{gcphcpaddon.ClusterResourceType, domain.TrustBundleResourceType},
+				[]domain.ManifestType{gcphcpaddon.ClusterManifestType, domain.TrustBundleManifestType},
 			)},
 			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
 		}); err != nil {

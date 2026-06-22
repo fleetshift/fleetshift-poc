@@ -8,8 +8,8 @@ import (
 )
 
 func TestCreateManagedResourceWorkflowID_IncludesResourceType(t *testing.T) {
-	a := domain.CreateManagedResourceWorkflowID("clusters", "prod")
-	b := domain.CreateManagedResourceWorkflowID("databases", "prod")
+	a := domain.CreateManagedResourceWorkflowID("test.fleetshift.io/Cluster", "prod")
+	b := domain.CreateManagedResourceWorkflowID("test.fleetshift.io/Database", "prod")
 
 	if a == b {
 		t.Fatalf("workflow IDs must differ for same-name managed resources of different types: %q", a)

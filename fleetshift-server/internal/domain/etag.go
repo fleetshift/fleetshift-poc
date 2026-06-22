@@ -28,14 +28,14 @@ func (v ManagedResourceView) Etag() Etag {
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
-	hashString(h, string(v.Deployment.id))
-	hashString(h, v.Deployment.uid)
+	hashString(h, string(v.Deployment.name))
+	hashString(h, v.Deployment.uid.String())
 }
 
 func hashManagedResourceFields(h hash.Hash, v ManagedResourceView) {
 	hashString(h, string(v.ManagedResource.resourceType))
 	hashString(h, string(v.ManagedResource.name))
-	hashString(h, v.ManagedResource.uid)
+	hashString(h, v.ManagedResource.uid.String())
 	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.currentVersion))
 	binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
 	hashBytes(h, v.Intent.Spec)

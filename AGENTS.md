@@ -27,11 +27,12 @@ The architecture documentation lives in docs/design/ and is the primary source o
 
 ## Cross-cutting concerns
 
-- Never remove comments unless they are truly no longer relevant (e.g. a TODO that is now implemented or obsolete). Prefer updating out of date explanations unless new behavior is trivially obvious.
+- This is a prototype. Don't be afraid to break contracts if it would produce a more ideal design for the task at hand. We'd rather learn and experiment with a potentially better way. There's little value to backwards compatibility for compatibility's sake.
+- _Please never remove comments unless they are truly no longer relevant_ (e.g. a TODO that is now implemented or obsolete). Prefer updating out of date explanations unless new behavior is trivially obvious.
 - Prefer modern stdlib abstractions and utilities where relevant (especially around crypto or low level encoding / decoding)
 - Follow test-driven development. When at all possible, write failing tests **first**, then write the code to make the test pass.
 - See the Taskfile (used w/ `task` cli) for common development tasks like running tests, generating proto, and building binaries (`task -l` for available tasks)
-- Please always run go fmt ./... after you're done
+- Please always run go fmt ./... after you're done with any Go code changes
 
 ## fleetshift-server
 

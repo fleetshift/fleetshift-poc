@@ -1,6 +1,52 @@
 package domain
 
-import "time"
+import (
+	"database/sql/driver"
+	"fmt"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+// DeploymentUID is the opaque, stable identifier for a deployment
+// instance. Generated once at creation time and never changes. The
+// underlying type is [uuid.UUID] so structural validity is encoded
+// in the type system.
+type DeploymentUID uuid.UUID
+
+// NewDeploymentUID generates a new random [DeploymentUID].
+func NewDeploymentUID() DeploymentUID {
+	return DeploymentUID(uuid.New())
+}
+
+// ParseDeploymentUID parses a string into a [DeploymentUID].
+func ParseDeploymentUID(s string) (DeploymentUID, error) {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return DeploymentUID{}, fmt.Errorf("deployment uid: %w", err)
+	}
+	return DeploymentUID(u), nil
+}
+
+// String returns the canonical UUID string representation.
+func (u DeploymentUID) String() string { return uuid.UUID(u).String() }
+
+// MarshalText implements [encoding.TextMarshaler] for JSON string encoding.
+func (u DeploymentUID) MarshalText() ([]byte, error) { return uuid.UUID(u).MarshalText() }
+
+// UnmarshalText implements [encoding.TextUnmarshaler] for JSON string decoding.
+func (u *DeploymentUID) UnmarshalText(data []byte) error {
+	return (*uuid.UUID)(u).UnmarshalText(data)
+}
+
+// Value implements [driver.Valuer] for SQL persistence.
+func (u DeploymentUID) Value() (driver.Value, error) { return uuid.UUID(u).String(), nil }
+
+// Scan implements [sql.Scanner] for SQL hydration.
+func (u *DeploymentUID) Scan(src any) error { return (*uuid.UUID)(u).Scan(src) }
+
+// IsZero returns true when the UID is the zero (nil) UUID.
+func (u DeploymentUID) IsZero() bool { return uuid.UUID(u) == uuid.Nil }
 
 // Deployment is the thin user-facing aggregate. It holds
 // deployment-specific identity and a reference to the [Fulfillment]
@@ -9,8 +55,8 @@ import "time"
 // Construct new instances with [NewDeployment]; reconstitute from
 // persistence with [DeploymentFromSnapshot]. Read via accessor methods.
 type Deployment struct {
-	id            DeploymentID
-	uid           string
+	name          ResourceName
+	uid           DeploymentUID
 	fulfillmentID FulfillmentID
 	createdAt     time.Time
 	updatedAt     time.Time
@@ -19,9 +65,9 @@ type Deployment struct {
 // NewDeployment creates a brand-new [Deployment]. Use this on creation
 // paths; use [DeploymentFromSnapshot] only for reconstituting from
 // persistence.
-func NewDeployment(id DeploymentID, uid string, fulfillmentID FulfillmentID, now time.Time) Deployment {
+func NewDeployment(name ResourceName, uid DeploymentUID, fulfillmentID FulfillmentID, now time.Time) Deployment {
 	return Deployment{
-		id:            id,
+		name:          name,
 		uid:           uid,
 		fulfillmentID: fulfillmentID,
 		createdAt:     now,
@@ -29,11 +75,12 @@ func NewDeployment(id DeploymentID, uid string, fulfillmentID FulfillmentID, now
 	}
 }
 
-// ID returns the deployment's unique identifier.
-func (d Deployment) ID() DeploymentID { return d.id }
+// Name returns the collection-qualified resource name
+// (e.g. "deployments/my-deploy").
+func (d Deployment) Name() ResourceName { return d.name }
 
 // UID returns the deployment's external UID.
-func (d Deployment) UID() string { return d.uid }
+func (d Deployment) UID() DeploymentUID { return d.uid }
 
 // FulfillmentID returns the linked fulfillment's identifier.
 func (d Deployment) FulfillmentID() FulfillmentID { return d.fulfillmentID }

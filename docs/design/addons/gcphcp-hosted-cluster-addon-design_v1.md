@@ -53,7 +53,7 @@ The addon declares both capabilities:
 
 ```
 DeliveryCapability   { TargetType:    "gcphcp" }
-ManagedResourceCapability { ResourceType: "api.gcphcp.cluster" }
+ManagedResourceCapability { ResourceType: "gcphcp.fleetshift.io/Cluster" }
 ```
 
 ### 2.2 Connect-time assets

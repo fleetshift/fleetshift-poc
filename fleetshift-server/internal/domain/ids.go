@@ -8,9 +8,6 @@ type TargetID string
 // "platform", and "local"; addons register additional types.
 type TargetType string
 
-// DeploymentID uniquely identifies a deployment.
-type DeploymentID string
-
 // Generation is a monotonically increasing counter on a [Fulfillment].
 // It is bumped on every mutation (create, invalidation, resume, delete)
 // and compared against [ObservedGeneration] to detect pending work.

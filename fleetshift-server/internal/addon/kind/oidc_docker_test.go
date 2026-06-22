@@ -448,7 +448,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	// Register managed resource type.
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-mr-oidc"},
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-mr-oidc", ManifestType: kindaddon.ClusterManifestType},
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",
 		CollectionID:   "clusters",

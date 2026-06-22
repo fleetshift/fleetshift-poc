@@ -10,8 +10,8 @@ message ManifestResult {
   // Zero-based index into the delivery's manifest list.
   int32 ordinal = 1;
 
-  // Resource type of the manifest (echoed from the request).
-  string resource_type = 2;
+  // Manifest type (echoed from the request).
+  string manifest_type = 2;
 
   // Apply outcome.
   State state = 3;

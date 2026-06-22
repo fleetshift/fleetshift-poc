@@ -24,8 +24,8 @@ func NewDeleteObserver(logger *slog.Logger) *DeleteObserver {
 // DeleteDeploymentStarted → deleteDeploymentProbe (workflow-level)
 // ---------------------------------------------------------------------------
 
-func (o *DeleteObserver) DeleteDeploymentStarted(ctx context.Context, id domain.DeploymentID) (context.Context, domain.DeleteProbe) {
-	logger := o.logger.With(slog.String("deployment_id", string(id)))
+func (o *DeleteObserver) DeleteDeploymentStarted(ctx context.Context, name domain.ResourceName) (context.Context, domain.DeleteProbe) {
+	logger := o.logger.With(slog.String("deployment_name", string(name)))
 	return ctx, &deleteProbe{
 		logger:    logger,
 		ctx:       ctx,
@@ -104,7 +104,7 @@ func (p *deleteProbe) End() {
 
 func (o *DeleteObserver) DeploymentCleanupStarted(ctx context.Context, input domain.DeleteDeploymentCleanupInput) (context.Context, domain.DeleteCleanupProbe) {
 	logger := o.logger.With(
-		slog.String("deployment_id", string(input.DeploymentID)),
+		slog.String("deployment_name", string(input.Name)),
 		slog.String("fulfillment_id", string(input.FulfillmentID)),
 	)
 	return ctx, &deleteCleanupProbe{
@@ -174,8 +174,8 @@ func (p *deleteCleanupProbe) End() {
 // MutateDeploymentStarted → mutateDeploymentProbe (activity-level)
 // ---------------------------------------------------------------------------
 
-func (o *DeleteObserver) MutateDeploymentStarted(ctx context.Context, id domain.DeploymentID) (context.Context, domain.MutateDeploymentProbe) {
-	logger := o.logger.With(slog.String("deployment_id", string(id)))
+func (o *DeleteObserver) MutateDeploymentStarted(ctx context.Context, name domain.ResourceName) (context.Context, domain.MutateDeploymentProbe) {
+	logger := o.logger.With(slog.String("deployment_name", string(name)))
 	return ctx, &mutateDeploymentProbe{
 		logger:    logger,
 		ctx:       ctx,

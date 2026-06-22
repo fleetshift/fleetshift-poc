@@ -23,24 +23,24 @@ func TestToPlacementTarget_OmitsProperties(t *testing.T) {
 	// PlacementTarget has no Properties field; conversion omits them by type.
 }
 
-func TestToPlacementTarget_PropagatesAcceptedResourceTypes(t *testing.T) {
+func TestToPlacementTarget_PropagatesAcceptedManifestTypes(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "cluster-a",
-		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster", "kubernetes"},
+		AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster", "kubernetes"},
 	})
 	got := domain.ToPlacementTarget(target)
-	if len(got.AcceptedResourceTypes) != 2 {
-		t.Fatalf("len(AcceptedResourceTypes) = %d, want 2", len(got.AcceptedResourceTypes))
+	if len(got.AcceptedManifestTypes) != 2 {
+		t.Fatalf("len(AcceptedManifestTypes) = %d, want 2", len(got.AcceptedManifestTypes))
 	}
-	if got.AcceptedResourceTypes[0] != "api.kind.cluster" || got.AcceptedResourceTypes[1] != "kubernetes" {
-		t.Errorf("AcceptedResourceTypes = %v, want [api.kind.cluster, kubernetes]", got.AcceptedResourceTypes)
+	if got.AcceptedManifestTypes[0] != "api.kind.cluster" || got.AcceptedManifestTypes[1] != "kubernetes" {
+		t.Errorf("AcceptedManifestTypes = %v, want [api.kind.cluster, kubernetes]", got.AcceptedManifestTypes)
 	}
 
 	// Verify it's a copy, not a shared slice.
-	got.AcceptedResourceTypes[0] = "mutated"
-	if target.AcceptedResourceTypes()[0] == "mutated" {
-		t.Error("AcceptedResourceTypes should be copied, not shared")
+	got.AcceptedManifestTypes[0] = "mutated"
+	if target.AcceptedManifestTypes()[0] == "mutated" {
+		t.Error("AcceptedManifestTypes should be copied, not shared")
 	}
 }
 

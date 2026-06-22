@@ -37,9 +37,9 @@ type RegisterTarget struct {
 	Labels map[string]string `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	// Opaque properties for delivery agents and manifest strategies.
 	Properties map[string]string `protobuf:"bytes,5,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	// Resource types this target can accept. An empty list means
+	// Manifest types this target can accept. An empty list means
 	// the target is unconstrained.
-	AcceptedResourceTypes []string `protobuf:"bytes,6,rep,name=accepted_resource_types,json=acceptedResourceTypes,proto3" json:"accepted_resource_types,omitempty"`
+	AcceptedManifestTypes []string `protobuf:"bytes,6,rep,name=accepted_manifest_types,json=acceptedManifestTypes,proto3" json:"accepted_manifest_types,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -109,9 +109,9 @@ func (x *RegisterTarget) GetProperties() map[string]string {
 	return nil
 }
 
-func (x *RegisterTarget) GetAcceptedResourceTypes() []string {
+func (x *RegisterTarget) GetAcceptedManifestTypes() []string {
 	if x != nil {
-		return x.AcceptedResourceTypes
+		return x.AcceptedManifestTypes
 	}
 	return nil
 }
@@ -130,7 +130,7 @@ const file_fleetshift_v1_register_target_proto_rawDesc = "" +
 	"\n" +
 	"properties\x18\x05 \x03(\v2-.fleetshift.v1.RegisterTarget.PropertiesEntryR\n" +
 	"properties\x126\n" +
-	"\x17accepted_resource_types\x18\x06 \x03(\tR\x15acceptedResourceTypes\x1a9\n" +
+	"\x17accepted_manifest_types\x18\x06 \x03(\tR\x15acceptedManifestTypes\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a=\n" +

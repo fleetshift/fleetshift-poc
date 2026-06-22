@@ -14,8 +14,8 @@ func TestBuildSignedInputEnvelope_Deterministic(t *testing.T) {
 	ms := canonical.ManifestStrategy{
 		Type: "inline",
 		Manifests: []canonical.Manifest{{
-			ResourceType: "api.kind.cluster",
-			Raw:          json.RawMessage(`{"name":"test-cluster"}`),
+			Type: "api.kind.cluster",
+			Raw:  json.RawMessage(`{"name":"test-cluster"}`),
 		}},
 	}
 	ps := canonical.PlacementStrategy{
@@ -23,11 +23,11 @@ func TestBuildSignedInputEnvelope_Deterministic(t *testing.T) {
 		Targets: []string{"t1", "t2"},
 	}
 
-	a, err := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
+	a, err := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
 	if err != nil {
 		t.Fatalf("first call: %v", err)
 	}
-	b, err := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
+	b, err := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
 	if err != nil {
 		t.Fatalf("second call: %v", err)
 	}
@@ -41,11 +41,11 @@ func TestBuildSignedInputEnvelope_DifferentInputs(t *testing.T) {
 	ms := canonical.ManifestStrategy{Type: "inline"}
 	ps := canonical.PlacementStrategy{Type: "all"}
 
-	a, _ := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
-	b, _ := canonical.BuildSignedInputEnvelope("dep-2", ms, ps, testValidUntil, nil, 1)
+	a, _ := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
+	b, _ := canonical.BuildSignedInputEnvelope("deployments/dep-2", ms, ps, testValidUntil, nil, 1)
 
 	if string(a) == string(b) {
-		t.Error("different deployment IDs should produce different envelopes")
+		t.Error("different resource names should produce different envelopes")
 	}
 }
 
@@ -53,7 +53,7 @@ func TestBuildSignedInputEnvelope_OmitsZeroGeneration(t *testing.T) {
 	ms := canonical.ManifestStrategy{Type: "inline"}
 	ps := canonical.PlacementStrategy{Type: "all"}
 
-	env, _ := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 0)
+	env, _ := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 0)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(env, &parsed); err != nil {
@@ -68,7 +68,7 @@ func TestBuildSignedInputEnvelope_IncludesNonZeroGeneration(t *testing.T) {
 	ms := canonical.ManifestStrategy{Type: "inline"}
 	ps := canonical.PlacementStrategy{Type: "all"}
 
-	env, _ := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 3)
+	env, _ := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 3)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(env, &parsed); err != nil {
@@ -87,7 +87,7 @@ func TestBuildSignedInputEnvelope_EmptyConstraints(t *testing.T) {
 	ms := canonical.ManifestStrategy{Type: "inline"}
 	ps := canonical.PlacementStrategy{Type: "all"}
 
-	env, _ := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, nil, 1)
+	env, _ := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, nil, 1)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(env, &parsed); err != nil {
@@ -108,7 +108,7 @@ func TestBuildSignedInputEnvelope_ConstraintsSorted(t *testing.T) {
 		{Name: "a-constraint", Expression: "output.bar == true"},
 	}
 
-	env, _ := canonical.BuildSignedInputEnvelope("dep-1", ms, ps, testValidUntil, constraints, 1)
+	env, _ := canonical.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, testValidUntil, constraints, 1)
 
 	var parsed struct {
 		OutputConstraints []struct {
@@ -131,8 +131,8 @@ func TestBuildSignedInputEnvelope_StructureMatchesPOC(t *testing.T) {
 	ms := canonical.ManifestStrategy{
 		Type: "inline",
 		Manifests: []canonical.Manifest{{
-			ResourceType: "api.kind.cluster",
-			Raw:          json.RawMessage(`{"name":"c1"}`),
+			Type: "api.kind.cluster",
+			Raw:  json.RawMessage(`{"name":"c1"}`),
 		}},
 	}
 	ps := canonical.PlacementStrategy{
@@ -140,7 +140,7 @@ func TestBuildSignedInputEnvelope_StructureMatchesPOC(t *testing.T) {
 		Targets: []string{"target-a"},
 	}
 
-	env, _ := canonical.BuildSignedInputEnvelope("my-dep", ms, ps, testValidUntil, nil, 1)
+	env, _ := canonical.BuildSignedInputEnvelope("deployments/my-dep", ms, ps, testValidUntil, nil, 1)
 
 	var parsed map[string]any
 	if err := json.Unmarshal(env, &parsed); err != nil {
@@ -154,7 +154,7 @@ func TestBuildSignedInputEnvelope_StructureMatchesPOC(t *testing.T) {
 	}
 
 	content := parsed["content"].(map[string]any)
-	for _, key := range []string{"deployment_id", "manifest_strategy", "placement_strategy"} {
+	for _, key := range []string{"name", "manifest_strategy", "placement_strategy"} {
 		if _, ok := content[key]; !ok {
 			t.Errorf("missing content key %q", key)
 		}
@@ -206,7 +206,7 @@ func TestBuildManagedResourceEnvelope_Structure(t *testing.T) {
 }
 
 func TestHashIntent_Deterministic(t *testing.T) {
-	data := []byte(`{"content":{"deployment_id":"test"}}`)
+	data := []byte(`{"content":{"name":"deployments/test"}}`)
 	a := canonical.HashIntent(data)
 	b := canonical.HashIntent(data)
 

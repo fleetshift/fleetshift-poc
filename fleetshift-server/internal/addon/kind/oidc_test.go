@@ -39,7 +39,7 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(specBytes),
 	}}
 
@@ -80,7 +80,7 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 	}
 
 	manifests := []domain.Manifest{{
-		ResourceType: kind.ClusterResourceType,
+		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name": "empty-aud"}`),
 	}}
 

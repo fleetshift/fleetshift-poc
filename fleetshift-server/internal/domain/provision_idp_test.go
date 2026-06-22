@@ -24,7 +24,7 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 		CreateDeployment: &fakeCreateDeploymentWF{startFn: func(_ context.Context, in domain.CreateDeploymentInput) (domain.Execution[domain.DeploymentView], error) {
 			startedInput = in
 			return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
-				Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{ID: in.ID}),
+				Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{Name: in.Name}),
 			}}, nil
 		}},
 		TrustBundlePlacement: domain.PlacementStrategySpec{
@@ -67,15 +67,15 @@ func TestProvisionIdPWorkflowSpec_Run(t *testing.T) {
 		t.Errorf("saved method ID = %q, want %q", savedMethod.ID(), "test-idp")
 	}
 
-	if startedInput.ID != "idp-trust-test-idp" {
-		t.Errorf("deployment ID = %q, want %q", startedInput.ID, "idp-trust-test-idp")
+	if startedInput.Name != "deployments/idp-trust-test-idp" {
+		t.Errorf("deployment Name = %q, want %q", startedInput.Name, "deployments/idp-trust-test-idp")
 	}
 	if len(startedInput.ManifestStrategy.Manifests) != 1 {
 		t.Fatalf("manifests len = %d, want 1", len(startedInput.ManifestStrategy.Manifests))
 	}
 	m := startedInput.ManifestStrategy.Manifests[0]
-	if m.ResourceType != domain.TrustBundleResourceType {
-		t.Errorf("resource type = %q, want %q", m.ResourceType, domain.TrustBundleResourceType)
+	if m.ManifestType != domain.TrustBundleManifestType {
+		t.Errorf("manifest type = %q, want %q", m.ManifestType, domain.TrustBundleManifestType)
 	}
 
 	var entry domain.TrustBundleEntry
@@ -221,7 +221,7 @@ func (f *fakeCreateDeploymentWF) Start(ctx context.Context, in domain.CreateDepl
 		return f.startFn(ctx, in)
 	}
 	return &immediateExecution[domain.DeploymentView]{val: domain.DeploymentView{
-		Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{ID: in.ID}),
+		Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{Name: in.Name}),
 	}}, nil
 }
 

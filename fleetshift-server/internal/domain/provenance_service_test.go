@@ -225,7 +225,7 @@ func TestProvenanceService_BuildManagedResourceProvenance(t *testing.T) {
 	}
 
 	caller := &domain.SubjectClaims{FederatedIdentity: identity}
-	resourceType := domain.ResourceType("api.kind.cluster")
+	resourceType := domain.ResourceType("kind.fleetshift.io/Cluster")
 	resourceName := domain.ResourceName("test-cluster")
 	spec := json.RawMessage(`{"replicas":3}`)
 	validUntil := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)

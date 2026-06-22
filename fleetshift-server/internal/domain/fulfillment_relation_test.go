@@ -11,7 +11,7 @@ import (
 func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 	rel := domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"}
 	intent := domain.ResourceIntent{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Name:         "prod-us-east-1",
 		Version:      1,
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
@@ -23,8 +23,8 @@ func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 	if ms.Type != domain.ManifestStrategyManagedResource {
 		t.Errorf("ManifestStrategy.Type = %q, want %q", ms.Type, domain.ManifestStrategyManagedResource)
 	}
-	if ms.IntentRef.ResourceType != "clusters" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", ms.IntentRef.ResourceType, "clusters")
+	if ms.IntentRef.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("IntentRef.ResourceType = %q, want %q", ms.IntentRef.ResourceType, "test.fleetshift.io/Cluster")
 	}
 	if ms.IntentRef.Name != "prod-us-east-1" {
 		t.Errorf("IntentRef.Name = %q, want %q", ms.IntentRef.Name, "prod-us-east-1")
@@ -72,7 +72,7 @@ func TestFulfillmentRelation_JSONRoundTrip(t *testing.T) {
 
 func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 	original := domain.SignedRelation{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.example"},
@@ -91,8 +91,8 @@ func TestSignedRelation_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("Unmarshal: %v", err)
 	}
 
-	if got.ResourceType != "clusters" {
-		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "clusters")
+	if got.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("ResourceType = %q, want %q", got.ResourceType, "test.fleetshift.io/Cluster")
 	}
 	rst, ok := got.Relation.(domain.RegisteredSelfTarget)
 	if !ok {

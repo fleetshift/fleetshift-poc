@@ -180,7 +180,7 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 
 	auth := domain.DeliveryAuth{Token: "not-a-real-token"}
 	manifests := []domain.Manifest{{
-		ResourceType: "raw",
+		ManifestType: "raw",
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
@@ -251,7 +251,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 
 	auth := domain.DeliveryAuth{Token: "expired-token"}
 	manifests := []domain.Manifest{{
-		ResourceType: "raw",
+		ManifestType: "raw",
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 
@@ -289,7 +289,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 
 	auth := domain.DeliveryAuth{Token: "some-token"}
 	manifests := []domain.Manifest{{
-		ResourceType: "raw",
+		ManifestType: "raw",
 		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"test","namespace":"default"},"data":{"key":"value"}}`),
 	}}
 

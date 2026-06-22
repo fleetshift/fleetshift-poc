@@ -36,12 +36,12 @@ type InputContent interface {
 // DeploymentContent groups the identity and strategy fields that the
 // signer authorizes. Matches the hybrid PoC's DeploymentContent.
 type DeploymentContent struct {
-	DeploymentID      DeploymentID
+	Name              ResourceName
 	ManifestStrategy  ManifestStrategySpec
 	PlacementStrategy PlacementStrategySpec
 }
 
-func (c DeploymentContent) ContentID() string   { return string(c.DeploymentID) }
+func (c DeploymentContent) ContentID() string   { return string(c.Name) }
 func (c DeploymentContent) ContentType() string { return "deployment" }
 func (DeploymentContent) inputContent()         {}
 
@@ -188,11 +188,11 @@ type Attestation struct {
 	Input SignedInput
 	// TODO: the python POC shoes a "verification bundle" – we should probably implement that pattern here
 	SignedRelation *SignedRelation
-	Output         DeliveryOutput // one of [*PutManifests] or [*RemoveByDeploymentId]
+	Output         DeliveryOutput // one of [*PutManifests] or [*RemoveByDeploymentName]
 }
 
 // DeliveryOutput is a sealed sum type for delivery actions.
-// Valid implementations are [*PutManifests] and [*RemoveByDeploymentId].
+// Valid implementations are [*PutManifests] and [*RemoveByDeploymentName].
 type DeliveryOutput interface {
 	deliveryOutput() // sealed
 }
@@ -205,23 +205,23 @@ type PutManifests struct {
 
 func (*PutManifests) deliveryOutput() {}
 
-// RemoveByDeploymentId removes a deployment from a target.
-type RemoveByDeploymentId struct {
-	DeploymentID DeploymentID
+// RemoveByDeploymentName removes a deployment from a target.
+type RemoveByDeploymentName struct {
+	Name ResourceName
 	// TODO: Cap 8+ — Placement
 }
 
-func (*RemoveByDeploymentId) deliveryOutput() {}
+func (*RemoveByDeploymentName) deliveryOutput() {}
 
 // attestationJSON is the wire representation used by Attestation's custom
 // JSON codec. A discriminator field (OutputType) tells the decoder which
 // concrete DeliveryOutput variant to instantiate.
 type attestationJSON struct {
-	Input                SignedInput           `json:"Input"`
-	SignedRelation       *SignedRelation       `json:"SignedRelation,omitempty"`
-	OutputType           string                `json:"OutputType"`
-	PutManifests         *PutManifests         `json:"PutManifests,omitempty"`
-	RemoveByDeploymentId *RemoveByDeploymentId `json:"RemoveByDeploymentId,omitempty"`
+	Input                  SignedInput             `json:"Input"`
+	SignedRelation         *SignedRelation         `json:"SignedRelation,omitempty"`
+	OutputType             string                  `json:"OutputType"`
+	PutManifests           *PutManifests           `json:"PutManifests,omitempty"`
+	RemoveByDeploymentName *RemoveByDeploymentName `json:"RemoveByDeploymentName,omitempty"`
 }
 
 func (a Attestation) MarshalJSON() ([]byte, error) {
@@ -230,9 +230,9 @@ func (a Attestation) MarshalJSON() ([]byte, error) {
 	case *PutManifests:
 		j.OutputType = "PutManifests"
 		j.PutManifests = o
-	case *RemoveByDeploymentId:
-		j.OutputType = "RemoveByDeploymentId"
-		j.RemoveByDeploymentId = o
+	case *RemoveByDeploymentName:
+		j.OutputType = "RemoveByDeploymentName"
+		j.RemoveByDeploymentName = o
 	case nil:
 		// no output
 	default:
@@ -251,8 +251,8 @@ func (a *Attestation) UnmarshalJSON(data []byte) error {
 	switch j.OutputType {
 	case "PutManifests":
 		a.Output = j.PutManifests
-	case "RemoveByDeploymentId":
-		a.Output = j.RemoveByDeploymentId
+	case "RemoveByDeploymentName":
+		a.Output = j.RemoveByDeploymentName
 	case "":
 		a.Output = nil
 	default:
@@ -317,7 +317,7 @@ func HashIntent(envelope []byte) []byte {
 // that gets hashed and signed. Delegates to [canonical.BuildSignedInputEnvelope]
 // after converting domain types to canonical types.
 func BuildSignedInputEnvelope(
-	id DeploymentID,
+	name ResourceName,
 	ms ManifestStrategySpec,
 	ps PlacementStrategySpec,
 	validUntil time.Time,
@@ -325,7 +325,7 @@ func BuildSignedInputEnvelope(
 	expectedGeneration Generation,
 ) ([]byte, error) {
 	return canonical.BuildSignedInputEnvelope(
-		string(id),
+		string(name),
 		toCanonicalManifestStrategy(ms),
 		toCanonicalPlacementStrategy(ps),
 		validUntil,
@@ -360,8 +360,8 @@ func toCanonicalManifestStrategy(ms ManifestStrategySpec) canonical.ManifestStra
 	}
 	for _, m := range ms.Manifests {
 		out.Manifests = append(out.Manifests, canonical.Manifest{
-			ResourceType: string(m.ResourceType),
-			Raw:          m.Raw,
+			Type: string(m.ManifestType),
+			Raw:  m.Raw,
 		})
 	}
 	return out

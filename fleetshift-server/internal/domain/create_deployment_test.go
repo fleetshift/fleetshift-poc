@@ -61,7 +61,7 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 	rec := &stubRecord{ctx: ctx}
 
 	input := domain.CreateDeploymentInput{
-		ID: "d1",
+		Name: "deployments/d1",
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 		},
@@ -75,14 +75,14 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 		t.Fatalf("Run: %v", err)
 	}
 
-	if dep.Deployment.ID() != "d1" {
-		t.Errorf("Deployment.ID = %q, want %q", dep.Deployment.ID(), "d1")
+	if dep.Deployment.Name() != "deployments/d1" {
+		t.Errorf("Deployment.Name = %q, want %q", dep.Deployment.Name(), "deployments/d1")
 	}
 	if dep.Fulfillment.State() != domain.FulfillmentStateCreating {
 		t.Errorf("Fulfillment.State = %q, want %q", dep.Fulfillment.State(), domain.FulfillmentStateCreating)
 	}
-	if dep.Deployment.UID() == "" {
-		t.Error("Deployment.UID is empty, want non-empty UUID")
+	if dep.Deployment.UID().IsZero() {
+		t.Error("Deployment.UID is zero, want non-zero UUID")
 	}
 	if dep.Deployment.CreatedAt().IsZero() {
 		t.Error("Deployment.CreatedAt is zero, want non-zero")
@@ -97,9 +97,9 @@ func TestCreateDeploymentWorkflow_PersistsThenStartsOrchestration(t *testing.T) 
 		t.Error("DeploymentView.Etag() is empty, want non-empty")
 	}
 
-	persisted := getThinDeployment(t, store, "d1")
-	if persisted.ID() != "d1" {
-		t.Errorf("persisted ID = %q, want %q", persisted.ID(), "d1")
+	persisted := getThinDeployment(t, store, "deployments/d1")
+	if persisted.Name() != "deployments/d1" {
+		t.Errorf("persisted Name = %q, want %q", persisted.Name(), "deployments/d1")
 	}
 
 	if fakeOrch.started != dep.Deployment.FulfillmentID() {

@@ -25,8 +25,8 @@ const (
 // Manifest is an opaque declarative payload delivered to a target.
 type Manifest struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
-	// Identifies the kind of resource (e.g. "api.kind.cluster").
-	ResourceType string `protobuf:"bytes,1,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	// Opaque dispatch label identifying the manifest kind (e.g. "api.kind.cluster").
+	ManifestType string `protobuf:"bytes,1,opt,name=manifest_type,json=manifestType,proto3" json:"manifest_type,omitempty"`
 	// Opaque content of the manifest.
 	Raw           []byte `protobuf:"bytes,2,opt,name=raw,proto3" json:"raw,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -63,9 +63,9 @@ func (*Manifest) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_manifest_proto_rawDescGZIP(), []int{0}
 }
 
-func (x *Manifest) GetResourceType() string {
+func (x *Manifest) GetManifestType() string {
 	if x != nil {
-		return x.ResourceType
+		return x.ManifestType
 	}
 	return ""
 }
@@ -83,7 +83,7 @@ const file_fleetshift_v1_manifest_proto_rawDesc = "" +
 	"\n" +
 	"\x1cfleetshift/v1/manifest.proto\x12\rfleetshift.v1\x1a\x1fgoogle/api/field_behavior.proto\"K\n" +
 	"\bManifest\x12(\n" +
-	"\rresource_type\x18\x01 \x01(\tB\x03\xe0A\x02R\fresourceType\x12\x15\n" +
+	"\rmanifest_type\x18\x01 \x01(\tB\x03\xe0A\x02R\fmanifestType\x12\x15\n" +
 	"\x03raw\x18\x02 \x01(\fB\x03\xe0A\x02R\x03rawBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
 var (

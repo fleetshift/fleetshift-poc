@@ -1,15 +1,127 @@
 package domain
 
 import (
+	"database/sql/driver"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
-// ResourceName uniquely identifies a managed resource instance within
-// its [ResourceType]. Following AIP naming conventions, this is the
-// leaf segment of the resource name (e.g. "prod-us-east-1" for a
-// resource named "clusters/prod-us-east-1").
-type ResourceName string
+// ResourceType identifies a kind of managed resource as registered by
+// an addon (e.g. "kind.fleetshift.io/Cluster"). Per AIP-123, resource
+// types follow the pattern {ServiceName}/{Type} where ServiceName is
+// the AIP-122 service name and Type is the PascalCase singular proto
+// message name.
+//
+// ResourceType is used for routing, schema lookup, and fulfillment
+// relation resolution — not as a resource identity key. See
+// [ManifestType] for the decoupled manifest dispatch label.
+type ResourceType string
+
+// NewResourceType constructs a [ResourceType] from a [ServiceName] and
+// a PascalCase type name per AIP-123. The type name must start with an
+// uppercase letter and contain only alphanumeric characters.
+func NewResourceType(service ServiceName, typeName string) (ResourceType, error) {
+	if service == "" {
+		return "", fmt.Errorf("resource type: %w: service name must not be empty", ErrInvalidArgument)
+	}
+	if err := validateTypeName(typeName); err != nil {
+		return "", err
+	}
+	return ResourceType(string(service) + "/" + typeName), nil
+}
+
+// ParseResourceType validates and returns a [ResourceType] from a raw
+// string in the AIP-123 format "{ServiceName}/{Type}".
+func ParseResourceType(s string) (ResourceType, error) {
+	if s == "" {
+		return "", fmt.Errorf("resource type: %w: must not be empty", ErrInvalidArgument)
+	}
+	parts := strings.SplitN(s, "/", 3)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", fmt.Errorf("resource type: %w: must be {ServiceName}/{Type}", ErrInvalidArgument)
+	}
+	if err := validateTypeName(parts[1]); err != nil {
+		return "", err
+	}
+	return ResourceType(s), nil
+}
+
+// ServiceName extracts the service component from a resource type.
+// Returns empty for malformed values.
+func (rt ResourceType) ServiceName() ServiceName {
+	if i := strings.IndexByte(string(rt), '/'); i > 0 {
+		return ServiceName(rt[:i])
+	}
+	return ""
+}
+
+// TypeName extracts the type component from a resource type.
+// Returns empty for malformed values.
+func (rt ResourceType) TypeName() string {
+	if i := strings.IndexByte(string(rt), '/'); i >= 0 && i < len(rt)-1 {
+		return string(rt[i+1:])
+	}
+	return ""
+}
+
+func validateTypeName(s string) error {
+	if s == "" {
+		return fmt.Errorf("resource type: %w: type name must not be empty", ErrInvalidArgument)
+	}
+	if s[0] < 'A' || s[0] > 'Z' {
+		return fmt.Errorf("resource type: %w: type name must start with uppercase letter", ErrInvalidArgument)
+	}
+	for _, c := range s {
+		if !((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) {
+			return fmt.Errorf("resource type: %w: type name must be alphanumeric PascalCase", ErrInvalidArgument)
+		}
+	}
+	return nil
+}
+
+// ManagedResourceUID is the opaque, stable identifier for a managed
+// resource instance. Generated once at creation time and never
+// changes. The underlying type is [uuid.UUID] so structural validity
+// is encoded in the type system.
+type ManagedResourceUID uuid.UUID
+
+// NewManagedResourceUID generates a new random [ManagedResourceUID].
+func NewManagedResourceUID() ManagedResourceUID {
+	return ManagedResourceUID(uuid.New())
+}
+
+// ParseManagedResourceUID parses a string into a [ManagedResourceUID].
+func ParseManagedResourceUID(s string) (ManagedResourceUID, error) {
+	u, err := uuid.Parse(s)
+	if err != nil {
+		return ManagedResourceUID{}, fmt.Errorf("managed resource uid: %w", err)
+	}
+	return ManagedResourceUID(u), nil
+}
+
+// String returns the canonical UUID string representation.
+func (u ManagedResourceUID) String() string { return uuid.UUID(u).String() }
+
+// MarshalText implements [encoding.TextMarshaler] for JSON string encoding.
+func (u ManagedResourceUID) MarshalText() ([]byte, error) { return uuid.UUID(u).MarshalText() }
+
+// UnmarshalText implements [encoding.TextUnmarshaler] for JSON string decoding.
+func (u *ManagedResourceUID) UnmarshalText(data []byte) error {
+	return (*uuid.UUID)(u).UnmarshalText(data)
+}
+
+// Value implements [driver.Valuer] for SQL persistence.
+func (u ManagedResourceUID) Value() (driver.Value, error) { return uuid.UUID(u).String(), nil }
+
+// Scan implements [sql.Scanner] for SQL hydration.
+func (u *ManagedResourceUID) Scan(src any) error { return (*uuid.UUID)(u).Scan(src) }
+
+// IsZero returns true when the UID is the zero (nil) UUID.
+func (u ManagedResourceUID) IsZero() bool { return uuid.UUID(u) == uuid.Nil }
 
 // IntentVersion is a monotonically increasing counter for versioned
 // resource intent within a managed resource. Each spec update creates
@@ -117,7 +229,7 @@ type ResourceIntent struct {
 type ManagedResource struct {
 	resourceType   ResourceType
 	name           ResourceName
-	uid            string
+	uid            ManagedResourceUID
 	currentVersion IntentVersion
 	fulfillmentID  FulfillmentID
 	createdAt      time.Time
@@ -133,7 +245,7 @@ type ManagedResource struct {
 //
 // After construction, call [ManagedResource.RecordIntent] to attach
 // the initial spec version.
-func NewManagedResource(resourceType ResourceType, name ResourceName, uid string, fulfillmentID FulfillmentID, now time.Time) *ManagedResource {
+func NewManagedResource(resourceType ResourceType, name ResourceName, uid ManagedResourceUID, fulfillmentID FulfillmentID, now time.Time) *ManagedResource {
 	return &ManagedResource{
 		resourceType:  resourceType,
 		name:          name,
@@ -182,7 +294,7 @@ func (mr *ManagedResource) ResourceType() ResourceType { return mr.resourceType 
 func (mr *ManagedResource) Name() ResourceName { return mr.name }
 
 // UID returns the resource's external UID.
-func (mr *ManagedResource) UID() string { return mr.uid }
+func (mr *ManagedResource) UID() ManagedResourceUID { return mr.uid }
 
 // CurrentVersion returns the current intent version.
 func (mr *ManagedResource) CurrentVersion() IntentVersion { return mr.currentVersion }

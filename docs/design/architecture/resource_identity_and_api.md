@@ -50,7 +50,7 @@ The platform introduces API separation at both the transport (HTTP and gRPC) and
 1. **Platform API layer** — defines the canonical resource hierarchy and identity. Resource types have a place in this hierarchy regardless of which extension defines them. At this layer, the representation is generic: it tracks relationships, aggregates metadata, and correlates aliases. It is mostly read-only (labels are user-writable).
 2. **Extension API layer** — implements resource functionality through typed, extension-specific schemas. Extensions can observe, manage (mapping to a fulfillment), or provide delivery connectivity. Each extension registers services in its own proto package, differentiated at the transport level.
 
-The relative resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//gcphcp.fleetshift.io/clusters/foo` and `//fleetshift.io/clusters/foo` refer to the same logical resource through different APIs.
+The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource. `//gcphcp.fleetshift.io/clusters/foo` and `//fleetshift.io/clusters/foo` refer to the same logical resource through different APIs.
 
 ```mermaid
 graph TB
@@ -158,7 +158,7 @@ Full resource names use the versionless service name:
 //fleetshift.io/clusters/foo
 ```
 
-The relative resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource.
+The resource name (`clusters/foo`) is identity-equivalent across services when referring to the same logical resource.
 
 ### URLs (AIP-127)
 
@@ -178,9 +178,23 @@ Versioning is defined separately from the service name. An addon registers a ser
 
 ## Resource identity model
 
+### Naming types (AIP-122)
+
+The implementation's naming types mirror AIP-122 terminology:
+
+| Type               | Example                            | Description                                                           |
+| ------------------ | ---------------------------------- | --------------------------------------------------------------------- |
+| `ResourceID`       | `foo`                              | Leaf segment identifier (rarely used in isolation)                    |
+| `ResourceName`     | `clusters/foo`                     | Collection-qualified resource name; the primary identity type         |
+| `FullResourceName` | `//gcphcp.fleetshift.io/clusters/foo` | Globally unique including service; used in attestation and cross-service references |
+| `CollectionID`     | `clusters`                         | Single collection segment (rarely used in isolation)                  |
+| `CollectionName`   | `clusters`                         | Full path to a collection; generalizes to hierarchical names          |
+
+`ResourceName` is the standard currency for domain APIs. `ResourceID` is used only at boundaries (e.g. parsing a resource name from an HTTP path segment). The current implementation is flat (`clusters/foo`), but `CollectionName` and `ResourceName` do not structurally prevent future hierarchy.
+
 ### Identity uniqueness
 
-A relative resource name is unique within a **platform identity domain**. Extension collections participate in that domain only when their resource type registration maps them to the corresponding platform resource type.
+A resource name is unique within a **platform identity domain**. Extension collections participate in that domain only when their resource type registration maps them to the corresponding platform resource type.
 
 Once `clusters/foo` exists, it is one logical resource regardless of how many extensions define APIs for it.
 

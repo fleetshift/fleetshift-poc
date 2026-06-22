@@ -132,15 +132,17 @@ func (h *platformHandler) doCreate(ctx context.Context, req proto.Message) (prot
 		}
 	}
 
-	collectionID, err := domain.NewCollectionID(h.cfg.CollectionID)
+	resourceName, err := domain.NewResourceName(
+		domain.NewCollectionName(domain.CollectionID(h.cfg.CollectionID)),
+		domain.ResourceID(id),
+	)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid collection ID: %v", err)
+		return nil, status.Errorf(codes.InvalidArgument, "invalid resource name: %v", err)
 	}
 
 	pr, err := h.resources.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: collectionID,
-		ID:           id,
-		Labels:       labels,
+		Name:   resourceName,
+		Labels: labels,
 	})
 	if err != nil {
 		return nil, toDomainError(err)
@@ -175,17 +177,12 @@ func (h *platformHandler) doGet(ctx context.Context, req proto.Message) (proto.M
 	nameField := h.descs.GetRequest.Fields().ByName("name")
 	name := req.ProtoReflect().Get(nameField).String()
 
-	id, err := h.parseName(name)
+	resourceName, err := h.parseResourceName(name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	collectionID, err := domain.NewCollectionID(h.cfg.CollectionID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid collection ID: %v", err)
-	}
-
-	pr, err := h.resources.Get(ctx, collectionID, id)
+	pr, err := h.resources.Get(ctx, resourceName)
 	if err != nil {
 		return nil, toDomainError(err)
 	}
@@ -216,12 +213,9 @@ func (h *platformHandler) handleList(
 }
 
 func (h *platformHandler) doList(ctx context.Context, _ proto.Message) (proto.Message, error) {
-	collectionID, err := domain.NewCollectionID(h.cfg.CollectionID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid collection ID: %v", err)
-	}
+	collection := domain.NewCollectionName(domain.CollectionID(h.cfg.CollectionID))
 
-	resources, err := h.resources.List(ctx, collectionID)
+	resources, err := h.resources.List(ctx, collection)
 	if err != nil {
 		return nil, toDomainError(err)
 	}
@@ -266,17 +260,12 @@ func (h *platformHandler) doDelete(ctx context.Context, req proto.Message) (prot
 	nameField := h.descs.DeleteRequest.Fields().ByName("name")
 	name := req.ProtoReflect().Get(nameField).String()
 
-	id, err := h.parseName(name)
+	resourceName, err := h.parseResourceName(name)
 	if err != nil {
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	collectionID, err := domain.NewCollectionID(h.cfg.CollectionID)
-	if err != nil {
-		return nil, status.Errorf(codes.Internal, "invalid collection ID: %v", err)
-	}
-
-	pr, err := h.resources.Delete(ctx, collectionID, id)
+	pr, err := h.resources.Delete(ctx, resourceName)
 	if err != nil {
 		return nil, toDomainError(err)
 	}
@@ -284,13 +273,16 @@ func (h *platformHandler) doDelete(ctx context.Context, req proto.Message) (prot
 	return h.resourceToMessage(pr)
 }
 
-func (h *platformHandler) parseName(name string) (string, error) {
+func (h *platformHandler) parseResourceName(name string) (domain.ResourceName, error) {
 	collection := h.cfg.Collection()
 	id, ok := strings.CutPrefix(name, collection)
 	if !ok || id == "" {
 		return "", fmt.Errorf("name must have format %s{id}", collection)
 	}
-	return id, nil
+	return domain.NewResourceName(
+		domain.NewCollectionName(domain.CollectionID(h.cfg.CollectionID)),
+		domain.ResourceID(id),
+	)
 }
 
 // resourceToMessage converts a domain PlatformResource to a dynamic
@@ -301,10 +293,10 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	msg := dynamicpb.NewMessage(h.descs.Resource)
 
 	nameField := h.descs.Resource.Fields().ByName("name")
-	msg.Set(nameField, protoreflect.ValueOfString(h.cfg.Collection()+string(pr.RelativeName().ID())))
+	msg.Set(nameField, protoreflect.ValueOfString(string(pr.Name())))
 
 	uidField := h.descs.Resource.Fields().ByName("uid")
-	msg.Set(uidField, protoreflect.ValueOfString(string(pr.UID())))
+	msg.Set(uidField, protoreflect.ValueOfString(pr.UID().String()))
 
 	labelsField := h.descs.Resource.Fields().ByName("labels")
 	setMapStringString(msg, labelsField, pr.Labels())
@@ -355,7 +347,7 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	for _, rel := range pr.Relationships() {
 		relMsg := dynamicpb.NewMessage(relDesc)
 		relMsg.Set(relDesc.Fields().ByName("type"), protoreflect.ValueOfString(string(rel.Type)))
-		relMsg.Set(relDesc.Fields().ByName("target_uid"), protoreflect.ValueOfString(string(rel.TargetUID)))
+		relMsg.Set(relDesc.Fields().ByName("target_uid"), protoreflect.ValueOfString(rel.TargetUID.String()))
 		relMsg.Set(relDesc.Fields().ByName("source_service"), protoreflect.ValueOfString(string(rel.SourceService)))
 		if !rel.CreatedAt.IsZero() {
 			if tsVal, err := marshalTimestamp(relDesc.Fields().ByName("create_time"), rel.CreatedAt); err == nil {

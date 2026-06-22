@@ -216,7 +216,7 @@ func setupWithDelivery(
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: clusterTargetType, Name: "Kind Cluster Addon",
-		AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+		AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
@@ -225,7 +225,8 @@ func setupWithDelivery(
 	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
 		ResourceType: kindaddon.ClusterResourceType,
 		Relation: domain.RegisteredSelfTarget{
-			AddonTarget: "kind-local",
+			AddonTarget:  "kind-local",
+			ManifestType: kindaddon.ClusterManifestType,
 		},
 		Signature:      domain.Signature{},
 		APIServiceName: "kind.fleetshift.io",
@@ -729,7 +730,7 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "prov-cluster")
+	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "clusters/prov-cluster")
 	if err != nil {
 		t.Fatalf("get managed resource: %v", err)
 	}
@@ -823,7 +824,7 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "resume-cluster")
+	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "clusters/resume-cluster")
 	if err != nil {
 		t.Fatalf("get managed resource: %v", err)
 	}

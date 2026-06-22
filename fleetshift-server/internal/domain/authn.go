@@ -137,9 +137,9 @@ type TrustBundleEntry struct {
 	RegistrySubjectMapping   *RegistrySubjectMapping `json:"registry_subject_mapping,omitempty"`
 }
 
-// TrustBundleResourceType is the [ResourceType] for IdP trust bundle
+// TrustBundleManifestType is the [ManifestType] for IdP trust bundle
 // manifests delivered to agents.
-const TrustBundleResourceType ResourceType = "idp-trust-bundle"
+const TrustBundleManifestType ManifestType = "idp-trust-bundle"
 
 // OIDCMetadata is the resolved OIDC discovery document.
 type OIDCMetadata struct {

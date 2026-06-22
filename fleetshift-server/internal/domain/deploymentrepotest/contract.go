@@ -40,10 +40,10 @@ func Run(t *testing.T, factory Factory) {
 		return f
 	}
 
-	sampleThinDeployment := func(depID domain.DeploymentID, fid domain.FulfillmentID) domain.Deployment {
+	sampleThinDeployment := func(depName domain.ResourceName, fid domain.FulfillmentID) domain.Deployment {
 		return domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-			ID:            depID,
-			UID:           "uid-abc-123",
+			Name:          depName,
+			UID:           domain.NewDeploymentUID(),
 			FulfillmentID: fid,
 			CreatedAt:     fixedTime,
 			UpdatedAt:     fixedTime,
@@ -58,22 +58,22 @@ func Run(t *testing.T, factory Factory) {
 		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
-		d := sampleThinDeployment("d-create-get", fid)
+		d := sampleThinDeployment("deployments/d-create-get", fid)
 		repo := tx.Deployments()
 
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "d-create-get")
+		got, err := repo.Get(ctx, "deployments/d-create-get")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
 		if got.FulfillmentID() != fid {
 			t.Errorf("FulfillmentID = %q, want %q", got.FulfillmentID(), fid)
 		}
-		if got.UID() != "uid-abc-123" {
-			t.Errorf("UID = %q, want %q", got.UID(), "uid-abc-123")
+		if got.UID().IsZero() {
+			t.Error("UID is zero, want non-zero")
 		}
 		if !got.CreatedAt().Equal(fixedTime) {
 			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt(), fixedTime)
@@ -91,7 +91,7 @@ func Run(t *testing.T, factory Factory) {
 		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
-		d := sampleThinDeployment("d-dup", fid)
+		d := sampleThinDeployment("deployments/d-dup", fid)
 		repo := tx.Deployments()
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -106,7 +106,7 @@ func Run(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.Deployments().Get(ctx, "nonexistent-deployment")
+		_, err := tx.Deployments().Get(ctx, "deployments/nonexistent-deployment")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get: got %v, want ErrNotFound", err)
 		}
@@ -126,18 +126,18 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
 
-		d := sampleThinDeployment("d-view", f.ID())
+		d := sampleThinDeployment("deployments/d-view", f.ID())
 		repo := tx.Deployments()
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create deployment: %v", err)
 		}
 
-		v, err := repo.GetView(ctx, "d-view")
+		v, err := repo.GetView(ctx, "deployments/d-view")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
-		if v.Deployment.ID() != "d-view" {
-			t.Errorf("Deployment.ID = %q, want %q", v.Deployment.ID(), "d-view")
+		if v.Deployment.Name() != "deployments/d-view" {
+			t.Errorf("Deployment.Name = %q, want %q", v.Deployment.Name(), "deployments/d-view")
 		}
 		if v.Deployment.FulfillmentID() != f.ID() {
 			t.Errorf("Deployment.FulfillmentID = %q, want %q", v.Deployment.FulfillmentID(), f.ID())
@@ -167,19 +167,19 @@ func Run(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 
 		for _, pair := range []struct {
-			depID string
-			fid   domain.FulfillmentID
+			depName domain.ResourceName
+			fid     domain.FulfillmentID
 		}{
-			{"d-list-a", "f-list-a"},
-			{"d-list-b", "f-list-b"},
+			{"deployments/d-list-a", "f-list-a"},
+			{"deployments/d-list-b", "f-list-b"},
 		} {
 			f := sampleFulfillment(pair.fid)
 			if err := tx.Fulfillments().Create(ctx, f); err != nil {
 				t.Fatalf("Create fulfillment %q: %v", pair.fid, err)
 			}
-			d := sampleThinDeployment(domain.DeploymentID(pair.depID), pair.fid)
+			d := sampleThinDeployment(pair.depName, pair.fid)
 			if err := tx.Deployments().Create(ctx, d); err != nil {
-				t.Fatalf("Create deployment %q: %v", pair.depID, err)
+				t.Fatalf("Create deployment %q: %v", pair.depName, err)
 			}
 		}
 
@@ -190,14 +190,14 @@ func Run(t *testing.T, factory Factory) {
 		if len(views) != 2 {
 			t.Fatalf("ListView len = %d, want 2", len(views))
 		}
-		seen := map[domain.DeploymentID]bool{}
+		seen := map[domain.ResourceName]bool{}
 		for _, v := range views {
-			seen[v.Deployment.ID()] = true
+			seen[v.Deployment.Name()] = true
 			if v.Deployment.FulfillmentID() != v.Fulfillment.ID() {
-				t.Errorf("deployment %s: FulfillmentID %q != Fulfillment.ID %q", v.Deployment.ID(), v.Deployment.FulfillmentID(), v.Fulfillment.ID())
+				t.Errorf("deployment %s: FulfillmentID %q != Fulfillment.ID %q", v.Deployment.Name(), v.Deployment.FulfillmentID(), v.Fulfillment.ID())
 			}
 		}
-		for _, id := range []domain.DeploymentID{"d-list-a", "d-list-b"} {
+		for _, id := range []domain.ResourceName{"deployments/d-list-a", "deployments/d-list-b"} {
 			if !seen[id] {
 				t.Errorf("ListView missing deployment %q", id)
 			}
@@ -212,15 +212,15 @@ func Run(t *testing.T, factory Factory) {
 		if err := tx.Fulfillments().Create(ctx, sampleFulfillment(fid)); err != nil {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
-		d := sampleThinDeployment("d-del", fid)
+		d := sampleThinDeployment("deployments/d-del", fid)
 		repo := tx.Deployments()
 		if err := repo.Create(ctx, d); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if err := repo.Delete(ctx, "d-del"); err != nil {
+		if err := repo.Delete(ctx, "deployments/d-del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		_, err := repo.Get(ctx, "d-del")
+		_, err := repo.Get(ctx, "deployments/d-del")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get after Delete: got %v, want ErrNotFound", err)
 		}
@@ -230,7 +230,7 @@ func Run(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		err := tx.Deployments().Delete(ctx, "nonexistent-deployment")
+		err := tx.Deployments().Delete(ctx, "deployments/nonexistent-deployment")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Delete: got %v, want ErrNotFound", err)
 		}

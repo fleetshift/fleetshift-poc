@@ -19,7 +19,7 @@ import "context"
 type DeleteObserver interface {
 	// DeleteDeploymentStarted is called when a
 	// [DeleteDeploymentWorkflowSpec] run begins.
-	DeleteDeploymentStarted(ctx context.Context, id DeploymentID) (context.Context, DeleteProbe)
+	DeleteDeploymentStarted(ctx context.Context, name ResourceName) (context.Context, DeleteProbe)
 
 	// DeleteManagedResourceStarted is called when a
 	// [DeleteManagedResourceWorkflowSpec] run begins.
@@ -35,7 +35,7 @@ type DeleteObserver interface {
 
 	// MutateDeploymentStarted is called at the start of the deployment
 	// mutate-to-deleting activity.
-	MutateDeploymentStarted(ctx context.Context, id DeploymentID) (context.Context, MutateDeploymentProbe)
+	MutateDeploymentStarted(ctx context.Context, name ResourceName) (context.Context, MutateDeploymentProbe)
 
 	// MutateManagedResourceStarted is called at the start of the
 	// managed-resource mutate-to-deleting activity. This activity-level
@@ -119,7 +119,7 @@ type MutateManagedResourceProbe interface {
 // NoOpDeleteObserver is a [DeleteObserver] that returns no-op probes.
 type NoOpDeleteObserver struct{}
 
-func (NoOpDeleteObserver) DeleteDeploymentStarted(ctx context.Context, _ DeploymentID) (context.Context, DeleteProbe) {
+func (NoOpDeleteObserver) DeleteDeploymentStarted(ctx context.Context, _ ResourceName) (context.Context, DeleteProbe) {
 	return ctx, NoOpDeleteProbe{}
 }
 
@@ -135,7 +135,7 @@ func (NoOpDeleteObserver) ManagedResourceCleanupStarted(ctx context.Context, _ D
 	return ctx, NoOpDeleteCleanupProbe{}
 }
 
-func (NoOpDeleteObserver) MutateDeploymentStarted(ctx context.Context, _ DeploymentID) (context.Context, MutateDeploymentProbe) {
+func (NoOpDeleteObserver) MutateDeploymentStarted(ctx context.Context, _ ResourceName) (context.Context, MutateDeploymentProbe) {
 	return ctx, NoOpMutateDeploymentProbe{}
 }
 

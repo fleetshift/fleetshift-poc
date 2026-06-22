@@ -29,7 +29,7 @@ func TestStrategyFactory_ManifestStrategy_ManagedResource(t *testing.T) {
 	factory := domain.StrategyFactory{Store: store}
 	spec := domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyManagedResource,
-		IntentRef: domain.IntentRef{ResourceType: "clusters", Name: "prod", Version: 1},
+		IntentRef: domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "prod", Version: 1},
 	}
 
 	s, err := factory.ManifestStrategy(spec)
@@ -40,8 +40,8 @@ func TestStrategyFactory_ManifestStrategy_ManagedResource(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ManagedResourceManifestStrategy, got %T", s)
 	}
-	if mrs.Ref.ResourceType != "clusters" {
-		t.Errorf("Ref.ResourceType = %q, want %q", mrs.Ref.ResourceType, "clusters")
+	if mrs.Ref.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("Ref.ResourceType = %q, want %q", mrs.Ref.ResourceType, "test.fleetshift.io/Cluster")
 	}
 }
 

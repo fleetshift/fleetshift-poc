@@ -23,23 +23,24 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-1", "clusters", "clusters/prod", map[string]string{"env": "prod"}, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/prod"), map[string]string{"env": "prod"}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if got.UID() != "uid-1" {
-			t.Errorf("UID = %q, want uid-1", got.UID())
+		if got.UID() != uid {
+			t.Errorf("UID = %q, want %q", got.UID(), uid)
 		}
-		if got.CollectionID() != "clusters" {
-			t.Errorf("CollectionID = %q, want clusters", got.CollectionID())
+		if got.Collection() != domain.CollectionName("clusters") {
+			t.Errorf("Collection = %q, want clusters", got.Collection())
 		}
-		if got.RelativeName() != "clusters/prod" {
-			t.Errorf("RelativeName = %q, want clusters/prod", got.RelativeName())
+		if got.Name() != domain.ResourceName("clusters/prod") {
+			t.Errorf("Name = %q, want clusters/prod", got.Name())
 		}
 		if got.Labels()["env"] != "prod" {
 			t.Errorf("Labels[env] = %q, want prod", got.Labels()["env"])
@@ -53,17 +54,18 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-2", "clusters", "clusters/staging", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/staging"), nil, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.GetByName(ctx, "clusters/staging")
+		got, err := repo.GetByName(ctx, domain.ResourceName("clusters/staging"))
 		if err != nil {
 			t.Fatalf("GetByName: %v", err)
 		}
-		if got.UID() != "uid-2" {
-			t.Errorf("UID = %q, want uid-2", got.UID())
+		if got.UID() != uid {
+			t.Errorf("UID = %q, want %q", got.UID(), uid)
 		}
 	})
 
@@ -71,12 +73,14 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r1 := domain.NewPlatformResource("uid-a", "clusters", "clusters/dup", nil, now)
+		uid1 := domain.NewPlatformResourceUID()
+		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/dup"), nil, now)
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create first: %v", err)
 		}
 
-		r2 := domain.NewPlatformResource("uid-b", "clusters", "clusters/dup", nil, now)
+		uid2 := domain.NewPlatformResourceUID()
+		r2 := domain.NewPlatformResource(uid2, domain.ResourceName("clusters/dup"), nil, now)
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("got %v, want ErrAlreadyExists", err)
@@ -87,28 +91,32 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		if err := repo.Create(ctx, domain.NewPlatformResource("uid-l1", "clusters", "clusters/a", nil, now)); err != nil {
+		uidL1 := domain.NewPlatformResourceUID()
+		uidL2 := domain.NewPlatformResourceUID()
+		uidL3 := domain.NewPlatformResourceUID()
+
+		if err := repo.Create(ctx, domain.NewPlatformResource(uidL1, domain.ResourceName("clusters/a"), nil, now)); err != nil {
 			t.Fatalf("Create a: %v", err)
 		}
-		if err := repo.Create(ctx, domain.NewPlatformResource("uid-l2", "clusters", "clusters/b", nil, now)); err != nil {
+		if err := repo.Create(ctx, domain.NewPlatformResource(uidL2, domain.ResourceName("clusters/b"), nil, now)); err != nil {
 			t.Fatalf("Create b: %v", err)
 		}
-		if err := repo.Create(ctx, domain.NewPlatformResource("uid-l3", "nodes", "nodes/n1", nil, now)); err != nil {
+		if err := repo.Create(ctx, domain.NewPlatformResource(uidL3, domain.ResourceName("nodes/n1"), nil, now)); err != nil {
 			t.Fatalf("Create n1: %v", err)
 		}
 
-		got, err := repo.ListByCollection(ctx, "clusters")
+		got, err := repo.ListByCollection(ctx, domain.CollectionName("clusters"))
 		if err != nil {
 			t.Fatalf("List: %v", err)
 		}
 		if len(got) != 2 {
 			t.Fatalf("len = %d, want 2", len(got))
 		}
-		if got[0].RelativeName() != "clusters/a" {
-			t.Errorf("got[0].RelativeName = %q, want clusters/a", got[0].RelativeName())
+		if got[0].Name() != domain.ResourceName("clusters/a") {
+			t.Errorf("got[0].Name = %q, want clusters/a", got[0].Name())
 		}
-		if got[1].RelativeName() != "clusters/b" {
-			t.Errorf("got[1].RelativeName = %q, want clusters/b", got[1].RelativeName())
+		if got[1].Name() != domain.ResourceName("clusters/b") {
+			t.Errorf("got[1].Name = %q, want clusters/b", got[1].Name())
 		}
 	})
 
@@ -116,7 +124,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-u1", "clusters", "clusters/labelled", map[string]string{"a": "1"}, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/labelled"), map[string]string{"a": "1"}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
@@ -127,7 +136,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Update: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-u1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -149,7 +158,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-r1", "clusters", "clusters/multi", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/multi"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName: "kind.fleetshift.io",
 			Version:     "v1alpha1",
@@ -167,7 +177,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-r1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -180,7 +190,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-pu1", "clusters", "clusters/update-rep", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/update-rep"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName: "kind.fleetshift.io",
 			Version:     "v1alpha1",
@@ -191,7 +202,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		loaded, err := repo.Get(ctx, "uid-pu1")
+		loaded, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -207,7 +218,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Update: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-pu1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get after update: %v", err)
 		}
@@ -227,7 +238,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-ts1", "clusters", "clusters/tomb", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/tomb"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName: "kind.fleetshift.io",
 			Version:     "v1",
@@ -237,7 +249,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		loaded, err := repo.Get(ctx, "uid-ts1")
+		loaded, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -250,7 +262,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Update: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-ts1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get after tombstone: %v", err)
 		}
@@ -272,7 +284,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-a1", "clusters", "clusters/aliased", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/aliased"), nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "my-proj-123")
 		if err := r.AddAlias(alias); err != nil {
 			t.Fatalf("AddAlias: %v", err)
@@ -282,15 +295,15 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		uid, err := repo.ResolveAlias(ctx, alias)
+		resolvedUID, err := repo.ResolveAlias(ctx, alias)
 		if err != nil {
 			t.Fatalf("ResolveAlias: %v", err)
 		}
-		if uid != "uid-a1" {
-			t.Errorf("resolved UID = %q, want uid-a1", uid)
+		if resolvedUID != uid {
+			t.Errorf("resolved UID = %q, want %q", resolvedUID, uid)
 		}
 
-		got, err := repo.Get(ctx, "uid-a1")
+		got, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -303,7 +316,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r := domain.NewPlatformResource("uid-ai1", "clusters", "clusters/alias-idem", nil, now)
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/alias-idem"), nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "proj-1")
 		if err := r.AddAlias(alias); err != nil {
 			t.Fatalf("AddAlias: %v", err)
@@ -312,7 +326,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		loaded, err := repo.Get(ctx, "uid-ai1")
+		loaded, err := repo.Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -328,7 +342,8 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r1 := domain.NewPlatformResource("uid-ac1", "clusters", "clusters/ac1", nil, now)
+		uid1 := domain.NewPlatformResourceUID()
+		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/ac1"), nil, now)
 		alias, _ := domain.NewAlias("gcp", "project_id", "contested")
 		if err := r1.AddAlias(alias); err != nil {
 			t.Fatalf("AddAlias r1: %v", err)
@@ -337,7 +352,8 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create r1: %v", err)
 		}
 
-		r2 := domain.NewPlatformResource("uid-ac2", "clusters", "clusters/ac2", nil, now)
+		uid2 := domain.NewPlatformResourceUID()
+		r2 := domain.NewPlatformResource(uid2, domain.ResourceName("clusters/ac2"), nil, now)
 		if err := r2.AddAlias(alias); err != nil {
 			t.Fatalf("AddAlias r2: %v", err)
 		}
@@ -351,16 +367,19 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		r1 := domain.NewPlatformResource("uid-rel1", "clusters", "clusters/rel1", nil, now)
-		r2 := domain.NewPlatformResource("uid-rel2", "nodes", "nodes/rel2", nil, now)
+		uid1 := domain.NewPlatformResourceUID()
+		uid2 := domain.NewPlatformResourceUID()
+
+		r2 := domain.NewPlatformResource(uid2, domain.ResourceName("nodes/rel2"), nil, now)
 		if err := repo.Create(ctx, r2); err != nil {
 			t.Fatalf("Create r2: %v", err)
 		}
 
+		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/rel1"), nil, now)
 		_ = r1.AddRelationship(domain.ResourceRelationship{
-			SourceUID:     "uid-rel1",
+			SourceUID:     uid1,
 			Type:          "runs-on",
-			TargetUID:     "uid-rel2",
+			TargetUID:     uid2,
 			SourceService: "kind.fleetshift.io",
 			CreatedAt:     now,
 		})
@@ -368,7 +387,7 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create r1: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "uid-rel1")
+		got, err := repo.Get(ctx, uid1)
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -379,8 +398,8 @@ func Run(t *testing.T, factory Factory) {
 		if rels[0].Type != "runs-on" {
 			t.Errorf("Type = %q, want runs-on", rels[0].Type)
 		}
-		if rels[0].TargetUID != "uid-rel2" {
-			t.Errorf("TargetUID = %q, want uid-rel2", rels[0].TargetUID)
+		if rels[0].TargetUID != uid2 {
+			t.Errorf("TargetUID = %q, want %q", rels[0].TargetUID, uid2)
 		}
 	})
 
@@ -388,12 +407,13 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
-		_, err := repo.Get(ctx, "missing")
+		missingUID := domain.NewPlatformResourceUID()
+		_, err := repo.Get(ctx, missingUID)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("Get: got %v, want ErrNotFound", err)
 		}
 
-		_, err = repo.GetByName(ctx, "clusters/missing")
+		_, err = repo.GetByName(ctx, domain.ResourceName("clusters/missing"))
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("GetByName: got %v, want ErrNotFound", err)
 		}

@@ -115,7 +115,7 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
   "manifest_strategy": {
     "type": "MANAGED_RESOURCE",
     "managed_resource": {
-      "resource_type": "api.kind.cluster",
+      "resource_type": "kind.fleetshift.io/Cluster",
       "resource_name": "clusters/dev-cluster"
     }
   },
@@ -135,7 +135,7 @@ The platform mechanically derives a Fulfillment from the managed resource. Becau
 }
 ```
 
-- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document as a `Manifest` with `ResourceType` matching the managed resource type. The addon interprets it — in this case, provisioning the requested cluster with the specified configuration.
+- **Manifest strategy**: `MANAGED_RESOURCE` is a reference to the stored resource spec. When the platform delivers to the addon, it sends the full managed resource document as a `Manifest` with a `ManifestType` that the addon declares it accepts. Manifest types are opaque dispatch labels decoupled from the API resource type — they identify what kind of payload a manifest carries so agents can route and validate without understanding manifest content. The addon interprets it — in this case, provisioning the requested cluster with the specified configuration.
 - **Placement**: a single static target — the addon's own delivery endpoint. The addon registered this target during capability registration. Since the addon is a delivery agent for its own target type, it receives the managed resource through the standard delivery channel.
 - **Rollout**: immediate. A single managed resource means a single target means a single delivery — rollout strategy is degenerate.
 - **Provenance**: derived from the original managed resource's signature. A verifier can chain from the Fulfillment's provenance back to the user's signed resource intent. The `managed_resource_ref` links the two, and the derivation rule is mechanically fixed (the addon is always the target), so a verifier can confirm the Fulfillment was correctly derived without trusting the platform.
@@ -154,7 +154,7 @@ domain.AddonDescriptor{
     Name: "Kind Cluster Provider",
     Capabilities: []domain.Capability{
         domain.DeliveryCapability{TargetType: "kind"},
-        domain.ManagedResourceCapability{ResourceType: "api.kind.cluster"},
+        domain.ManagedResourceCapability{ResourceType: "kind.fleetshift.io/Cluster"},
     },
 }
 ```
@@ -163,7 +163,7 @@ Then at connect time, the workload provides the full schema:
 
 ```go
 domain.ManagedResourceSchema{
-    ResourceType: "api.kind.cluster",
+    ResourceType: "kind.fleetshift.io/Cluster",
     ServiceName:  "kind.fleetshift.io",
     Singular:     "Cluster",
     Plural:       "clusters",
@@ -195,7 +195,7 @@ Managed resources use the same signed input model as deployments. The attestatio
 
 The fulfillment relation — addon-signed evidence describing how the resource maps to a fulfillment — is external evidence in the `VerificationBundle`, not part of what the user signs. Relation types are platform-defined — the verifier has built-in logic for each — so they use strong typing rather than an open attributes pattern.
 
-The first relation type is `RegisteredSelfTarget`: 1:1 manifest delivery to the addon itself. The addon signs over `{relation_type, resource_type}` to claim: "I own resources of this type, and fulfillments derived from them target me directly." At verification time, the verifier looks up the matching relation from the bundle by `(addon_id, resource_type)`, verifies the relation's signature cryptographically and against the trust store (the signer's key must be recognised by the claimed trust anchor), checks consistency (relation resource type matches content resource type, relation signer matches the declared addon), and derives constraints: placement is static to the addon, manifests must match the user's signed spec (the content is deterministic — like `inline` for deployments). Future relation types (CEL-based derivation, multi-target mappings) add to the typed union, each with platform-defined verification logic.
+The first relation type is `RegisteredSelfTarget`: 1:1 manifest delivery to the addon itself. The addon signs over `{relation_type, resource_type, manifest_type}` to claim: "I own resources of this type, and fulfillments derived from them target me directly with this manifest type." At verification time, the verifier looks up the matching relation from the bundle by `(addon_id, resource_type)`, verifies the relation's signature cryptographically and against the trust store (the signer's key must be recognised by the claimed trust anchor), checks consistency (relation resource type matches content resource type, relation signer matches the declared addon), and derives constraints: placement is static to the addon, manifests use the declared manifest type, and content must match the user's signed spec (the content is deterministic — like `inline` for deployments). Future relation types (CEL-based derivation, multi-target mappings) add to the typed union, each with platform-defined verification logic.
 
 Additionally, we expect addons to eventually produce other platform objects as part of delivery — a managed resource may trigger related resource or deployment creations. In this case, there needs to be trusted evidence that constrains the resulting artifacts within the user's original resource intent. The fulfillment relation is a plausible foundation: a verifier could test that the original intent was to a resource owned by this addon, that the addon was an appropriate target based on its signed relation, and that resulting manifests and placement are signed by the authorized addon. Whether the current relation model is sufficient for this multi-artifact case, or whether it needs additional evidence (e.g. an addon-signed production manifest linking the managed resource to the artifacts it spawns), is an open question.
 

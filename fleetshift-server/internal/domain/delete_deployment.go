@@ -10,7 +10,7 @@ import (
 // carries fresh caller auth so retried deletes use current
 // credentials rather than stale create-time auth.
 type DeleteDeploymentInput struct {
-	ID   DeploymentID
+	Name ResourceName
 	Auth DeliveryAuth
 }
 
@@ -47,7 +47,7 @@ func (s *DeleteDeploymentWorkflowSpec) Name() string { return "delete-deployment
 // cannot accidentally clear Deleting and effectively "undelete" later.
 func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeleteDeploymentInput, deploymentMutationResult] {
 	return NewActivity("mutate-to-deleting", func(ctx context.Context, in DeleteDeploymentInput) (deploymentMutationResult, error) {
-		ctx, probe := s.deleteObserver().MutateDeploymentStarted(ctx, in.ID)
+		ctx, probe := s.deleteObserver().MutateDeploymentStarted(ctx, in.Name)
 		defer probe.End()
 
 		tx, err := s.Store.Begin(ctx)
@@ -57,7 +57,7 @@ func (s *DeleteDeploymentWorkflowSpec) MutateToDeleting() Activity[DeleteDeploym
 		}
 		defer tx.Rollback()
 
-		dep, err := tx.Deployments().Get(ctx, in.ID)
+		dep, err := tx.Deployments().Get(ctx, in.Name)
 		if err != nil {
 			probe.Error(err)
 			return deploymentMutationResult{}, err
@@ -128,7 +128,7 @@ func (s *DeleteDeploymentWorkflowSpec) StartCleanup() Activity[DeleteDeploymentC
 // immediately; the actual row deletion happens asynchronously in the
 // cleanup workflow.
 func (s *DeleteDeploymentWorkflowSpec) Run(record Record, input DeleteDeploymentInput) (DeploymentView, error) {
-	_, probe := s.deleteObserver().DeleteDeploymentStarted(record.Context(), input.ID)
+	_, probe := s.deleteObserver().DeleteDeploymentStarted(record.Context(), input.Name)
 	defer probe.End()
 
 	mr, err := RunActivity(record, s.MutateToDeleting(), input)
@@ -139,7 +139,7 @@ func (s *DeleteDeploymentWorkflowSpec) Run(record Record, input DeleteDeployment
 	probe.Mutated(mr.FulfillmentID, mr.MyGen)
 
 	if _, err := RunActivity(record, s.StartCleanup(), DeleteDeploymentCleanupInput{
-		DeploymentID:  input.ID,
+		Name:          input.Name,
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
 		probe.Error(err)

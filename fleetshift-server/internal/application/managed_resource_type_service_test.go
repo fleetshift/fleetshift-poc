@@ -20,7 +20,7 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 
 	// Create
 	def, err := svc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
@@ -31,19 +31,19 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
-	if def.ResourceType != "clusters" {
-		t.Errorf("ResourceType = %q, want %q", def.ResourceType, "clusters")
+	if def.ResourceType != "test.fleetshift.io/Cluster" {
+		t.Errorf("ResourceType = %q, want %q", def.ResourceType, "test.fleetshift.io/Cluster")
 	}
 	if def.CreatedAt.IsZero() {
 		t.Error("CreatedAt is zero")
 	}
 
 	// Get
-	got, err := svc.Get(ctx, "clusters")
+	got, err := svc.Get(ctx, "test.fleetshift.io/Cluster")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.ResourceType != "clusters" {
+	if got.ResourceType != "test.fleetshift.io/Cluster" {
 		t.Errorf("Get: ResourceType = %q", got.ResourceType)
 	}
 	rst, ok := got.Relation.(domain.RegisteredSelfTarget)
@@ -64,10 +64,10 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	}
 
 	// Delete
-	if err := svc.Delete(ctx, "clusters"); err != nil {
+	if err := svc.Delete(ctx, "test.fleetshift.io/Cluster"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
-	_, err = svc.Get(ctx, "clusters")
+	_, err = svc.Get(ctx, "test.fleetshift.io/Cluster")
 	if !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 	}
@@ -83,7 +83,7 @@ func TestManagedResourceTypeService_CreateMissingFields(t *testing.T) {
 	}
 
 	_, err = svc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "x",
+		ResourceType: "test.fleetshift.io/X",
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("Create no relation: got %v, want ErrInvalidArgument", err)
@@ -95,7 +95,7 @@ func TestManagedResourceTypeService_CreateDuplicate(t *testing.T) {
 	svc := newTypeService(t)
 
 	in := application.CreateTypeInput{
-		ResourceType: "clusters",
+		ResourceType: "test.fleetshift.io/Cluster",
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon"},
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "s", Issuer: "i"},

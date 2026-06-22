@@ -11,7 +11,7 @@ import (
 // resume a paused deployment. It intentionally excludes transport-only
 // state (full AuthorizationContext, request metadata, peer addresses).
 type ResumeDeploymentInput struct {
-	ID                 DeploymentID
+	Name               ResourceName
 	Auth               DeliveryAuth // fresh caller credentials for the resumed deployment
 	UserSignature      []byte       // ECDSA-P256-SHA256 re-signing material; empty for unsigned
 	ValidUntil         time.Time    // client-supplied attestation expiry; zero for unsigned
@@ -45,7 +45,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 		}
 		defer tx.Rollback()
 
-		dep, err := tx.Deployments().Get(ctx, in.ID)
+		dep, err := tx.Deployments().Get(ctx, in.Name)
 		if err != nil {
 			return deploymentMutationResult{}, err
 		}
@@ -90,7 +90,7 @@ func (s *ResumeDeploymentWorkflowSpec) MutateToResumed() Activity[ResumeDeployme
 			}
 			prov, err = s.ProvenanceSvc.BuildDeploymentProvenance(
 				ctx, tx.SignerEnrollments(), in.Auth.Caller,
-				dep.ID(), f.ManifestStrategy(), f.PlacementStrategy(),
+				dep.Name(), f.ManifestStrategy(), f.PlacementStrategy(),
 				provenanceGen, in.UserSignature, in.ValidUntil,
 			)
 			if err != nil {

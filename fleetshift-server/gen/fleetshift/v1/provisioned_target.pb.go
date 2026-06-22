@@ -32,7 +32,7 @@ type ProvisionedTarget struct {
 	Name                  string                 `protobuf:"bytes,3,opt,name=name,proto3" json:"name,omitempty"`
 	Labels                map[string]string      `protobuf:"bytes,4,rep,name=labels,proto3" json:"labels,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
 	Properties            map[string]string      `protobuf:"bytes,5,rep,name=properties,proto3" json:"properties,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"`
-	AcceptedResourceTypes []string               `protobuf:"bytes,6,rep,name=accepted_resource_types,json=acceptedResourceTypes,proto3" json:"accepted_resource_types,omitempty"`
+	AcceptedManifestTypes []string               `protobuf:"bytes,6,rep,name=accepted_manifest_types,json=acceptedManifestTypes,proto3" json:"accepted_manifest_types,omitempty"`
 	unknownFields         protoimpl.UnknownFields
 	sizeCache             protoimpl.SizeCache
 }
@@ -102,9 +102,9 @@ func (x *ProvisionedTarget) GetProperties() map[string]string {
 	return nil
 }
 
-func (x *ProvisionedTarget) GetAcceptedResourceTypes() []string {
+func (x *ProvisionedTarget) GetAcceptedManifestTypes() []string {
 	if x != nil {
-		return x.AcceptedResourceTypes
+		return x.AcceptedManifestTypes
 	}
 	return nil
 }
@@ -123,7 +123,7 @@ const file_fleetshift_v1_provisioned_target_proto_rawDesc = "" +
 	"\n" +
 	"properties\x18\x05 \x03(\v20.fleetshift.v1.ProvisionedTarget.PropertiesEntryR\n" +
 	"properties\x126\n" +
-	"\x17accepted_resource_types\x18\x06 \x03(\tR\x15acceptedResourceTypes\x1a9\n" +
+	"\x17accepted_manifest_types\x18\x06 \x03(\tR\x15acceptedManifestTypes\x1a9\n" +
 	"\vLabelsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\x1a=\n" +

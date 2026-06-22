@@ -25,8 +25,12 @@ import (
 const TargetType domain.TargetType = "kind"
 
 // ClusterResourceType is the [domain.ResourceType] for kind cluster
-// specifications.
-const ClusterResourceType domain.ResourceType = "api.kind.cluster"
+// specifications (used in the managed resource system).
+const ClusterResourceType domain.ResourceType = "kind.fleetshift.io/Cluster"
+
+// ClusterManifestType is the [domain.ManifestType] for kind cluster
+// manifests delivered to the kind agent.
+const ClusterManifestType domain.ManifestType = "api.kind.cluster"
 
 // ClusterSpec is the canonical spec for a kind cluster resource. It
 // mirrors the proto KindClusterSpec message and is used by both the
@@ -176,8 +180,8 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 
 	var clusterManifests []domain.Manifest
 	for _, m := range manifests {
-		switch m.ResourceType {
-		case domain.TrustBundleResourceType:
+		switch m.ManifestType {
+		case domain.TrustBundleManifestType:
 			if err := a.storeTrustBundle(m); err != nil {
 				a.inflight.Delete(deliveryID)
 				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{

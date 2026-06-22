@@ -16,19 +16,18 @@ func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 	ctx := context.Background()
 
 	pr, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "prod-us-east-1",
-		Labels:       map[string]string{"env": "prod", "region": "us-east-1"},
+		Name:   "clusters/prod-us-east-1",
+		Labels: map[string]string{"env": "prod", "region": "us-east-1"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if pr.CollectionID() != "clusters" {
-		t.Errorf("CollectionID = %q, want %q", pr.CollectionID(), "clusters")
+	if pr.Collection() != "clusters" {
+		t.Errorf("Collection = %q, want %q", pr.Collection(), "clusters")
 	}
-	if pr.RelativeName() != "clusters/prod-us-east-1" {
-		t.Errorf("RelativeName = %q, want %q", pr.RelativeName(), "clusters/prod-us-east-1")
+	if pr.Name() != "clusters/prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", pr.Name(), "clusters/prod-us-east-1")
 	}
 	if pr.Labels()["env"] != "prod" {
 		t.Errorf("Labels[env] = %q, want %q", pr.Labels()["env"], "prod")
@@ -47,18 +46,16 @@ func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "prod-us-east-1",
-		Labels:       map[string]string{"env": "prod"},
+		Name:   "clusters/prod-us-east-1",
+		Labels: map[string]string{"env": "prod"},
 	})
 	if err != nil {
 		t.Fatalf("first Create: %v", err)
 	}
 
 	_, err = svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "prod-us-east-1",
-		Labels:       map[string]string{"env": "staging"},
+		Name:   "clusters/prod-us-east-1",
+		Labels: map[string]string{"env": "staging"},
 	})
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("second Create err = %v, want %v", err, domain.ErrAlreadyExists)
@@ -71,20 +68,18 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	ctx := context.Background()
 
 	pr, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "prod",
-		Labels:       map[string]string{"env": "prod"},
+		Name:   "clusters/prod",
+		Labels: map[string]string{"env": "prod"},
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	// Attach a representation directly via the domain.
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	fetched, err := tx.ResourceIdentities().GetByName(ctx, pr.RelativeName())
+	fetched, err := tx.ResourceIdentities().GetByName(ctx, pr.Name())
 	if err != nil {
 		tx.Rollback()
 		t.Fatalf("GetByName: %v", err)
@@ -106,8 +101,7 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 		t.Fatalf("Commit: %v", err)
 	}
 
-	// Get via the service and verify representations.
-	got, err := svc.Get(ctx, "clusters", "prod")
+	got, err := svc.Get(ctx, "clusters/prod")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
@@ -132,26 +126,21 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
-	// Create two resources in the same collection.
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "alpha",
+		Name: "clusters/alpha",
 	})
 	if err != nil {
 		t.Fatalf("Create alpha: %v", err)
 	}
 	_, err = svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "beta",
+		Name: "clusters/beta",
 	})
 	if err != nil {
 		t.Fatalf("Create beta: %v", err)
 	}
 
-	// Create one in a different collection to verify isolation.
 	_, err = svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "namespaces",
-		ID:           "default",
+		Name: "namespaces/default",
 	})
 	if err != nil {
 		t.Fatalf("Create namespaces/default: %v", err)
@@ -165,16 +154,15 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 		t.Fatalf("List len = %d, want 2", len(resources))
 	}
 
-	// Verify stable ordering (alphabetical by relative name).
-	names := make([]domain.RelativeResourceName, len(resources))
+	names := make([]domain.ResourceName, len(resources))
 	for i, r := range resources {
-		names[i] = r.RelativeName()
+		names[i] = r.Name()
 	}
 	if names[0] != "clusters/alpha" {
-		t.Errorf("resources[0].RelativeName = %q, want %q", names[0], "clusters/alpha")
+		t.Errorf("resources[0].Name = %q, want %q", names[0], "clusters/alpha")
 	}
 	if names[1] != "clusters/beta" {
-		t.Errorf("resources[1].RelativeName = %q, want %q", names[1], "clusters/beta")
+		t.Errorf("resources[1].Name = %q, want %q", names[1], "clusters/beta")
 	}
 }
 
@@ -184,14 +172,13 @@ func TestPlatformResourceService_DeleteSoftDeletes(t *testing.T) {
 	ctx := context.Background()
 
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		CollectionID: "clusters",
-		ID:           "to-delete",
+		Name: "clusters/to-delete",
 	})
 	if err != nil {
 		t.Fatalf("Create: %v", err)
 	}
 
-	deleted, err := svc.Delete(ctx, "clusters", "to-delete")
+	deleted, err := svc.Delete(ctx, "clusters/to-delete")
 	if err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
@@ -199,13 +186,12 @@ func TestPlatformResourceService_DeleteSoftDeletes(t *testing.T) {
 		t.Fatal("DeletedAt is nil after soft-delete, want non-nil")
 	}
 
-	// Verify the resource no longer appears in List.
 	resources, err := svc.List(ctx, "clusters")
 	if err != nil {
 		t.Fatalf("List after delete: %v", err)
 	}
 	for _, r := range resources {
-		if r.RelativeName() == "clusters/to-delete" {
+		if r.Name() == "clusters/to-delete" {
 			t.Error("deleted resource still appears in List")
 		}
 	}

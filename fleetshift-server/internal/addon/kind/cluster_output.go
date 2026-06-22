@@ -60,7 +60,7 @@ func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 		Type:                  KubernetesTargetType,
 		Name:                  o.Name,
 		Properties:            props,
-		AcceptedResourceTypes: []domain.ResourceType{kubernetes.ManifestResourceType},
+		AcceptedManifestTypes: []domain.ManifestType{kubernetes.ManifestManifestType},
 	}
 }
 

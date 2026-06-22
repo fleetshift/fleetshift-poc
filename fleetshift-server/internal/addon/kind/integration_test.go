@@ -112,11 +112,11 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	_, err = deploySvc.Create(ctx, domain.CreateDeploymentInput{
-		ID: "kind-deployment",
+		Name: "deployments/kind-deployment",
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
-				ResourceType: kindaddon.ClusterResourceType,
+				ManifestType: kindaddon.ClusterManifestType,
 				Raw:          json.RawMessage(configBytes),
 			}},
 		},
@@ -129,7 +129,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	view := awaitState(ctx, t, store, "kind-deployment", domain.FulfillmentStateActive)
+	view := awaitState(ctx, t, store, "deployments/kind-deployment", domain.FulfillmentStateActive)
 	if len(view.Fulfillment.ResolvedTargets()) != 1 {
 		t.Fatalf("ResolvedTargets: got %d, want 1", len(view.Fulfillment.ResolvedTargets()))
 	}
@@ -203,7 +203,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
-			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		}))
 		_ = tx.Commit()
 	}
@@ -211,7 +211,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	// --- Step 3: Register managed resource type ---
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local", ManifestType: kindaddon.ClusterManifestType},
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",
 		CollectionID:   "clusters",
@@ -246,21 +246,21 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	}
 }
 
-func awaitState(ctx context.Context, t *testing.T, store domain.Store, id domain.DeploymentID, want domain.FulfillmentState) domain.DeploymentView {
+func awaitState(ctx context.Context, t *testing.T, store domain.Store, name domain.ResourceName, want domain.FulfillmentState) domain.DeploymentView {
 	t.Helper()
 	for {
 		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		view, err := tx.Deployments().GetView(ctx, id)
+		view, err := tx.Deployments().GetView(ctx, name)
 		tx.Rollback()
 		if err == nil && view.Fulfillment.State() == want {
 			return view
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for deployment %s to reach state %q", id, want)
+			t.Fatalf("timed out waiting for deployment %s to reach state %q", name, want)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

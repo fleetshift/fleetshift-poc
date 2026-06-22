@@ -77,7 +77,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1", "t2", "t3")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
@@ -91,10 +91,10 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
+		view := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
 		assertResolvedTargets(t, view.Fulfillment, "t1", "t3")
 
-		records := queryDeliveries(ctx, t, infra, "d1")
+		records := queryDeliveries(ctx, t, infra, "deployments/d1")
 		if len(records) != 2 {
 			t.Fatalf("expected 2 delivery records, got %d", len(records))
 		}
@@ -117,7 +117,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1", "t2", "t3")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -128,10 +128,10 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
+		view := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
 		assertResolvedTargets(t, view.Fulfillment, "t1", "t2", "t3")
 
-		records := queryDeliveries(ctx, t, infra, "d1")
+		records := queryDeliveries(ctx, t, infra, "deployments/d1")
 		if len(records) != 3 {
 			t.Fatalf("expected 3 delivery records, got %d", len(records))
 		}
@@ -150,7 +150,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -164,7 +164,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
+		view := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
 		assertResolvedTargets(t, view.Fulfillment, "t1", "t3")
 	})
 
@@ -177,7 +177,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -201,7 +201,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1", "t2")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -212,10 +212,10 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatal(err)
 		}
 
-		view := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
+		view := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
 		fID := view.Deployment.FulfillmentID()
 
-		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{ID: "d1"}, 1)
+		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{Name: "deployments/d1"}, 1)
 		if err != nil {
 			t.Fatalf("Start delete workflow: %v", err)
 		}
@@ -228,7 +228,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		// fulfillment rows after orchestration signals completion. Poll
 		// until the deployment is gone.
 		for {
-			_, depErr := queryDeploymentView(ctx, t, infra, "d1")
+			_, depErr := queryDeploymentView(ctx, t, infra, "deployments/d1")
 			if errors.Is(depErr, domain.ErrNotFound) {
 				break
 			}
@@ -255,7 +255,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1", "t2")
 
 		input := domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -276,9 +276,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			return
 		}
 		// Engine may be idempotent (same workflow instance ID) and return success.
-		view, err := queryDeploymentView(ctx, t, infra, "d1")
-		if err != nil || view.Deployment.ID() != "d1" {
-			t.Fatalf("second Create succeeded but deployment d1 missing or wrong: %v", err)
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d1")
+		if err != nil || view.Deployment.Name() != "deployments/d1" {
+			t.Fatalf("second Create succeeded but deployment deployments/d1 missing or wrong: %v", err)
 		}
 	})
 
@@ -294,7 +294,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -308,9 +308,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d1", 1)
 
-		view, err := queryDeploymentView(ctx, t, infra, "d1")
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d1")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -325,7 +325,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("lock should be released: ActiveWorkflowGen = %v, want nil", f.ActiveWorkflowGen())
 		}
 
-		records := queryDeliveries(ctx, t, infra, "d1")
+		records := queryDeliveries(ctx, t, infra, "deployments/d1")
 		if len(records) != 0 {
 			t.Fatalf("expected 0 delivery records, got %d", len(records))
 		}
@@ -342,7 +342,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d-outputs",
+			Name: "deployments/d-outputs",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}},
@@ -356,7 +356,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitDeploymentState(ctx, t, infra, "d-outputs", domain.FulfillmentStateActive)
+		awaitDeploymentState(ctx, t, infra, "deployments/d-outputs", domain.FulfillmentStateActive)
 
 		tx, err := infra.Store.BeginReadOnly(ctx)
 		if err != nil {
@@ -397,7 +397,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1", "t2", "t3")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -412,7 +412,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 
 		_, err = runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d2",
+			Name: "deployments/d2",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -426,14 +426,14 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create d2: %v", err)
 		}
 
-		view1 := awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
-		view2 := awaitDeploymentState(ctx, t, infra, "d2", domain.FulfillmentStateActive)
+		view1 := awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
+		view2 := awaitDeploymentState(ctx, t, infra, "deployments/d2", domain.FulfillmentStateActive)
 
 		assertResolvedTargets(t, view1.Fulfillment, "t1", "t3")
 		assertResolvedTargets(t, view2.Fulfillment, "t2")
 
-		records1 := queryDeliveries(ctx, t, infra, "d1")
-		records2 := queryDeliveries(ctx, t, infra, "d2")
+		records1 := queryDeliveries(ctx, t, infra, "deployments/d1")
+		records2 := queryDeliveries(ctx, t, infra, "deployments/d2")
 		if len(records1) != 2 {
 			t.Fatalf("d1: expected 2 delivery records, got %d", len(records1))
 		}
@@ -451,7 +451,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		registerTargets(ctx, t, infra, "t1")
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -465,8 +465,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
-		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+		awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d1", 1)
 
 		// Bump generation directly in the DB (simulating an external
 		// change source) and manually start orchestration. This test
@@ -481,7 +481,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 				t.Fatalf("Begin: %v", err)
 			}
 			defer tx.Rollback()
-			view, err := tx.Deployments().GetView(ctx, "d1")
+			view, err := tx.Deployments().GetView(ctx, "deployments/d1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -495,7 +495,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			}
 		}()
 
-		fID := fulfillmentID(ctx, t, infra, "d1")
+		fID := fulfillmentID(ctx, t, infra, "deployments/d1")
 		for {
 			_, err := wfs.Orchestration.Start(ctx, fID)
 			if err == nil {
@@ -511,9 +511,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			}
 		}
 
-		awaitObservedGeneration(ctx, t, infra, "d1", 2)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d1", 2)
 
-		view, err := queryDeploymentView(ctx, t, infra, "d1")
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d1")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -533,7 +533,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -547,11 +547,11 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitDeploymentPaused(ctx, t, infra, "d1")
-		awaitObservedGeneration(ctx, t, infra, "d1", 1)
+		awaitDeploymentPaused(ctx, t, infra, "deployments/d1")
+		awaitObservedGeneration(ctx, t, infra, "deployments/d1", 1)
 
 		exec, err := wfs.ResumeDeployment.Start(ctx, domain.ResumeDeploymentInput{
-			ID: "d1",
+			Name: "deployments/d1",
 			Auth: domain.DeliveryAuth{
 				Caller: &domain.SubjectClaims{
 					FederatedIdentity: domain.FederatedIdentity{
@@ -569,8 +569,8 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Resume workflow: %v", err)
 		}
 
-		awaitDeploymentState(ctx, t, infra, "d1", domain.FulfillmentStateActive)
-		awaitObservedGeneration(ctx, t, infra, "d1", 2)
+		awaitDeploymentState(ctx, t, infra, "deployments/d1", domain.FulfillmentStateActive)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d1", 2)
 	})
 
 	t.Run("StartOrchestration_AlreadyRunning", func(t *testing.T) {
@@ -583,7 +583,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 
 		// Seed fulfillment + deployment directly (bypassing create workflow) so
 		// there is no prior orchestration instance to race against.
-		fID := seedFulfillmentCreating(ctx, t, infra, domain.DeploymentID("dup"), domain.ManifestStrategySpec{
+		fID := seedFulfillmentCreating(ctx, t, infra, "deployments/dup", domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		}, domain.PlacementStrategySpec{
@@ -629,7 +629,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d-transient",
+			Name: "deployments/d-transient",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -643,9 +643,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitObservedGeneration(ctx, t, infra, "d-transient", 1)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d-transient", 1)
 
-		view, err := queryDeploymentView(ctx, t, infra, "d-transient")
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d-transient")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -674,7 +674,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d-terminal",
+			Name: "deployments/d-terminal",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -688,9 +688,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitObservedGeneration(ctx, t, infra, "d-terminal", 1)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d-terminal", 1)
 
-		view, err := queryDeploymentView(ctx, t, infra, "d-terminal")
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d-terminal")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -726,7 +726,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d-delretry",
+			Name: "deployments/d-delretry",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -740,9 +740,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitDeploymentState(ctx, t, infra, "d-delretry", domain.FulfillmentStateActive)
+		awaitDeploymentState(ctx, t, infra, "deployments/d-delretry", domain.FulfillmentStateActive)
 
-		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{ID: "d-delretry"}, 1)
+		exec, err := wfs.DeleteDeployment.Start(ctx, domain.DeleteDeploymentInput{Name: "deployments/d-delretry"}, 1)
 		if err != nil {
 			t.Fatalf("Start delete workflow: %v", err)
 		}
@@ -751,7 +751,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		}
 
 		for {
-			_, err := queryDeploymentView(ctx, t, infra, "d-delretry")
+			_, err := queryDeploymentView(ctx, t, infra, "deployments/d-delretry")
 			if errors.Is(err, domain.ErrNotFound) {
 				break
 			}
@@ -778,7 +778,7 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 		)
 
 		_, err := runCreateDeployment(ctx, t, wfs, domain.CreateDeploymentInput{
-			ID: "d-async-fail",
+			Name: "deployments/d-async-fail",
 			ManifestStrategy: domain.ManifestStrategySpec{
 				Type:      domain.ManifestStrategyInline,
 				Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
@@ -792,9 +792,9 @@ func Run(t *testing.T, infraFactory InfraFactory, registryFactory RegistryFactor
 			t.Fatalf("Create: %v", err)
 		}
 
-		awaitObservedGeneration(ctx, t, infra, "d-async-fail", 1)
+		awaitObservedGeneration(ctx, t, infra, "deployments/d-async-fail", 1)
 
-		view, err := queryDeploymentView(ctx, t, infra, "d-async-fail")
+		view, err := queryDeploymentView(ctx, t, infra, "deployments/d-async-fail")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -862,7 +862,7 @@ func registerTargets(ctx context.Context, t *testing.T, infra Infra, ids ...stri
 	must(t, tx.Commit())
 }
 
-func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.Generation) {
+func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id domain.ResourceName, want domain.Generation) {
 	t.Helper()
 	for {
 		tx, err := infra.Store.BeginReadOnly(ctx)
@@ -885,7 +885,7 @@ func awaitObservedGeneration(ctx context.Context, t *testing.T, infra Infra, id 
 	}
 }
 
-func awaitDeploymentPaused(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) domain.DeploymentView {
+func awaitDeploymentPaused(ctx context.Context, t *testing.T, infra Infra, id domain.ResourceName) domain.DeploymentView {
 	t.Helper()
 	for {
 		tx, err := infra.Store.BeginReadOnly(ctx)
@@ -908,7 +908,7 @@ func awaitDeploymentPaused(ctx context.Context, t *testing.T, infra Infra, id do
 	}
 }
 
-func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID, want domain.FulfillmentState) domain.DeploymentView {
+func awaitDeploymentState(ctx context.Context, t *testing.T, infra Infra, id domain.ResourceName, want domain.FulfillmentState) domain.DeploymentView {
 	t.Helper()
 	for {
 		tx, err := infra.Store.BeginReadOnly(ctx)
@@ -951,16 +951,16 @@ func assertResolvedTargets(t *testing.T, ful domain.Fulfillment, expectedIDs ...
 	}
 }
 
-func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID) []domain.Delivery {
+func queryDeliveries(ctx context.Context, t *testing.T, infra Infra, depName domain.ResourceName) []domain.Delivery {
 	t.Helper()
 	tx, err := infra.Store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("Begin: %v", err)
 	}
 	defer tx.Rollback()
-	view, err := tx.Deployments().GetView(ctx, depID)
+	view, err := tx.Deployments().GetView(ctx, depName)
 	if err != nil {
-		t.Fatalf("GetView(%s): %v", depID, err)
+		t.Fatalf("GetView(%s): %v", depName, err)
 	}
 	records, err := tx.Deliveries().ListByFulfillment(ctx, view.Deployment.FulfillmentID())
 	if err != nil {
@@ -983,7 +983,7 @@ func queryDeliveriesByFulfillment(ctx context.Context, t *testing.T, infra Infra
 	return records
 }
 
-func queryDeploymentView(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) (domain.DeploymentView, error) {
+func queryDeploymentView(ctx context.Context, t *testing.T, infra Infra, id domain.ResourceName) (domain.DeploymentView, error) {
 	t.Helper()
 	tx, err := infra.Store.BeginReadOnly(ctx)
 	if err != nil {
@@ -993,7 +993,7 @@ func queryDeploymentView(ctx context.Context, t *testing.T, infra Infra, id doma
 	return tx.Deployments().GetView(ctx, id)
 }
 
-func fulfillmentID(ctx context.Context, t *testing.T, infra Infra, id domain.DeploymentID) domain.FulfillmentID {
+func fulfillmentID(ctx context.Context, t *testing.T, infra Infra, id domain.ResourceName) domain.FulfillmentID {
 	t.Helper()
 	tx, err := infra.Store.BeginReadOnly(ctx)
 	if err != nil {
@@ -1007,11 +1007,11 @@ func fulfillmentID(ctx context.Context, t *testing.T, infra Infra, id domain.Dep
 	return view.Deployment.FulfillmentID()
 }
 
-func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, depID domain.DeploymentID, manifest domain.ManifestStrategySpec, placement domain.PlacementStrategySpec) domain.FulfillmentID {
+func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, depName domain.ResourceName, manifest domain.ManifestStrategySpec, placement domain.PlacementStrategySpec) domain.FulfillmentID {
 	t.Helper()
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	fID := domain.FulfillmentID(uuid.New().String())
-	dUID := uuid.New().String()
+	dUID := domain.NewDeploymentUID()
 	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        fID,
 		State:     domain.FulfillmentStateCreating,
@@ -1022,7 +1022,7 @@ func seedFulfillmentCreating(ctx context.Context, t *testing.T, infra Infra, dep
 	f.AdvancePlacementStrategy(placement, now)
 	f.AdvanceRolloutStrategy(nil, now)
 	dep := domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-		ID:            depID,
+		Name:          depName,
 		UID:           dUID,
 		FulfillmentID: fID,
 		CreatedAt:     now,

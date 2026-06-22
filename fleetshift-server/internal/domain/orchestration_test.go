@@ -35,7 +35,7 @@ func testContext(t *testing.T) context.Context {
 	return ctx
 }
 
-func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain.DeploymentID, seed domain.FulfillmentSnapshot) {
+func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depName domain.ResourceName, seed domain.FulfillmentSnapshot) {
 	t.Helper()
 	defaultTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	if seed.CreatedAt.IsZero() {
@@ -44,7 +44,7 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 	if seed.UpdatedAt.IsZero() {
 		seed.UpdatedAt = seed.CreatedAt
 	}
-	seed.ID = domain.FulfillmentID(depID)
+	seed.ID = domain.FulfillmentID(depName)
 
 	// Use Advance* to populate pending strategy records so the version
 	// tables get rows on Create. The initial create always lands at
@@ -67,8 +67,8 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 	}
 
 	dep := domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-		ID:            depID,
-		UID:           "test-uid",
+		Name:          depName,
+		UID:           domain.NewDeploymentUID(),
 		FulfillmentID: f.ID(),
 		CreatedAt:     seed.CreatedAt,
 		UpdatedAt:     seed.UpdatedAt,
@@ -82,7 +82,7 @@ func seedFulfillmentAndDeployment(t *testing.T, store domain.Store, depID domain
 		t.Fatalf("seed fulfillment %q: %v", f.ID(), err)
 	}
 	if err := tx.Deployments().Create(context.Background(), dep); err != nil {
-		t.Fatalf("seed deployment %q: %v", depID, err)
+		t.Fatalf("seed deployment %q: %v", depName, err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -143,7 +143,7 @@ func seedTargets(t *testing.T, store domain.Store, targets ...domain.TargetInfo)
 	}
 }
 
-func getFulfillment(t *testing.T, store domain.Store, id domain.DeploymentID) domain.Fulfillment {
+func getFulfillment(t *testing.T, store domain.Store, id domain.ResourceName) domain.Fulfillment {
 	t.Helper()
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
@@ -157,7 +157,7 @@ func getFulfillment(t *testing.T, store domain.Store, id domain.DeploymentID) do
 	return *f
 }
 
-func getThinDeployment(t *testing.T, store domain.Store, id domain.DeploymentID) domain.Deployment {
+func getThinDeployment(t *testing.T, store domain.Store, id domain.ResourceName) domain.Deployment {
 	t.Helper()
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
@@ -199,16 +199,16 @@ func getInventoryItem(t *testing.T, store domain.Store, id domain.InventoryItemI
 	return item
 }
 
-func getDeliveries(t *testing.T, store domain.Store, depID domain.DeploymentID) []domain.Delivery {
+func getDeliveries(t *testing.T, store domain.Store, depName domain.ResourceName) []domain.Delivery {
 	t.Helper()
 	tx, err := store.BeginReadOnly(context.Background())
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	records, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID(depID))
+	records, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID(depName))
 	if err != nil {
-		t.Fatalf("list deliveries for %q: %v", depID, err)
+		t.Fatalf("list deliveries for %q: %v", depName, err)
 	}
 	return records
 }
@@ -742,7 +742,7 @@ func newTestWorkflow(store domain.Store, delivery domain.DeliveryAgent, events c
 
 func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1", "t2"}},
@@ -754,12 +754,12 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active", dep.State())
 	}
@@ -767,7 +767,7 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 		t.Errorf("ObservedGeneration = %d, want 1", dep.ObservedGeneration())
 	}
 
-	deliveries := getDeliveries(t, store, "d1")
+	deliveries := getDeliveries(t, store, "deployments/d1")
 	if len(deliveries) != 2 {
 		t.Fatalf("expected 2 deliveries, got %d", len(deliveries))
 	}
@@ -775,7 +775,7 @@ func TestOrchestration_BasicPipeline_ReachesActive(t *testing.T) {
 
 func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:      1,
 		ResolvedTargets: []domain.TargetID{"old1"},
 		ManifestStrategy: domain.ManifestStrategySpec{
@@ -800,7 +800,7 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
-	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
+	_, err := wf.Run(recorder, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -832,7 +832,7 @@ func TestOrchestration_RemoveStepsRunBeforeDeliverSteps(t *testing.T) {
 
 func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -846,7 +846,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
-	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
+	_, err := wf.Run(recorder, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -862,7 +862,7 @@ func TestOrchestration_PlacementAndRolloutRunAsActivities(t *testing.T) {
 
 func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategySelector, TargetSelector: &domain.TargetSelector{MatchLabels: map[string]string{"env": "prod"}}},
@@ -874,12 +874,12 @@ func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active", dep.State())
 	}
@@ -896,7 +896,7 @@ func TestOrchestration_ZeroTargets_ActiveWithEmptySet(t *testing.T) {
 
 func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing.T) {
 	store, vault := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
@@ -922,7 +922,7 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 	obs := &recordingObserver{}
 	wf.Observer = obs
 
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -933,8 +933,8 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 	}
 
 	item := getInventoryItem(t, store, "target:k8s-new-cluster")
-	if item.SourceDeliveryID() == nil || *item.SourceDeliveryID() != "d1:provisioner" {
-		t.Fatalf("inventory SourceDeliveryID = %v, want d1:provisioner", item.SourceDeliveryID())
+	if item.SourceDeliveryID() == nil || *item.SourceDeliveryID() != "deployments/d1:provisioner" {
+		t.Fatalf("inventory SourceDeliveryID = %v, want deployments/d1:provisioner", item.SourceDeliveryID())
 	}
 
 	if vault != nil {
@@ -954,7 +954,7 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 
 func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -966,12 +966,12 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 	wf := newTestWorkflow(store, &asyncDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active", dep.State())
 	}
@@ -979,7 +979,7 @@ func TestOrchestration_AsyncDelivery_ReachesActive(t *testing.T) {
 
 func TestOrchestration_EmittingAsyncDelivery_ReachesActive(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -991,12 +991,12 @@ func TestOrchestration_EmittingAsyncDelivery_ReachesActive(t *testing.T) {
 	wf := newTestWorkflow(store, &emittingAsyncDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active", dep.State())
 	}
@@ -1004,7 +1004,7 @@ func TestOrchestration_EmittingAsyncDelivery_ReachesActive(t *testing.T) {
 
 func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -1016,12 +1016,12 @@ func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if !dep.Paused() {
 		t.Error("expected fulfillment to be paused after auth failure")
 	}
@@ -1032,7 +1032,7 @@ func TestOrchestration_AuthFailure_SetsPausedAuth(t *testing.T) {
 
 func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1044,13 +1044,13 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
 
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t2", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t2",
+		ID: "deployments/d1:t2", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t2",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -1061,7 +1061,7 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 	rec := &simpleRecord{ctx: testContext(t), events: events}
 	recorder := &recordingRecord{ctx: rec.ctx, delegate: rec}
 
-	_, err := wf.Run(recorder, domain.FulfillmentID("d1"))
+	_, err := wf.Run(recorder, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1082,7 +1082,7 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist, got: %v", err)
 	}
@@ -1093,7 +1093,7 @@ func TestOrchestration_DeletePipeline_RemovesFromTargets(t *testing.T) {
 
 func TestOrchestration_DeletePipeline_ResetsDeliveryForRemove(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1103,7 +1103,7 @@ func TestOrchestration_DeletePipeline_ResetsDeliveryForRemove(t *testing.T) {
 
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -1131,7 +1131,7 @@ func TestOrchestration_DeletePipeline_ResetsDeliveryForRemove(t *testing.T) {
 	wf := newTestWorkflow(store, delivery, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf.Run(rec, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if !removeCalled {
@@ -1186,7 +1186,7 @@ func (d *deliveryStateChecker) Remove(_ context.Context, _ domain.TargetInfo, de
 // waits for the completion signal from RecoverActiveDeliveries.
 func TestOrchestration_DeletePipeline_WaitsForProgressingDelivery(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1196,7 +1196,7 @@ func TestOrchestration_DeletePipeline_WaitsForProgressingDelivery(t *testing.T) 
 
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		Generation: 2,
 		State:      domain.DeliveryStateProgressing,
@@ -1219,7 +1219,7 @@ func TestOrchestration_DeletePipeline_WaitsForProgressingDelivery(t *testing.T) 
 	go func() {
 		events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
-				DeliveryID: "d1:t1",
+				DeliveryID: "deployments/d1:t1",
 				Generation: 2,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
@@ -1227,7 +1227,7 @@ func TestOrchestration_DeletePipeline_WaitsForProgressingDelivery(t *testing.T) 
 	}()
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf.Run(rec, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 	if removeCalled {
@@ -1247,7 +1247,7 @@ func TestOrchestration_DeletePipeline_WaitsForProgressingDelivery(t *testing.T) 
 
 func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1260,12 +1260,12 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t2", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t2",
+		ID: "deployments/d1:t2", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t2",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -1274,7 +1274,7 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1284,14 +1284,14 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist, got: %v", err)
 	}
 	if f.State() != domain.FulfillmentStateDeleting {
 		t.Errorf("fulfillment state = %q, want deleting", f.State())
 	}
-	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("d1"))
+	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1302,7 +1302,7 @@ func TestOrchestration_DeletePipeline_HardDeletesRecord(t *testing.T) {
 
 func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   nil,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1314,7 +1314,7 @@ func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1324,7 +1324,7 @@ func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist, got: %v", err)
 	}
@@ -1335,13 +1335,13 @@ func TestOrchestration_DeletePipeline_NoTargets_HardDeletes(t *testing.T) {
 
 func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.T) {
 	store, vault := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:      2,
 		ResolvedTargets: []domain.TargetID{"gcphcp-provider"},
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
-				ResourceType: "api.gcphcp.cluster",
+				ManifestType: "api.gcphcp.cluster",
 				Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 			}},
 		},
@@ -1353,13 +1353,13 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 	})
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "gcphcp-provider", Name: "gcphcp-provider", Type: "gcphcp"}))
 
-	deliveryID := domain.DeliveryID("d1:gcphcp-provider")
+	deliveryID := domain.DeliveryID("deployments/d1:gcphcp-provider")
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
 		ID:            deliveryID,
-		FulfillmentID: domain.FulfillmentID("d1"),
+		FulfillmentID: domain.FulfillmentID("deployments/d1"),
 		TargetID:      "gcphcp-provider",
 		Manifests: []domain.Manifest{{
-			ResourceType: "api.gcphcp.cluster",
+			ManifestType: "api.gcphcp.cluster",
 			Raw:          json.RawMessage(`{"name":"guest-cluster"}`),
 		}},
 		State: domain.DeliveryStateDelivered,
@@ -1410,7 +1410,7 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 	})
 
 	rec := &simpleRecord{ctx: ctx, events: events}
-	_, err = wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err = wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1428,14 +1428,14 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 	if _, err := readTx.Inventory().Get(ctx, "target:k8s-guest-cluster"); !errors.Is(err, domain.ErrNotFound) {
 		t.Fatalf("expected guest inventory item to be deleted, got err=%v", err)
 	}
-	deliveries, err := readTx.Deliveries().ListByFulfillment(ctx, domain.FulfillmentID("d1"))
+	deliveries, err := readTx.Deliveries().ListByFulfillment(ctx, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("list deliveries: %v", err)
 	}
 	if len(deliveries) != 0 {
 		t.Fatalf("expected delivery records to be deleted, got %d", len(deliveries))
 	}
-	f, err := readTx.Fulfillments().Get(ctx, domain.FulfillmentID("d1"))
+	f, err := readTx.Fulfillments().Get(ctx, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist, got: %v", err)
 	}
@@ -1453,7 +1453,7 @@ func TestOrchestration_DeletePipeline_CleansUpOwnedOutputsAndSecrets(t *testing.
 
 func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1465,7 +1465,7 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -1474,7 +1474,7 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1484,7 +1484,7 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("d1"))
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist, got: %v", err)
 	}
@@ -1495,7 +1495,7 @@ func TestOrchestration_DeletePipeline_MissingDeliveryRecord_Skips(t *testing.T) 
 
 func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -1506,7 +1506,7 @@ func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -1516,12 +1516,12 @@ func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 	wf := newTestWorkflow(store, failingAgent, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err == nil {
 		t.Fatal("expected error from Remove failure")
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateDeleting {
 		t.Errorf("State = %q, want deleting", dep.State())
 	}
@@ -1529,7 +1529,7 @@ func TestOrchestration_DeletePipeline_RemoveFailure_KeepsRecord(t *testing.T) {
 
 func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -1548,16 +1548,16 @@ func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T)
 	interceptor := &afterLoadBumpGenRecord{
 		delegate: rec,
 		store:    store,
-		depID:    "d1",
+		depName:  "deployments/d1",
 		bumps:    2,
 	}
 
-	_, err := wf.Run(interceptor, domain.FulfillmentID("d1"))
+	_, err := wf.Run(interceptor, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.ObservedGeneration() != 3 {
 		t.Errorf("ObservedGeneration = %d, want 3 (loop should reconcile up to bumped generation)", dep.ObservedGeneration())
 	}
@@ -1569,7 +1569,7 @@ func TestOrchestration_CompleteReconciliation_LoopsOnNewGeneration(t *testing.T)
 type afterLoadBumpGenRecord struct {
 	delegate domain.Record
 	store    domain.Store
-	depID    domain.DeploymentID
+	depName  domain.ResourceName
 	bumps    int
 	loaded   bool
 }
@@ -1593,7 +1593,7 @@ func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any)
 		if txErr != nil {
 			return out, txErr
 		}
-		thinDep, txErr := tx.Deployments().Get(context.Background(), r.depID)
+		thinDep, txErr := tx.Deployments().Get(context.Background(), r.depName)
 		if txErr != nil {
 			tx.Rollback()
 			return out, txErr
@@ -1621,12 +1621,12 @@ func (r *afterLoadBumpGenRecord) Run(activity domain.Activity[any, any], in any)
 
 func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation: 1,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{
-				{Raw: json.RawMessage(`{}`), ResourceType: "kubernetes.manifest"},
+				{Raw: json.RawMessage(`{}`), ManifestType: "kubernetes.manifest"},
 			},
 		},
 		PlacementStrategy: domain.PlacementStrategySpec{
@@ -1636,7 +1636,7 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 		State: domain.FulfillmentStateCreating,
 	})
 	seedTargets(t, store,
-		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k8s", Name: "k8s", Type: "kubernetes", AcceptedResourceTypes: []domain.ResourceType{"kubernetes.manifest"}}),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k8s", Name: "k8s", Type: "kubernetes", AcceptedManifestTypes: []domain.ManifestType{"kubernetes.manifest"}}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "plain", Name: "plain", Type: "test"}),
 	)
 
@@ -1648,7 +1648,7 @@ func TestOrchestration_ResourceTypeFiltering(t *testing.T) {
 	})
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1705,10 +1705,10 @@ func (r *attestationCapturingRecord) Run(activity domain.Activity[any, any], in 
 	return r.delegate.Run(activity, in)
 }
 
-func testProvenance(depID domain.DeploymentID, ms domain.ManifestStrategySpec, ps domain.PlacementStrategySpec) *domain.Provenance {
+func testProvenance(depName domain.ResourceName, ms domain.ManifestStrategySpec, ps domain.PlacementStrategySpec) *domain.Provenance {
 	return &domain.Provenance{
 		Content: domain.DeploymentContent{
-			DeploymentID:      depID,
+			Name:              depName,
 			ManifestStrategy:  ms,
 			PlacementStrategy: ps,
 		},
@@ -1741,16 +1741,16 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 	store, _ := setupStore(t)
 	ms := domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyInline,
-		Manifests: []domain.Manifest{{ResourceType: "test.resource", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		Manifests: []domain.Manifest{{ManifestType: "test.resource", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
 	}
 	ps := domain.PlacementStrategySpec{
 		Type:    domain.PlacementStrategyStatic,
 		Targets: []domain.TargetID{"t1"},
 	}
-	prov := testProvenance("attested-dep", ms, ps)
+	prov := testProvenance("deployments/attested-dep", ms, ps)
 
 	seedSignerEnrollment(t, store, testSignerEnrollment("se-test", "test-signer"))
-	seedFulfillmentAndDeployment(t, store, "attested-dep", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/attested-dep", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
@@ -1768,7 +1768,7 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
-	_, err := wf.Run(capRec, domain.FulfillmentID("attested-dep"))
+	_, err := wf.Run(capRec, domain.FulfillmentID("deployments/attested-dep"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1790,8 +1790,8 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 	if !ok {
 		t.Fatalf("Input.Provenance.Content is %T, want DeploymentContent", att.Input.Provenance.Content)
 	}
-	if depContent.DeploymentID != "attested-dep" {
-		t.Errorf("DeploymentContent.DeploymentID = %q, want %q", depContent.DeploymentID, "attested-dep")
+	if depContent.Name != "deployments/attested-dep" {
+		t.Errorf("DeploymentContent.Name = %q, want %q", depContent.Name, "deployments/attested-dep")
 	}
 	if att.Input.Provenance.Sig.Signer != prov.Sig.Signer {
 		t.Errorf("Input.Provenance.Sig.Signer = %v, want %v", att.Input.Provenance.Sig.Signer, prov.Sig.Signer)
@@ -1818,7 +1818,7 @@ func TestOrchestration_DeliverWithProvenance_AssemblesAttestation(t *testing.T) 
 
 func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "no-prov-dep", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/no-prov-dep", domain.FulfillmentSnapshot{
 		Generation: 1,
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type:      domain.ManifestStrategyInline,
@@ -1838,7 +1838,7 @@ func TestOrchestration_DeliverWithoutProvenance_NilAttestation(t *testing.T) {
 	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
-	_, err := wf.Run(capRec, domain.FulfillmentID("no-prov-dep"))
+	_, err := wf.Run(capRec, domain.FulfillmentID("deployments/no-prov-dep"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1896,7 +1896,7 @@ func (d authFailingNoSignalDelivery) Remove(_ context.Context, _ domain.TargetIn
 
 func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -1911,7 +1911,7 @@ func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 
 	done := make(chan error, 1)
 	go func() {
-		_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+		_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 		done <- err
 	}()
 
@@ -1920,7 +1920,7 @@ func TestOrchestration_AuthFailureNoSignal_DoesNotHang(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Run returned unexpected error: %v", err)
 		}
-		dep := getFulfillment(t, store, "d1")
+		dep := getFulfillment(t, store, "deployments/d1")
 		if !dep.Paused() {
 			t.Error("expected fulfillment to be paused after auth failure")
 		}
@@ -1942,10 +1942,10 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 		Type:    domain.PlacementStrategyStatic,
 		Targets: []domain.TargetID{"new1"},
 	}
-	prov := testProvenance("rm-attested", ms, ps)
+	prov := testProvenance("deployments/rm-attested", ms, ps)
 
 	seedSignerEnrollment(t, store, testSignerEnrollment("se-rm", "test-signer"))
-	seedFulfillmentAndDeployment(t, store, "rm-attested", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/rm-attested", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"old1"},
 		ManifestStrategy:  ms,
@@ -1967,7 +1967,7 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
-	_, err := wf.Run(capRec, domain.FulfillmentID("rm-attested"))
+	_, err := wf.Run(capRec, domain.FulfillmentID("deployments/rm-attested"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -1988,15 +1988,15 @@ func TestOrchestration_RemoveWithProvenance_AssemblesRemoveAttestation(t *testin
 	if !ok {
 		t.Fatalf("Input.Provenance.Content is %T, want DeploymentContent", att.Input.Provenance.Content)
 	}
-	if depContent.DeploymentID != "rm-attested" {
-		t.Errorf("DeploymentContent.DeploymentID = %q, want %q", depContent.DeploymentID, "rm-attested")
+	if depContent.Name != "deployments/rm-attested" {
+		t.Errorf("DeploymentContent.Name = %q, want %q", depContent.Name, "deployments/rm-attested")
 	}
-	rm, ok := att.Output.(*domain.RemoveByDeploymentId)
+	rm, ok := att.Output.(*domain.RemoveByDeploymentName)
 	if !ok {
-		t.Fatalf("Attestation.Output is %T, want *RemoveByDeploymentId", att.Output)
+		t.Fatalf("Attestation.Output is %T, want *RemoveByDeploymentName", att.Output)
 	}
-	if rm.DeploymentID != "rm-attested" {
-		t.Errorf("RemoveByDeploymentId.DeploymentID = %q, want %q", rm.DeploymentID, "rm-attested")
+	if rm.Name != "deployments/rm-attested" {
+		t.Errorf("RemoveByDeploymentName.Name = %q, want %q", rm.Name, "deployments/rm-attested")
 	}
 }
 
@@ -2010,10 +2010,10 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 		Type:    domain.PlacementStrategyStatic,
 		Targets: []domain.TargetID{"t1", "t2"},
 	}
-	prov := testProvenance("del-attested", ms, ps)
+	prov := testProvenance("deployments/del-attested", ms, ps)
 
 	seedSignerEnrollment(t, store, testSignerEnrollment("se-del", "test-signer"))
-	seedFulfillmentAndDeployment(t, store, "del-attested", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/del-attested", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1", "t2"},
 		ManifestStrategy:  ms,
@@ -2029,13 +2029,13 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t2", Name: "t2", Type: "test"}),
 	)
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "del-attested:t1", FulfillmentID: domain.FulfillmentID("del-attested"), TargetID: "t1",
+		ID: "deployments/del-attested:t1", FulfillmentID: domain.FulfillmentID("deployments/del-attested"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
 
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "del-attested:t2", FulfillmentID: domain.FulfillmentID("del-attested"), TargetID: "t2",
+		ID: "deployments/del-attested:t2", FulfillmentID: domain.FulfillmentID("deployments/del-attested"), TargetID: "t2",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -2046,7 +2046,7 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
-	_, err := wf.Run(capRec, domain.FulfillmentID("del-attested"))
+	_, err := wf.Run(capRec, domain.FulfillmentID("deployments/del-attested"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -2070,20 +2070,20 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 			t.Errorf("remove[%d]: Input.Provenance.Content is %T, want DeploymentContent", i, att.Input.Provenance.Content)
 			continue
 		}
-		if depContent.DeploymentID != "del-attested" {
-			t.Errorf("remove[%d]: DeploymentContent.DeploymentID = %q, want %q", i, depContent.DeploymentID, "del-attested")
+		if depContent.Name != "deployments/del-attested" {
+			t.Errorf("remove[%d]: DeploymentContent.Name = %q, want %q", i, depContent.Name, "deployments/del-attested")
 		}
 		if att.Input.Signer.RegistrySubject != "gh-test-signer" {
 			t.Errorf("remove[%d]: RegistrySubject = %q, want %q", i, att.Input.Signer.RegistrySubject, "gh-test-signer")
 		}
-		rmOut, ok := att.Output.(*domain.RemoveByDeploymentId)
+		rmOut, ok := att.Output.(*domain.RemoveByDeploymentName)
 		if !ok {
-			t.Errorf("remove[%d]: Output is %T, want *RemoveByDeploymentId", i, att.Output)
+			t.Errorf("remove[%d]: Output is %T, want *RemoveByDeploymentName", i, att.Output)
 			continue
 		}
-		if rmOut.DeploymentID != "del-attested" {
-			t.Errorf("remove[%d]: RemoveByDeploymentId.DeploymentID = %q, want %q",
-				i, rmOut.DeploymentID, "del-attested")
+		if rmOut.Name != "deployments/del-attested" {
+			t.Errorf("remove[%d]: RemoveByDeploymentName.Name = %q, want %q",
+				i, rmOut.Name, "deployments/del-attested")
 		}
 	}
 
@@ -2095,14 +2095,14 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("del-attested"))
+	f, err := tx.Fulfillments().Get(context.Background(), domain.FulfillmentID("deployments/del-attested"))
 	if err != nil {
 		t.Fatalf("expected fulfillment to still exist after orchestration cleanup, got: %v", err)
 	}
 	if f.State() != domain.FulfillmentStateDeleting {
 		t.Errorf("fulfillment state = %q, want deleting", f.State())
 	}
-	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("del-attested"))
+	deliveries, err := tx.Deliveries().ListByFulfillment(context.Background(), domain.FulfillmentID("deployments/del-attested"))
 	if err != nil {
 		t.Fatalf("list deliveries: %v", err)
 	}
@@ -2114,7 +2114,7 @@ func TestOrchestration_DeleteWithProvenance_AssemblesRemoveAttestation(t *testin
 func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
 	store, _ := setupStore(t)
 
-	seedFulfillmentAndDeployment(t, store, "del-no-prov", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/del-no-prov", domain.FulfillmentSnapshot{
 		Generation:      2,
 		ResolvedTargets: []domain.TargetID{"t1"},
 		ManifestStrategy: domain.ManifestStrategySpec{
@@ -2130,7 +2130,7 @@ func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
 
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "del-no-prov:t1", FulfillmentID: domain.FulfillmentID("del-no-prov"), TargetID: "t1",
+		ID: "deployments/del-no-prov:t1", FulfillmentID: domain.FulfillmentID("deployments/del-no-prov"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -2141,7 +2141,7 @@ func TestOrchestration_DeleteWithoutProvenance_NilAttestation(t *testing.T) {
 	simple := &simpleRecord{ctx: testContext(t), events: events}
 	capRec := &attestationCapturingRecord{delegate: simple}
 
-	_, err := wf.Run(capRec, domain.FulfillmentID("del-no-prov"))
+	_, err := wf.Run(capRec, domain.FulfillmentID("deployments/del-no-prov"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -2246,7 +2246,7 @@ func (p *faultArmingOutputsProbe) End() {
 
 func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExists(t *testing.T) {
 	realStore, vault := setupStore(t)
-	seedFulfillmentAndDeployment(t, realStore, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, realStore, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-cluster"}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
@@ -2289,7 +2289,7 @@ func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExi
 			wf.Observer = obs
 		})
 		rec := &simpleRecord{ctx: testContext(t), events: events}
-		_, lastErr = wf.Run(rec, domain.FulfillmentID("d1"))
+		_, lastErr = wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 		if lastErr == nil {
 			break
 		}
@@ -2304,7 +2304,7 @@ func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExi
 			maxAttempts, lastErr)
 	}
 
-	dep := getFulfillment(t, realStore, "d1")
+	dep := getFulfillment(t, realStore, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active after replay recovery", dep.State())
 	}
@@ -2316,7 +2316,7 @@ func TestOrchestration_DeliveryOutputs_ReplayAfterTransientFailure_ErrAlreadyExi
 
 func TestOrchestration_AuthFailure_PreservesResolvedTargets(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -2328,12 +2328,12 @@ func TestOrchestration_AuthFailure_PreservesResolvedTargets(t *testing.T) {
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if !dep.Paused() {
 		t.Fatalf("expected fulfillment to be paused after auth failure")
 	}
@@ -2347,7 +2347,7 @@ func TestOrchestration_AuthFailure_PreservesResolvedTargets(t *testing.T) {
 
 func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -2360,7 +2360,7 @@ func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, authFailingDelivery{events: events}, events)
 	rec := &simpleRecord{ctx: ctx, events: events}
-	if _, err := wf.Run(rec, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf.Run(rec, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run (create): %v", err)
 	}
 
@@ -2369,7 +2369,7 @@ func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f, err := tx.Fulfillments().Get(ctx, domain.FulfillmentID("d1"))
+	f, err := tx.Fulfillments().Get(ctx, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		tx.Rollback()
 		t.Fatal(err)
@@ -2389,7 +2389,7 @@ func TestOrchestration_DeleteAfterAuthPause_CallsRemove(t *testing.T) {
 	wf2 := newTestWorkflow(store, removeAgent, events2)
 	rec2 := &simpleRecord{ctx: ctx, events: events2}
 	recorder := &recordingRecord{ctx: rec2.ctx, delegate: rec2}
-	if _, err := wf2.Run(recorder, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf2.Run(recorder, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run (delete): %v", err)
 	}
 
@@ -2440,7 +2440,7 @@ func (d *recordingRemoveDelivery) Remove(_ context.Context, target domain.Target
 
 func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -2449,7 +2449,7 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 	})
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -2459,12 +2459,12 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 	wf := newTestWorkflow(store, &failingRemoveDelivery{events: events, err: authErr}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if !dep.Paused() {
 		t.Errorf("expected fulfillment to be paused after auth failure")
 	}
@@ -2485,7 +2485,7 @@ func TestOrchestration_DeletePipeline_AuthExpired_SetsPausedAuth(t *testing.T) {
 // the delete path (not the create/update path) after resume.
 func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
 		ResolvedTargets:   []domain.TargetID{"t1"},
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
@@ -2494,7 +2494,7 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 	})
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		State:     domain.DeliveryStateDelivered,
 	}))
@@ -2506,11 +2506,11 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 	authErr := fmt.Errorf("%w: STS token exchange failed: invalid_grant", domain.ErrAuthExpired)
 	wf1 := newTestWorkflow(store, &failingRemoveDelivery{events: events1, err: authErr}, events1)
 	rec1 := &simpleRecord{ctx: ctx, events: events1}
-	if _, err := wf1.Run(rec1, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf1.Run(rec1, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run (delete attempt): %v", err)
 	}
 
-	f := getFulfillment(t, store, "d1")
+	f := getFulfillment(t, store, "deployments/d1")
 	if !f.Paused() {
 		t.Fatalf("expected fulfillment to be paused after auth failure")
 	}
@@ -2524,7 +2524,7 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	fPtr, err := tx.Fulfillments().Get(ctx, domain.FulfillmentID("d1"))
+	fPtr, err := tx.Fulfillments().Get(ctx, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		tx.Rollback()
 		t.Fatal(err)
@@ -2547,7 +2547,7 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 	removeAgent := &recordingRemoveDelivery{events: events2}
 	wf2 := newTestWorkflow(store, removeAgent, events2)
 	rec2 := &simpleRecord{ctx: ctx, events: events2}
-	if _, err := wf2.Run(rec2, domain.FulfillmentID("d1")); err != nil {
+	if _, err := wf2.Run(rec2, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run (after resume): %v", err)
 	}
 
@@ -2559,7 +2559,7 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 		t.Errorf("Remove called for targets %v, want [t1]; resumed delete must take the delete path", removed)
 	}
 
-	f = getFulfillment(t, store, "d1")
+	f = getFulfillment(t, store, "deployments/d1")
 	if f.State() != domain.FulfillmentStateDeleting {
 		t.Errorf("final State = %q, want deleting", f.State())
 	}
@@ -2574,7 +2574,7 @@ func TestOrchestration_DeletePausedResume_StaysDeleting(t *testing.T) {
 
 func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -2582,7 +2582,7 @@ func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.
 	})
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		Generation: 1,
 		State:      domain.DeliveryStateFailed,
@@ -2592,12 +2592,12 @@ func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events)
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active (terminal delivery should be reset and re-dispatched)", dep.State())
 	}
@@ -2610,7 +2610,7 @@ func TestOrchestration_DeliverTerminalDelivery_ResetsAndRedispatches(t *testing.
 // signal from RecoverActiveDeliveries.
 func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -2618,7 +2618,7 @@ func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.
 	})
 	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "t1", Type: "test"}))
 	seedDelivery(t, store, domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
-		ID: "d1:t1", FulfillmentID: domain.FulfillmentID("d1"), TargetID: "t1",
+		ID: "deployments/d1:t1", FulfillmentID: domain.FulfillmentID("deployments/d1"), TargetID: "t1",
 		Manifests:  []domain.Manifest{{Raw: json.RawMessage(`{}`)}},
 		Generation: 1,
 		State:      domain.DeliveryStateProgressing,
@@ -2643,7 +2643,7 @@ func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.
 	go func() {
 		events <- domain.FulfillmentEvent{
 			DeliveryCompleted: &domain.DeliveryCompletionEvent{
-				DeliveryID: "d1:t1",
+				DeliveryID: "deployments/d1:t1",
 				Generation: 1,
 				Result:     domain.DeliveryResult{State: domain.DeliveryStateDelivered},
 			},
@@ -2651,7 +2651,7 @@ func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.
 	}()
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
-	_, err := wf.Run(rec, domain.FulfillmentID("d1"))
+	_, err := wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 	if err != nil {
 		t.Fatalf("Run: %v", err)
 	}
@@ -2660,7 +2660,7 @@ func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.
 		t.Error("Deliver was called — Progressing delivery should wait for completion signal, not re-dispatch")
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active", dep.State())
 	}
@@ -2673,7 +2673,7 @@ func TestOrchestration_DeliverProgressingDelivery_WaitsForCompletion(t *testing.
 		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	d, err := tx.Deliveries().Get(context.Background(), "d1:t1")
+	d, err := tx.Deliveries().Get(context.Background(), "deployments/d1:t1")
 	if err != nil {
 		t.Fatalf("get delivery: %v", err)
 	}
@@ -2699,7 +2699,7 @@ func (d *deliverCallTracker) Remove(ctx context.Context, target domain.TargetInf
 
 func TestOrchestration_AsyncDeliveryFailure_ConvergesViaRetry(t *testing.T) {
 	store, _ := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
+	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        1,
 		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{}`)}}},
 		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"t1"}},
@@ -2716,7 +2716,7 @@ func TestOrchestration_AsyncDeliveryFailure_ConvergesViaRetry(t *testing.T) {
 		agent.events = events
 		wf := newTestWorkflow(store, agent, events)
 		rec := &simpleRecord{ctx: testContext(t), events: events}
-		_, lastErr = wf.Run(rec, domain.FulfillmentID("d1"))
+		_, lastErr = wf.Run(rec, domain.FulfillmentID("deployments/d1"))
 		if lastErr == nil {
 			break
 		}
@@ -2729,7 +2729,7 @@ func TestOrchestration_AsyncDeliveryFailure_ConvergesViaRetry(t *testing.T) {
 		t.Fatalf("workflow did not converge after %d attempts: %v", maxAttempts, lastErr)
 	}
 
-	dep := getFulfillment(t, store, "d1")
+	dep := getFulfillment(t, store, "deployments/d1")
 	if dep.State() != domain.FulfillmentStateActive {
 		t.Errorf("State = %q, want active (async failure should be retried via reset-to-Pending)", dep.State())
 	}

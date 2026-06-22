@@ -2,12 +2,13 @@ syntax = "proto3";
 
 package fleetshift.v1;
 
-option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
-
-import "google/protobuf/timestamp.proto";
 import "fleetshift/v1/manifest.proto";
 import "fleetshift/v1/manifest_strategy.proto";
 import "fleetshift/v1/placement_strategy.proto";
+import "google/protobuf/timestamp.proto";
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
 // FederatedIdentity unambiguously identifies a subject by pairing
 // the issuer-scoped subject ID with the issuer URL that vouches for it.
 message FederatedIdentity {
@@ -52,7 +53,7 @@ message Provenance {
 // DeploymentContent groups the identity and strategy fields that the
 // signer authorizes. Matches the hybrid PoC's DeploymentContent.
 message DeploymentContent {
-  string deployment_id = 1;
+  string deployment_name = 1;
   ManifestStrategy manifest_strategy = 2;
   PlacementStrategy placement_strategy = 3;
 }
@@ -77,7 +78,7 @@ message Attestation {
 
   oneof output {
     PutManifests put_manifests = 2;
-    RemoveByDeploymentId remove = 3;
+    RemoveByDeploymentName remove = 3;
   }
 }
 
@@ -92,9 +93,9 @@ message PutManifests {
   PlacementEvidence placement = 3;
 }
 
-// RemoveByDeploymentId removes a deployment from a target.
-message RemoveByDeploymentId {
-  string deployment_id = 1;
+// RemoveByDeploymentName removes a deployment from a target.
+message RemoveByDeploymentName {
+  string deployment_name = 1;
 
   // TODO: signed placement decision.
   PlacementEvidence placement = 2;
@@ -110,7 +111,7 @@ message OutputSignature {
 // PlacementEvidence is a signed placement decision from an addon.
 // Matches the hybrid PoC's PlacementEvidence.
 message PlacementEvidence {
-  string deployment_id = 1;
+  string deployment_name = 1;
   repeated string targets = 2;
   OutputSignature signature = 3;
 }

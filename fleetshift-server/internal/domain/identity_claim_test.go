@@ -11,19 +11,19 @@ func TestClaimOrGetIdentity_CreatesNewResource(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-	pr, err := ClaimOrGetIdentity(ctx, repo, "uid-1", "clusters", "prod", nil, now)
+	pr, err := ClaimOrGetIdentity(ctx, repo, "clusters/prod", nil, now)
 	if err != nil {
 		t.Fatalf("ClaimOrGetIdentity: %v", err)
 	}
 
-	if pr.UID() != "uid-1" {
-		t.Errorf("UID = %q, want uid-1", pr.UID())
+	if pr.UID().IsZero() {
+		t.Error("UID is zero, want non-zero")
 	}
-	if pr.CollectionID() != "clusters" {
-		t.Errorf("CollectionID = %q, want clusters", pr.CollectionID())
+	if pr.Collection() != "clusters" {
+		t.Errorf("Collection = %q, want clusters", pr.Collection())
 	}
-	if pr.RelativeName() != "clusters/prod" {
-		t.Errorf("RelativeName = %q, want clusters/prod", pr.RelativeName())
+	if pr.Name() != "clusters/prod" {
+		t.Errorf("Name = %q, want clusters/prod", pr.Name())
 	}
 }
 
@@ -32,18 +32,18 @@ func TestClaimOrGetIdentity_IdempotentForSameName(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-	first, err := ClaimOrGetIdentity(ctx, repo, "uid-1", "clusters", "prod", nil, now)
+	first, err := ClaimOrGetIdentity(ctx, repo, "clusters/prod", nil, now)
 	if err != nil {
 		t.Fatalf("first claim: %v", err)
 	}
 
-	second, err := ClaimOrGetIdentity(ctx, repo, "uid-2", "clusters", "prod", nil, now.Add(time.Hour))
+	second, err := ClaimOrGetIdentity(ctx, repo, "clusters/prod", nil, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("second claim: %v", err)
 	}
 
 	if second.UID() != first.UID() {
-		t.Errorf("second UID = %q, want %q (same resource)", second.UID(), first.UID())
+		t.Errorf("second UID = %s, want %s (same resource)", second.UID(), first.UID())
 	}
 }
 
@@ -51,8 +51,8 @@ func TestClaimOrGetIdentity_RaceRetry(t *testing.T) {
 	// Simulate: GetByName returns NotFound, Create returns
 	// AlreadyExists (concurrent insert won), retry GetByName succeeds.
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	name, _ := NewRelativeResourceName("clusters", "prod")
-	winner := NewPlatformResource("uid-winner", "clusters", name, nil, now)
+	uidWinner := NewPlatformResourceUID()
+	winner := NewPlatformResource(uidWinner, "clusters/prod", nil, now)
 
 	repo := &raceIdentityRepo{
 		fakeIdentityRepo: newFakeIdentityRepo(),
@@ -60,13 +60,13 @@ func TestClaimOrGetIdentity_RaceRetry(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	pr, err := ClaimOrGetIdentity(ctx, repo, "uid-loser", "clusters", "prod", nil, now)
+	pr, err := ClaimOrGetIdentity(ctx, repo, "clusters/prod", nil, now)
 	if err != nil {
 		t.Fatalf("ClaimOrGetIdentity with race: %v", err)
 	}
 
-	if pr.UID() != "uid-winner" {
-		t.Errorf("UID = %q, want uid-winner (from race retry)", pr.UID())
+	if pr.UID() != uidWinner {
+		t.Errorf("UID = %s, want %s (from race retry)", pr.UID(), uidWinner)
 	}
 }
 
@@ -76,22 +76,22 @@ func TestClaimOrGetIdentity_RaceRetry(t *testing.T) {
 
 type fakeIdentityRepo struct {
 	byUID  map[PlatformResourceUID]*PlatformResource
-	byName map[RelativeResourceName]*PlatformResource
+	byName map[ResourceName]*PlatformResource
 }
 
 func newFakeIdentityRepo() *fakeIdentityRepo {
 	return &fakeIdentityRepo{
 		byUID:  make(map[PlatformResourceUID]*PlatformResource),
-		byName: make(map[RelativeResourceName]*PlatformResource),
+		byName: make(map[ResourceName]*PlatformResource),
 	}
 }
 
 func (r *fakeIdentityRepo) Create(_ context.Context, pr *PlatformResource) error {
-	if _, exists := r.byName[pr.RelativeName()]; exists {
+	if _, exists := r.byName[pr.Name()]; exists {
 		return ErrAlreadyExists
 	}
 	r.byUID[pr.UID()] = pr
-	r.byName[pr.RelativeName()] = pr
+	r.byName[pr.Name()] = pr
 	return nil
 }
 
@@ -103,7 +103,7 @@ func (r *fakeIdentityRepo) Get(_ context.Context, uid PlatformResourceUID) (*Pla
 	return pr, nil
 }
 
-func (r *fakeIdentityRepo) GetByName(_ context.Context, name RelativeResourceName) (*PlatformResource, error) {
+func (r *fakeIdentityRepo) GetByName(_ context.Context, name ResourceName) (*PlatformResource, error) {
 	pr, ok := r.byName[name]
 	if !ok {
 		return nil, ErrNotFound
@@ -113,14 +113,14 @@ func (r *fakeIdentityRepo) GetByName(_ context.Context, name RelativeResourceNam
 
 func (r *fakeIdentityRepo) Update(_ context.Context, pr *PlatformResource) error {
 	r.byUID[pr.UID()] = pr
-	r.byName[pr.RelativeName()] = pr
+	r.byName[pr.Name()] = pr
 	return nil
 }
 
-func (r *fakeIdentityRepo) ListByCollection(_ context.Context, collection CollectionID) ([]*PlatformResource, error) {
+func (r *fakeIdentityRepo) ListByCollection(_ context.Context, collection CollectionName) ([]*PlatformResource, error) {
 	var result []*PlatformResource
 	for _, pr := range r.byName {
-		if pr.CollectionID() == collection && pr.DeletedAt() == nil {
+		if pr.Collection() == collection && pr.DeletedAt() == nil {
 			result = append(result, pr)
 		}
 	}
@@ -128,7 +128,7 @@ func (r *fakeIdentityRepo) ListByCollection(_ context.Context, collection Collec
 }
 
 func (r *fakeIdentityRepo) ResolveAlias(_ context.Context, _ Alias) (PlatformResourceUID, error) {
-	return "", ErrNotFound
+	return PlatformResourceUID{}, ErrNotFound
 }
 
 func (r *fakeIdentityRepo) GetRepresentation(_ context.Context, _ FullResourceName) (ResourceRepresentation, error) {
@@ -147,6 +147,6 @@ type raceIdentityRepo struct {
 func (r *raceIdentityRepo) Create(_ context.Context, _ *PlatformResource) error {
 	r.raceHit = true
 	r.fakeIdentityRepo.byUID[r.winner.UID()] = r.winner
-	r.fakeIdentityRepo.byName[r.winner.RelativeName()] = r.winner
+	r.fakeIdentityRepo.byName[r.winner.Name()] = r.winner
 	return ErrAlreadyExists
 }

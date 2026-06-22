@@ -26,7 +26,7 @@ func (s *ProvenanceService) BuildDeploymentProvenance(
 	ctx context.Context,
 	enrollments SignerEnrollmentRepository,
 	caller *SubjectClaims,
-	id DeploymentID,
+	name ResourceName,
 	ms ManifestStrategySpec,
 	ps PlacementStrategySpec,
 	generation Generation,
@@ -38,7 +38,7 @@ func (s *ProvenanceService) BuildDeploymentProvenance(
 		return nil, err
 	}
 
-	envelopeBytes, err := BuildSignedInputEnvelope(id, ms, ps, validUntil, nil, generation)
+	envelopeBytes, err := BuildSignedInputEnvelope(name, ms, ps, validUntil, nil, generation)
 	if err != nil {
 		return nil, fmt.Errorf("build signed input envelope: %w", err)
 	}
@@ -55,7 +55,7 @@ func (s *ProvenanceService) BuildDeploymentProvenance(
 
 	return &Provenance{
 		Content: DeploymentContent{
-			DeploymentID:      id,
+			Name:              name,
 			ManifestStrategy:  ms,
 			PlacementStrategy: ps,
 		},

@@ -80,8 +80,8 @@ type ManifestResult struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Zero-based index into the delivery's manifest list.
 	Ordinal int32 `protobuf:"varint,1,opt,name=ordinal,proto3" json:"ordinal,omitempty"`
-	// Resource type of the manifest (echoed from the request).
-	ResourceType string `protobuf:"bytes,2,opt,name=resource_type,json=resourceType,proto3" json:"resource_type,omitempty"`
+	// Manifest type (echoed from the request).
+	ManifestType string `protobuf:"bytes,2,opt,name=manifest_type,json=manifestType,proto3" json:"manifest_type,omitempty"`
 	// Apply outcome.
 	State ManifestResult_State `protobuf:"varint,3,opt,name=state,proto3,enum=fleetshift.v1.ManifestResult_State" json:"state,omitempty"`
 	// Human-readable detail about the outcome (especially on failure).
@@ -127,9 +127,9 @@ func (x *ManifestResult) GetOrdinal() int32 {
 	return 0
 }
 
-func (x *ManifestResult) GetResourceType() string {
+func (x *ManifestResult) GetManifestType() string {
 	if x != nil {
-		return x.ResourceType
+		return x.ManifestType
 	}
 	return ""
 }
@@ -155,7 +155,7 @@ const file_fleetshift_v1_manifest_result_proto_rawDesc = "" +
 	"#fleetshift/v1/manifest_result.proto\x12\rfleetshift.v1\"\xfd\x01\n" +
 	"\x0eManifestResult\x12\x18\n" +
 	"\aordinal\x18\x01 \x01(\x05R\aordinal\x12#\n" +
-	"\rresource_type\x18\x02 \x01(\tR\fresourceType\x129\n" +
+	"\rmanifest_type\x18\x02 \x01(\tR\fmanifestType\x129\n" +
 	"\x05state\x18\x03 \x01(\x0e2#.fleetshift.v1.ManifestResult.StateR\x05state\x12\x18\n" +
 	"\amessage\x18\x04 \x01(\tR\amessage\"W\n" +
 	"\x05State\x12\x15\n" +

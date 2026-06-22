@@ -143,8 +143,8 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Create fulfillment: %v", err)
 		}
 		if err := tx.Deployments().Create(ctx, domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-			ID:            "d1",
-			UID:           "uid-cross",
+			Name:          "deployments/d1",
+			UID:           domain.NewDeploymentUID(),
 			FulfillmentID: "f-cross",
 			CreatedAt:     fixed,
 			UpdatedAt:     fixed,
@@ -167,7 +167,7 @@ func Run(t *testing.T, factory Factory) {
 		if _, err := tx2.Fulfillments().Get(ctx, "f-cross"); err != nil {
 			t.Fatalf("fulfillment not found after cross-repo commit: %v", err)
 		}
-		d, err := tx2.Deployments().Get(ctx, "d1")
+		d, err := tx2.Deployments().Get(ctx, "deployments/d1")
 		if err != nil {
 			t.Fatalf("deployment not found after cross-repo commit: %v", err)
 		}
@@ -181,13 +181,15 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		fixed := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
+		uid := domain.NewPlatformResourceUID()
+
 		tx, err := store.Begin(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
 		defer tx.Rollback()
 
-		r := domain.NewPlatformResource("plat-store-1", "clusters", "clusters/store-test", nil, fixed)
+		r := domain.NewPlatformResource(uid, "clusters/store-test", nil, fixed)
 		if err := tx.ResourceIdentities().Create(ctx, r); err != nil {
 			t.Fatalf("ResourceIdentities().Create: %v", err)
 		}
@@ -201,12 +203,12 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx2.Rollback()
 
-		got, err := tx2.ResourceIdentities().Get(ctx, "plat-store-1")
+		got, err := tx2.ResourceIdentities().Get(ctx, uid)
 		if err != nil {
 			t.Fatalf("Get after commit: %v", err)
 		}
-		if got.UID() != "plat-store-1" {
-			t.Errorf("UID = %q, want plat-store-1", got.UID())
+		if got.UID() != uid {
+			t.Errorf("UID = %s, want %s", got.UID(), uid)
 		}
 	})
 

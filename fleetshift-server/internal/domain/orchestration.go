@@ -694,7 +694,7 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 				"",
 				pt.Labels,
 				pt.Properties,
-				pt.AcceptedResourceTypes,
+				pt.AcceptedManifestTypes,
 			)); err != nil {
 				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
@@ -1388,8 +1388,8 @@ func assembleRemoveAttestation(f Fulfillment, ev *ResolvedEvidence) *Attestation
 			Signer:     *ev.SignerAssertion,
 		},
 		SignedRelation: ev.SignedRelation,
-		Output: &RemoveByDeploymentId{
-			DeploymentID: DeploymentID(f.Provenance().Content.ContentID()),
+		Output: &RemoveByDeploymentName{
+			Name: ResourceName(f.Provenance().Content.ContentID()),
 		},
 	}
 }

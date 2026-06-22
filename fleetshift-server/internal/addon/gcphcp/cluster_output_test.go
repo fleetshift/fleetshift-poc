@@ -69,12 +69,12 @@ func TestClusterOutput_Target(t *testing.T) {
 		t.Errorf("expected IssuerURL=https://issuer.example.com, got %s", bundles[0].IssuerURL)
 	}
 
-	// Verify AcceptedResourceTypes
-	if len(target.AcceptedResourceTypes) != 1 {
-		t.Fatalf("expected 1 accepted resource type, got %d", len(target.AcceptedResourceTypes))
+	// Verify AcceptedManifestTypes
+	if len(target.AcceptedManifestTypes) != 1 {
+		t.Fatalf("expected 1 accepted manifest type, got %d", len(target.AcceptedManifestTypes))
 	}
-	if target.AcceptedResourceTypes[0] != kubernetes.ManifestResourceType {
-		t.Errorf("expected AcceptedResourceTypes[0]=%s, got %s", kubernetes.ManifestResourceType, target.AcceptedResourceTypes[0])
+	if target.AcceptedManifestTypes[0] != kubernetes.ManifestManifestType {
+		t.Errorf("expected AcceptedManifestTypes[0]=%s, got %s", kubernetes.ManifestManifestType, target.AcceptedManifestTypes[0])
 	}
 }
 

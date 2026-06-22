@@ -68,7 +68,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	ps := defaultPlacementStrategy()
 	validUntil := time.Now().Add(24 * time.Hour)
 
-	sig := signEnvelope(t, privKey, "e2e-dep", ms, ps, validUntil, 1)
+	sig := signEnvelope(t, privKey, "deployments/e2e-dep", ms, ps, validUntil, 1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -79,7 +79,7 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 	})
 
 	dep, err := h.deployments.Create(ctx, domain.CreateDeploymentInput{
-		ID:                "e2e-dep",
+		Name:              "deployments/e2e-dep",
 		ManifestStrategy:  ms,
 		PlacementStrategy: ps,
 		UserSignature:     sig,
@@ -92,16 +92,16 @@ func TestEndToEnd_CreateDeployment_AssemblesAndVerifiesAttestation(t *testing.T)
 		t.Fatal("expected Provenance on fulfillment")
 	}
 
-	awaitDeploymentState(ctx, t, store, "e2e-dep", domain.FulfillmentStateActive)
+	awaitDeploymentState(ctx, t, store, "deployments/e2e-dep", domain.FulfillmentStateActive)
 
 	att := agent.capturedAttestation()
 	if att == nil {
 		t.Fatal("delivery agent received nil Attestation; expected assembled attestation")
 	}
 
-	if att.Input.Provenance.Content.ContentID() != "e2e-dep" {
+	if att.Input.Provenance.Content.ContentID() != "deployments/e2e-dep" {
 		t.Errorf("Attestation.Input.Provenance.Content.ContentID() = %q, want %q",
-			att.Input.Provenance.Content.ContentID(), "e2e-dep")
+			att.Input.Provenance.Content.ContentID(), "deployments/e2e-dep")
 	}
 	if att.Input.Signer.RegistrySubject != registrySubject {
 		t.Errorf("Attestation.Input.Signer.RegistrySubject = %q, want %q",

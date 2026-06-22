@@ -33,9 +33,9 @@ import (
 // managed by the direct delivery agent (token-passthrough, no fleetlet).
 const TargetType domain.TargetType = "kubernetes"
 
-// ManifestResourceType is the [domain.ResourceType] for generic
+// ManifestManifestType is the [domain.ManifestType] for generic
 // Kubernetes manifests applied via server-side apply.
-const ManifestResourceType domain.ResourceType = "kubernetes"
+const ManifestManifestType domain.ManifestType = "kubernetes"
 
 const fieldManager = "fleetshift"
 

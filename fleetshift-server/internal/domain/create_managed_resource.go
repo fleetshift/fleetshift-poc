@@ -52,7 +52,15 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		now := s.now()
 		fID := FulfillmentID(uuid.New().String())
 
-		mr := NewManagedResource(in.ResourceType, in.Name, uuid.New().String(), fID, now)
+		// Identity integration: claim/create the platform resource and
+		// attach a managed representation, atomic with the managed
+		// resource persistence.
+		pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), in.Name, nil, now)
+		if err != nil {
+			return ManagedResourceView{}, fmt.Errorf("claim identity: %w", err)
+		}
+
+		mr := NewManagedResource(in.ResourceType, in.Name, NewManagedResourceUID(), fID, now)
 		intent := mr.RecordIntent(in.Spec, now)
 
 		ms, ps, rs := in.TypeDef.Relation.DeriveStrategies(intent)
@@ -74,14 +82,6 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 
 		if err := tx.ManagedResources().CreateInstance(ctx, mr); err != nil {
 			return ManagedResourceView{}, fmt.Errorf("create instance: %w", err)
-		}
-
-		// Identity integration: claim/create the platform resource and
-		// attach a managed representation, atomic with the managed
-		// resource persistence.
-		pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), PlatformResourceUID(uuid.New().String()), in.TypeDef.CollectionID, string(in.Name), nil, now)
-		if err != nil {
-			return ManagedResourceView{}, fmt.Errorf("claim identity: %w", err)
 		}
 		if err := pr.AttachRepresentation(AttachRepresentationInput{
 			ServiceName: in.TypeDef.APIServiceName,

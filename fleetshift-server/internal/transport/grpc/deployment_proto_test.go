@@ -53,7 +53,7 @@ func TestDeploymentToProto_ReconcilingRespectsPause(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			view := domain.DeploymentView{
 				Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-					ID: "d1", UID: "uid-1", FulfillmentID: "f1",
+					Name: "deployments/d1", UID: domain.NewDeploymentUID(), FulfillmentID: "f1",
 				}),
 				Fulfillment: *domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 					ID:          "f1",
@@ -82,7 +82,7 @@ func TestDeploymentToProto_ReconcilingRespectsPause(t *testing.T) {
 func TestDeploymentToProto_PauseReasonPopulated(t *testing.T) {
 	view := domain.DeploymentView{
 		Deployment: domain.DeploymentFromSnapshot(domain.DeploymentSnapshot{
-			ID: "d1", UID: "uid-1", FulfillmentID: "f1",
+			Name: "deployments/d1", UID: domain.NewDeploymentUID(), FulfillmentID: "f1",
 		}),
 		Fulfillment: *domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 			ID:          "f1",

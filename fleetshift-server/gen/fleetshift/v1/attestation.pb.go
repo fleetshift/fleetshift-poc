@@ -330,7 +330,7 @@ func (x *Provenance) GetOutputConstraints() []*OutputConstraint {
 // signer authorizes. Matches the hybrid PoC's DeploymentContent.
 type DeploymentContent struct {
 	state             protoimpl.MessageState `protogen:"open.v1"`
-	DeploymentId      string                 `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
+	DeploymentName    string                 `protobuf:"bytes,1,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
 	ManifestStrategy  *ManifestStrategy      `protobuf:"bytes,2,opt,name=manifest_strategy,json=manifestStrategy,proto3" json:"manifest_strategy,omitempty"`
 	PlacementStrategy *PlacementStrategy     `protobuf:"bytes,3,opt,name=placement_strategy,json=placementStrategy,proto3" json:"placement_strategy,omitempty"`
 	unknownFields     protoimpl.UnknownFields
@@ -367,9 +367,9 @@ func (*DeploymentContent) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{5}
 }
 
-func (x *DeploymentContent) GetDeploymentId() string {
+func (x *DeploymentContent) GetDeploymentName() string {
 	if x != nil {
-		return x.DeploymentId
+		return x.DeploymentName
 	}
 	return ""
 }
@@ -543,7 +543,7 @@ func (x *Attestation) GetPutManifests() *PutManifests {
 	return nil
 }
 
-func (x *Attestation) GetRemove() *RemoveByDeploymentId {
+func (x *Attestation) GetRemove() *RemoveByDeploymentName {
 	if x != nil {
 		if x, ok := x.Output.(*Attestation_Remove); ok {
 			return x.Remove
@@ -561,7 +561,7 @@ type Attestation_PutManifests struct {
 }
 
 type Attestation_Remove struct {
-	Remove *RemoveByDeploymentId `protobuf:"bytes,3,opt,name=remove,proto3,oneof"`
+	Remove *RemoveByDeploymentName `protobuf:"bytes,3,opt,name=remove,proto3,oneof"`
 }
 
 func (*Attestation_PutManifests) isAttestation_Output() {}
@@ -631,30 +631,30 @@ func (x *PutManifests) GetPlacement() *PlacementEvidence {
 	return nil
 }
 
-// RemoveByDeploymentId removes a deployment from a target.
-type RemoveByDeploymentId struct {
-	state        protoimpl.MessageState `protogen:"open.v1"`
-	DeploymentId string                 `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
+// RemoveByDeploymentName removes a deployment from a target.
+type RemoveByDeploymentName struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DeploymentName string                 `protobuf:"bytes,1,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
 	// TODO: signed placement decision.
 	Placement     *PlacementEvidence `protobuf:"bytes,2,opt,name=placement,proto3" json:"placement,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *RemoveByDeploymentId) Reset() {
-	*x = RemoveByDeploymentId{}
+func (x *RemoveByDeploymentName) Reset() {
+	*x = RemoveByDeploymentName{}
 	mi := &file_fleetshift_v1_attestation_proto_msgTypes[9]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *RemoveByDeploymentId) String() string {
+func (x *RemoveByDeploymentName) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*RemoveByDeploymentId) ProtoMessage() {}
+func (*RemoveByDeploymentName) ProtoMessage() {}
 
-func (x *RemoveByDeploymentId) ProtoReflect() protoreflect.Message {
+func (x *RemoveByDeploymentName) ProtoReflect() protoreflect.Message {
 	mi := &file_fleetshift_v1_attestation_proto_msgTypes[9]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -666,19 +666,19 @@ func (x *RemoveByDeploymentId) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use RemoveByDeploymentId.ProtoReflect.Descriptor instead.
-func (*RemoveByDeploymentId) Descriptor() ([]byte, []int) {
+// Deprecated: Use RemoveByDeploymentName.ProtoReflect.Descriptor instead.
+func (*RemoveByDeploymentName) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{9}
 }
 
-func (x *RemoveByDeploymentId) GetDeploymentId() string {
+func (x *RemoveByDeploymentName) GetDeploymentName() string {
 	if x != nil {
-		return x.DeploymentId
+		return x.DeploymentName
 	}
 	return ""
 }
 
-func (x *RemoveByDeploymentId) GetPlacement() *PlacementEvidence {
+func (x *RemoveByDeploymentName) GetPlacement() *PlacementEvidence {
 	if x != nil {
 		return x.Placement
 	}
@@ -742,12 +742,12 @@ func (x *OutputSignature) GetTrustAnchorId() string {
 // PlacementEvidence is a signed placement decision from an addon.
 // Matches the hybrid PoC's PlacementEvidence.
 type PlacementEvidence struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	DeploymentId  string                 `protobuf:"bytes,1,opt,name=deployment_id,json=deploymentId,proto3" json:"deployment_id,omitempty"`
-	Targets       []string               `protobuf:"bytes,2,rep,name=targets,proto3" json:"targets,omitempty"`
-	Signature     *OutputSignature       `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	DeploymentName string                 `protobuf:"bytes,1,opt,name=deployment_name,json=deploymentName,proto3" json:"deployment_name,omitempty"`
+	Targets        []string               `protobuf:"bytes,2,rep,name=targets,proto3" json:"targets,omitempty"`
+	Signature      *OutputSignature       `protobuf:"bytes,3,opt,name=signature,proto3" json:"signature,omitempty"`
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *PlacementEvidence) Reset() {
@@ -780,9 +780,9 @@ func (*PlacementEvidence) Descriptor() ([]byte, []int) {
 	return file_fleetshift_v1_attestation_proto_rawDescGZIP(), []int{11}
 }
 
-func (x *PlacementEvidence) GetDeploymentId() string {
+func (x *PlacementEvidence) GetDeploymentName() string {
 	if x != nil {
-		return x.DeploymentId
+		return x.DeploymentName
 	}
 	return ""
 }
@@ -829,9 +829,9 @@ const file_fleetshift_v1_attestation_proto_rawDesc = "" +
 	"\vvalid_until\x18\x02 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"validUntil\x12/\n" +
 	"\x13expected_generation\x18\x03 \x01(\x03R\x12expectedGeneration\x12N\n" +
-	"\x12output_constraints\x18\x04 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\"\xd7\x01\n" +
-	"\x11DeploymentContent\x12#\n" +
-	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12L\n" +
+	"\x12output_constraints\x18\x04 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\"\xdb\x01\n" +
+	"\x11DeploymentContent\x12'\n" +
+	"\x0fdeployment_name\x18\x01 \x01(\tR\x0edeploymentName\x12L\n" +
 	"\x11manifest_strategy\x18\x02 \x01(\v2\x1f.fleetshift.v1.ManifestStrategyR\x10manifestStrategy\x12O\n" +
 	"\x12placement_strategy\x18\x03 \x01(\v2 .fleetshift.v1.PlacementStrategyR\x11placementStrategy\"\xf7\x02\n" +
 	"\vSignedInput\x12:\n" +
@@ -841,24 +841,24 @@ const file_fleetshift_v1_attestation_proto_rawDesc = "" +
 	"\vvalid_until\x18\x04 \x01(\v2\x1a.google.protobuf.TimestampR\n" +
 	"validUntil\x12N\n" +
 	"\x12output_constraints\x18\x05 \x03(\v2\x1f.fleetshift.v1.OutputConstraintR\x11outputConstraints\x12/\n" +
-	"\x13expected_generation\x18\x06 \x01(\x03R\x12expectedGeneration\"\xcc\x01\n" +
+	"\x13expected_generation\x18\x06 \x01(\x03R\x12expectedGeneration\"\xce\x01\n" +
 	"\vAttestation\x120\n" +
 	"\x05input\x18\x01 \x01(\v2\x1a.fleetshift.v1.SignedInputR\x05input\x12B\n" +
-	"\rput_manifests\x18\x02 \x01(\v2\x1b.fleetshift.v1.PutManifestsH\x00R\fputManifests\x12=\n" +
-	"\x06remove\x18\x03 \x01(\v2#.fleetshift.v1.RemoveByDeploymentIdH\x00R\x06removeB\b\n" +
+	"\rput_manifests\x18\x02 \x01(\v2\x1b.fleetshift.v1.PutManifestsH\x00R\fputManifests\x12?\n" +
+	"\x06remove\x18\x03 \x01(\v2%.fleetshift.v1.RemoveByDeploymentNameH\x00R\x06removeB\b\n" +
 	"\x06output\"\xd4\x01\n" +
 	"\fPutManifests\x125\n" +
 	"\tmanifests\x18\x01 \x03(\v2\x17.fleetshift.v1.ManifestR\tmanifests\x12M\n" +
 	"\x12manifest_signature\x18\x02 \x01(\v2\x1e.fleetshift.v1.OutputSignatureR\x11manifestSignature\x12>\n" +
-	"\tplacement\x18\x03 \x01(\v2 .fleetshift.v1.PlacementEvidenceR\tplacement\"{\n" +
-	"\x14RemoveByDeploymentId\x12#\n" +
-	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12>\n" +
+	"\tplacement\x18\x03 \x01(\v2 .fleetshift.v1.PlacementEvidenceR\tplacement\"\x81\x01\n" +
+	"\x16RemoveByDeploymentName\x12'\n" +
+	"\x0fdeployment_name\x18\x01 \x01(\tR\x0edeploymentName\x12>\n" +
 	"\tplacement\x18\x02 \x01(\v2 .fleetshift.v1.PlacementEvidenceR\tplacement\"q\n" +
 	"\x0fOutputSignature\x126\n" +
 	"\tsignature\x18\x01 \x01(\v2\x18.fleetshift.v1.SignatureR\tsignature\x12&\n" +
-	"\x0ftrust_anchor_id\x18\x02 \x01(\tR\rtrustAnchorId\"\x90\x01\n" +
-	"\x11PlacementEvidence\x12#\n" +
-	"\rdeployment_id\x18\x01 \x01(\tR\fdeploymentId\x12\x18\n" +
+	"\x0ftrust_anchor_id\x18\x02 \x01(\tR\rtrustAnchorId\"\x94\x01\n" +
+	"\x11PlacementEvidence\x12'\n" +
+	"\x0fdeployment_name\x18\x01 \x01(\tR\x0edeploymentName\x12\x18\n" +
 	"\atargets\x18\x02 \x03(\tR\atargets\x12<\n" +
 	"\tsignature\x18\x03 \x01(\v2\x1e.fleetshift.v1.OutputSignatureR\tsignatureBWZUgithub.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1b\x06proto3"
 
@@ -876,22 +876,22 @@ func file_fleetshift_v1_attestation_proto_rawDescGZIP() []byte {
 
 var file_fleetshift_v1_attestation_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_fleetshift_v1_attestation_proto_goTypes = []any{
-	(*FederatedIdentity)(nil),     // 0: fleetshift.v1.FederatedIdentity
-	(*Signature)(nil),             // 1: fleetshift.v1.Signature
-	(*SignerAssertion)(nil),       // 2: fleetshift.v1.SignerAssertion
-	(*OutputConstraint)(nil),      // 3: fleetshift.v1.OutputConstraint
-	(*Provenance)(nil),            // 4: fleetshift.v1.Provenance
-	(*DeploymentContent)(nil),     // 5: fleetshift.v1.DeploymentContent
-	(*SignedInput)(nil),           // 6: fleetshift.v1.SignedInput
-	(*Attestation)(nil),           // 7: fleetshift.v1.Attestation
-	(*PutManifests)(nil),          // 8: fleetshift.v1.PutManifests
-	(*RemoveByDeploymentId)(nil),  // 9: fleetshift.v1.RemoveByDeploymentId
-	(*OutputSignature)(nil),       // 10: fleetshift.v1.OutputSignature
-	(*PlacementEvidence)(nil),     // 11: fleetshift.v1.PlacementEvidence
-	(*timestamppb.Timestamp)(nil), // 12: google.protobuf.Timestamp
-	(*ManifestStrategy)(nil),      // 13: fleetshift.v1.ManifestStrategy
-	(*PlacementStrategy)(nil),     // 14: fleetshift.v1.PlacementStrategy
-	(*Manifest)(nil),              // 15: fleetshift.v1.Manifest
+	(*FederatedIdentity)(nil),      // 0: fleetshift.v1.FederatedIdentity
+	(*Signature)(nil),              // 1: fleetshift.v1.Signature
+	(*SignerAssertion)(nil),        // 2: fleetshift.v1.SignerAssertion
+	(*OutputConstraint)(nil),       // 3: fleetshift.v1.OutputConstraint
+	(*Provenance)(nil),             // 4: fleetshift.v1.Provenance
+	(*DeploymentContent)(nil),      // 5: fleetshift.v1.DeploymentContent
+	(*SignedInput)(nil),            // 6: fleetshift.v1.SignedInput
+	(*Attestation)(nil),            // 7: fleetshift.v1.Attestation
+	(*PutManifests)(nil),           // 8: fleetshift.v1.PutManifests
+	(*RemoveByDeploymentName)(nil), // 9: fleetshift.v1.RemoveByDeploymentName
+	(*OutputSignature)(nil),        // 10: fleetshift.v1.OutputSignature
+	(*PlacementEvidence)(nil),      // 11: fleetshift.v1.PlacementEvidence
+	(*timestamppb.Timestamp)(nil),  // 12: google.protobuf.Timestamp
+	(*ManifestStrategy)(nil),       // 13: fleetshift.v1.ManifestStrategy
+	(*PlacementStrategy)(nil),      // 14: fleetshift.v1.PlacementStrategy
+	(*Manifest)(nil),               // 15: fleetshift.v1.Manifest
 }
 var file_fleetshift_v1_attestation_proto_depIdxs = []int32{
 	0,  // 0: fleetshift.v1.Signature.signer:type_name -> fleetshift.v1.FederatedIdentity
@@ -907,11 +907,11 @@ var file_fleetshift_v1_attestation_proto_depIdxs = []int32{
 	3,  // 10: fleetshift.v1.SignedInput.output_constraints:type_name -> fleetshift.v1.OutputConstraint
 	6,  // 11: fleetshift.v1.Attestation.input:type_name -> fleetshift.v1.SignedInput
 	8,  // 12: fleetshift.v1.Attestation.put_manifests:type_name -> fleetshift.v1.PutManifests
-	9,  // 13: fleetshift.v1.Attestation.remove:type_name -> fleetshift.v1.RemoveByDeploymentId
+	9,  // 13: fleetshift.v1.Attestation.remove:type_name -> fleetshift.v1.RemoveByDeploymentName
 	15, // 14: fleetshift.v1.PutManifests.manifests:type_name -> fleetshift.v1.Manifest
 	10, // 15: fleetshift.v1.PutManifests.manifest_signature:type_name -> fleetshift.v1.OutputSignature
 	11, // 16: fleetshift.v1.PutManifests.placement:type_name -> fleetshift.v1.PlacementEvidence
-	11, // 17: fleetshift.v1.RemoveByDeploymentId.placement:type_name -> fleetshift.v1.PlacementEvidence
+	11, // 17: fleetshift.v1.RemoveByDeploymentName.placement:type_name -> fleetshift.v1.PlacementEvidence
 	1,  // 18: fleetshift.v1.OutputSignature.signature:type_name -> fleetshift.v1.Signature
 	10, // 19: fleetshift.v1.PlacementEvidence.signature:type_name -> fleetshift.v1.OutputSignature
 	20, // [20:20] is the sub-list for method output_type

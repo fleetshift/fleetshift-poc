@@ -11,10 +11,11 @@ func fulfillmentValue(s FulfillmentSnapshot) Fulfillment {
 }
 
 func TestDeploymentView_Etag_Deterministic(t *testing.T) {
+	depUID := NewDeploymentUID()
 	v := DeploymentView{
 		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{
-			ID:  "dep-1",
-			UID: "uid-abc",
+			Name: "deployments/dep-1",
+			UID:  depUID,
 		}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			ID:         "f-1",
@@ -39,7 +40,7 @@ func TestDeploymentView_Etag_Deterministic(t *testing.T) {
 
 func TestDeploymentView_Etag_WeakPrefix(t *testing.T) {
 	v := DeploymentView{
-		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{ID: "dep-1", UID: "uid-abc"}),
+		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/dep-1", UID: NewDeploymentUID()}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{ID: "f-1", Generation: 1, State: FulfillmentStateCreating}),
 	}
 	etag := string(v.Etag())
@@ -53,7 +54,7 @@ func TestDeploymentView_Etag_WeakPrefix(t *testing.T) {
 
 func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 	base := DeploymentView{
-		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{ID: "dep-1", UID: "uid-abc"}),
+		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/dep-1", UID: NewDeploymentUID()}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			ID:              "f-1",
 			Generation:      3,
@@ -95,15 +96,14 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 }
 
 func TestDeploymentView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
-	// Two views whose variable-length fields concatenate to the same
-	// byte stream without length-framing: (ID="ab", UID="c") vs
-	// (ID="a", UID="bc"). They must produce distinct etags.
+	uid1 := NewDeploymentUID()
+	uid2 := NewDeploymentUID()
 	a := DeploymentView{
-		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{ID: "ab", UID: "c"}),
+		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/ab", UID: uid1}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	b := DeploymentView{
-		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{ID: "a", UID: "bc"}),
+		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/a", UID: uid2}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	if a.Etag() == b.Etag() {
@@ -114,8 +114,9 @@ func TestDeploymentView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
 func TestFulfillment_Etag_ResolvedTargetBoundariesAreUnambiguous(t *testing.T) {
 	// Two views whose ResolvedTargets concatenate to the same bytes:
 	// ["ab","c"] vs ["a","bc"]. They must produce distinct etags.
+	sharedUID := NewDeploymentUID()
 	a := DeploymentView{
-		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{ID: "d", UID: "u"}),
+		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/d", UID: sharedUID}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			Generation:      1,
 			State:           FulfillmentStateActive,
@@ -123,7 +124,7 @@ func TestFulfillment_Etag_ResolvedTargetBoundariesAreUnambiguous(t *testing.T) {
 		}),
 	}
 	b := DeploymentView{
-		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{ID: "d", UID: "u"}),
+		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/d", UID: sharedUID}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			Generation:      1,
 			State:           FulfillmentStateActive,
@@ -138,8 +139,9 @@ func TestFulfillment_Etag_ResolvedTargetBoundariesAreUnambiguous(t *testing.T) {
 func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
 	// ["abc"] vs ["ab","c"] — same concatenated bytes but different
 	// slice lengths. Must produce distinct etags.
+	sharedUID2 := NewDeploymentUID()
 	a := DeploymentView{
-		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{ID: "d", UID: "u"}),
+		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/d", UID: sharedUID2}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			Generation:      1,
 			State:           FulfillmentStateActive,
@@ -147,7 +149,7 @@ func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
 		}),
 	}
 	b := DeploymentView{
-		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{ID: "d", UID: "u"}),
+		Deployment: DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/d", UID: sharedUID2}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
 			Generation:      1,
 			State:           FulfillmentStateActive,
@@ -164,15 +166,15 @@ func managedResourceValue(s ManagedResourceSnapshot) ManagedResource {
 }
 
 func TestManagedResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
-	// (Name="ab", UID="c") vs (Name="a", UID="bc") — same concat,
-	// must differ.
+	uid1 := NewManagedResourceUID()
+	uid2 := NewManagedResourceUID()
 	a := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "t", Name: "ab", UID: "c"}),
+		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "ab", UID: uid1}),
 		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
 		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	b := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "t", Name: "a", UID: "bc"}),
+		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "a", UID: uid2}),
 		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
 		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
@@ -184,13 +186,13 @@ func TestManagedResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
 func TestManagedResourceView_Etag_Deterministic(t *testing.T) {
 	v := ManagedResourceView{
 		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType:   "api.kind.cluster",
+			ResourceType:   "kind.fleetshift.io/Cluster",
 			Name:           "test-cluster",
-			UID:            "uid-mr",
+			UID:            NewManagedResourceUID(),
 			CurrentVersion: 2,
 		}),
 		Intent: ResourceIntent{
-			ResourceType: "api.kind.cluster",
+			ResourceType: "kind.fleetshift.io/Cluster",
 			Name:         "test-cluster",
 			Version:      2,
 			Spec:         json.RawMessage(`{"replicas":3}`),
@@ -212,7 +214,7 @@ func TestManagedResourceView_Etag_Deterministic(t *testing.T) {
 func TestManagedResourceView_Etag_WeakPrefix(t *testing.T) {
 	v := ManagedResourceView{
 		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType: "api.kind.cluster",
+			ResourceType: "kind.fleetshift.io/Cluster",
 			Name:         "test-cluster",
 		}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{ID: "f-2", Generation: 1, State: FulfillmentStateCreating}),
@@ -229,7 +231,7 @@ func TestManagedResourceView_Etag_WeakPrefix(t *testing.T) {
 func TestManagedResourceView_Etag_ChangesOnStateChange(t *testing.T) {
 	base := ManagedResourceView{
 		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType:   "api.kind.cluster",
+			ResourceType:   "kind.fleetshift.io/Cluster",
 			Name:           "test-cluster",
 			CurrentVersion: 1,
 		}),

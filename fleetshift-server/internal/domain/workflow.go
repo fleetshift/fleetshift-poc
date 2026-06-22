@@ -94,7 +94,7 @@ type DeleteCleanupCompleteEvent struct {
 // fulfillment rows that the [DeleteDeploymentCleanupWorkflow] will
 // hard-delete after receiving a [DeleteCleanupCompleteSignal].
 type DeleteDeploymentCleanupInput struct {
-	DeploymentID  DeploymentID
+	Name          ResourceName
 	FulfillmentID FulfillmentID
 }
 

@@ -24,7 +24,7 @@ func TestFulfillmentSnapshot_RoundTrip(t *testing.T) {
 		StatusReason:             "all good",
 		Auth:                     DeliveryAuth{Token: "tok"},
 		Provenance:               &Provenance{Sig: Signature{Signer: FederatedIdentity{Subject: "u1", Issuer: "iss"}}},
-		AttestationRef:           &AttestationRef{RelationRef: ptrTo(ResourceType("k8s"))},
+		AttestationRef:           &AttestationRef{RelationRef: ptrTo(ResourceType("test.fleetshift.io/K8s"))},
 		Generation:               gen,
 		ObservedGeneration:       5,
 		ActiveWorkflowGen:        &gen,
@@ -97,9 +97,10 @@ func TestFulfillmentFromSnapshot_SetsLoadedGeneration(t *testing.T) {
 }
 
 func TestDeploymentSnapshot_RoundTrip(t *testing.T) {
+	uid := NewDeploymentUID()
 	snap := DeploymentSnapshot{
-		ID:            "d-1",
-		UID:           "uid-abc",
+		Name:          "deployments/d-1",
+		UID:           uid,
 		FulfillmentID: "f-1",
 		CreatedAt:     refTime,
 		UpdatedAt:     refTime.Add(time.Minute),
@@ -108,7 +109,7 @@ func TestDeploymentSnapshot_RoundTrip(t *testing.T) {
 	d := DeploymentFromSnapshot(snap)
 	got := d.Snapshot()
 
-	assertEq(t, "ID", got.ID, snap.ID)
+	assertEq(t, "Name", got.Name, snap.Name)
 	assertEq(t, "UID", got.UID, snap.UID)
 	assertEq(t, "FulfillmentID", got.FulfillmentID, snap.FulfillmentID)
 	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
@@ -120,7 +121,7 @@ func TestDeliverySnapshot_RoundTrip(t *testing.T) {
 		ID:            "del-1",
 		FulfillmentID: "f-1",
 		TargetID:      "t-1",
-		Manifests:     []Manifest{{ResourceType: "k8s", Name: "app", Raw: json.RawMessage(`{}`)}},
+		Manifests:     []Manifest{{ManifestType: "k8s", ManifestID: "app", Raw: json.RawMessage(`{}`)}},
 		Generation:    5,
 		State:         DeliveryStatePending,
 		CreatedAt:     refTime,
@@ -134,7 +135,7 @@ func TestDeliverySnapshot_RoundTrip(t *testing.T) {
 	assertEq(t, "FulfillmentID", got.FulfillmentID, snap.FulfillmentID)
 	assertEq(t, "TargetID", got.TargetID, snap.TargetID)
 	assertEq(t, "len(Manifests)", len(got.Manifests), len(snap.Manifests))
-	assertEq(t, "Manifests[0].ResourceType", got.Manifests[0].ResourceType, snap.Manifests[0].ResourceType)
+	assertEq(t, "Manifests[0].ManifestType", got.Manifests[0].ManifestType, snap.Manifests[0].ManifestType)
 	assertEq(t, "Generation", got.Generation, snap.Generation)
 	assertEq(t, "State", got.State, snap.State)
 	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
@@ -150,7 +151,7 @@ func TestTargetInfoSnapshot_RoundTrip(t *testing.T) {
 		State:                 TargetStateReady,
 		Labels:                map[string]string{"env": "prod"},
 		Properties:            map[string]string{"kubeconfig": "ref://vault/kc"},
-		AcceptedResourceTypes: []ResourceType{"k8s"},
+		AcceptedManifestTypes: []ManifestType{"k8s"},
 	}
 
 	ti := TargetInfoFromSnapshot(snap)
@@ -163,7 +164,7 @@ func TestTargetInfoSnapshot_RoundTrip(t *testing.T) {
 	assertEq(t, "State", got.State, snap.State)
 	assertEq(t, "Labels[env]", got.Labels["env"], snap.Labels["env"])
 	assertEq(t, "Properties[kubeconfig]", got.Properties["kubeconfig"], snap.Properties["kubeconfig"])
-	assertEq(t, "len(AcceptedResourceTypes)", len(got.AcceptedResourceTypes), len(snap.AcceptedResourceTypes))
+	assertEq(t, "len(AcceptedManifestTypes)", len(got.AcceptedManifestTypes), len(snap.AcceptedManifestTypes))
 }
 
 func TestInventoryItemSnapshot_RoundTrip(t *testing.T) {
@@ -243,17 +244,18 @@ func TestSignerEnrollmentSnapshot_RoundTrip(t *testing.T) {
 
 func TestManagedResourceSnapshot_RoundTrip(t *testing.T) {
 	deletedAt := refTime.Add(2 * time.Hour)
+	uid := NewManagedResourceUID()
 	snap := ManagedResourceSnapshot{
-		ResourceType:   "clusters",
+		ResourceType:   "test.fleetshift.io/Cluster",
 		Name:           "prod-east",
-		UID:            "uid-mr",
+		UID:            uid,
 		CurrentVersion: 4,
 		FulfillmentID:  "f-1",
 		CreatedAt:      refTime,
 		UpdatedAt:      refTime.Add(time.Hour),
 		DeletedAt:      &deletedAt,
 		PendingIntents: []ResourceIntent{
-			{ResourceType: "clusters", Name: "prod-east", Version: 5, Spec: json.RawMessage(`{}`)},
+			{ResourceType: "test.fleetshift.io/Cluster", Name: "prod-east", Version: 5, Spec: json.RawMessage(`{}`)},
 		},
 	}
 
@@ -280,7 +282,7 @@ func TestManagedResourceSnapshot_RoundTrip(t *testing.T) {
 
 func TestManagedResourceFromSnapshot_PreservesVersionBaseline(t *testing.T) {
 	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "clusters",
+		ResourceType:   "test.fleetshift.io/Cluster",
 		Name:           "prod",
 		CurrentVersion: 7,
 		FulfillmentID:  "f-1",
@@ -316,7 +318,7 @@ func TestFulfillmentSnapshot_CapturesPendingBuffers(t *testing.T) {
 
 func TestManagedResourceSnapshot_CapturesPendingIntents(t *testing.T) {
 	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "clusters",
+		ResourceType:   "test.fleetshift.io/Cluster",
 		Name:           "prod",
 		CurrentVersion: 0,
 		FulfillmentID:  "f-1",
@@ -376,7 +378,7 @@ func TestFulfillment_DrainPendingStrategyRecords(t *testing.T) {
 
 func TestManagedResource_DrainPendingIntents(t *testing.T) {
 	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "clusters",
+		ResourceType:   "test.fleetshift.io/Cluster",
 		Name:           "prod",
 		CurrentVersion: 0,
 		FulfillmentID:  "f-1",
@@ -411,44 +413,43 @@ func TestManagedResource_DrainPendingIntents(t *testing.T) {
 func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 	deletedAt := refTime.Add(2 * time.Hour)
 	repDeletedAt := refTime.Add(3 * time.Hour)
+	uid := NewPlatformResourceUID()
+	targetUID := NewPlatformResourceUID()
 	snap := PlatformResourceSnapshot{
-		UID:          "plat-1",
-		CollectionID: "clusters",
-		RelativeName: "clusters/prod",
-		Labels:       map[string]string{"env": "prod"},
-		CreatedAt:    refTime,
-		UpdatedAt:    refTime.Add(time.Hour),
-		DeletedAt:    &deletedAt,
+		UID:       uid,
+		Name:      "clusters/prod",
+		Labels:    map[string]string{"env": "prod"},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+		DeletedAt: &deletedAt,
 		Representations: []ResourceRepresentationSnapshot{
 			{
-				PlatformUID:  "plat-1",
-				ServiceName:  "kind.fleetshift.io",
-				Version:      "v1",
-				CollectionID: "clusters",
-				RelativeName: "clusters/prod",
-				Roles:        []RepresentationRole{RepresentationRoleManaged},
-				Labels:       map[string]string{"runtime": "containerd"},
-				CreatedAt:    refTime,
-				UpdatedAt:    refTime,
+				PlatformUID: uid,
+				ServiceName: "kind.fleetshift.io",
+				Version:     "v1",
+				Name:        "clusters/prod",
+				Roles:       []RepresentationRole{RepresentationRoleManaged},
+				Labels:      map[string]string{"runtime": "containerd"},
+				CreatedAt:   refTime,
+				UpdatedAt:   refTime,
 			},
 			{
-				PlatformUID:  "plat-1",
-				ServiceName:  "gcp.fleetshift.io",
-				Version:      "v1",
-				CollectionID: "clusters",
-				RelativeName: "clusters/prod",
-				Roles:        []RepresentationRole{RepresentationRoleInventory},
-				Labels:       map[string]string{"project": "my-proj"},
-				CreatedAt:    refTime,
-				UpdatedAt:    refTime,
-				DeletedAt:    &repDeletedAt,
+				PlatformUID: uid,
+				ServiceName: "gcp.fleetshift.io",
+				Version:     "v1",
+				Name:        "clusters/prod",
+				Roles:       []RepresentationRole{RepresentationRoleInventory},
+				Labels:      map[string]string{"project": "my-proj"},
+				CreatedAt:   refTime,
+				UpdatedAt:   refTime,
+				DeletedAt:   &repDeletedAt,
 			},
 		},
 		Aliases: []ResourceAliasSnapshot{
 			{Namespace: "gcp", Key: "project_id", Value: "my-proj"},
 		},
 		Relationships: []ResourceRelationshipSnapshot{
-			{SourceUID: "plat-1", Type: "runs-on", TargetUID: "plat-2", SourceService: "kind.fleetshift.io", CreatedAt: refTime},
+			{SourceUID: uid, Type: "runs-on", TargetUID: targetUID, SourceService: "kind.fleetshift.io", CreatedAt: refTime},
 		},
 	}
 
@@ -456,8 +457,7 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 	got := r.Snapshot()
 
 	assertEq(t, "UID", got.UID, snap.UID)
-	assertEq(t, "CollectionID", got.CollectionID, snap.CollectionID)
-	assertEq(t, "RelativeName", got.RelativeName, snap.RelativeName)
+	assertEq(t, "Name", got.Name, snap.Name)
 	assertEq(t, "Labels[env]", got.Labels["env"], snap.Labels["env"])
 	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
 	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
@@ -494,12 +494,11 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 
 func TestPlatformResourceSnapshot_RoundTrip_NilDeletedAt(t *testing.T) {
 	snap := PlatformResourceSnapshot{
-		UID:          "plat-2",
-		CollectionID: "clusters",
-		RelativeName: "clusters/staging",
-		Labels:       map[string]string{},
-		CreatedAt:    refTime,
-		UpdatedAt:    refTime,
+		UID:       NewPlatformResourceUID(),
+		Name:      "clusters/staging",
+		Labels:    map[string]string{},
+		CreatedAt: refTime,
+		UpdatedAt: refTime,
 	}
 
 	r := PlatformResourceFromSnapshot(snap)

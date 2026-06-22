@@ -90,7 +90,7 @@ func setupHarness(t *testing.T) *testHarness {
 func (h *testHarness) buildValidAttestation(t *testing.T) *domain.Attestation {
 	t.Helper()
 	manifests := []domain.Manifest{{
-		ResourceType: "kubernetes",
+		ManifestType: "kubernetes",
 		Raw:          json.RawMessage(`{"kind":"ConfigMap","apiVersion":"v1","metadata":{"name":"test","namespace":"default"}}`),
 	}}
 	ms := domain.ManifestStrategySpec{
@@ -104,7 +104,7 @@ func (h *testHarness) buildValidAttestation(t *testing.T) *domain.Attestation {
 	validUntil := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
 	gen := domain.Generation(1)
 
-	envelope, err := domain.BuildSignedInputEnvelope("dep-1", ms, ps, validUntil, nil, gen)
+	envelope, err := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, validUntil, nil, gen)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
 	}
@@ -116,7 +116,7 @@ func (h *testHarness) buildValidAttestation(t *testing.T) *domain.Attestation {
 		Input: domain.SignedInput{
 			Provenance: domain.Provenance{
 				Content: domain.DeploymentContent{
-					DeploymentID:      "dep-1",
+					Name:              "deployments/dep-1",
 					ManifestStrategy:  ms,
 					PlacementStrategy: ps,
 				},
@@ -251,7 +251,7 @@ func TestVerifyAttestation_ManifestJSONNormalized(t *testing.T) {
 	// round-trip through manifest_strategies.spec would produce.
 	att.Output = &domain.PutManifests{
 		Manifests: []domain.Manifest{{
-			ResourceType: "kubernetes",
+			ManifestType: "kubernetes",
 			Raw:          json.RawMessage(`{"apiVersion": "v1", "kind": "ConfigMap", "metadata": {"name": "test", "namespace": "default"}}`),
 		}},
 	}
@@ -267,7 +267,7 @@ func TestVerifyAttestation_ManifestContentMismatch(t *testing.T) {
 	att := h.buildValidAttestation(t)
 	att.Output = &domain.PutManifests{
 		Manifests: []domain.Manifest{{
-			ResourceType: "kubernetes",
+			ManifestType: "kubernetes",
 			Raw:          json.RawMessage(`{"tampered":true}`),
 		}},
 	}
@@ -281,8 +281,8 @@ func TestVerifyAttestation_ManifestContentMismatch(t *testing.T) {
 func TestVerifyAttestation_RemoveDeploymentIDMismatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Output = &domain.RemoveByDeploymentId{
-		DeploymentID: "wrong-dep",
+	att.Output = &domain.RemoveByDeploymentName{
+		Name: "deployments/wrong-dep",
 	}
 
 	err := h.verifier.Verify(context.Background(), att, 1)
@@ -294,8 +294,8 @@ func TestVerifyAttestation_RemoveDeploymentIDMismatch(t *testing.T) {
 func TestVerifyAttestation_RemoveDeploymentIDMatch(t *testing.T) {
 	h := setupHarness(t)
 	att := h.buildValidAttestation(t)
-	att.Output = &domain.RemoveByDeploymentId{
-		DeploymentID: "dep-1",
+	att.Output = &domain.RemoveByDeploymentName{
+		Name: "deployments/dep-1",
 	}
 
 	err := h.verifier.Verify(context.Background(), att, 1)
@@ -389,7 +389,7 @@ func TestVerifyAttestation_GenerationZero_SkipsCheck(t *testing.T) {
 	ms := att.Input.Provenance.Content.(domain.DeploymentContent).ManifestStrategy
 	ps := att.Input.Provenance.Content.(domain.DeploymentContent).PlacementStrategy
 	validUntil := att.Input.Provenance.ValidUntil
-	envelope, err := domain.BuildSignedInputEnvelope("dep-1", ms, ps, validUntil, nil, 0)
+	envelope, err := domain.BuildSignedInputEnvelope("deployments/dep-1", ms, ps, validUntil, nil, 0)
 	if err != nil {
 		t.Fatalf("build envelope: %v", err)
 	}

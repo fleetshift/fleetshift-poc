@@ -25,7 +25,7 @@ message RegisterTarget {
   // Opaque properties for delivery agents and manifest strategies.
   map<string, string> properties = 5;
 
-  // Resource types this target can accept. An empty list means
+  // Manifest types this target can accept. An empty list means
   // the target is unconstrained.
-  repeated string accepted_resource_types = 6;
+  repeated string accepted_manifest_types = 6;
 }

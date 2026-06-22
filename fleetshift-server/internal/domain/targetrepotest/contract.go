@@ -78,7 +78,7 @@ func Run(t *testing.T, factory Factory) {
 			Name:                  "cluster-a",
 			Labels:                map[string]string{"env": "prod"},
 			Properties:            map[string]string{"region": "us-east"},
-			AcceptedResourceTypes: []domain.ResourceType{"kubernetes.manifest", "helm.chart"},
+			AcceptedManifestTypes: []domain.ManifestType{"kubernetes.manifest", "helm.chart"},
 		})
 
 		if err := repo.Create(ctx, target); err != nil {
@@ -89,15 +89,15 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
-		if len(got.AcceptedResourceTypes()) != 2 {
-			t.Fatalf("AcceptedResourceTypes len = %d, want 2", len(got.AcceptedResourceTypes()))
+		if len(got.AcceptedManifestTypes()) != 2 {
+			t.Fatalf("AcceptedManifestTypes len = %d, want 2", len(got.AcceptedManifestTypes()))
 		}
-		types := map[domain.ResourceType]bool{}
-		for _, rt := range got.AcceptedResourceTypes() {
-			types[rt] = true
+		types := map[domain.ManifestType]bool{}
+		for _, mt := range got.AcceptedManifestTypes() {
+			types[mt] = true
 		}
 		if !types["kubernetes.manifest"] || !types["helm.chart"] {
-			t.Errorf("AcceptedResourceTypes = %v, want [kubernetes.manifest helm.chart]", got.AcceptedResourceTypes())
+			t.Errorf("AcceptedManifestTypes = %v, want [kubernetes.manifest helm.chart]", got.AcceptedManifestTypes())
 		}
 	})
 

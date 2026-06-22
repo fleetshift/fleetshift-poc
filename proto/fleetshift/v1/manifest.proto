@@ -8,8 +8,8 @@ import "google/api/field_behavior.proto";
 
 // Manifest is an opaque declarative payload delivered to a target.
 message Manifest {
-  // Identifies the kind of resource (e.g. "api.kind.cluster").
-  string resource_type = 1 [(google.api.field_behavior) = REQUIRED];
+  // Opaque dispatch label identifying the manifest kind (e.g. "api.kind.cluster").
+  string manifest_type = 1 [(google.api.field_behavior) = REQUIRED];
 
   // Opaque content of the manifest.
   bytes raw = 2 [(google.api.field_behavior) = REQUIRED];

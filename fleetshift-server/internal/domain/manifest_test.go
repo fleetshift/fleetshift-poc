@@ -10,8 +10,8 @@ import (
 func TestFilterAcceptedManifests_UnconstrainedTarget(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "t1", Name: "unconstrained"})
 	manifests := []domain.Manifest{
-		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
-		{ResourceType: "kubernetes", Raw: json.RawMessage(`{}`)},
+		{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
+		{ManifestType: "kubernetes", Raw: json.RawMessage(`{}`)},
 	}
 	got := domain.FilterAcceptedManifests(target, manifests)
 	if len(got) != 2 {
@@ -23,18 +23,18 @@ func TestFilterAcceptedManifests_FiltersToAcceptedTypes(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "kind-only",
-		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster"},
+		AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster"},
 	})
 	manifests := []domain.Manifest{
-		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
-		{ResourceType: "kubernetes", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)},
+		{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
+		{ManifestType: "kubernetes", Raw: json.RawMessage(`{"kind":"ConfigMap"}`)},
 	}
 	got := domain.FilterAcceptedManifests(target, manifests)
 	if len(got) != 1 {
 		t.Fatalf("expected 1 manifest after filtering; got %d", len(got))
 	}
-	if got[0].ResourceType != "api.kind.cluster" {
-		t.Errorf("expected api.kind.cluster, got %s", got[0].ResourceType)
+	if got[0].ManifestType != "api.kind.cluster" {
+		t.Errorf("expected api.kind.cluster, got %s", got[0].ManifestType)
 	}
 }
 
@@ -42,10 +42,10 @@ func TestFilterAcceptedManifests_AllFiltered(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "k8s",
-		AcceptedResourceTypes: []domain.ResourceType{"kubernetes"},
+		AcceptedManifestTypes: []domain.ManifestType{"kubernetes"},
 	})
 	manifests := []domain.Manifest{
-		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
+		{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{"name":"c1"}`)},
 	}
 	got := domain.FilterAcceptedManifests(target, manifests)
 	if len(got) != 0 {
@@ -57,7 +57,7 @@ func TestFilterAcceptedManifests_EmptyManifests(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "k8s",
-		AcceptedResourceTypes: []domain.ResourceType{"kubernetes"},
+		AcceptedManifestTypes: []domain.ManifestType{"kubernetes"},
 	})
 	got := domain.FilterAcceptedManifests(target, nil)
 	if len(got) != 0 {
@@ -69,12 +69,12 @@ func TestFilterAcceptedManifests_MultipleAcceptedTypes(t *testing.T) {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:                    "t1",
 		Name:                  "multi",
-		AcceptedResourceTypes: []domain.ResourceType{"api.kind.cluster", "kubernetes"},
+		AcceptedManifestTypes: []domain.ManifestType{"api.kind.cluster", "kubernetes"},
 	})
 	manifests := []domain.Manifest{
-		{ResourceType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
-		{ResourceType: "kubernetes", Raw: json.RawMessage(`{}`)},
-		{ResourceType: "helm.chart", Raw: json.RawMessage(`{}`)},
+		{ManifestType: "api.kind.cluster", Raw: json.RawMessage(`{}`)},
+		{ManifestType: "kubernetes", Raw: json.RawMessage(`{}`)},
+		{ManifestType: "helm.chart", Raw: json.RawMessage(`{}`)},
 	}
 	got := domain.FilterAcceptedManifests(target, manifests)
 	if len(got) != 2 {

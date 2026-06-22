@@ -15,8 +15,12 @@ var gcphcpClusterSpecProto string
 const TargetType domain.TargetType = "gcphcp"
 
 // ClusterResourceType is the [domain.ResourceType] for GCP HCP cluster
-// managed resources.
-const ClusterResourceType domain.ResourceType = "api.gcphcp.cluster"
+// managed resources (used in the managed resource system).
+const ClusterResourceType domain.ResourceType = "gcphcp.fleetshift.io/Cluster"
+
+// ClusterManifestType is the [domain.ManifestType] for GCP HCP cluster
+// manifests delivered to the gcphcp agent.
+const ClusterManifestType domain.ManifestType = "api.gcphcp.cluster"
 
 // KubernetesTargetType is the [domain.TargetType] for Kubernetes
 // clusters provisioned by the GCP HCP addon.
@@ -55,7 +59,8 @@ func Schema(addonTargetID domain.TargetID) domain.ManagedResourceSchema {
 		EntryFile:   specProtoPath,
 		SpecMessage: "addons.gcphcp.v1.GCPHCPClusterSpec",
 		Relation: domain.RegisteredSelfTarget{
-			AddonTarget: addonTargetID,
+			AddonTarget:  addonTargetID,
+			ManifestType: ClusterManifestType,
 		},
 	}
 }

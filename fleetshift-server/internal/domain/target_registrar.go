@@ -42,7 +42,7 @@ func (r *TargetRegistrar) Register(ctx context.Context, target TargetInfo) error
 		target.State(),
 		target.Labels(),
 		target.Properties(),
-		target.AcceptedResourceTypes(),
+		target.AcceptedManifestTypes(),
 	)
 
 	if r.Inventory != nil {

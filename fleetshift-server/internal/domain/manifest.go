@@ -2,35 +2,41 @@ package domain
 
 import "encoding/json"
 
-// ResourceType identifies the kind of declarative resource in a [Manifest].
-// The platform treats manifest content as opaque; ResourceType provides
-// metadata that delivery agents use for dispatch and validation.
-type ResourceType string
+// ManifestType is an opaque dispatch label for delivery targets.
+// It identifies what kind of payload a [Manifest] carries (e.g.
+// "api.kind.cluster", "idp-trust-bundle") so agents can route and
+// validate without understanding manifest content.
+type ManifestType string
+
+// ManifestID is an opaque identifier for a manifest instance. Unlike
+// [ResourceName], it carries no AIP naming convention — manifests in a
+// fulfillment are opaque payloads, not AIP resources.
+type ManifestID string
 
 // Manifest is an opaque declarative payload delivered to a target.
-// ResourceType identifies what the payload represents (e.g.
+// ManifestType identifies what the payload represents (e.g.
 // "api.kind.cluster"); Raw holds the actual content as opaque JSON.
 type Manifest struct {
-	ResourceType ResourceType
-	Name         ResourceName
+	ManifestType ManifestType
+	ManifestID   ManifestID
 	Raw          json.RawMessage
 }
 
 // FilterAcceptedManifests returns the subset of manifests whose
-// [ResourceType] is accepted by the target. If the target has no
-// AcceptedResourceTypes (unconstrained / legacy), all manifests are
+// [ManifestType] is accepted by the target. If the target has no
+// AcceptedManifestTypes (unconstrained / legacy), all manifests are
 // returned unchanged.
 func FilterAcceptedManifests(target TargetInfo, manifests []Manifest) []Manifest {
-	if len(target.AcceptedResourceTypes()) == 0 {
+	if len(target.AcceptedManifestTypes()) == 0 {
 		return manifests
 	}
-	accepted := make(map[ResourceType]struct{}, len(target.AcceptedResourceTypes()))
-	for _, rt := range target.AcceptedResourceTypes() {
-		accepted[rt] = struct{}{}
+	accepted := make(map[ManifestType]struct{}, len(target.AcceptedManifestTypes()))
+	for _, mt := range target.AcceptedManifestTypes() {
+		accepted[mt] = struct{}{}
 	}
 	out := make([]Manifest, 0, len(manifests))
 	for _, m := range manifests {
-		if _, ok := accepted[m.ResourceType]; ok {
+		if _, ok := accepted[m.ManifestType]; ok {
 			out = append(out, m)
 		}
 	}

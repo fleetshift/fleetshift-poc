@@ -6,24 +6,14 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// ResourceTypeConfig describes an extension service for a platform resource
-// type. This is the input to the dynamic service builder — it carries
-// everything needed to build and register a typed gRPC + HTTP service at
-// runtime without compile-time Go stubs.
-//
-// # Relationship to platform resource identity
-//
-// Each config describes an extension representation of a platform-level
-// resource type. The addon does not define a resource type in isolation;
-// it implements a platform resource type through its own typed API. Multiple
-// extensions can model the same platform resource type (e.g. one manages
-// clusters, another inventories them), each under its own APIServiceName but
-// sharing the same CollectionID.
+// CollectionConfig describes the identity and naming of a resource
+// collection. This is the shared vocabulary between extension and
+// platform APIs that participate in the same identity domain — the
+// CollectionID binds them to the same platform resource type.
 //
 // The relative resource name ({CollectionID}/{id}, e.g. "clusters/foo") is
-// identity-equivalent across all extensions that share a CollectionID. This
-// is how extension resources unify under a single platform identity — the
-// CollectionID is the implicit platform identity domain binding.
+// identity-equivalent across all APIs that share a CollectionID. This is
+// how extension resources unify under a single platform identity.
 //
 // See docs/design/architecture/resource_identity_and_api.md for the full
 // two-layer API model and identity semantics.
@@ -33,10 +23,6 @@ import (
 // The resource hierarchy is currently flat: resource names are
 // {CollectionID}/{leaf_id} with no parent segments. Workspace and tenant
 // scoping will introduce parent collections in the future.
-// CollectionConfig describes the identity and naming of a resource
-// collection. This is the shared vocabulary between extension and
-// platform APIs that participate in the same identity domain — the
-// CollectionID binds them to the same platform resource type.
 type CollectionConfig struct {
 	// Version is the HTTP API version segment (e.g. "v1").
 	Version string
@@ -54,15 +40,27 @@ type CollectionConfig struct {
 	Plural string
 }
 
+// ResourceTypeConfig describes an extension service for a platform resource
+// type. This is the input to the dynamic service builder — it carries
+// everything needed to build and register a typed gRPC + HTTP service at
+// runtime without compile-time Go stubs.
+//
+// Each config describes an extension representation of a platform-level
+// resource type. The addon does not define a resource type in isolation;
+// it implements a platform resource type through its own typed API. Multiple
+// extensions can model the same platform resource type (e.g. one manages
+// clusters, another inventories them), each under its own APIServiceName but
+// sharing the same [CollectionConfig.CollectionID].
 type ResourceTypeConfig struct {
 	CollectionConfig
 
 	// ResourceType is the addon-scoped domain identifier used for
-	// internal dispatch (e.g. "api.kind.cluster"). This identifies
-	// the addon's specific implementation of the resource type — it is
-	// NOT the platform identity. Two addons modeling the same platform
-	// resource type will have different ResourceType values but the
-	// same CollectionID.
+	// internal dispatch (e.g. "kind.fleetshift.io/Cluster"). Per
+	// AIP-123, this follows the {ServiceName}/{Type} pattern. It
+	// identifies the addon's specific implementation of the resource
+	// type — it is NOT the platform identity. Two addons modeling
+	// the same platform resource type will have different
+	// ResourceType values but the same CollectionID.
 	ResourceType domain.ResourceType
 
 	// APIServiceName is the versionless AIP-122 service name that
