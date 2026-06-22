@@ -980,6 +980,134 @@ func TestResync_DoesNotClobberOwnedByEdges(t *testing.T) {
 	}
 }
 
+func TestEdgeComputation_MultipleEdgeTypesToSameDest(t *testing.T) {
+	// A resource can have multiple edge types to the same destination.
+	// For example, a Pod owned by a Node AND running on that Node would
+	// produce both ownedBy and runsOn edges to the same dest UID.
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	schemaMultiEdge := map[schema.GroupVersionResource]SchemaEntry{
+		podGVR: {
+			GVR:  podGVR,
+			Kind: "Pod",
+			BuildEdges: func(r *unstructured.Unstructured, uid string) func(NodeStore) []Edge {
+				return func(ns NodeStore) []Edge {
+					return []Edge{
+						{EdgeType: EdgeRunsOn, SourceUID: uid, DestUID: "node-1", SourceKind: "Pod", DestKind: "Node"},
+						{EdgeType: EdgeAttachedTo, SourceUID: uid, DestUID: "node-1", SourceKind: "Pod", DestKind: "Node"},
+					}
+				}
+			},
+		},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, schemaMultiEdge, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "uid-pod", "name": "test-pod", "namespace": "default",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pod, GVR: podGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) == 0 {
+		t.Fatal("expected at least one delta, got none")
+	}
+
+	edgeTypes := make(map[string]bool)
+	for _, d := range deltas {
+		for _, e := range d.edgeAdds {
+			if e.SourceUID == "uid-pod" && e.DestUID == "node-1" {
+				edgeTypes[e.EdgeType] = true
+			}
+		}
+	}
+
+	if !edgeTypes["runsOn"] {
+		t.Error("expected runsOn edge from uid-pod to node-1")
+	}
+	if !edgeTypes["attachedTo"] {
+		t.Error("expected attachedTo edge from uid-pod to node-1")
+	}
+	if len(edgeTypes) != 2 {
+		t.Errorf("expected 2 distinct edge types, got %d: %v", len(edgeTypes), edgeTypes)
+	}
+}
+
+func TestEdgeComputation_MultipleEdgeTypes_DeleteRemovesBoth(t *testing.T) {
+	podGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
+
+	schemaMultiEdge := map[schema.GroupVersionResource]SchemaEntry{
+		podGVR: {
+			GVR:  podGVR,
+			Kind: "Pod",
+			BuildEdges: func(r *unstructured.Unstructured, uid string) func(NodeStore) []Edge {
+				return func(ns NodeStore) []Edge {
+					return []Edge{
+						{EdgeType: EdgeRunsOn, SourceUID: uid, DestUID: "node-1", SourceKind: "Pod", DestKind: "Node"},
+						{EdgeType: EdgeAttachedTo, SourceUID: uid, DestUID: "node-1", SourceKind: "Pod", DestKind: "Node"},
+					}
+				}
+			},
+		},
+	}
+
+	mock := &mockInventoryWriter{}
+	w := NewWriter("target-1", mock, schemaMultiEdge, 100*time.Millisecond, nil)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go w.Run(ctx)
+
+	pod := &unstructured.Unstructured{Object: map[string]any{
+		"apiVersion": "v1", "kind": "Pod",
+		"metadata": map[string]any{
+			"uid": "uid-pod", "name": "test-pod", "namespace": "default",
+			"resourceVersion": "100", "creationTimestamp": "2025-06-01T12:00:00Z",
+		},
+	}}
+
+	w.EventCh() <- ResourceEvent{Op: EventAdd, Resource: pod, GVR: podGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	// Delete the pod — both edge types should be deleted.
+	w.EventCh() <- ResourceEvent{Op: EventDelete, Resource: pod, GVR: podGVR}
+	time.Sleep(250 * time.Millisecond)
+
+	deltas := mock.getDeltas()
+	if len(deltas) < 2 {
+		t.Fatalf("expected at least 2 deltas, got %d", len(deltas))
+	}
+
+	deletedEdgeTypes := make(map[string]bool)
+	for _, d := range deltas {
+		for _, e := range d.edgeDels {
+			if e.SourceUID == "uid-pod" && e.DestUID == "node-1" {
+				deletedEdgeTypes[e.EdgeType] = true
+			}
+		}
+	}
+
+	if !deletedEdgeTypes["runsOn"] {
+		t.Error("expected runsOn edge deletion")
+	}
+	if !deletedEdgeTypes["attachedTo"] {
+		t.Error("expected attachedTo edge deletion")
+	}
+}
+
 func TestShutdownFlush_PersistsPendingEvents(t *testing.T) {
 	// Regression test: when the context is cancelled, the Writer must
 	// flush pending events using an uncancelled context so data is

@@ -19,6 +19,16 @@ const (
 	EventDelete
 )
 
+// edgeKey identifies a unique edge in the diff map.
+// No current code path needs O(1) lookup by source UID alone (e.g. "delete all
+// edges from source X"). If that changes, switch to map[string]map[edgeKey]Edge
+// keyed by sourceUID for the outer map, or add a secondary index.
+type edgeKey struct {
+	SourceUID string
+	DestUID   string
+	EdgeType  EdgeType
+}
+
 // ResourceEvent is a single informer event for a Kubernetes resource.
 type ResourceEvent struct {
 	Op       EventOp
@@ -44,8 +54,8 @@ type Writer struct {
 	batchInterval       time.Duration
 	heartbeatInterval   time.Duration
 	currentNodes        map[string]inventoryNode
-	edgeFuncs           map[string]func(NodeStore) []Edge
-	previousEdges       map[string]map[string]Edge // sourceUID -> destUID -> Edge
+	edgeFuncs     map[string]func(NodeStore) []Edge
+	previousEdges map[edgeKey]Edge
 	logger              *slog.Logger
 	consecutiveFailures int
 }
@@ -70,8 +80,8 @@ func NewWriter(
 		batchInterval:     batchInterval,
 		heartbeatInterval: heartbeatInterval,
 		currentNodes:      make(map[string]inventoryNode),
-		edgeFuncs:         make(map[string]func(NodeStore) []Edge),
-		previousEdges:     make(map[string]map[string]Edge),
+		edgeFuncs:     make(map[string]func(NodeStore) []Edge),
+		previousEdges: make(map[edgeKey]Edge),
 		logger:            logger,
 	}
 }
@@ -207,58 +217,46 @@ func (w *Writer) flush(
 
 	// Compute edges for all current nodes.
 	ns := buildNodeStore(w.currentNodes)
-	newEdges := make(map[string]map[string]Edge)
+	newEdges := make(map[edgeKey]Edge)
 
 	// Type-specific edges from BuildEdges closures.
 	for _, edgeFn := range w.edgeFuncs {
 		for _, e := range edgeFn(ns) {
-			if newEdges[e.SourceUID] == nil {
-				newEdges[e.SourceUID] = make(map[string]Edge)
-			}
-			newEdges[e.SourceUID][e.DestUID] = e
+			newEdges[edgeKey{e.SourceUID, e.DestUID, e.EdgeType}] = e
 		}
 	}
 
 	// Common edges (ownedBy traversal) for ALL nodes.
 	for uid := range w.currentNodes {
 		for _, e := range commonEdges(uid, ns) {
-			if newEdges[e.SourceUID] == nil {
-				newEdges[e.SourceUID] = make(map[string]Edge)
-			}
-			newEdges[e.SourceUID][e.DestUID] = e
+			newEdges[edgeKey{e.SourceUID, e.DestUID, e.EdgeType}] = e
 		}
 	}
 
 	// Diff edges to produce adds and deletes.
 	var edgeAdds, edgeDels []domain.InventoryEdge
 
-	// Edges in new but not previous → adds.
-	for srcUID, destMap := range newEdges {
-		for destUID, edge := range destMap {
-			if _, ok := w.previousEdges[srcUID][destUID]; !ok {
-				edgeAdds = append(edgeAdds, domain.InventoryEdge{
-					EdgeType:   string(edge.EdgeType),
-					SourceUID:  edge.SourceUID,
-					DestUID:    edge.DestUID,
-					SourceKind: edge.SourceKind,
-					DestKind:   edge.DestKind,
-				})
-			}
+	for key, edge := range newEdges {
+		if _, ok := w.previousEdges[key]; !ok {
+			edgeAdds = append(edgeAdds, domain.InventoryEdge{
+				EdgeType:   string(edge.EdgeType),
+				SourceUID:  edge.SourceUID,
+				DestUID:    edge.DestUID,
+				SourceKind: edge.SourceKind,
+				DestKind:   edge.DestKind,
+			})
 		}
 	}
 
-	// Edges in previous but not new → deletes.
-	for srcUID, destMap := range w.previousEdges {
-		for destUID, edge := range destMap {
-			if _, ok := newEdges[srcUID][destUID]; !ok {
-				edgeDels = append(edgeDels, domain.InventoryEdge{
-					EdgeType:   string(edge.EdgeType),
-					SourceUID:  edge.SourceUID,
-					DestUID:    edge.DestUID,
-					SourceKind: edge.SourceKind,
-					DestKind:   edge.DestKind,
-				})
-			}
+	for key, edge := range w.previousEdges {
+		if _, ok := newEdges[key]; !ok {
+			edgeDels = append(edgeDels, domain.InventoryEdge{
+				EdgeType:   string(edge.EdgeType),
+				SourceUID:  edge.SourceUID,
+				DestUID:    edge.DestUID,
+				SourceKind: edge.SourceKind,
+				DestKind:   edge.DestKind,
+			})
 		}
 	}
 
