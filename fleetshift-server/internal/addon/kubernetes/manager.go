@@ -27,6 +27,7 @@ const (
 // Agents with delivery and indexer delegates, and implements
 // [domain.DeliveryAgent] by routing to the appropriate Agent.
 type Manager struct {
+	ctx              context.Context
 	store            domain.Store
 	vault            domain.Vault
 	inventoryWriter  domain.InventoryWriter
@@ -39,8 +40,11 @@ type Manager struct {
 	agents map[domain.TargetID]*Agent
 }
 
-// NewManager creates a Manager.
+// NewManager creates a Manager. The provided context governs the
+// lifetime of all agents created by the Manager — it must outlive
+// individual request or activity contexts.
 func NewManager(
+	ctx context.Context,
 	store domain.Store,
 	vault domain.Vault,
 	inventoryWriter domain.InventoryWriter,
@@ -50,6 +54,7 @@ func NewManager(
 	logger *slog.Logger,
 ) *Manager {
 	return &Manager{
+		ctx:              ctx,
 		store:            store,
 		vault:            vault,
 		inventoryWriter:  inventoryWriter,
@@ -100,7 +105,7 @@ func (m *Manager) HandleTargetReady(ctx context.Context, target domain.TargetInf
 		}, logger)
 	}
 
-	ta := NewAgent(ctx, id, cfg, dynClient, discClient, dc, ic, logger)
+	ta := NewAgent(m.ctx, id, cfg, dynClient, discClient, dc, ic, logger)
 
 	// Re-check under lock to handle races.
 	m.mu.Lock()

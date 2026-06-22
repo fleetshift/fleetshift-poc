@@ -215,7 +215,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// dependencies (Docker, AWS creds, etc.) that the addon manager
 	// should not own. Registration with the router and targets happens
 	// later via AddonManager.Connect / RegisterTarget.
-	addons, err := constructAddons(enabledAddons, f, logger, deliveryReporter, store, vault, keyResolver, oidcHTTPClient, oidcCABundle)
+	addons, err := constructAddons(ctx, enabledAddons, f, logger, deliveryReporter, store, vault, keyResolver, oidcHTTPClient, oidcCABundle)
 	if err != nil {
 		return err
 	}

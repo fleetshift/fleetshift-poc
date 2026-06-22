@@ -824,6 +824,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	inventoryWriter := application.NewInventoryWriteService(h.Store)
 
 	k8sMgr := kubeaddon.NewManager(
+		context.Background(),
 		h.Store,
 		nil, // vault — SA token is passed directly
 		inventoryWriter,

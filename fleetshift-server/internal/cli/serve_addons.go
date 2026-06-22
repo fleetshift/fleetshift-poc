@@ -33,6 +33,7 @@ type addonState struct {
 // have external dependencies (Docker, AWS creds, etc.) that the addon
 // manager should not own.
 func constructAddons(
+	ctx context.Context,
 	enabledAddons map[string]bool,
 	f *serveFlags,
 	logger *slog.Logger,
@@ -102,7 +103,7 @@ func constructAddons(
 
 	if enabledAddons["kubernetes"] {
 		inventoryWriter := application.NewInventoryWriteService(store)
-		agents.k8sMgr = kubernetesaddon.NewManager(store, vault, inventoryWriter, deliveryReporter, keyResolver, oidcHTTPClient, logger.With("component", "kubernetes-agent"))
+		agents.k8sMgr = kubernetesaddon.NewManager(ctx, store, vault, inventoryWriter, deliveryReporter, keyResolver, oidcHTTPClient, logger.With("component", "kubernetes-agent"))
 	}
 
 	return agents, nil

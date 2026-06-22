@@ -275,6 +275,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 
 		kubeMgr := kubeaddon.NewManager(
+			context.Background(),
 			store,
 			nil,
 			mockInventoryWriter{},

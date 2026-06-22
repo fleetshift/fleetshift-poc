@@ -47,6 +47,7 @@ func newTestManager(t *testing.T, reporter domain.DeliveryReporter) *kubeaddon.M
 	t.Helper()
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	mgr := kubeaddon.NewManager(
+		context.Background(),
 		store,
 		nil,
 		mockInventoryWriter{},
@@ -330,6 +331,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		// this test exercises vault-backed credential resolution and
 		// attestation verification.
 		mgr := kubeaddon.NewManager(
+			context.Background(),
 			store,
 			vault,
 			mockInventoryWriter{},

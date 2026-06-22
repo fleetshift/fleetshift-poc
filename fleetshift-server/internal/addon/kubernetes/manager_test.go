@@ -40,7 +40,7 @@ func newTestManager(t *testing.T) *kubernetes.Manager {
 	store := &sqlite.Store{DB: db}
 	vault := &fakeVault{secrets: make(map[domain.SecretRef][]byte)}
 	logger := slog.Default()
-	return kubernetes.NewManager(store, vault, nil, nopReporter{}, nil, nil, logger)
+	return kubernetes.NewManager(context.Background(), store, vault, nil, nopReporter{}, nil, nil, logger)
 }
 
 func testTarget(id string) domain.TargetInfo {
@@ -130,6 +130,33 @@ func TestHandleTargetTerminated_StopsAgent(t *testing.T) {
 		// expected
 	default:
 		t.Error("expected Done channel to be closed after Stop")
+	}
+}
+
+func TestHandleTargetReady_AgentSurvivesCallerCancel(t *testing.T) {
+	mgr := newTestManager(t)
+	t.Cleanup(mgr.StopAll)
+
+	callerCtx, callerCancel := context.WithCancel(context.Background())
+
+	if err := mgr.HandleTargetReady(callerCtx, testTarget("test-target")); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	ta := mgr.GetAgent("test-target")
+	if ta == nil {
+		t.Fatal("expected agent to be running")
+	}
+
+	// Simulate the caller's context being cancelled (e.g. a Temporal
+	// activity returning). The agent must stay alive.
+	callerCancel()
+
+	select {
+	case <-ta.Done():
+		t.Fatal("agent stopped when caller context was cancelled — agent lifetime must not depend on caller context")
+	default:
+		// expected: agent is still running
 	}
 }
 
