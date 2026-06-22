@@ -119,11 +119,11 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	}
 
 	_, err = deploySvc.Create(ctx, domain.CreateDeploymentInput{
-		ID: "kind-docker-deploy",
+		Name: "deployments/kind-docker-deploy",
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
 			Manifests: []domain.Manifest{{
-				ResourceType: kindaddon.ClusterResourceType,
+				ManifestType: kindaddon.ClusterManifestType,
 				Raw:          json.RawMessage(specBytes),
 			}},
 		},

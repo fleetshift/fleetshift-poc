@@ -84,7 +84,7 @@ func buildCreateRequest(f *createDeploymentFlags) (*pb.CreateDeploymentRequest, 
 	ms := &pb.ManifestStrategy{
 		Type: pb.ManifestStrategy_TYPE_INLINE,
 		Manifests: []*pb.Manifest{{
-			ResourceType: f.resourceType,
+			ManifestType: f.resourceType,
 			Raw:          manifest,
 		}},
 	}
@@ -206,8 +206,8 @@ func canonicalStrategiesFromProto(dep *pb.Deployment) (canonical.ManifestStrateg
 			ms.Type = "inline"
 			for _, m := range p.GetManifests() {
 				ms.Manifests = append(ms.Manifests, canonical.Manifest{
-					ResourceType: m.GetResourceType(),
-					Raw:          m.GetRaw(),
+					Type: m.GetManifestType(),
+					Raw:  m.GetRaw(),
 				})
 			}
 		}

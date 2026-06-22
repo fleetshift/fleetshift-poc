@@ -99,7 +99,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "oidc-kind", Type: kindaddon.TargetType, Name: "OIDC Kind"})
 	manifests := []domain.Manifest{{
-		ResourceType: kindaddon.ClusterResourceType,
+		ManifestType: kindaddon.ClusterManifestType,
 		Raw:          json.RawMessage(specBytes),
 	}}
 
@@ -266,7 +266,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 			}
 		}`)
 		manifests := []domain.Manifest{{
-			ResourceType: kubeaddon.ManifestResourceType,
+			ManifestType: kubeaddon.ManifestManifestType,
 			Raw:          configMapManifest,
 		}}
 
@@ -336,7 +336,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		}`)
 
 		err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
-			ResourceType: kubeaddon.ManifestResourceType,
+			ManifestType: kubeaddon.ManifestManifestType,
 			Raw:          bobManifest,
 		}}, bobAuth, nil, 1)
 		if err != nil {
@@ -440,7 +440,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 			ID:                    "kind-mr-oidc",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Docker Kind Provider (MR OIDC)",
-			AcceptedResourceTypes: []domain.ResourceType{kindaddon.ClusterResourceType},
+			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		}))
 		_ = tx.Commit()
 	}

@@ -196,7 +196,7 @@ func TestDeploymentResume_Sign_PopulatesSignatureFields(t *testing.T) {
 		ManifestStrategy: &pb.ManifestStrategy{
 			Type: pb.ManifestStrategy_TYPE_INLINE,
 			Manifests: []*pb.Manifest{{
-				ResourceType: "test.resource",
+				ManifestType: "test.resource",
 				Raw:          []byte(`{"kind":"ConfigMap"}`),
 			}},
 		},
@@ -295,8 +295,8 @@ func canonicalStrategiesFromDeployment(dep *pb.Deployment) (canonical.ManifestSt
 			ms.Type = "inline"
 			for _, m := range p.GetManifests() {
 				ms.Manifests = append(ms.Manifests, canonical.Manifest{
-					ResourceType: m.GetResourceType(),
-					Raw:          m.GetRaw(),
+					Type: m.GetManifestType(),
+					Raw:  m.GetRaw(),
 				})
 			}
 		}
