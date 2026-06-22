@@ -232,7 +232,6 @@ export default function ClustersPage() {
         }),
     [filtered, page, perPage, deleting],
   );
-
   const activeState = loading
     ? DataViewState.loading
     : error
