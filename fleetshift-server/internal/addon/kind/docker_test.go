@@ -136,7 +136,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	view := awaitState(ctx, t, store, "kind-docker-deploy", domain.FulfillmentStateActive)
+	view := awaitState(ctx, t, store, "deployments/kind-docker-deploy", domain.FulfillmentStateActive)
 	if len(view.Fulfillment.ResolvedTargets()) != 1 || view.Fulfillment.ResolvedTargets()[0] != "kind-docker" {
 		t.Fatalf("unexpected ResolvedTargets: %v", view.Fulfillment.ResolvedTargets())
 	}
