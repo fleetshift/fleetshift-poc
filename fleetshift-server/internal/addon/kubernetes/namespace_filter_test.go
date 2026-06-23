@@ -3,8 +3,7 @@ package kubernetes
 import "testing"
 
 func TestNamespaceFilter_AllowAll(t *testing.T) {
-	// Empty patterns: everything allowed.
-	f := NewNamespaceFilter(NamespaceFilterConfig{IncludeClusterScoped: true})
+	f := NewNamespaceFilter(NamespaceFilterConfig{})
 
 	if !f.IsNamespaceAllowed("default") {
 		t.Error("expected default namespace allowed")
@@ -17,21 +16,9 @@ func TestNamespaceFilter_AllowAll(t *testing.T) {
 	}
 }
 
-func TestNamespaceFilter_ClusterScopedDisabled(t *testing.T) {
-	f := NewNamespaceFilter(NamespaceFilterConfig{IncludeClusterScoped: false})
-
-	if f.IsNamespaceAllowed("") {
-		t.Error("expected cluster-scoped denied when IncludeClusterScoped=false")
-	}
-	if !f.IsNamespaceAllowed("default") {
-		t.Error("expected named namespace allowed")
-	}
-}
-
 func TestNamespaceFilter_IncludeOnly(t *testing.T) {
 	f := NewNamespaceFilter(NamespaceFilterConfig{
-		IncludePatterns:      []string{"prod-*", "staging"},
-		IncludeClusterScoped: true,
+		IncludePatterns: []string{"prod-*", "staging"},
 	})
 
 	if !f.IsNamespaceAllowed("prod-us") {
@@ -50,8 +37,7 @@ func TestNamespaceFilter_IncludeOnly(t *testing.T) {
 
 func TestNamespaceFilter_ExcludeOnly(t *testing.T) {
 	f := NewNamespaceFilter(NamespaceFilterConfig{
-		ExcludePatterns:      []string{"kube-*", "openshift-*"},
-		IncludeClusterScoped: true,
+		ExcludePatterns: []string{"kube-*", "openshift-*"},
 	})
 
 	if !f.IsNamespaceAllowed("default") {
@@ -67,9 +53,8 @@ func TestNamespaceFilter_ExcludeOnly(t *testing.T) {
 
 func TestNamespaceFilter_IncludeAndExclude(t *testing.T) {
 	f := NewNamespaceFilter(NamespaceFilterConfig{
-		IncludePatterns:      []string{"prod-*"},
-		ExcludePatterns:      []string{"prod-canary"},
-		IncludeClusterScoped: true,
+		IncludePatterns: []string{"prod-*"},
+		ExcludePatterns: []string{"prod-canary"},
 	})
 
 	if !f.IsNamespaceAllowed("prod-us") {
@@ -84,14 +69,34 @@ func TestNamespaceFilter_IncludeAndExclude(t *testing.T) {
 }
 
 func TestNamespaceFilter_InvalidPatternIgnored(t *testing.T) {
-	// filepath.Match returns an error for invalid patterns like "[".
-	// These should be treated as non-matching.
 	f := NewNamespaceFilter(NamespaceFilterConfig{
-		IncludePatterns:      []string{"["},
-		IncludeClusterScoped: true,
+		IncludePatterns: []string{"["},
 	})
 
 	if f.IsNamespaceAllowed("anything") {
 		t.Error("expected denied: invalid include pattern should not match")
+	}
+}
+
+func TestNamespaceFilter_ClusterScopedAlwaysPasses(t *testing.T) {
+	cases := []struct {
+		name string
+		cfg  NamespaceFilterConfig
+	}{
+		{"no patterns", NamespaceFilterConfig{}},
+		{"include only", NamespaceFilterConfig{IncludePatterns: []string{"prod-*"}}},
+		{"exclude only", NamespaceFilterConfig{ExcludePatterns: []string{"kube-*"}}},
+		{"both", NamespaceFilterConfig{
+			IncludePatterns: []string{"prod-*"},
+			ExcludePatterns: []string{"prod-canary"},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := NewNamespaceFilter(tc.cfg)
+			if !f.IsNamespaceAllowed("") {
+				t.Error("expected cluster-scoped (empty namespace) to always pass")
+			}
+		})
 	}
 }

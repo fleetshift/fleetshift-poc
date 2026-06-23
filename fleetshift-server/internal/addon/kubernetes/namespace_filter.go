@@ -5,9 +5,8 @@ import "path/filepath"
 // NamespaceFilterConfig controls which namespaces are included in indexing.
 // Glob patterns use filepath.Match syntax.
 type NamespaceFilterConfig struct {
-	IncludePatterns      []string
-	ExcludePatterns      []string
-	IncludeClusterScoped bool // when true (default), cluster-scoped resources are allowed
+	IncludePatterns []string
+	ExcludePatterns []string
 }
 
 // NamespaceFilter evaluates whether a resource's namespace passes the
@@ -22,14 +21,13 @@ func NewNamespaceFilter(cfg NamespaceFilterConfig) *NamespaceFilter {
 }
 
 // IsNamespaceAllowed returns true if the namespace passes the filter.
-// An empty namespace (cluster-scoped resource) is allowed when
-// IncludeClusterScoped is true. For named namespaces: if IncludePatterns
+// Cluster-scoped resources (empty namespace) always pass — namespace
+// patterns don't apply to them. For named namespaces: if IncludePatterns
 // is non-empty, the namespace must match at least one include pattern;
 // then if ExcludePatterns is non-empty, it must NOT match any exclude pattern.
 func (f *NamespaceFilter) IsNamespaceAllowed(namespace string) bool {
-	// Cluster-scoped resources have an empty namespace.
 	if namespace == "" {
-		return f.config.IncludeClusterScoped
+		return true
 	}
 
 	// Include check: if patterns are specified, namespace must match at least one.

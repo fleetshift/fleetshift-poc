@@ -204,13 +204,11 @@ Watch-all is the default behavior — index everything the cluster supports minu
 
 ### Namespace filtering
 
-Namespace filtering is applied at the informer level during LIST and WATCH. Resources in excluded namespaces are dropped before reaching the event channel. Two dimensions:
+Namespace filtering is applied at the informer level during LIST and WATCH. Resources in excluded namespaces are dropped before reaching the event channel.
 
 **Namespace include/exclude** — glob patterns controlling which namespaces are watched. Include patterns whitelist matching namespaces. Exclude patterns remove matching namespaces from the included set. Glob patterns are evaluated directly on each event via `filepath.Match` — no caching or pre-resolution is needed because pattern matching is a pure string operation with negligible cost.
 
-**Cluster-scoped inclusion** — `includeClusterScoped` (default true). When false, all cluster-scoped resources are excluded unless explicitly present in the user allow list. This follows the same override pattern as the default deny list — user allow overrides the exclusion.
-
-Cluster-scoped resources that commonly need allow-list exceptions when `includeClusterScoped` is false: Nodes (for `runsOn` edges), PersistentVolumes (for PVC→PV edges), Namespaces (for namespace-level inventory).
+**Cluster-scoped resources** always pass the namespace filter — they don't have a namespace, so namespace patterns don't apply to them. Whether cluster-scoped resource types are watched is controlled entirely by the allow/deny lists at the GVR selection layer. To exclude cluster-scoped resources, deny them via the deny list or omit them from the allow list (in watch-selected mode).
 
 ## Graph model
 

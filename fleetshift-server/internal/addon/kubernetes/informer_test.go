@@ -287,6 +287,48 @@ func TestInformerManager_StopAll(t *testing.T) {
 	}
 }
 
+// --- GenericInformer namespace filter tests ---
+
+func TestGenericInformer_ClusterScopedPassesThroughNamespaceFilter(t *testing.T) {
+	// Cluster-scoped resources (empty namespace) should always pass the
+	// namespace filter, even when include patterns are set.
+	nodesGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"}
+	dynClient := newFakeDynamicClient(nodesGVR)
+
+	node := newUnstructured("nodes", "node-uid-1")
+	node.SetName("worker-1")
+	node.SetResourceVersion("100")
+	_, err := dynClient.Resource(nodesGVR).Create(context.Background(), node, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fake node: %v", err)
+	}
+
+	nsFilter := NewNamespaceFilter(NamespaceFilterConfig{
+		IncludePatterns: []string{"prod-*"},
+	})
+
+	eventCh := make(chan ResourceEvent, 100)
+	resyncCh := make(chan ResyncEvent, 100)
+
+	informer := NewInformer(dynClient, nodesGVR, eventCh, resyncCh, nsFilter, slog.Default())
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go informer.Run(ctx)
+
+	select {
+	case ev := <-eventCh:
+		if ev.Op != EventAdd {
+			t.Errorf("expected EventAdd, got %v", ev.Op)
+		}
+		if ev.Resource.GetName() != "worker-1" {
+			t.Errorf("expected resource name worker-1, got %s", ev.Resource.GetName())
+		}
+	case <-time.After(1 * time.Second):
+		t.Error("timed out waiting for node event — cluster-scoped should pass namespace filter")
+	}
+	cancel()
+}
+
 // --- FilterSupportedResources tests ---
 
 func TestFilterSupportedResources_DefaultDenyApplied(t *testing.T) {
