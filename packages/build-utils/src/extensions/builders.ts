@@ -3,6 +3,8 @@ import type {
   ClusterProviderProperties,
   FleetshiftExtension,
   ModuleExtras,
+  ModuleGroupExtras,
+  ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
@@ -11,6 +13,7 @@ import type {
 } from "./types";
 import {
   validateClusterProviderProperties,
+  validateModuleGroupProperties,
   validateModuleProperties,
   validateOnboardingActionProperties,
   validateSetupProperties,
@@ -22,6 +25,16 @@ function throwOnErrors(errors: string[], type: string): void {
       `Invalid ${type} extension:\n${errors.map((e) => `  - ${e}`).join("\n")}`,
     );
   }
+}
+
+export function createModuleGroup(
+  properties: ModuleGroupProperties,
+): FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras> {
+  throwOnErrors(
+    validateModuleGroupProperties(properties),
+    "fleetshift.module-group",
+  );
+  return { type: "fleetshift.module-group", properties };
 }
 
 export function createModule(

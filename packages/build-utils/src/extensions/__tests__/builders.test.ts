@@ -3,9 +3,41 @@ import { describe, expect, it } from "vitest";
 import {
   createClusterProvider,
   createModule,
+  createModuleGroup,
   createOnboardingAction,
   createSetup,
 } from "../builders";
+
+describe("createModuleGroup", () => {
+  it("returns extension with correct type", () => {
+    const ext = createModuleGroup({
+      id: "settings",
+      label: "Settings",
+    });
+    expect(ext.type).toBe("fleetshift.module-group");
+    expect(ext.properties.id).toBe("settings");
+  });
+
+  it("preserves optional fields", () => {
+    const ext = createModuleGroup({
+      id: "settings",
+      label: "Settings",
+      description: "Workspace settings",
+      keywords: ["settings", "preferences"],
+    });
+    expect(ext.properties.description).toBe("Workspace settings");
+    expect(ext.properties.keywords).toEqual(["settings", "preferences"]);
+  });
+
+  it("throws on invalid id", () => {
+    expect(() =>
+      createModuleGroup({
+        id: "BadId",
+        label: "Bad",
+      }),
+    ).toThrow(/id/);
+  });
+});
 
 describe("createModule", () => {
   it("returns extension with correct type", () => {
@@ -60,6 +92,27 @@ describe("createModule", () => {
         icon: { $codeRef: "I.default" },
       }),
     ).toThrow(/id/);
+  });
+
+  it("preserves optional group field", () => {
+    const ext = createModule({
+      id: "navigation",
+      label: "Navigation",
+      component: { $codeRef: "ClustersModule.default" },
+      icon: { $codeRef: "ClustersIcon.default" },
+      group: "settings",
+    });
+    expect(ext.properties.group).toBe("settings");
+  });
+
+  it("omits group when not provided", () => {
+    const ext = createModule({
+      id: "clusters",
+      label: "Clusters",
+      component: { $codeRef: "ClustersModule.default" },
+      icon: { $codeRef: "ClustersIcon.default" },
+    });
+    expect(ext.properties.group).toBeUndefined();
   });
 
   it("throws on invalid CodeRef", () => {

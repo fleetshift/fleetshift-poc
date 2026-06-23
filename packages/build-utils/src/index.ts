@@ -8,6 +8,7 @@ export type {
   EncodedCodeRef,
   FleetshiftExtension,
   FleetshiftPluginOptions,
+  ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
   SetupProperties,
@@ -15,6 +16,7 @@ export type {
 export {
   createClusterProvider,
   createModule,
+  createModuleGroup,
   createOnboardingAction,
   createSetup,
   FleetshiftPlugin,

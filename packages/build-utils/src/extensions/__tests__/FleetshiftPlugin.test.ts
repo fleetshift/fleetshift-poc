@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { createModule, createSetup } from "../builders";
+import { createModule, createModuleGroup, createSetup } from "../builders";
 import { FleetshiftPlugin } from "../FleetshiftPlugin";
 
 const { applySpy } = vi.hoisted(() => ({ applySpy: vi.fn() }));
@@ -128,6 +128,54 @@ describe("FleetshiftPlugin", () => {
           ],
         }),
     ).not.toThrow();
+  });
+
+  it("constructs with module group and grouped modules", () => {
+    expect(
+      () =>
+        new FleetshiftPlugin({
+          ...baseOptions,
+          pluginMetadata: {
+            ...baseOptions.pluginMetadata,
+            exposedModules: {
+              TestPage: "./src/TestPage.tsx",
+              TestIcon: "./src/TestIcon.tsx",
+              GroupIcon: "./src/GroupIcon.tsx",
+            },
+          },
+          extensions: [
+            createModuleGroup({
+              id: "settings",
+              label: "Settings",
+            }),
+            createModule({
+              id: "navigation",
+              label: "Navigation",
+              component: { $codeRef: "TestPage.default" },
+              icon: { $codeRef: "TestIcon.default" },
+              group: "settings",
+            }),
+          ],
+        }),
+    ).not.toThrow();
+  });
+
+  it("throws when module references non-existent group", () => {
+    expect(
+      () =>
+        new FleetshiftPlugin({
+          ...baseOptions,
+          extensions: [
+            createModule({
+              id: "navigation",
+              label: "Navigation",
+              component: { $codeRef: "TestPage.default" },
+              icon: { $codeRef: "TestIcon.default" },
+              group: "nonexistent",
+            }),
+          ],
+        }),
+    ).toThrow(/references group "nonexistent"/);
   });
 
   it("accepts empty extensions array", () => {

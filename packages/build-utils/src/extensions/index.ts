@@ -1,6 +1,7 @@
 export {
   createClusterProvider,
   createModule,
+  createModuleGroup,
   createOnboardingAction,
   createSetup,
 } from "./builders";
@@ -15,6 +16,8 @@ export type {
   FleetshiftExtension,
   FleetshiftExtensionType,
   ModuleExtras,
+  ModuleGroupExtras,
+  ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionExtras,
   OnboardingActionProperties,
@@ -26,6 +29,7 @@ export {
   validateClusterProviderProperties,
   validateCodeRef,
   validateExtensionSet,
+  validateModuleGroupProperties,
   validateModuleProperties,
   validateOnboardingActionProperties,
   validateSetupProperties,

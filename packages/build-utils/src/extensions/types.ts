@@ -15,6 +15,7 @@ export type BaseExtensionProperties = {
 };
 
 export const FLEETSHIFT_EXTENSION_TYPES = [
+  "fleetshift.module-group",
   "fleetshift.module",
   "fleetshift.setup",
   "fleetshift.cluster-provider",
@@ -32,10 +33,13 @@ export type FleetshiftExtension<
   properties: BaseExtensionProperties & TExtra;
 };
 
+export type ModuleGroupExtras = Record<string, never>;
+
 export type ModuleExtras = {
   component: EncodedCodeRef;
   icon: EncodedCodeRef;
   extensionPoints?: Record<string, ExtensionPointDeclaration>;
+  group?: string;
 };
 
 export type SetupExtras = {
@@ -61,6 +65,7 @@ export type OnboardingActionExtras = {
   overviewCta?: string;
 };
 
+export type ModuleGroupProperties = BaseExtensionProperties & ModuleGroupExtras;
 export type ModuleProperties = BaseExtensionProperties & ModuleExtras;
 export type SetupProperties = BaseExtensionProperties & SetupExtras;
 export type ClusterProviderProperties = BaseExtensionProperties &
