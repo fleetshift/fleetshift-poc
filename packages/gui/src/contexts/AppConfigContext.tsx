@@ -23,6 +23,14 @@ export interface NavLayoutPage {
   pageId: string;
 }
 
+export interface NavLayoutGroup {
+  type: "group";
+  groupId: string;
+  pluginKey: string;
+  label: string;
+  children: NavLayoutPage[];
+}
+
 export interface NavLayoutSection {
   type: "section";
   id: string;
@@ -30,7 +38,7 @@ export interface NavLayoutSection {
   children: { pageId: string }[];
 }
 
-export type NavLayoutEntry = NavLayoutPage | NavLayoutSection;
+export type NavLayoutEntry = NavLayoutPage | NavLayoutGroup | NavLayoutSection;
 
 interface AppConfigContextValue {
   scalprumConfig: AppsConfig<{ assetsHost: string }>;

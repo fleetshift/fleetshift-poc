@@ -40,8 +40,8 @@ export function TreeItem({
     transition: { idle: true },
   });
 
-  const isSection = node.kind === "section";
-  const kindClass = isSection ? "section" : "page";
+  const isContainer = node.kind === "group" || node.kind === "section";
+  const kindClass = isContainer ? "section" : "page";
 
   return (
     <li
@@ -63,11 +63,11 @@ export function TreeItem({
           {label}
         </span>
 
-        {!isSection && pathSlug && (
+        {!isContainer && pathSlug && (
           <span className="ome-tree-item__path">/{pathSlug}</span>
         )}
 
-        {isSection && (
+        {node.kind === "section" && (
           <>
             <Button
               variant="plain"
@@ -86,7 +86,7 @@ export function TreeItem({
           </>
         )}
 
-        {!isSection && onRemove && (
+        {!isContainer && onRemove && (
           <Button
             variant="plain"
             size="sm"

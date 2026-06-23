@@ -9,10 +9,10 @@ import {
   useRef,
 } from "react";
 
+import type { NavLayoutGroup } from "../../contexts/AppConfigContext";
 import { useAppConfig } from "../../contexts/AppConfigContext";
 import { isClusterProviderExtension } from "../../extensions/isClusterProviderExtension";
 import { isModuleExtension } from "../../extensions/isModuleExtension";
-import { isSetupExtension } from "../../extensions/isSetupExtension";
 import type { SearchResultProps } from "../../extensions/searchTypes";
 import {
   createSearchDB,
@@ -109,7 +109,7 @@ const SETTINGS: Omit<SearchEntry, "category" | "icon">[] = [
 ];
 
 export function SearchProvider({ children }: { children: ReactNode }) {
-  const { pluginPages } = useAppConfig();
+  const { pluginPages, navLayout } = useAppConfig();
   const {
     loaded: installLoaded,
     isInstalled,
@@ -120,8 +120,6 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const [cpExtensions, cpLoaded] = useResolvedExtensions(
     isClusterProviderExtension,
   );
-  const [setupExtensions, setupLoaded] =
-    useResolvedExtensions(isSetupExtension);
   const dbRef = useRef<SearchDB | null>(null);
   const componentMapRef = useRef(
     new Map<string, React.ComponentType<SearchResultProps>>(),
@@ -139,7 +137,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
   const currentInstallVersion = installVersion.current;
 
   useEffect(() => {
-    if (!modulesLoaded || !cpLoaded || !setupLoaded || !installLoaded) return;
+    if (!modulesLoaded || !cpLoaded || !installLoaded) return;
 
     const db = createSearchDB();
     dbRef.current = db;
@@ -156,10 +154,32 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       if (page) modulePageIds.add(page.id);
     }
 
-    // Nav pages — skip any that have a module extension (those get richer entries below)
+    // Build page lookup for group path resolution
+    const pageMap = new Map<string, (typeof pluginPages)[number]>();
+    for (const page of pluginPages) {
+      pageMap.set(page.id, page);
+    }
+
+    // Build group lookup: pageId → group, groupId → group metadata
+    const pageToGroup = new Map<string, NavLayoutGroup>();
+    const groupsById = new Map<string, NavLayoutGroup>();
+    for (const entry of navLayout) {
+      if (entry.type === "group") {
+        groupsById.set(entry.groupId, entry);
+        for (const child of entry.children) {
+          pageToGroup.set(child.pageId, entry);
+        }
+      }
+    }
+
+    // Pages inside groups are indexed via module extensions below — skip them here
+    const groupedPageIds = new Set(pageToGroup.keys());
+
+    // Nav pages — skip any that have a module extension or belong to a group
     // Also skip detail pages whose path contains route params (e.g. ":id")
     for (const page of pluginPages) {
       if (modulePageIds.has(page.id)) continue;
+      if (groupedPageIds.has(page.id)) continue;
       if (page.path.includes(":")) continue;
 
       const navId = `nav-${page.id}`;
@@ -225,6 +245,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const entryId = `ext-${globalFeatureId}`;
       const moduleStatus = isInstalled(page.scope) ? "" : "not-enabled";
 
+      const group = pageToGroup.get(page.id);
+      const groupFeature = group ? `group.${group.groupId}` : undefined;
+
       inserts.push(
         insertEntry(db, {
           id: entryId,
@@ -235,6 +258,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           icon: "",
           status: moduleStatus,
           meta: keywords ? keywords.join(" ") : "",
+          feature: groupFeature,
         }),
       );
 
@@ -324,49 +348,50 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Scan setup extensions: link to parent via type
-    for (const ext of setupExtensions) {
-      const { id, label, description, path } = ext.properties;
-
-      const parentFeatureId = typeToFeatureId.get("fleetshift.setup");
-      const parent = parentFeatureId
-        ? featureParentRef.current.get(parentFeatureId)
-        : undefined;
-
-      let resolvedPathname = "";
-      if (parent) {
-        const parts = [parent.pathname, path].filter(Boolean);
-        resolvedPathname = parts.join("/").replace(/\/+/g, "/");
-      }
-
-      const entryId = `ext-${id}`;
+    // Group parent entries: one per navLayout group so children link via `feature`
+    for (const group of groupsById.values()) {
+      const groupFeatureId = `group.${group.groupId}`;
+      const firstChild = group.children[0];
+      const firstPage = firstChild ? pageMap.get(firstChild.pageId) : undefined;
+      const groupPath = firstPage
+        ? `/${firstPage.path.split("/")[0]}`
+        : `/${group.groupId}`;
+      const entryId = `group-${group.groupId}`;
 
       inserts.push(
         insertEntry(db, {
           id: entryId,
-          title: label,
-          description: description ?? `Navigate to ${label}`,
-          category: parent?.category ?? "nav",
-          pathname: resolvedPathname,
+          title: group.label,
+          description: `${group.label} settings and configuration`,
+          category: "nav",
+          pathname: groupPath,
           icon: "CogIcon",
           status: "",
-          meta: [label, id].join(" "),
-          feature: parentFeatureId,
+          meta: group.label,
         }),
       );
+
+      featureParentRef.current.set(groupFeatureId, {
+        id: entryId,
+        title: group.label,
+        description: `${group.label} settings and configuration`,
+        category: "nav",
+        pathname: groupPath,
+        icon: "CogIcon",
+        status: "",
+      });
     }
 
     Promise.all(inserts);
   }, [
     modulesLoaded,
     cpLoaded,
-    setupLoaded,
     installLoaded,
     isInstalled,
     moduleExtensions,
     cpExtensions,
-    setupExtensions,
     pluginPages,
+    navLayout,
     currentInstallVersion,
   ]);
 

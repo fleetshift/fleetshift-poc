@@ -11,12 +11,28 @@ import { NotFoundPage } from "../pages/NotFoundPage";
 import { PluginPage } from "../pages/PluginPage";
 
 const ConsoleRoutes = () => {
-  const { pluginPages } = useAppConfig();
+  const { pluginPages, navLayout } = useAppConfig();
 
   const sortedPages = useMemo(
     () => [...pluginPages].sort((a, b) => b.path.length - a.path.length),
     [pluginPages],
   );
+
+  const groupRedirects = useMemo(() => {
+    const pageMap = new Map(pluginPages.map((p) => [p.id, p]));
+    const redirects: { from: string; to: string }[] = [];
+    for (const entry of navLayout) {
+      if (entry.type !== "group" || entry.children.length === 0) continue;
+      const firstChild = pageMap.get(entry.children[0].pageId);
+      if (firstChild) {
+        redirects.push({
+          from: `/${entry.groupId}`,
+          to: `/${firstChild.path}`,
+        });
+      }
+    }
+    return redirects;
+  }, [navLayout, pluginPages]);
 
   return (
     <AuthProvider>
@@ -40,6 +56,13 @@ const ConsoleRoutes = () => {
                       pluginKey={page.pluginKey}
                     />
                   }
+                />
+              ))}
+              {groupRedirects.map((r) => (
+                <Route
+                  key={r.from}
+                  path={r.from}
+                  element={<Navigate to={r.to} replace />}
                 />
               ))}
               <Route path="*" element={<NotFoundPage />} />

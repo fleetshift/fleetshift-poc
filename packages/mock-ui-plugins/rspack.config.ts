@@ -1,6 +1,7 @@
 import {
   createClusterProvider,
   createModule,
+  createModuleGroup,
   createOnboardingAction,
   createPfModuleReplacementPlugin,
   createPfTransformImport,
@@ -299,9 +300,16 @@ const KindPlugin = new FleetshiftPlugin({
 
 const SettingsPlugin = new FleetshiftPlugin({
   extensions: [
-    createModule({
+    createModuleGroup({
       id: "settings",
+      label: "Settings",
+      description: "Workspace configuration and preferences",
+      keywords: ["settings", "preferences", "configuration"],
+    }),
+    createModule({
+      id: "navigation",
       label: "Navigation",
+      group: "settings",
       component: { $codeRef: "SettingsPage.default" },
       icon: { $codeRef: "SettingsIcon.default" },
       description: "Manage nav layout and workspace preferences",
@@ -310,6 +318,7 @@ const SettingsPlugin = new FleetshiftPlugin({
     createModule({
       id: "auth-settings",
       label: "Authentication",
+      group: "settings",
       component: { $codeRef: "AuthSettingsPage.default" },
       icon: { $codeRef: "AuthIcon.default" },
       description:
@@ -326,6 +335,7 @@ const SettingsPlugin = new FleetshiftPlugin({
     createModule({
       id: "extensions",
       label: "Extensions",
+      group: "settings",
       component: { $codeRef: "ExtensionsPage.default" },
       icon: { $codeRef: "ExtensionsIcon.default" },
       description: "Discover and configure extensions for your fleet.",
