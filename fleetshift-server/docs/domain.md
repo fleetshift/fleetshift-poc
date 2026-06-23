@@ -20,8 +20,8 @@ constructors, even when they are just type aliases over primitives (e.g.
 **Entities** have identity and a lifecycle but do not form a consistency
 boundary on their own. They are always owned by an aggregate and accessed
 through it. For example, `ResourceRepresentation` is an entity within the
-`PlatformResource` aggregate — it has identity (service + collection + name)
-and mutable state, but is never loaded or persisted independently.
+`PlatformResource` aggregate — it has identity (service + collection_name +
+resource_id) and mutable state, but is never loaded or persisted independently.
 
 **Aggregates** are consistency boundaries. An aggregate owns its entities and
 values, and all mutations go through the aggregate root's methods. External

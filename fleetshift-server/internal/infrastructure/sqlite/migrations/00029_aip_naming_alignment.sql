@@ -1,37 +1,119 @@
 -- +goose Up
 
--- platform_resources: relative_name → name, drop collection_id (derivable from name)
-DROP INDEX IF EXISTS idx_platform_resources_collection;
-ALTER TABLE platform_resources RENAME COLUMN relative_name TO name;
-ALTER TABLE platform_resources DROP COLUMN collection_id;
-
--- resource_representations: relative_name → name, drop collection_id (derivable from name)
+-- platform_resources: replace (collection_id, relative_name) with
+-- (collection_name, resource_id). collection_name is the full parent
+-- collection path (e.g. "clusters" or "publishers/123/books") and
+-- resource_id is the leaf segment (e.g. "prod"). This enables exact-match
+-- listing by collection without prefix matching, which would over-include
+-- descendants in nested collection hierarchies.
 --
--- SQLite does not support DROP COLUMN on columns that participate in a
--- composite PRIMARY KEY. Recreate the table with (service_name, name) as PK.
+-- The old collection_id was a flat, single-segment value; relative_name
+-- was the full collection-qualified path. We split relative_name at the
+-- last '/' to derive the two new columns.
+DROP INDEX IF EXISTS idx_platform_resources_collection;
+
+CREATE TABLE platform_resources_new (
+    uid             TEXT PRIMARY KEY,
+    collection_name TEXT NOT NULL,
+    resource_id     TEXT NOT NULL,
+    labels          TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    deleted_at      TEXT,
+    UNIQUE (collection_name, resource_id)
+);
+
+CREATE INDEX idx_platform_resources_collection ON platform_resources_new (collection_name);
+
+-- Backfill: for single-slash names (e.g. "clusters/prod")
+INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at)
+SELECT uid,
+       SUBSTR(relative_name, 1, INSTR(relative_name, '/') - 1),
+       SUBSTR(relative_name, INSTR(relative_name, '/') + 1),
+       labels, created_at, updated_at, deleted_at
+FROM platform_resources
+WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) = 1;
+
+-- Backfill: for multi-slash names (e.g. "publishers/123/books/les-mis")
+-- Use a recursive CTE to locate the last '/' position.
+-- +goose StatementBegin
+INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at)
+WITH RECURSIVE split(uid, name, pos, last_pos, labels, created_at, updated_at, deleted_at) AS (
+    SELECT uid, relative_name, 1, 0, labels, created_at, updated_at, deleted_at
+    FROM platform_resources
+    WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) > 1
+    UNION ALL
+    SELECT uid, name, pos + 1,
+           CASE WHEN SUBSTR(name, pos, 1) = '/' THEN pos ELSE last_pos END,
+           labels, created_at, updated_at, deleted_at
+    FROM split
+    WHERE pos <= LENGTH(name)
+)
+SELECT uid,
+       SUBSTR(name, 1, last_pos - 1),
+       SUBSTR(name, last_pos + 1),
+       labels, created_at, updated_at, deleted_at
+FROM split
+WHERE pos > LENGTH(name);
+-- +goose StatementEnd
+
+DROP TABLE platform_resources;
+ALTER TABLE platform_resources_new RENAME TO platform_resources;
+
+-- resource_representations: same split.
+-- PK changes from (service_name, collection_id, relative_name) to
+-- (service_name, collection_name, resource_id).
 DROP INDEX IF EXISTS idx_resource_representations_platform;
 
 CREATE TABLE resource_representations_new (
-    platform_uid  TEXT NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
-    service_name  TEXT NOT NULL,
-    version       TEXT NOT NULL,
-    name          TEXT NOT NULL,
-    roles         TEXT NOT NULL DEFAULT '[]',
-    labels        TEXT NOT NULL DEFAULT '{}',
-    created_at    TEXT NOT NULL,
-    updated_at    TEXT NOT NULL,
-    deleted_at    TEXT,
-    PRIMARY KEY (service_name, name)
+    platform_uid    TEXT NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
+    service_name    TEXT NOT NULL,
+    version         TEXT NOT NULL,
+    collection_name TEXT NOT NULL,
+    resource_id     TEXT NOT NULL,
+    roles           TEXT NOT NULL DEFAULT '[]',
+    labels          TEXT NOT NULL DEFAULT '{}',
+    created_at      TEXT NOT NULL,
+    updated_at      TEXT NOT NULL,
+    deleted_at      TEXT,
+    PRIMARY KEY (service_name, collection_name, resource_id)
 );
 
-INSERT INTO resource_representations_new
-    (platform_uid, service_name, version, name, roles, labels, created_at, updated_at, deleted_at)
-SELECT platform_uid, service_name, version, relative_name, roles, labels, created_at, updated_at, deleted_at
-FROM resource_representations;
+CREATE INDEX idx_resource_representations_platform ON resource_representations_new (platform_uid);
+
+-- Backfill representations: single-slash names.
+INSERT INTO resource_representations_new (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at)
+SELECT platform_uid, service_name, version,
+       SUBSTR(relative_name, 1, INSTR(relative_name, '/') - 1),
+       SUBSTR(relative_name, INSTR(relative_name, '/') + 1),
+       roles, labels, created_at, updated_at, deleted_at
+FROM resource_representations
+WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) = 1;
+
+-- Backfill representations: multi-slash names.
+-- +goose StatementBegin
+INSERT INTO resource_representations_new (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at)
+WITH RECURSIVE split(platform_uid, service_name, version, name, pos, last_pos, roles, labels, created_at, updated_at, deleted_at) AS (
+    SELECT platform_uid, service_name, version, relative_name, 1, 0, roles, labels, created_at, updated_at, deleted_at
+    FROM resource_representations
+    WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) > 1
+    UNION ALL
+    SELECT platform_uid, service_name, version, name, pos + 1,
+           CASE WHEN SUBSTR(name, pos, 1) = '/' THEN pos ELSE last_pos END,
+           roles, labels, created_at, updated_at, deleted_at
+    FROM split
+    WHERE pos <= LENGTH(name)
+)
+SELECT platform_uid, service_name, version,
+       SUBSTR(name, 1, last_pos - 1),
+       SUBSTR(name, last_pos + 1),
+       roles, labels, created_at, updated_at, deleted_at
+FROM split
+WHERE pos > LENGTH(name);
+-- +goose StatementEnd
 
 DROP TABLE resource_representations;
 ALTER TABLE resource_representations_new RENAME TO resource_representations;
-CREATE INDEX idx_resource_representations_platform ON resource_representations (platform_uid);
 
 -- targets: accepted_resource_types → accepted_manifest_types
 ALTER TABLE targets RENAME COLUMN accepted_resource_types TO accepted_manifest_types;
@@ -57,13 +139,29 @@ CREATE TABLE resource_representations_old (
 
 INSERT INTO resource_representations_old
     (platform_uid, service_name, version, collection_id, relative_name, roles, labels, created_at, updated_at, deleted_at)
-SELECT platform_uid, service_name, version, '', name, roles, labels, created_at, updated_at, deleted_at
+SELECT platform_uid, service_name, version, collection_name, collection_name || '/' || resource_id, roles, labels, created_at, updated_at, deleted_at
 FROM resource_representations;
 
 DROP TABLE resource_representations;
 ALTER TABLE resource_representations_old RENAME TO resource_representations;
 CREATE INDEX idx_resource_representations_platform ON resource_representations (platform_uid);
 
-ALTER TABLE platform_resources ADD COLUMN collection_id TEXT NOT NULL DEFAULT '';
-ALTER TABLE platform_resources RENAME COLUMN name TO relative_name;
+DROP INDEX IF EXISTS idx_platform_resources_collection;
+
+CREATE TABLE platform_resources_old (
+    uid           TEXT PRIMARY KEY,
+    collection_id TEXT NOT NULL,
+    relative_name TEXT NOT NULL UNIQUE,
+    labels        TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL,
+    updated_at    TEXT NOT NULL,
+    deleted_at    TEXT
+);
+
+INSERT INTO platform_resources_old (uid, collection_id, relative_name, labels, created_at, updated_at, deleted_at)
+SELECT uid, collection_name, collection_name || '/' || resource_id, labels, created_at, updated_at, deleted_at
+FROM platform_resources;
+
+DROP TABLE platform_resources;
+ALTER TABLE platform_resources_old RENAME TO platform_resources;
 CREATE INDEX idx_platform_resources_collection ON platform_resources (collection_id);

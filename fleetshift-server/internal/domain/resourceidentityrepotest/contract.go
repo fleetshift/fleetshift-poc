@@ -403,6 +403,98 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("ListByCollection_NestedExcludesDescendants", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// Create a resource in a nested collection: publishers/123/books
+		bookUID := domain.NewPlatformResourceUID()
+		if err := repo.Create(ctx, domain.NewPlatformResource(bookUID, domain.ResourceName("publishers/123/books/les-mis"), nil, now)); err != nil {
+			t.Fatalf("Create book: %v", err)
+		}
+
+		// Create a deeper descendant: publishers/123/books/les-mis/chapters
+		chapterUID := domain.NewPlatformResourceUID()
+		if err := repo.Create(ctx, domain.NewPlatformResource(chapterUID, domain.ResourceName("publishers/123/books/les-mis/chapters/1"), nil, now)); err != nil {
+			t.Fatalf("Create chapter: %v", err)
+		}
+
+		// Create a resource in a sibling collection: publishers/123/magazines
+		magUID := domain.NewPlatformResourceUID()
+		if err := repo.Create(ctx, domain.NewPlatformResource(magUID, domain.ResourceName("publishers/123/magazines/vogue"), nil, now)); err != nil {
+			t.Fatalf("Create magazine: %v", err)
+		}
+
+		// Listing publishers/123/books should return only the direct child (les-mis),
+		// not the grandchild chapter or sibling magazine.
+		got, err := repo.ListByCollection(ctx, domain.CollectionName("publishers/123/books"))
+		if err != nil {
+			t.Fatalf("ListByCollection: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1 (only direct children)", len(got))
+		}
+		if got[0].Name() != domain.ResourceName("publishers/123/books/les-mis") {
+			t.Errorf("got[0].Name = %q, want publishers/123/books/les-mis", got[0].Name())
+		}
+	})
+
+	t.Run("ListByCollection_NestedParentDoesNotIncludeChildren", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		// Parent resource: publishers/123
+		parentUID := domain.NewPlatformResourceUID()
+		if err := repo.Create(ctx, domain.NewPlatformResource(parentUID, domain.ResourceName("publishers/123"), nil, now)); err != nil {
+			t.Fatalf("Create publisher: %v", err)
+		}
+
+		// Child resource in a sub-collection: publishers/123/books/les-mis
+		childUID := domain.NewPlatformResourceUID()
+		if err := repo.Create(ctx, domain.NewPlatformResource(childUID, domain.ResourceName("publishers/123/books/les-mis"), nil, now)); err != nil {
+			t.Fatalf("Create book: %v", err)
+		}
+
+		// Listing the flat "publishers" collection should return only 123,
+		// not the nested book.
+		got, err := repo.ListByCollection(ctx, domain.CollectionName("publishers"))
+		if err != nil {
+			t.Fatalf("ListByCollection: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("len = %d, want 1", len(got))
+		}
+		if got[0].Name() != domain.ResourceName("publishers/123") {
+			t.Errorf("got[0].Name = %q, want publishers/123", got[0].Name())
+		}
+	})
+
+	t.Run("CreateAndGetByName_NestedCollection", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		uid := domain.NewPlatformResourceUID()
+		name := domain.ResourceName("publishers/123/books/les-mis")
+		r := domain.NewPlatformResource(uid, name, map[string]string{"genre": "fiction"}, now)
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.GetByName(ctx, name)
+		if err != nil {
+			t.Fatalf("GetByName: %v", err)
+		}
+		if got.UID() != uid {
+			t.Errorf("UID = %q, want %q", got.UID(), uid)
+		}
+		if got.Collection() != domain.CollectionName("publishers/123/books") {
+			t.Errorf("Collection = %q, want publishers/123/books", got.Collection())
+		}
+		if got.Name() != name {
+			t.Errorf("Name = %q, want %q", got.Name(), name)
+		}
+	})
+
 	t.Run("GetNotFoundCases", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()

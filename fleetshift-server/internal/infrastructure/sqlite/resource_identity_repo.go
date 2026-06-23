@@ -28,10 +28,13 @@ func (r *ResourceIdentityRepo) Create(ctx context.Context, pr *domain.PlatformRe
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
+	collectionName := string(s.Name.Collection())
+	resourceID := string(s.Name.ID())
+
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO platform_resources (uid, name, labels, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?)`,
-		s.UID, string(s.Name), string(labels),
+		`INSERT INTO platform_resources (uid, collection_name, resource_id, labels, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
+		s.UID, collectionName, resourceID, string(labels),
 		s.CreatedAt.UTC().Format(time.RFC3339),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
 	)
@@ -60,7 +63,7 @@ func (r *ResourceIdentityRepo) Create(ctx context.Context, pr *domain.PlatformRe
 
 func (r *ResourceIdentityRepo) Get(ctx context.Context, uid domain.PlatformResourceUID) (*domain.PlatformResource, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT uid, name, labels, created_at, updated_at, deleted_at
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
 		 FROM platform_resources WHERE uid = ?`,
 		uid,
 	)
@@ -72,10 +75,12 @@ func (r *ResourceIdentityRepo) Get(ctx context.Context, uid domain.PlatformResou
 }
 
 func (r *ResourceIdentityRepo) GetByName(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
+	collectionName := string(name.Collection())
+	resourceID := string(name.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT uid, name, labels, created_at, updated_at, deleted_at
-		 FROM platform_resources WHERE name = ?`,
-		string(name),
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
+		 FROM platform_resources WHERE collection_name = ? AND resource_id = ?`,
+		collectionName, resourceID,
 	)
 	snap, err := scanPlatformResourceSnapshot(row)
 	if err != nil {
@@ -134,8 +139,8 @@ func (r *ResourceIdentityRepo) Update(ctx context.Context, pr *domain.PlatformRe
 
 func (r *ResourceIdentityRepo) ListByCollection(ctx context.Context, collection domain.CollectionName) ([]*domain.PlatformResource, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT uid, name, labels, created_at, updated_at, deleted_at
-		 FROM platform_resources WHERE name LIKE ? || '/%' ORDER BY name`,
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
+		 FROM platform_resources WHERE collection_name = ? ORDER BY resource_id`,
 		string(collection),
 	)
 	if err != nil {
@@ -190,11 +195,13 @@ func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Al
 func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domain.FullResourceName) (domain.ResourceRepresentation, error) {
 	service := name.ServiceName()
 	relative := name.ResourceName()
+	collectionName := string(relative.Collection())
+	resourceID := string(relative.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT platform_uid, service_name, version, name, roles, labels, created_at, updated_at, deleted_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at
 		 FROM resource_representations
-		 WHERE service_name = ? AND name = ?`,
-		string(service), string(relative),
+		 WHERE service_name = ? AND collection_name = ? AND resource_id = ?`,
+		string(service), collectionName, resourceID,
 	)
 	return scanRepresentation(row)
 }
@@ -214,11 +221,14 @@ func (r *ResourceIdentityRepo) reconcileRepresentations(ctx context.Context, s d
 			return fmt.Errorf("marshal labels: %w", err)
 		}
 
+		collectionName := string(rep.Name.Collection())
+		resourceID := string(rep.Name.ID())
+
 		var existingUID domain.PlatformResourceUID
 		checkErr := r.DB.QueryRowContext(ctx,
 			`SELECT platform_uid FROM resource_representations
-			 WHERE service_name = ? AND name = ?`,
-			string(rep.ServiceName), string(rep.Name),
+			 WHERE service_name = ? AND collection_name = ? AND resource_id = ?`,
+			string(rep.ServiceName), collectionName, resourceID,
 		).Scan(&existingUID)
 		if checkErr == nil && existingUID != rep.PlatformUID {
 			return fmt.Errorf("representation %s/%s owned by %s, not %s: %w",
@@ -234,16 +244,16 @@ func (r *ResourceIdentityRepo) reconcileRepresentations(ctx context.Context, s d
 
 		_, err = r.DB.ExecContext(ctx,
 			`INSERT INTO resource_representations
-			 (platform_uid, service_name, version, name, roles, labels, created_at, updated_at, deleted_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-			 ON CONFLICT(service_name, name) DO UPDATE SET
+			 (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(service_name, collection_name, resource_id) DO UPDATE SET
 			   version = excluded.version,
 			   roles = excluded.roles,
 			   labels = excluded.labels,
 			   updated_at = excluded.updated_at,
 			   deleted_at = excluded.deleted_at`,
 			rep.PlatformUID, string(rep.ServiceName), string(rep.Version),
-			string(rep.Name),
+			collectionName, resourceID,
 			string(roles), string(labels),
 			rep.CreatedAt.UTC().Format(time.RFC3339),
 			rep.UpdatedAt.UTC().Format(time.RFC3339),
@@ -337,7 +347,7 @@ func (r *ResourceIdentityRepo) loadChildren(ctx context.Context, snap domain.Pla
 
 func (r *ResourceIdentityRepo) loadRepresentations(ctx context.Context, uid domain.PlatformResourceUID) ([]domain.ResourceRepresentationSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT platform_uid, service_name, version, name, roles, labels, created_at, updated_at, deleted_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at
 		 FROM resource_representations
 		 WHERE platform_uid = ?
 		 ORDER BY service_name`,
@@ -425,10 +435,10 @@ func (r *ResourceIdentityRepo) loadRelationships(ctx context.Context, uid domain
 
 func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, error) {
 	var uid domain.PlatformResourceUID
-	var resourceName, labelsJSON, createdAtStr, updatedAtStr string
+	var collectionName, resourceID, labelsJSON, createdAtStr, updatedAtStr string
 	var deletedAtStr sql.NullString
 
-	if err := s.Scan(&uid, &resourceName, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
+	if err := s.Scan(&uid, &collectionName, &resourceID, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.PlatformResourceSnapshot{}, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -451,7 +461,7 @@ func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, e
 
 	snap := domain.PlatformResourceSnapshot{
 		UID:       uid,
-		Name:      domain.ResourceName(resourceName),
+		Name:      domain.ResourceName(collectionName + "/" + resourceID),
 		Labels:    labels,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
@@ -469,11 +479,11 @@ func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, e
 
 func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 	var platformUID domain.PlatformResourceUID
-	var serviceName, version, resourceName string
+	var serviceName, version, collectionName, resourceID string
 	var rolesJSON, labelsJSON, createdAtStr, updatedAtStr string
 	var deletedAtStr sql.NullString
 
-	if err := s.Scan(&platformUID, &serviceName, &version, &resourceName, &rolesJSON, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
+	if err := s.Scan(&platformUID, &serviceName, &version, &collectionName, &resourceID, &rolesJSON, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ResourceRepresentation{}, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -503,7 +513,7 @@ func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 		PlatformUID: platformUID,
 		ServiceName: domain.ServiceName(serviceName),
 		Version:     domain.APIVersion(version),
-		Name:        domain.ResourceName(resourceName),
+		Name:        domain.ResourceName(collectionName + "/" + resourceID),
 		Roles:       roles,
 		Labels:      labels,
 		CreatedAt:   createdAt,

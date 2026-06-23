@@ -192,6 +192,12 @@ The implementation's naming types mirror AIP-122 terminology:
 
 `ResourceName` is the standard currency for domain APIs. `ResourceID` is used only at boundaries (e.g. parsing a resource name from an HTTP path segment). The current implementation is flat (`clusters/foo`), but `CollectionName` and `ResourceName` do not structurally prevent future hierarchy.
 
+### Persistence of resource identity
+
+The repository layer persists resource identity as two separate columns: `collection_name` (the full parent `CollectionName`, e.g. `clusters` or `publishers/123/books`) and `resource_id` (the leaf `ResourceID`, e.g. `prod` or `les-mis`). The composed `ResourceName` is reconstructed on read by joining `collection_name + "/" + resource_id`.
+
+This split enables exact-match listing by collection (`WHERE collection_name = ?`) rather than prefix matching, which would over-include descendants in nested collection hierarchies. The uniqueness constraint is `(collection_name, resource_id)` per table. `ResourceName` remains the only identity type exposed by the domain; the split is an infrastructure concern.
+
 ### Identity uniqueness
 
 A resource name is unique within a **platform identity domain**. Extension collections participate in that domain only when their resource type registration maps them to the corresponding platform resource type.
