@@ -536,14 +536,6 @@ func awaitDeploymentGone(ctx context.Context, t *testing.T, store domain.Store, 
 	}
 }
 
-func TestCreateDeployment_MissingID(t *testing.T) {
-	h := setup(t)
-	_, err := h.deployments.Create(context.Background(), domain.CreateDeploymentInput{})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
-	}
-}
-
 // seedDeployment persists a fulfillment and a thin deployment that
 // references it. The fulfillment is created via [domain.NewFulfillment],
 // advanced with default strategies, and persisted. It starts in

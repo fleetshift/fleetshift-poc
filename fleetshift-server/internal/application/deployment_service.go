@@ -20,10 +20,6 @@ type DeploymentService struct {
 // Create starts the durable create-deployment workflow, which persists
 // the deployment and launches orchestration as a child workflow.
 func (s *DeploymentService) Create(ctx context.Context, in domain.CreateDeploymentInput) (domain.DeploymentView, error) {
-	if in.Name == "" {
-		return domain.DeploymentView{}, fmt.Errorf("%w: deployment name is required", domain.ErrInvalidArgument)
-	}
-
 	ac := AuthFromContext(ctx)
 	if ac != nil && ac.Subject != nil {
 		in.Auth = domain.DeliveryAuth{
