@@ -281,11 +281,14 @@ func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, tar
 
 // HandleTargetReady implements [domain.TargetObserver] by dispatching
 // StartIndexing to all connected IndexAgents that match the target's type.
+// Dispatches only while the addon is Connected — a disconnected addon
+// retains its indexAgent for cleanup (see [HandleTargetTerminated]) but
+// should not start new indexing work.
 func (m *AddonManager) HandleTargetReady(ctx context.Context, target domain.TargetInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	for _, rec := range m.addons {
-		if rec.indexAgent == nil {
+		if rec.indexAgent == nil || rec.addon.State != domain.AddonStateConnected {
 			continue
 		}
 		if !hasIndexCapabilityForTargetType(rec.addon.Capabilities, target.Type()) {
@@ -300,7 +303,9 @@ func (m *AddonManager) HandleTargetReady(ctx context.Context, target domain.Targ
 }
 
 // HandleTargetTerminated implements [domain.TargetObserver] by dispatching
-// StopIndexing to all connected IndexAgents that are tracking the target.
+// StopIndexing to all IndexAgents that are tracking the target. Unlike
+// [HandleTargetReady], this is not gated on Connected state — it must
+// work during disconnect to prevent orphaned agent goroutines.
 func (m *AddonManager) HandleTargetTerminated(ctx context.Context, target domain.TargetInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -332,6 +337,12 @@ func hasIndexCapabilityForTargetType(caps []domain.Capability, tt domain.TargetT
 // agent is deregistered, but the API surface remains live so users can
 // still CRUD managed resources. The addon transitions back to
 // [domain.AddonStateEnabled].
+//
+// The indexAgent reference is intentionally preserved so that
+// [HandleTargetTerminated] can still dispatch StopIndexing for targets
+// terminated during the disconnect window. [HandleTargetReady] gates
+// on [domain.AddonStateConnected], so no new indexing work is started.
+// On reconnect, [connectIndexAgent] overwrites the reference.
 func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -349,8 +360,6 @@ func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) err
 		}
 		rec.deliveryAgent = nil
 	}
-
-	rec.indexAgent = nil
 
 	rec.addon.State = domain.AddonStateEnabled
 	rec.addon.ConnectedAt = nil

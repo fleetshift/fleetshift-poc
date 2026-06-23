@@ -1034,7 +1034,7 @@ func TestAddonManager_ConnectIndexAgentWithoutCapabilityReturnsError(t *testing.
 	}
 }
 
-func TestAddonManager_DisconnectDeregistersIndexAgentButKeepsTargets(t *testing.T) {
+func TestAddonManager_DisconnectKeepsIndexAgentButBlocksNewDispatches(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()
 
@@ -1074,9 +1074,47 @@ func TestAddonManager_DisconnectDeregistersIndexAgentButKeepsTargets(t *testing.
 		t.Errorf("started count = %d, want 1 (disconnect should prevent new dispatches)", indexAgent.startedCount())
 	}
 
-	// StopIndexing should NOT have been called
+	// Disconnect does NOT stop running indexers
 	if indexAgent.stoppedCount() != 0 {
 		t.Errorf("stopped count = %d, want 0 (disconnect does not stop running indexers)", indexAgent.stoppedCount())
+	}
+}
+
+func TestAddonManager_TargetTerminatedDuringDisconnectStopsIndexer(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if err := env.mgr.Disconnect(ctx, "kubernetes"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	// Target terminated while addon is disconnected — StopIndexing
+	// must still be dispatched so the agent goroutine is cleaned up.
+	if err := env.mgr.HandleTargetTerminated(ctx, target); err != nil {
+		t.Fatalf("HandleTargetTerminated during disconnect: %v", err)
+	}
+
+	if indexAgent.stoppedCount() != 1 {
+		t.Errorf("stopped count = %d, want 1 (termination during disconnect must stop indexer)", indexAgent.stoppedCount())
 	}
 }
 
