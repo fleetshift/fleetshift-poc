@@ -25,9 +25,6 @@ type ResourceType string
 // a PascalCase type name per AIP-123. The type name must start with an
 // uppercase letter and contain only alphanumeric characters.
 func NewResourceType(service ServiceName, typeName string) (ResourceType, error) {
-	if service == "" {
-		return "", fmt.Errorf("resource type: %w: service name must not be empty", ErrInvalidArgument)
-	}
 	if err := validateTypeName(typeName); err != nil {
 		return "", err
 	}

@@ -43,12 +43,6 @@ func TestNewResourceType(t *testing.T) {
 			typeName: "Cluster/Sub",
 			wantErr:  true,
 		},
-		{
-			name:     "empty service name",
-			service:  "",
-			typeName: "Cluster",
-			wantErr:  true,
-		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
