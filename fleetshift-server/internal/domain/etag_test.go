@@ -96,14 +96,13 @@ func TestDeploymentView_Etag_ChangesOnStateChange(t *testing.T) {
 }
 
 func TestDeploymentView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
-	uid1 := NewDeploymentUID()
-	uid2 := NewDeploymentUID()
+	sharedUID := NewDeploymentUID()
 	a := DeploymentView{
-		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/ab", UID: uid1}),
+		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/ab", UID: sharedUID}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	b := DeploymentView{
-		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/a", UID: uid2}),
+		Deployment:  DeploymentFromSnapshot(DeploymentSnapshot{Name: "deployments/a", UID: sharedUID}),
 		Fulfillment: fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	if a.Etag() == b.Etag() {
@@ -166,15 +165,14 @@ func managedResourceValue(s ManagedResourceSnapshot) ManagedResource {
 }
 
 func TestManagedResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
-	uid1 := NewManagedResourceUID()
-	uid2 := NewManagedResourceUID()
+	sharedUID := NewManagedResourceUID()
 	a := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "ab", UID: uid1}),
+		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "ab", UID: sharedUID}),
 		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
 		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}
 	b := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "a", UID: uid2}),
+		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "a", UID: sharedUID}),
 		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
 		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
 	}

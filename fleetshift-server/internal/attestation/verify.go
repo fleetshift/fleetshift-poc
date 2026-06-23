@@ -275,6 +275,10 @@ func verifyPutManifests(input *domain.SignedInput, put *domain.PutManifests) err
 			return fmt.Errorf("manifest[%d] manifest type mismatch: expected %q, got %q",
 				i, expected[i].ManifestType, actual[i].ManifestType)
 		}
+		if expected[i].ManifestID != actual[i].ManifestID {
+			return fmt.Errorf("manifest[%d] manifest ID mismatch: expected %q, got %q",
+				i, expected[i].ManifestID, actual[i].ManifestID)
+		}
 		if !jsonEqual(expected[i].Raw, actual[i].Raw) {
 			return fmt.Errorf("manifest[%d] content mismatch", i)
 		}

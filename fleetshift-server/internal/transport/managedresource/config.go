@@ -122,9 +122,10 @@ func (c *ResourceTypeConfig) Collection() string {
 
 // PlatformResourceConfig describes a platform-canonical resource
 // service. Unlike [ResourceTypeConfig] (which is extension-specific),
-// the platform config uses the fixed service name "fleetshift.io" and
-// proto package "fleetshift.v1". It only needs the [CollectionConfig]
-// to know the collection shape.
+// the platform config uses the fixed service name "fleetshift.io",
+// proto package "fleetshift.v1", and platform API version
+// [PlatformAPIVersion]. It only needs the [CollectionConfig] to know
+// the collection shape.
 type PlatformResourceConfig struct {
 	CollectionConfig
 }
@@ -132,6 +133,11 @@ type PlatformResourceConfig struct {
 // PlatformProtoPackage is the fixed proto package for all
 // platform-canonical resource services.
 const PlatformProtoPackage = "fleetshift.v1"
+
+// PlatformAPIVersion is the fixed HTTP API version for the
+// platform-canonical API surface. Extension schemas version their own
+// APIs independently; they do not choose the platform API version.
+const PlatformAPIVersion = "v1"
 
 // PlatformServiceName is the fixed AIP-122 service name for the
 // platform API surface.

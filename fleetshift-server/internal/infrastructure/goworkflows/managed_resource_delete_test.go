@@ -250,7 +250,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 	})
 	view, err := resourceSvc.Create(createCtx, application.CreateManagedResourceInput{
 		ResourceType: "test.fleetshift.io/Cluster",
-		Name:         "prod-us-east-1",
+		Name:         "clusters/prod-us-east-1",
 		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
 	})
 	if err != nil {
@@ -268,7 +268,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		},
 		Token: "delete-token",
 	})
-	if _, err := resourceSvc.Delete(deleteCtx, "test.fleetshift.io/Cluster", "prod-us-east-1"); err != nil {
+	if _, err := resourceSvc.Delete(deleteCtx, "test.fleetshift.io/Cluster", "clusters/prod-us-east-1"); err != nil {
 		t.Fatalf("Delete: %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 		t.Fatal("expected remove path to emit at least one event")
 	}
 
-	viewDuringDelete, err := resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
+	viewDuringDelete, err := resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "clusters/prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get during delete: %v", err)
 	}

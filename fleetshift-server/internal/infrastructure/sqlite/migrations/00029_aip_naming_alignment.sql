@@ -19,40 +19,39 @@ CREATE TABLE platform_resources_new (
     labels          TEXT NOT NULL DEFAULT '{}',
     created_at      TEXT NOT NULL,
     updated_at      TEXT NOT NULL,
-    deleted_at      TEXT,
     UNIQUE (collection_name, resource_id)
 );
 
 CREATE INDEX idx_platform_resources_collection ON platform_resources_new (collection_name);
 
 -- Backfill: for single-slash names (e.g. "clusters/prod")
-INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at)
+INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at)
 SELECT uid,
        SUBSTR(relative_name, 1, INSTR(relative_name, '/') - 1),
        SUBSTR(relative_name, INSTR(relative_name, '/') + 1),
-       labels, created_at, updated_at, deleted_at
+       labels, created_at, updated_at
 FROM platform_resources
 WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) = 1;
 
 -- Backfill: for multi-slash names (e.g. "publishers/123/books/les-mis")
 -- Use a recursive CTE to locate the last '/' position.
 -- +goose StatementBegin
-INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at)
-WITH RECURSIVE split(uid, name, pos, last_pos, labels, created_at, updated_at, deleted_at) AS (
-    SELECT uid, relative_name, 1, 0, labels, created_at, updated_at, deleted_at
+INSERT INTO platform_resources_new (uid, collection_name, resource_id, labels, created_at, updated_at)
+WITH RECURSIVE split(uid, name, pos, last_pos, labels, created_at, updated_at) AS (
+    SELECT uid, relative_name, 1, 0, labels, created_at, updated_at
     FROM platform_resources
     WHERE LENGTH(relative_name) - LENGTH(REPLACE(relative_name, '/', '')) > 1
     UNION ALL
     SELECT uid, name, pos + 1,
            CASE WHEN SUBSTR(name, pos, 1) = '/' THEN pos ELSE last_pos END,
-           labels, created_at, updated_at, deleted_at
+           labels, created_at, updated_at
     FROM split
     WHERE pos <= LENGTH(name)
 )
 SELECT uid,
        SUBSTR(name, 1, last_pos - 1),
        SUBSTR(name, last_pos + 1),
-       labels, created_at, updated_at, deleted_at
+       labels, created_at, updated_at
 FROM split
 WHERE pos > LENGTH(name);
 -- +goose StatementEnd
@@ -119,6 +118,14 @@ ALTER TABLE resource_representations_new RENAME TO resource_representations;
 ALTER TABLE targets RENAME COLUMN accepted_resource_types TO accepted_manifest_types;
 
 -- +goose Down
+-- WARNING: this rollback is lossy for nested collections. It stores
+-- the full collection path (e.g. "publishers/123/books") in the old
+-- collection_id column, but pre-migration collection_id was flat
+-- (e.g. "books"). SQLite has no procedural guard to fail fast, so if
+-- nested data exists the collection_id semantics will be silently
+-- corrupted. Only roll back if you are certain no nested-collection
+-- resources have been created.
+
 ALTER TABLE targets RENAME COLUMN accepted_manifest_types TO accepted_resource_types;
 
 DROP INDEX IF EXISTS idx_resource_representations_platform;
@@ -158,8 +165,8 @@ CREATE TABLE platform_resources_old (
     deleted_at    TEXT
 );
 
-INSERT INTO platform_resources_old (uid, collection_id, relative_name, labels, created_at, updated_at, deleted_at)
-SELECT uid, collection_name, collection_name || '/' || resource_id, labels, created_at, updated_at, deleted_at
+INSERT INTO platform_resources_old (uid, collection_id, relative_name, labels, created_at, updated_at)
+SELECT uid, collection_name, collection_name || '/' || resource_id, labels, created_at, updated_at
 FROM platform_resources;
 
 DROP TABLE platform_resources;

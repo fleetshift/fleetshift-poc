@@ -3,6 +3,7 @@ package application_test
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -675,6 +676,53 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 	}
 }
 
+func TestAddonManager_ReconnectDeactivatesOldRegistrationOnIDChange(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+
+	v1 := clusterSchema()
+	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{v1},
+	}); err != nil {
+		t.Fatalf("first Connect: %v", err)
+	}
+
+	if err := env.mgr.Disconnect(ctx, "cluster-mgmt"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	// Reconnect with a schema that yields a different registration ID
+	// (different ProtoPackage produces a different gRPC service name).
+	v2 := clusterSchema()
+	v2.ProtoPackage = "test.fleetshift.v2"
+	v2.ProtoFiles = map[string]string{"fake.proto": "syntax = \"proto3\";\nmessage ClusterSpecV2 {}"}
+	v2.SpecMessage = "fake.ClusterSpecV2"
+
+	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{v2},
+	}); err != nil {
+		t.Fatalf("second Connect: %v", err)
+	}
+
+	if env.activator.deactivatedCount() != 1 {
+		t.Fatalf("deactivated count = %d, want 1 (old registration ID)", env.activator.deactivatedCount())
+	}
+	if env.activator.deactivated[0] != "test.fleetshift.v1.ClusterService" {
+		t.Errorf("deactivated service = %q, want test.fleetshift.v1.ClusterService",
+			env.activator.deactivated[0])
+	}
+}
+
 func TestAddonManager_ReEnableAfterDisable(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()
@@ -728,6 +776,70 @@ func TestAddonManager_DuplicateEnableReturnsError(t *testing.T) {
 	err := env.mgr.Enable(ctx, desc)
 	if err == nil {
 		t.Fatal("expected error on duplicate Enable")
+	}
+}
+
+// TestAddonManager_ConnectRejectsConflictingAPIMetadata verifies that
+// when an existing type def has non-empty API identity metadata and the
+// reconnecting addon provides different values, Connect fails.
+func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	buildManager := func() *addonManagerEnv {
+		router := delivery.NewRoutingDeliveryService()
+		typeSvc := application.NewManagedResourceTypeService(store)
+		targetSvc := &application.TargetService{Store: store}
+		activator := &recordingActivator{}
+		mgr := application.NewAddonManager(application.AddonManagerDeps{
+			Router:    router,
+			TypeSvc:   typeSvc,
+			Activator: activator,
+		})
+		return &addonManagerEnv{
+			mgr:       mgr,
+			activator: activator,
+			router:    router,
+			typeSvc:   typeSvc,
+			targetSvc: targetSvc,
+		}
+	}
+
+	ctx := context.Background()
+
+	// --- first "pod": creates type def WITH API metadata ---
+	env1 := buildManager()
+	if err := env1.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 1): %v", err)
+	}
+	if err := env1.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+	schema1 := clusterSchema()
+	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema1},
+	}); err != nil {
+		t.Fatalf("Connect (pod 1): %v", err)
+	}
+
+	// --- second "pod": reconnects with DIFFERENT API metadata ---
+	env2 := buildManager()
+	if err := env2.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 2): %v", err)
+	}
+	schema2 := clusterSchema()
+	schema2.APIServiceName = "different.service.io"
+	err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema2},
+	})
+	if err == nil {
+		t.Fatal("expected error when reconnecting with conflicting API metadata")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
 	}
 }
 

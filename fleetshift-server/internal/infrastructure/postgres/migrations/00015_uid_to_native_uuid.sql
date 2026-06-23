@@ -5,13 +5,13 @@
 -- before the parent column type can change, then re-added afterward.
 
 -- deployments (standalone, no FK to platform_resources)
-UPDATE deployments SET uid = '00000000-0000-0000-0000-000000000000' WHERE uid = '';
+UPDATE deployments SET uid = gen_random_uuid()::text WHERE uid = '';
 ALTER TABLE deployments ALTER COLUMN uid DROP DEFAULT;
 ALTER TABLE deployments ALTER COLUMN uid TYPE UUID USING uid::uuid;
 ALTER TABLE deployments ALTER COLUMN uid SET DEFAULT gen_random_uuid();
 
 -- managed_resources (standalone uid)
-UPDATE managed_resources SET uid = '00000000-0000-0000-0000-000000000000' WHERE uid = '';
+UPDATE managed_resources SET uid = gen_random_uuid()::text WHERE uid = '';
 ALTER TABLE managed_resources ALTER COLUMN uid TYPE UUID USING uid::uuid;
 
 -- platform_resources and dependents: drop FKs, convert all columns, re-add FKs
@@ -57,5 +57,6 @@ ALTER TABLE resource_relationships ADD CONSTRAINT resource_relationships_target_
     FOREIGN KEY (target_uid) REFERENCES platform_resources(uid) ON DELETE CASCADE;
 
 ALTER TABLE managed_resources ALTER COLUMN uid TYPE TEXT;
-ALTER TABLE deployments ALTER COLUMN uid SET DEFAULT '';
+ALTER TABLE deployments ALTER COLUMN uid DROP DEFAULT;
 ALTER TABLE deployments ALTER COLUMN uid TYPE TEXT;
+ALTER TABLE deployments ALTER COLUMN uid SET DEFAULT '';

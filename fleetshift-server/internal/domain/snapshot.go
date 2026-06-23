@@ -121,7 +121,6 @@ type PlatformResourceSnapshot struct {
 	Labels    map[string]string
 	CreatedAt time.Time
 	UpdatedAt time.Time
-	DeletedAt *time.Time
 
 	Representations []ResourceRepresentationSnapshot
 	Aliases         []ResourceAliasSnapshot
@@ -139,7 +138,7 @@ type ResourceRepresentationSnapshot struct {
 	Labels      map[string]string
 	CreatedAt   time.Time
 	UpdatedAt   time.Time
-	DeletedAt   *time.Time
+	Deleted     bool
 }
 
 // ResourceAliasSnapshot is the persistence DTO for an [Alias] bound
@@ -425,8 +424,8 @@ func SignerEnrollmentFromSnapshot(s SignerEnrollmentSnapshot) SignerEnrollment {
 
 // PlatformResourceFromSnapshot constructs a [PlatformResource] from a
 // snapshot. Labels are shallow-copied to avoid sharing the map with
-// the caller. Child entities (representations, aliases, relationships)
-// are reconstituted from their snapshot slices.
+// the caller. Child entities (representations, aliases,
+// relationships) are reconstituted from their snapshot slices.
 func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource {
 	labels := make(map[string]string, len(s.Labels))
 	for k, v := range s.Labels {
@@ -454,7 +453,6 @@ func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource 
 		labels:          labels,
 		createdAt:       s.CreatedAt,
 		updatedAt:       s.UpdatedAt,
-		deletedAt:       s.DeletedAt,
 		representations: reps,
 		aliases:         aliases,
 		relationships:   rels,

@@ -37,9 +37,6 @@ type PlatformServiceDescriptors struct {
 
 	// ListResponse is the list response message descriptor.
 	ListResponse protoreflect.MessageDescriptor
-
-	// DeleteRequest is the delete request message descriptor.
-	DeleteRequest protoreflect.MessageDescriptor
 }
 
 // BuildPlatformServiceDescriptors programmatically constructs the full
@@ -47,7 +44,7 @@ type PlatformServiceDescriptors struct {
 // resource service. Given a [PlatformResourceConfig], it builds:
 //   - The platform resource message (identity, labels, representations, aliases, relationships)
 //   - Helper messages (representation, alias, relationship)
-//   - Create/Get/List/Delete request and response messages
+//   - Create/Get/List request and response messages
 //   - The service definition with all methods
 //
 // The resulting descriptors are used to instantiate dynamicpb.Message
@@ -95,7 +92,6 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 			buildPlatformGetRequest(resourceName),
 			buildPlatformListRequest(resourceName, plural),
 			buildPlatformListResponse(resourceName, plural, collectionID, fqn(resourceName)),
-			buildPlatformDeleteRequest(resourceName),
 		},
 		Service: []*descriptorpb.ServiceDescriptorProto{
 			buildPlatformService(resourceName, plural, pkg),
@@ -131,7 +127,6 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 		GetRequest:    fd.Messages().ByName(protoreflect.Name("Get" + resourceName + "Request")),
 		ListRequest:   fd.Messages().ByName(protoreflect.Name("List" + "Platform" + plural + "Request")),
 		ListResponse:  fd.Messages().ByName(protoreflect.Name("List" + "Platform" + plural + "Response")),
-		DeleteRequest: fd.Messages().ByName(protoreflect.Name("Delete" + resourceName + "Request")),
 	}, nil
 }
 
@@ -160,7 +155,6 @@ func buildPlatformResourceMessage(
 			repeatedMessageField("relationships", 7, pkg+"."+relMsg.GetName()),
 			messageField("create_time", 8, "google.protobuf.Timestamp"),
 			messageField("update_time", 9, "google.protobuf.Timestamp"),
-			messageField("delete_time", 10, "google.protobuf.Timestamp"),
 		},
 	}
 }
@@ -241,15 +235,6 @@ func buildPlatformListResponse(resourceName, plural, collectionID, resourceFQN s
 	}
 }
 
-func buildPlatformDeleteRequest(resourceName string) *descriptorpb.DescriptorProto {
-	return &descriptorpb.DescriptorProto{
-		Name: proto.String("Delete" + resourceName + "Request"),
-		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
-		},
-	}
-}
-
 func buildPlatformService(resourceName, plural, pkg string) *descriptorpb.ServiceDescriptorProto {
 	fqnPrefix := "." + pkg + "."
 	return &descriptorpb.ServiceDescriptorProto{
@@ -269,11 +254,6 @@ func buildPlatformService(resourceName, plural, pkg string) *descriptorpb.Servic
 				Name:       proto.String("List" + "Platform" + plural),
 				InputType:  proto.String(fqnPrefix + "List" + "Platform" + plural + "Request"),
 				OutputType: proto.String(fqnPrefix + "List" + "Platform" + plural + "Response"),
-			},
-			{
-				Name:       proto.String("Delete" + resourceName),
-				InputType:  proto.String(fqnPrefix + "Delete" + resourceName + "Request"),
-				OutputType: proto.String(fqnPrefix + resourceName),
 			},
 		},
 	}

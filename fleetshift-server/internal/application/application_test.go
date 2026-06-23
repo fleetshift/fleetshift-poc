@@ -525,6 +525,9 @@ func awaitDeploymentGone(ctx context.Context, t *testing.T, store domain.Store, 
 		if errors.Is(err, domain.ErrNotFound) {
 			return
 		}
+		if err != nil {
+			t.Fatalf("GetView(%s): unexpected error: %v", name, err)
+		}
 		select {
 		case <-ctx.Done():
 			t.Fatalf("timed out waiting for deployment %s to be deleted", name)

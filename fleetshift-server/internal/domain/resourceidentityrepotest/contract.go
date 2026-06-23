@@ -226,15 +226,15 @@ func Run(t *testing.T, factory Factory) {
 		if len(reps) != 1 {
 			t.Fatalf("representations len = %d, want 1", len(reps))
 		}
-		if reps[0].Version != "v1beta1" {
-			t.Errorf("Version = %q, want v1beta1", reps[0].Version)
+		if reps[0].Version() != "v1beta1" {
+			t.Errorf("Version = %q, want v1beta1", reps[0].Version())
 		}
-		if reps[0].Labels["v"] != "2" {
-			t.Errorf("Labels[v] = %q, want 2", reps[0].Labels["v"])
+		if reps[0].Labels()["v"] != "2" {
+			t.Errorf("Labels[v] = %q, want 2", reps[0].Labels()["v"])
 		}
 	})
 
-	t.Run("TombstoneRepresentation", func(t *testing.T) {
+	t.Run("DeleteRepresentation", func(t *testing.T) {
 		repo := factory(t)
 		ctx := context.Background()
 
@@ -255,8 +255,8 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		later := now.Add(time.Hour)
-		if err := loaded.TombstoneRepresentation("kind.fleetshift.io", later); err != nil {
-			t.Fatalf("Tombstone: %v", err)
+		if err := loaded.DeleteRepresentation("kind.fleetshift.io", later); err != nil {
+			t.Fatalf("DeleteRepresentation: %v", err)
 		}
 		if err := repo.Update(ctx, loaded); err != nil {
 			t.Fatalf("Update: %v", err)
@@ -264,19 +264,16 @@ func Run(t *testing.T, factory Factory) {
 
 		got, err := repo.Get(ctx, uid)
 		if err != nil {
-			t.Fatalf("Get after tombstone: %v", err)
+			t.Fatalf("Get after delete: %v", err)
 		}
 		if len(got.Representations()) != 0 {
-			t.Errorf("active representations len = %d, want 0", len(got.Representations()))
+			t.Errorf("representations len = %d, want 0", len(got.Representations()))
 		}
 
-		// Direct GetRepresentation should still return it (with DeletedAt set).
-		rep, err := repo.GetRepresentation(ctx, "//kind.fleetshift.io/clusters/tomb")
-		if err != nil {
-			t.Fatalf("GetRepresentation: %v", err)
-		}
-		if rep.DeletedAt == nil {
-			t.Fatal("DeletedAt is nil, want non-nil after tombstone")
+		// Direct GetRepresentation should report the representation as gone.
+		_, err = repo.GetRepresentation(ctx, "//kind.fleetshift.io/clusters/tomb")
+		if !errors.Is(err, domain.ErrNotFound) {
+			t.Fatalf("GetRepresentation after delete: got %v, want ErrNotFound", err)
 		}
 	})
 
@@ -376,13 +373,9 @@ func Run(t *testing.T, factory Factory) {
 		}
 
 		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/rel1"), nil, now)
-		_ = r1.AddRelationship(domain.ResourceRelationship{
-			SourceUID:     uid1,
-			Type:          "runs-on",
-			TargetUID:     uid2,
-			SourceService: "kind.fleetshift.io",
-			CreatedAt:     now,
-		})
+		_ = r1.AddRelationship(domain.NewResourceRelationship(
+			uid1, "runs-on", uid2, "kind.fleetshift.io", now,
+		))
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create r1: %v", err)
 		}
@@ -395,11 +388,11 @@ func Run(t *testing.T, factory Factory) {
 		if len(rels) != 1 {
 			t.Fatalf("relationships len = %d, want 1", len(rels))
 		}
-		if rels[0].Type != "runs-on" {
-			t.Errorf("Type = %q, want runs-on", rels[0].Type)
+		if rels[0].Type() != "runs-on" {
+			t.Errorf("Type = %q, want runs-on", rels[0].Type())
 		}
-		if rels[0].TargetUID != uid2 {
-			t.Errorf("TargetUID = %q, want %q", rels[0].TargetUID, uid2)
+		if rels[0].TargetUID() != uid2 {
+			t.Errorf("TargetUID = %q, want %q", rels[0].TargetUID(), uid2)
 		}
 	})
 
@@ -492,6 +485,103 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if got.Name() != name {
 			t.Errorf("Name = %q, want %q", got.Name(), name)
+		}
+	})
+
+	t.Run("RepresentationOwnershipConflict", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		uid1 := domain.NewPlatformResourceUID()
+		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/rep-owner"), nil, now)
+		_ = r1.AttachRepresentation(domain.AttachRepresentationInput{
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+		}, now)
+		if err := repo.Create(ctx, r1); err != nil {
+			t.Fatalf("Create r1: %v", err)
+		}
+
+		// Build a second platform resource whose representation collides
+		// with r1's representation key (same service + collection + id)
+		// but belongs to a different platform_uid. This can only happen
+		// through snapshot construction, but the repo must reject it.
+		uid2 := domain.NewPlatformResourceUID()
+		r2 := domain.PlatformResourceFromSnapshot(domain.PlatformResourceSnapshot{
+			UID:       uid2,
+			Name:      domain.ResourceName("clusters/rep-thief"),
+			CreatedAt: now,
+			UpdatedAt: now,
+			Representations: []domain.ResourceRepresentationSnapshot{{
+				PlatformUID: uid2,
+				ServiceName: "kind.fleetshift.io",
+				Version:     "v1",
+				Name:        domain.ResourceName("clusters/rep-owner"),
+				Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			}},
+		})
+		err := repo.Create(ctx, r2)
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			t.Fatalf("got %v, want ErrAlreadyExists for representation ownership conflict", err)
+		}
+	})
+
+	t.Run("RepresentationOwnershipIdempotent", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		uid := domain.NewPlatformResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/rep-idem"), nil, now)
+		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+		}, now)
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		loaded, err := repo.Get(ctx, uid)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+
+		later := now.Add(time.Hour)
+		_ = loaded.AttachRepresentation(domain.AttachRepresentationInput{
+			ServiceName: "kind.fleetshift.io",
+			Version:     "v1beta1",
+			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+		}, later)
+		if err := repo.Update(ctx, loaded); err != nil {
+			t.Fatalf("Update (same owner): %v", err)
+		}
+	})
+
+	t.Run("ListByCollection_ReturnsAllResources", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		uid1 := domain.NewPlatformResourceUID()
+		uid2 := domain.NewPlatformResourceUID()
+		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/alpha"), nil, now)
+		r2 := domain.NewPlatformResource(uid2, domain.ResourceName("clusters/beta"), nil, now)
+
+		if err := repo.Create(ctx, r1); err != nil {
+			t.Fatalf("Create alpha: %v", err)
+		}
+		if err := repo.Create(ctx, r2); err != nil {
+			t.Fatalf("Create beta: %v", err)
+		}
+
+		got, err := repo.ListByCollection(ctx, domain.CollectionName("clusters"))
+		if err != nil {
+			t.Fatalf("ListByCollection: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("len = %d, want 2", len(got))
 		}
 	})
 

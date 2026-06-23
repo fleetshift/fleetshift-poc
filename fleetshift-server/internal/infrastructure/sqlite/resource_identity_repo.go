@@ -63,7 +63,7 @@ func (r *ResourceIdentityRepo) Create(ctx context.Context, pr *domain.PlatformRe
 
 func (r *ResourceIdentityRepo) Get(ctx context.Context, uid domain.PlatformResourceUID) (*domain.PlatformResource, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at
 		 FROM platform_resources WHERE uid = ?`,
 		uid,
 	)
@@ -78,7 +78,7 @@ func (r *ResourceIdentityRepo) GetByName(ctx context.Context, name domain.Resour
 	collectionName := string(name.Collection())
 	resourceID := string(name.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at
 		 FROM platform_resources WHERE collection_name = ? AND resource_id = ?`,
 		collectionName, resourceID,
 	)
@@ -100,17 +100,10 @@ func (r *ResourceIdentityRepo) Update(ctx context.Context, pr *domain.PlatformRe
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 
-	var deletedAt *string
-	if s.DeletedAt != nil {
-		v := s.DeletedAt.UTC().Format(time.RFC3339)
-		deletedAt = &v
-	}
-
 	res, err := r.DB.ExecContext(ctx,
-		`UPDATE platform_resources SET labels = ?, updated_at = ?, deleted_at = ? WHERE uid = ?`,
+		`UPDATE platform_resources SET labels = ?, updated_at = ? WHERE uid = ?`,
 		string(labels),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
-		deletedAt,
 		s.UID,
 	)
 	if err != nil {
@@ -139,7 +132,7 @@ func (r *ResourceIdentityRepo) Update(ctx context.Context, pr *domain.PlatformRe
 
 func (r *ResourceIdentityRepo) ListByCollection(ctx context.Context, collection domain.CollectionName) ([]*domain.PlatformResource, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at, deleted_at
+		`SELECT uid, collection_name, resource_id, labels, created_at, updated_at
 		 FROM platform_resources WHERE collection_name = ? ORDER BY resource_id`,
 		string(collection),
 	)
@@ -198,7 +191,7 @@ func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domai
 	collectionName := string(relative.Collection())
 	resourceID := string(relative.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at
 		 FROM resource_representations
 		 WHERE service_name = ? AND collection_name = ? AND resource_id = ?`,
 		string(service), collectionName, resourceID,
@@ -212,6 +205,20 @@ func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domai
 
 func (r *ResourceIdentityRepo) reconcileRepresentations(ctx context.Context, s domain.PlatformResourceSnapshot) error {
 	for _, rep := range s.Representations {
+		collectionName := string(rep.Name.Collection())
+		resourceID := string(rep.Name.ID())
+
+		if rep.Deleted {
+			if _, err := r.DB.ExecContext(ctx,
+				`DELETE FROM resource_representations
+				 WHERE platform_uid = ? AND service_name = ? AND collection_name = ? AND resource_id = ?`,
+				rep.PlatformUID, string(rep.ServiceName), collectionName, resourceID,
+			); err != nil {
+				return fmt.Errorf("delete representation: %w", err)
+			}
+			continue
+		}
+
 		roles, err := json.Marshal(rep.Roles)
 		if err != nil {
 			return fmt.Errorf("marshal roles: %w", err)
@@ -221,46 +228,33 @@ func (r *ResourceIdentityRepo) reconcileRepresentations(ctx context.Context, s d
 			return fmt.Errorf("marshal labels: %w", err)
 		}
 
-		collectionName := string(rep.Name.Collection())
-		resourceID := string(rep.Name.ID())
-
-		var existingUID domain.PlatformResourceUID
-		checkErr := r.DB.QueryRowContext(ctx,
-			`SELECT platform_uid FROM resource_representations
-			 WHERE service_name = ? AND collection_name = ? AND resource_id = ?`,
-			string(rep.ServiceName), collectionName, resourceID,
-		).Scan(&existingUID)
-		if checkErr == nil && existingUID != rep.PlatformUID {
-			return fmt.Errorf("representation %s/%s owned by %s, not %s: %w",
-				rep.ServiceName, rep.Name,
-				existingUID, rep.PlatformUID, domain.ErrAlreadyExists)
-		}
-
-		var deletedAtStr *string
-		if rep.DeletedAt != nil {
-			s := rep.DeletedAt.UTC().Format(time.RFC3339)
-			deletedAtStr = &s
-		}
-
-		_, err = r.DB.ExecContext(ctx,
+		// The WHERE clause makes the ownership check atomic with the
+		// upsert: if a different platform resource already owns this
+		// (service, collection, resource_id) triple, the update is
+		// skipped and RowsAffected returns 0.
+		res, err := r.DB.ExecContext(ctx,
 			`INSERT INTO resource_representations
-			 (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(service_name, collection_name, resource_id) DO UPDATE SET
 			   version = excluded.version,
 			   roles = excluded.roles,
 			   labels = excluded.labels,
-			   updated_at = excluded.updated_at,
-			   deleted_at = excluded.deleted_at`,
+			   updated_at = excluded.updated_at
+			 WHERE resource_representations.platform_uid = excluded.platform_uid`,
 			rep.PlatformUID, string(rep.ServiceName), string(rep.Version),
 			collectionName, resourceID,
 			string(roles), string(labels),
 			rep.CreatedAt.UTC().Format(time.RFC3339),
 			rep.UpdatedAt.UTC().Format(time.RFC3339),
-			deletedAtStr,
 		)
 		if err != nil {
 			return fmt.Errorf("upsert representation: %w", err)
+		}
+		n, _ := res.RowsAffected()
+		if n == 0 {
+			return fmt.Errorf("representation %s/%s owned by another platform resource: %w",
+				rep.ServiceName, rep.Name, domain.ErrAlreadyExists)
 		}
 	}
 	return nil
@@ -347,7 +341,7 @@ func (r *ResourceIdentityRepo) loadChildren(ctx context.Context, snap domain.Pla
 
 func (r *ResourceIdentityRepo) loadRepresentations(ctx context.Context, uid domain.PlatformResourceUID) ([]domain.ResourceRepresentationSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at, deleted_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at
 		 FROM resource_representations
 		 WHERE platform_uid = ?
 		 ORDER BY service_name`,
@@ -436,9 +430,8 @@ func (r *ResourceIdentityRepo) loadRelationships(ctx context.Context, uid domain
 func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, error) {
 	var uid domain.PlatformResourceUID
 	var collectionName, resourceID, labelsJSON, createdAtStr, updatedAtStr string
-	var deletedAtStr sql.NullString
 
-	if err := s.Scan(&uid, &collectionName, &resourceID, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
+	if err := s.Scan(&uid, &collectionName, &resourceID, &labelsJSON, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.PlatformResourceSnapshot{}, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -459,31 +452,21 @@ func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, e
 		return domain.PlatformResourceSnapshot{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 
-	snap := domain.PlatformResourceSnapshot{
+	return domain.PlatformResourceSnapshot{
 		UID:       uid,
 		Name:      domain.ResourceName(collectionName + "/" + resourceID),
 		Labels:    labels,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
-	}
-	if deletedAtStr.Valid {
-		t, err := time.Parse(time.RFC3339, deletedAtStr.String)
-		if err != nil {
-			return domain.PlatformResourceSnapshot{}, fmt.Errorf("parse deleted_at: %w", err)
-		}
-		snap.DeletedAt = &t
-	}
-
-	return snap, nil
+	}, nil
 }
 
 func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 	var platformUID domain.PlatformResourceUID
 	var serviceName, version, collectionName, resourceID string
 	var rolesJSON, labelsJSON, createdAtStr, updatedAtStr string
-	var deletedAtStr sql.NullString
 
-	if err := s.Scan(&platformUID, &serviceName, &version, &collectionName, &resourceID, &rolesJSON, &labelsJSON, &createdAtStr, &updatedAtStr, &deletedAtStr); err != nil {
+	if err := s.Scan(&platformUID, &serviceName, &version, &collectionName, &resourceID, &rolesJSON, &labelsJSON, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ResourceRepresentation{}, fmt.Errorf("%w", domain.ErrNotFound)
 		}
@@ -509,7 +492,7 @@ func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 		return domain.ResourceRepresentation{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 
-	rep := domain.ResourceRepresentation{
+	return domain.ResourceRepresentationFromSnapshot(domain.ResourceRepresentationSnapshot{
 		PlatformUID: platformUID,
 		ServiceName: domain.ServiceName(serviceName),
 		Version:     domain.APIVersion(version),
@@ -518,14 +501,5 @@ func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 		Labels:      labels,
 		CreatedAt:   createdAt,
 		UpdatedAt:   updatedAt,
-	}
-	if deletedAtStr.Valid {
-		t, err := time.Parse(time.RFC3339, deletedAtStr.String)
-		if err != nil {
-			return domain.ResourceRepresentation{}, fmt.Errorf("parse deleted_at: %w", err)
-		}
-		rep.DeletedAt = &t
-	}
-
-	return rep, nil
+	}), nil
 }

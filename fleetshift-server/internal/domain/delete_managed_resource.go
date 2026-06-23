@@ -51,8 +51,9 @@ func (s *DeleteManagedResourceWorkflowSpec) deleteObserver() DeleteObserver {
 func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-managed-resource" }
 
 // MutateToDeleting transitions the fulfillment to deleting, stores the
-// delete request auth for later background remove/retry passes, and
-// bumps its generation inside a serialized write transaction.
+// delete request auth for later background remove/retry passes, removes
+// the managed representation link, and bumps the generation inside a
+// serialized write transaction.
 func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, managedResourceMutationResult] {
 	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (managedResourceMutationResult, error) {
 		ctx, probe := s.deleteObserver().MutateManagedResourceStarted(ctx, in.ResourceType, in.Name)
@@ -92,11 +93,18 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
 		}
 
-		// Identity integration: tombstone the managed representation,
+		// Identity integration: remove the managed representation link,
 		// atomic with the fulfillment state transition.
-		if err := tombstoneRepresentation(ctx, tx, in.TypeDef, in.Name, now); err != nil {
+		err = deleteRepresentation(ctx, tx, in.TypeDef, in.Name, now)
+		if err != nil {
+			alreadyDeleting := f.State() == FulfillmentStateDeleting
+			if alreadyDeleting && errors.Is(err, ErrNotFound) {
+				err = nil
+			}
+		}
+		if err != nil {
 			probe.Error(err)
-			return managedResourceMutationResult{}, fmt.Errorf("tombstone representation: %w", err)
+			return managedResourceMutationResult{}, fmt.Errorf("delete representation: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -186,17 +194,18 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 	return mr.View, nil
 }
 
-// tombstoneRepresentation looks up the platform resource by name and
-// tombstones the managed representation. Called within MutateToDeleting's
-// transaction so it is atomic with the fulfillment state transition.
-func tombstoneRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName, now time.Time) error {
+// deleteRepresentation looks up the platform resource by name and
+// removes the managed representation link. Called within
+// MutateToDeleting's transaction so it is atomic with the fulfillment
+// state transition.
+func deleteRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName, now time.Time) error {
 	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
 	if err != nil {
 		return fmt.Errorf("get platform resource %s: %w", name, err)
 	}
 
-	if err := pr.TombstoneRepresentation(typeDef.APIServiceName, now); err != nil {
-		return fmt.Errorf("tombstone representation: %w", err)
+	if err := pr.DeleteRepresentation(typeDef.APIServiceName, now); err != nil {
+		return fmt.Errorf("delete representation: %w", err)
 	}
 
 	if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {

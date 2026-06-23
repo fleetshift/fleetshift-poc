@@ -97,7 +97,7 @@ type ManagedResourceSchema struct {
 	// (e.g. "kind.fleetshift.v1").
 	ProtoPackage string
 
-	// Version is the HTTP API version segment (e.g. "v1").
+	// Version is the extension HTTP API version segment (e.g. "v1").
 	Version string
 
 	// CollectionID is the AIP collection identifier used in resource

@@ -9,8 +9,8 @@ import (
 )
 
 // PlatformResourceService manages the lifecycle of platform resource
-// identities: create, get, list, and delete. This is the thin
-// application-layer entry point used by platform API handlers.
+// identities: create, get, and list. This is the thin application-layer
+// entry point used by platform API handlers.
 type PlatformResourceService struct {
 	store domain.Store
 	now   func() time.Time
@@ -20,8 +20,7 @@ type PlatformResourceService struct {
 type PlatformResourceServiceOption func(*PlatformResourceService)
 
 // WithPlatformResourceClock overrides the wall-clock used for
-// timestamps (e.g. creation and deletion times). Defaults to
-// [time.Now].
+// timestamps (e.g. creation time). Defaults to [time.Now].
 func WithPlatformResourceClock(fn func() time.Time) PlatformResourceServiceOption {
 	return func(s *PlatformResourceService) { s.now = fn }
 }
@@ -52,10 +51,6 @@ type CreatePlatformResourceInput struct {
 // already taken (per AIP-133: Create must not silently update an
 // existing resource).
 func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformResourceInput) (*domain.PlatformResource, error) {
-	if in.Name == "" {
-		return nil, fmt.Errorf("%w: resource name is required", domain.ErrInvalidArgument)
-	}
-
 	tx, err := s.store.Begin(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
@@ -91,7 +86,7 @@ func (s *PlatformResourceService) Get(ctx context.Context, name domain.ResourceN
 	return pr, tx.Commit()
 }
 
-// List returns all active (non-deleted) platform resources in a collection.
+// List returns all platform resources in a collection.
 func (s *PlatformResourceService) List(ctx context.Context, collection domain.CollectionName) ([]*domain.PlatformResource, error) {
 	tx, err := s.store.BeginReadOnly(ctx)
 	if err != nil {
@@ -103,40 +98,5 @@ func (s *PlatformResourceService) List(ctx context.Context, collection domain.Co
 	if err != nil {
 		return nil, err
 	}
-
-	active := make([]*domain.PlatformResource, 0, len(all))
-	for _, r := range all {
-		if r.DeletedAt() == nil {
-			active = append(active, r)
-		}
-	}
-	return active, tx.Commit()
-}
-
-// Delete soft-deletes a platform resource by its resource name.
-func (s *PlatformResourceService) Delete(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
-	tx, err := s.store.Begin(ctx)
-	if err != nil {
-		return nil, fmt.Errorf("begin tx: %w", err)
-	}
-	defer tx.Rollback()
-
-	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
-	if err != nil {
-		return nil, err
-	}
-
-	now := s.now()
-	if err := pr.SoftDelete(now); err != nil {
-		return nil, err
-	}
-
-	if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
-		return nil, fmt.Errorf("update: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit: %w", err)
-	}
-	return pr, nil
+	return all, tx.Commit()
 }

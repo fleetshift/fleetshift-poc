@@ -9,7 +9,11 @@ Logic about an object, like its state transitions, should be pushed to that stru
 ## Aggregates, entities, and value objects
 
 There are three kinds of domain objects, each with different ownership and
-identity semantics.
+identity semantics. All objects should be valid on construction, following the "parse, don't validate" principle. "Normalization" is also an acceptable behavior during construction.
+
+Accepting a domain object means it is valid. You do not need to redundantly validate or re-parse it because the type communicates what "valid" means already.
+
+As such, types are never "empty" unless "empty" has semantic meaning for the type. If an argument is optional, a pointer is used.
 
 **Value objects** are the simplest and most preferred. A value is defined
 entirely by its data — two values with the same fields are equal. Values have
@@ -29,6 +33,8 @@ code never reaches into an aggregate to mutate a child entity directly. The
 aggregate enforces invariants that span multiple fields or child entities (e.g.
 "a representation's collection must match the aggregate's collection"). The
 repository loads and saves entire aggregates, not individual child entities.
+
+Fields are always private and encapsulated with getters and methods named for the relevant operation or behavior.
 
 ### Where logic belongs
 

@@ -42,7 +42,6 @@ func TestBuildPlatformServiceDescriptors_Success(t *testing.T) {
 		"uid":         protoreflect.StringKind,
 		"create_time": protoreflect.MessageKind,
 		"update_time": protoreflect.MessageKind,
-		"delete_time": protoreflect.MessageKind,
 	}
 	for name, wantKind := range expectedFields {
 		fd := res.Fields().ByName(protoreflect.Name(name))
@@ -132,19 +131,12 @@ func TestBuildPlatformServiceDescriptors_Success(t *testing.T) {
 		t.Errorf("ListResponse name = %q, want %q", got, want)
 	}
 
-	if desc.DeleteRequest == nil {
-		t.Error("DeleteRequest descriptor is nil")
-	} else if got, want := string(desc.DeleteRequest.Name()), "DeletePlatformClusterRequest"; got != want {
-		t.Errorf("DeleteRequest name = %q, want %q", got, want)
-	}
-
 	// --- Service methods ---
 	methods := desc.Service.Methods()
 	wantMethods := []string{
 		"CreatePlatformCluster",
 		"GetPlatformCluster",
 		"ListPlatformClusters",
-		"DeletePlatformCluster",
 	}
 	if got, want := methods.Len(), len(wantMethods); got != want {
 		t.Fatalf("method count = %d, want %d", got, want)

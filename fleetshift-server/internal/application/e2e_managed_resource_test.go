@@ -134,7 +134,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	privateKey := enrollSigner(t, store, fakeReg, subjectID, issuer)
 	validSpec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
 	validUntil := time.Date(2026, 5, 5, 12, 0, 0, 0, time.UTC)
-	sig := signManagedResourceEnvelope(t, privateKey, "test.fleetshift.io/Cluster", "prod-us-east-1", validSpec, validUntil, 1)
+	sig := signManagedResourceEnvelope(t, privateKey, "test.fleetshift.io/Cluster", "clusters/prod-us-east-1", validSpec, validUntil, 1)
 
 	signedCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{FederatedIdentity: domain.FederatedIdentity{Subject: subjectID, Issuer: issuer}},
@@ -143,7 +143,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 
 	view, err := resourceSvc.Create(signedCtx, application.CreateManagedResourceInput{
 		ResourceType:  "test.fleetshift.io/Cluster",
-		Name:          "prod-us-east-1",
+		Name:          "clusters/prod-us-east-1",
 		Spec:          validSpec,
 		UserSignature: sig,
 		ValidUntil:    validUntil,
@@ -152,8 +152,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
-	if view.ManagedResource.Name() != "prod-us-east-1" {
-		t.Errorf("Name = %q, want %q", view.ManagedResource.Name(), "prod-us-east-1")
+	if view.ManagedResource.Name() != "clusters/prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", view.ManagedResource.Name(), "clusters/prod-us-east-1")
 	}
 	if view.ManagedResource.CurrentVersion() != 1 {
 		t.Errorf("CurrentVersion = %d, want 1", view.ManagedResource.CurrentVersion())
@@ -198,8 +198,8 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if content.ResourceType != "test.fleetshift.io/Cluster" {
 		t.Errorf("ManagedResourceContent.ResourceType = %q, want test.fleetshift.io/Cluster", content.ResourceType)
 	}
-	if content.ResourceName != "prod-us-east-1" {
-		t.Errorf("ManagedResourceContent.ResourceName = %q, want prod-us-east-1", content.ResourceName)
+	if content.ResourceName != "clusters/prod-us-east-1" {
+		t.Errorf("ManagedResourceContent.ResourceName = %q, want clusters/prod-us-east-1", content.ResourceName)
 	}
 	if string(content.Spec) != string(validSpec) {
 		t.Errorf("ManagedResourceContent.Spec = %s, want %s", content.Spec, validSpec)
@@ -245,7 +245,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	}
 
 	// --- Step 6: Verify the resource is retrievable from the service ---
-	got, err := resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "prod-us-east-1")
+	got, err := resourceSvc.Get(ctx, "test.fleetshift.io/Cluster", "clusters/prod-us-east-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}

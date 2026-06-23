@@ -67,10 +67,6 @@ func BuildPlatformService(cfg *PlatformResourceConfig, deps PlatformDeps) (*Regi
 				MethodName: "ListPlatform" + plural,
 				Handler:    handler.handleList,
 			},
-			{
-				MethodName: "Delete" + prefix,
-				Handler:    handler.handleDelete,
-			},
 		},
 		Streams:  []grpc.StreamDesc{},
 		Metadata: "dynamic/fleetshift/v1/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
@@ -234,45 +230,6 @@ func (h *platformHandler) doList(ctx context.Context, _ proto.Message) (proto.Me
 	return resp, nil
 }
 
-func (h *platformHandler) handleDelete(
-	_ any,
-	ctx context.Context,
-	dec func(any) error,
-	interceptor grpc.UnaryServerInterceptor,
-) (any, error) {
-	req := dynamicpb.NewMessage(h.descs.DeleteRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-
-	if interceptor != nil {
-		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.GRPCServiceName() + "/DeletePlatform" + h.cfg.Singular,
-		}
-		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
-			return h.doDelete(ctx, r.(proto.Message))
-		})
-	}
-	return h.doDelete(ctx, req)
-}
-
-func (h *platformHandler) doDelete(ctx context.Context, req proto.Message) (proto.Message, error) {
-	nameField := h.descs.DeleteRequest.Fields().ByName("name")
-	name := req.ProtoReflect().Get(nameField).String()
-
-	resourceName, err := h.parseResourceName(name)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
-	}
-
-	pr, err := h.resources.Delete(ctx, resourceName)
-	if err != nil {
-		return nil, toDomainError(err)
-	}
-
-	return h.resourceToMessage(pr)
-}
-
 func (h *platformHandler) parseResourceName(name string) (domain.ResourceName, error) {
 	collection := h.cfg.Collection()
 	id, ok := strings.CutPrefix(name, collection)
@@ -309,21 +266,21 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	repDesc := repsField.Message()
 	for _, rep := range pr.Representations() {
 		repMsg := dynamicpb.NewMessage(repDesc)
-		repMsg.Set(repDesc.Fields().ByName("service_name"), protoreflect.ValueOfString(string(rep.ServiceName)))
-		repMsg.Set(repDesc.Fields().ByName("version"), protoreflect.ValueOfString(string(rep.Version)))
+		repMsg.Set(repDesc.Fields().ByName("service_name"), protoreflect.ValueOfString(string(rep.ServiceName())))
+		repMsg.Set(repDesc.Fields().ByName("version"), protoreflect.ValueOfString(string(rep.Version())))
 		repMsg.Set(repDesc.Fields().ByName("full_resource_name"), protoreflect.ValueOfString(string(rep.FullResourceName())))
 		rolesField := repDesc.Fields().ByName("roles")
 		rolesList := repMsg.Mutable(rolesField).List()
-		for _, role := range rep.Roles {
+		for _, role := range rep.Roles() {
 			rolesList.Append(protoreflect.ValueOfString(string(role)))
 		}
-		if !rep.CreatedAt.IsZero() {
-			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("create_time"), rep.CreatedAt); err == nil {
+		if !rep.CreatedAt().IsZero() {
+			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("create_time"), rep.CreatedAt()); err == nil {
 				repMsg.Set(repDesc.Fields().ByName("create_time"), tsVal)
 			}
 		}
-		if !rep.UpdatedAt.IsZero() {
-			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("update_time"), rep.UpdatedAt); err == nil {
+		if !rep.UpdatedAt().IsZero() {
+			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("update_time"), rep.UpdatedAt()); err == nil {
 				repMsg.Set(repDesc.Fields().ByName("update_time"), tsVal)
 			}
 		}
@@ -346,11 +303,11 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	relDesc := relsField.Message()
 	for _, rel := range pr.Relationships() {
 		relMsg := dynamicpb.NewMessage(relDesc)
-		relMsg.Set(relDesc.Fields().ByName("type"), protoreflect.ValueOfString(string(rel.Type)))
-		relMsg.Set(relDesc.Fields().ByName("target_uid"), protoreflect.ValueOfString(rel.TargetUID.String()))
-		relMsg.Set(relDesc.Fields().ByName("source_service"), protoreflect.ValueOfString(string(rel.SourceService)))
-		if !rel.CreatedAt.IsZero() {
-			if tsVal, err := marshalTimestamp(relDesc.Fields().ByName("create_time"), rel.CreatedAt); err == nil {
+		relMsg.Set(relDesc.Fields().ByName("type"), protoreflect.ValueOfString(string(rel.Type())))
+		relMsg.Set(relDesc.Fields().ByName("target_uid"), protoreflect.ValueOfString(rel.TargetUID().String()))
+		relMsg.Set(relDesc.Fields().ByName("source_service"), protoreflect.ValueOfString(string(rel.SourceService())))
+		if !rel.CreatedAt().IsZero() {
+			if tsVal, err := marshalTimestamp(relDesc.Fields().ByName("create_time"), rel.CreatedAt()); err == nil {
 				relMsg.Set(relDesc.Fields().ByName("create_time"), tsVal)
 			}
 		}
@@ -365,11 +322,6 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	if !pr.UpdatedAt().IsZero() {
 		if tsVal, err := marshalTimestamp(h.descs.Resource.Fields().ByName("update_time"), pr.UpdatedAt()); err == nil {
 			msg.Set(h.descs.Resource.Fields().ByName("update_time"), tsVal)
-		}
-	}
-	if pr.DeletedAt() != nil {
-		if tsVal, err := marshalTimestamp(h.descs.Resource.Fields().ByName("delete_time"), *pr.DeletedAt()); err == nil {
-			msg.Set(h.descs.Resource.Fields().ByName("delete_time"), tsVal)
 		}
 	}
 

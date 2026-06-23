@@ -697,18 +697,18 @@ func TestManagedResourceService_Create_ClaimsIdentityAndAttachesRepresentation(t
 	if len(reps) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(reps))
 	}
-	if reps[0].ServiceName != "test.fleetshift.io" {
-		t.Errorf("ServiceName = %q, want test.fleetshift.io", reps[0].ServiceName)
+	if reps[0].ServiceName() != "test.fleetshift.io" {
+		t.Errorf("ServiceName = %q, want test.fleetshift.io", reps[0].ServiceName())
 	}
-	if reps[0].Version != "v1" {
-		t.Errorf("Version = %q, want v1", reps[0].Version)
+	if reps[0].Version() != "v1" {
+		t.Errorf("Version = %q, want v1", reps[0].Version())
 	}
-	if reps[0].Roles[0] != domain.RepresentationRoleManaged {
-		t.Errorf("Role = %q, want managed", reps[0].Roles[0])
+	if reps[0].Roles()[0] != domain.RepresentationRoleManaged {
+		t.Errorf("Role = %q, want managed", reps[0].Roles()[0])
 	}
 }
 
-func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
+func TestManagedResourceService_Delete_RemovesRepresentation(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
 	h := setupManagedResources(t)
@@ -733,7 +733,8 @@ func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 
 	awaitFulfillmentGone(ctx, t, h.store, view.Fulfillment.ID())
 
-	// Platform resource should still exist but representation should be tombstoned.
+	// Platform resource should still exist but the representation link
+	// should be removed.
 	tx, err := h.store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("begin read tx: %v", err)
@@ -745,19 +746,22 @@ func TestManagedResourceService_Delete_TombstonesRepresentation(t *testing.T) {
 		t.Fatalf("GetByName after delete: %v", err)
 	}
 
-	activeReps := pr.Representations()
-	if len(activeReps) != 0 {
-		t.Errorf("active representations = %d, want 0 (tombstoned)", len(activeReps))
+	reps := pr.Representations()
+	if len(reps) != 0 {
+		t.Errorf("representations = %d, want 0", len(reps))
 	}
 
-	allReps := pr.AllRepresentations()
-	if len(allReps) != 1 {
-		t.Fatalf("all representations = %d, want 1", len(allReps))
-	}
-	if allReps[0].DeletedAt == nil {
-		t.Error("representation.DeletedAt is nil, want non-nil (tombstoned)")
+	_, err = tx.ResourceIdentities().GetRepresentation(ctx, "//test.fleetshift.io/clusters/prod-del")
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("GetRepresentation after delete: got %v, want ErrNotFound", err)
 	}
 }
+
+// TODO: Re-introduce delete idempotency test once etag-based
+// concurrency control is implemented. The previous test
+// (TestManagedResourceService_DeleteIdempotentWhenTypeDefMissing) was
+// removed because Delete is intentionally non-idempotent until etags
+// gate retries.
 
 func awaitFulfillmentGone(ctx context.Context, t *testing.T, store domain.Store, id domain.FulfillmentID) {
 	t.Helper()

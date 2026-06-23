@@ -27,9 +27,6 @@ func buildPlatformHTTPHandler(platSvc *RegisteredPlatformService, conn *grpc.Cli
 		case r.Method == http.MethodGet && len(rest) > 1:
 			id := strings.TrimPrefix(rest, "/")
 			handlePlatformHTTPGet(w, r, conn, platSvc, id)
-		case r.Method == http.MethodDelete && len(rest) > 1:
-			id := strings.TrimPrefix(rest, "/")
-			handlePlatformHTTPDelete(w, r, conn, platSvc, id)
 		default:
 			http.NotFound(w, r)
 		}
@@ -48,7 +45,7 @@ func handlePlatformHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc
 	idField := svc.Descriptors.CreateRequest.Fields().ByNumber(1)
 	createReq.Set(idField, protoreflect.ValueOfString(id))
 
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(limitedBody(r))
 	if err != nil {
 		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return
@@ -94,21 +91,6 @@ func handlePlatformHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.C
 	resp := dynamicpb.NewMessage(svc.Descriptors.ListResponse)
 	method := "/" + svc.Config.GRPCServiceName() + "/ListPlatform" + svc.Config.Plural
 	if err := conn.Invoke(grpcContext(r), method, listReq, resp); err != nil {
-		grpcHTTPError(w, err)
-		return
-	}
-
-	writeJSON(w, http.StatusOK, resp)
-}
-
-func handlePlatformHTTPDelete(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredPlatformService, id string) {
-	deleteReq := dynamicpb.NewMessage(svc.Descriptors.DeleteRequest)
-	nameField := svc.Descriptors.DeleteRequest.Fields().ByName("name")
-	deleteReq.Set(nameField, protoreflect.ValueOfString(svc.Config.Collection()+id))
-
-	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	method := "/" + svc.Config.GRPCServiceName() + "/DeletePlatform" + svc.Config.Singular
-	if err := conn.Invoke(grpcContext(r), method, deleteReq, resp); err != nil {
 		grpcHTTPError(w, err)
 		return
 	}

@@ -42,10 +42,39 @@ ALTER TABLE resource_representations DROP COLUMN relative_name;
 ALTER TABLE resource_representations RENAME COLUMN resource_id_new TO resource_id;
 ALTER TABLE resource_representations ADD CONSTRAINT resource_representations_pkey PRIMARY KEY (service_name, collection_name, resource_id);
 
+-- platform_resources: drop the deleted_at column. Platform resources are
+-- now create/get/list-only; delete is not implemented and this column is
+-- unused. The resource_representations.deleted_at column remains
+-- temporarily for compatibility at this migration step, but
+-- representation deletion no longer uses tombstones and the column is
+-- removed in 00017.
+ALTER TABLE platform_resources DROP COLUMN deleted_at;
+
 -- targets: accepted_resource_types → accepted_manifest_types
 ALTER TABLE targets RENAME COLUMN accepted_resource_types TO accepted_manifest_types;
 
 -- +goose Down
+ALTER TABLE platform_resources ADD COLUMN deleted_at TIMESTAMPTZ;
+
+-- NOTE: the rollback is lossy for nested collections. It stores the
+-- full collection path (e.g. "publishers/123/books") in the old
+-- collection_id column, but pre-migration collection_id was flat
+-- (e.g. "books"). Fail fast if nested data exists rather than
+-- silently corrupting the collection_id semantics.
+--
+-- +goose StatementBegin
+DO $$
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM platform_resources
+        WHERE collection_name LIKE '%/%'
+    ) THEN
+        RAISE EXCEPTION 'Cannot roll back: nested collection names exist in platform_resources. '
+            'The old collection_id column cannot represent hierarchical paths.';
+    END IF;
+END $$;
+-- +goose StatementEnd
+
 ALTER TABLE targets RENAME COLUMN accepted_manifest_types TO accepted_resource_types;
 
 ALTER TABLE resource_representations DROP CONSTRAINT resource_representations_pkey;

@@ -41,9 +41,14 @@ func WithAttestationAssembler(a domain.AttestationAssembler) DeliveryReportServi
 }
 
 // WithDeliveryReportClock overrides the wall-clock used for delivery
-// state transition timestamps. Defaults to [time.Now].
+// state transition timestamps. Defaults to [time.Now]. A nil fn is
+// treated as a no-op to prevent nil-dereference panics at runtime.
 func WithDeliveryReportClock(fn func() time.Time) DeliveryReportServiceOption {
-	return func(s *DeliveryReportService) { s.now = fn }
+	return func(s *DeliveryReportService) {
+		if fn != nil {
+			s.now = fn
+		}
+	}
 }
 
 // NewDeliveryReportService creates a service with the given

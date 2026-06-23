@@ -350,18 +350,35 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 	if rec.schemaRegistrations == nil {
 		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
 	}
+
+	// If the registration ID changed (e.g. the gRPC service name
+	// changed due to a package rename), deactivate the old one so
+	// its gRPC/HTTP routes don't leak.
+	if prev, ok := rec.schemaRegistrations[schema.ResourceType]; ok && prev != id {
+		m.activator.Deactivate(prev)
+	}
 	rec.schemaRegistrations[schema.ResourceType] = id
 
 	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
-		if _, err := m.typeSvc.Create(ctx, CreateTypeInput{
+		newSvc := domain.ServiceName(schema.APIServiceName)
+		newVer := domain.APIVersion(schema.Version)
+		newCol := domain.CollectionID(schema.CollectionID)
+
+		_, err := m.typeSvc.Create(ctx, CreateTypeInput{
 			ResourceType:   schema.ResourceType,
 			Relation:       schema.Relation,
 			Signature:      domain.Signature{},
-			APIServiceName: domain.ServiceName(schema.APIServiceName),
-			APIVersion:     domain.APIVersion(schema.Version),
-			CollectionID:   domain.CollectionID(schema.CollectionID),
-		}); err != nil && !errors.Is(err, domain.ErrAlreadyExists) {
-			return fmt.Errorf("create type def: %w", err)
+			APIServiceName: newSvc,
+			APIVersion:     newVer,
+			CollectionID:   newCol,
+		})
+		if err != nil {
+			if !errors.Is(err, domain.ErrAlreadyExists) {
+				return fmt.Errorf("create type def: %w", err)
+			}
+			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newSvc, newVer, newCol); err != nil {
+				return err
+			}
 		}
 		if rec.registeredTypeDefs == nil {
 			rec.registeredTypeDefs = make(map[domain.ResourceType]struct{})
@@ -369,5 +386,24 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 		rec.registeredTypeDefs[schema.ResourceType] = struct{}{}
 	}
 
+	return nil
+}
+
+// detectAPIMetadataDrift loads the existing type def and rejects
+// reconnection attempts that change the API identity fields.
+func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newSvc domain.ServiceName, newVer domain.APIVersion, newCol domain.CollectionID) error {
+	existing, err := m.typeSvc.Get(ctx, rt)
+	if err != nil {
+		return fmt.Errorf("load existing type def for drift detection: %w", err)
+	}
+	if existing.APIServiceName != newSvc {
+		return fmt.Errorf("%w: API service name drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIServiceName, newSvc)
+	}
+	if existing.APIVersion != newVer {
+		return fmt.Errorf("%w: API version drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIVersion, newVer)
+	}
+	if existing.CollectionID != newCol {
+		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID, newCol)
+	}
 	return nil
 }

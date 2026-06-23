@@ -120,7 +120,7 @@ func (r *fakeIdentityRepo) Update(_ context.Context, pr *PlatformResource) error
 func (r *fakeIdentityRepo) ListByCollection(_ context.Context, collection CollectionName) ([]*PlatformResource, error) {
 	var result []*PlatformResource
 	for _, pr := range r.byName {
-		if pr.Collection() == collection && pr.DeletedAt() == nil {
+		if pr.Collection() == collection {
 			result = append(result, pr)
 		}
 	}

@@ -20,8 +20,11 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 
 	// Create
 	def, err := svc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "test.fleetshift.io/Cluster",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+		ResourceType:   "test.fleetshift.io/Cluster",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt", ManifestType: "api.kind.cluster"},
+		APIServiceName: "test.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
 			ContentHash:    []byte("hash"),
@@ -73,20 +76,18 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	}
 }
 
-func TestManagedResourceTypeService_CreateMissingFields(t *testing.T) {
+func TestManagedResourceTypeService_CreateNilRelation(t *testing.T) {
 	ctx := context.Background()
 	svc := newTypeService(t)
 
-	_, err := svc.Create(ctx, application.CreateTypeInput{})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create empty: got %v, want ErrInvalidArgument", err)
-	}
-
-	_, err = svc.Create(ctx, application.CreateTypeInput{
-		ResourceType: "test.fleetshift.io/X",
+	_, err := svc.Create(ctx, application.CreateTypeInput{
+		ResourceType:   "test.fleetshift.io/X",
+		APIServiceName: "test.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "xs",
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("Create no relation: got %v, want ErrInvalidArgument", err)
+		t.Fatalf("Create nil relation: got %v, want ErrInvalidArgument", err)
 	}
 }
 
@@ -95,8 +96,11 @@ func TestManagedResourceTypeService_CreateDuplicate(t *testing.T) {
 	svc := newTypeService(t)
 
 	in := application.CreateTypeInput{
-		ResourceType: "test.fleetshift.io/Cluster",
-		Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon"},
+		ResourceType:   "test.fleetshift.io/Cluster",
+		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon", ManifestType: "api.kind.cluster"},
+		APIServiceName: "test.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
 		Signature: domain.Signature{
 			Signer:         domain.FederatedIdentity{Subject: "s", Issuer: "i"},
 			ContentHash:    []byte("h"),
@@ -109,5 +113,38 @@ func TestManagedResourceTypeService_CreateDuplicate(t *testing.T) {
 	_, err := svc.Create(ctx, in)
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("second Create: got %v, want ErrAlreadyExists", err)
+	}
+}
+
+func TestManagedResourceTypeService_CreateInvalidRelation(t *testing.T) {
+	ctx := context.Background()
+	svc := newTypeService(t)
+
+	tests := []struct {
+		name string
+		rel  domain.FulfillmentRelation
+	}{
+		{
+			name: "missing ManifestType",
+			rel:  domain.RegisteredSelfTarget{AddonTarget: "addon"},
+		},
+		{
+			name: "missing AddonTarget",
+			rel:  domain.RegisteredSelfTarget{ManifestType: "api.kind.cluster"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := svc.Create(ctx, application.CreateTypeInput{
+				ResourceType:   "test.fleetshift.io/Cluster",
+				Relation:       tc.rel,
+				APIServiceName: "test.fleetshift.io",
+				APIVersion:     "v1",
+				CollectionID:   "clusters",
+			})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+			}
+		})
 	}
 }

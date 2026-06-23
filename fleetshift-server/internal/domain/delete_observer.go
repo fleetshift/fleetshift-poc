@@ -38,9 +38,7 @@ type DeleteObserver interface {
 	MutateDeploymentStarted(ctx context.Context, name ResourceName) (context.Context, MutateDeploymentProbe)
 
 	// MutateManagedResourceStarted is called at the start of the
-	// managed-resource mutate-to-deleting activity. This activity-level
-	// probe additionally observes the tombstone branch that silently
-	// tolerates errors.
+	// managed-resource mutate-to-deleting activity.
 	MutateManagedResourceStarted(ctx context.Context, resourceType ResourceType, name ResourceName) (context.Context, MutateManagedResourceProbe)
 }
 

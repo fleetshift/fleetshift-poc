@@ -103,6 +103,19 @@ func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	}
 }
 
+func newActivatorWithHTTPAndPlatform(t *testing.T) activatorHTTPEnv {
+	t.Helper()
+
+	env := newActivatorWithHTTP(t)
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+	env.activator.PlatformDeps = managedresource.PlatformDeps{
+		Resources: application.NewPlatformResourceService(store),
+	}
+
+	return env
+}
+
 func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	activator, mux := newActivator(t)
 
@@ -716,8 +729,13 @@ func TestPlatformRefCounting(t *testing.T) {
 		t.Fatal("Kind activation should create the platform service (refcount 0→1)")
 	}
 
-	// Step 2: activate GCP HCP (same collection: "clusters")
-	gcpID, err := activator.Activate(ctx, gcphcpaddon.Schema("gcphcp-test"))
+	// Step 2: activate GCP HCP (same collection: "clusters"), but with
+	// a different extension API version. This should still share the same
+	// platform service.
+	gcphcpSchema := gcphcpaddon.Schema("gcphcp-test")
+	gcphcpSchema.Version = "v2"
+
+	gcpID, err := activator.Activate(ctx, gcphcpSchema)
 	if err != nil {
 		t.Fatalf("Activate GCPHCP: %v", err)
 	}
@@ -813,6 +831,33 @@ func TestPlatformReflection(t *testing.T) {
 }
 
 var _ application.SchemaActivator = (*managedresource.DynamicSchemaActivator)(nil)
+
+// ---------------------------------------------------------------------------
+// Platform version selection tests
+// ---------------------------------------------------------------------------
+
+// TestPlatformHTTPVersionIsFixed verifies that the platform API route
+// comes from the activator, not from the extension schema's Version.
+func TestPlatformHTTPVersionIsFixed(t *testing.T) {
+	env := newActivatorWithHTTPAndPlatform(t)
+
+	schema := kindaddon.Schema()
+	schema.Version = "v2"
+
+	if _, err := env.activator.Activate(context.Background(), schema); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	platformV1 := env.httpURL + "/apis/fleetshift.io/" + managedresource.PlatformAPIVersion + "/clusters"
+	if code := httpStatus(t, platformV1); code != http.StatusOK {
+		t.Fatalf("expected platform route %q to return 200, got %d", platformV1, code)
+	}
+
+	platformV2 := env.httpURL + "/apis/fleetshift.io/v2/clusters"
+	if code := httpStatus(t, platformV2); code != http.StatusNotFound {
+		t.Fatalf("expected platform route %q to be absent, got status %d", platformV2, code)
+	}
+}
 
 // ---------------------------------------------------------------------------
 // Cross-API contract: extension create → platform API visibility
@@ -1095,12 +1140,12 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 	}
 }
 
-// TestExtensionDelete_TombstonesPlatformRepresentation verifies that
+// TestExtensionDelete_RemovesPlatformRepresentation verifies that
 // deleting a managed resource through the extension gRPC service
-// tombstones its representation in the platform resource API. The
+// removes its representation from the platform resource API. The
 // platform resource itself survives — only the active representation
 // list becomes empty.
-func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
+func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	env := newActivatorWithResourcesAndPlatform(t)
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
 	defer cancel()
@@ -1136,7 +1181,7 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 		t.Fatalf("DeleteWidget: %v", err)
 	}
 
-	// Platform Get: resource exists but representation is tombstoned.
+	// Platform Get: resource exists but the representation link is gone.
 	platDescs := platformWidgetDescs(t)
 
 	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
@@ -1150,12 +1195,12 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 
 	repsField := platDescs.Resource.Fields().ByName("representations")
 	if getResp.Get(repsField).List().Len() != 0 {
-		t.Errorf("representations len = %d after delete, want 0 (tombstoned)",
+		t.Errorf("representations len = %d after delete, want 0",
 			getResp.Get(repsField).List().Len())
 	}
 
 	// Platform List: resource still appears (not soft-deleted at the
-	// platform level — only the representation is tombstoned).
+	// platform level — only the representation link is removed).
 	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
 	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
 	if err := env.conn.Invoke(ctx,
@@ -1165,7 +1210,7 @@ func TestExtensionDelete_TombstonesPlatformRepresentation(t *testing.T) {
 
 	listField := platDescs.ListResponse.Fields().ByNumber(1)
 	if listResp.Get(listField).List().Len() != 1 {
-		t.Errorf("ListPlatformWidgets after delete = %d resources, want 1 (resource survives representation tombstone)",
+		t.Errorf("ListPlatformWidgets after delete = %d resources, want 1 (resource survives representation removal)",
 			listResp.Get(listField).List().Len())
 	}
 }

@@ -40,6 +40,34 @@ func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 	}
 }
 
+func TestPlatformResourceService_CreateRejectsMalformedName(t *testing.T) {
+	store := newStore(t)
+	svc := application.NewPlatformResourceService(store)
+	ctx := context.Background()
+
+	tests := []struct {
+		name string
+		rn   domain.ResourceName
+	}{
+		{name: "empty", rn: ""},
+		{name: "no slash", rn: "prod"},
+		{name: "leading slash", rn: "/clusters/prod"},
+		{name: "trailing slash", rn: "clusters/prod/"},
+		{name: "double slash", rn: "clusters//prod"},
+		{name: "odd segments", rn: "publishers/123/books"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
+				Name: tt.rn,
+			})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("Create(%q): got %v, want ErrInvalidArgument", tt.rn, err)
+			}
+		})
+	}
+}
+
 func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
 	store := newStore(t)
 	svc := application.NewPlatformResourceService(store)
@@ -110,14 +138,14 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	if len(reps) != 1 {
 		t.Fatalf("Representations len = %d, want 1", len(reps))
 	}
-	if reps[0].ServiceName != "kind.fleetshift.io" {
-		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName, "kind.fleetshift.io")
+	if reps[0].ServiceName() != "kind.fleetshift.io" {
+		t.Errorf("ServiceName = %q, want %q", reps[0].ServiceName(), "kind.fleetshift.io")
 	}
-	if reps[0].Version != "v1alpha1" {
-		t.Errorf("Version = %q, want %q", reps[0].Version, "v1alpha1")
+	if reps[0].Version() != "v1alpha1" {
+		t.Errorf("Version = %q, want %q", reps[0].Version(), "v1alpha1")
 	}
-	if reps[0].Roles[0] != domain.RepresentationRoleManaged {
-		t.Errorf("Role = %q, want %q", reps[0].Roles[0], domain.RepresentationRoleManaged)
+	if reps[0].Roles()[0] != domain.RepresentationRoleManaged {
+		t.Errorf("Role = %q, want %q", reps[0].Roles()[0], domain.RepresentationRoleManaged)
 	}
 }
 
@@ -126,6 +154,7 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 	svc := application.NewPlatformResourceService(store)
 	ctx := context.Background()
 
+	// Create two resources in the same collection.
 	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
 		Name: "clusters/alpha",
 	})
@@ -139,6 +168,7 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 		t.Fatalf("Create beta: %v", err)
 	}
 
+	// Create one in a different collection to verify isolation.
 	_, err = svc.Create(ctx, application.CreatePlatformResourceInput{
 		Name: "namespaces/default",
 	})
@@ -154,6 +184,7 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 		t.Fatalf("List len = %d, want 2", len(resources))
 	}
 
+	// Verify stable ordering (alphabetical by relative name).
 	names := make([]domain.ResourceName, len(resources))
 	for i, r := range resources {
 		names[i] = r.Name()
@@ -163,36 +194,5 @@ func TestPlatformResourceService_ListByCollection(t *testing.T) {
 	}
 	if names[1] != "clusters/beta" {
 		t.Errorf("resources[1].Name = %q, want %q", names[1], "clusters/beta")
-	}
-}
-
-func TestPlatformResourceService_DeleteSoftDeletes(t *testing.T) {
-	store := newStore(t)
-	svc := application.NewPlatformResourceService(store)
-	ctx := context.Background()
-
-	_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-		Name: "clusters/to-delete",
-	})
-	if err != nil {
-		t.Fatalf("Create: %v", err)
-	}
-
-	deleted, err := svc.Delete(ctx, "clusters/to-delete")
-	if err != nil {
-		t.Fatalf("Delete: %v", err)
-	}
-	if deleted.DeletedAt() == nil {
-		t.Fatal("DeletedAt is nil after soft-delete, want non-nil")
-	}
-
-	resources, err := svc.List(ctx, "clusters")
-	if err != nil {
-		t.Fatalf("List after delete: %v", err)
-	}
-	for _, r := range resources {
-		if r.Name() == "clusters/to-delete" {
-			t.Error("deleted resource still appears in List")
-		}
 	}
 }

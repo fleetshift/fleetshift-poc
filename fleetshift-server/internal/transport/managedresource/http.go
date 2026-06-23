@@ -16,6 +16,17 @@ import (
 	"google.golang.org/protobuf/types/dynamicpb"
 )
 
+// maxRequestBodySize is the upper bound for request bodies on
+// create/resume-style HTTP handlers. Prevents unbounded memory
+// allocation from malicious or misconfigured clients.
+const maxRequestBodySize = 4 << 20 // 4 MiB
+
+// limitedBody wraps the request body with a size limit. Reads past
+// maxRequestBodySize will fail with http.MaxBytesError.
+func limitedBody(r *http.Request) io.ReadCloser {
+	return http.MaxBytesReader(nil, r.Body, maxRequestBodySize)
+}
+
 // RegisterHTTP registers REST/JSON routes for the dynamic service on the
 // given HTTP mux. Routes follow the AIP HTTP binding pattern at the
 // canonical /apis/{service}/{version}/{collection} prefix:
@@ -72,7 +83,7 @@ func buildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix stri
 }
 
 func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(limitedBody(r))
 	if err != nil {
 		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return
@@ -174,7 +185,7 @@ func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	resumeReq.Set(nameField, stringValue(svc.Config.Collection()+id))
 
 	// Parse optional request body for user_signature / valid_until.
-	body, err := io.ReadAll(r.Body)
+	body, err := io.ReadAll(limitedBody(r))
 	if err != nil {
 		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return

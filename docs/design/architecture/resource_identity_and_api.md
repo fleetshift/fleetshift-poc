@@ -397,13 +397,4 @@ No implicit synthetic rollup condition is generated. Source conditions remain au
 4. **Short-form HTTP path aliases**: whether `/v1/clusters/foo` serves as an alias for `/apis/fleetshift.io/v1/clusters/foo`.
 5. **Pre-created identity persistence**: whether platform resources that were pre-created (before any extension resource existed) have stronger persistence guarantees against extension-initiated deletion.
 
----
-
-## Migration note
-
-The existing `schema_activator.go` hardcodes `ProtoPackage: "fleetshift.v1"`. This is a known gap between the design and current implementation. The required transport-layer changes include:
-
-- Addon-provided package in schema (replacing the hardcoded `fleetshift.v1`)
-- Dual service registration: platform resource type + extension resource type
-- HTTP mux prefix routing by service name (`/apis/{service_name}/{version}/...`)
 

@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -51,9 +52,20 @@ func runTypeTests(t *testing.T, factory Factory) {
 	ctx := context.Background()
 
 	sampleTypeDef := func(rt domain.ResourceType) domain.ManagedResourceTypeDef {
+		svc := rt.ServiceName()
+		if svc == "" {
+			svc = "test.fleetshift.io"
+		}
+		typeName := rt.TypeName()
+		if typeName == "" {
+			typeName = string(rt)
+		}
 		return domain.ManagedResourceTypeDef{
-			ResourceType: rt,
-			Relation:     domain.RegisteredSelfTarget{AddonTarget: "addon-" + domain.TargetID(rt.TypeName())},
+			ResourceType:   rt,
+			Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-" + domain.TargetID(typeName)},
+			APIServiceName: svc,
+			APIVersion:     "v1",
+			CollectionID:   domain.CollectionID(strings.ToLower(typeName) + "s"),
 			Signature: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://issuer.test"},
 				ContentHash:    []byte("hash"),
@@ -143,7 +155,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		repo := tx.ManagedResources()
 
-		def := sampleTypeDef("api-id-test")
+		def := sampleTypeDef("kind.fleetshift.io/Cluster")
 		def.APIServiceName = "kind.fleetshift.io"
 		def.APIVersion = "v1"
 		def.CollectionID = "clusters"
@@ -152,7 +164,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 			t.Fatalf("CreateType: %v", err)
 		}
 
-		got, err := repo.GetType(ctx, "api-id-test")
+		got, err := repo.GetType(ctx, "kind.fleetshift.io/Cluster")
 		if err != nil {
 			t.Fatalf("GetType: %v", err)
 		}
