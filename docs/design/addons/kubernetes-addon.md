@@ -56,7 +56,9 @@ AddonDescriptor{
 }
 ```
 
-`DeliveryCapability` declares that the addon provides a delivery agent for Kubernetes targets — it can apply and remove manifests via server-side apply. `IndexCapability` declares that the addon provides an indexer agent — it watches cluster resources and writes observed inventory to the platform. These are independent capabilities: an addon could declare one without the other. For example, an observation-only addon could declare only `IndexCapability`, while a simple apply-only addon could declare only `DeliveryCapability`.
+`DeliveryCapability` declares that the addon provides a `DeliveryAgent` for Kubernetes targets — it can apply and remove manifests via server-side apply. `IndexCapability` declares that the addon provides an `IndexAgent` — it watches cluster resources and writes observed inventory to the platform. These are independent capabilities: an addon could declare one without the other. For example, an observation-only addon could declare only `IndexCapability`, while a simple apply-only addon could declare only `DeliveryCapability`.
+
+At Connect time, the addon provides both a `DeliveryAgent` and an `IndexAgent` through `ConnectInput`. The platform validates each against the corresponding capability declaration. `DeliveryCapability` drives delivery agent registration in the delivery router. `IndexCapability` drives `IndexAgent` registration in the `AddonManager`, which dispatches `StartIndexing`/`StopIndexing` calls when targets become ready or are terminated.
 
 In the current POC, the descriptor is compiled into the server binary. Enable and Connect happen at startup. In a future external agent model, the descriptor would be provided dynamically at addon registration time, and the Agent would connect through a fleetlet channel rather than being wired in-process.
 
@@ -93,12 +95,15 @@ The Agent is the reusable core. How it gets created and wired depends on the dep
 In the in-process model, the platform server hosts multiple Agents — one per registered kubernetes target. A Manager handles this:
 
 - **Agent registry**: tracks running Agents by target ID
-- **Delivery routing**: implements `domain.DeliveryAgent` by dispatching to the correct Agent
-- **Lifecycle handling**: creates Agents when targets become ready, destroys them when targets are terminated
+- **Delivery routing**: implements `DeliveryAgent` by dispatching to the correct Agent
+- **Indexing lifecycle**: implements `IndexAgent` — `StartIndexing` creates an Agent when a target becomes ready, `StopIndexing` stops it when terminated
 - **Client construction**: builds Kubernetes client configuration from target properties and vault-backed service account tokens
-- **Inventory cleanup**: deletes all inventory for a target on termination
 
-Agent creation is idempotent — concurrent requests for the same target do not create duplicates.
+The Manager does not manage inventory cleanup directly. When a target is terminated, `StopIndexing` stops the Agent; the platform handles inventory cleanup (edges and items) in the orchestration's cleanup transaction or via the `AddonManager` on addon disable.
+
+Agent creation is idempotent — concurrent `StartIndexing` calls for the same target do not create duplicates.
+
+The Manager receives target lifecycle events through the `AddonManager`, which implements the orchestration's `TargetObserver` interface and dispatches to the Manager's `IndexAgent` methods based on `IndexCapability` target type matching. The Manager does not receive target events directly from the orchestration.
 
 The Manager is in-process infrastructure, not part of the addon's core model. The key interfaces it passes to each Agent — `InventoryWriter` and `DeliveryReporter` — are the modularity boundaries that enable the external deployment model.
 
@@ -114,7 +119,7 @@ The `InventoryWriter` and `DeliveryReporter` interfaces are the key modularity b
 | Delivery requests | Direct calls from delivery router via Manager | Fleetlet delivery channel |
 | Inventory writes | Direct InventoryWriteService | Fleetlet index channel adapter |
 | Delivery reporting | Direct DeliveryReportService | Fleetlet delivery channel adapter |
-| Lifecycle | Platform signals target ready/terminated | Process start/stop IS the lifecycle |
+| Lifecycle | AddonManager dispatches `StartIndexing`/`StopIndexing` via `IndexAgent` | Process start/stop IS the lifecycle |
 
 The actual fleetlet channel integration is not yet built, but no structural changes to the Agent or its delegates should be required.
 
@@ -260,7 +265,9 @@ The edge table is keyed by target ID, source UID, destination UID, and edge type
 
 `ApplyDelta` includes edge add and edge delete parameters alongside item upserts and deletes, all within a single transaction. `Resync` atomically replaces items only — it does not touch edges. Edge management is handled exclusively by the `ApplyDelta` path.
 
-Edge persistence is handled by a dedicated `EdgeRepository`, separate from the `InventoryRepository` that handles items. Both repositories are accessed through the same transaction, ensuring atomicity. The `EdgeRepository` supports creating or updating edges in batch, deleting specific edges, deleting edges by source UIDs (for resync scoping), and deleting all edges for a target (for termination cleanup). Target termination calls cleanup on both repositories — edges first, then items.
+Edge persistence is handled by a dedicated `EdgeRepository`, separate from the `InventoryRepository` that handles items. Both repositories are accessed through the same transaction, ensuring atomicity. The `EdgeRepository` supports creating or updating edges in batch, deleting specific edges, deleting edges by source UIDs (for resync scoping), and deleting all edges for a target (for termination cleanup).
+
+Inventory and edge cleanup on target termination is the platform's responsibility, not the addon's. The orchestration's `CleanupDeliveryData` deletes edges and items atomically in the same transaction that removes the target record. On addon disable, the `AddonManager` uses the `InventoryCleanup` interface to delete edges and items per target. The addon's `StopIndexing` only stops the Agent — it does not touch inventory data.
 
 ## Indexing pipeline
 
