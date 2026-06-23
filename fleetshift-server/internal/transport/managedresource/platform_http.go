@@ -45,7 +45,7 @@ func handlePlatformHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc
 	idField := svc.Descriptors.CreateRequest.Fields().ByNumber(1)
 	createReq.Set(idField, protoreflect.ValueOfString(id))
 
-	body, err := io.ReadAll(limitedBody(r))
+	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return

@@ -550,7 +550,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	httpServer := &http.Server{
 		Addr:    f.httpAddr,
-		Handler: topMux,
+		Handler: transporthttp.MaxBody(topMux),
 	}
 
 	// --- addon lifecycle ---
