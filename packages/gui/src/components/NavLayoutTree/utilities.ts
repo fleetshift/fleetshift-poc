@@ -1,12 +1,17 @@
-import type { NavLayoutEntry, NavLayoutSection } from "../../utils/extensions";
+import type {
+  NavLayoutEntry,
+  NavLayoutGroup,
+  NavLayoutSection,
+} from "../../utils/extensions";
 
 export interface FlatNode {
   id: string;
-  kind: "page" | "section";
+  kind: "page" | "group" | "section";
   depth: number;
   parentId: string | null;
   pageId?: string;
   label?: string;
+  groupMeta?: NavLayoutGroup;
 }
 
 export const INDENTATION = 36;
@@ -22,6 +27,24 @@ export function flattenLayout(layout: NavLayoutEntry[]): FlatNode[] {
         parentId: null,
         pageId: entry.pageId,
       });
+    } else if (entry.type === "group") {
+      result.push({
+        id: entry.groupId,
+        kind: "group",
+        depth: 0,
+        parentId: null,
+        label: entry.label,
+        groupMeta: entry,
+      });
+      for (const child of entry.children) {
+        result.push({
+          id: child.pageId,
+          kind: "page",
+          depth: 1,
+          parentId: entry.groupId,
+          pageId: child.pageId,
+        });
+      }
     } else if (entry.type === "section") {
       result.push({
         id: entry.id,
@@ -46,20 +69,29 @@ export function flattenLayout(layout: NavLayoutEntry[]): FlatNode[] {
 
 export function buildLayout(nodes: FlatNode[]): NavLayoutEntry[] {
   const result: NavLayoutEntry[] = [];
+  let currentGroup: NavLayoutGroup | null = null;
   let currentSection: NavLayoutSection | null = null;
 
   for (const node of nodes) {
-    if (node.kind === "section") {
+    if (node.kind === "group" && node.groupMeta) {
+      currentGroup = { ...node.groupMeta, children: [] };
+      currentSection = null;
+      result.push(currentGroup);
+    } else if (node.kind === "section") {
       currentSection = {
         type: "section",
         id: node.id,
         label: node.label || "Untitled",
         children: [],
       };
+      currentGroup = null;
       result.push(currentSection);
+    } else if (node.depth === 1 && currentGroup) {
+      currentGroup.children.push({ type: "page", pageId: node.pageId! });
     } else if (node.depth === 1 && currentSection) {
       currentSection.children.push({ pageId: node.pageId! });
     } else {
+      currentGroup = null;
       currentSection = null;
       result.push({ type: "page", pageId: node.pageId! });
     }
@@ -90,8 +122,12 @@ export function getProjection(
   const activeIndex = items.findIndex((i) => i.id === activeId);
   const activeItem = activeIndex !== -1 ? items[activeIndex] : null;
 
-  // Sections always stay at depth 0
-  if (!activeItem || activeItem.kind === "section") {
+  // Groups and sections always stay at depth 0
+  if (
+    !activeItem ||
+    activeItem.kind === "group" ||
+    activeItem.kind === "section"
+  ) {
     return { depth: 0, parentId: null };
   }
 
@@ -102,17 +138,15 @@ export function getProjection(
   const dragDepth = Math.round(dragOffsetX / INDENTATION);
   const projectedDepth = Math.max(0, Math.min(1, initialDepth + dragDepth));
 
-  // Nesting is only allowed under sections (not under other items)
+  // Nesting is only allowed under groups/sections (not under other items)
   let maxDepth = 0;
   let parentId: string | null = null;
 
   if (prev) {
-    if (prev.kind === "section") {
-      // Directly after a section header → can nest as its child
+    if (prev.kind === "group" || prev.kind === "section") {
       maxDepth = 1;
       parentId = prev.id;
     } else if (prev.depth === 1 && prev.parentId) {
-      // After another item already inside a section → join that section
       maxDepth = 1;
       parentId = prev.parentId;
     }

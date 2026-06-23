@@ -277,7 +277,8 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
               const childrenByFeature = new Map<string, SearchResultItem[]>();
               const standalone: SearchResultItem[] = [];
 
-              const toFeatureId = (id: string) => id.replace(/^(ext|nav)-/, "");
+              const toFeatureId = (id: string) =>
+                id.replace(/^(group|ext|nav)-/, "");
 
               for (const item of items) {
                 if (item.feature) {

@@ -2,7 +2,7 @@
 
 **Epic:** [OME-3 — Addon / Extension Model](https://redhat.atlassian.net/browse/OME-3)
 **Depends on:** [Feature Contracts](./feature-contracts.md)
-**Status:** Draft
+**Status:** Implemented
 
 ## Context
 
@@ -22,11 +22,10 @@ We need **expandable nav groups** — a bucket of related modules that collapses
 A module group declares a navigational container for related modules within the same plugin.
 
 ```typescript
-type ModuleGroupExtras = {
-  /** Icon rendered in the nav group header */
-  icon: EncodedCodeRef;
-};
+type ModuleGroupExtras = Record<string, never>;
 ```
+
+Module groups have no extra properties beyond `BaseExtensionProperties` (id, label, description, keywords). PF's `NavExpandable` does not support icons, so groups are label-only in the nav.
 
 Added to the extension type registry:
 
@@ -58,7 +57,7 @@ function createModuleGroup(
     "label": "Settings",
     "description": "Workspace settings and configuration",
     "keywords": ["settings", "preferences", "configuration"],
-    "icon": { "$codeRef": "SettingsIcon.default" }
+    "keywords": ["settings", "preferences", "configuration"]
   }
 }
 ```
@@ -78,7 +77,7 @@ type ModuleExtras = {
 ```
 
 When `group` is set:
-- The module's icon is still **required**. It may not display in the nav (the group icon represents the collapsed section), but search results and breadcrumbs use the individual module icon.
+- The module's icon is still **required** — search results use the individual module icon.
 - The module's route nests under the group: `/{groupId}/{moduleId}`.
 
 When `group` is omitted:
@@ -155,7 +154,6 @@ const SettingsPlugin = new FleetshiftPlugin({
     createModuleGroup({
       id: "settings",
       label: "Settings",
-      icon: { $codeRef: "SettingsIcon.default" },
       description: "Workspace settings and configuration",
       keywords: ["settings", "preferences"],
     }),
@@ -202,6 +200,8 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
 3. **Unique ids within group.** Two modules in the same group cannot share an id.
 4. **Group id format.** Must match `/^[a-z][a-z0-9-]*$/` (same as module ids) since it becomes a URL segment.
 
+**Affected code:** `validateExtensionSet` in `packages/build-utils/src/extensions/validate.ts`, `createModuleGroup` builder in `packages/build-utils/src/extensions/builders.ts`, types in `packages/build-utils/src/extensions/types.ts`.
+
 ## Backend: `navLayout` Changes
 
 ### Current format (flat)
@@ -228,9 +228,8 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
     {
       "type": "group",
       "groupId": "settings",
-      "pluginKey": "settings-plugin",
+      "pluginKey": "settings",
       "label": "Settings",
-      "icon": "SettingsIcon",
       "children": [
         { "type": "page", "pageId": "settings.navigation" },
         { "type": "page", "pageId": "settings.auth" },
@@ -244,6 +243,8 @@ Routes: `/settings/navigation`, `/settings/auth`, `/settings/extensions`
 The backend's `generateNavLayout()` function scans manifests for `fleetshift.module-group` extensions, collects modules with matching `group` fields, and nests them under the group entry. Ungrouped modules remain as top-level `"type": "page"` entries.
 
 `pluginPages` is unchanged — it still lists every module as a flat page entry (id, title, path, scope, module, pluginKey). The grouping is a nav concern, not a routing concern. The shell's router registers all pages flat; the nav component renders the hierarchy from `navLayout`.
+
+**Affected code:** `generatePluginPages` and `generateNavLayout` in `fleetshift-server/internal/transport/http/uiconfig.go`. The `handleUserConfig` handler at `GET /api/ui/user-config` returns both `pluginPages` and `navLayout` to the shell. Route path generation for grouped modules changes from `{pluginKey}/{moduleId}` to `{groupId}/{moduleId}`.
 
 ## Shell: Navigation Rendering
 
@@ -365,56 +366,20 @@ Nav reordering already exists. Users can drag-reorder nav items via the Settings
 - **Editor:** `NavOrderEditor` uses PF `DragDropSort` on two flat lists (main section, bottom section).
 - **Consumer:** `AppNav` calls `orderByIds(mainItems, savedOrder)` and `orderByIds(bottomItems, savedOrder)`.
 
-### What changes
+### What changed
 
-The flat `string[]` cannot represent nested ordering (group order + module order within groups). Replace with a nested structure:
+The flat `string[]` storage works for groups. Groups are treated as atomic draggable items — moving a group moves all its children. No nested ordering within groups for now.
 
-```typescript
-type NavOrderEntry =
-  | { type: "page"; pageId: string }
-  | { type: "group"; groupId: string; icon?: string; label?: string; children: string[] };
+- `getNavPages()` returns groups alongside pages (id = groupId, scope = `${pluginKey}-plugin`, title = group label).
+- `NavOrderEditor` shows groups and ungrouped pages in the same drag list. No special handling needed.
+- `AppNav` applies `orderByIds()` to navLayout entries before rendering.
+- Group children are not individually orderable — they follow the order declared in the plugin manifest.
 
-// Stored as NavOrderEntry[]
-```
+### Future extensions
 
-This is a breaking change from the current flat `string[]`. We are still in POC phase — pick the most robust solution, not the backward-compatible one.
-
-- Top-level array defines order of groups and ungrouped pages.
-- Each group entry defines order of its child modules.
-- `icon` and `label` on group entries support user-created custom groups (groups not backed by plugin manifests).
-
-### IndexedDB migration
-
-Bump `EXTENSION_DB_VERSION` from 2 to 3. On upgrade, wipe the `nav-order` store — existing flat data is not worth migrating. Users re-customize their order.
-
-### NavOrderEditor changes
-
-The editor needs to support:
-
-1. **Reorder groups and ungrouped pages** at the top level (existing drag-drop pattern).
-2. **Reorder modules within a group** (nested drag-drop within each expandable section).
-3. **Drag a module into a group** — moving an ungrouped module into a group creates a user-defined grouping override.
-4. **Create a custom group** — users can create new groups that don't come from plugin manifests. Requires a name and icon.
-
-### Icon gallery for custom groups
-
-Custom groups need icons. Rather than requiring users to type a PF icon name:
-
-1. **Build-time:** Generate a JSON manifest of all available PF icon import paths (from `@patternfly/react-icons`).
-2. **Runtime:** Show a gallery modal where users browse and pick an icon. Use dynamic `import()` to load only the selected icon — no star import, no massive bundle.
-3. **Caching:** Store the selected icon reference in IndexedDB alongside the custom group. Load the icon JSON manifest only when the gallery is opened and IndexedDB has no cached copy.
-
-### Search must follow active layout
-
-Search results and breadcrumbs must reflect the user's configured nav layout, not just the plugin-defined default. This means:
-
-- **Search grouping:** If the user reordered modules within a group or reordered groups, search results should match that order when displaying grouped results.
-- **Breadcrumbs:** The group → module chain follows the active layout. If a module's group has been reordered, the breadcrumb still shows the correct group label (group labels are from plugin metadata, only order changes).
-- **Search index rebuild:** The Orama index is built once on bootstrap. It needs access to the resolved nav order (plugin default + user overrides) to set correct `group` fields and result ordering. `SearchProvider` already reads `pluginPages` from `AppConfig` — it also needs to read the active nav order.
-
-### Admin custom groups (Future)
-
-Creating entirely new groups, moving modules across plugin boundaries, or renaming groups is a separate capability beyond reordering. Deferred to a future design. The reorder system described above handles ordering within the plugin-defined group structure.
+- **Reorder modules within a group** (nested drag-drop).
+- **Custom groups** — user-created groups with icons from a PF icon gallery.
+- **Cross-group module moves** — dragging a module into a different group.
 
 ## Migration
 
@@ -442,11 +407,9 @@ Creating entirely new groups, moving modules across plugin boundaries, or renami
 
 ### Phase 4: Nav Reorder
 
-1. Change IndexedDB `nav-order` store from flat `string[]` to nested `NavOrderEntry[]`.
-2. Bump `EXTENSION_DB_VERSION` to 3, wipe old data on upgrade.
-3. Update `NavOrderEditor` for nested drag-drop (top-level groups + within-group modules).
-4. Support dragging modules into groups and creating custom groups.
-5. Build PF icon gallery: build-time JSON manifest + runtime dynamic import + IndexedDB cache.
+1. `getNavPages()` returns groups alongside pages (App.tsx).
+2. `AppNav` applies `orderByIds()` to navLayout entries with saved order.
+3. `NavOrderEditor` works unchanged — groups appear as atomic draggable items.
 
 ### Phase 5: Adopt
 
@@ -455,11 +418,11 @@ Creating entirely new groups, moving modules across plugin boundaries, or renami
 
 ## Decisions
 
-- **Module icons:** Always required, even in groups. May not display in nav but needed for search and breadcrumbs.
-- **Group ordering:** Alphabetical by default. Users can reorder via settings.
-- **Group homepage:** No `component` on groups. If a group needs a landing page, make it an explicit first child module. Keeps the contract simple.
-- **Nav reorder storage:** Breaking change to nested `NavOrderEntry[]` format. Not backward-compatible — DB version bumps and old data is wiped.
-- **Backward compatibility:** Not a concern. We are in POC phase. Pick the most robust solution.
+- **No group icon.** PF `NavExpandable` doesn't support icons. Groups are label-only in the nav. Module icons still required for search results.
+- **Group ordering:** Alphabetical by default. Users can reorder via settings. Groups are atomic — moving a group moves all children.
+- **Group homepage:** No `component` on groups. If a group needs a landing page, make it an explicit first child module. `/{groupId}` redirects to first child.
+- **Nav reorder storage:** Flat `string[]` unchanged. Groups use their groupId as the entry.
+- **Setup extensions excluded from search.** Setup flow pages (authentication, console config) have corresponding module extensions in the console flow. Only module extensions are indexed to avoid duplicates.
 
 ## Related Issues
 

@@ -107,7 +107,7 @@ model {
       description '''
         New extension type: fleetshift.module-group.
         Declares a navigational container for related modules.
-        Properties: id, label, icon, description, keywords.
+        Properties: id, label, description, keywords.
         No component — groups are not routable. If a group needs
         a landing page, it should be an explicit first child module.
 
@@ -164,7 +164,7 @@ model {
         FleetshiftExtension<"fleetshift.module-group", ModuleGroupExtras>.
 
         Existing createModule() accepts optional group?: string.
-        ModuleGroupExtras: { icon, component? }.
+        ModuleGroupExtras: Record<string, never> (no extra properties).
         All builders produce FleetshiftExtension with type tags.
       '''
       technology 'TypeScript'
@@ -228,7 +228,7 @@ model {
         Routes registered longest-path-first to prevent prefix shadowing.
 
         navLayout: emits nested entries:
-        { type: "group", groupId, label, icon, children: [
+        { type: "group", groupId, label, pluginKey, children: [
           { type: "page", pageId }
         ]}
         Ungrouped modules remain as top-level { type: "page" }.
@@ -309,18 +309,13 @@ model {
       technology 'Orama'
     }
 
-    breadcrumbs = component 'Breadcrumbs' {
+    breadcrumbs = component 'Breadcrumbs (future)' {
       description '''
-        New component. Derives breadcrumb chain from navLayout
-        and current route:
+        Not yet implemented. Will derive breadcrumb chain from
+        navLayout and current route:
 
         /{groupId}/{moduleId} → Group Label > Module Label
         /{pluginKey}/{moduleId} → Module Label (no parent)
-        /{groupId}/{moduleId}?ext=x → Group Label > Module > Extension
-
-        Group label comes from fleetshift.module-group metadata.
-        Module label from fleetshift.module metadata.
-        Extension label from the matched extension metadata.
       '''
       technology 'React / PatternFly'
     }
@@ -331,20 +326,19 @@ model {
   navReorder = system 'Nav Reorder' {
     description '''
       Existing capability extended for groups. Users reorder nav
-      items via Settings page. With groups, supports reordering
-      groups at the top level, modules within groups, dragging
-      modules into groups, and creating custom groups with icons
-      from a PF icon gallery (dynamic imports, no star import).
-      Search and breadcrumbs follow the active layout.
+      items via Settings page. Groups appear as atomic draggable
+      items — moving a group moves all its children. Reordering
+      is top-level only (groups and ungrouped pages).
+
+      getNavPages() returns groups alongside pages so the
+      NavOrderEditor treats them identically.
     '''
 
     navOrderStore = store 'Nav Order (IndexedDB)' {
       description '''
-        IndexedDB nav-order store. Breaking change from flat string[]
-        to nested NavOrderEntry[]:
-        { type: "page", pageId } | { type: "group", groupId, icon?, label?, children: string[] }.
-        DB version bumps from 2 to 3, old data wiped on upgrade.
-        Custom groups store a PF icon reference for the icon gallery.
+        IndexedDB nav-order store. Flat string[] of entry IDs.
+        Groups use their groupId, pages use pageId.
+        orderByIds() sorts navLayout entries by saved order.
       '''
     }
   }

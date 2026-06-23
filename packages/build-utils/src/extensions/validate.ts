@@ -5,6 +5,7 @@ import {
   type ClusterProviderProperties,
   type EncodedCodeRef,
   type FleetshiftExtension,
+  type ModuleGroupProperties,
   type ModuleProperties,
   type OnboardingActionProperties,
   type SetupProperties,
@@ -85,6 +86,13 @@ export function validateModuleProperties(props: ModuleProperties): string[] {
   ];
 }
 
+export function validateModuleGroupProperties(
+  props: ModuleGroupProperties,
+): string[] {
+  const ctx = `fleetshift.module-group "${props.id || "(no id)"}"`;
+  return [...validateBaseProperties(props, ctx)];
+}
+
 export function validateSetupProperties(props: SetupProperties): string[] {
   const ctx = `fleetshift.setup "${props.id || "(no id)"}"`;
   const errors = [
@@ -160,6 +168,10 @@ function validateSingleExtension(ext: FleetshiftExtension): string[] {
     return [`${ext.type}: "properties" must be an object`];
   }
   switch (ext.type) {
+    case "fleetshift.module-group":
+      return validateModuleGroupProperties(
+        props as unknown as ModuleGroupProperties,
+      );
     case "fleetshift.module":
       return validateModuleProperties(props as unknown as ModuleProperties);
     case "fleetshift.setup":
@@ -211,13 +223,18 @@ export function validateExtensionSet(
     }
 
     if (typeof props.id === "string" && props.id.length > 0) {
-      const existing = seenIds.get(props.id);
+      const group =
+        ext.type === "fleetshift.module"
+          ? (props.group as string | undefined)
+          : undefined;
+      const dedupKey = group ? `${group}.${props.id}` : props.id;
+      const existing = seenIds.get(dedupKey);
       if (existing) {
         errors.push(
           `Duplicate extension ID "${props.id}" — first declared as ${existing}, also declared as ${ext.type}`,
         );
       } else {
-        seenIds.set(props.id, ext.type);
+        seenIds.set(dedupKey, ext.type);
       }
     }
 
@@ -228,6 +245,44 @@ export function validateExtensionSet(
           `CodeRef "${ref.$codeRef}" references module "${moduleName}" which is not in exposedModules. Available: ${[...exposedKeys].join(", ")}`,
         );
       }
+    }
+  }
+
+  const groupIds = new Set<string>();
+  for (const ext of extensions) {
+    if (ext.type === "fleetshift.module-group") {
+      const id = (ext.properties as { id?: string }).id;
+      if (typeof id === "string" && id.length > 0) {
+        groupIds.add(id);
+      }
+    }
+  }
+
+  const moduleIdsPerGroup = new Map<string, string[]>();
+  for (const ext of extensions) {
+    if (ext.type !== "fleetshift.module") continue;
+    const props = asRecord(ext.properties);
+    if (!props) continue;
+    const group = props.group as string | undefined;
+    if (typeof group !== "string") continue;
+
+    if (!groupIds.has(group)) {
+      errors.push(
+        `Module "${props.id}" references group "${group}" which does not exist in this plugin's extensions`,
+      );
+    }
+
+    const existing = moduleIdsPerGroup.get(group);
+    const moduleId = props.id as string;
+    if (existing) {
+      if (existing.includes(moduleId)) {
+        errors.push(
+          `Duplicate module id "${moduleId}" within group "${group}"`,
+        );
+      }
+      existing.push(moduleId);
+    } else {
+      moduleIdsPerGroup.set(group, [moduleId]);
     }
   }
 

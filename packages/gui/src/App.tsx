@@ -29,13 +29,20 @@ const ScalprumShell = ({ children }: PropsWithChildren) => {
         },
         getNavPages: () => {
           const pageMap = new Map(pluginPagesRef.current.map((p) => [p.id, p]));
-          return navLayoutRef.current
-            .filter(
-              (e): e is { type: "page"; pageId: string } => e.type === "page",
-            )
-            .map((e) => pageMap.get(e.pageId))
-            .filter(Boolean)
-            .map((p) => ({ id: p!.id, scope: p!.scope, title: p!.title }));
+          const result: { id: string; scope: string; title: string }[] = [];
+          for (const entry of navLayoutRef.current) {
+            if (entry.type === "page") {
+              const p = pageMap.get(entry.pageId);
+              if (p) result.push({ id: p.id, scope: p.scope, title: p.title });
+            } else if (entry.type === "group") {
+              result.push({
+                id: entry.groupId,
+                scope: `${entry.pluginKey}-plugin`,
+                title: entry.label,
+              });
+            }
+          }
+          return result;
         },
         getClusterIdsForPlugin: () => [] as string[],
         getClusterName: (clusterId: string) => clusterId,

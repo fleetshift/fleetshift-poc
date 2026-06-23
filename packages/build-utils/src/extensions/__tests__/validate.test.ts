@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type {
   ClusterProviderProperties,
   FleetshiftExtension,
+  ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
   SetupProperties,
@@ -11,6 +12,7 @@ import {
   validateClusterProviderProperties,
   validateCodeRef,
   validateExtensionSet,
+  validateModuleGroupProperties,
   validateModuleProperties,
   validateOnboardingActionProperties,
   validateSetupProperties,
@@ -94,6 +96,35 @@ describe("validateCodeRef", () => {
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]).toContain("invalid $codeRef");
+  });
+});
+
+const validModuleGroup: ModuleGroupProperties = {
+  id: "settings",
+  label: "Settings",
+};
+
+describe("validateModuleGroupProperties", () => {
+  it("accepts valid module group", () => {
+    expect(validateModuleGroupProperties(validModuleGroup)).toEqual([]);
+  });
+
+  it("rejects empty id", () => {
+    const errors = validateModuleGroupProperties({
+      ...validModuleGroup,
+      id: "",
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toContain("id");
+  });
+
+  it("rejects uppercase id", () => {
+    const errors = validateModuleGroupProperties({
+      ...validModuleGroup,
+      id: "BadId",
+    });
+    expect(errors.length).toBeGreaterThan(0);
+    expect(errors[0]).toContain("lowercase");
   });
 });
 
@@ -371,6 +402,118 @@ describe("validateExtensionSet", () => {
         {},
       ),
     ).toThrow(/properties.*must be an object/);
+  });
+
+  it("accepts module group with grouped modules", () => {
+    expect(() =>
+      validateExtensionSet(
+        [
+          {
+            type: "fleetshift.module-group",
+            properties: validModuleGroup,
+          },
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "navigation",
+              group: "settings",
+            },
+          },
+        ],
+        exposedModules,
+      ),
+    ).not.toThrow();
+  });
+
+  it("rejects module referencing non-existent group", () => {
+    expect(() =>
+      validateExtensionSet(
+        [
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "navigation",
+              group: "nonexistent",
+            },
+          },
+        ],
+        exposedModules,
+      ),
+    ).toThrow(/references group "nonexistent" which does not exist/);
+  });
+
+  it("rejects duplicate module ids within the same group", () => {
+    expect(() =>
+      validateExtensionSet(
+        [
+          {
+            type: "fleetshift.module-group",
+            properties: validModuleGroup,
+          },
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "nav",
+              label: "First",
+              group: "settings",
+            },
+          },
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "nav",
+              label: "Second",
+              group: "settings",
+            },
+          },
+        ],
+        exposedModules,
+      ),
+    ).toThrow(/Duplicate module id "nav" within group "settings"/);
+  });
+
+  it("allows same module id in different groups", () => {
+    expect(() =>
+      validateExtensionSet(
+        [
+          {
+            type: "fleetshift.module-group",
+            properties: { ...validModuleGroup, id: "group-a" },
+          },
+          {
+            type: "fleetshift.module-group",
+            properties: {
+              ...validModuleGroup,
+              id: "group-b",
+              label: "Group B",
+            },
+          },
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "overview",
+              label: "Overview A",
+              group: "group-a",
+            },
+          },
+          {
+            type: "fleetshift.module",
+            properties: {
+              ...validModule,
+              id: "overview",
+              label: "Overview B",
+              group: "group-b",
+            },
+          },
+        ],
+        exposedModules,
+      ),
+    ).not.toThrow();
   });
 
   it("reports all errors in a single throw", () => {

@@ -37,6 +37,14 @@ export interface NavLayoutPage {
   pageId: string;
 }
 
+export interface NavLayoutGroup {
+  type: "group";
+  groupId: string;
+  pluginKey: string;
+  label: string;
+  children: NavLayoutPage[];
+}
+
 export interface NavLayoutSection {
   type: "section";
   id: string;
@@ -44,7 +52,7 @@ export interface NavLayoutSection {
   children: { pageId: string }[];
 }
 
-export type NavLayoutEntry = NavLayoutPage | NavLayoutSection;
+export type NavLayoutEntry = NavLayoutPage | NavLayoutGroup | NavLayoutSection;
 
 /** Check whether a page exists anywhere in the layout (top-level or inside a section) */
 export function isPageInLayout(
@@ -54,6 +62,8 @@ export function isPageInLayout(
   return layout.some(
     (entry) =>
       (entry.type === "page" && entry.pageId === pageId) ||
+      (entry.type === "group" &&
+        entry.children.some((child) => child.pageId === pageId)) ||
       (entry.type === "section" &&
         entry.children.some((child) => child.pageId === pageId)),
   );
