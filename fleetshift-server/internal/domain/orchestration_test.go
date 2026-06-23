@@ -954,10 +954,10 @@ func TestOrchestration_DeliveryOutputs_RegistersTargetAndStoresSecret(t *testing
 
 // recordingTargetHandler records HandleTargetReady and HandleTargetTerminated calls.
 type recordingTargetHandler struct {
-	readyTargets     []domain.TargetInfo
-	terminatedIDs    []domain.TargetID
-	readyErr         error
-	terminatedErr    error
+	readyTargets        []domain.TargetInfo
+	terminatedTargets   []domain.TargetInfo
+	readyErr            error
+	terminatedErr       error
 }
 
 func (r *recordingTargetHandler) HandleTargetReady(_ context.Context, target domain.TargetInfo) error {
@@ -965,12 +965,12 @@ func (r *recordingTargetHandler) HandleTargetReady(_ context.Context, target dom
 	return r.readyErr
 }
 
-func (r *recordingTargetHandler) HandleTargetTerminated(_ context.Context, id domain.TargetID) error {
-	r.terminatedIDs = append(r.terminatedIDs, id)
+func (r *recordingTargetHandler) HandleTargetTerminated(_ context.Context, target domain.TargetInfo) error {
+	r.terminatedTargets = append(r.terminatedTargets, target)
 	return r.terminatedErr
 }
 
-func TestOrchestration_DeliveryOutputs_NotifiesProvisionedTargetHandler(t *testing.T) {
+func TestOrchestration_DeliveryOutputs_NotifiesTargetObserver(t *testing.T) {
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
 		Generation:        1,
@@ -991,7 +991,7 @@ func TestOrchestration_DeliveryOutputs_NotifiesProvisionedTargetHandler(t *testi
 		}},
 	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		wf.ProvisionedTargets = handler
+		wf.TargetObserver = handler
 	})
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
@@ -1010,7 +1010,7 @@ func TestOrchestration_DeliveryOutputs_NotifiesProvisionedTargetHandler(t *testi
 	}
 }
 
-func TestOrchestration_DeletePipeline_NotifiesProvisionedTargetHandler(t *testing.T) {
+func TestOrchestration_DeletePipeline_NotifiesTargetObserver(t *testing.T) {
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
 		Generation:      2,
@@ -1069,7 +1069,7 @@ func TestOrchestration_DeletePipeline_NotifiesProvisionedTargetHandler(t *testin
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		wf.ProvisionedTargets = handler
+		wf.TargetObserver = handler
 	})
 
 	rec := &simpleRecord{ctx: ctx, events: events}
@@ -1077,11 +1077,11 @@ func TestOrchestration_DeletePipeline_NotifiesProvisionedTargetHandler(t *testin
 		t.Fatalf("Run: %v", err)
 	}
 
-	if len(handler.terminatedIDs) != 1 {
-		t.Fatalf("expected 1 HandleTargetTerminated call, got %d", len(handler.terminatedIDs))
+	if len(handler.terminatedTargets) != 1 {
+		t.Fatalf("expected 1 HandleTargetTerminated call, got %d", len(handler.terminatedTargets))
 	}
-	if handler.terminatedIDs[0] != "k8s-guest" {
-		t.Errorf("terminated target ID = %q, want k8s-guest", handler.terminatedIDs[0])
+	if handler.terminatedTargets[0].ID() != "k8s-guest" {
+		t.Errorf("terminated target ID = %q, want k8s-guest", handler.terminatedTargets[0].ID())
 	}
 }
 
@@ -1106,7 +1106,7 @@ func TestOrchestration_DeliveryOutputs_HandlerError_FailsActivity(t *testing.T) 
 		}},
 	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		wf.ProvisionedTargets = handler
+		wf.TargetObserver = handler
 	})
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}
@@ -1178,7 +1178,7 @@ func TestOrchestration_DeletePipeline_HandlerError_FailsActivity(t *testing.T) {
 	events := make(chan domain.FulfillmentEvent, 16)
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		wf.ProvisionedTargets = handler
+		wf.TargetObserver = handler
 	})
 
 	rec := &simpleRecord{ctx: ctx, events: events}
@@ -1191,7 +1191,7 @@ func TestOrchestration_DeletePipeline_HandlerError_FailsActivity(t *testing.T) {
 	_ = getTarget(t, store, "k8s-guest")
 }
 
-func TestWithProvisionedTargetHandler_MultipleHandlers(t *testing.T) {
+func TestWithTargetObserver_MultipleObservers(t *testing.T) {
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "d1", domain.FulfillmentSnapshot{
 		Generation:        1,
@@ -1213,8 +1213,8 @@ func TestWithProvisionedTargetHandler_MultipleHandlers(t *testing.T) {
 		}},
 	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		domain.WithProvisionedTargetHandler(h1)(wf)
-		domain.WithProvisionedTargetHandler(h2)(wf)
+		domain.WithTargetObserver(h1)(wf)
+		domain.WithTargetObserver(h2)(wf)
 	})
 
 	rec := &simpleRecord{ctx: testContext(t), events: events}

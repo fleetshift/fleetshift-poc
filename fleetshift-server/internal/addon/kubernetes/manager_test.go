@@ -115,7 +115,7 @@ func TestHandleTargetTerminated_StopsAgent(t *testing.T) {
 		t.Fatal("expected agent to be running")
 	}
 
-	if err := mgr.HandleTargetTerminated(ctx, "test-target"); err != nil {
+	if err := mgr.HandleTargetTerminated(ctx, target); err != nil {
 		t.Fatalf("HandleTargetTerminated: %v", err)
 	}
 

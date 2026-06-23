@@ -225,7 +225,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		domain.WithVault(vault),
 	}
 	if addons.k8sMgr != nil {
-		orchOpts = append(orchOpts, domain.WithProvisionedTargetHandler(addons.k8sMgr))
+		orchOpts = append(orchOpts, domain.WithTargetObserver(addons.k8sMgr))
 	}
 
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
@@ -233,7 +233,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		orchOpts...,
 	)
 
-	if err := orchSpec.RecoverProvisionedTargets(ctx); err != nil {
+	if err := orchSpec.RecoverTargets(ctx); err != nil {
 		logger.Error("target recovery errors", "error", err)
 	}
 	orchWf, err := reg.RegisterOrchestration(orchSpec)

@@ -162,10 +162,10 @@ type OrchestrationWorkflowSpec struct {
 	// pressure.
 	AckRetryInterval time.Duration
 
-	// ProvisionedTargets is notified when the orchestration creates
+	// TargetObserver is notified when the orchestration creates
 	// or removes targets as delivery side effects. Optional — nil means
 	// no notifications are sent.
-	ProvisionedTargets ProvisionedTargetHandler
+	TargetObserver TargetObserver
 }
 
 // OrchestrationWorkflowOption configures optional fields on
@@ -199,61 +199,61 @@ func WithAckRetryInterval(d time.Duration) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) { s.AckRetryInterval = d }
 }
 
-// ProvisionedTargetHandler is notified when the orchestration creates
+// TargetObserver is notified when the orchestration creates
 // or removes targets as delivery side effects. Optional — nil means
 // no notifications are sent.
-type ProvisionedTargetHandler interface {
+type TargetObserver interface {
 	HandleTargetReady(ctx context.Context, target TargetInfo) error
-	HandleTargetTerminated(ctx context.Context, targetID TargetID) error
+	HandleTargetTerminated(ctx context.Context, target TargetInfo) error
 }
 
-// WithProvisionedTargetHandler registers a handler that is notified
+// WithTargetObserver registers an observer that is notified
 // when the orchestration provisions or removes targets as delivery
-// outputs. The option is additive — multiple calls compose handlers.
-func WithProvisionedTargetHandler(h ProvisionedTargetHandler) OrchestrationWorkflowOption {
+// outputs. The option is additive — multiple calls compose observers.
+func WithTargetObserver(o TargetObserver) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) {
-		if s.ProvisionedTargets == nil {
-			s.ProvisionedTargets = h
+		if s.TargetObserver == nil {
+			s.TargetObserver = o
 			return
 		}
-		if multi, ok := s.ProvisionedTargets.(multiTargetHandler); ok {
-			s.ProvisionedTargets = append(multi, h)
+		if multi, ok := s.TargetObserver.(multiTargetObserver); ok {
+			s.TargetObserver = append(multi, o)
 		} else {
-			s.ProvisionedTargets = multiTargetHandler{s.ProvisionedTargets, h}
+			s.TargetObserver = multiTargetObserver{s.TargetObserver, o}
 		}
 	}
 }
 
-// multiTargetHandler dispatches target lifecycle events to multiple
-// handlers. Each handler filters internally for targets it manages.
-type multiTargetHandler []ProvisionedTargetHandler
+// multiTargetObserver dispatches target lifecycle events to multiple
+// observers. Each observer filters internally for targets it manages.
+type multiTargetObserver []TargetObserver
 
-func (m multiTargetHandler) HandleTargetReady(ctx context.Context, target TargetInfo) error {
-	for _, h := range m {
-		if err := h.HandleTargetReady(ctx, target); err != nil {
+func (m multiTargetObserver) HandleTargetReady(ctx context.Context, target TargetInfo) error {
+	for _, o := range m {
+		if err := o.HandleTargetReady(ctx, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (m multiTargetHandler) HandleTargetTerminated(ctx context.Context, targetID TargetID) error {
-	for _, h := range m {
-		if err := h.HandleTargetTerminated(ctx, targetID); err != nil {
+func (m multiTargetObserver) HandleTargetTerminated(ctx context.Context, target TargetInfo) error {
+	for _, o := range m {
+		if err := o.HandleTargetTerminated(ctx, target); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-// RecoverProvisionedTargets scans existing targets and calls
-// [ProvisionedTargetHandler.HandleTargetReady] for each target in ready
+// RecoverTargets scans existing targets and calls
+// [TargetObserver.HandleTargetReady] for each target in ready
 // state. Call this at startup to recover agents for targets that were
-// provisioned before the server restarted. No-ops when no handler is set.
-// Individual handler errors are collected and returned joined; recovery
+// provisioned before the server restarted. No-ops when no observer is set.
+// Individual observer errors are collected and returned joined; recovery
 // continues for remaining targets.
-func (s *OrchestrationWorkflowSpec) RecoverProvisionedTargets(ctx context.Context) error {
-	if s.ProvisionedTargets == nil {
+func (s *OrchestrationWorkflowSpec) RecoverTargets(ctx context.Context) error {
+	if s.TargetObserver == nil {
 		return nil
 	}
 
@@ -273,11 +273,20 @@ func (s *OrchestrationWorkflowSpec) RecoverProvisionedTargets(ctx context.Contex
 		if t.State() != TargetStateReady && t.State() != "" {
 			continue
 		}
-		if err := s.ProvisionedTargets.HandleTargetReady(ctx, t); err != nil {
+		if err := s.TargetObserver.HandleTargetReady(ctx, t); err != nil {
 			errs = append(errs, fmt.Errorf("target %s: %w", t.ID(), err))
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func (s *OrchestrationWorkflowSpec) lookupTarget(ctx context.Context, id TargetID) (TargetInfo, error) {
+	tx, err := s.Store.BeginReadOnly(ctx)
+	if err != nil {
+		return TargetInfo{}, err
+	}
+	defer tx.Rollback()
+	return tx.Targets().Get(ctx, id)
 }
 
 // NewOrchestrationWorkflowSpec creates an [OrchestrationWorkflowSpec]
@@ -631,10 +640,14 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 			}
 		}
 
-		if s.ProvisionedTargets != nil {
+		if s.TargetObserver != nil {
 			for _, targetID := range plan.targetIDs {
-				if err := s.ProvisionedTargets.HandleTargetTerminated(ctx, targetID); err != nil {
-					return struct{}{}, fmt.Errorf("notify target handler for termination of %s: %w", targetID, err)
+				target, err := s.lookupTarget(ctx, targetID)
+				if err != nil {
+					continue
+				}
+				if err := s.TargetObserver.HandleTargetTerminated(ctx, target); err != nil {
+					return struct{}{}, fmt.Errorf("notify target observer for termination of %s: %w", targetID, err)
 				}
 			}
 		}
@@ -800,13 +813,13 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 			return struct{}{}, err
 		}
 
-		if s.ProvisionedTargets != nil {
+		if s.TargetObserver != nil {
 			for _, pt := range in.Result.ProvisionedTargets {
 				target := NewTargetInfo(pt.ID, pt.Type, pt.Name, "", pt.Labels, pt.Properties, pt.AcceptedResourceTypes)
 				if target.State() == TargetStateReady || target.State() == "" {
-					if err := s.ProvisionedTargets.HandleTargetReady(ctx, target); err != nil {
+					if err := s.TargetObserver.HandleTargetReady(ctx, target); err != nil {
 						probe.Error(err)
-						return struct{}{}, fmt.Errorf("notify target handler for %q: %w", pt.ID, err)
+						return struct{}{}, fmt.Errorf("notify target observer for %q: %w", pt.ID, err)
 					}
 				}
 			}

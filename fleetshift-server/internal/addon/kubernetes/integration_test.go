@@ -509,7 +509,7 @@ func Test_TargetTermination(t *testing.T) {
 	}, 30*time.Second)
 
 	ctx := context.Background()
-	if err := f.k8sMgr.HandleTargetTerminated(ctx, f.targetID); err != nil {
+	if err := f.k8sMgr.HandleTargetTerminated(ctx, f.target); err != nil {
 		t.Fatalf("HandleTargetTerminated: %v", err)
 	}
 
@@ -801,6 +801,7 @@ type e2eFixture struct {
 	dynClient dynamic.Interface
 	typedK8s  *kubernetes.Clientset
 	namespace string
+	target    domain.TargetInfo
 	targetID  domain.TargetID
 	auth      domain.DeliveryAuth
 }
@@ -893,6 +894,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		dynClient: fixture.adminDynClient,
 		typedK8s:  fixture.adminK8s,
 		namespace: ns,
+		target:    target,
 		targetID:  targetID,
 		auth:      domain.DeliveryAuth{Token: domain.RawToken(fixture.saToken)},
 	}

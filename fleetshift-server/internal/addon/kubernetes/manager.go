@@ -123,10 +123,10 @@ func (m *Manager) HandleTargetReady(ctx context.Context, target domain.TargetInf
 
 // HandleTargetTerminated stops the agent for the given target, removes it
 // from tracking, and deletes inventory for the target.
-func (m *Manager) HandleTargetTerminated(ctx context.Context, targetID domain.TargetID) error {
+func (m *Manager) HandleTargetTerminated(ctx context.Context, target domain.TargetInfo) error {
 	m.mu.Lock()
-	ta, ok := m.agents[targetID]
-	delete(m.agents, targetID)
+	ta, ok := m.agents[target.ID()]
+	delete(m.agents, target.ID())
 	m.mu.Unlock()
 
 	if !ok {
@@ -134,18 +134,17 @@ func (m *Manager) HandleTargetTerminated(ctx context.Context, targetID domain.Ta
 	}
 	ta.Stop()
 
-	// Clean up inventory for this target.
 	tx, err := m.store.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx for inventory cleanup: %w", err)
 	}
 	defer tx.Rollback()
 
-	if err := tx.Edges().DeleteByTarget(ctx, targetID); err != nil {
-		return fmt.Errorf("delete edges for target %s: %w", targetID, err)
+	if err := tx.Edges().DeleteByTarget(ctx, target.ID()); err != nil {
+		return fmt.Errorf("delete edges for target %s: %w", target.ID(), err)
 	}
-	if err := tx.Inventory().DeleteByTarget(ctx, targetID); err != nil {
-		return fmt.Errorf("delete inventory for target %s: %w", targetID, err)
+	if err := tx.Inventory().DeleteByTarget(ctx, target.ID()); err != nil {
+		return fmt.Errorf("delete inventory for target %s: %w", target.ID(), err)
 	}
 	return tx.Commit()
 }
