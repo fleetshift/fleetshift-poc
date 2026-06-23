@@ -480,8 +480,8 @@ func Test_DefaultDenyList(t *testing.T) {
 	}
 }
 
-// Test_TargetTermination verifies that HandleTargetTerminated cleans up
-// all inventory items and edges for the target.
+// Test_TargetTermination verifies that StopIndexing stops the agent and
+// that platform-side inventory cleanup removes all items and edges.
 func Test_TargetTermination(t *testing.T) {
 	f := setupE2E(t)
 
@@ -509,8 +509,14 @@ func Test_TargetTermination(t *testing.T) {
 	}, 30*time.Second)
 
 	ctx := context.Background()
-	if err := f.k8sMgr.HandleTargetTerminated(ctx, f.target); err != nil {
-		t.Fatalf("HandleTargetTerminated: %v", err)
+	if err := f.k8sMgr.StopIndexing(ctx, f.target); err != nil {
+		t.Fatalf("StopIndexing: %v", err)
+	}
+
+	// Platform-side cleanup (mirrors what CleanupDeliveryData does).
+	cleanup := &application.InventoryCleanupService{Store: f.harness.Store}
+	if err := cleanup.DeleteByTarget(ctx, f.targetID); err != nil {
+		t.Fatalf("inventory cleanup: %v", err)
 	}
 
 	// Verify all inventory is gone.

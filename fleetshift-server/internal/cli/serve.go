@@ -220,7 +220,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return err
 	}
 
-	// --- create AddonManager (before orchSpec so it can be the TargetObserver) ---
 	typeSvc := &application.ManagedResourceTypeService{Store: store}
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router:           router,
@@ -239,7 +238,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		store, router, domain.StrategyFactory{Store: store}, reg,
 		orchOpts...,
 	)
-	// NOTE: RecoverTargets moved to AFTER connectAddons (below)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
 		return fmt.Errorf("register orchestration: %w", err)
