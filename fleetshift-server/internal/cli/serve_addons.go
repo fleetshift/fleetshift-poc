@@ -25,7 +25,7 @@ type addonState struct {
 	gcphcpAgent         domain.DeliveryAgent
 	gcphcpConcreteAgent *gcphcpaddon.Agent
 	gcphcpCfg           gcphcpaddon.Config
-	k8sMgr              *kubernetesaddon.Manager
+	k8sPool             *kubernetesaddon.AgentPool
 }
 
 // constructAddons builds the delivery agents for each enabled addon.
@@ -103,7 +103,7 @@ func constructAddons(
 
 	if enabledAddons["kubernetes"] {
 		inventoryWriter := application.NewInventoryWriteService(store)
-		agents.k8sMgr = kubernetesaddon.NewManager(ctx, store, vault, inventoryWriter, deliveryReporter, keyResolver, oidcHTTPClient, logger.With("component", "kubernetes-agent"))
+		agents.k8sPool = kubernetesaddon.NewAgentPool(ctx, store, vault, inventoryWriter, deliveryReporter, keyResolver, oidcHTTPClient, logger.With("component", "kubernetes-agent"))
 	}
 
 	return agents, nil
@@ -153,8 +153,8 @@ func connectAddons(ctx context.Context, addonMgr *application.AddonManager, enab
 
 	if enabledAddons["kubernetes"] {
 		if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
-			DeliveryAgent: agents.k8sMgr,
-			IndexAgent:    agents.k8sMgr,
+			DeliveryAgent: agents.k8sPool,
+			IndexAgent:    agents.k8sPool,
 		}); err != nil {
 			return fmt.Errorf("connect kubernetes addon: %w", err)
 		}
@@ -190,8 +190,8 @@ func connectAddons(ctx context.Context, addonMgr *application.AddonManager, enab
 
 // shutdownAddons performs graceful shutdown of addon agents.
 func shutdownAddons(agents *addonState) {
-	if agents.k8sMgr != nil {
-		agents.k8sMgr.StopAll()
+	if agents.k8sPool != nil {
+		agents.k8sPool.StopAll()
 	}
 }
 

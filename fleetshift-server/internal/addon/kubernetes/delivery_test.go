@@ -89,13 +89,13 @@ func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]d
 
 // newTestManagerWithReporter creates a Manager with the given reporter
 // for delivery tests that need to observe async results.
-func newTestManagerWithReporter(t *testing.T, reporter domain.DeliveryReporter) *kubernetes.Manager {
+func newTestManagerWithReporter(t *testing.T, reporter domain.DeliveryReporter) *kubernetes.AgentPool {
 	t.Helper()
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	vault := &fakeVault{secrets: make(map[domain.SecretRef][]byte)}
 	logger := slog.Default()
-	return kubernetes.NewManager(context.Background(), store, vault, nil, reporter, nil, nil, logger)
+	return kubernetes.NewAgentPool(context.Background(), store, vault, nil, reporter, nil, nil, logger)
 }
 
 // deliveryTarget builds a TargetInfo with the given properties for

@@ -34,13 +34,13 @@ func (v *fakeVault) Delete(_ context.Context, ref domain.SecretRef) error {
 	return nil
 }
 
-func newTestManager(t *testing.T) *kubernetes.Manager {
+func newTestManager(t *testing.T) *kubernetes.AgentPool {
 	t.Helper()
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 	vault := &fakeVault{secrets: make(map[domain.SecretRef][]byte)}
 	logger := slog.Default()
-	return kubernetes.NewManager(context.Background(), store, vault, nil, nopReporter{}, nil, nil, logger)
+	return kubernetes.NewAgentPool(context.Background(), store, vault, nil, nopReporter{}, nil, nil, logger)
 }
 
 func testTarget(id string) domain.TargetInfo {

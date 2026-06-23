@@ -92,31 +92,31 @@ The Agent is the reusable core. How it gets created and wired depends on the dep
 
 ### In-process
 
-In the in-process model, the platform server hosts multiple Agents — one per registered kubernetes target. A Manager handles this:
+In the in-process model, the platform server hosts multiple Agents — one per registered kubernetes target. An AgentPool handles this:
 
 - **Agent registry**: tracks running Agents by target ID
 - **Delivery routing**: implements `DeliveryAgent` by dispatching to the correct Agent
 - **Indexing lifecycle**: implements `IndexAgent` — `StartIndexing` creates an Agent when a target becomes ready, `StopIndexing` stops it when terminated
 - **Client construction**: builds Kubernetes client configuration from target properties and vault-backed service account tokens
 
-The Manager does not manage inventory cleanup directly. When a target is terminated, `StopIndexing` stops the Agent; the platform handles inventory cleanup (edges and items) in the orchestration's cleanup transaction or via the `AddonManager` on addon disable.
+The AgentPool does not manage inventory cleanup directly. When a target is terminated, `StopIndexing` stops the Agent; the platform handles inventory cleanup (edges and items) in the orchestration's cleanup transaction or via the `AddonManager` on addon disable.
 
 Agent creation is idempotent — concurrent `StartIndexing` calls for the same target do not create duplicates.
 
-The Manager receives target lifecycle events through the `AddonManager`, which implements the orchestration's `TargetObserver` interface and dispatches to the Manager's `IndexAgent` methods based on `IndexCapability` target type matching. The Manager does not receive target events directly from the orchestration.
+The AgentPool receives target lifecycle events through the `AddonManager`, which implements the orchestration's `TargetObserver` interface and dispatches to the AgentPool's `IndexAgent` methods based on `IndexCapability` target type matching. The AgentPool does not receive target events directly from the orchestration.
 
-The Manager is in-process infrastructure, not part of the addon's core model. The key interfaces it passes to each Agent — `InventoryWriter` and `DeliveryReporter` — are the modularity boundaries that enable the external deployment model.
+The AgentPool is in-process infrastructure, not part of the addon's core model. The key interfaces it passes to each Agent — `InventoryWriter` and `DeliveryReporter` — are the modularity boundaries that enable the external deployment model.
 
 ### External agent
 
-In the external model, the Agent runs as its own process on or near the target cluster — one Agent per cluster. There is no Manager. The process creates a single Agent directly, using in-cluster credentials or configuration flags for the Kubernetes client, and wiring the delegates to fleetlet channel adapters.
+In the external model, the Agent runs as its own process on or near the target cluster — one Agent per cluster. There is no AgentPool. The process creates a single Agent directly, using in-cluster credentials or configuration flags for the Kubernetes client, and wiring the delegates to fleetlet channel adapters.
 
 The `InventoryWriter` and `DeliveryReporter` interfaces are the key modularity boundaries. In-process, these are backed by application-layer services (direct function calls). In the external model, they would be backed by fleetlet channel adapters implementing the same interfaces. The Agent and its delegates are identical in both models — only the interface implementations change.
 
 | Concern | In-process | External agent |
 | --- | --- | --- |
-| Agent creation | Manager builds from target properties + vault | Process builds from in-cluster config |
-| Delivery requests | Direct calls from delivery router via Manager | Fleetlet delivery channel |
+| Agent creation | AgentPool builds from target properties + vault | Process builds from in-cluster config |
+| Delivery requests | Direct calls from delivery router via AgentPool | Fleetlet delivery channel |
 | Inventory writes | Direct InventoryWriteService | Fleetlet index channel adapter |
 | Delivery reporting | Direct DeliveryReportService | Fleetlet delivery channel adapter |
 | Lifecycle | AddonManager dispatches `StartIndexing`/`StopIndexing` via `IndexAgent` | Process start/stop IS the lifecycle |

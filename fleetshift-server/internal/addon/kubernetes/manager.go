@@ -22,11 +22,11 @@ const (
 	PropServiceAccountTokenRef = "service_account_token_ref"
 )
 
-// Manager manages the lifecycle of Agents — one per ready target.
+// AgentPool manages the lifecycle of Agents — one per ready target.
 // It builds K8s clients from target properties + vault, creates
 // Agents with delivery and indexer delegates, and implements
 // [domain.DeliveryAgent] by routing to the appropriate Agent.
-type Manager struct {
+type AgentPool struct {
 	ctx              context.Context
 	store            domain.Store
 	vault            domain.Vault
@@ -40,12 +40,12 @@ type Manager struct {
 	agents map[domain.TargetID]*Agent
 }
 
-var _ domain.IndexAgent = (*Manager)(nil)
+var _ domain.IndexAgent = (*AgentPool)(nil)
 
-// NewManager creates a Manager. The provided context governs the
-// lifetime of all agents created by the Manager — it must outlive
+// NewAgentPool creates an AgentPool. The provided context governs the
+// lifetime of all agents created by the AgentPool — it must outlive
 // individual request or activity contexts.
-func NewManager(
+func NewAgentPool(
 	ctx context.Context,
 	store domain.Store,
 	vault domain.Vault,
@@ -54,8 +54,8 @@ func NewManager(
 	keyResolver *domain.KeyResolver,
 	httpClient *http.Client,
 	logger *slog.Logger,
-) *Manager {
-	return &Manager{
+) *AgentPool {
+	return &AgentPool{
 		ctx:              ctx,
 		store:            store,
 		vault:            vault,
@@ -72,7 +72,7 @@ func NewManager(
 // delivery and indexer delegates, and starts it in a goroutine. It is
 // idempotent: if an agent for the given target is already running, it
 // returns nil without starting a duplicate.
-func (m *Manager) StartIndexing(ctx context.Context, target domain.TargetInfo) error {
+func (m *AgentPool) StartIndexing(ctx context.Context, target domain.TargetInfo) error {
 	id := target.ID()
 
 	m.mu.Lock()
@@ -126,7 +126,7 @@ func (m *Manager) StartIndexing(ctx context.Context, target domain.TargetInfo) e
 // StopIndexing stops the agent for the given target and removes it
 // from tracking. It does NOT delete inventory — the caller is
 // responsible for cleanup.
-func (m *Manager) StopIndexing(ctx context.Context, target domain.TargetInfo) error {
+func (m *AgentPool) StopIndexing(ctx context.Context, target domain.TargetInfo) error {
 	m.mu.Lock()
 	ta, ok := m.agents[target.ID()]
 	delete(m.agents, target.ID())
@@ -141,14 +141,14 @@ func (m *Manager) StopIndexing(ctx context.Context, target domain.TargetInfo) er
 
 // GetAgent returns the running Agent for the given ID, or nil if
 // no agent is running.
-func (m *Manager) GetAgent(id domain.TargetID) *Agent {
+func (m *AgentPool) GetAgent(id domain.TargetID) *Agent {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.agents[id]
 }
 
 // StopAll stops all running agents.
-func (m *Manager) StopAll() {
+func (m *AgentPool) StopAll() {
 	m.mu.Lock()
 	agents := make(map[domain.TargetID]*Agent, len(m.agents))
 	for id, ta := range m.agents {
@@ -164,7 +164,7 @@ func (m *Manager) StopAll() {
 
 // Deliver implements [domain.DeliveryAgent] by routing to the
 // appropriate Agent.
-func (m *Manager) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+func (m *AgentPool) Deliver(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	ta := m.GetAgent(target.ID())
 	if ta == nil {
 		return fmt.Errorf("no agent for target %s", target.ID())
@@ -174,7 +174,7 @@ func (m *Manager) Deliver(ctx context.Context, target domain.TargetInfo, deliver
 
 // Remove implements [domain.DeliveryAgent] by routing to the
 // appropriate Agent.
-func (m *Manager) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
+func (m *AgentPool) Remove(ctx context.Context, target domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, auth domain.DeliveryAuth, att *domain.Attestation, generation domain.Generation) error {
 	ta := m.GetAgent(target.ID())
 	if ta == nil {
 		return fmt.Errorf("no agent for target %s", target.ID())
@@ -184,7 +184,7 @@ func (m *Manager) Remove(ctx context.Context, target domain.TargetInfo, delivery
 
 // buildRESTConfig constructs a [rest.Config] from the target's properties
 // and optional vault-backed service account token.
-func (m *Manager) buildRESTConfig(ctx context.Context, target domain.TargetInfo) (*rest.Config, error) {
+func (m *AgentPool) buildRESTConfig(ctx context.Context, target domain.TargetInfo) (*rest.Config, error) {
 	props := target.Properties()
 	host := props[PropAPIServer]
 	if host == "" {

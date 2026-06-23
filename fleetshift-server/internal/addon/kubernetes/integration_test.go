@@ -509,7 +509,7 @@ func Test_TargetTermination(t *testing.T) {
 	}, 30*time.Second)
 
 	ctx := context.Background()
-	if err := f.k8sMgr.StopIndexing(ctx, f.target); err != nil {
+	if err := f.k8sPool.StopIndexing(ctx, f.target); err != nil {
 		t.Fatalf("StopIndexing: %v", err)
 	}
 
@@ -803,7 +803,7 @@ type clusterFixture struct {
 
 type e2eFixture struct {
 	harness   *testharness.Harness
-	k8sMgr    *kubeaddon.Manager
+	k8sPool   *kubeaddon.AgentPool
 	dynClient dynamic.Interface
 	typedK8s  *kubernetes.Clientset
 	namespace string
@@ -830,7 +830,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	h := testharness.New(t)
 	inventoryWriter := application.NewInventoryWriteService(h.Store)
 
-	k8sMgr := kubeaddon.NewManager(
+	k8sPool := kubeaddon.NewAgentPool(
 		context.Background(),
 		h.Store,
 		nil, // vault — SA token is passed directly
@@ -848,7 +848,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		t.Fatalf("Enable kubernetes addon: %v", err)
 	}
 	if err := h.AddonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
-		DeliveryAgent: k8sMgr,
+		DeliveryAgent: k8sPool,
 	}); err != nil {
 		t.Fatalf("Connect kubernetes addon: %v", err)
 	}
@@ -867,7 +867,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	if err := h.Targets.Register(ctx, target); err != nil {
 		t.Fatalf("Register target: %v", err)
 	}
-	if err := k8sMgr.StartIndexing(ctx, target); err != nil {
+	if err := k8sPool.StartIndexing(ctx, target); err != nil {
 		t.Fatalf("StartIndexing: %v", err)
 	}
 
@@ -890,13 +890,13 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	}
 
 	t.Cleanup(func() {
-		k8sMgr.StopAll()
+		k8sPool.StopAll()
 		_ = fixture.adminDynClient.Resource(nsGVR).Delete(context.Background(), ns, metav1.DeleteOptions{})
 	})
 
 	f := &e2eFixture{
 		harness:   h,
-		k8sMgr:    k8sMgr,
+		k8sPool:   k8sPool,
 		dynClient: fixture.adminDynClient,
 		typedK8s:  fixture.adminK8s,
 		namespace: ns,
@@ -963,7 +963,7 @@ func (f *e2eFixture) remove(t *testing.T, manifests ...json.RawMessage) {
 	for i, m := range manifests {
 		kubeManifests[i] = domain.Manifest{ResourceType: kubeaddon.ManifestResourceType, Raw: m}
 	}
-	err := f.k8sMgr.Remove(context.Background(), target, "e2e-removal", kubeManifests, f.auth, nil, 1)
+	err := f.k8sPool.Remove(context.Background(), target, "e2e-removal", kubeManifests, f.auth, nil, 1)
 	if err != nil {
 		t.Fatalf("remove: %v", err)
 	}
