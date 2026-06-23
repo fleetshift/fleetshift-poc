@@ -58,9 +58,6 @@ func Schema(addonTargetID domain.TargetID) domain.ManagedResourceSchema {
 		},
 		EntryFile:   specProtoPath,
 		SpecMessage: "addons.gcphcp.v1.GCPHCPClusterSpec",
-		Relation: domain.RegisteredSelfTarget{
-			AddonTarget:  addonTargetID,
-			ManifestType: ClusterManifestType,
-		},
+		Relation:    domain.NewRegisteredSelfTarget(addonTargetID, ClusterManifestType),
 	}
 }

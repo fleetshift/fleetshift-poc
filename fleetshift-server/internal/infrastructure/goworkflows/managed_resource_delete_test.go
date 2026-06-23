@@ -230,7 +230,7 @@ func TestManagedResourceDelete_GoWorkflows_UsesDeleteAuthAndEmitsRemoveEvents(t 
 
 	if _, err := typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Cluster",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt", ManifestType: "clusters"},
+		Relation:       domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "clusters"),
 		Signature:      domain.Signature{},
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",

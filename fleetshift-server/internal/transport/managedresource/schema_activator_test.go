@@ -28,6 +28,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
+func widgetRel() domain.RegisteredSelfTarget {
+	return domain.NewRegisteredSelfTarget("widget-addon", "widgets")
+}
+
 func newActivator(t *testing.T) (*managedresource.DynamicSchemaActivator, *managedresource.DynamicServiceMux) {
 	t.Helper()
 	mux := managedresource.NewDynamicServiceMux()
@@ -568,7 +572,7 @@ message WidgetSpec {
   string name = 1 [(buf.validate.field).required = true];
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation: widgetRel(),
 	}
 
 	// v2: name is optional.
@@ -587,13 +591,13 @@ message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation: widgetRel(),
 	}
 
 	// Register the widget type in the store so Create can look it up.
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation:       widgetRel(),
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",
@@ -985,7 +989,7 @@ message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation: widgetRel(),
 	}
 }
 
@@ -1070,7 +1074,7 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 	// create workflow claims a platform resource identity.
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation:       widgetRel(),
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",
@@ -1154,7 +1158,7 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 
 	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "widget-addon", ManifestType: "widgets"},
+		Relation:       widgetRel(),
 		Signature:      domain.Signature{},
 		APIServiceName: "fleetshift.io",
 		APIVersion:     "v1",

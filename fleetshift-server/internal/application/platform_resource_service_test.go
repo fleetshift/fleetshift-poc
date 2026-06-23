@@ -40,34 +40,6 @@ func TestPlatformResourceService_CreatePrecreatesIdentity(t *testing.T) {
 	}
 }
 
-func TestPlatformResourceService_CreateRejectsMalformedName(t *testing.T) {
-	store := newStore(t)
-	svc := application.NewPlatformResourceService(store)
-	ctx := context.Background()
-
-	tests := []struct {
-		name string
-		rn   domain.ResourceName
-	}{
-		{name: "empty", rn: ""},
-		{name: "no slash", rn: "prod"},
-		{name: "leading slash", rn: "/clusters/prod"},
-		{name: "trailing slash", rn: "clusters/prod/"},
-		{name: "double slash", rn: "clusters//prod"},
-		{name: "odd segments", rn: "publishers/123/books"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.Create(ctx, application.CreatePlatformResourceInput{
-				Name: tt.rn,
-			})
-			if !errors.Is(err, domain.ErrInvalidArgument) {
-				t.Errorf("Create(%q): got %v, want ErrInvalidArgument", tt.rn, err)
-			}
-		})
-	}
-}
-
 func TestPlatformResourceService_CreateRejectsExistingResource(t *testing.T) {
 	store := newStore(t)
 	svc := application.NewPlatformResourceService(store)

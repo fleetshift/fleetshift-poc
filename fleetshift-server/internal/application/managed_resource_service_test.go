@@ -56,7 +56,7 @@ func registerTestAddon(t *testing.T, store domain.Store, resourceType domain.Res
 
 	if err := tx.ManagedResources().CreateType(ctx, domain.ManagedResourceTypeDef{
 		ResourceType:   resourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: targetID, ManifestType: manifestType},
+		Relation:       domain.NewRegisteredSelfTarget(targetID, manifestType),
 		APIServiceName: serviceName,
 		APIVersion:     "v1",
 		CollectionID:   collectionID,

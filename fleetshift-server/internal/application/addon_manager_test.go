@@ -199,7 +199,7 @@ func clusterSchema() domain.ManagedResourceSchema {
 		Plural:         "Clusters",
 		ProtoFiles:     map[string]string{"fake.proto": "syntax = \"proto3\";"},
 		SpecMessage:    "fake.ClusterSpec",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local", ManifestType: "api.kind.cluster"},
+		Relation:       domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
 	}
 }
 
@@ -544,7 +544,7 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 		Plural:         "Databases",
 		ProtoFiles:     map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
 		SpecMessage:    "fake.DatabaseSpec",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local", ManifestType: "api.fake.database"},
+		Relation:       domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
 	}
 	if err := env.mgr.Connect(ctx, "multi-resource", application.ConnectInput{
 		Schemas: []domain.ManagedResourceSchema{clusterS, databaseS},

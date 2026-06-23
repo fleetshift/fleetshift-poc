@@ -62,7 +62,7 @@ func runTypeTests(t *testing.T, factory Factory) {
 		}
 		return domain.ManagedResourceTypeDef{
 			ResourceType:   rt,
-			Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-" + domain.TargetID(typeName)},
+			Relation:       domain.NewRegisteredSelfTarget("addon-"+domain.TargetID(typeName), domain.ManifestType("api.test."+strings.ToLower(typeName))),
 			APIServiceName: svc,
 			APIVersion:     "v1",
 			CollectionID:   domain.CollectionID(strings.ToLower(typeName) + "s"),
@@ -98,8 +98,8 @@ func runTypeTests(t *testing.T, factory Factory) {
 		if !ok {
 			t.Fatalf("Relation type = %T, want RegisteredSelfTarget", got.Relation)
 		}
-		if rst.AddonTarget != "addon-Cluster" {
-			t.Errorf("AddonTarget = %q, want %q", rst.AddonTarget, "addon-Cluster")
+		if rst.AddonTarget() != "addon-Cluster" {
+			t.Errorf("AddonTarget() = %q, want %q", rst.AddonTarget(), "addon-Cluster")
 		}
 		if !got.CreatedAt.Equal(fixedTime) {
 			t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, fixedTime)

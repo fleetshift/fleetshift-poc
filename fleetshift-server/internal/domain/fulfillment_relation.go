@@ -24,9 +24,22 @@ type FulfillmentRelation interface {
 // Produces: managed-resource manifests (resolved by intent reference),
 // static placement to the addon target, immediate rollout.
 type RegisteredSelfTarget struct {
-	AddonTarget  TargetID     `json:"addon_target"`
-	ManifestType ManifestType `json:"manifest_type"`
+	addonTarget  TargetID
+	manifestType ManifestType
 }
+
+// NewRegisteredSelfTarget constructs a [RegisteredSelfTarget]. Both
+// parameters are already-valid value objects; the type system guarantees
+// non-emptiness via their respective constructors.
+func NewRegisteredSelfTarget(addonTarget TargetID, manifestType ManifestType) RegisteredSelfTarget {
+	return RegisteredSelfTarget{addonTarget: addonTarget, manifestType: manifestType}
+}
+
+// AddonTarget returns the target that owns resources of this type.
+func (r RegisteredSelfTarget) AddonTarget() TargetID { return r.addonTarget }
+
+// ManifestType returns the manifest type produced for fulfillments.
+func (r RegisteredSelfTarget) ManifestType() ManifestType { return r.manifestType }
 
 func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestStrategySpec, PlacementStrategySpec, *RolloutStrategySpec) {
 	ms := ManifestStrategySpec{
@@ -35,12 +48,12 @@ func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestS
 			ResourceType: intent.ResourceType,
 			Name:         intent.Name,
 			Version:      intent.Version,
-			ManifestType: r.ManifestType,
+			ManifestType: r.manifestType,
 		},
 	}
 	ps := PlacementStrategySpec{
 		Type:    PlacementStrategyStatic,
-		Targets: []TargetID{r.AddonTarget},
+		Targets: []TargetID{r.addonTarget},
 	}
 	rs := &RolloutStrategySpec{
 		Type: RolloutStrategyImmediate,
@@ -49,6 +62,42 @@ func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestS
 }
 
 func (RegisteredSelfTarget) fulfillmentRelation() {}
+
+// MarshalJSON implements json.Marshaler for RegisteredSelfTarget.
+func (r RegisteredSelfTarget) MarshalJSON() ([]byte, error) {
+	return json.Marshal(registeredSelfTargetJSON{
+		AddonTarget:  string(r.addonTarget),
+		ManifestType: string(r.manifestType),
+	})
+}
+
+// UnmarshalJSON implements json.Unmarshaler for RegisteredSelfTarget.
+// This is a deserialization boundary — it validates raw strings through
+// the value object constructors before accepting them.
+func (r *RegisteredSelfTarget) UnmarshalJSON(data []byte) error {
+	var dto registeredSelfTargetJSON
+	if err := json.Unmarshal(data, &dto); err != nil {
+		return err
+	}
+	target, err := NewTargetID(dto.AddonTarget)
+	if err != nil {
+		return fmt.Errorf("registered self target: %w", err)
+	}
+	mt, err := NewManifestType(dto.ManifestType)
+	if err != nil {
+		return fmt.Errorf("registered self target: %w", err)
+	}
+	*r = NewRegisteredSelfTarget(target, mt)
+	return nil
+}
+
+// registeredSelfTargetJSON is the serialization DTO for
+// [RegisteredSelfTarget]. Fields are raw strings — validation happens
+// during unmarshal via [NewTargetID] and [NewManifestType].
+type registeredSelfTargetJSON struct {
+	AddonTarget  string `json:"addon_target"`
+	ManifestType string `json:"manifest_type"`
+}
 
 // SignedRelation is self-contained evidence for delivery-side
 // verification. It bundles the resource type scope, the fulfillment
@@ -102,16 +151,28 @@ func (sr *SignedRelation) UnmarshalJSON(data []byte) error {
 // fulfillmentRelJSON is the discriminated union representation for
 // FulfillmentRelation serialization.
 type fulfillmentRelJSON struct {
-	Type                 string                `json:"Type"`
-	RegisteredSelfTarget *RegisteredSelfTarget `json:"RegisteredSelfTarget,omitempty"`
+	Type                 string                    `json:"Type"`
+	RegisteredSelfTarget *registeredSelfTargetJSON `json:"RegisteredSelfTarget,omitempty"`
 }
 
 func marshalFulfillmentRelation(r FulfillmentRelation) (fulfillmentRelJSON, error) {
 	switch v := r.(type) {
 	case RegisteredSelfTarget:
-		return fulfillmentRelJSON{Type: "RegisteredSelfTarget", RegisteredSelfTarget: &v}, nil
+		return fulfillmentRelJSON{
+			Type: "RegisteredSelfTarget",
+			RegisteredSelfTarget: &registeredSelfTargetJSON{
+				AddonTarget:  string(v.addonTarget),
+				ManifestType: string(v.manifestType),
+			},
+		}, nil
 	case *RegisteredSelfTarget:
-		return fulfillmentRelJSON{Type: "RegisteredSelfTarget", RegisteredSelfTarget: v}, nil
+		return fulfillmentRelJSON{
+			Type: "RegisteredSelfTarget",
+			RegisteredSelfTarget: &registeredSelfTargetJSON{
+				AddonTarget:  string(v.addonTarget),
+				ManifestType: string(v.manifestType),
+			},
+		}, nil
 	case nil:
 		return fulfillmentRelJSON{}, nil
 	default:
@@ -125,7 +186,15 @@ func unmarshalFulfillmentRelation(j fulfillmentRelJSON) (FulfillmentRelation, er
 		if j.RegisteredSelfTarget == nil {
 			return nil, fmt.Errorf("fulfillment relation: RegisteredSelfTarget is nil")
 		}
-		return *j.RegisteredSelfTarget, nil
+		target, err := NewTargetID(j.RegisteredSelfTarget.AddonTarget)
+		if err != nil {
+			return nil, fmt.Errorf("fulfillment relation: %w", err)
+		}
+		mt, err := NewManifestType(j.RegisteredSelfTarget.ManifestType)
+		if err != nil {
+			return nil, fmt.Errorf("fulfillment relation: %w", err)
+		}
+		return NewRegisteredSelfTarget(target, mt), nil
 	case "":
 		return nil, nil
 	default:

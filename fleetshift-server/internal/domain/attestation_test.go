@@ -10,6 +10,10 @@ import (
 
 var testValidUntil = time.Date(2026, 3, 11, 12, 0, 0, 0, time.UTC)
 
+func mustRelation(target domain.TargetID, mt domain.ManifestType) domain.RegisteredSelfTarget {
+	return domain.NewRegisteredSelfTarget(target, mt)
+}
+
 func TestBuildSignedInputEnvelope_Deterministic(t *testing.T) {
 	ms := domain.ManifestStrategySpec{
 		Type: domain.ManifestStrategyInline,
@@ -203,7 +207,7 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 			},
 		},
 		SignedRelation: &domain.SignedRelation{
-			Relation:  domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt"},
+			Relation:  mustRelation("addon-cluster-mgmt", "api.kind.cluster"),
 			Signature: domain.Signature{Signer: domain.FederatedIdentity{Subject: "addon-svc", Issuer: "https://addon.example.com"}},
 		},
 		Output: &domain.PutManifests{
@@ -230,7 +234,7 @@ func TestAttestation_JSONRoundTrip_WithComposedSignedInput(t *testing.T) {
 	if got.SignedRelation == nil {
 		t.Fatal("SignedRelation = nil, want populated relation")
 	}
-	if rel, ok := got.SignedRelation.Relation.(domain.RegisteredSelfTarget); !ok || rel.AddonTarget != "addon-cluster-mgmt" {
+	if rel, ok := got.SignedRelation.Relation.(domain.RegisteredSelfTarget); !ok || rel.AddonTarget() != "addon-cluster-mgmt" {
 		t.Fatalf("SignedRelation.Relation = %#v, want RegisteredSelfTarget(addon-cluster-mgmt)", got.SignedRelation.Relation)
 	}
 	pm, ok := got.Output.(*domain.PutManifests)

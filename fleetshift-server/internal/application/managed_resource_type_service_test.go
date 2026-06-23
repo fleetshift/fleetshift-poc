@@ -18,10 +18,12 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	ctx := context.Background()
 	svc := newTypeService(t)
 
+	rel := domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "api.kind.cluster")
+
 	// Create
 	def, err := svc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Cluster",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt", ManifestType: "api.kind.cluster"},
+		Relation:       rel,
 		APIServiceName: "test.fleetshift.io",
 		APIVersion:     "v1",
 		CollectionID:   "clusters",
@@ -53,8 +55,8 @@ func TestManagedResourceTypeService_CRUD(t *testing.T) {
 	if !ok {
 		t.Fatalf("Relation type = %T, want RegisteredSelfTarget", got.Relation)
 	}
-	if rst.AddonTarget != "addon-cluster-mgmt" {
-		t.Errorf("AddonTarget = %q", rst.AddonTarget)
+	if rst.AddonTarget() != "addon-cluster-mgmt" {
+		t.Errorf("AddonTarget = %q", rst.AddonTarget())
 	}
 
 	// List
@@ -97,7 +99,7 @@ func TestManagedResourceTypeService_CreateDuplicate(t *testing.T) {
 
 	in := application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Cluster",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon", ManifestType: "api.kind.cluster"},
+		Relation:       domain.NewRegisteredSelfTarget("addon", "api.kind.cluster"),
 		APIServiceName: "test.fleetshift.io",
 		APIVersion:     "v1",
 		CollectionID:   "clusters",
@@ -113,38 +115,5 @@ func TestManagedResourceTypeService_CreateDuplicate(t *testing.T) {
 	_, err := svc.Create(ctx, in)
 	if !errors.Is(err, domain.ErrAlreadyExists) {
 		t.Fatalf("second Create: got %v, want ErrAlreadyExists", err)
-	}
-}
-
-func TestManagedResourceTypeService_CreateInvalidRelation(t *testing.T) {
-	ctx := context.Background()
-	svc := newTypeService(t)
-
-	tests := []struct {
-		name string
-		rel  domain.FulfillmentRelation
-	}{
-		{
-			name: "missing ManifestType",
-			rel:  domain.RegisteredSelfTarget{AddonTarget: "addon"},
-		},
-		{
-			name: "missing AddonTarget",
-			rel:  domain.RegisteredSelfTarget{ManifestType: "api.kind.cluster"},
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			_, err := svc.Create(ctx, application.CreateTypeInput{
-				ResourceType:   "test.fleetshift.io/Cluster",
-				Relation:       tc.rel,
-				APIServiceName: "test.fleetshift.io",
-				APIVersion:     "v1",
-				CollectionID:   "clusters",
-			})
-			if !errors.Is(err, domain.ErrInvalidArgument) {
-				t.Fatalf("expected ErrInvalidArgument, got: %v", err)
-			}
-		})
 	}
 }

@@ -211,7 +211,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	// --- Step 3: Register managed resource type ---
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "kind-local", ManifestType: kindaddon.ClusterManifestType},
+		Relation:       domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",
 		CollectionID:   "clusters",

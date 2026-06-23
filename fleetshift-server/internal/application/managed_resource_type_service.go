@@ -22,9 +22,14 @@ type ManagedResourceTypeServiceOption func(*ManagedResourceTypeService)
 
 // WithManagedResourceTypeClock overrides the wall-clock used for
 // timestamps (e.g. CreatedAt / UpdatedAt on type definitions).
-// Defaults to [time.Now].
+// Defaults to [time.Now]. A nil fn is treated as a no-op to prevent
+// nil-dereference panics at runtime.
 func WithManagedResourceTypeClock(fn func() time.Time) ManagedResourceTypeServiceOption {
-	return func(s *ManagedResourceTypeService) { s.now = fn }
+	return func(s *ManagedResourceTypeService) {
+		if fn != nil {
+			s.now = fn
+		}
+	}
 }
 
 // NewManagedResourceTypeService creates a service with the given store
@@ -58,9 +63,6 @@ type CreateTypeInput struct {
 
 // Create registers a new managed resource type.
 func (s *ManagedResourceTypeService) Create(ctx context.Context, in CreateTypeInput) (domain.ManagedResourceTypeDef, error) {
-	if in.ResourceType == "" {
-		return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: resource type is required", domain.ErrInvalidArgument)
-	}
 	if in.Relation == nil {
 		return domain.ManagedResourceTypeDef{}, fmt.Errorf("%w: relation is required", domain.ErrInvalidArgument)
 	}

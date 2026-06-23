@@ -1,12 +1,24 @@
 package domain
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+)
 
 // ManifestType is an opaque dispatch label for delivery targets.
 // It identifies what kind of payload a [Manifest] carries (e.g.
 // "api.kind.cluster", "idp-trust-bundle") so agents can route and
 // validate without understanding manifest content.
 type ManifestType string
+
+// NewManifestType validates and returns a [ManifestType]. It rejects
+// empty values.
+func NewManifestType(s string) (ManifestType, error) {
+	if s == "" {
+		return "", fmt.Errorf("manifest type: %w: must not be empty", ErrInvalidArgument)
+	}
+	return ManifestType(s), nil
+}
 
 // ManifestID is an opaque identifier for a manifest instance. Unlike
 // [ResourceName], it carries no AIP naming convention — manifests in a

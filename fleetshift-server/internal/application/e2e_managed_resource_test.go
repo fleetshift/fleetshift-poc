@@ -118,7 +118,7 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 
 	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType:   "test.fleetshift.io/Cluster",
-		Relation:       domain.RegisteredSelfTarget{AddonTarget: "addon-cluster-mgmt", ManifestType: "clusters"},
+		Relation:       domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "clusters"),
 		Signature:      addonSig,
 		APIServiceName: "kind.fleetshift.io",
 		APIVersion:     "v1",
@@ -207,12 +207,12 @@ func TestEndToEnd_ManagedResource_DeliveryWithAttestation(t *testing.T) {
 	if att.SignedRelation == nil {
 		t.Fatal("expected SignedRelation in managed resource attestation")
 	}
-	rel, ok := att.SignedRelation.Relation.(domain.RegisteredSelfTarget)
+	signedRel, ok := att.SignedRelation.Relation.(domain.RegisteredSelfTarget)
 	if !ok {
 		t.Fatalf("SignedRelation.Relation = %T, want RegisteredSelfTarget", att.SignedRelation.Relation)
 	}
-	if rel.AddonTarget != "addon-cluster-mgmt" {
-		t.Errorf("SignedRelation.AddonTarget = %q, want addon-cluster-mgmt", rel.AddonTarget)
+	if signedRel.AddonTarget() != "addon-cluster-mgmt" {
+		t.Errorf("SignedRelation.AddonTarget() = %q, want addon-cluster-mgmt", signedRel.AddonTarget())
 	}
 	if att.SignedRelation.Signature.Signer.Subject != "addon-cluster-svc" {
 		t.Errorf("SignedRelation.Signature.Signer.Subject = %q, want addon-cluster-svc", att.SignedRelation.Signature.Signer.Subject)
