@@ -139,9 +139,11 @@ type ManagedResourceTypeDef struct {
 	Signature      Signature
 	APIServiceName ServiceName
 	APIVersion     APIVersion
-	CollectionID   CollectionID
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	// TODO: Note that this is currently limited to a single, non-nested collection.
+	// It will have to be a separate feature to expand type defs to introduce a configurable parent collection.
+	CollectionID CollectionID
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // MarshalJSON implements json.Marshaler so the interface-typed Relation
