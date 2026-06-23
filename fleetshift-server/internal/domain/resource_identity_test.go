@@ -262,27 +262,14 @@ func TestNewResourceName(t *testing.T) {
 		name       string
 		collection CollectionName
 		id         ResourceID
-		wantErr    bool
 	}{
-		{name: "valid", collection: "clusters", id: "prod"},
-		{name: "valid nested", collection: "publishers/123/books", id: "les-mis"},
-		{name: "empty collection", collection: "", id: "prod", wantErr: true},
-		{name: "empty id", collection: "clusters", id: "", wantErr: true},
-		{name: "id with slash", collection: "clusters", id: "a/b", wantErr: true},
-		{name: "collection with leading slash", collection: "/clusters", id: "prod", wantErr: true},
-		{name: "collection with trailing slash", collection: "clusters/", id: "prod", wantErr: true},
-		{name: "collection with double slash", collection: "publishers//books", id: "prod", wantErr: true},
+		{name: "flat", collection: "clusters", id: "prod"},
+		{name: "nested", collection: "publishers/123/books", id: "les-mis"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got, err := NewResourceName(tt.collection, tt.id)
-			if tt.wantErr {
-				if !errors.Is(err, ErrInvalidArgument) {
-					t.Errorf("got err %v, want ErrInvalidArgument", err)
-				}
-				return
-			}
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

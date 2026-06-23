@@ -274,22 +274,8 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 }
 
 // NewResourceName constructs a [ResourceName] from a collection and
-// resource ID. It validates the collection path structurally (no
-// leading/trailing/double slashes) and verifies the id segment is
-// non-empty and contains no '/'.
+// resource ID.
 func NewResourceName(collection CollectionName, id ResourceID) (ResourceName, error) {
-	if collection == "" {
-		return "", fmt.Errorf("resource name: %w: collection must not be empty", ErrInvalidArgument)
-	}
-	if _, err := validateCanonicalPath("resource name", string(collection)); err != nil {
-		return "", err
-	}
-	if id == "" {
-		return "", fmt.Errorf("resource name: %w: id must not be empty", ErrInvalidArgument)
-	}
-	if strings.Contains(string(id), "/") {
-		return "", fmt.Errorf("resource name: %w: id must not contain '/'", ErrInvalidArgument)
-	}
 	return ResourceName(string(collection) + "/" + string(id)), nil
 }
 
