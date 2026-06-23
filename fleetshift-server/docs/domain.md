@@ -95,11 +95,9 @@ Each aggregate `Foo` has:
 - **Snapshot fields are pure data.** Primitives, type aliases, value objects,
   or slices/maps thereof. Never embed a domain object inside a snapshot.
 - **Pending buffers are write-path only.** `Snapshot()` captures pending
-  strategy records / intents non-mutatively. `FromSnapshot()` always
-  initializes them as empty — the object starts in "freshly loaded" state.
-  Repositories use the explicit drain methods (`DrainPendingStrategyRecords`,
-  `DrainPendingIntents`) to extract and clear pending buffers for flushing
-  to storage, ensuring each record is written exactly once.
+  objects non-mutatively. `FromSnapshot()` always initializes them symmetrically.
+  Of course, pending state is not likely to be hydrated on read, so this state is typically
+  never provided to FromSnapshot in the first place.
 - **Repositories use snapshots for both reads and writes.** Write paths call
   `obj.Snapshot()` and read individual fields. Read paths scan into a snapshot
   struct and call `FooFromSnapshot(s)` to produce the domain object.
