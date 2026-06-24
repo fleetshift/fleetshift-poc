@@ -56,8 +56,18 @@ type pluginPage struct {
 }
 
 type navLayoutEntry struct {
-	Type   string `json:"type"`
-	PageID string `json:"pageId"`
+	Type      string           `json:"type"`
+	PageID    string           `json:"pageId,omitempty"`
+	GroupID   string           `json:"groupId,omitempty"`
+	PluginKey string           `json:"pluginKey,omitempty"`
+	Label     string           `json:"label,omitempty"`
+	Children  []navLayoutEntry `json:"children,omitempty"`
+}
+
+type moduleGroupMeta struct {
+	id        string
+	label     string
+	pluginKey string
 }
 
 func NewUIConfigMux(opts UIConfigOptions) *http.ServeMux {
@@ -125,7 +135,7 @@ func handleUserConfig(opts UIConfigOptions) http.HandlerFunc {
 
 		scalprumConfig := buildScalprumConfig(registry)
 		pages := generatePluginPages(registry)
-		navLayout := generateNavLayout(pages)
+		navLayout := generateNavLayout(registry, pages)
 		entries := make([]pluginEntry, 0, len(registry.Plugins))
 		for _, e := range registry.Plugins {
 			entries = append(entries, e)
@@ -205,8 +215,12 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 				id = ""
 			}
 
+			group, _ := ext.Properties["group"].(string)
+
 			var pagePath string
-			if id != "" {
+			if id != "" && group != "" {
+				pagePath = fmt.Sprintf("%s/%s", group, id)
+			} else if id != "" {
 				pagePath = fmt.Sprintf("%s/%s", entry.Key, id)
 			} else {
 				pagePath = strings.Trim(slugRe.ReplaceAllString(strings.ToLower(label), "-"), "-")
@@ -237,10 +251,79 @@ func generatePluginPages(registry pluginRegistry) []pluginPage {
 	return pages
 }
 
-func generateNavLayout(pages []pluginPage) []navLayoutEntry {
+func collectModuleGroups(registry pluginRegistry) map[string]moduleGroupMeta {
+	groups := make(map[string]moduleGroupMeta)
+	for _, entry := range registry.Plugins {
+		for _, ext := range entry.PluginManifest.Extensions {
+			if ext.Type != "fleetshift.module-group" {
+				continue
+			}
+			id, _ := ext.Properties["id"].(string)
+			if id == "" {
+				continue
+			}
+			label, _ := ext.Properties["label"].(string)
+			groups[id] = moduleGroupMeta{
+				id:        id,
+				label:     label,
+				pluginKey: entry.Key,
+			}
+		}
+	}
+	return groups
+}
+
+func generateNavLayout(registry pluginRegistry, pages []pluginPage) []navLayoutEntry {
+	groups := collectModuleGroups(registry)
+
+	groupChildren := make(map[string][]navLayoutEntry)
+	groupedPageIDs := make(map[string]bool)
+
+	for _, entry := range registry.Plugins {
+		for _, ext := range entry.PluginManifest.Extensions {
+			if ext.Type != "fleetshift.module" {
+				continue
+			}
+			group, _ := ext.Properties["group"].(string)
+			if group == "" {
+				continue
+			}
+			id, _ := ext.Properties["id"].(string)
+			if id == "" || !safeIDRe.MatchString(id) {
+				continue
+			}
+			pageID := fmt.Sprintf("%s.%s", entry.Key, id)
+			groupChildren[group] = append(groupChildren[group], navLayoutEntry{Type: "page", PageID: pageID})
+			groupedPageIDs[pageID] = true
+		}
+	}
+
 	var layout []navLayoutEntry
+	emittedGroups := make(map[string]bool)
+
 	for _, p := range pages {
 		if p.ID == "orchestration-detail" {
+			continue
+		}
+		if groupedPageIDs[p.ID] {
+			parts := strings.SplitN(p.Path, "/", 2)
+			groupID := parts[0]
+			meta, ok := groups[groupID]
+			if !ok {
+				layout = append(layout, navLayoutEntry{Type: "page", PageID: p.ID})
+				continue
+			}
+			if emittedGroups[groupID] {
+				continue
+			}
+			emittedGroups[groupID] = true
+			layout = append(layout, navLayoutEntry{
+				Type:      "group",
+				GroupID:   meta.id,
+				PluginKey: meta.pluginKey,
+				Label:     meta.label,
+				Children:  groupChildren[groupID],
+			})
 			continue
 		}
 		layout = append(layout, navLayoutEntry{Type: "page", PageID: p.ID})
