@@ -7,7 +7,6 @@ import (
 	"context"
 	"net"
 	"testing"
-	"time"
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
@@ -17,9 +16,8 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testharness"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
@@ -53,39 +51,47 @@ func (stubDiscovery) FetchMetadata(_ context.Context, issuerURL domain.IssuerURL
 func Start(t *testing.T) string {
 	t.Helper()
 
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
-
-	router := delivery.NewRoutingDeliveryService()
-	recording := &sqlite.RecordingDeliveryService{Store: store}
-	router.Register("test", recording)
-	router.Register(gcphcpaddon.TargetType, recording)
-
-	reg := &memworkflow.Registry{}
-	recording.Reporter = application.NewDeliveryReportService(store, reg)
-
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithAckRetryInterval(5*time.Second),
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	// Build gRPC infrastructure first (needed for DynamicSchemaActivator)
+	specValidator, err := protovalidate.New()
 	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
+		t.Fatalf("protovalidate.New: %v", err)
 	}
 
-	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateDeployment: %v", err)
+	dynamicMux := managedresource.NewDynamicServiceMux()
+	fileRegistry := managedresource.NewDynamicFileRegistry()
+
+	// Create DynamicSchemaActivator with placeholder deps (will be wired after harness creation)
+	activator := &managedresource.DynamicSchemaActivator{
+		GRPCMux:      dynamicMux,
+		FileRegistry: fileRegistry,
+		Deps: managedresource.Deps{
+			Validator: specValidator,
+			// Resources will be wired after harness creation
+		},
 	}
 
+	// Create the harness with all platform services
+	h := testharness.New(t, testharness.WithSchemaActivator(activator))
+
+	// Wire the activator's Resources dependency now that harness is created
+	activator.Deps.Resources = h.ManagedResources
+
+	// Register recording delivery for test and gcphcp targets
+	recording := &sqlite.RecordingDeliveryService{Store: h.Store}
+	recording.Reporter = h.Reporter
+	h.Router.Register("test", recording)
+	h.Router.Register(gcphcpaddon.TargetType, recording)
+
+	// Create DB handle for auth methods (harness uses Store but we need DB for auth)
+	// We can get it from the Store since it's a sqlite.Store
+	store := h.Store.(*sqlite.Store)
+	authMethodRepo := &sqlite.AuthMethodRepo{DB: store.DB}
+
+	// Register ProvisionIdP workflow (testserver-specific, for OIDC auth)
 	provSpec := &domain.ProvisionIdPWorkflowSpec{
-		AuthMethods:      &sqlite.AuthMethodRepo{DB: db},
+		AuthMethods:      authMethodRepo,
 		Discovery:        stubDiscovery{},
-		CreateDeployment: createWf,
+		CreateDeployment: h.Deployments.CreateWF,
 	}
 	trustBundleTargets := []domain.TargetID{"kind-local"}
 	if len(trustBundleTargets) > 0 {
@@ -94,138 +100,41 @@ func Start(t *testing.T) string {
 			Targets: trustBundleTargets,
 		}
 	}
-	provWf, err := reg.RegisterProvisionIdP(provSpec)
+	provWf, err := h.Registry.RegisterProvisionIdP(provSpec)
 	if err != nil {
 		t.Fatalf("RegisterProvisionIdP: %v", err)
 	}
 
-	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{Store: store}
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
-	}
-
-	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       cleanupWf,
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeployment: %v", err)
-	}
-
-	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeDeployment: %v", err)
-	}
-
-	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateManagedResource: %v", err)
-	}
-
-	mrCleanupSpec := &domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store}
-	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(mrCleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
-	}
-
-	deleteMRSpec := &domain.DeleteManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       mrCleanupWf,
-	}
-	deleteMRWf, err := reg.RegisterDeleteManagedResource(deleteMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResource: %v", err)
-	}
-
-	resumeMRSpec := &domain.ResumeManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeMRWf, err := reg.RegisterResumeManagedResource(resumeMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeManagedResource: %v", err)
-	}
-
-	deploymentSvc := &application.DeploymentService{
-		Store:    store,
-		CreateWF: createWf,
-		DeleteWF: deleteWf,
-		ResumeWF: resumeWf,
-	}
-
-	managedResourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-		DeleteWF: deleteMRWf,
-		ResumeWF: resumeMRWf,
-	}
-
-	specValidator, err := protovalidate.New()
-	if err != nil {
-		t.Fatalf("protovalidate.New: %v", err)
-	}
-
-	authMethodRepo := &sqlite.AuthMethodRepo{DB: db}
 	authMethodSvc := &application.AuthMethodService{
 		Methods:     authMethodRepo,
 		ProvisionWF: provWf,
 	}
 	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, stubVerifier{}, domain.NoOpAuthnObserver{})
 
-	dynamicMux := managedresource.NewDynamicServiceMux()
-	fileRegistry := managedresource.NewDynamicFileRegistry()
-
+	// Create gRPC server with dynamic service handling
 	srv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
 		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
 		grpc.UnknownServiceHandler(dynamicMux.Handle),
 	)
 	pb.RegisterDeploymentServiceServer(srv, &transportgrpc.DeploymentServer{
-		Deployments: deploymentSvc,
+		Deployments: h.Deployments,
 	})
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
 	managedresource.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
 
-	activator := &managedresource.DynamicSchemaActivator{
-		GRPCMux:      dynamicMux,
-		FileRegistry: fileRegistry,
-		Deps: managedresource.Deps{
-			Resources: managedResourceSvc,
-			Validator: specValidator,
-		},
-	}
-
 	// Use the AddonManager lifecycle (Enable → Connect) to match
 	// production wiring in serve.go. This registers targets, creates
 	// managed resource type definitions, and activates schemas.
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
-	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
-	})
-
 	ctx := context.Background()
-	if err := addonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+	if err := h.AddonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
 		t.Fatalf("enable kind addon: %v", err)
 	}
 
 	schema := kindaddon.Schema()
-	if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
+	if err := h.AddonMgr.Connect(ctx, "kind", application.ConnectInput{
 		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
@@ -237,12 +146,12 @@ func Start(t *testing.T) string {
 		t.Fatalf("connect kind addon: %v", err)
 	}
 
-	if err := addonMgr.Enable(ctx, gcphcpaddon.Descriptor()); err != nil {
+	if err := h.AddonMgr.Enable(ctx, gcphcpaddon.Descriptor()); err != nil {
 		t.Fatalf("enable gcphcp addon: %v", err)
 	}
 
 	gcpSchema := gcphcpaddon.Schema("gcphcp-test")
-	if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
+	if err := h.AddonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
 		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "gcphcp-test",
 			Type:                  gcphcpaddon.TargetType,

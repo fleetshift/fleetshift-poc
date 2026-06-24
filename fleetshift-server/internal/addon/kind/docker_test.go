@@ -13,11 +13,8 @@ import (
 	"sigs.k8s.io/kind/pkg/log"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testharness"
 )
 
 // TestKindAddon_RealDocker exercises the full addon lifecycle against
@@ -39,72 +36,17 @@ func TestKindAddon_RealDocker(t *testing.T) {
 	// Pre-clean in case a previous run left a stale cluster.
 	_ = checker.Delete(clusterName, "")
 
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
+	h := testharness.New(t)
 
-	reg := &memworkflow.Registry{}
-	reporter := buildReporter(store, reg)
-
-	kindAgent := kindaddon.NewAgent(reporter, func(logger log.Logger) kindaddon.ClusterProvider {
+	kindAgent := kindaddon.NewAgent(h.Reporter, func(logger log.Logger) kindaddon.ClusterProvider {
 		return cluster.NewProvider(cluster.ProviderWithLogger(logger))
 	})
-	router := delivery.NewRoutingDeliveryService()
-	router.Register(kindaddon.TargetType, kindAgent)
-
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
-	}
-
-	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateDeployment: %v", err)
-	}
-
-	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{Store: store}
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
-	}
-
-	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       cleanupWf,
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeployment: %v", err)
-	}
-
-	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeDeployment: %v", err)
-	}
-
-	targetSvc := &application.TargetService{Store: store}
-	deploySvc := &application.DeploymentService{
-		Store:    store,
-		CreateWF: createWf,
-		DeleteWF: deleteWf,
-		ResumeWF: resumeWf,
-	}
+	h.Router.Register(kindaddon.TargetType, kindAgent)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+	if err := h.Targets.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "kind-docker",
 		Type: kindaddon.TargetType,
 		Name: "Docker Kind Provider",
@@ -118,7 +60,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("marshal spec: %v", err)
 	}
 
-	_, err = deploySvc.Create(ctx, domain.CreateDeploymentInput{
+	_, err = h.Deployments.Create(ctx, domain.CreateDeploymentInput{
 		ID: "kind-docker-deploy",
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -136,7 +78,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	view := awaitState(ctx, t, store, "kind-docker-deploy", domain.FulfillmentStateActive)
+	view := awaitState(ctx, t, h.Store, "kind-docker-deploy", domain.FulfillmentStateActive)
 	if len(view.Fulfillment.ResolvedTargets()) != 1 || view.Fulfillment.ResolvedTargets()[0] != "kind-docker" {
 		t.Fatalf("unexpected ResolvedTargets: %v", view.Fulfillment.ResolvedTargets())
 	}

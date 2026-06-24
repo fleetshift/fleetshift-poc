@@ -9,9 +9,8 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/testharness"
 )
 
 // buildReporter constructs a [application.DeliveryReportService] wired
@@ -28,72 +27,16 @@ func buildReporter(store domain.Store, reg *memworkflow.Registry) *application.D
 //  4. Verify the deployment reaches Active and the fake provider
 //     received the cluster creation.
 func TestKindAddon_EndToEnd(t *testing.T) {
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
-
-	reg := &memworkflow.Registry{}
-	reporter := buildReporter(store, reg)
+	h := testharness.New(t)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
-	router := delivery.NewRoutingDeliveryService()
-	router.Register(kindaddon.TargetType, kindAgent)
-
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithAckRetryInterval(5*time.Second),
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
-	}
-
-	cwfSpec := &domain.CreateDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createWf, err := reg.RegisterCreateDeployment(cwfSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateDeployment: %v", err)
-	}
-
-	cleanupSpec := &domain.DeleteDeploymentCleanupWorkflowSpec{Store: store}
-	cleanupWf, err := reg.RegisterDeleteDeploymentCleanup(cleanupSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeploymentCleanup: %v", err)
-	}
-
-	deleteSpec := &domain.DeleteDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-		Cleanup:       cleanupWf,
-	}
-	deleteWf, err := reg.RegisterDeleteDeployment(deleteSpec)
-	if err != nil {
-		t.Fatalf("RegisterDeleteDeployment: %v", err)
-	}
-
-	resumeSpec := &domain.ResumeDeploymentWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	resumeWf, err := reg.RegisterResumeDeployment(resumeSpec)
-	if err != nil {
-		t.Fatalf("RegisterResumeDeployment: %v", err)
-	}
-
-	targetSvc := &application.TargetService{Store: store}
-	deploySvc := &application.DeploymentService{
-		Store:    store,
-		CreateWF: createWf,
-		DeleteWF: deleteWf,
-		ResumeWF: resumeWf,
-	}
+	kindAgent := kindaddon.NewAgent(h.Reporter, fakeFactory(provider))
+	h.Router.Register(kindaddon.TargetType, kindAgent)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+	if err := h.Targets.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:     "my-kind",
 		Type:   kindaddon.TargetType,
 		Name:   "Local Kind Provider",
@@ -111,7 +54,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("marshal cluster spec: %v", err)
 	}
 
-	_, err = deploySvc.Create(ctx, domain.CreateDeploymentInput{
+	_, err = h.Deployments.Create(ctx, domain.CreateDeploymentInput{
 		ID: "kind-deployment",
 		ManifestStrategy: domain.ManifestStrategySpec{
 			Type: domain.ManifestStrategyInline,
@@ -129,7 +72,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 		t.Fatalf("Create deployment: %v", err)
 	}
 
-	view := awaitState(ctx, t, store, "kind-deployment", domain.FulfillmentStateActive)
+	view := awaitState(ctx, t, h.Store, "kind-deployment", domain.FulfillmentStateActive)
 	if len(view.Fulfillment.ResolvedTargets()) != 1 {
 		t.Fatalf("ResolvedTargets: got %d, want 1", len(view.Fulfillment.ResolvedTargets()))
 	}
@@ -158,47 +101,18 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 // a non-nil Caller triggers RBAC bootstrap which requires a live
 // Kubernetes API server.
 func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
-	db := sqlite.OpenTestDB(t)
-	store := &sqlite.Store{DB: db}
-
-	reg := &memworkflow.Registry{}
-	reporter := buildReporter(store, reg)
+	h := testharness.New(t)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
-	router := delivery.NewRoutingDeliveryService()
-	router.Register(kindaddon.TargetType, kindAgent)
-
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithAckRetryInterval(5*time.Second),
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
-	}
-
-	createMRSpec := &domain.CreateManagedResourceWorkflowSpec{
-		Store:         store,
-		Orchestration: orchWf,
-	}
-	createMRWf, err := reg.RegisterCreateManagedResource(createMRSpec)
-	if err != nil {
-		t.Fatalf("RegisterCreateManagedResource: %v", err)
-	}
-
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
-	resourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-	}
+	kindAgent := kindaddon.NewAgent(h.Reporter, fakeFactory(provider))
+	h.Router.Register(kindaddon.TargetType, kindAgent)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	// --- Step 1-2: Register target ---
 	{
-		tx, _ := store.Begin(ctx)
+		tx, _ := h.Store.Begin(ctx)
 		_ = tx.Targets().Create(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
@@ -209,7 +123,8 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	}
 
 	// --- Step 3: Register managed resource type ---
-	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
+	typeSvc := &application.ManagedResourceTypeService{Store: h.Store}
+	_, err := typeSvc.Create(ctx, application.CreateTypeInput{
 		ResourceType: kindaddon.ClusterResourceType,
 		Relation:     domain.RegisteredSelfTarget{AddonTarget: "kind-local"},
 		Signature: domain.Signature{
@@ -225,7 +140,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	// --- Step 4: Create managed resource ---
 	spec := json.RawMessage(`{"name":"mr-cluster","nodes":[{"role":"control-plane"},{"role":"worker"}]}`)
 
-	view, err := resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+	view, err := h.ManagedResources.Create(ctx, application.CreateManagedResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
 		Name:         "mr-cluster",
 		Spec:         spec,
@@ -235,7 +150,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	}
 
 	// --- Step 5: Wait for delivery and verify ---
-	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
+	awaitFulfillment(ctx, t, h.Store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
 	if !provider.hasCluster("mr-cluster") {

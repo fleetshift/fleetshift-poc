@@ -35,6 +35,7 @@ type Tx interface {
 	Deployments() DeploymentRepository
 	Deliveries() DeliveryRepository
 	Inventory() InventoryRepository
+	Edges() EdgeRepository
 	ManagedResources() ManagedResourceRepository
 	SignerEnrollments() SignerEnrollmentRepository
 	ResourceIdentities() ResourceIdentityRepository

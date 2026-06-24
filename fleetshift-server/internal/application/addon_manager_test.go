@@ -165,9 +165,10 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 	activator := &recordingActivator{}
 
 	mgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
+		Router:           router,
+		TypeSvc:          typeSvc,
+		Activator:        activator,
+		InventoryCleanup: nil,
 	})
 
 	return &addonManagerEnv{
@@ -298,7 +299,7 @@ func TestAddonManager_ConnectWithDeliveryAgent(t *testing.T) {
 
 	agent := &stubDeliveryAgent{}
 	if err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Agent: agent,
+		DeliveryAgent: agent,
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -373,7 +374,7 @@ func TestAddonManager_Disconnect(t *testing.T) {
 	}
 	agent := &stubDeliveryAgent{}
 	if err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Agent: agent,
+		DeliveryAgent: agent,
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -464,7 +465,7 @@ func TestAddonManager_ConnectRegistersTargets(t *testing.T) {
 
 	agent := &stubDeliveryAgent{}
 	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Agent: agent,
+		DeliveryAgent: agent,
 		Targets: []domain.TargetInfo{
 			domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 				ID:                    "kind-local",
@@ -504,7 +505,7 @@ func TestAddonManager_ConnectDuplicateTargetIsIdempotent(t *testing.T) {
 	}
 
 	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Agent: &stubDeliveryAgent{},
+		DeliveryAgent: &stubDeliveryAgent{},
 		Targets: []domain.TargetInfo{
 			target,
 		},
@@ -751,6 +752,51 @@ func (s *stubDeliveryAgent) Remove(_ context.Context, _ domain.TargetInfo, _ dom
 
 var _ domain.DeliveryAgent = (*stubDeliveryAgent)(nil)
 
+type stubIndexAgent struct {
+	mu      sync.Mutex
+	started []domain.TargetID
+	stopped []domain.TargetID
+}
+
+func (s *stubIndexAgent) StartIndexing(_ context.Context, target domain.TargetInfo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.started = append(s.started, target.ID())
+	return nil
+}
+
+func (s *stubIndexAgent) StopIndexing(_ context.Context, target domain.TargetInfo) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stopped = append(s.stopped, target.ID())
+	return nil
+}
+
+func (s *stubIndexAgent) startedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.started)
+}
+
+func (s *stubIndexAgent) stoppedCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.stopped)
+}
+
+var _ domain.IndexAgent = (*stubIndexAgent)(nil)
+
+func kubernetesDescriptor() domain.AddonDescriptor {
+	return domain.AddonDescriptor{
+		ID:   "kubernetes",
+		Name: "Kubernetes Agent",
+		Capabilities: []domain.Capability{
+			domain.DeliveryCapability{TargetType: "kubernetes"},
+			domain.IndexCapability{TargetType: "kubernetes"},
+		},
+	}
+}
+
 // TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent simulates a pod
 // restart: the first AddonManager creates the type def in the DB, then a
 // second AddonManager (empty in-memory state, same DB) connects the same
@@ -794,9 +840,10 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		activator := &recordingActivator{}
 
 		mgr := application.NewAddonManager(application.AddonManagerDeps{
-			Router:    router,
-			TypeSvc:   typeSvc,
-			Activator: activator,
+			Router:           router,
+			TypeSvc:          typeSvc,
+			Activator:        activator,
+			InventoryCleanup: nil,
 		})
 		return &addonManagerEnv{
 			mgr:       mgr,
@@ -845,5 +892,260 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 	}
 	if typeDef.ResourceType != "clusters" {
 		t.Errorf("type def resource type = %q, want clusters", typeDef.ResourceType)
+	}
+}
+
+func TestAddonManager_HandleTargetReadyDispatchesToIndexAgent(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if indexAgent.startedCount() != 1 {
+		t.Errorf("started count = %d, want 1", indexAgent.startedCount())
+	}
+	if indexAgent.started[0] != "test-cluster" {
+		t.Errorf("started target = %q, want test-cluster", indexAgent.started[0])
+	}
+}
+
+func TestAddonManager_HandleTargetReadySkipsNonMatchingAddon(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// Target type "gcphcp" does not match kubernetes addon's IndexCapability
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "gcp-cluster", Type: "gcphcp", Name: "GCP Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if indexAgent.startedCount() != 0 {
+		t.Errorf("started count = %d, want 0 (target type mismatch)", indexAgent.startedCount())
+	}
+}
+
+func TestAddonManager_HandleTargetTerminatedDispatchesToIndexAgent(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if err := env.mgr.HandleTargetTerminated(ctx, target); err != nil {
+		t.Fatalf("HandleTargetTerminated: %v", err)
+	}
+
+	if indexAgent.stoppedCount() != 1 {
+		t.Errorf("stopped count = %d, want 1", indexAgent.stoppedCount())
+	}
+}
+
+func TestAddonManager_HandleTargetTerminatedSkipsUnknownTarget(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	// Never called HandleTargetReady — target is not tracked
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "unknown", Type: "kubernetes", Name: "Unknown",
+	})
+	if err := env.mgr.HandleTargetTerminated(ctx, target); err != nil {
+		t.Fatalf("HandleTargetTerminated: %v", err)
+	}
+
+	if indexAgent.stoppedCount() != 0 {
+		t.Errorf("stopped count = %d, want 0 (target not tracked)", indexAgent.stoppedCount())
+	}
+}
+
+func TestAddonManager_ConnectIndexAgentWithoutCapabilityReturnsError(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// kind addon has DeliveryCapability but NOT IndexCapability
+	if err := env.mgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    &stubIndexAgent{},
+	})
+	if err == nil {
+		t.Fatal("expected error when providing IndexAgent without IndexCapability")
+	}
+}
+
+func TestAddonManager_DisconnectKeepsIndexAgentButBlocksNewDispatches(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if err := env.mgr.Disconnect(ctx, "kubernetes"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	// After disconnect, new HandleTargetReady should NOT dispatch
+	target2 := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster-2", Type: "kubernetes", Name: "Test Cluster 2",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target2); err != nil {
+		t.Fatalf("HandleTargetReady after disconnect: %v", err)
+	}
+
+	// Only the first target should have been started
+	if indexAgent.startedCount() != 1 {
+		t.Errorf("started count = %d, want 1 (disconnect should prevent new dispatches)", indexAgent.startedCount())
+	}
+
+	// Disconnect does NOT stop running indexers
+	if indexAgent.stoppedCount() != 0 {
+		t.Errorf("stopped count = %d, want 0 (disconnect does not stop running indexers)", indexAgent.stoppedCount())
+	}
+}
+
+func TestAddonManager_TargetTerminatedDuringDisconnectStopsIndexer(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if err := env.mgr.Disconnect(ctx, "kubernetes"); err != nil {
+		t.Fatalf("Disconnect: %v", err)
+	}
+
+	// Target terminated while addon is disconnected — StopIndexing
+	// must still be dispatched so the agent goroutine is cleaned up.
+	if err := env.mgr.HandleTargetTerminated(ctx, target); err != nil {
+		t.Fatalf("HandleTargetTerminated during disconnect: %v", err)
+	}
+
+	if indexAgent.stoppedCount() != 1 {
+		t.Errorf("stopped count = %d, want 1 (termination during disconnect must stop indexer)", indexAgent.stoppedCount())
+	}
+}
+
+func TestAddonManager_DisableStopsIndexersAndCleansUpInventory(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, kubernetesDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	indexAgent := &stubIndexAgent{}
+	if err := env.mgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		DeliveryAgent: &stubDeliveryAgent{},
+		IndexAgent:    indexAgent,
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "test-cluster", Type: "kubernetes", Name: "Test Cluster",
+	})
+	if err := env.mgr.HandleTargetReady(ctx, target); err != nil {
+		t.Fatalf("HandleTargetReady: %v", err)
+	}
+
+	if err := env.mgr.Disable(ctx, "kubernetes"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	if indexAgent.stoppedCount() != 1 {
+		t.Errorf("stopped count = %d, want 1 (disable should stop all indexers)", indexAgent.stoppedCount())
 	}
 }

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"testing"
@@ -271,10 +272,26 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		}}
 
 		kubeReporter := newChannelReporter()
-		kubeAgent := kubeaddon.NewAgent(kubeReporter)
+		store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
+
+		kubeMgr := kubeaddon.NewAgentPool(
+			context.Background(),
+			store,
+			nil,
+			mockInventoryWriter{},
+			kubeReporter,
+			nil,
+			nil,
+			slog.Default(),
+		)
+		defer kubeMgr.StopAll()
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
+
+		if err := kubeMgr.StartIndexing(ctx, k8sTarget); err != nil {
+			t.Fatalf("StartIndexing: %v", err)
+		}
 
 		aliceToken := res.IDP.IssueToken(t, oidctest.TokenClaims{Subject: "alice"})
 		aliceAuth := domain.DeliveryAuth{
@@ -288,7 +305,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 			Token:    domain.RawToken(aliceToken),
 		}
 
-		err = kubeAgent.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, 1)
+		err = kubeMgr.Deliver(ctx, k8sTarget, "d-pass:k8s-test", manifests, aliceAuth, nil, 1)
 		if err != nil {
 			t.Fatalf("Deliver (alice): %v", err)
 		}
@@ -335,7 +352,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 			}
 		}`)
 
-		err = kubeAgent.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
+		err = kubeMgr.Deliver(ctx, k8sTarget, "d-bob:k8s-test", []domain.Manifest{{
 			ResourceType: kubeaddon.ManifestResourceType,
 			Raw:          bobManifest,
 		}}, bobAuth, nil, 1)

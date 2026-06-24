@@ -41,9 +41,10 @@ type DeliveryAgentRegistry interface {
 
 // AddonManagerDeps holds the injected dependencies for [AddonManager].
 type AddonManagerDeps struct {
-	Router    DeliveryAgentRegistry
-	TypeSvc   *ManagedResourceTypeService
-	Activator SchemaActivator
+	Router           DeliveryAgentRegistry
+	TypeSvc          *ManagedResourceTypeService
+	Activator        SchemaActivator
+	InventoryCleanup InventoryCleanup
 }
 
 // AddonManager orchestrates the addon lifecycle: enable, connect,
@@ -54,15 +55,18 @@ type AddonManager struct {
 	mu     sync.RWMutex
 	addons map[domain.AddonID]*addonRecord
 
-	router    DeliveryAgentRegistry
-	typeSvc   *ManagedResourceTypeService
-	activator SchemaActivator
+	router           DeliveryAgentRegistry
+	typeSvc          *ManagedResourceTypeService
+	activator        SchemaActivator
+	inventoryCleanup InventoryCleanup
 }
 
 // addonRecord is the in-memory state for an addon within the manager.
 type addonRecord struct {
-	addon domain.Addon
-	agent domain.DeliveryAgent
+	addon          domain.Addon
+	deliveryAgent  domain.DeliveryAgent
+	indexAgent     domain.IndexAgent
+	indexedTargets map[domain.TargetID]domain.TargetInfo
 	// Keyed by resource type so connectSchemas can reconcile the new
 	// input against existing state and deactivate stale schemas.
 	// Content-change detection is handled by the SchemaActivator itself.
@@ -73,11 +77,20 @@ type addonRecord struct {
 // NewAddonManager creates a new manager with the given dependencies.
 func NewAddonManager(deps AddonManagerDeps) *AddonManager {
 	return &AddonManager{
-		addons:    make(map[domain.AddonID]*addonRecord),
-		router:    deps.Router,
-		typeSvc:   deps.TypeSvc,
-		activator: deps.Activator,
+		addons:           make(map[domain.AddonID]*addonRecord),
+		router:           deps.Router,
+		typeSvc:          deps.TypeSvc,
+		activator:        deps.Activator,
+		inventoryCleanup: deps.InventoryCleanup,
 	}
+}
+
+// SetActivator updates the schema activator. This is used during startup
+// to wire the activator after creating the AddonManager but before calling Connect.
+func (m *AddonManager) SetActivator(activator SchemaActivator) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activator = activator
 }
 
 // Enable authorizes and records an addon's declared capabilities.
@@ -119,9 +132,13 @@ func (m *AddonManager) Enable(_ context.Context, desc domain.AddonDescriptor) er
 // are simply not processed. This keeps the [AddonManager.Connect]
 // signature stable as new capability types are introduced.
 type ConnectInput struct {
-	// Agent is the delivery agent for addons that declare a
+	// DeliveryAgent is the delivery agent for addons that declare a
 	// [domain.DeliveryCapability]. Nil for managed-resource-only addons.
-	Agent domain.DeliveryAgent
+	DeliveryAgent domain.DeliveryAgent
+
+	// IndexAgent is the indexing agent for addons that declare an
+	// [domain.IndexCapability]. Nil for addons without indexing.
+	IndexAgent domain.IndexAgent
 
 	// Targets are the delivery targets this addon serves. Registered
 	// atomically with the agent so the routing table and target store
@@ -163,7 +180,11 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 		return err
 	}
 
-	if err := m.connectDeliveryAgent(rec, in.Agent); err != nil {
+	if err := m.connectDeliveryAgent(rec, in.DeliveryAgent); err != nil {
+		return err
+	}
+
+	if err := m.connectIndexAgent(rec, in.IndexAgent); err != nil {
 		return err
 	}
 
@@ -224,10 +245,25 @@ func (m *AddonManager) connectDeliveryAgent(rec *addonRecord, agent domain.Deliv
 	for _, cap := range rec.addon.Capabilities {
 		if dc, ok := cap.(domain.DeliveryCapability); ok {
 			m.router.Register(dc.TargetType, agent)
-			rec.agent = agent
+			rec.deliveryAgent = agent
 		}
 	}
 	return nil
+}
+
+func (m *AddonManager) connectIndexAgent(rec *addonRecord, agent domain.IndexAgent) error {
+	if agent == nil {
+		return nil
+	}
+	for _, cap := range rec.addon.Capabilities {
+		if _, ok := cap.(domain.IndexCapability); ok {
+			rec.indexAgent = agent
+			rec.indexedTargets = make(map[domain.TargetID]domain.TargetInfo)
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: addon %q provides an IndexAgent but declares no IndexCapability",
+		domain.ErrInvalidArgument, rec.addon.ID)
 }
 
 func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, targets []domain.TargetInfo) error {
@@ -243,10 +279,70 @@ func (m *AddonManager) connectTargets(ctx context.Context, rec *addonRecord, tar
 	return nil
 }
 
+// HandleTargetReady implements [domain.TargetObserver] by dispatching
+// StartIndexing to all connected IndexAgents that match the target's type.
+// Dispatches only while the addon is Connected — a disconnected addon
+// retains its indexAgent for cleanup (see [HandleTargetTerminated]) but
+// should not start new indexing work.
+func (m *AddonManager) HandleTargetReady(ctx context.Context, target domain.TargetInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, rec := range m.addons {
+		if rec.indexAgent == nil || rec.addon.State != domain.AddonStateConnected {
+			continue
+		}
+		if !hasIndexCapabilityForTargetType(rec.addon.Capabilities, target.Type()) {
+			continue
+		}
+		if err := rec.indexAgent.StartIndexing(ctx, target); err != nil {
+			return err
+		}
+		rec.indexedTargets[target.ID()] = target
+	}
+	return nil
+}
+
+// HandleTargetTerminated implements [domain.TargetObserver] by dispatching
+// StopIndexing to all IndexAgents that are tracking the target. Unlike
+// [HandleTargetReady], this is not gated on Connected state — it must
+// work during disconnect to prevent orphaned agent goroutines.
+func (m *AddonManager) HandleTargetTerminated(ctx context.Context, target domain.TargetInfo) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, rec := range m.addons {
+		if rec.indexAgent == nil {
+			continue
+		}
+		if _, ok := rec.indexedTargets[target.ID()]; !ok {
+			continue
+		}
+		if err := rec.indexAgent.StopIndexing(ctx, target); err != nil {
+			return err
+		}
+		delete(rec.indexedTargets, target.ID())
+	}
+	return nil
+}
+
+func hasIndexCapabilityForTargetType(caps []domain.Capability, tt domain.TargetType) bool {
+	for _, cap := range caps {
+		if ic, ok := cap.(domain.IndexCapability); ok && ic.TargetType == tt {
+			return true
+		}
+	}
+	return false
+}
+
 // Disconnect deactivates an addon's runtime capabilities. The delivery
 // agent is deregistered, but the API surface remains live so users can
 // still CRUD managed resources. The addon transitions back to
 // [domain.AddonStateEnabled].
+//
+// The indexAgent reference is intentionally preserved so that
+// [HandleTargetTerminated] can still dispatch StopIndexing for targets
+// terminated during the disconnect window. [HandleTargetReady] gates
+// on [domain.AddonStateConnected], so no new indexing work is started.
+// On reconnect, [connectIndexAgent] overwrites the reference.
 func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -256,13 +352,13 @@ func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) err
 		return fmt.Errorf("%w: addon %q not found", domain.ErrNotFound, addonID)
 	}
 
-	if rec.agent != nil {
+	if rec.deliveryAgent != nil {
 		for _, cap := range rec.addon.Capabilities {
 			if dc, ok := cap.(domain.DeliveryCapability); ok {
 				m.router.Deregister(dc.TargetType)
 			}
 		}
-		rec.agent = nil
+		rec.deliveryAgent = nil
 	}
 
 	rec.addon.State = domain.AddonStateEnabled
@@ -283,13 +379,24 @@ func (m *AddonManager) Disable(ctx context.Context, addonID domain.AddonID) erro
 		return fmt.Errorf("%w: addon %q not found", domain.ErrNotFound, addonID)
 	}
 
-	if rec.agent != nil {
+	if rec.deliveryAgent != nil {
 		for _, cap := range rec.addon.Capabilities {
 			if dc, ok := cap.(domain.DeliveryCapability); ok {
 				m.router.Deregister(dc.TargetType)
 			}
 		}
-		rec.agent = nil
+		rec.deliveryAgent = nil
+	}
+
+	if rec.indexAgent != nil {
+		for targetID, target := range rec.indexedTargets {
+			_ = rec.indexAgent.StopIndexing(ctx, target)
+			if m.inventoryCleanup != nil {
+				_ = m.inventoryCleanup.DeleteByTarget(ctx, targetID)
+			}
+			delete(rec.indexedTargets, targetID)
+		}
+		rec.indexAgent = nil
 	}
 
 	for rt := range rec.schemaHandles {

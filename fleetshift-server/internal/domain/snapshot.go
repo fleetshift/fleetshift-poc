@@ -91,6 +91,10 @@ type InventoryItemSnapshot struct {
 	SourceDeliveryID *DeliveryID
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
+	TargetID         TargetID
+	Observed         json.RawMessage
+	Conditions       []InventoryCondition
+	ObservedAt       *time.Time
 }
 
 // AuthMethodSnapshot is the persistence DTO for [AuthMethod].
@@ -271,6 +275,10 @@ func (i InventoryItem) Snapshot() InventoryItemSnapshot {
 		SourceDeliveryID: i.sourceDeliveryID,
 		CreatedAt:        i.createdAt,
 		UpdatedAt:        i.updatedAt,
+		TargetID:         i.targetID,
+		Observed:         i.observed,
+		Conditions:       i.conditions,
+		ObservedAt:       i.observedAt,
 	}
 }
 
@@ -400,6 +408,10 @@ func InventoryItemFromSnapshot(s InventoryItemSnapshot) InventoryItem {
 		sourceDeliveryID: s.SourceDeliveryID,
 		createdAt:        s.CreatedAt,
 		updatedAt:        s.UpdatedAt,
+		targetID:         s.TargetID,
+		observed:         s.Observed,
+		conditions:       s.Conditions,
+		observedAt:       s.ObservedAt,
 	}
 }
 

@@ -161,6 +161,11 @@ type OrchestrationWorkflowSpec struct {
 	// duplicate deliveries and compounding goroutine scheduling
 	// pressure.
 	AckRetryInterval time.Duration
+
+	// TargetObserver is notified when the orchestration creates
+	// or removes targets as delivery side effects. Optional — nil means
+	// no notifications are sent.
+	TargetObserver TargetObserver
 }
 
 // OrchestrationWorkflowOption configures optional fields on
@@ -192,6 +197,96 @@ func WithNow(fn func() time.Time) OrchestrationWorkflowOption {
 // before redispatching unacked deliveries.
 func WithAckRetryInterval(d time.Duration) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) { s.AckRetryInterval = d }
+}
+
+// TargetObserver is notified when the orchestration creates
+// or removes targets as delivery side effects. Optional — nil means
+// no notifications are sent.
+type TargetObserver interface {
+	HandleTargetReady(ctx context.Context, target TargetInfo) error
+	HandleTargetTerminated(ctx context.Context, target TargetInfo) error
+}
+
+// WithTargetObserver registers an observer that is notified
+// when the orchestration provisions or removes targets as delivery
+// outputs. The option is additive — multiple calls compose observers.
+func WithTargetObserver(o TargetObserver) OrchestrationWorkflowOption {
+	return func(s *OrchestrationWorkflowSpec) {
+		if s.TargetObserver == nil {
+			s.TargetObserver = o
+			return
+		}
+		if multi, ok := s.TargetObserver.(multiTargetObserver); ok {
+			s.TargetObserver = append(multi, o)
+		} else {
+			s.TargetObserver = multiTargetObserver{s.TargetObserver, o}
+		}
+	}
+}
+
+// multiTargetObserver dispatches target lifecycle events to multiple
+// observers. Each observer filters internally for targets it manages.
+type multiTargetObserver []TargetObserver
+
+func (m multiTargetObserver) HandleTargetReady(ctx context.Context, target TargetInfo) error {
+	for _, o := range m {
+		if err := o.HandleTargetReady(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m multiTargetObserver) HandleTargetTerminated(ctx context.Context, target TargetInfo) error {
+	for _, o := range m {
+		if err := o.HandleTargetTerminated(ctx, target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// RecoverTargets scans existing targets and calls
+// [TargetObserver.HandleTargetReady] for each target in ready
+// state. Call this at startup to recover agents for targets that were
+// provisioned before the server restarted. No-ops when no observer is set.
+// Individual observer errors are collected and returned joined; recovery
+// continues for remaining targets.
+func (s *OrchestrationWorkflowSpec) RecoverTargets(ctx context.Context) error {
+	if s.TargetObserver == nil {
+		return nil
+	}
+
+	tx, err := s.Store.BeginReadOnly(ctx)
+	if err != nil {
+		return fmt.Errorf("begin read tx for target recovery: %w", err)
+	}
+	defer tx.Rollback()
+
+	targets, err := tx.Targets().List(ctx)
+	if err != nil {
+		return fmt.Errorf("list targets for recovery: %w", err)
+	}
+
+	var errs []error
+	for _, t := range targets {
+		if t.State() != TargetStateReady && t.State() != "" {
+			continue
+		}
+		if err := s.TargetObserver.HandleTargetReady(ctx, t); err != nil {
+			errs = append(errs, fmt.Errorf("target %s: %w", t.ID(), err))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func (s *OrchestrationWorkflowSpec) lookupTarget(ctx context.Context, id TargetID) (TargetInfo, error) {
+	tx, err := s.Store.BeginReadOnly(ctx)
+	if err != nil {
+		return TargetInfo{}, err
+	}
+	defer tx.Rollback()
+	return tx.Targets().Get(ctx, id)
 }
 
 // NewOrchestrationWorkflowSpec creates an [OrchestrationWorkflowSpec]
@@ -545,6 +640,18 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 			}
 		}
 
+		if s.TargetObserver != nil {
+			for _, targetID := range plan.targetIDs {
+				target, err := s.lookupTarget(ctx, targetID)
+				if err != nil {
+					continue
+				}
+				if err := s.TargetObserver.HandleTargetTerminated(ctx, target); err != nil {
+					return struct{}{}, fmt.Errorf("notify target observer for termination of %s: %w", targetID, err)
+				}
+			}
+		}
+
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
 			return struct{}{}, fmt.Errorf("begin tx: %w", err)
@@ -552,6 +659,12 @@ func (s *OrchestrationWorkflowSpec) CleanupDeliveryData() Activity[FulfillmentID
 		defer tx.Rollback()
 
 		for _, targetID := range plan.targetIDs {
+			if err := tx.Edges().DeleteByTarget(ctx, targetID); err != nil {
+				return struct{}{}, fmt.Errorf("delete edges for target %s: %w", targetID, err)
+			}
+			if err := tx.Inventory().DeleteByTarget(ctx, targetID); err != nil {
+				return struct{}{}, fmt.Errorf("delete observed inventory for target %s: %w", targetID, err)
+			}
 			if err := tx.Targets().Delete(ctx, targetID); err != nil && !errors.Is(err, ErrNotFound) {
 				return struct{}{}, fmt.Errorf("delete provisioned target %s: %w", targetID, err)
 			}
@@ -705,6 +818,19 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 			probe.Error(err)
 			return struct{}{}, err
 		}
+
+		if s.TargetObserver != nil {
+			for _, pt := range in.Result.ProvisionedTargets {
+				target := NewTargetInfo(pt.ID, pt.Type, pt.Name, "", pt.Labels, pt.Properties, pt.AcceptedResourceTypes)
+				if target.State() == TargetStateReady || target.State() == "" {
+					if err := s.TargetObserver.HandleTargetReady(ctx, target); err != nil {
+						probe.Error(err)
+						return struct{}{}, fmt.Errorf("notify target observer for %q: %w", pt.ID, err)
+					}
+				}
+			}
+		}
+
 		return struct{}{}, nil
 	})
 }

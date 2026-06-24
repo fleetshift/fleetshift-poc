@@ -43,6 +43,7 @@ func (t *storeTx) Fulfillments() domain.FulfillmentRepository {
 func (t *storeTx) Deployments() domain.DeploymentRepository { return &DeploymentRepo{DB: t.tx} }
 func (t *storeTx) Deliveries() domain.DeliveryRepository    { return &DeliveryRepo{DB: t.tx} }
 func (t *storeTx) Inventory() domain.InventoryRepository    { return &InventoryRepo{DB: t.tx} }
+func (t *storeTx) Edges() domain.EdgeRepository             { return &EdgeRepo{DB: t.tx} }
 func (t *storeTx) ManagedResources() domain.ManagedResourceRepository {
 	return &ManagedResourceRepo{DB: t.tx}
 }

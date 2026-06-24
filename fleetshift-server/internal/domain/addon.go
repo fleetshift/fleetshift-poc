@@ -78,6 +78,15 @@ type DeliveryCapability struct {
 func (DeliveryCapability) addonCapability()       {}
 func (DeliveryCapability) CapabilityType() string { return "delivery" }
 
+// IndexCapability declares that the addon provides an index agent
+// for the given target type.
+type IndexCapability struct {
+	TargetType TargetType
+}
+
+func (IndexCapability) addonCapability()       {}
+func (IndexCapability) CapabilityType() string { return "index" }
+
 // ManagedResourceSchema is provided by the workload at connect time.
 // It carries the full schema and fulfillment relation that the platform
 // validates against the declared [ManagedResourceCapability].

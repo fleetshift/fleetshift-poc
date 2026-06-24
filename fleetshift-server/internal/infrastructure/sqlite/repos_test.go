@@ -8,6 +8,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/authmethodrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/edgerepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/managedresourcerepotest"
@@ -118,5 +119,17 @@ func TestAuthMethodRepo(t *testing.T) {
 	authmethodrepotest.Run(t, func(t *testing.T) domain.AuthMethodRepository {
 		db := sqlite.OpenTestDB(t)
 		return &sqlite.AuthMethodRepo{DB: db}
+	})
+}
+
+func TestEdgeRepo(t *testing.T) {
+	edgerepotest.Run(t, func(t *testing.T) domain.EdgeRepository {
+		store := beginTestTx(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { tx.Rollback() })
+		return tx.Edges()
 	})
 }

@@ -33,13 +33,30 @@ func (r *InventoryRepo) Create(ctx context.Context, item domain.InventoryItem) e
 		srcDeliveryID = &id
 	}
 
+	var observedAt *string
+	if s.ObservedAt != nil {
+		oa := s.ObservedAt.UTC().Format(time.RFC3339)
+		observedAt = &oa
+	}
+
+	observed := s.Observed
+	if observed == nil {
+		observed = json.RawMessage("{}")
+	}
+
+	conditions, err := marshalConditions(s.Conditions)
+	if err != nil {
+		return fmt.Errorf("marshal conditions: %w", err)
+	}
+
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at, target_id, observed_at, observed, conditions)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 		s.ID, s.Type, s.Name,
 		string(props), string(labels), srcDeliveryID,
 		s.CreatedAt.UTC().Format(time.RFC3339),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
+		s.TargetID, observedAt, string(observed), string(conditions),
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -67,20 +84,41 @@ func (r *InventoryRepo) CreateOrUpdate(ctx context.Context, item domain.Inventor
 		srcDeliveryID = &id
 	}
 
+	var observedAt *string
+	if s.ObservedAt != nil {
+		oa := s.ObservedAt.UTC().Format(time.RFC3339)
+		observedAt = &oa
+	}
+
+	observed := s.Observed
+	if observed == nil {
+		observed = json.RawMessage("{}")
+	}
+
+	conditions, err := marshalConditions(s.Conditions)
+	if err != nil {
+		return fmt.Errorf("marshal conditions: %w", err)
+	}
+
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		`INSERT INTO inventory_items (id, type, name, properties, labels, source_delivery_id, created_at, updated_at, target_id, observed_at, observed, conditions)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 		 ON CONFLICT(id) DO UPDATE SET
 		   type = EXCLUDED.type,
 		   name = EXCLUDED.name,
 		   properties = EXCLUDED.properties,
 		   labels = EXCLUDED.labels,
 		   source_delivery_id = EXCLUDED.source_delivery_id,
-		   updated_at = EXCLUDED.updated_at`,
+		   updated_at = EXCLUDED.updated_at,
+		   target_id = EXCLUDED.target_id,
+		   observed_at = EXCLUDED.observed_at,
+		   observed = EXCLUDED.observed,
+		   conditions = EXCLUDED.conditions`,
 		s.ID, s.Type, s.Name,
 		string(props), string(labels), srcDeliveryID,
 		s.CreatedAt.UTC().Format(time.RFC3339),
 		s.UpdatedAt.UTC().Format(time.RFC3339),
+		s.TargetID, observedAt, string(observed), string(conditions),
 	)
 	if err != nil {
 		return fmt.Errorf("upsert inventory item: %w", err)
@@ -90,7 +128,7 @@ func (r *InventoryRepo) CreateOrUpdate(ctx context.Context, item domain.Inventor
 
 func (r *InventoryRepo) Get(ctx context.Context, id domain.InventoryItemID) (domain.InventoryItem, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at
+		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at, target_id, observed_at, observed, conditions
 		 FROM inventory_items WHERE id = $1`,
 		id,
 	)
@@ -99,13 +137,13 @@ func (r *InventoryRepo) Get(ctx context.Context, id domain.InventoryItemID) (dom
 
 func (r *InventoryRepo) List(ctx context.Context) ([]domain.InventoryItem, error) {
 	return r.queryItems(ctx,
-		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at
+		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at, target_id, observed_at, observed, conditions
 		 FROM inventory_items`)
 }
 
 func (r *InventoryRepo) ListByType(ctx context.Context, t domain.InventoryType) ([]domain.InventoryItem, error) {
 	return r.queryItems(ctx,
-		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at
+		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at, target_id, observed_at, observed, conditions
 		 FROM inventory_items WHERE type = $1`,
 		t)
 }
@@ -127,12 +165,29 @@ func (r *InventoryRepo) Update(ctx context.Context, item domain.InventoryItem) e
 		srcDeliveryID = &id
 	}
 
+	var observedAt *string
+	if s.ObservedAt != nil {
+		oa := s.ObservedAt.UTC().Format(time.RFC3339)
+		observedAt = &oa
+	}
+
+	observed := s.Observed
+	if observed == nil {
+		observed = json.RawMessage("{}")
+	}
+
+	conditions, err := marshalConditions(s.Conditions)
+	if err != nil {
+		return fmt.Errorf("marshal conditions: %w", err)
+	}
+
 	res, err := r.DB.ExecContext(ctx,
 		`UPDATE inventory_items
-		 SET type = $1, name = $2, properties = $3, labels = $4, source_delivery_id = $5, updated_at = $6
-		 WHERE id = $7`,
+		 SET type = $1, name = $2, properties = $3, labels = $4, source_delivery_id = $5, updated_at = $6, target_id = $7, observed_at = $8, observed = $9, conditions = $10
+		 WHERE id = $11`,
 		s.Type, s.Name, string(props), string(labels), srcDeliveryID,
-		s.UpdatedAt.UTC().Format(time.RFC3339), s.ID,
+		s.UpdatedAt.UTC().Format(time.RFC3339), s.TargetID, observedAt, string(observed), string(conditions),
+		s.ID,
 	)
 	if err != nil {
 		return fmt.Errorf("update inventory item: %w", err)
@@ -175,9 +230,10 @@ func scanInventoryItem(s scanner) (domain.InventoryItem, error) {
 func scanInventoryItemSnapshot(s scanner) (domain.InventoryItemSnapshot, error) {
 	var snap domain.InventoryItemSnapshot
 	var id, itemType, name, propsJSON, labelsJSON, createdAtStr, updatedAtStr string
-	var srcDeliveryID sql.NullString
+	var targetID, observedJSON, conditionsJSON string
+	var srcDeliveryID, observedAtStr sql.NullString
 
-	if err := s.Scan(&id, &itemType, &name, &propsJSON, &labelsJSON, &srcDeliveryID, &createdAtStr, &updatedAtStr); err != nil {
+	if err := s.Scan(&id, &itemType, &name, &propsJSON, &labelsJSON, &srcDeliveryID, &createdAtStr, &updatedAtStr, &targetID, &observedAtStr, &observedJSON, &conditionsJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return snap, domain.ErrNotFound
 		}
@@ -204,5 +260,57 @@ func scanInventoryItemSnapshot(s scanner) (domain.InventoryItemSnapshot, error) 
 		return snap, fmt.Errorf("parse updated_at: %w", err)
 	}
 	snap.UpdatedAt = t
+
+	if targetID != "" {
+		snap.TargetID = domain.TargetID(targetID)
+	}
+	if observedAtStr.Valid {
+		oa, err := time.Parse(time.RFC3339, observedAtStr.String)
+		if err != nil {
+			return snap, fmt.Errorf("parse observed_at: %w", err)
+		}
+		snap.ObservedAt = &oa
+	}
+	if observedJSON != "" {
+		snap.Observed = json.RawMessage(observedJSON)
+	}
+	if conditionsJSON != "" && conditionsJSON != "[]" {
+		if err := json.Unmarshal([]byte(conditionsJSON), &snap.Conditions); err != nil {
+			return snap, fmt.Errorf("unmarshal conditions: %w", err)
+		}
+	}
+
 	return snap, nil
+}
+
+func marshalConditions(conditions []domain.InventoryCondition) (json.RawMessage, error) {
+	if conditions == nil {
+		return json.RawMessage("[]"), nil
+	}
+	data, err := json.Marshal(conditions)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(data), nil
+}
+
+func (r *InventoryRepo) DeleteByTarget(ctx context.Context, targetID domain.TargetID) error {
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM inventory_items WHERE target_id = $1`, targetID)
+	if err != nil {
+		return fmt.Errorf("delete items by target: %w", err)
+	}
+	return nil
+}
+
+func (r *InventoryRepo) ReplaceByTargetAndType(ctx context.Context, targetID domain.TargetID, t domain.InventoryType, items []domain.InventoryItem) error {
+	_, err := r.DB.ExecContext(ctx, `DELETE FROM inventory_items WHERE target_id = $1 AND type = $2`, targetID, t)
+	if err != nil {
+		return fmt.Errorf("delete for replace: %w", err)
+	}
+	for _, item := range items {
+		if err := r.Create(ctx, item); err != nil {
+			return fmt.Errorf("insert replacement: %w", err)
+		}
+	}
+	return nil
 }

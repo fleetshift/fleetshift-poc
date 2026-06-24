@@ -27,16 +27,10 @@ import (
 	"github.com/cschleiden/go-workflows/worker"
 	"github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
 	"github.com/spf13/cobra"
-	"sigs.k8s.io/kind/pkg/cluster"
-	kindlog "sigs.k8s.io/kind/pkg/log"
-
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
-	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
-	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	kubernetesaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
@@ -157,6 +151,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
+	var oidcHTTPClient *http.Client
+	if oidcCABundle != nil {
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		pool.AppendCertsFromPEM(oidcCABundle)
+		oidcHTTPClient = &http.Client{
+			Transport: &http.Transport{
+				TLSClientConfig: &tls.Config{RootCAs: pool},
+			},
+		}
+	}
+
 	enabledAddons := parseAddons(f.addons)
 	logger.Info("enabled addons", "addons", slices.Sorted(maps.Keys(enabledAddons)))
 
@@ -194,76 +202,41 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		)),
 	)
 
+	keyResolver := &domain.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
+		},
+	}
+
 	// --- construct addon agents ---
 	//
 	// Agent construction stays here because agents have external
 	// dependencies (Docker, AWS creds, etc.) that the addon manager
 	// should not own. Registration with the router and targets happens
 	// later via AddonManager.Connect / RegisterTarget.
-
-	var kindAgent domain.DeliveryAgent
-	if enabledAddons["kind"] {
-		kindOpts := []kindaddon.AgentOption{
-			kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
-		}
-		if tempDir := os.Getenv("KIND_TEMP_DIR"); tempDir != "" {
-			kindOpts = append(kindOpts, kindaddon.WithTempDir(tempDir))
-			logger.Info("kind agent: using temp dir " + tempDir)
-		}
-		if oidcCABundle != nil {
-			kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
-		}
-		if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
-			kindOpts = append(kindOpts, kindaddon.WithContainerHost(containerHost))
-			logger.Info("kind agent: rewriting localhost OIDC issuer URLs to " + containerHost)
-		}
-		if httpsPort := os.Getenv("OIDC_HTTPS_PORT"); httpsPort != "" {
-			kindOpts = append(kindOpts, kindaddon.WithOIDCHTTPSPort(httpsPort))
-			logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
-		}
-		kindAgent = kindaddon.NewAgent(
-			deliveryReporter,
-			func(logger kindlog.Logger) kindaddon.ClusterProvider {
-				var opts []cluster.ProviderOption
-				if logger != nil {
-					opts = append(opts, cluster.ProviderWithLogger(logger))
-				}
-				return cluster.NewProvider(opts...)
-			},
-			kindOpts...,
-		)
+	addons, err := constructAddons(ctx, enabledAddons, f, logger, deliveryReporter, store, vault, keyResolver, oidcHTTPClient, oidcCABundle)
+	if err != nil {
+		return err
 	}
 
-	var gcphcpAgent domain.DeliveryAgent
-	var gcphcpConcreteAgent *gcphcpaddon.Agent
-	var gcphcpCfg gcphcpaddon.Config
-	if enabledAddons["gcphcp"] {
-		configPath := f.gcphcpConfig
-		if configPath == "" {
-			configPath = os.Getenv("GCPHCP_CONFIG")
-		}
-		if configPath != "" {
-			var err error
-			gcphcpCfg, err = gcphcpaddon.ParseConfig(configPath)
-			if err != nil {
-				return fmt.Errorf("parse gcphcp config: %w", err)
-			}
-			gcphcpConcreteAgent = gcphcpaddon.NewAgent(gcphcpaddon.AgentDeps{
-				Gateway:  gcphcpCfg.Gateway,
-				Observer: gcphcpaddon.NewSlogAgentObserver(logger),
-				Reporter: deliveryReporter,
-			})
-			gcphcpAgent = gcphcpConcreteAgent
-		} else {
-			logger.Warn("gcphcp addon enabled but no config provided, skipping")
-			delete(enabledAddons, "gcphcp")
-		}
+	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:           router,
+		TypeSvc:          typeSvc,
+		Activator:        nil, // set later after dynamic service infrastructure
+		InventoryCleanup: &application.InventoryCleanupService{Store: store},
+	})
+
+	orchOpts := []domain.OrchestrationWorkflowOption{
+		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
+		domain.WithVault(vault),
+		domain.WithTargetObserver(addonMgr),
 	}
 
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
 		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
-		domain.WithVault(vault),
+		orchOpts...,
 	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -334,20 +307,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- auth infrastructure ---
 
-	var oidcHTTPClient *http.Client
-	if oidcCABundle != nil {
-		pool, err := x509.SystemCertPool()
-		if err != nil {
-			pool = x509.NewCertPool()
-		}
-		pool.AppendCertsFromPEM(oidcCABundle)
-		oidcHTTPClient = &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{RootCAs: pool},
-			},
-		}
-	}
-
 	discoveryClient := oidc.NewDiscoveryClient(oidcHTTPClient)
 
 	var verifierOpts []oidc.VerifierOption
@@ -366,9 +325,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		CreateDeployment: createWf,
 		EventSink:        setupHub,
 	}
+	// TODO: change in future to support multiple gcphcp targets
 	var gcphcpTargetID string
 	if enabledAddons["gcphcp"] {
-		gcphcpTargetID = gcphcpCfg.Targets[0].ID
+		gcphcpTargetID = addons.gcphcpCfg.Targets[0].ID
 	}
 	if placement := buildTrustBundlePlacement(enabledAddons, gcphcpTargetID); placement.Type != "" {
 		provSpec.TrustBundlePlacement = placement
@@ -399,12 +359,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- application services ---
 
-	keyResolver := &domain.KeyResolver{
-		Registries: domain.BuiltInKeyRegistries(),
-		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
-			domain.KeyRegistryTypeGitHub: &keyregistry.GitHubClient{},
-		},
-	}
 	provenanceSvc := &domain.ProvenanceService{
 		KeyResolver: keyResolver,
 		AuthMethods: authMethodRepo,
@@ -452,20 +406,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		ProvenanceSvc: provenanceSvc,
 	}
 
-	// --- kubernetes delivery agent ---
-
-	var kubeAgent domain.DeliveryAgent
-	if enabledAddons["kubernetes"] {
-		kubeAgentOpts := []kubernetesaddon.AgentOption{
-			kubernetesaddon.WithKeyResolver(keyResolver),
-			kubernetesaddon.WithVault(vault),
-		}
-		if oidcHTTPClient != nil {
-			kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
-		}
-		kubeAgent = kubernetesaddon.NewAgent(deliveryReporter, kubeAgentOpts...)
-	}
-
 	// --- dynamic service infrastructure ---
 
 	dynamicMux := managedresource.NewDynamicServiceMux()
@@ -476,6 +416,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		grpc.ChainStreamInterceptor(authnInterceptor.Stream()),
 		grpc.UnknownServiceHandler(dynamicMux.Handle),
 	)
+
 	pb.RegisterDeploymentServiceServer(grpcServer, &transportgrpc.DeploymentServer{
 		Deployments: deploymentSvc,
 	})
@@ -549,7 +490,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- addon lifecycle ---
 
-	typeSvc := &application.ManagedResourceTypeService{Store: store}
+	// Wire the schema activator into the AddonManager created earlier
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
@@ -559,27 +500,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			Validator: specValidator,
 		},
 	}
-	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
-		Router:    router,
-		TypeSvc:   typeSvc,
-		Activator: activator,
-	})
+	addonMgr.SetActivator(activator)
 
-	// Phase 2: enable addons — records capabilities, no API surface yet.
-	if enabledAddons["kind"] {
-		if err := addonMgr.Enable(ctx, kindaddon.Descriptor()); err != nil {
-			return fmt.Errorf("enable kind addon: %w", err)
-		}
-	}
-	if enabledAddons["kubernetes"] {
-		if err := addonMgr.Enable(ctx, kubernetesaddon.Descriptor()); err != nil {
-			return fmt.Errorf("enable kubernetes addon: %w", err)
-		}
-	}
-	if enabledAddons["gcphcp"] {
-		if err := addonMgr.Enable(ctx, gcphcpaddon.Descriptor()); err != nil {
-			return fmt.Errorf("enable gcphcp addon: %w", err)
-		}
+	// Phase 2 (Defined → Enabled): authorize addons and record capability
+	// expectations. For backend capabilities (delivery agents, managed
+	// resource schemas), the capability is recorded but not yet activated —
+	// runtime assets come later at Connect.
+	if err := enableAddons(ctx, addonMgr, enabledAddons); err != nil {
+		return err
 	}
 
 	// --- start ---
@@ -598,58 +526,18 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}()
 
-	// Phase 3: connect addons — schemas compiled, delivery agents
-	// registered, targets seeded. Happens AFTER the servers are serving
-	// so the DynamicServiceMux can dispatch immediately.
-	if enabledAddons["kind"] {
-		if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
-			Agent: kindAgent,
-			Targets: []domain.TargetInfo{domain.NewTargetInfo(
-				"kind-local",
-				kindaddon.TargetType,
-				"Local Kind Provider",
-				domain.TargetStateReady,
-				nil,
-				nil,
-				[]domain.ResourceType{kindaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			)},
-			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
-		}); err != nil {
-			return fmt.Errorf("connect kind addon: %w", err)
-		}
+	// Phase 3 (Enabled → Connected): addon workloads provide runtime
+	// assets — delivery agents, managed resource schemas, and target
+	// definitions. Schemas are compiled, delivery agents registered in the
+	// router, targets seeded. Happens AFTER the servers are serving so the
+	// DynamicServiceMux can dispatch immediately.
+	if err := connectAddons(ctx, addonMgr, enabledAddons, addons, logger); err != nil {
+		return err
 	}
 
-	if enabledAddons["kubernetes"] {
-		if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
-			Agent: kubeAgent,
-		}); err != nil {
-			return fmt.Errorf("connect kubernetes addon: %w", err)
-		}
-	}
-
-	if enabledAddons["gcphcp"] {
-		activeTarget := gcphcpCfg.Targets[0]
-		targetID := domain.TargetID(activeTarget.ID)
-		if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
-			Agent: gcphcpAgent,
-			Targets: []domain.TargetInfo{domain.NewTargetInfo(
-				targetID,
-				gcphcpaddon.TargetType,
-				fmt.Sprintf("GCP HCP %s/%s", activeTarget.GCPProject, activeTarget.Region),
-				domain.TargetStateReady,
-				nil,
-				activeTarget.TargetProperties(),
-				[]domain.ResourceType{gcphcpaddon.ClusterResourceType, domain.TrustBundleResourceType},
-			)},
-			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
-		}); err != nil {
-			return fmt.Errorf("connect gcphcp addon: %w", err)
-		}
-		if gcphcpConcreteAgent != nil {
-			if err := gcphcpConcreteAgent.RecoverActiveDeliveries(ctx, []domain.TargetID{targetID}); err != nil {
-				logger.Error("gcphcp: failed to recover active deliveries", "error", err)
-			}
-		}
+	// Recover targets AFTER addons are connected (IndexAgents must be registered first)
+	if err := orchSpec.RecoverTargets(ctx); err != nil {
+		logger.Error("target recovery errors", "error", err)
 	}
 
 	// --- shutdown ---
@@ -661,6 +549,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return err
 	}
 
+	shutdownAddons(addons)
 	grpcServer.GracefulStop()
 
 	workerCancel()
@@ -757,37 +646,6 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
-}
-
-func parseAddons(spec string) map[string]bool {
-	addons := make(map[string]bool)
-	if spec == "" {
-		return addons
-	}
-	for _, a := range strings.Split(spec, ",") {
-		a = strings.TrimSpace(a)
-		if a != "" {
-			addons[a] = true
-		}
-	}
-	return addons
-}
-
-func buildTrustBundlePlacement(enabledAddons map[string]bool, gcphcpTargetID string) domain.PlacementStrategySpec {
-	targets := make([]domain.TargetID, 0, 2)
-	if enabledAddons["kind"] {
-		targets = append(targets, "kind-local")
-	}
-	if enabledAddons["gcphcp"] && gcphcpTargetID != "" {
-		targets = append(targets, domain.TargetID(gcphcpTargetID))
-	}
-	if len(targets) == 0 {
-		return domain.PlacementStrategySpec{}
-	}
-	return domain.PlacementStrategySpec{
-		Type:    domain.PlacementStrategyStatic,
-		Targets: targets,
-	}
 }
 
 func resolveDatabaseURLFile(f *serveFlags) error {
