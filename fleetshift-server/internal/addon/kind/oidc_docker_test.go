@@ -274,7 +274,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		kubeReporter := newChannelReporter()
 		store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 
-		kubeMgr := kubeaddon.NewManager(
+		kubeMgr := kubeaddon.NewAgentPool(
 			context.Background(),
 			store,
 			nil,

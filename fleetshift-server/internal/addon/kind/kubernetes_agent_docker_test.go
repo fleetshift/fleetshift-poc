@@ -43,10 +43,10 @@ func (mockInventoryWriter) Resync(_ context.Context, _ domain.TargetID, _ domain
 // newTestManager creates a kubernetes Manager with no-op inventory,
 // nil vault, and the given reporter. Use this for delivery-only tests
 // that don't need vault-backed credential resolution or real indexing.
-func newTestManager(t *testing.T, reporter domain.DeliveryReporter) *kubeaddon.Manager {
+func newTestManager(t *testing.T, reporter domain.DeliveryReporter) *kubeaddon.AgentPool {
 	t.Helper()
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
-	mgr := kubeaddon.NewManager(
+	mgr := kubeaddon.NewAgentPool(
 		context.Background(),
 		store,
 		nil,
@@ -330,7 +330,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		// Real vault + keyResolver + httpClient — unlike newTestManager,
 		// this test exercises vault-backed credential resolution and
 		// attestation verification.
-		mgr := kubeaddon.NewManager(
+		mgr := kubeaddon.NewAgentPool(
 			context.Background(),
 			store,
 			vault,
