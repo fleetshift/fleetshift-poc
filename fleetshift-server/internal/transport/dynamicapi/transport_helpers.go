@@ -15,6 +15,8 @@ import (
 )
 
 // ToStatusError maps well-known domain errors to gRPC status codes.
+// It also preserves context cancellation/deadline semantics and passes
+// through errors that are already gRPC status errors.
 func ToStatusError(err error) error {
 	switch {
 	case errors.Is(err, domain.ErrNotFound):
@@ -25,9 +27,15 @@ func ToStatusError(err error) error {
 		return status.Error(codes.Aborted, err.Error())
 	case errors.Is(err, domain.ErrInvalidArgument):
 		return status.Error(codes.InvalidArgument, err.Error())
-	default:
-		return status.Error(codes.Internal, "internal error")
+	case errors.Is(err, context.Canceled):
+		return status.Error(codes.Canceled, err.Error())
+	case errors.Is(err, context.DeadlineExceeded):
+		return status.Error(codes.DeadlineExceeded, err.Error())
 	}
+	if st, ok := status.FromError(err); ok {
+		return st.Err()
+	}
+	return status.Error(codes.Internal, "internal error")
 }
 
 // GRPCContext returns a context that forwards the HTTP Authorization
@@ -63,7 +71,7 @@ func HTTPError(w http.ResponseWriter, code codes.Code, msg string) {
 		httpCode = http.StatusBadRequest
 	case codes.NotFound:
 		httpCode = http.StatusNotFound
-	case codes.AlreadyExists:
+	case codes.AlreadyExists, codes.Aborted:
 		httpCode = http.StatusConflict
 	}
 	http.Error(w, msg, httpCode)
