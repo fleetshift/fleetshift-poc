@@ -228,6 +228,7 @@ Core edge types shipped with the kubernetes addon:
 | `ownedBy` | any resource | its controlling owner | controlling `ownerReference`, walked recursively up the controller chain |
 | `runsOn` | Pod | Node | `spec.nodeName` |
 | `attachedTo` | Pod | Secret, ConfigMap, PVC | scanning `spec.volumes`, `spec.containers[].env`, `spec.containers[].envFrom` |
+| `attachedTo` | PVC | PV | `spec.volumeName` |
 | `selects` | Service | Pod | label selector matching against known Pods |
 
 ### Recursive owner traversal
@@ -385,7 +386,7 @@ Resources with a `SchemaEntry` get additional extraction:
 
 - **JSONPath field extractions**: named fields with JSONPath expressions and data type coercion (unchanged from current behavior)
 - **ComputeExtra hook**: optional function for computed properties that JSONPath cannot express
-- **ComputeEdges hook**: optional function for type-specific edge building (core `ownedBy` edges are automatic)
+- **BuildEdges hook**: optional function for type-specific edge building (core `ownedBy` edges are automatic)
 - **Annotation extraction**: opt-in via `ExtractAnnotations` flag, with a configurable size cap per value (default 64 chars). `kubectl.kubernetes.io/last-applied-configuration` is always stripped.
 
 ## Schema and field extraction
@@ -419,11 +420,11 @@ Two-tier extraction converts an unstructured Kubernetes resource into a domain `
 5. *(enriched)* Extract annotations if `ExtractAnnotations` is true, with size cap and noise stripping
 6. *(enriched)* Run `ComputeExtra` hook if present (e.g., pod status computation, container lists)
 7. Build the item with ID `targetID/UID`, name, labels, the computed inventory type, and the extracted fields
-8. *(enriched)* Store `ComputeEdges` closure for edge computation at flush time
+8. *(enriched)* Store `BuildEdges` closure for edge computation at flush time
 
 ### Default schema
 
-The default schema provides enriched extraction for core Kubernetes resource types: workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs), pods, services, nodes, namespaces, storage (PVCs, PVs), and configuration (ConfigMaps, Secrets). For most types, key status fields and replica counts are extracted. Nodes and pods include `ComputeExtra` hooks for computed properties (node addresses, pod status). Pods and services include `ComputeEdges` hooks for type-specific edges (`runsOn`, `attachedTo`, `selects`). ConfigMaps and Secrets are indexed for identity and labels only — no enriched fields are extracted.
+The default schema provides enriched extraction for core Kubernetes resource types: workloads (Deployments, StatefulSets, DaemonSets, ReplicaSets, Jobs, CronJobs), pods, services, nodes, namespaces, storage (PVCs, PVs), and configuration (ConfigMaps, Secrets). For most types, key status fields and replica counts are extracted. Nodes and pods include `ComputeExtra` hooks for computed properties (node addresses, pod status). Pods, services, and PVCs include `BuildEdges` hooks for type-specific edges (`runsOn`, `attachedTo`, `selects`). ConfigMaps and Secrets are indexed for identity and labels only — no enriched fields are extracted.
 
 All other resources discovered on the cluster receive base extraction only — metadata, GVR, labels, conditions — without any schema entry.
 
