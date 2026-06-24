@@ -73,6 +73,8 @@ func HTTPError(w http.ResponseWriter, code codes.Code, msg string) {
 		httpCode = http.StatusNotFound
 	case codes.AlreadyExists, codes.Aborted:
 		httpCode = http.StatusConflict
+	case codes.PermissionDenied:
+		httpCode = http.StatusForbidden
 	}
 	http.Error(w, msg, httpCode)
 }
