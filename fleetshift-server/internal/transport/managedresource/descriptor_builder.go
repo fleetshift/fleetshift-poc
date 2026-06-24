@@ -14,6 +14,8 @@ import (
 	// protoregistry.GlobalFiles so the dynamic descriptor builder
 	// can resolve the Provenance message type.
 	_ "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
 // ServiceDescriptors holds the compiled descriptors for a dynamically-built
@@ -113,7 +115,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	// Build a file registry containing the spec's file and its dependencies
 	// so protodesc can resolve cross-file references.
 	files := new(protoregistry.Files)
-	if err := registerFileAndDeps(files, specFile); err != nil {
+	if err := dynamicapi.RegisterFileAndDeps(files, specFile); err != nil {
 		return nil, fmt.Errorf("register spec file deps: %w", err)
 	}
 
@@ -122,7 +124,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	if err != nil {
 		return nil, fmt.Errorf("find timestamp.proto: %w", err)
 	}
-	if err := registerFileAndDeps(files, tsFile); err != nil {
+	if err := dynamicapi.RegisterFileAndDeps(files, tsFile); err != nil {
 		return nil, fmt.Errorf("register timestamp deps: %w", err)
 	}
 
@@ -131,7 +133,7 @@ func BuildServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoreflect.Mess
 	if err != nil {
 		return nil, fmt.Errorf("find attestation.proto: %w", err)
 	}
-	if err := registerFileAndDeps(files, attestFile); err != nil {
+	if err := dynamicapi.RegisterFileAndDeps(files, attestFile); err != nil {
 		return nil, fmt.Errorf("register attestation deps: %w", err)
 	}
 
@@ -166,19 +168,19 @@ func buildResourceMessage(singular, pkg, specFullName, resourceStateEnumName str
 			buildResourceStateEnum(resourceStateEnumName),
 		},
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
-			stringField("uid", 2),
-			messageField("spec", 3, specFullName),
+			dynamicapi.StringField("name", 1),
+			dynamicapi.StringField("uid", 2),
+			dynamicapi.MessageField("spec", 3, specFullName),
 			int64Field("intent_version", 4),
 			enumField("state", 5, pkg+"."+singular+"."+resourceStateEnumName),
 			boolField("reconciling", 6),
-			messageField("create_time", 7, "google.protobuf.Timestamp"),
-			messageField("update_time", 8, "google.protobuf.Timestamp"),
-			messageField("delete_time", 9, "google.protobuf.Timestamp"),
-			stringField("etag", 10),
-			messageField("provenance", 11, "fleetshift.v1.Provenance"),
+			dynamicapi.MessageField("create_time", 7, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("update_time", 8, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("delete_time", 9, "google.protobuf.Timestamp"),
+			dynamicapi.StringField("etag", 10),
+			dynamicapi.MessageField("provenance", 11, "fleetshift.v1.Provenance"),
 			int64Field("generation", 12),
-			stringField("pause_reason", 13),
+			dynamicapi.StringField("pause_reason", 13),
 		},
 	}
 }
@@ -187,10 +189,10 @@ func buildCreateRequest(singular, lower, resourceFQN string) *descriptorpb.Descr
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Create" + singular + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField(lower+"_id", 1),
-			messageField(lower, 2, resourceFQN),
+			dynamicapi.StringField(lower+"_id", 1),
+			dynamicapi.MessageField(lower, 2, resourceFQN),
 			bytesField("user_signature", 3),
-			messageField("valid_until", 4, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("valid_until", 4, "google.protobuf.Timestamp"),
 		},
 	}
 }
@@ -199,7 +201,7 @@ func buildGetRequest(singular string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Get" + singular + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
+			dynamicapi.StringField("name", 1),
 		},
 	}
 }
@@ -208,8 +210,8 @@ func buildListRequest(plural string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("List" + plural + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			int32Field("page_size", 1),
-			stringField("page_token", 2),
+			dynamicapi.Int32Field("page_size", 1),
+			dynamicapi.StringField("page_token", 2),
 		},
 	}
 }
@@ -218,8 +220,8 @@ func buildListResponse(singular, plural, collectionID, resourceFQN string) *desc
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("List" + plural + "Response"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			repeatedMessageField(collectionID, 1, resourceFQN),
-			stringField("next_page_token", 2),
+			dynamicapi.RepeatedMessageField(collectionID, 1, resourceFQN),
+			dynamicapi.StringField("next_page_token", 2),
 		},
 	}
 }
@@ -228,7 +230,7 @@ func buildDeleteRequest(singular string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Delete" + singular + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
+			dynamicapi.StringField("name", 1),
 		},
 	}
 }
@@ -237,10 +239,10 @@ func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Resume" + singular + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
+			dynamicapi.StringField("name", 1),
 			bytesField("user_signature", 2),
-			messageField("valid_until", 3, "google.protobuf.Timestamp"),
-			stringField("etag", 4),
+			dynamicapi.MessageField("valid_until", 3, "google.protobuf.Timestamp"),
+			dynamicapi.StringField("etag", 4),
 			int64Field("expected_generation", 5),
 		},
 	}
@@ -309,31 +311,13 @@ func enumField(name string, number int32, typeName string) *descriptorpb.FieldDe
 	}
 }
 
-// --- field builder helpers ---
-
-func stringField(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
+// --- extension-only field builder helpers ---
 
 func bytesField(name string, number int32) *descriptorpb.FieldDescriptorProto {
 	return &descriptorpb.FieldDescriptorProto{
 		Name:   proto.String(name),
 		Number: proto.Int32(number),
 		Type:   descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
-
-func int32Field(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_INT32.Enum(),
 		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 	}
 }
@@ -354,47 +338,4 @@ func boolField(name string, number int32) *descriptorpb.FieldDescriptorProto {
 		Type:   descriptorpb.FieldDescriptorProto_TYPE_BOOL.Enum(),
 		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 	}
-}
-
-func messageField(name string, number int32, typeName string) *descriptorpb.FieldDescriptorProto {
-	fqn := typeName
-	if !strings.HasPrefix(fqn, ".") {
-		fqn = "." + fqn
-	}
-	return &descriptorpb.FieldDescriptorProto{
-		Name:     proto.String(name),
-		Number:   proto.Int32(number),
-		Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
-		TypeName: proto.String(fqn),
-		Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
-
-func repeatedMessageField(name string, number int32, typeName string) *descriptorpb.FieldDescriptorProto {
-	fqn := typeName
-	if !strings.HasPrefix(fqn, ".") {
-		fqn = "." + fqn
-	}
-	return &descriptorpb.FieldDescriptorProto{
-		Name:     proto.String(name),
-		Number:   proto.Int32(number),
-		Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
-		TypeName: proto.String(fqn),
-		Label:    descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
-	}
-}
-
-func registerFileAndDeps(files *protoregistry.Files, fd protoreflect.FileDescriptor) error {
-	// Already registered?
-	if _, err := files.FindFileByPath(string(fd.Path())); err == nil {
-		return nil
-	}
-	// Register dependencies first.
-	for i := range fd.Imports().Len() {
-		dep := fd.Imports().Get(i).FileDescriptor
-		if err := registerFileAndDeps(files, dep); err != nil {
-			return err
-		}
-	}
-	return files.RegisterFile(fd)
 }

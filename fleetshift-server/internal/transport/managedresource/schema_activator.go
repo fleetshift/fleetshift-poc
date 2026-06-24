@@ -12,12 +12,15 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
 // DynamicSchemaActivator implements [application.SchemaActivator] by
 // compiling proto from inline sources, building a dynamic gRPC service,
-// and registering it in the [DynamicServiceMux], [DynamicHTTPMux], and
-// [DynamicFileRegistry] (for gRPC reflection).
+// and registering it in the [dynamicapi.DynamicServiceMux],
+// [dynamicapi.DynamicHTTPMux], and [dynamicapi.DynamicFileRegistry]
+// (for gRPC reflection).
 //
 // It keeps a content hash per service so that repeated Activate calls
 // with unchanged schemas skip recompilation. When the schema content
@@ -29,19 +32,19 @@ import (
 // # Platform API version
 //
 // Platform-canonical services use the activator-selected platform API
-// version (defaulting to [PlatformAPIVersion]). Extension
+// version (defaulting to [platformresource.APIVersion]). Extension
 // [domain.ManagedResourceSchema.Version] applies only to the extension's
 // own transport surface; it does not control the platform route or gRPC
 // identity for the shared collection.
 type DynamicSchemaActivator struct {
-	GRPCMux      *DynamicServiceMux
-	HTTPMux      *DynamicHTTPMux
-	FileRegistry *DynamicFileRegistry
+	GRPCMux      *dynamicapi.DynamicServiceMux
+	HTTPMux      *dynamicapi.DynamicHTTPMux
+	FileRegistry *dynamicapi.DynamicFileRegistry
 	Deps         Deps
-	PlatformDeps PlatformDeps
+	PlatformDeps platformresource.Deps
 	// PlatformVersion optionally overrides the platform HTTP API version
 	// used for platform-canonical registrations. If empty,
-	// [PlatformAPIVersion] is used.
+	// [platformresource.APIVersion] is used.
 	PlatformVersion string
 
 	mu     sync.Mutex
@@ -114,7 +117,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		return "", err
 	}
 
-	specDesc, err := CompileInline(
+	specDesc, err := dynamicapi.CompileInline(
 		ctx,
 		schema.ProtoFiles,
 		entryFile,
@@ -125,7 +128,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	}
 
 	cfg := &ResourceTypeConfig{
-		CollectionConfig: CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
@@ -159,9 +162,13 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	// Either new or changed — register or atomically replace.
 	oldReg, alreadyRegistered := a.regs[serviceName]
 	if alreadyRegistered {
-		a.GRPCMux.Replace(svc)
+		a.GRPCMux.ReplaceDesc(svc.Desc)
 		if a.HTTPMux != nil {
-			a.HTTPMux.Replace(svc, oldReg.httpPrefix)
+			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), oldReg.httpPrefix)
+			a.HTTPMux.ReplacePrefixHandler(reg.httpPrefix, handler)
+			if oldReg.httpPrefix != reg.httpPrefix {
+				a.HTTPMux.DeregisterByPrefix(oldReg.httpPrefix)
+			}
 		}
 		if a.FileRegistry != nil {
 			if oldReg.descriptorPath != reg.descriptorPath {
@@ -170,11 +177,13 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 			a.FileRegistry.Replace(svc.Descriptors.File)
 		}
 	} else {
-		if err := a.GRPCMux.Register(svc); err != nil {
+		if err := a.GRPCMux.RegisterDesc(svc.Desc); err != nil {
 			return "", fmt.Errorf("register gRPC: %w", err)
 		}
 		if a.HTTPMux != nil {
-			if err := a.HTTPMux.Register(svc); err != nil {
+			prefix := svc.Config.CanonicalHTTPPrefix()
+			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), prefix)
+			if err := a.HTTPMux.RegisterPrefixHandler(prefix, handler); err != nil {
 				a.GRPCMux.Deregister(reg.grpcServiceName)
 				return "", fmt.Errorf("register HTTP: %w", err)
 			}
@@ -238,7 +247,7 @@ func (a *DynamicSchemaActivator) platformAPIVersion() string {
 	if a.PlatformVersion != "" {
 		return a.PlatformVersion
 	}
-	return PlatformAPIVersion
+	return platformresource.APIVersion
 }
 
 // platformKeyForCollection returns the refcounting key for a
@@ -246,7 +255,7 @@ func (a *DynamicSchemaActivator) platformAPIVersion() string {
 // required identity field.
 func platformKeyForCollection(collectionID string) string {
 	if collectionID != "" {
-		return PlatformServiceName + "/" + collectionID
+		return platformresource.ServiceName + "/" + collectionID
 	}
 	return ""
 }
@@ -267,8 +276,8 @@ func (a *DynamicSchemaActivator) initPlatformMaps() {
 // service for the schema's collection. Must be called with a.mu held.
 func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ManagedResourceSchema) error {
 	platformVersion := a.platformAPIVersion()
-	platCfg := &PlatformResourceConfig{
-		CollectionConfig: CollectionConfig{
+	platCfg := &platformresource.Config{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      platformVersion,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
@@ -276,7 +285,7 @@ func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ManagedRe
 		},
 	}
 
-	platSvc, err := BuildPlatformService(platCfg, a.PlatformDeps)
+	platSvc, err := platformresource.BuildService(platCfg, a.PlatformDeps)
 	if err != nil {
 		return fmt.Errorf("build: %w", err)
 	}
@@ -292,7 +301,7 @@ func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ManagedRe
 	}
 	if a.HTTPMux != nil {
 		prefix := platCfg.HTTPPrefix()
-		handler := buildPlatformHTTPHandler(platSvc, a.HTTPMux.Conn(), prefix)
+		handler := platformresource.BuildHTTPHandler(platSvc, a.HTTPMux.Conn(), prefix)
 		if err := a.HTTPMux.RegisterPrefixHandler(prefix, handler); err != nil {
 			a.GRPCMux.Deregister(reg.grpcServiceName)
 			return fmt.Errorf("HTTP: %w", err)

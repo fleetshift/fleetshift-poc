@@ -196,8 +196,18 @@ This means a single `ManagedResourceCapability` results in two dynamic gRPC serv
 
 The key components:
 
-- **`DynamicServiceMux`**: wired as the gRPC server's `UnknownServiceHandler`. Requests to services that were not registered at server creation time are routed here. Services can be added, replaced (atomically), or removed at any time. Composite reflection merges dynamic services with statically registered ones so they are discoverable via `grpcurl` and similar tools.
-- **`DynamicHTTPMux`**: wraps an `http.ServeMux` with handler indirection. A stable dispatcher function is registered once per URL prefix; the actual handler is stored in an internal map and swapped atomically on replacement. This avoids Go 1.22's panic on duplicate `ServeMux` pattern registration and provides zero-downtime replacement. HTTP path routing uses the `/apis/{service_name}/{version}/` prefix to differentiate between extension services sharing resource type names.
-- **`DynamicSchemaActivator`**: the `SchemaActivator` implementation in the transport layer. It compiles inline proto, builds the service, and manages registration in both muxes. Content hashing (SHA-256) ensures that unchanged schemas skip recompilation and that changed schemas are atomically replaced rather than deregistered-then-registered. The activator now uses the addon-provided `ProtoPackage` and `ServiceName` rather than hardcoding `fleetshift.v1`.
+These components are split across three packages under `internal/transport/`:
+
+- **`dynamicapi`** (shared leaf): `DynamicServiceMux`, `DynamicHTTPMux`, `DynamicFileRegistry`, the proto compiler, composite reflection, and shared helpers (field builders, timestamp marshaling, HTTP utilities). This package has no knowledge of specific resource types.
+- **`managedresource`** (extension + activator): service builder and gRPC/HTTP handlers for addon-defined extension APIs, plus the `DynamicSchemaActivator` that orchestrates schema compilation and registration.
+- **`platformresource`** (platform): service builder and gRPC/HTTP handlers for platform-canonical resource APIs (`fleetshift.v1.Platform{Singular}Service`).
+
+`dynamicapi` is a pure leaf — both `managedresource` and `platformresource` import it, and `managedresource` imports `platformresource` (the activator registers platform services as a side-effect of extension activation). There are no cycles.
+
+Key runtime components:
+
+- **`DynamicServiceMux`** (`dynamicapi`): wired as the gRPC server's `UnknownServiceHandler`. Requests to services that were not registered at server creation time are routed here. Services can be added, replaced (atomically), or removed at any time. Composite reflection merges dynamic services with statically registered ones so they are discoverable via `grpcurl` and similar tools.
+- **`DynamicHTTPMux`** (`dynamicapi`): wraps an `http.ServeMux` with handler indirection. A stable dispatcher function is registered once per URL prefix; the actual handler is stored in an internal map and swapped atomically on replacement. This avoids Go 1.22's panic on duplicate `ServeMux` pattern registration and provides zero-downtime replacement. HTTP path routing uses the `/apis/{service_name}/{version}/` prefix to differentiate between extension services sharing resource type names.
+- **`DynamicSchemaActivator`** (`managedresource`): the `SchemaActivator` implementation in the transport layer. It compiles inline proto, builds the service, and manages registration in both muxes. Content hashing (SHA-256) ensures that unchanged schemas skip recompilation and that changed schemas are atomically replaced rather than deregistered-then-registered. The activator uses the addon-provided `ProtoPackage` and `ServiceName` rather than hardcoding `fleetshift.v1`.
 
 Proto schemas are transmitted as inline source content at addon connect time (see [addon lifecycle](#addon-lifecycle)). The connect-time schema now specifies the target package (`ProtoPackage`) and service name (`ServiceName`) for the extension service registration. The platform's compiler combines inline sources with a built-in resolver for well-known imports (`google/protobuf/*`, `buf/validate/*`), so addon-defined specs can use `protovalidate` annotations that the platform enforces at the API boundary.

@@ -1,44 +1,19 @@
+// Package managedresource provides in-process proto compilation and dynamic
+// gRPC + HTTP service registration for addon-defined managed resource types.
+// It enables the platform to host typed, AIP-compliant gRPC services
+// without requiring compile-time Go stub generation for each addon type.
+//
+// Platform-canonical resource APIs live in the sibling
+// [platformresource] package. Shared infrastructure (dynamic mux, file
+// registry, compiler, helpers) lives in [dynamicapi].
 package managedresource
 
 import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
-
-// CollectionConfig describes the identity and naming of a resource
-// collection. This is the shared vocabulary between extension and
-// platform APIs that participate in the same identity domain — the
-// CollectionID binds them to the same platform resource type.
-//
-// The relative resource name ({CollectionID}/{id}, e.g. "clusters/foo") is
-// identity-equivalent across all APIs that share a CollectionID. This is
-// how extension resources unify under a single platform identity.
-//
-// See docs/design/architecture/resource_identity_and_api.md for the full
-// two-layer API model and identity semantics.
-//
-// # Current scope
-//
-// The resource hierarchy is currently flat: resource names are
-// {CollectionID}/{leaf_id} with no parent segments. Workspace and tenant
-// scoping will introduce parent collections in the future.
-type CollectionConfig struct {
-	// Version is the HTTP API version segment (e.g. "v1").
-	Version string
-
-	// CollectionID is the AIP collection identifier that establishes
-	// platform identity domain membership (e.g. "clusters").
-	CollectionID string
-
-	// Singular is the PascalCase singular resource name used in RPC
-	// and message names (e.g. "Cluster").
-	Singular string
-
-	// Plural is the PascalCase plural resource name used in List RPC
-	// and message names (e.g. "Clusters").
-	Plural string
-}
 
 // ResourceTypeConfig describes an extension service for a platform resource
 // type. This is the input to the dynamic service builder — it carries
@@ -50,9 +25,9 @@ type CollectionConfig struct {
 // it implements a platform resource type through its own typed API. Multiple
 // extensions can model the same platform resource type (e.g. one manages
 // clusters, another inventories them), each under its own APIServiceName but
-// sharing the same [CollectionConfig.CollectionID].
+// sharing the same [dynamicapi.CollectionConfig.CollectionID].
 type ResourceTypeConfig struct {
-	CollectionConfig
+	dynamicapi.CollectionConfig
 
 	// ResourceType is the addon-scoped domain identifier used for
 	// internal dispatch (e.g. "kind.fleetshift.io/Cluster"). Per
@@ -117,46 +92,5 @@ func (c *ResourceTypeConfig) CanonicalHTTPPrefix() string {
 // the same platform resource regardless of which extension service
 // produced it.
 func (c *ResourceTypeConfig) Collection() string {
-	return c.CollectionID + "/"
-}
-
-// PlatformResourceConfig describes a platform-canonical resource
-// service. Unlike [ResourceTypeConfig] (which is extension-specific),
-// the platform config uses the fixed service name "fleetshift.io",
-// proto package "fleetshift.v1", and platform API version
-// [PlatformAPIVersion]. It only needs the [CollectionConfig] to know
-// the collection shape.
-type PlatformResourceConfig struct {
-	CollectionConfig
-}
-
-// PlatformProtoPackage is the fixed proto package for all
-// platform-canonical resource services.
-const PlatformProtoPackage = "fleetshift.v1"
-
-// PlatformAPIVersion is the fixed HTTP API version for the
-// platform-canonical API surface. Extension schemas version their own
-// APIs independently; they do not choose the platform API version.
-const PlatformAPIVersion = "v1"
-
-// PlatformServiceName is the fixed AIP-122 service name for the
-// platform API surface.
-const PlatformServiceName = "fleetshift.io"
-
-// GRPCServiceName returns the fully-qualified gRPC service name for
-// the platform resource (e.g. "fleetshift.v1.PlatformClusterService").
-func (c *PlatformResourceConfig) GRPCServiceName() string {
-	return PlatformProtoPackage + ".Platform" + c.Singular + "Service"
-}
-
-// HTTPPrefix returns the platform-canonical HTTP route prefix
-// (e.g. "/apis/fleetshift.io/v1/clusters").
-func (c *PlatformResourceConfig) HTTPPrefix() string {
-	return "/apis/" + PlatformServiceName + "/" + c.Version + "/" + c.CollectionID
-}
-
-// Collection returns the relative resource name collection prefix
-// (e.g. "clusters/").
-func (c *PlatformResourceConfig) Collection() string {
 	return c.CollectionID + "/"
 }

@@ -1,15 +1,16 @@
-package managedresource_test
+package dynamicapi_test
 
 import (
 	"context"
 	"testing"
 
+	_ "buf.build/gen/go/bufbuild/protovalidate/protocolbuffers/go/buf/validate"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
 const specMessageName = "addons.kind.v1.KindClusterSpec"
@@ -22,7 +23,7 @@ func TestCompileInline(t *testing.T) {
 		break
 	}
 
-	desc, err := managedresource.CompileInline(
+	desc, err := dynamicapi.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
@@ -54,7 +55,7 @@ func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
 		break
 	}
 
-	desc, err := managedresource.CompileInline(
+	desc, err := dynamicapi.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,

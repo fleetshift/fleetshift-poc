@@ -7,6 +7,7 @@ import (
 
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -17,7 +18,7 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 	for name := range schema.ProtoFiles {
 		entryFile = name
 	}
-	spec, err := managedresource.CompileInline(
+	spec, err := dynamicapi.CompileInline(
 		t.Context(),
 		schema.ProtoFiles,
 		entryFile,
@@ -28,7 +29,7 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 	}
 
 	cfg := &managedresource.ResourceTypeConfig{
-		CollectionConfig: managedresource.CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
@@ -50,7 +51,7 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 	t.Helper()
 	schema := gcphcpaddon.Schema("gcphcp-example")
-	spec, err := managedresource.CompileInline(
+	spec, err := dynamicapi.CompileInline(
 		t.Context(),
 		schema.ProtoFiles,
 		schema.EntryFile,
@@ -61,7 +62,7 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 	}
 
 	cfg := &managedresource.ResourceTypeConfig{
-		CollectionConfig: managedresource.CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
@@ -81,7 +82,7 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 }
 
 func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	fd := buildClusterFileDescriptor(t)
 
 	if err := reg.Register(fd); err != nil {
@@ -108,7 +109,7 @@ func TestDynamicFileRegistry_RegisterAndFind(t *testing.T) {
 }
 
 func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	kindFD := buildClusterFileDescriptor(t)
 	gcphcpFD := buildGCPHCPClusterFileDescriptor(t)
 
@@ -134,7 +135,7 @@ func TestDynamicFileRegistry_RegistersMultipleManagedResourceSchemas(t *testing.
 }
 
 func TestDynamicFileRegistry_DuplicateRegisterReturnsError(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	fd := buildClusterFileDescriptor(t)
 
 	if err := reg.Register(fd); err != nil {
@@ -146,7 +147,7 @@ func TestDynamicFileRegistry_DuplicateRegisterReturnsError(t *testing.T) {
 }
 
 func TestDynamicFileRegistry_ReplaceUpdatesDescriptor(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	fd := buildClusterFileDescriptor(t)
 
 	if err := reg.Register(fd); err != nil {
@@ -166,7 +167,7 @@ func TestDynamicFileRegistry_ReplaceUpdatesDescriptor(t *testing.T) {
 }
 
 func TestDynamicFileRegistry_DeregisterRemovesDescriptor(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	fd := buildClusterFileDescriptor(t)
 
 	if err := reg.Register(fd); err != nil {
@@ -188,7 +189,7 @@ func TestDynamicFileRegistry_DeregisterRemovesDescriptor(t *testing.T) {
 }
 
 func TestDynamicFileRegistry_DeregisterNoOp(t *testing.T) {
-	reg := managedresource.NewDynamicFileRegistry()
+	reg := dynamicapi.NewDynamicFileRegistry()
 	// Should not panic.
 	reg.Deregister("nonexistent.proto")
 }

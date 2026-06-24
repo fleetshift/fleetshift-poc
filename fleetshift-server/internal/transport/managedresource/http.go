@@ -1,7 +1,6 @@
 package managedresource
 
 import (
-	"context"
 	"io"
 	"net/http"
 	"strconv"
@@ -9,11 +8,11 @@ import (
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/dynamicpb"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
 // RegisterHTTP registers REST/JSON routes for the dynamic service on the
@@ -27,11 +26,11 @@ import (
 //
 // The conn is a gRPC client connection to the server hosting the service.
 //
-// For dynamic (hot-swappable) registration, prefer [DynamicHTTPMux] which
-// uses handler indirection to support atomic replace and deregister.
+// For dynamic (hot-swappable) registration, prefer [dynamicapi.DynamicHTTPMux]
+// which uses handler indirection to support atomic replace and deregister.
 func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, conn *grpc.ClientConn) {
 	prefix := svc.Config.CanonicalHTTPPrefix()
-	handler := buildHTTPHandler(svc, conn, prefix)
+	handler := BuildHTTPHandler(svc, conn, prefix)
 
 	// Register both the exact path and the subtree pattern so that
 	// /v1/{collection} (list, create) and /v1/{collection}/{id} (get,
@@ -41,12 +40,12 @@ func RegisterHTTP(mux *http.ServeMux, svc *RegisteredService, conn *grpc.ClientC
 	mux.HandleFunc(prefix+"/", handler)
 }
 
-// buildHTTPHandler creates the HTTP handler function for a managed
+// BuildHTTPHandler creates the HTTP handler function for a managed
 // resource service without registering it on any mux. The conn is a
 // shared gRPC client connection to the server's own loopback — routing
 // to the correct service is handled by method name, not connection
 // identity.
-func buildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix string) http.HandlerFunc {
+func BuildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		rest := strings.TrimPrefix(r.URL.Path, prefix)
 
@@ -74,14 +73,14 @@ func buildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix stri
 func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
+		dynamicapi.HTTPError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return
 	}
 
 	// Parse the request body as the resource message (spec + optional fields).
 	resource := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	if err := protojson.Unmarshal(body, resource); err != nil {
-		httpError(w, codes.InvalidArgument, "parse body: "+err.Error())
+		dynamicapi.HTTPError(w, codes.InvalidArgument, "parse body: "+err.Error())
 		return
 	}
 
@@ -89,7 +88,7 @@ func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	lower := strings.ToLower(svc.Config.Singular[:1]) + svc.Config.Singular[1:]
 	id := r.URL.Query().Get(lower + "_id")
 	if id == "" {
-		httpError(w, codes.InvalidArgument, lower+"_id query parameter is required")
+		dynamicapi.HTTPError(w, codes.InvalidArgument, lower+"_id query parameter is required")
 		return
 	}
 
@@ -101,12 +100,12 @@ func handleHTTPCreate(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.GRPCServiceName() + "/Create" + svc.Config.Singular
-	if err := conn.Invoke(grpcContext(r), method, createReq, resp); err != nil {
-		grpcHTTPError(w, err)
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, createReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func handleHTTPGet(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService, id string) {
@@ -116,12 +115,12 @@ func handleHTTPGet(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.GRPCServiceName() + "/Get" + svc.Config.Singular
-	if err := conn.Invoke(grpcContext(r), method, getReq, resp); err != nil {
-		grpcHTTPError(w, err)
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, getReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService) {
@@ -131,7 +130,7 @@ func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientCon
 		if field := svc.Descriptors.ListRequest.Fields().ByName("page_size"); field != nil {
 			n, err := strconv.ParseInt(v, 10, 32)
 			if err != nil {
-				httpError(w, codes.InvalidArgument, "invalid page_size: "+err.Error())
+				dynamicapi.HTTPError(w, codes.InvalidArgument, "invalid page_size: "+err.Error())
 				return
 			}
 			listReq.Set(field, protoreflect.ValueOfInt32(int32(n)))
@@ -145,12 +144,12 @@ func handleHTTPList(w http.ResponseWriter, r *http.Request, conn *grpc.ClientCon
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.ListResponse)
 	method := "/" + svc.Config.GRPCServiceName() + "/List" + svc.Config.Plural
-	if err := conn.Invoke(grpcContext(r), method, listReq, resp); err != nil {
-		grpcHTTPError(w, err)
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, listReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func handleHTTPDelete(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService, id string) {
@@ -160,12 +159,12 @@ func handleHTTPDelete(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.GRPCServiceName() + "/Delete" + svc.Config.Singular
-	if err := conn.Invoke(grpcContext(r), method, deleteReq, resp); err != nil {
-		grpcHTTPError(w, err)
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, deleteReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService, id string) {
@@ -176,12 +175,12 @@ func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	// Parse optional request body for user_signature / valid_until.
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		httpError(w, codes.InvalidArgument, "read body: "+err.Error())
+		dynamicapi.HTTPError(w, codes.InvalidArgument, "read body: "+err.Error())
 		return
 	}
 	if len(body) > 0 {
 		if err := protojson.Unmarshal(body, resumeReq); err != nil {
-			httpError(w, codes.InvalidArgument, "parse body: "+err.Error())
+			dynamicapi.HTTPError(w, codes.InvalidArgument, "parse body: "+err.Error())
 			return
 		}
 		// Re-set name since body unmarshal might have cleared it.
@@ -190,23 +189,12 @@ func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.GRPCServiceName() + "/Resume" + svc.Config.Singular
-	if err := conn.Invoke(grpcContext(r), method, resumeReq, resp); err != nil {
-		grpcHTTPError(w, err)
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, resumeReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}
 
-	writeJSON(w, http.StatusOK, resp)
-}
-
-// grpcContext returns a context that forwards the HTTP Authorization
-// header as outgoing gRPC metadata so that the server-side authn
-// interceptor can authenticate the caller.
-func grpcContext(r *http.Request) context.Context {
-	auth := r.Header.Get("Authorization")
-	if auth == "" {
-		return r.Context()
-	}
-	return metadata.AppendToOutgoingContext(r.Context(), "authorization", auth)
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
 }
 
 func stringValue(s string) protoreflect.Value {
@@ -215,37 +203,4 @@ func stringValue(s string) protoreflect.Value {
 
 func messageValue(m *dynamicpb.Message) protoreflect.Value {
 	return protoreflect.ValueOfMessage(m)
-}
-
-func writeJSON(w http.ResponseWriter, code int, msg *dynamicpb.Message) {
-	b, err := protojson.Marshal(msg)
-	if err != nil {
-		http.Error(w, "marshal response: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(code)
-	w.Write(b)
-}
-
-func httpError(w http.ResponseWriter, code codes.Code, msg string) {
-	httpCode := http.StatusInternalServerError
-	switch code {
-	case codes.InvalidArgument:
-		httpCode = http.StatusBadRequest
-	case codes.NotFound:
-		httpCode = http.StatusNotFound
-	case codes.AlreadyExists:
-		httpCode = http.StatusConflict
-	}
-	http.Error(w, msg, httpCode)
-}
-
-func grpcHTTPError(w http.ResponseWriter, err error) {
-	st, ok := status.FromError(err)
-	if !ok {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-	httpError(w, st.Code(), st.Message())
 }

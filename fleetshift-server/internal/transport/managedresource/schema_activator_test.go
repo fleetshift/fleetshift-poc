@@ -25,16 +25,18 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
 func widgetRel() domain.RegisteredSelfTarget {
 	return domain.NewRegisteredSelfTarget("widget-addon", "widgets")
 }
 
-func newActivator(t *testing.T) (*managedresource.DynamicSchemaActivator, *managedresource.DynamicServiceMux) {
+func newActivator(t *testing.T) (*managedresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
 	t.Helper()
-	mux := managedresource.NewDynamicServiceMux()
+	mux := dynamicapi.NewDynamicServiceMux()
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
@@ -47,8 +49,8 @@ func newActivator(t *testing.T) (*managedresource.DynamicSchemaActivator, *manag
 
 type activatorHTTPEnv struct {
 	activator *managedresource.DynamicSchemaActivator
-	grpcMux   *managedresource.DynamicServiceMux
-	httpMux   *managedresource.DynamicHTTPMux
+	grpcMux   *dynamicapi.DynamicServiceMux
+	httpMux   *dynamicapi.DynamicHTTPMux
 	httpURL   string
 }
 
@@ -57,7 +59,7 @@ type activatorHTTPEnv struct {
 // to. The returned httpURL is the base URL for the httptest server.
 func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	t.Helper()
-	grpcMux := managedresource.NewDynamicServiceMux()
+	grpcMux := dynamicapi.NewDynamicServiceMux()
 
 	validator, err := protovalidate.New()
 	if err != nil {
@@ -90,7 +92,7 @@ func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	}
 	t.Cleanup(func() { conn.Close() })
 
-	httpMux := managedresource.NewDynamicHTTPMux(nil, conn)
+	httpMux := dynamicapi.NewDynamicHTTPMux(nil, conn)
 
 	ts := httptest.NewServer(httpMux.ServeMux())
 	t.Cleanup(ts.Close)
@@ -113,7 +115,7 @@ func newActivatorWithHTTPAndPlatform(t *testing.T) activatorHTTPEnv {
 	env := newActivatorWithHTTP(t)
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
-	env.activator.PlatformDeps = managedresource.PlatformDeps{
+	env.activator.PlatformDeps = platformresource.Deps{
 		Resources: application.NewPlatformResourceService(store),
 	}
 
@@ -473,7 +475,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 		t.Fatalf("protovalidate.New: %v", err)
 	}
 
-	grpcMux := managedresource.NewDynamicServiceMux()
+	grpcMux := dynamicapi.NewDynamicServiceMux()
 
 	lis := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer(grpc.UnknownServiceHandler(grpcMux.Handle))
@@ -523,7 +525,7 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		entryFile = name
 		break
 	}
-	specDesc, err := managedresource.CompileInline(
+	specDesc, err := dynamicapi.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
@@ -533,7 +535,7 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		t.Fatalf("CompileInline: %v", err)
 	}
 	descs, err := managedresource.BuildServiceDescriptors(&managedresource.ResourceTypeConfig{
-		CollectionConfig: managedresource.CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
@@ -677,9 +679,9 @@ message WidgetSpec {
 // newActivatorWithPlatform creates an activator wired with a real
 // PlatformResourceService backed by an in-memory SQLite store. This is
 // the minimal setup needed for the platform refcounting code path.
-func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActivator, *managedresource.DynamicServiceMux) {
+func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
 	t.Helper()
-	mux := managedresource.NewDynamicServiceMux()
+	mux := dynamicapi.NewDynamicServiceMux()
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
@@ -689,7 +691,7 @@ func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActiv
 	return &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		Deps:         managedresource.Deps{Validator: validator},
-		PlatformDeps: managedresource.PlatformDeps{Resources: application.NewPlatformResourceService(store)},
+		PlatformDeps: platformresource.Deps{Resources: application.NewPlatformResourceService(store)},
 	}, mux
 }
 
@@ -796,8 +798,8 @@ func TestReplaceDoesNotDropPlatform(t *testing.T) {
 }
 
 func TestPlatformReflection(t *testing.T) {
-	mux := managedresource.NewDynamicServiceMux()
-	fileReg := managedresource.NewDynamicFileRegistry()
+	mux := dynamicapi.NewDynamicServiceMux()
+	fileReg := dynamicapi.NewDynamicFileRegistry()
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
@@ -809,7 +811,7 @@ func TestPlatformReflection(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{Validator: validator},
-		PlatformDeps: managedresource.PlatformDeps{Resources: application.NewPlatformResourceService(store)},
+		PlatformDeps: platformresource.Deps{Resources: application.NewPlatformResourceService(store)},
 	}
 
 	schema := kindaddon.Schema()
@@ -852,7 +854,7 @@ func TestPlatformHTTPVersionIsFixed(t *testing.T) {
 		t.Fatalf("Activate: %v", err)
 	}
 
-	platformV1 := env.httpURL + "/apis/fleetshift.io/" + managedresource.PlatformAPIVersion + "/clusters"
+	platformV1 := env.httpURL + "/apis/fleetshift.io/" + platformresource.APIVersion + "/clusters"
 	if code := httpStatus(t, platformV1); code != http.StatusOK {
 		t.Fatalf("expected platform route %q to return 200, got %d", platformV1, code)
 	}
@@ -928,7 +930,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 		t.Fatalf("protovalidate.New: %v", err)
 	}
 
-	grpcMux := managedresource.NewDynamicServiceMux()
+	grpcMux := dynamicapi.NewDynamicServiceMux()
 
 	lis := bufconn.Listen(1 << 20)
 	srv := grpc.NewServer(grpc.UnknownServiceHandler(grpcMux.Handle))
@@ -961,7 +963,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 				Resources: resourceSvc,
 				Validator: validator,
 			},
-			PlatformDeps: managedresource.PlatformDeps{
+			PlatformDeps: platformresource.Deps{
 				Resources: platformResourceSvc,
 			},
 		},
@@ -993,11 +995,11 @@ message WidgetSpec {
 	}
 }
 
-func platformWidgetDescs(t *testing.T) *managedresource.PlatformServiceDescriptors {
+func platformWidgetDescs(t *testing.T) *platformresource.ServiceDescriptors {
 	t.Helper()
-	descs, err := managedresource.BuildPlatformServiceDescriptors(
-		&managedresource.PlatformResourceConfig{
-			CollectionConfig: managedresource.CollectionConfig{
+	descs, err := platformresource.BuildServiceDescriptors(
+		&platformresource.Config{
+			CollectionConfig: dynamicapi.CollectionConfig{
 				Version:      "v1",
 				CollectionID: "widgets",
 				Singular:     "Widget",

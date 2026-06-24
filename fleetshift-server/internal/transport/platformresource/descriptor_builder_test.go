@@ -1,14 +1,16 @@
-package managedresource
+package platformresource
 
 import (
 	"testing"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
-func clusterPlatformConfig() *PlatformResourceConfig {
-	return &PlatformResourceConfig{
-		CollectionConfig: CollectionConfig{
+func clusterPlatformConfig() *Config {
+	return &Config{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      "v1",
 			Singular:     "Cluster",
 			Plural:       "Clusters",
@@ -17,8 +19,8 @@ func clusterPlatformConfig() *PlatformResourceConfig {
 	}
 }
 
-func TestBuildPlatformServiceDescriptors_Success(t *testing.T) {
-	desc, err := BuildPlatformServiceDescriptors(clusterPlatformConfig())
+func TestBuildServiceDescriptors_Success(t *testing.T) {
+	desc, err := BuildServiceDescriptors(clusterPlatformConfig())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -149,39 +151,39 @@ func TestBuildPlatformServiceDescriptors_Success(t *testing.T) {
 	}
 }
 
-func TestBuildPlatformServiceDescriptors_ValidationErrors(t *testing.T) {
+func TestBuildServiceDescriptors_ValidationErrors(t *testing.T) {
 	tests := []struct {
 		name string
-		cfg  *PlatformResourceConfig
+		cfg  *Config
 	}{
 		{name: "nil config", cfg: nil},
 		{
 			name: "empty singular",
-			cfg: &PlatformResourceConfig{CollectionConfig: CollectionConfig{
+			cfg: &Config{CollectionConfig: dynamicapi.CollectionConfig{
 				Singular: "", Plural: "Clusters", CollectionID: "clusters",
 			}},
 		},
 		{
 			name: "empty plural",
-			cfg: &PlatformResourceConfig{CollectionConfig: CollectionConfig{
+			cfg: &Config{CollectionConfig: dynamicapi.CollectionConfig{
 				Singular: "Cluster", Plural: "", CollectionID: "clusters",
 			}},
 		},
 		{
 			name: "empty collection ID",
-			cfg: &PlatformResourceConfig{CollectionConfig: CollectionConfig{
+			cfg: &Config{CollectionConfig: dynamicapi.CollectionConfig{
 				Singular: "Cluster", Plural: "Clusters", CollectionID: "",
 			}},
 		},
 		{
 			name: "lowercase singular",
-			cfg: &PlatformResourceConfig{CollectionConfig: CollectionConfig{
+			cfg: &Config{CollectionConfig: dynamicapi.CollectionConfig{
 				Singular: "cluster", Plural: "Clusters", CollectionID: "clusters",
 			}},
 		},
 		{
 			name: "lowercase plural",
-			cfg: &PlatformResourceConfig{CollectionConfig: CollectionConfig{
+			cfg: &Config{CollectionConfig: dynamicapi.CollectionConfig{
 				Singular: "Cluster", Plural: "clusters", CollectionID: "clusters",
 			}},
 		},
@@ -189,7 +191,7 @@ func TestBuildPlatformServiceDescriptors_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := BuildPlatformServiceDescriptors(tt.cfg)
+			_, err := BuildServiceDescriptors(tt.cfg)
 			if err == nil {
 				t.Error("expected error for invalid input, got nil")
 			}

@@ -1,4 +1,4 @@
-package managedresource
+package platformresource
 
 import (
 	"context"
@@ -14,29 +14,30 @@ import (
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
-// RegisteredPlatformService is a fully built dynamic gRPC service for
+// RegisteredService is a fully built dynamic gRPC service for
 // the platform-canonical API, ready to be registered on a
-// [DynamicServiceMux]. It parallels [RegisteredService] for extension
-// APIs.
-type RegisteredPlatformService struct {
+// [dynamicapi.DynamicServiceMux]. It parallels
+// [managedresource.RegisteredService] for extension APIs.
+type RegisteredService struct {
 	Desc        *grpc.ServiceDesc
-	Descriptors *PlatformServiceDescriptors
-	Config      *PlatformResourceConfig
+	Descriptors *ServiceDescriptors
+	Config      *Config
 }
 
-// PlatformDeps holds the shared dependencies injected into platform
+// Deps holds the shared dependencies injected into platform
 // service handlers.
-type PlatformDeps struct {
+type Deps struct {
 	Resources *application.PlatformResourceService
 }
 
-// BuildPlatformService constructs a dynamic gRPC service for the
+// BuildService constructs a dynamic gRPC service for the
 // platform-canonical resource API. It does not register the service —
 // the caller is responsible for wiring it into the mux.
-func BuildPlatformService(cfg *PlatformResourceConfig, deps PlatformDeps) (*RegisteredPlatformService, error) {
-	descs, err := BuildPlatformServiceDescriptors(cfg)
+func BuildService(cfg *Config, deps Deps) (*RegisteredService, error) {
+	descs, err := BuildServiceDescriptors(cfg)
 	if err != nil {
 		return nil, fmt.Errorf("build platform descriptors for %s: %w", cfg.Singular, err)
 	}
@@ -72,7 +73,7 @@ func BuildPlatformService(cfg *PlatformResourceConfig, deps PlatformDeps) (*Regi
 		Metadata: "dynamic/fleetshift/v1/platform_" + strings.ToLower(singular[:1]) + singular[1:] + "_service.proto",
 	}
 
-	return &RegisteredPlatformService{
+	return &RegisteredService{
 		Desc:        grpcDesc,
 		Descriptors: descs,
 		Config:      cfg,
@@ -82,8 +83,8 @@ func BuildPlatformService(cfg *PlatformResourceConfig, deps PlatformDeps) (*Regi
 // platformHandler implements the gRPC method handler closures for the
 // platform-canonical resource API.
 type platformHandler struct {
-	cfg       *PlatformResourceConfig
-	descs     *PlatformServiceDescriptors
+	cfg       *Config
+	descs     *ServiceDescriptors
 	resources *application.PlatformResourceService
 }
 
@@ -141,7 +142,7 @@ func (h *platformHandler) doCreate(ctx context.Context, req proto.Message) (prot
 		Labels: labels,
 	})
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.resourceToMessage(pr)
@@ -180,7 +181,7 @@ func (h *platformHandler) doGet(ctx context.Context, req proto.Message) (proto.M
 
 	pr, err := h.resources.Get(ctx, resourceName)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.resourceToMessage(pr)
@@ -213,7 +214,7 @@ func (h *platformHandler) doList(ctx context.Context, _ proto.Message) (proto.Me
 
 	resources, err := h.resources.List(ctx, collection)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	resp := dynamicpb.NewMessage(h.descs.ListResponse)
@@ -275,12 +276,12 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 			rolesList.Append(protoreflect.ValueOfString(string(role)))
 		}
 		if !rep.CreatedAt().IsZero() {
-			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("create_time"), rep.CreatedAt()); err == nil {
+			if tsVal, err := dynamicapi.MarshalTimestamp(repDesc.Fields().ByName("create_time"), rep.CreatedAt()); err == nil {
 				repMsg.Set(repDesc.Fields().ByName("create_time"), tsVal)
 			}
 		}
 		if !rep.UpdatedAt().IsZero() {
-			if tsVal, err := marshalTimestamp(repDesc.Fields().ByName("update_time"), rep.UpdatedAt()); err == nil {
+			if tsVal, err := dynamicapi.MarshalTimestamp(repDesc.Fields().ByName("update_time"), rep.UpdatedAt()); err == nil {
 				repMsg.Set(repDesc.Fields().ByName("update_time"), tsVal)
 			}
 		}
@@ -307,7 +308,7 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 		relMsg.Set(relDesc.Fields().ByName("target_uid"), protoreflect.ValueOfString(rel.TargetUID().String()))
 		relMsg.Set(relDesc.Fields().ByName("source_service"), protoreflect.ValueOfString(string(rel.SourceService())))
 		if !rel.CreatedAt().IsZero() {
-			if tsVal, err := marshalTimestamp(relDesc.Fields().ByName("create_time"), rel.CreatedAt()); err == nil {
+			if tsVal, err := dynamicapi.MarshalTimestamp(relDesc.Fields().ByName("create_time"), rel.CreatedAt()); err == nil {
 				relMsg.Set(relDesc.Fields().ByName("create_time"), tsVal)
 			}
 		}
@@ -315,12 +316,12 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	}
 
 	if !pr.CreatedAt().IsZero() {
-		if tsVal, err := marshalTimestamp(h.descs.Resource.Fields().ByName("create_time"), pr.CreatedAt()); err == nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(h.descs.Resource.Fields().ByName("create_time"), pr.CreatedAt()); err == nil {
 			msg.Set(h.descs.Resource.Fields().ByName("create_time"), tsVal)
 		}
 	}
 	if !pr.UpdatedAt().IsZero() {
-		if tsVal, err := marshalTimestamp(h.descs.Resource.Fields().ByName("update_time"), pr.UpdatedAt()); err == nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(h.descs.Resource.Fields().ByName("update_time"), pr.UpdatedAt()); err == nil {
 			msg.Set(h.descs.Resource.Fields().ByName("update_time"), tsVal)
 		}
 	}

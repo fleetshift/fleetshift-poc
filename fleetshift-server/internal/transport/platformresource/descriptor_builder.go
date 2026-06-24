@@ -1,4 +1,4 @@
-package managedresource
+package platformresource
 
 import (
 	"fmt"
@@ -9,14 +9,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/reflect/protoregistry"
 	"google.golang.org/protobuf/types/descriptorpb"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
-// PlatformServiceDescriptors holds the compiled descriptors for a
+// ServiceDescriptors holds the compiled descriptors for a
 // dynamically-built platform-canonical resource service. Unlike
-// [ServiceDescriptors] (which targets extension APIs with a spec
-// envelope), these descriptors model the platform's generic resource
-// shape — identity, labels, representations, aliases, and relationships.
-type PlatformServiceDescriptors struct {
+// extension [managedresource.ServiceDescriptors] (which targets
+// extension APIs with a spec envelope), these descriptors model the
+// platform's generic resource shape — identity, labels,
+// representations, aliases, and relationships.
+type ServiceDescriptors struct {
 	// File is the synthesized file descriptor containing all messages and service.
 	File protoreflect.FileDescriptor
 
@@ -39,9 +42,9 @@ type PlatformServiceDescriptors struct {
 	ListResponse protoreflect.MessageDescriptor
 }
 
-// BuildPlatformServiceDescriptors programmatically constructs the full
+// BuildServiceDescriptors programmatically constructs the full
 // set of proto descriptors for a platform-canonical AIP-compliant
-// resource service. Given a [PlatformResourceConfig], it builds:
+// resource service. Given a [Config], it builds:
 //   - The platform resource message (identity, labels, representations, aliases, relationships)
 //   - Helper messages (representation, alias, relationship)
 //   - Create/Get/List request and response messages
@@ -49,7 +52,7 @@ type PlatformServiceDescriptors struct {
 //
 // The resulting descriptors are used to instantiate dynamicpb.Message
 // instances for gRPC marshaling at runtime.
-func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServiceDescriptors, error) {
+func BuildServiceDescriptors(cfg *Config) (*ServiceDescriptors, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("platform resource config is required")
 	}
@@ -67,16 +70,16 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 	lower := strings.ToLower(singular[:1]) + singular[1:]
 	plural := cfg.Plural
 	collectionID := cfg.CollectionID
-	pkg := PlatformProtoPackage
+	pkg := ProtoPackage
 	resourceName := "Platform" + singular
 
 	fqn := func(name string) string { return pkg + "." + name }
 
-	repMsg := buildPlatformRepresentationMessage(resourceName)
-	aliasMsg := buildPlatformAliasMessage(resourceName)
-	relMsg := buildPlatformRelationshipMessage(resourceName)
+	repMsg := buildRepresentationMessage(resourceName)
+	aliasMsg := buildAliasMessage(resourceName)
+	relMsg := buildRelationshipMessage(resourceName)
 
-	resourceMsg := buildPlatformResourceMessage(resourceName, pkg, repMsg, aliasMsg, relMsg)
+	resourceMsg := buildResourceMessage(resourceName, pkg, repMsg, aliasMsg, relMsg)
 
 	fdp := &descriptorpb.FileDescriptorProto{
 		Name:       proto.String(fmt.Sprintf("dynamic/fleetshift/v1/platform_%s_service.proto", lower)),
@@ -88,13 +91,13 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 			repMsg,
 			aliasMsg,
 			relMsg,
-			buildPlatformCreateRequest(resourceName, lower, fqn(resourceName)),
-			buildPlatformGetRequest(resourceName),
-			buildPlatformListRequest(resourceName, plural),
-			buildPlatformListResponse(resourceName, plural, collectionID, fqn(resourceName)),
+			buildCreateRequest(resourceName, lower, fqn(resourceName)),
+			buildGetRequest(resourceName),
+			buildListRequest(resourceName, plural),
+			buildListResponse(resourceName, plural, collectionID, fqn(resourceName)),
 		},
 		Service: []*descriptorpb.ServiceDescriptorProto{
-			buildPlatformService(resourceName, plural, pkg),
+			buildService(resourceName, plural, pkg),
 		},
 	}
 
@@ -104,7 +107,7 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 	if err != nil {
 		return nil, fmt.Errorf("find timestamp.proto: %w", err)
 	}
-	if err := registerFileAndDeps(files, tsFile); err != nil {
+	if err := dynamicapi.RegisterFileAndDeps(files, tsFile); err != nil {
 		return nil, fmt.Errorf("register timestamp deps: %w", err)
 	}
 
@@ -119,7 +122,7 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 		return nil, fmt.Errorf("service %s not found in built descriptor", svcName)
 	}
 
-	return &PlatformServiceDescriptors{
+	return &ServiceDescriptors{
 		File:          fd,
 		Service:       svc,
 		Resource:      fd.Messages().ByName(protoreflect.Name(resourceName)),
@@ -130,7 +133,7 @@ func BuildPlatformServiceDescriptors(cfg *PlatformResourceConfig) (*PlatformServ
 	}, nil
 }
 
-func buildPlatformResourceMessage(
+func buildResourceMessage(
 	resourceName, pkg string,
 	repMsg, aliasMsg, relMsg *descriptorpb.DescriptorProto,
 ) *descriptorpb.DescriptorProto {
@@ -146,96 +149,96 @@ func buildPlatformResourceMessage(
 			effectiveLabelsEntry,
 		},
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
-			stringField("uid", 2),
+			dynamicapi.StringField("name", 1),
+			dynamicapi.StringField("uid", 2),
 			labelsField,
 			effectiveLabelsField,
-			repeatedMessageField("representations", 5, pkg+"."+repMsg.GetName()),
-			repeatedMessageField("aliases", 6, pkg+"."+aliasMsg.GetName()),
-			repeatedMessageField("relationships", 7, pkg+"."+relMsg.GetName()),
-			messageField("create_time", 8, "google.protobuf.Timestamp"),
-			messageField("update_time", 9, "google.protobuf.Timestamp"),
+			dynamicapi.RepeatedMessageField("representations", 5, pkg+"."+repMsg.GetName()),
+			dynamicapi.RepeatedMessageField("aliases", 6, pkg+"."+aliasMsg.GetName()),
+			dynamicapi.RepeatedMessageField("relationships", 7, pkg+"."+relMsg.GetName()),
+			dynamicapi.MessageField("create_time", 8, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("update_time", 9, "google.protobuf.Timestamp"),
 		},
 	}
 }
 
-func buildPlatformRepresentationMessage(resourceName string) *descriptorpb.DescriptorProto {
+func buildRepresentationMessage(resourceName string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String(resourceName + "Representation"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("service_name", 1),
-			stringField("version", 2),
-			stringField("full_resource_name", 3),
+			dynamicapi.StringField("service_name", 1),
+			dynamicapi.StringField("version", 2),
+			dynamicapi.StringField("full_resource_name", 3),
 			repeatedStringField("roles", 4),
-			messageField("create_time", 5, "google.protobuf.Timestamp"),
-			messageField("update_time", 6, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("create_time", 5, "google.protobuf.Timestamp"),
+			dynamicapi.MessageField("update_time", 6, "google.protobuf.Timestamp"),
 		},
 	}
 }
 
-func buildPlatformAliasMessage(resourceName string) *descriptorpb.DescriptorProto {
+func buildAliasMessage(resourceName string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String(resourceName + "Alias"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("namespace", 1),
-			stringField("key", 2),
-			stringField("value", 3),
+			dynamicapi.StringField("namespace", 1),
+			dynamicapi.StringField("key", 2),
+			dynamicapi.StringField("value", 3),
 		},
 	}
 }
 
-func buildPlatformRelationshipMessage(resourceName string) *descriptorpb.DescriptorProto {
+func buildRelationshipMessage(resourceName string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String(resourceName + "Relationship"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("type", 1),
-			stringField("target_uid", 2),
-			stringField("source_service", 3),
-			messageField("create_time", 4, "google.protobuf.Timestamp"),
+			dynamicapi.StringField("type", 1),
+			dynamicapi.StringField("target_uid", 2),
+			dynamicapi.StringField("source_service", 3),
+			dynamicapi.MessageField("create_time", 4, "google.protobuf.Timestamp"),
 		},
 	}
 }
 
-func buildPlatformCreateRequest(resourceName, lower, resourceFQN string) *descriptorpb.DescriptorProto {
+func buildCreateRequest(resourceName, lower, resourceFQN string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Create" + resourceName + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField(lower+"_id", 1),
-			messageField("platform_"+lower, 2, resourceFQN),
+			dynamicapi.StringField(lower+"_id", 1),
+			dynamicapi.MessageField("platform_"+lower, 2, resourceFQN),
 		},
 	}
 }
 
-func buildPlatformGetRequest(resourceName string) *descriptorpb.DescriptorProto {
+func buildGetRequest(resourceName string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Get" + resourceName + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("name", 1),
+			dynamicapi.StringField("name", 1),
 		},
 	}
 }
 
-func buildPlatformListRequest(resourceName, plural string) *descriptorpb.DescriptorProto {
+func buildListRequest(resourceName, plural string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("List" + "Platform" + plural + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			int32Field("page_size", 1),
-			stringField("page_token", 2),
+			dynamicapi.Int32Field("page_size", 1),
+			dynamicapi.StringField("page_token", 2),
 		},
 	}
 }
 
-func buildPlatformListResponse(resourceName, plural, collectionID, resourceFQN string) *descriptorpb.DescriptorProto {
+func buildListResponse(resourceName, plural, collectionID, resourceFQN string) *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("List" + "Platform" + plural + "Response"),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			repeatedMessageField(collectionID, 1, resourceFQN),
-			stringField("next_page_token", 2),
+			dynamicapi.RepeatedMessageField(collectionID, 1, resourceFQN),
+			dynamicapi.StringField("next_page_token", 2),
 		},
 	}
 }
 
-func buildPlatformService(resourceName, plural, pkg string) *descriptorpb.ServiceDescriptorProto {
+func buildService(resourceName, plural, pkg string) *descriptorpb.ServiceDescriptorProto {
 	fqnPrefix := "." + pkg + "."
 	return &descriptorpb.ServiceDescriptorProto{
 		Name: proto.String(resourceName + "Service"),
@@ -274,8 +277,8 @@ func buildMapStringStringField(parentFQN, fieldName, entryName string, number in
 	entry := &descriptorpb.DescriptorProto{
 		Name: proto.String(entryName),
 		Field: []*descriptorpb.FieldDescriptorProto{
-			stringField("key", 1),
-			stringField("value", 2),
+			dynamicapi.StringField("key", 1),
+			dynamicapi.StringField("value", 2),
 		},
 		Options: &descriptorpb.MessageOptions{
 			MapEntry: proto.Bool(true),

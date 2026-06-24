@@ -3,10 +3,8 @@ package managedresource
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"strings"
-	"time"
 
 	"buf.build/go/protovalidate"
 	"google.golang.org/grpc"
@@ -21,6 +19,7 @@ import (
 	fleetshiftv1 "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
 
 // RegisteredService is a fully built dynamic gRPC service ready to be
@@ -120,7 +119,7 @@ func resolveSpecDescriptor(cfg *ResourceTypeConfig) (protoreflect.MessageDescrip
 	if cfg.SpecDescriptor != nil {
 		return cfg.SpecDescriptor, nil
 	}
-	desc, err := CompileFromGlobalRegistry(cfg.SpecMessage)
+	desc, err := dynamicapi.CompileFromGlobalRegistry(cfg.SpecMessage)
 	if err != nil {
 		return nil, err
 	}
@@ -232,7 +231,7 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 
 	view, err := h.resources.Create(ctx, in)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.viewToResource(view)
@@ -271,7 +270,7 @@ func (h *dynamicHandler) doGet(ctx context.Context, req proto.Message) (proto.Me
 
 	view, err := h.resources.Get(ctx, h.cfg.ResourceType, resourceName)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.viewToResource(view)
@@ -302,7 +301,7 @@ func (h *dynamicHandler) handleList(
 func (h *dynamicHandler) doList(ctx context.Context, _ proto.Message) (proto.Message, error) {
 	views, err := h.resources.List(ctx, h.cfg.ResourceType)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	resp := dynamicpb.NewMessage(h.descs.ListResponse)
@@ -353,7 +352,7 @@ func (h *dynamicHandler) doDelete(ctx context.Context, req proto.Message) (proto
 
 	view, err := h.resources.Delete(ctx, h.cfg.ResourceType, resourceName)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.viewToResource(view)
@@ -431,7 +430,7 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 
 	view, err := h.resources.Resume(ctx, in)
 	if err != nil {
-		return nil, toDomainError(err)
+		return nil, dynamicapi.ToStatusError(err)
 	}
 
 	return h.viewToResource(view)
@@ -495,7 +494,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	// create_time
 	if !mr.CreatedAt().IsZero() {
 		createTimeField := h.descs.Resource.Fields().ByName("create_time")
-		if tsVal, err := marshalTimestamp(createTimeField, mr.CreatedAt()); err != nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(createTimeField, mr.CreatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(createTimeField, tsVal)
@@ -505,7 +504,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	// update_time
 	if !mr.UpdatedAt().IsZero() {
 		updateTimeField := h.descs.Resource.Fields().ByName("update_time")
-		if tsVal, err := marshalTimestamp(updateTimeField, mr.UpdatedAt()); err != nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(updateTimeField, mr.UpdatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(updateTimeField, tsVal)
@@ -515,7 +514,7 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	// delete_time
 	if mr.DeletedAt() != nil {
 		deleteTimeField := h.descs.Resource.Fields().ByName("delete_time")
-		if tsVal, err := marshalTimestamp(deleteTimeField, *mr.DeletedAt()); err != nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(deleteTimeField, *mr.DeletedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(deleteTimeField, tsVal)
@@ -558,21 +557,6 @@ func stateFromFulfillment(s domain.FulfillmentState) protoreflect.EnumNumber {
 	}
 }
 
-// marshalTimestamp converts a time.Time to a protoreflect.Value suitable
-// for setting on a dynamic Timestamp field.
-func marshalTimestamp(field protoreflect.FieldDescriptor, t time.Time) (protoreflect.Value, error) {
-	ts := timestamppb.New(t)
-	tsMsg := dynamicpb.NewMessage(field.Message())
-	b, err := proto.Marshal(ts)
-	if err != nil {
-		return protoreflect.Value{}, fmt.Errorf("marshal %s: %w", field.Name(), err)
-	}
-	if err := proto.Unmarshal(b, tsMsg); err != nil {
-		return protoreflect.Value{}, fmt.Errorf("unmarshal %s: %w", field.Name(), err)
-	}
-	return protoreflect.ValueOfMessage(tsMsg), nil
-}
-
 // marshalProvenance converts a domain Provenance to a protoreflect.Value
 // suitable for setting on the dynamic resource message's provenance field.
 func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance) (protoreflect.Value, error) {
@@ -606,19 +590,4 @@ func marshalProvenance(field protoreflect.FieldDescriptor, p *domain.Provenance)
 		return protoreflect.Value{}, fmt.Errorf("unmarshal provenance: %w", err)
 	}
 	return protoreflect.ValueOfMessage(dynMsg), nil
-}
-
-func toDomainError(err error) error {
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		return status.Error(codes.NotFound, err.Error())
-	case errors.Is(err, domain.ErrAlreadyExists):
-		return status.Error(codes.AlreadyExists, err.Error())
-	case errors.Is(err, domain.ErrStaleGeneration):
-		return status.Error(codes.Aborted, err.Error())
-	case errors.Is(err, domain.ErrInvalidArgument):
-		return status.Error(codes.InvalidArgument, err.Error())
-	default:
-		return status.Error(codes.Internal, "internal error")
-	}
 }

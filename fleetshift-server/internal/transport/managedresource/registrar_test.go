@@ -24,6 +24,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -38,7 +39,7 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 		entryFile = name
 		break
 	}
-	desc, err := managedresource.CompileInline(
+	desc, err := dynamicapi.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
@@ -49,7 +50,7 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 	}
 
 	return &managedresource.ResourceTypeConfig{
-		CollectionConfig: managedresource.CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,

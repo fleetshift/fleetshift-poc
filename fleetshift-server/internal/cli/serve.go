@@ -47,9 +47,11 @@ import (
 	pgstore "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
 type serveFlags struct {
@@ -474,8 +476,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- dynamic service infrastructure ---
 
-	dynamicMux := managedresource.NewDynamicServiceMux()
-	fileRegistry := managedresource.NewDynamicFileRegistry()
+	dynamicMux := dynamicapi.NewDynamicServiceMux()
+	fileRegistry := dynamicapi.NewDynamicFileRegistry()
 
 	grpcServer := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
@@ -492,7 +494,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
-	managedresource.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
+	dynamicapi.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
 	if err != nil {
@@ -534,7 +536,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("dynamic http mux grpc client: %w", err)
 	}
 	defer dynamicHTTPConn.Close()
-	dynamicHTTPMux := managedresource.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
+	dynamicHTTPMux := dynamicapi.NewDynamicHTTPMux(topMux, dynamicHTTPConn)
 
 	if f.webDir != "" {
 		uiMux := transporthttp.NewUIConfigMux(transporthttp.UIConfigOptions{
@@ -565,7 +567,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			Resources: managedResourceSvc,
 			Validator: specValidator,
 		},
-		PlatformDeps: managedresource.PlatformDeps{
+		PlatformDeps: platformresource.Deps{
 			Resources: platformResourceSvc,
 		},
 	}

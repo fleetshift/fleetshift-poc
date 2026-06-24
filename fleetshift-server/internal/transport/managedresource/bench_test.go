@@ -14,6 +14,7 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
@@ -34,7 +35,7 @@ func setupBench(b *testing.B) *benchEnv {
 		entryFile = name
 		break
 	}
-	desc, err := managedresource.CompileInline(
+	desc, err := dynamicapi.CompileInline(
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
@@ -50,7 +51,7 @@ func setupBench(b *testing.B) *benchEnv {
 	}
 
 	cfg := &managedresource.ResourceTypeConfig{
-		CollectionConfig: managedresource.CollectionConfig{
+		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,

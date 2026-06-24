@@ -1,4 +1,4 @@
-package managedresource
+package dynamicapi
 
 import (
 	"sync"

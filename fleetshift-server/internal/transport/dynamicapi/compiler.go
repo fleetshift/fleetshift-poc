@@ -1,8 +1,4 @@
-// Package managedresource provides in-process proto compilation and dynamic
-// gRPC service registration for addon-defined managed resource types.
-// It enables the platform to host typed, AIP-compliant gRPC services
-// without requiring compile-time Go stub generation for each addon type.
-package managedresource
+package dynamicapi
 
 import (
 	"context"

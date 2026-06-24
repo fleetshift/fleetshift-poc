@@ -1,4 +1,4 @@
-package managedresource
+package dynamicapi
 
 import (
 	"google.golang.org/protobuf/reflect/protodesc"

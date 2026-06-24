@@ -13,16 +13,17 @@ import (
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 const kindClusterServiceName = "kind.fleetshift.v1.ClusterService"
 
-func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchemaActivator, mux *managedresource.DynamicServiceMux, fileReg *managedresource.DynamicFileRegistry) *grpc.ClientConn {
+func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchemaActivator, mux *dynamicapi.DynamicServiceMux, fileReg *dynamicapi.DynamicFileRegistry) *grpc.ClientConn {
 	t.Helper()
 
 	srv := grpc.NewServer(grpc.UnknownServiceHandler(mux.Handle))
-	managedresource.RegisterCompositeReflection(srv, mux, fileReg)
+	dynamicapi.RegisterCompositeReflection(srv, mux, fileReg)
 
 	lis, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -105,8 +106,8 @@ func fileContainingSymbol(t *testing.T, conn *grpc.ClientConn, symbol string) *r
 }
 
 func TestReflection_ListServicesIncludesDynamic(t *testing.T) {
-	mux := managedresource.NewDynamicServiceMux()
-	fileReg := managedresource.NewDynamicFileRegistry()
+	mux := dynamicapi.NewDynamicServiceMux()
+	fileReg := dynamicapi.NewDynamicFileRegistry()
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
@@ -124,8 +125,8 @@ func TestReflection_ListServicesIncludesDynamic(t *testing.T) {
 }
 
 func TestReflection_FileContainingSymbolReturnsDynamicDescriptor(t *testing.T) {
-	mux := managedresource.NewDynamicServiceMux()
-	fileReg := managedresource.NewDynamicFileRegistry()
+	mux := dynamicapi.NewDynamicServiceMux()
+	fileReg := dynamicapi.NewDynamicFileRegistry()
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
@@ -152,8 +153,8 @@ func TestReflection_FileContainingSymbolReturnsDynamicDescriptor(t *testing.T) {
 }
 
 func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
-	mux := managedresource.NewDynamicServiceMux()
-	fileReg := managedresource.NewDynamicFileRegistry()
+	mux := dynamicapi.NewDynamicServiceMux()
+	fileReg := dynamicapi.NewDynamicFileRegistry()
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
@@ -177,8 +178,8 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 }
 
 func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
-	mux := managedresource.NewDynamicServiceMux()
-	fileReg := managedresource.NewDynamicFileRegistry()
+	mux := dynamicapi.NewDynamicServiceMux()
+	fileReg := dynamicapi.NewDynamicFileRegistry()
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,

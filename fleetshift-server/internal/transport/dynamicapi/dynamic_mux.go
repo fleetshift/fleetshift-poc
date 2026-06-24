@@ -1,4 +1,4 @@
-package managedresource
+package dynamicapi
 
 import (
 	"fmt"
@@ -42,24 +42,9 @@ func NewDynamicServiceMux() *DynamicServiceMux {
 	}
 }
 
-// Register adds a compiled managed resource service to the mux. The
-// service becomes immediately routable. Returns an error if a service
-// with the same name is already registered — use [Replace] for
-// atomic updates.
-func (m *DynamicServiceMux) Register(svc *RegisteredService) error {
-	return m.RegisterDesc(svc.Desc)
-}
-
-// Replace atomically swaps an existing service registration. If the
-// service is not currently registered it is added (same as [Register]).
-// In-flight requests that already resolved the old entry are unaffected;
-// new requests route to the replacement immediately.
-func (m *DynamicServiceMux) Replace(svc *RegisteredService) {
-	m.ReplaceDesc(svc.Desc)
-}
-
-// RegisterDesc adds a gRPC service descriptor to the mux. This is the
-// low-level primitive used by both extension and platform registration.
+// RegisterDesc adds a gRPC service descriptor to the mux. Returns an
+// error if a service with the same name is already registered — use
+// [ReplaceDesc] for atomic updates.
 func (m *DynamicServiceMux) RegisterDesc(desc *grpc.ServiceDesc) error {
 	entry := buildEntryFromDesc(desc)
 
@@ -230,30 +215,7 @@ func NewDynamicHTTPMux(mux *http.ServeMux, conn *grpc.ClientConn) *DynamicHTTPMu
 	}
 }
 
-// Register adds HTTP routes for a managed resource service at its
-// canonical /apis/{service}/{version}/{collection} prefix. Returns an
-// error if a service with the same canonical prefix is already
-// registered — use [Replace] for atomic updates.
-func (m *DynamicHTTPMux) Register(svc *RegisteredService) error {
-	canonical := svc.Config.CanonicalHTTPPrefix()
-	handler := buildHTTPHandler(svc, m.conn, canonical)
-	return m.RegisterPrefixHandler(canonical, handler)
-}
-
-// Replace atomically swaps the HTTP handler for a service. If the
-// service is not currently registered it is added (same as [Register]).
-// Any deprecatedPrefixes are removed in the same lock hold, so the
-// switch from old to new prefix is atomic from the perspective of
-// concurrent requests.
-func (m *DynamicHTTPMux) Replace(svc *RegisteredService, deprecatedPrefixes ...string) {
-	canonical := svc.Config.CanonicalHTTPPrefix()
-	handler := buildHTTPHandler(svc, m.conn, canonical)
-	m.ReplacePrefixHandler(canonical, handler, deprecatedPrefixes...)
-}
-
 // RegisterPrefixHandler adds an HTTP handler at the given prefix.
-// This is the low-level primitive used by both extension and platform
-// registration.
 func (m *DynamicHTTPMux) RegisterPrefixHandler(prefix string, handler http.HandlerFunc) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

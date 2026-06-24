@@ -20,6 +20,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
@@ -184,8 +185,8 @@ func Start(t *testing.T) string {
 	}
 	authnInterceptor := transportgrpc.NewAuthnInterceptor(authMethodSvc, stubVerifier{}, domain.NoOpAuthnObserver{})
 
-	dynamicMux := managedresource.NewDynamicServiceMux()
-	fileRegistry := managedresource.NewDynamicFileRegistry()
+	dynamicMux := dynamicapi.NewDynamicServiceMux()
+	fileRegistry := dynamicapi.NewDynamicFileRegistry()
 
 	srv := grpc.NewServer(
 		grpc.ChainUnaryInterceptor(authnInterceptor.Unary()),
@@ -198,7 +199,7 @@ func Start(t *testing.T) string {
 	pb.RegisterAuthMethodServiceServer(srv, &transportgrpc.AuthMethodServer{
 		AuthMethods: authMethodSvc,
 	})
-	managedresource.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
+	dynamicapi.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
 
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
