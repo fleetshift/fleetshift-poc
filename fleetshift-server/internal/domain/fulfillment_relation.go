@@ -166,6 +166,9 @@ func marshalFulfillmentRelation(r FulfillmentRelation) (fulfillmentRelJSON, erro
 			},
 		}, nil
 	case *RegisteredSelfTarget:
+		if v == nil {
+			return fulfillmentRelJSON{}, fmt.Errorf("fulfillment relation: RegisteredSelfTarget is nil")
+		}
 		return fulfillmentRelJSON{
 			Type: "RegisteredSelfTarget",
 			RegisteredSelfTarget: &registeredSelfTargetJSON{
