@@ -342,23 +342,14 @@ func validateSchemaCapability(rec *addonRecord, schema domain.ManagedResourceSch
 
 // activateSchema delegates to the SchemaActivator and records the
 // resulting registration ID and type def.
+//
+// Type metadata is validated before activation so that a CreateType or
+// drift-detection failure never leaves routes live with no matching
+// type definition (and never tears down the previous registration).
 func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ManagedResourceSchema) error {
-	id, err := m.activator.Activate(ctx, schema)
-	if err != nil {
-		return err
-	}
-	if rec.schemaRegistrations == nil {
-		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
-	}
-
-	// If the registration ID changed (e.g. the gRPC service name
-	// changed due to a package rename), deactivate the old one so
-	// its gRPC/HTTP routes don't leak.
-	if prev, ok := rec.schemaRegistrations[schema.ResourceType]; ok && prev != id {
-		m.activator.Deactivate(prev)
-	}
-	rec.schemaRegistrations[schema.ResourceType] = id
-
+	// Validate / register the type definition first — this is
+	// side-effect-free with respect to the transport layer, so
+	// a failure here keeps the previous registration intact.
 	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
 		newSvc := domain.ServiceName(schema.APIServiceName)
 		newVer := domain.APIVersion(schema.Version)
@@ -385,6 +376,22 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 		}
 		rec.registeredTypeDefs[schema.ResourceType] = struct{}{}
 	}
+
+	id, err := m.activator.Activate(ctx, schema)
+	if err != nil {
+		return err
+	}
+	if rec.schemaRegistrations == nil {
+		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
+	}
+
+	// If the registration ID changed (e.g. the gRPC service name
+	// changed due to a package rename), deactivate the old one so
+	// its gRPC/HTTP routes don't leak.
+	if prev, ok := rec.schemaRegistrations[schema.ResourceType]; ok && prev != id {
+		m.activator.Deactivate(prev)
+	}
+	rec.schemaRegistrations[schema.ResourceType] = id
 
 	return nil
 }
