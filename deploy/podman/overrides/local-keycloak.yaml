@@ -1,11 +1,4 @@
 services:
-  keycloak-certs:
-    image: alpine:3
-    command: /scripts/generate-certs.sh
-    volumes:
-      - keycloak-certs:/certs
-      - ./scripts/generate-certs.sh:/scripts/generate-certs.sh:ro
-
   keycloak:
     image: quay.io/keycloak/keycloak:26.2
     command: start-dev --import-realm
@@ -26,16 +19,14 @@ services:
       - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
       - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
     volumes:
-      - keycloak-certs:/opt/keycloak/certs:ro
+      - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro
+      - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro
       - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
       interval: 5s
       timeout: 3s
       retries: 30
-    depends_on:
-      keycloak-certs:
-        condition: service_completed_successfully
 
   fleetshift-server:
     command:
@@ -52,10 +43,7 @@ services:
     environment:
       OIDC_HTTPS_PORT: "${KC_HTTPS_PORT}"
     volumes:
-      - keycloak-certs:/certs:ro
-    depends_on:
-      keycloak-certs:
-        condition: service_completed_successfully
+      - ./.certs/ca.crt:/certs/ca.crt:ro
 
   auth-setup:
     image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server-local:latest}
@@ -76,6 +64,3 @@ services:
     depends_on:
       fleetshift-server:
         condition: service_healthy
-
-volumes:
-  keycloak-certs:

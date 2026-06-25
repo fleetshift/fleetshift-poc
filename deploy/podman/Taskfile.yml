@@ -33,6 +33,16 @@ vars:
   RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
 
 tasks:
+  cert-init:
+    desc: Generate local TLS certs for Keycloak (one-time, requires mkcert)
+    cmds:
+      - ./scripts/generate-certs.sh
+    status:
+      - test -f {{.ROOT_DIR}}/deploy/podman/.certs/keycloak.crt
+    preconditions:
+      - sh: command -v mkcert
+        msg: "mkcert is not installed. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
+
   render-gcphcp-config:
     internal: true
     cmds:
@@ -71,6 +81,8 @@ tasks:
         msg: "podman is not installed."
       - sh: command -v docker-compose
         msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not compatible)"
+      - sh: '{{if eq .RESOLVED_AUTH "local"}}command -v mkcert{{else}}true{{end}}'
+        msg: "mkcert is required for AUTH=local. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
       - sh: echo "{{.RESOLVED_DEPLOY_MODE}}" | grep -qE '^(demo|prod)$'
         msg: "DEPLOY_MODE must be demo or prod, got: {{.RESOLVED_DEPLOY_MODE}}"
       - sh: echo "{{.RESOLVED_DB}}" | grep -qE '^(sqlite|postgres)$'
@@ -80,6 +92,7 @@ tasks:
       - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
         msg: "OIDC_ISSUER_URL is required when AUTH=external"
     cmds:
+      - '{{if eq .RESOLVED_AUTH "local"}}./scripts/generate-certs.sh{{else}}true{{end}}'
       - ./scripts/start.sh
       - printf 'AUTH={{.RESOLVED_AUTH}}\nDB={{.RESOLVED_DB}}\nDEV={{.DEV}}\n' > .active-deploy
 

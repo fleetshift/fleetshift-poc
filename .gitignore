@@ -62,3 +62,6 @@ data/
 .claude_state
 keycloak/certs/
 .worktrees/
+
+# Local mkcert certificates
+deploy/podman/.certs/

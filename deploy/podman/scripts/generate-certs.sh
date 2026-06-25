@@ -1,34 +1,34 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Generate self-signed TLS certificates for the local Keycloak instance.
-# Runs as an init container via overrides/local-keycloak.yaml.
-# Skips if certs already exist (idempotent).
+# Generate TLS certificates for the local Keycloak instance using mkcert.
+# Called by 'task cert-init'. Skips if certs already exist (idempotent).
 
-if [ -f /certs/keycloak.crt ]; then
-  echo "TLS certs already exist, skipping generation"
+CERT_DIR="$(cd "$(dirname "$0")/.." && pwd)/.certs"
+
+if [ -f "$CERT_DIR/keycloak.crt" ]; then
+  echo "TLS certs already exist in $CERT_DIR, skipping generation"
   exit 0
 fi
 
-apk add --no-cache openssl > /dev/null
+mkdir -p "$CERT_DIR"
 
-echo "Generating CA..."
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout /certs/ca.key -out /certs/ca.crt \
-  -days 3650 -subj "/CN=FleetShift Local CA" 2>/dev/null
+echo "==> Installing CA into system trust store..."
+mkcert -install
 
-echo "Generating Keycloak server certificate..."
-openssl req -newkey rsa:2048 -nodes \
-  -keyout /certs/keycloak.key -out /tmp/keycloak.csr \
-  -subj "/CN=keycloak" 2>/dev/null
+echo "==> Generating Keycloak certificate..."
+mkcert -key-file "$CERT_DIR/keycloak.key" \
+       -cert-file "$CERT_DIR/keycloak.crt" \
+       keycloak
 
-printf "subjectAltName=DNS:keycloak,DNS:localhost" > /tmp/san.cnf
-openssl x509 -req -in /tmp/keycloak.csr \
-  -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial \
-  -out /certs/keycloak.crt -days 3650 \
-  -extfile /tmp/san.cnf 2>/dev/null
+echo "==> Copying CA cert for container mounting..."
+cp "$(mkcert -CAROOT)/rootCA.pem" "$CERT_DIR/ca.crt"
 
-rm -f /tmp/keycloak.csr /tmp/san.cnf /certs/ca.srl
-chmod 644 /certs/*.crt
-chmod 644 /certs/*.key
-echo "TLS certs generated in /certs/"
+echo "==> Deleting CA private key..."
+rm -f "$(mkcert -CAROOT)/rootCA-key.pem"
+
+chmod 600 "$CERT_DIR/keycloak.key"
+chmod 644 "$CERT_DIR/keycloak.crt" "$CERT_DIR/ca.crt"
+
+echo "TLS certs generated in $CERT_DIR/"
+echo "CA private key has been deleted — regenerate with 'task cert-init' if needed."
