@@ -63,11 +63,11 @@ type DeliveryRepository interface {
 // boundary for the extension resource model.
 //
 // Intent versioning is owned by the [ExtensionResource] aggregate (via
-// [ManagedState]). Create and Save read pending intents from the
-// aggregate's [ExtensionResource.Snapshot] and flush them to storage.
-// The aggregate is only valid within the scope of a single transaction;
-// on the next read, [ExtensionResourceFromSnapshot] naturally produces
-// an aggregate with no pending intents.
+// [ManagedState]). Create reads pending intents from the aggregate's
+// [ExtensionResource.Snapshot] and flushes them to storage. The
+// aggregate is only valid within the scope of a single transaction; on
+// the next read, [ExtensionResourceFromSnapshot] naturally produces an
+// aggregate with no pending intents.
 type ExtensionResourceRepository interface {
 	// Type registration
 	CreateType(ctx context.Context, def ExtensionResourceType) error
@@ -75,13 +75,11 @@ type ExtensionResourceRepository interface {
 	ListTypes(ctx context.Context) ([]ExtensionResourceType, error)
 	DeleteType(ctx context.Context, rt ResourceType) error
 
-	// Instance aggregate (Create drains pending intents)
+	// Instance aggregate
 	Create(ctx context.Context, r *ExtensionResource) error
 	Get(ctx context.Context, rt ResourceType, name ResourceName) (*ExtensionResource, error)
 	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
-	// Save persists mutations to an existing extension resource.
-	Save(ctx context.Context, r *ExtensionResource) error
 	Delete(ctx context.Context, rt ResourceType, name ResourceName) error
 
 	// Read views (join extension resource + managed state + intent + fulfillment)

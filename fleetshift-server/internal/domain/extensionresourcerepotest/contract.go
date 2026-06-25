@@ -25,7 +25,6 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("Instances", func(t *testing.T) { runInstanceTests(t, factory) })
 	t.Run("Intents", func(t *testing.T) { runIntentTests(t, factory) })
 	t.Run("Views", func(t *testing.T) { runViewTests(t, factory) })
-	t.Run("Save", func(t *testing.T) { runSaveTests(t, factory) })
 }
 
 // ---------------------------------------------------------------------------
@@ -593,45 +592,6 @@ func runViewTests(t *testing.T, factory Factory) {
 				t.Errorf("Fulfillment is nil for %s", v.Resource.Name())
 			}
 		}
-	})
-}
-
-// ---------------------------------------------------------------------------
-// Save
-// ---------------------------------------------------------------------------
-
-func runSaveTests(t *testing.T, factory Factory) {
-	ctx := context.Background()
-
-	t.Run("SaveRoundTrips", func(t *testing.T) {
-		tx := factory(t)
-		defer tx.Rollback()
-		repo := tx.ExtensionResources()
-
-		seedType(t, tx, "test.fleetshift.io/Cluster")
-		fID := domain.FulfillmentID("f-save")
-		seedFulfillment(t, tx, fID, fixedTime)
-
-		r := newER("test.fleetshift.io/Cluster", "clusters/save", fID)
-		if err := repo.Create(ctx, r); err != nil {
-			t.Fatalf("Create: %v", err)
-		}
-
-		loaded, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/save")
-		if err != nil {
-			t.Fatalf("Get: %v", err)
-		}
-
-		if err := repo.Save(ctx, loaded); err != nil {
-			t.Fatalf("Save: %v", err)
-		}
-
-		reloaded, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/save")
-		if err != nil {
-			t.Fatalf("Get after save: %v", err)
-		}
-		assertEqual(t, "ResourceType", reloaded.ResourceType(), loaded.ResourceType())
-		assertEqual(t, "Name", reloaded.Name(), loaded.Name())
 	})
 }
 

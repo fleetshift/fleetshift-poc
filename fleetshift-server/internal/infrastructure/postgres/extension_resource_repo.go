@@ -182,47 +182,6 @@ func (r *ExtensionResourceRepo) ListByResourceType(ctx context.Context, rt domai
 	return result, nil
 }
 
-func (r *ExtensionResourceRepo) Save(ctx context.Context, er *domain.ExtensionResource) error {
-	snap := er.Snapshot()
-
-	labelsJSON, err := json.Marshal(snap.Labels)
-	if err != nil {
-		return fmt.Errorf("marshal labels: %w", err)
-	}
-
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE extension_resources SET labels = $1, updated_at = $2
-		 WHERE uid = $3`,
-		string(labelsJSON), snap.UpdatedAt.UTC(), snap.UID.String())
-	if err != nil {
-		return fmt.Errorf("update extension resource: %w", err)
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("%w: extension resource %s/%s", domain.ErrNotFound, snap.ResourceType, snap.Name)
-	}
-
-	if snap.Managed != nil {
-		_, err = r.DB.ExecContext(ctx,
-			`UPDATE extension_resource_managed SET current_version = $1
-			 WHERE extension_resource_uid = $2`,
-			snap.Managed.CurrentVersion, snap.UID.String())
-		if err != nil {
-			return fmt.Errorf("update managed state: %w", err)
-		}
-	}
-
-	for _, intent := range snap.PendingIntents {
-		if _, err := r.DB.ExecContext(ctx,
-			`INSERT INTO resource_intents (resource_type, name, version, spec, created_at)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			intent.ResourceType, intent.Name, intent.Version, string(intent.Spec),
-			intent.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
-			return fmt.Errorf("insert intent v%d: %w", intent.Version, err)
-		}
-	}
-	return nil
-}
-
 func (r *ExtensionResourceRepo) Delete(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) error {
 	res, err := r.DB.ExecContext(ctx,
 		`DELETE FROM extension_resources WHERE resource_type = $1 AND resource_name = $2`,
