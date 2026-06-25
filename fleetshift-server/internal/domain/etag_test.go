@@ -289,12 +289,16 @@ func TestExtensionResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) 
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	sharedUID := NewExtensionResourceUID()
 
+	// ResourceType and Name are adjacent variable-length fields in the
+	// hash. These two pairs have identical raw concatenations
+	// ("svc.io/Foobars/x") but different field boundaries, so they
+	// would collide if hashString stopped length-prefixing.
 	a := ExtensionResourceView{
-		Resource: *NewExtensionResource(sharedUID, "kind.fleetshift.io/Cluster", "clusters/ab", now,
+		Resource: *NewExtensionResource(sharedUID, "svc.io/Foo", "bars/x", now,
 			WithManagedState("f-1")),
 	}
 	b := ExtensionResourceView{
-		Resource: *NewExtensionResource(sharedUID, "kind.fleetshift.io/Cluster", "clusters/a", now,
+		Resource: *NewExtensionResource(sharedUID, "svc.io/Foobar", "s/x", now,
 			WithManagedState("f-1")),
 	}
 	if a.Etag() == b.Etag() {
