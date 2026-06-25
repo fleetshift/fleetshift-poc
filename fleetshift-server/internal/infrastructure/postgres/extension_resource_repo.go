@@ -35,10 +35,10 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 	}
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO extension_resource_types
-			(resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			(resource_type, api_version, collection_id, management, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6)`,
 		snap.ResourceType,
-		string(snap.APIServiceName), string(snap.APIVersion), string(snap.CollectionID),
+		string(snap.APIVersion), string(snap.CollectionID),
 		nullStringFromBytes(mgmtJSON),
 		snap.CreatedAt.UTC(), snap.UpdatedAt.UTC())
 	if err != nil {
@@ -52,14 +52,14 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 
 func (r *ExtensionResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at
+		`SELECT resource_type, api_version, collection_id, management, created_at, updated_at
 		 FROM extension_resource_types WHERE resource_type = $1`, rt)
 	return scanExtensionResourceType(row)
 }
 
 func (r *ExtensionResourceRepo) ListTypes(ctx context.Context) ([]domain.ExtensionResourceType, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at
+		`SELECT resource_type, api_version, collection_id, management, created_at, updated_at
 		 FROM extension_resource_types ORDER BY resource_type`)
 	if err != nil {
 		return nil, err
@@ -272,11 +272,11 @@ JOIN fulfillments f ON f.id = erm.fulfillment_id
 
 func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) {
 	var snap domain.ExtensionResourceTypeSnapshot
-	var apiServiceName, apiVersion, collectionID string
+	var apiVersion, collectionID string
 	var mgmtJSON sql.NullString
 
 	if err := s.Scan(
-		&snap.ResourceType, &apiServiceName, &apiVersion, &collectionID,
+		&snap.ResourceType, &apiVersion, &collectionID,
 		&mgmtJSON, &snap.CreatedAt, &snap.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -285,7 +285,6 @@ func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) 
 		return domain.ExtensionResourceType{}, err
 	}
 
-	snap.APIServiceName = domain.ServiceName(apiServiceName)
 	snap.APIVersion = domain.APIVersion(apiVersion)
 	snap.CollectionID = domain.CollectionID(collectionID)
 

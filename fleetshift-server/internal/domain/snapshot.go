@@ -170,13 +170,12 @@ type ManagementTypeSnapshot struct {
 // ExtensionResourceTypeSnapshot is the persistence DTO for
 // [ExtensionResourceType].
 type ExtensionResourceTypeSnapshot struct {
-	ResourceType   ResourceType
-	APIServiceName ServiceName
-	APIVersion     APIVersion
-	CollectionID   CollectionID
-	Management     *ManagementTypeSnapshot
-	CreatedAt      time.Time
-	UpdatedAt      time.Time
+	ResourceType ResourceType
+	APIVersion   APIVersion
+	CollectionID CollectionID
+	Management   *ManagementTypeSnapshot
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 }
 
 // ManagedStateSnapshot is the persistence DTO for [ManagedState].
@@ -328,13 +327,12 @@ func (t ExtensionResourceType) Snapshot() ExtensionResourceTypeSnapshot {
 		}
 	}
 	return ExtensionResourceTypeSnapshot{
-		ResourceType:   t.resourceType,
-		APIServiceName: t.resourceType.ServiceName(),
-		APIVersion:     t.apiVersion,
-		CollectionID:   t.collectionID,
-		Management:     mgmt,
-		CreatedAt:      t.createdAt,
-		UpdatedAt:      t.updatedAt,
+		ResourceType: t.resourceType,
+		APIVersion:   t.apiVersion,
+		CollectionID: t.collectionID,
+		Management:   mgmt,
+		CreatedAt:    t.createdAt,
+		UpdatedAt:    t.updatedAt,
 	}
 }
 

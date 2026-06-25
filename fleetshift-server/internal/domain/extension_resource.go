@@ -209,13 +209,12 @@ func (t ExtensionResourceType) MarshalJSON() ([]byte, error) {
 		mgmt = &managementTypeJSON{Relation: rel, Signature: t.management.signature}
 	}
 	return json.Marshal(extensionResourceTypeJSON{
-		ResourceType:   t.resourceType,
-		APIServiceName: t.resourceType.ServiceName(),
-		APIVersion:     t.apiVersion,
-		CollectionID:   t.collectionID,
-		Management:     mgmt,
-		CreatedAt:      t.createdAt,
-		UpdatedAt:      t.updatedAt,
+		ResourceType: t.resourceType,
+		APIVersion:   t.apiVersion,
+		CollectionID: t.collectionID,
+		Management:   mgmt,
+		CreatedAt:    t.createdAt,
+		UpdatedAt:    t.updatedAt,
 	})
 }
 
@@ -241,13 +240,12 @@ func (t *ExtensionResourceType) UnmarshalJSON(data []byte) error {
 }
 
 type extensionResourceTypeJSON struct {
-	ResourceType   ResourceType        `json:"ResourceType"`
-	APIServiceName ServiceName         `json:"APIServiceName"`
-	APIVersion     APIVersion          `json:"APIVersion"`
-	CollectionID   CollectionID        `json:"CollectionID"`
-	Management     *managementTypeJSON `json:"Management,omitempty"`
-	CreatedAt      time.Time           `json:"CreatedAt"`
-	UpdatedAt      time.Time           `json:"UpdatedAt"`
+	ResourceType ResourceType        `json:"ResourceType"`
+	APIVersion   APIVersion          `json:"APIVersion"`
+	CollectionID CollectionID        `json:"CollectionID"`
+	Management   *managementTypeJSON `json:"Management,omitempty"`
+	CreatedAt    time.Time           `json:"CreatedAt"`
+	UpdatedAt    time.Time           `json:"UpdatedAt"`
 }
 
 // ---------------------------------------------------------------------------

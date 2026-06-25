@@ -391,10 +391,9 @@ func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
 	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
 
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType:   "kind.fleetshift.io/Cluster",
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
+		ResourceType: "kind.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
 		Management: &ManagementTypeSnapshot{
 			Relation:  relation,
 			Signature: sig,
@@ -407,7 +406,6 @@ func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
 	got := ert.Snapshot()
 
 	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
-	assertEq(t, "APIServiceName", got.APIServiceName, snap.APIServiceName)
 	assertEq(t, "APIVersion", got.APIVersion, snap.APIVersion)
 	assertEq(t, "CollectionID", got.CollectionID, snap.CollectionID)
 	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
@@ -425,12 +423,11 @@ func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
 
 func TestExtensionResourceTypeSnapshot_RoundTrip_NoManagement(t *testing.T) {
 	snap := ExtensionResourceTypeSnapshot{
-		ResourceType:   "kind.fleetshift.io/Cluster",
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
-		CreatedAt:      refTime,
-		UpdatedAt:      refTime,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		CreatedAt:    refTime,
+		UpdatedAt:    refTime,
 	}
 
 	ert := ExtensionResourceTypeFromSnapshot(snap)

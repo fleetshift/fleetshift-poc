@@ -39,10 +39,9 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 	}
 
 	_, err := r.DB.ExecContext(ctx,
-		`INSERT INTO extension_resource_types (resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		`INSERT INTO extension_resource_types (resource_type, api_version, collection_id, management, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?)`,
 		snap.ResourceType,
-		string(snap.APIServiceName),
 		string(snap.APIVersion),
 		string(snap.CollectionID),
 		mgmtJSON,
@@ -59,14 +58,14 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 
 func (r *ExtensionResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at
+		`SELECT resource_type, api_version, collection_id, management, created_at, updated_at
 		 FROM extension_resource_types WHERE resource_type = ?`, rt)
 	return r.scanType(row)
 }
 
 func (r *ExtensionResourceRepo) ListTypes(ctx context.Context) ([]domain.ExtensionResourceType, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_type, api_service_name, api_version, collection_id, management, created_at, updated_at
+		`SELECT resource_type, api_version, collection_id, management, created_at, updated_at
 		 FROM extension_resource_types ORDER BY resource_type`)
 	if err != nil {
 		return nil, err
@@ -294,9 +293,9 @@ func (r *ExtensionResourceRepo) DeleteIntents(ctx context.Context, rt domain.Res
 // ---------------------------------------------------------------------------
 
 func (r *ExtensionResourceRepo) scanType(s interface{ Scan(...any) error }) (domain.ExtensionResourceType, error) {
-	var rtStr, apiServiceName, apiVersion, collectionID, createdAt, updatedAt string
+	var rtStr, apiVersion, collectionID, createdAt, updatedAt string
 	var mgmtJSON sql.NullString
-	if err := s.Scan(&rtStr, &apiServiceName, &apiVersion, &collectionID, &mgmtJSON, &createdAt, &updatedAt); err != nil {
+	if err := s.Scan(&rtStr, &apiVersion, &collectionID, &mgmtJSON, &createdAt, &updatedAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ExtensionResourceType{}, domain.ErrNotFound
 		}
@@ -304,10 +303,9 @@ func (r *ExtensionResourceRepo) scanType(s interface{ Scan(...any) error }) (dom
 	}
 
 	snap := domain.ExtensionResourceTypeSnapshot{
-		ResourceType:   domain.ResourceType(rtStr),
-		APIServiceName: domain.ServiceName(apiServiceName),
-		APIVersion:     domain.APIVersion(apiVersion),
-		CollectionID:   domain.CollectionID(collectionID),
+		ResourceType: domain.ResourceType(rtStr),
+		APIVersion:   domain.APIVersion(apiVersion),
+		CollectionID: domain.CollectionID(collectionID),
 	}
 	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		snap.CreatedAt = t

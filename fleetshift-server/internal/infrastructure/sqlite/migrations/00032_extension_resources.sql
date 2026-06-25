@@ -1,7 +1,6 @@
 -- +goose Up
 CREATE TABLE extension_resource_types (
     resource_type     TEXT PRIMARY KEY,
-    api_service_name  TEXT NOT NULL,
     api_version       TEXT NOT NULL,
     collection_id     TEXT NOT NULL,
     management        TEXT,  -- JSON, nullable for future inventory-only types
