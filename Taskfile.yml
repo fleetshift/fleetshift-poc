@@ -55,7 +55,7 @@ tasks:
     desc: Run server tests
     dir: fleetshift-server
     cmds:
-      - go test -count=1 ./...
+      - go test -tags=integration -count=1 ./...
 
   test:cli:
     desc: Run CLI tests
