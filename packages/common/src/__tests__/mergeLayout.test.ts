@@ -5,6 +5,7 @@ import type {
   NavLayoutGroup,
   NavLayoutOverride,
   NavLayoutPage,
+  NavLayoutSection,
 } from "../navLayout";
 import { collectPageIds, isNavLayoutOverride, mergeLayout } from "../navLayout";
 
@@ -19,6 +20,17 @@ const group = (
   type: "group",
   groupId,
   pluginKey,
+  label,
+  children,
+});
+
+const section = (
+  id: string,
+  label: string,
+  children: { pageId: string }[],
+): NavLayoutSection => ({
+  type: "section",
+  id,
   label,
   children,
 });
@@ -227,5 +239,42 @@ describe("mergeLayout", () => {
     const result = mergeLayout(backend, userOverride);
     const g = result[0] as NavLayoutGroup;
     expect(g.children).toEqual([page("a"), page("b")]);
+  });
+
+  it("inserts added pages into their backend section", () => {
+    // "b" is new
+    const backend = [
+      section("s1", "Tools", [{ pageId: "a" }, { pageId: "b" }]),
+    ];
+    const userOverride = override([section("s1", "Tools", [{ pageId: "a" }])]);
+    const result = mergeLayout(backend, userOverride);
+    const s = result[0] as NavLayoutSection;
+    expect(s.type).toBe("section");
+    expect(s.children).toEqual([{ pageId: "a" }, { pageId: "b" }]);
+  });
+
+  it("creates new section in override when backend adds a section", () => {
+    const backend = [
+      page("a"),
+      section("s-new", "New Section", [{ pageId: "x" }, { pageId: "y" }]),
+    ];
+    const userOverride = override([page("a")]);
+    const result = mergeLayout(backend, userOverride);
+    expect(result.length).toBe(2);
+    expect(result[0]).toEqual(page("a"));
+    const s = result[1] as NavLayoutSection;
+    expect(s.type).toBe("section");
+    expect(s.id).toBe("s-new");
+    expect(s.children.map((c) => c.pageId)).toEqual(["x", "y"]);
+  });
+
+  it("drops removed pages from sections in override", () => {
+    const backend = [section("s1", "Tools", [{ pageId: "a" }])]; // "b" removed
+    const userOverride = override([
+      section("s1", "Tools", [{ pageId: "a" }, { pageId: "b" }]),
+    ]);
+    const result = mergeLayout(backend, userOverride);
+    const s = result[0] as NavLayoutSection;
+    expect(s.children).toEqual([{ pageId: "a" }]);
   });
 });

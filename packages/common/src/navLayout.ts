@@ -72,23 +72,32 @@ export function isNavLayoutOverride(
 }
 
 /**
- * Build a lookup: pageId -> the backend group it belongs to.
- * Top-level pages return `null`.
+ * Discriminated container describing where a page lives in the backend layout.
+ */
+type BackendContainer =
+  | { kind: "top" }
+  | { kind: "group"; group: NavLayoutGroup }
+  | { kind: "section"; section: NavLayoutSection };
+
+/**
+ * Build a lookup: pageId -> the backend container it belongs to.
+ * Top-level pages map to `{ kind: "top" }`, group children to their group,
+ * and section children to their section.
  */
 function buildBackendGroupMap(
   backend: NavLayoutEntry[],
-): Map<string, NavLayoutGroup | null> {
-  const map = new Map<string, NavLayoutGroup | null>();
+): Map<string, BackendContainer> {
+  const map = new Map<string, BackendContainer>();
   for (const entry of backend) {
     if (entry.type === "page") {
-      map.set(entry.pageId, null);
+      map.set(entry.pageId, { kind: "top" });
     } else if (entry.type === "group") {
       for (const child of entry.children) {
-        map.set(child.pageId, entry);
+        map.set(child.pageId, { kind: "group", group: entry });
       }
     } else if (entry.type === "section") {
       for (const child of entry.children) {
-        map.set(child.pageId, null);
+        map.set(child.pageId, { kind: "section", section: entry });
       }
     }
   }
@@ -133,53 +142,94 @@ function dropRemoved(
 function insertAdded(
   layout: NavLayoutEntry[],
   addedIds: Set<string>,
-  backendGroupMap: Map<string, NavLayoutGroup | null>,
+  backendGroupMap: Map<string, BackendContainer>,
 ): NavLayoutEntry[] {
   if (addedIds.size === 0) return layout;
 
   const result = layout.map((entry) => {
-    if (entry.type !== "group") return entry;
-    // Check if any added pages belong to this group
-    const newChildren: NavLayoutPage[] = [];
-    for (const pageId of addedIds) {
-      const backendGroup = backendGroupMap.get(pageId);
-      if (backendGroup && backendGroup.groupId === entry.groupId) {
-        newChildren.push({ type: "page", pageId });
+    if (entry.type === "group") {
+      // Check if any added pages belong to this group
+      const newChildren: NavLayoutPage[] = [];
+      for (const pageId of addedIds) {
+        const container = backendGroupMap.get(pageId);
+        if (
+          container?.kind === "group" &&
+          container.group.groupId === entry.groupId
+        ) {
+          newChildren.push({ type: "page", pageId });
+        }
       }
+      if (newChildren.length === 0) return entry;
+      return {
+        ...entry,
+        children: [...entry.children, ...newChildren],
+      };
     }
-    if (newChildren.length === 0) return entry;
-    return {
-      ...entry,
-      children: [...entry.children, ...newChildren],
-    };
+
+    if (entry.type === "section") {
+      // Check if any added pages belong to this section
+      const newChildren: { pageId: string }[] = [];
+      for (const pageId of addedIds) {
+        const container = backendGroupMap.get(pageId);
+        if (
+          container?.kind === "section" &&
+          container.section.id === entry.id
+        ) {
+          newChildren.push({ pageId });
+        }
+      }
+      if (newChildren.length === 0) return entry;
+      return {
+        ...entry,
+        children: [...entry.children, ...newChildren],
+      };
+    }
+
+    return entry;
   });
 
-  // Collect which added pages were placed into existing groups
+  // Collect which added pages were placed into existing groups/sections
   const placed = new Set<string>();
   for (const entry of result) {
     if (entry.type === "group") {
       for (const child of entry.children) {
         if (addedIds.has(child.pageId)) placed.add(child.pageId);
       }
+    } else if (entry.type === "section") {
+      for (const child of entry.children) {
+        if (addedIds.has(child.pageId)) placed.add(child.pageId);
+      }
     }
   }
 
-  // Remaining added pages: check if they belong to a backend group not in override
+  // Remaining added pages: check if they belong to a backend container not in override
   const ungrouped: NavLayoutPage[] = [];
   const newGroups = new Map<string, NavLayoutGroup>();
+  const newSections = new Map<string, NavLayoutSection>();
 
   for (const pageId of addedIds) {
     if (placed.has(pageId)) continue;
-    const backendGroup = backendGroupMap.get(pageId);
-    if (backendGroup) {
+    const container = backendGroupMap.get(pageId);
+    if (container?.kind === "group") {
       // Group exists in backend but not in override — create it
-      const existing = newGroups.get(backendGroup.groupId);
+      const existing = newGroups.get(container.group.groupId);
       if (existing) {
         existing.children.push({ type: "page", pageId });
       } else {
-        newGroups.set(backendGroup.groupId, {
-          ...backendGroup,
+        newGroups.set(container.group.groupId, {
+          ...container.group,
           children: [{ type: "page", pageId }],
+        });
+      }
+    } else if (container?.kind === "section") {
+      // Section exists in backend but not in override — create it
+      const existing = newSections.get(container.section.id);
+      if (existing) {
+        existing.children.push({ pageId });
+      } else {
+        newSections.set(container.section.id, {
+          ...container.section,
+          children: [{ pageId }],
         });
       }
     } else {
@@ -190,9 +240,10 @@ function insertAdded(
   // Sort ungrouped alphabetically by pageId
   ungrouped.sort((a, b) => a.pageId.localeCompare(b.pageId));
 
-  // Append new groups then ungrouped pages
+  // Append new groups, new sections, then ungrouped pages
   const groupEntries = [...newGroups.values()] as NavLayoutEntry[];
-  return [...result, ...groupEntries, ...ungrouped];
+  const sectionEntries = [...newSections.values()] as NavLayoutEntry[];
+  return [...result, ...groupEntries, ...sectionEntries, ...ungrouped];
 }
 
 /**
