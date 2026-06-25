@@ -13,6 +13,13 @@ fi
 
 mkdir -p "$CERT_DIR"
 
+CAROOT="$(mkcert -CAROOT)"
+if [ ! -f "$CAROOT/rootCA-key.pem" ]; then
+  echo "==> CA key missing — removing old CA and generating fresh one..."
+  mkcert -uninstall 2>/dev/null || true
+  rm -f "$CAROOT/rootCA.pem" "$CAROOT/rootCA-key.pem"
+fi
+
 echo "==> Installing CA into system trust store..."
 mkcert -install
 
