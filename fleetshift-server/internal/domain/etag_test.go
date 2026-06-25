@@ -1,8 +1,10 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fulfillmentValue(s FulfillmentSnapshot) Fulfillment {
@@ -156,5 +158,164 @@ func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
 	}
 	if a.Etag() == b.Etag() {
 		t.Error("etags must differ when resolved target count differs")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResourceView etag tests
+// ---------------------------------------------------------------------------
+
+// extensionView builds a managed ExtensionResourceView with sensible
+// defaults suitable for etag testing. Callers mutate the returned value
+// before computing the etag.
+func extensionView() ExtensionResourceView {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	er := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+		WithManagedState("f-1"))
+	er.RecordIntent(json.RawMessage(`{"replicas":3}`), now)
+
+	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
+		ID:              "f-1",
+		Generation:      1,
+		State:           FulfillmentStateActive,
+		ResolvedTargets: []TargetID{"t1"},
+	})
+
+	intent := er.Snapshot().PendingIntents[0]
+
+	return ExtensionResourceView{
+		Resource:    *er,
+		Intent:      &intent,
+		Fulfillment: f,
+	}
+}
+
+func TestExtensionResourceView_Etag_Deterministic(t *testing.T) {
+	v := extensionView()
+	e1 := v.Etag()
+	e2 := v.Etag()
+	if e1 != e2 {
+		t.Errorf("etag is not deterministic: %q != %q", e1, e2)
+	}
+}
+
+func TestExtensionResourceView_Etag_WeakPrefix(t *testing.T) {
+	etag := string(extensionView().Etag())
+	if !strings.HasPrefix(etag, `W/"`) {
+		t.Errorf("etag should start with W/\", got %q", etag)
+	}
+	if !strings.HasSuffix(etag, `"`) {
+		t.Errorf("etag should end with \", got %q", etag)
+	}
+}
+
+func TestExtensionResourceView_Etag_ChangesOnMutation(t *testing.T) {
+	base := extensionView()
+	baseEtag := base.Etag()
+
+	t.Run("fulfillment state change", func(t *testing.T) {
+		snap := base.Fulfillment.Snapshot()
+		snap.State = FulfillmentStateFailed
+		v := base
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when fulfillment state changes")
+		}
+	})
+
+	t.Run("fulfillment generation change", func(t *testing.T) {
+		snap := base.Fulfillment.Snapshot()
+		snap.Generation = 99
+		v := base
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when fulfillment generation changes")
+		}
+	})
+
+	t.Run("intent version change", func(t *testing.T) {
+		v := base
+		changed := *base.Intent
+		changed.Version = 42
+		v.Intent = &changed
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when intent version changes")
+		}
+	})
+
+	t.Run("intent spec change", func(t *testing.T) {
+		v := base
+		changed := *base.Intent
+		changed.Spec = json.RawMessage(`{"replicas":5}`)
+		v.Intent = &changed
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when intent spec changes")
+		}
+	})
+
+	t.Run("managed version change", func(t *testing.T) {
+		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		er := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
+			UID:          base.Resource.UID(),
+			ResourceType: base.Resource.ResourceType(),
+			Name:         base.Resource.Name(),
+			Managed: &ManagedStateSnapshot{
+				CurrentVersion: 10,
+				FulfillmentID:  "f-1",
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		v := base
+		v.Resource = *er
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when managed version changes")
+		}
+	})
+
+	t.Run("resolved targets change", func(t *testing.T) {
+		snap := base.Fulfillment.Snapshot()
+		snap.ResolvedTargets = []TargetID{"t1", "t2", "t3"}
+		v := base
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when resolved targets change")
+		}
+	})
+}
+
+func TestExtensionResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	sharedUID := NewExtensionResourceUID()
+
+	a := ExtensionResourceView{
+		Resource: *NewExtensionResource(sharedUID, "kind.fleetshift.io/Cluster", "clusters/ab", now,
+			WithManagedState("f-1")),
+	}
+	b := ExtensionResourceView{
+		Resource: *NewExtensionResource(sharedUID, "kind.fleetshift.io/Cluster", "clusters/a", now,
+			WithManagedState("f-1")),
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when field values differ, even if concatenation is the same")
+	}
+}
+
+func TestExtensionResourceView_Etag_NilFulfillmentDiffers(t *testing.T) {
+	withFulfillment := extensionView()
+	without := withFulfillment
+	without.Fulfillment = nil
+	if withFulfillment.Etag() == without.Etag() {
+		t.Error("etag should differ between views with and without fulfillment")
+	}
+}
+
+func TestExtensionResourceView_Etag_NilIntentDiffers(t *testing.T) {
+	withIntent := extensionView()
+	without := withIntent
+	without.Intent = nil
+	if withIntent.Etag() == without.Etag() {
+		t.Error("etag should differ between views with and without intent")
 	}
 }
