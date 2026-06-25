@@ -13,8 +13,6 @@ import (
 // extension resource instance. Generated once at creation time and
 // never changes. The underlying type is [uuid.UUID] so structural
 // validity is encoded in the type system.
-//
-// See the Phase 4a plan document for context.
 type ExtensionResourceUID uuid.UUID
 
 // NewExtensionResourceUID generates a new random [ExtensionResourceUID].
@@ -123,7 +121,7 @@ type managementTypeJSON struct {
 // this type uses private fields with accessors per domain.md
 // conventions.
 //
-// In Phase 4a, all persisted types have management metadata because
+// For now, all persisted types have management metadata because
 // inventory-only types are deferred. The management field is modeled
 // as optional (*ManagementType) to establish the boundary for future
 // non-managed types.
@@ -281,7 +279,7 @@ func (s ManagedState) FulfillmentID() FulfillmentID { return s.fulfillmentID }
 // It is the single extension-side aggregate for a fully qualified
 // extension resource name such as //kind.fleetshift.io/clusters/dev.
 //
-// In Phase 4a, every persisted extension resource is managed because
+// For now, every persisted extension resource is managed because
 // inventory-only resources are deferred. The managed field is modeled
 // as optional (*ManagedState) to establish the boundary for future
 // non-managed types.

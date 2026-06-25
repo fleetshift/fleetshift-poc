@@ -13,7 +13,7 @@ import (
 // addons to declare an extension resource type, optionally with
 // management metadata (fulfillment relation and attestation signature).
 //
-// In Phase 4a, all registered types carry management metadata; the
+// For now, all registered types carry management metadata; the
 // management field is modeled as optional to establish the boundary for
 // future inventory-only types.
 type ExtensionResourceTypeService struct {
@@ -65,9 +65,9 @@ type CreateExtensionTypeInput struct {
 
 	// Management is optional. When present, the type's instances are
 	// managed resources with a fulfillment relation and attestation.
-	// In Phase 4a, management metadata is required for all registered
-	// types; this is enforced by callers (e.g. AddonManager), not here,
-	// because the type service should support future inventory-only types.
+	// For now, management metadata is required for all registered types;
+	// this is enforced by callers (e.g. AddonManager), not here, because
+	// the type service should support future inventory-only types.
 	Management *CreateExtensionTypeManagementInput
 }
 
