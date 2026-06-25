@@ -63,7 +63,7 @@ fi
 PODMAN_SOCKET="$PODMAN_SOCKET" compose up "${UP_ARGS[@]}"
 
 if [ "$AUTH_MODE" = "local" ]; then
-  KC_URL="http://${KC_HOSTNAME:-localhost}:${KC_HTTP_PORT:-8180}/auth"
+  KC_URL="https://${KC_HOSTNAME:-keycloak}:${KC_HTTPS_PORT:-8443}/auth"
 
   echo "==> Waiting for Keycloak API..."
   until curl -sf "$KC_URL/realms/master" >/dev/null 2>&1; do
@@ -112,8 +112,7 @@ echo ""
 echo "==> FleetShift stack is running!"
 echo "    FleetShift:      http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Keycloak Admin:  https://localhost:${KC_HTTPS_PORT:-8443}"
-  echo "    Keycloak (HTTP): http://localhost:${KC_HTTP_PORT:-8180}"
+  echo "    Keycloak:        https://keycloak:${KC_HTTPS_PORT:-8443}"
   echo ""
   echo "  Keycloak Admin Console:"
   echo "    admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"
