@@ -242,57 +242,6 @@ func TestSignerEnrollmentSnapshot_RoundTrip(t *testing.T) {
 	assertEq(t, "ExpiresAt", got.ExpiresAt, snap.ExpiresAt)
 }
 
-func TestManagedResourceSnapshot_RoundTrip(t *testing.T) {
-	deletedAt := refTime.Add(2 * time.Hour)
-	uid := NewManagedResourceUID()
-	snap := ManagedResourceSnapshot{
-		ResourceType:   "test.fleetshift.io/Cluster",
-		Name:           "prod-east",
-		UID:            uid,
-		CurrentVersion: 4,
-		FulfillmentID:  "f-1",
-		CreatedAt:      refTime,
-		UpdatedAt:      refTime.Add(time.Hour),
-		DeletedAt:      &deletedAt,
-		PendingIntents: []ResourceIntent{
-			{ResourceType: "test.fleetshift.io/Cluster", Name: "prod-east", Version: 5, Spec: json.RawMessage(`{}`)},
-		},
-	}
-
-	mr := ManagedResourceFromSnapshot(snap)
-	got := mr.Snapshot()
-
-	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
-	assertEq(t, "Name", got.Name, snap.Name)
-	assertEq(t, "UID", got.UID, snap.UID)
-	assertEq(t, "CurrentVersion", got.CurrentVersion, snap.CurrentVersion)
-	assertEq(t, "FulfillmentID", got.FulfillmentID, snap.FulfillmentID)
-	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
-	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
-	if got.DeletedAt == nil {
-		t.Fatal("DeletedAt is nil, want non-nil")
-	}
-	assertEq(t, "DeletedAt", *got.DeletedAt, *snap.DeletedAt)
-
-	// Pending intents must be zeroed on hydration round-trip.
-	if len(got.PendingIntents) != 0 {
-		t.Errorf("PendingIntents len = %d, want 0 after round-trip", len(got.PendingIntents))
-	}
-}
-
-func TestManagedResourceFromSnapshot_PreservesVersionBaseline(t *testing.T) {
-	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "test.fleetshift.io/Cluster",
-		Name:           "prod",
-		CurrentVersion: 7,
-		FulfillmentID:  "f-1",
-	})
-
-	intent := mr.RecordIntent(json.RawMessage(`{"v":8}`), refTime)
-	assertEq(t, "intent.Version", intent.Version, IntentVersion(8))
-	assertEq(t, "mr.CurrentVersion after RecordIntent", mr.CurrentVersion(), IntentVersion(8))
-}
-
 func TestFulfillmentSnapshot_CapturesPendingBuffers(t *testing.T) {
 	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
 		ID:         "f-1",
@@ -314,23 +263,6 @@ func TestFulfillmentSnapshot_CapturesPendingBuffers(t *testing.T) {
 		t.Errorf("PendingStrategyRecords.Placement len = %d, want 1",
 			len(snap.PendingStrategyRecords.Placement))
 	}
-}
-
-func TestManagedResourceSnapshot_CapturesPendingIntents(t *testing.T) {
-	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "test.fleetshift.io/Cluster",
-		Name:           "prod",
-		CurrentVersion: 0,
-		FulfillmentID:  "f-1",
-	})
-
-	mr.RecordIntent(json.RawMessage(`{"spec":"v1"}`), refTime)
-
-	snap := mr.Snapshot()
-	if len(snap.PendingIntents) != 1 {
-		t.Fatalf("PendingIntents len = %d, want 1", len(snap.PendingIntents))
-	}
-	assertEq(t, "PendingIntents[0].Version", snap.PendingIntents[0].Version, IntentVersion(1))
 }
 
 func TestFulfillment_DrainPendingStrategyRecords(t *testing.T) {
@@ -373,40 +305,6 @@ func TestFulfillment_DrainPendingStrategyRecords(t *testing.T) {
 	drained2 := f.DrainPendingStrategyRecords()
 	if len(drained2.Manifest) != 0 {
 		t.Errorf("second drain Manifest len = %d, want 0", len(drained2.Manifest))
-	}
-}
-
-func TestManagedResource_DrainPendingIntents(t *testing.T) {
-	mr := ManagedResourceFromSnapshot(ManagedResourceSnapshot{
-		ResourceType:   "test.fleetshift.io/Cluster",
-		Name:           "prod",
-		CurrentVersion: 0,
-		FulfillmentID:  "f-1",
-	})
-
-	mr.RecordIntent(json.RawMessage(`{"spec":"v1"}`), refTime)
-
-	// Snapshot still captures them (non-mutating).
-	snap := mr.Snapshot()
-	if len(snap.PendingIntents) != 1 {
-		t.Fatalf("Snapshot().PendingIntents len = %d, want 1", len(snap.PendingIntents))
-	}
-
-	// Drain returns the intents and clears the buffer.
-	drained := mr.DrainPendingIntents()
-	if len(drained) != 1 {
-		t.Fatalf("drained intents len = %d, want 1", len(drained))
-	}
-	assertEq(t, "drained[0].Version", drained[0].Version, IntentVersion(1))
-
-	// After drain, both Snapshot and a second drain return empty.
-	snap2 := mr.Snapshot()
-	if len(snap2.PendingIntents) != 0 {
-		t.Errorf("post-drain Snapshot().PendingIntents len = %d, want 0", len(snap2.PendingIntents))
-	}
-	drained2 := mr.DrainPendingIntents()
-	if len(drained2) != 0 {
-		t.Errorf("second drain intents len = %d, want 0", len(drained2))
 	}
 }
 
@@ -482,6 +380,167 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 		t.Fatalf("Relationships len = %d, want 1", len(got.Relationships))
 	}
 	assertEq(t, "Rel.Type", got.Relationships[0].Type, RelationshipType("runs-on"))
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResourceType snapshot round-trips
+// ---------------------------------------------------------------------------
+
+func TestExtensionResourceTypeSnapshot_RoundTrip(t *testing.T) {
+	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
+	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
+
+	snap := ExtensionResourceTypeSnapshot{
+		ResourceType:   "kind.fleetshift.io/Cluster",
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
+		Management: &ManagementTypeSnapshot{
+			Relation:  relation,
+			Signature: sig,
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	ert := ExtensionResourceTypeFromSnapshot(snap)
+	got := ert.Snapshot()
+
+	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
+	assertEq(t, "APIServiceName", got.APIServiceName, snap.APIServiceName)
+	assertEq(t, "APIVersion", got.APIVersion, snap.APIVersion)
+	assertEq(t, "CollectionID", got.CollectionID, snap.CollectionID)
+	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
+	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
+	if got.Management == nil {
+		t.Fatal("Management is nil after round-trip")
+	}
+	assertEq(t, "Signature.Signer.Subject", got.Management.Signature.Signer.Subject, "addon")
+	rst, ok := got.Management.Relation.(RegisteredSelfTarget)
+	if !ok {
+		t.Fatal("expected RegisteredSelfTarget after round-trip")
+	}
+	assertEq(t, "Relation.AddonTarget", rst.AddonTarget(), TargetID("target-kind"))
+}
+
+func TestExtensionResourceTypeSnapshot_RoundTrip_NoManagement(t *testing.T) {
+	snap := ExtensionResourceTypeSnapshot{
+		ResourceType:   "kind.fleetshift.io/Cluster",
+		APIServiceName: "kind.fleetshift.io",
+		APIVersion:     "v1",
+		CollectionID:   "clusters",
+		CreatedAt:      refTime,
+		UpdatedAt:      refTime,
+	}
+
+	ert := ExtensionResourceTypeFromSnapshot(snap)
+	got := ert.Snapshot()
+
+	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
+	if got.Management != nil {
+		t.Error("expected nil Management after round-trip")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResource snapshot round-trips
+// ---------------------------------------------------------------------------
+
+func TestExtensionResourceSnapshot_RoundTrip(t *testing.T) {
+	uid := NewExtensionResourceUID()
+	snap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		Labels:       map[string]string{"env": "dev"},
+		CreatedAt:    refTime,
+		UpdatedAt:    refTime.Add(time.Hour),
+		PendingIntents: []ResourceIntent{
+			{ResourceType: "kind.fleetshift.io/Cluster", Name: "clusters/dev", Version: 1, Spec: json.RawMessage(`{}`)},
+		},
+	}
+
+	r := ExtensionResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	assertEq(t, "UID", got.UID, snap.UID)
+	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
+	assertEq(t, "Name", got.Name, snap.Name)
+	assertEq(t, "Labels[env]", got.Labels["env"], "dev")
+	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
+	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
+	if got.Managed != nil {
+		t.Error("expected nil Managed for resource without managed state")
+	}
+
+	// Pending intents must be zeroed on hydration round-trip.
+	if len(got.PendingIntents) != 0 {
+		t.Errorf("PendingIntents len = %d, want 0 after round-trip", len(got.PendingIntents))
+	}
+}
+
+func TestExtensionResourceSnapshot_ManagedState_RoundTrip(t *testing.T) {
+	uid := NewExtensionResourceUID()
+	snap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/prod",
+		Labels:       map[string]string{},
+		Managed: &ManagedStateSnapshot{
+			CurrentVersion: 5,
+			FulfillmentID:  "f-1",
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	r := ExtensionResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	if got.Managed == nil {
+		t.Fatal("Managed is nil after round-trip")
+	}
+	assertEq(t, "Managed.CurrentVersion", got.Managed.CurrentVersion, IntentVersion(5))
+	assertEq(t, "Managed.FulfillmentID", got.Managed.FulfillmentID, FulfillmentID("f-1"))
+}
+
+func TestExtensionResourceFromSnapshot_PreservesVersionBaseline(t *testing.T) {
+	r := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
+		UID:          NewExtensionResourceUID(),
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/prod",
+		Managed: &ManagedStateSnapshot{
+			CurrentVersion: 7,
+			FulfillmentID:  "f-1",
+		},
+	})
+
+	intent, err := r.RecordIntent(json.RawMessage(`{"v":8}`), refTime)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEq(t, "intent.Version", intent.Version, IntentVersion(8))
+	assertEq(t, "managed.CurrentVersion after RecordIntent", r.Managed().CurrentVersion(), IntentVersion(8))
+}
+
+func TestExtensionResourceSnapshot_CapturesPendingIntents(t *testing.T) {
+	r := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
+		UID:          NewExtensionResourceUID(),
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/prod",
+		Managed: &ManagedStateSnapshot{
+			CurrentVersion: 0,
+			FulfillmentID:  "f-1",
+		},
+	})
+
+	r.RecordIntent(json.RawMessage(`{"spec":"v1"}`), refTime)
+
+	snap := r.Snapshot()
+	if len(snap.PendingIntents) != 1 {
+		t.Fatalf("PendingIntents len = %d, want 1", len(snap.PendingIntents))
+	}
+	assertEq(t, "PendingIntents[0].Version", snap.PendingIntents[0].Version, IntentVersion(1))
 }
 
 // assertEq is a generic test helper that compares two comparable values.

@@ -19,7 +19,7 @@ type deploymentMutationResult struct {
 // mutation activity: the view snapshot after mutation, the fulfillment
 // ID, and the generation it wrote.
 type managedResourceMutationResult struct {
-	View          ManagedResourceView
+	View          ExtensionResourceView
 	FulfillmentID FulfillmentID
 	MyGen         Generation
 }

@@ -384,10 +384,11 @@ func TestDynamicSchemaActivator_ReplaceWithChangedHTTPIdentity(t *testing.T) {
 		t.Fatal("expected old canonical route to exist after first Activate, got 404")
 	}
 
-	// Change the API service name (and thus the HTTP prefix) while
-	// keeping the same gRPC service name. This simulates a transport
-	// identity change that previously leaked the old HTTP route.
-	schema.APIServiceName = "kindv2.fleetshift.io"
+	// Change the service name (via ResourceType) and thus the HTTP
+	// prefix, while keeping the same gRPC service name. This simulates
+	// a transport identity change that previously leaked the old HTTP
+	// route.
+	schema.ResourceType = "kindv2.fleetshift.io/Cluster"
 	schema.ProtoFiles = map[string]string{
 		"cluster_spec.proto": `syntax = "proto3"; message KindClusterSpecV2 { string name = 1; }`,
 	}
@@ -420,11 +421,11 @@ const widgetTargetType domain.TargetType = "widget-target"
 type activatorResourceEnv struct {
 	activator *managedresource.DynamicSchemaActivator
 	conn      *grpc.ClientConn
-	typeSvc   *application.ManagedResourceTypeService
+	typeSvc   *application.ExtensionResourceTypeService
 }
 
 // newActivatorWithResources creates an activator backed by a real
-// ManagedResourceService (SQLite + memworkflow) and a bufconn gRPC
+// ExtensionResourceService (SQLite + memworkflow) and a bufconn gRPC
 // server. This lets tests send requests that exercise the full handler
 // path including protovalidate.
 func newActivatorWithResources(t *testing.T) activatorResourceEnv {
@@ -466,9 +467,9 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
-	resourceSvc := &application.ManagedResourceService{
-		Store: store, CreateWF: createWf, DeleteWF: deleteWf,
-	}
+	resourceSvc := application.NewExtensionResourceService(
+		store, createWf, deleteWf, nil, nil,
+	)
 
 	validator, err := protovalidate.New()
 	if err != nil {
@@ -510,7 +511,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 			},
 		},
 		conn:    conn,
-		typeSvc: application.NewManagedResourceTypeService(store),
+		typeSvc: application.NewExtensionResourceTypeService(store),
 	}
 }
 
@@ -542,7 +543,6 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 			Plural:       schema.Plural,
 		},
 		ResourceType:   schema.ResourceType,
-		APIServiceName: schema.APIServiceName,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    protoreflect.FullName(schema.SpecMessage),
 		SpecDescriptor: specDesc.Message,
@@ -559,14 +559,13 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 
 	// v1: name is required.
 	v1 := domain.ManagedResourceSchema{
-		ResourceType:   "test.fleetshift.io/Widget",
-		APIServiceName: "fleetshift.io",
-		ProtoPackage:   "fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "widgets",
-		Singular:       "Widget",
-		Plural:         "Widgets",
-		SpecMessage:    "WidgetSpec",
+		ResourceType: "test.fleetshift.io/Widget",
+		ProtoPackage: "fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "widgets",
+		Singular:     "Widget",
+		Plural:       "Widgets",
+		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 import "buf/validate/validate.proto";
@@ -579,14 +578,13 @@ message WidgetSpec {
 
 	// v2: name is optional.
 	v2 := domain.ManagedResourceSchema{
-		ResourceType:   "test.fleetshift.io/Widget",
-		APIServiceName: "fleetshift.io",
-		ProtoPackage:   "fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "widgets",
-		Singular:       "Widget",
-		Plural:         "Widgets",
-		SpecMessage:    "WidgetSpec",
+		ResourceType: "test.fleetshift.io/Widget",
+		ProtoPackage: "fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "widgets",
+		Singular:     "Widget",
+		Plural:       "Widgets",
+		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 message WidgetSpec {
@@ -597,13 +595,14 @@ message WidgetSpec {
 	}
 
 	// Register the widget type in the store so Create can look it up.
-	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       widgetRel(),
-		Signature:      domain.Signature{},
-		APIServiceName: "fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "widgets",
+	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
+		ResourceType: "test.fleetshift.io/Widget",
+		APIVersion:   "v1",
+		CollectionID: "widgets",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation:  widgetRel(),
+			Signature: domain.Signature{},
+		},
 	}); err != nil {
 		t.Fatalf("register widget type: %v", err)
 	}
@@ -872,12 +871,12 @@ func TestPlatformHTTPVersionIsFixed(t *testing.T) {
 type activatorPlatformResourceEnv struct {
 	activator *managedresource.DynamicSchemaActivator
 	conn      *grpc.ClientConn
-	typeSvc   *application.ManagedResourceTypeService
+	typeSvc   *application.ExtensionResourceTypeService
 	store     domain.Store
 }
 
 // newActivatorWithResourcesAndPlatform creates an activator wired with
-// both a ManagedResourceService and a PlatformResourceService backed
+// both an ExtensionResourceService and a PlatformResourceService backed
 // by the same SQLite store. This lets tests exercise the cross-API
 // contract: creating a managed resource through the extension gRPC
 // service should make it visible through the platform resource API.
@@ -920,9 +919,9 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 		t.Fatalf("RegisterDeleteManagedResource: %v", err)
 	}
 
-	resourceSvc := &application.ManagedResourceService{
-		Store: store, CreateWF: createWf, DeleteWF: deleteWf,
-	}
+	resourceSvc := application.NewExtensionResourceService(
+		store, createWf, deleteWf, nil, nil,
+	)
 	platformResourceSvc := application.NewPlatformResourceService(store)
 
 	validator, err := protovalidate.New()
@@ -968,7 +967,7 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 			},
 		},
 		conn:    conn,
-		typeSvc: application.NewManagedResourceTypeService(store),
+		typeSvc: application.NewExtensionResourceTypeService(store),
 		store:   store,
 	}
 }
@@ -977,14 +976,13 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 
 func platformTestWidgetSchema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType:   "test.fleetshift.io/Widget",
-		APIServiceName: "fleetshift.io",
-		ProtoPackage:   "fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "widgets",
-		Singular:       "Widget",
-		Plural:         "Widgets",
-		SpecMessage:    "WidgetSpec",
+		ResourceType: "test.fleetshift.io/Widget",
+		ProtoPackage: "fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "widgets",
+		Singular:     "Widget",
+		Plural:       "Widgets",
+		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 message WidgetSpec {
@@ -1046,9 +1044,9 @@ func awaitFulfillmentActive(ctx context.Context, t *testing.T, store domain.Stor
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		view, err := tx.ManagedResources().GetView(ctx, rt, name)
+		view, err := tx.ExtensionResources().GetView(ctx, rt, name)
 		tx.Rollback()
-		if err == nil && view.Fulfillment.State() == domain.FulfillmentStateActive {
+		if err == nil && view.Fulfillment != nil && view.Fulfillment.State() == domain.FulfillmentStateActive {
 			return
 		}
 		select {
@@ -1074,13 +1072,14 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 
 	// Register the widget type with API identity metadata so the
 	// create workflow claims a platform resource identity.
-	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       widgetRel(),
-		Signature:      domain.Signature{},
-		APIServiceName: "fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "widgets",
+	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
+		ResourceType: "test.fleetshift.io/Widget",
+		APIVersion:   "v1",
+		CollectionID: "widgets",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation:  widgetRel(),
+			Signature: domain.Signature{},
+		},
 	}); err != nil {
 		t.Fatalf("register widget type: %v", err)
 	}
@@ -1111,8 +1110,8 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 
 	rep := repList.Get(0).Message()
 	repDesc := repsField.Message()
-	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "fleetshift.io" {
-		t.Errorf("representation service_name = %q, want %q", got, "fleetshift.io")
+	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.fleetshift.io" {
+		t.Errorf("representation service_name = %q, want %q", got, "test.fleetshift.io")
 	}
 	if got := rep.Get(repDesc.Fields().ByName("version")).String(); got != "v1" {
 		t.Errorf("representation version = %q, want %q", got, "v1")
@@ -1158,13 +1157,14 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 
 	schema := platformTestWidgetSchema()
 
-	if _, err := env.typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   "test.fleetshift.io/Widget",
-		Relation:       widgetRel(),
-		Signature:      domain.Signature{},
-		APIServiceName: "fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "widgets",
+	if _, err := env.typeSvc.Create(ctx, application.CreateExtensionTypeInput{
+		ResourceType: "test.fleetshift.io/Widget",
+		APIVersion:   "v1",
+		CollectionID: "widgets",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation:  widgetRel(),
+			Signature: domain.Signature{},
+		},
 	}); err != nil {
 		t.Fatalf("register widget type: %v", err)
 	}

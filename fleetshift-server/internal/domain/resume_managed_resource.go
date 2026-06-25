@@ -47,27 +47,33 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 		}
 		defer tx.Rollback()
 
-		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
+		er, err := tx.ExtensionResources().Get(ctx, in.ResourceType, in.Name)
 		if err != nil {
 			return managedResourceMutationResult{}, err
 		}
+		managed := er.Managed()
+		if managed == nil {
+			return managedResourceMutationResult{}, fmt.Errorf(
+				"%w: extension resource %s/%s has no managed state",
+				ErrInvalidArgument, in.ResourceType, in.Name)
+		}
 
-		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion())
+		intent, err := tx.ExtensionResources().GetIntent(ctx, in.ResourceType, in.Name, managed.CurrentVersion())
 		if err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
+		f, err := tx.Fulfillments().Get(ctx, managed.FulfillmentID())
 		if err != nil {
 			return managedResourceMutationResult{}, err
 		}
 
-		// Etag check: construct the view and compare against the client's
-		// token. This covers all domain-visible state, not just generation.
-		currentView := ManagedResourceView{
-			ManagedResource: *mr,
-			Intent:          intent,
-			Fulfillment:     *f,
+		// Etag check: construct the extension resource view and compare
+		// against the client's token.
+		currentView := ExtensionResourceView{
+			Resource:    *er,
+			Intent:      &intent,
+			Fulfillment: f,
 		}
 		if in.Etag != "" && in.Etag != currentView.Etag() {
 			return managedResourceMutationResult{}, TerminalError(fmt.Errorf(
@@ -121,12 +127,12 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 		}
 
 		return managedResourceMutationResult{
-			View: ManagedResourceView{
-				ManagedResource: *mr,
-				Intent:          intent,
-				Fulfillment:     *f,
+			View: ExtensionResourceView{
+				Resource:    *er,
+				Intent:      &intent,
+				Fulfillment: f,
 			},
-			FulfillmentID: mr.FulfillmentID(),
+			FulfillmentID: managed.FulfillmentID(),
 			MyGen:         f.Generation(),
 		}, nil
 	})
@@ -155,14 +161,14 @@ func (s *ResumeManagedResourceWorkflowSpec) LoadFulfillment() Activity[Fulfillme
 
 // Run is the workflow body: mutate, then run the convergence-start
 // loop.
-func (s *ResumeManagedResourceWorkflowSpec) Run(record Record, input ResumeManagedResourceInput) (ManagedResourceView, error) {
+func (s *ResumeManagedResourceWorkflowSpec) Run(record Record, input ResumeManagedResourceInput) (ExtensionResourceView, error) {
 	mr, err := RunActivity(record, s.MutateToResumed(), input)
 	if err != nil {
-		return ManagedResourceView{}, fmt.Errorf("mutate to resumed: %w", err)
+		return ExtensionResourceView{}, fmt.Errorf("mutate to resumed: %w", err)
 	}
 
 	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, false); err != nil {
-		return ManagedResourceView{}, err
+		return ExtensionResourceView{}, err
 	}
 
 	return mr.View, nil

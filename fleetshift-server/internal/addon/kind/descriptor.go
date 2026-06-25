@@ -31,13 +31,12 @@ func Descriptor() domain.AddonDescriptor {
 // and route fulfillments to the kind delivery agent.
 func Schema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType:   ClusterResourceType,
-		APIServiceName: "kind.fleetshift.io",
-		ProtoPackage:   "kind.fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "clusters",
-		Singular:       "Cluster",
-		Plural:         "Clusters",
+		ResourceType: ClusterResourceType,
+		ProtoPackage: "kind.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "clusters",
+		Singular:     "Cluster",
+		Plural:       "Clusters",
 		ProtoFiles: map[string]string{
 			specProtoPath: kindClusterSpecProto,
 		},

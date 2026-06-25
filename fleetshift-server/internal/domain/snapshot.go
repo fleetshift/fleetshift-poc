@@ -161,23 +161,47 @@ type ResourceRelationshipSnapshot struct {
 	CreatedAt     time.Time
 }
 
-// ManagedResourceSnapshot is the persistence DTO for [ManagedResource].
-//
-// It captures persisted state and pending intents. On the read path,
-// [ManagedResourceFromSnapshot] initializes pending intents as empty.
-type ManagedResourceSnapshot struct {
+// ManagementTypeSnapshot is the persistence DTO for [ManagementType].
+type ManagementTypeSnapshot struct {
+	Relation  FulfillmentRelation
+	Signature Signature
+}
+
+// ExtensionResourceTypeSnapshot is the persistence DTO for
+// [ExtensionResourceType].
+type ExtensionResourceTypeSnapshot struct {
 	ResourceType   ResourceType
-	Name           ResourceName
-	UID            ManagedResourceUID
-	CurrentVersion IntentVersion
-	FulfillmentID  FulfillmentID
+	APIServiceName ServiceName
+	APIVersion     APIVersion
+	CollectionID   CollectionID
+	Management     *ManagementTypeSnapshot
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
-	DeletedAt      *time.Time
+}
+
+// ManagedStateSnapshot is the persistence DTO for [ManagedState].
+type ManagedStateSnapshot struct {
+	CurrentVersion IntentVersion
+	FulfillmentID  FulfillmentID
+}
+
+// ExtensionResourceSnapshot is the persistence DTO for
+// [ExtensionResource].
+//
+// It captures persisted state and pending intents. On the read path,
+// [ExtensionResourceFromSnapshot] initializes pending intents as empty.
+type ExtensionResourceSnapshot struct {
+	UID          ExtensionResourceUID
+	ResourceType ResourceType
+	Name         ResourceName
+	Labels       map[string]string
+	Managed      *ManagedStateSnapshot
+	CreatedAt    time.Time
+	UpdatedAt    time.Time
 
 	// Pending intents collected by RecordIntent.
 	// Populated on Snapshot() for write-path serialization;
-	// empty when constructed by ManagedResourceFromSnapshot (read path).
+	// empty when constructed by ExtensionResourceFromSnapshot (read path).
 	PendingIntents []ResourceIntent
 }
 
@@ -293,19 +317,50 @@ func (e SignerEnrollment) Snapshot() SignerEnrollmentSnapshot {
 	}
 }
 
-// Snapshot returns a [ManagedResourceSnapshot] capturing all persisted
-// state and pending intents.
-func (mr *ManagedResource) Snapshot() ManagedResourceSnapshot {
-	return ManagedResourceSnapshot{
-		ResourceType:   mr.resourceType,
-		Name:           mr.name,
-		UID:            mr.uid,
-		CurrentVersion: mr.currentVersion,
-		FulfillmentID:  mr.fulfillmentID,
-		CreatedAt:      mr.createdAt,
-		UpdatedAt:      mr.updatedAt,
-		DeletedAt:      mr.deletedAt,
-		PendingIntents: mr.pendingIntents,
+// Snapshot returns an [ExtensionResourceTypeSnapshot] capturing all
+// persisted state.
+func (t ExtensionResourceType) Snapshot() ExtensionResourceTypeSnapshot {
+	var mgmt *ManagementTypeSnapshot
+	if t.management != nil {
+		mgmt = &ManagementTypeSnapshot{
+			Relation:  t.management.relation,
+			Signature: t.management.signature,
+		}
+	}
+	return ExtensionResourceTypeSnapshot{
+		ResourceType:   t.resourceType,
+		APIServiceName: t.resourceType.ServiceName(),
+		APIVersion:     t.apiVersion,
+		CollectionID:   t.collectionID,
+		Management:     mgmt,
+		CreatedAt:      t.createdAt,
+		UpdatedAt:      t.updatedAt,
+	}
+}
+
+// Snapshot returns an [ExtensionResourceSnapshot] capturing all
+// persisted state and pending intents.
+func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
+	var managed *ManagedStateSnapshot
+	if r.managed != nil {
+		managed = &ManagedStateSnapshot{
+			CurrentVersion: r.managed.currentVersion,
+			FulfillmentID:  r.managed.fulfillmentID,
+		}
+	}
+	labels := make(map[string]string, len(r.labels))
+	for k, v := range r.labels {
+		labels[k] = v
+	}
+	return ExtensionResourceSnapshot{
+		UID:            r.uid,
+		ResourceType:   r.resourceType,
+		Name:           r.name,
+		Labels:         labels,
+		Managed:        managed,
+		CreatedAt:      r.createdAt,
+		UpdatedAt:      r.updatedAt,
+		PendingIntents: r.pendingIntents,
 	}
 }
 
@@ -459,20 +514,50 @@ func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource 
 	}
 }
 
-// ManagedResourceFromSnapshot constructs a [ManagedResource] from a
-// snapshot. Pending intents start nil regardless of what the snapshot
-// contains. CurrentVersion is restored so that future [RecordIntent]
-// calls increment from the correct baseline.
-func ManagedResourceFromSnapshot(s ManagedResourceSnapshot) *ManagedResource {
-	return &ManagedResource{
-		resourceType:   s.ResourceType,
-		name:           s.Name,
-		uid:            s.UID,
-		currentVersion: s.CurrentVersion,
-		fulfillmentID:  s.FulfillmentID,
-		createdAt:      s.CreatedAt,
-		updatedAt:      s.UpdatedAt,
-		deletedAt:      s.DeletedAt,
+// ExtensionResourceTypeFromSnapshot constructs an
+// [ExtensionResourceType] from a snapshot.
+func ExtensionResourceTypeFromSnapshot(s ExtensionResourceTypeSnapshot) ExtensionResourceType {
+	var mgmt *ManagementType
+	if s.Management != nil {
+		mgmt = &ManagementType{
+			relation:  s.Management.Relation,
+			signature: s.Management.Signature,
+		}
+	}
+	return ExtensionResourceType{
+		resourceType: s.ResourceType,
+		apiVersion:   s.APIVersion,
+		collectionID: s.CollectionID,
+		management:   mgmt,
+		createdAt:    s.CreatedAt,
+		updatedAt:    s.UpdatedAt,
+	}
+}
+
+// ExtensionResourceFromSnapshot constructs an [ExtensionResource] from
+// a snapshot. Pending intents start nil regardless of what the snapshot
+// contains. Labels are shallow-copied to avoid sharing the map with
+// the caller.
+func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResource {
+	labels := make(map[string]string, len(s.Labels))
+	for k, v := range s.Labels {
+		labels[k] = v
+	}
+	var managed *ManagedState
+	if s.Managed != nil {
+		managed = &ManagedState{
+			currentVersion: s.Managed.CurrentVersion,
+			fulfillmentID:  s.Managed.FulfillmentID,
+		}
+	}
+	return &ExtensionResource{
+		uid:          s.UID,
+		resourceType: s.ResourceType,
+		name:         s.Name,
+		labels:       labels,
+		managed:      managed,
+		createdAt:    s.CreatedAt,
+		updatedAt:    s.UpdatedAt,
 	}
 }
 
@@ -580,19 +665,6 @@ func (e *SignerEnrollment) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
-func (mr ManagedResource) MarshalJSON() ([]byte, error) {
-	return json.Marshal(mr.Snapshot())
-}
-
-func (mr *ManagedResource) UnmarshalJSON(data []byte) error {
-	var s ManagedResourceSnapshot
-	if err := json.Unmarshal(data, &s); err != nil {
-		return err
-	}
-	*mr = *ManagedResourceFromSnapshot(s)
-	return nil
-}
-
 func (r PlatformResource) MarshalJSON() ([]byte, error) {
 	return json.Marshal(r.Snapshot())
 }
@@ -603,5 +675,23 @@ func (r *PlatformResource) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*r = *PlatformResourceFromSnapshot(s)
+	return nil
+}
+
+// ExtensionResource JSON marshaling delegates to its snapshot DTO.
+// MarshalJSON on ExtensionResourceType is defined in
+// extension_resource.go because it needs custom handling for the
+// FulfillmentRelation interface within ManagementType.
+
+func (r ExtensionResource) MarshalJSON() ([]byte, error) {
+	return json.Marshal(r.Snapshot())
+}
+
+func (r *ExtensionResource) UnmarshalJSON(data []byte) error {
+	var s ExtensionResourceSnapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*r = *ExtensionResourceFromSnapshot(s)
 	return nil
 }

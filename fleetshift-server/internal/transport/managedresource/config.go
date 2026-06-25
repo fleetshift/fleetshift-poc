@@ -24,8 +24,9 @@ import (
 // resource type. The addon does not define a resource type in isolation;
 // it implements a platform resource type through its own typed API. Multiple
 // extensions can model the same platform resource type (e.g. one manages
-// clusters, another inventories them), each under its own APIServiceName but
-// sharing the same [dynamicapi.CollectionConfig.CollectionID].
+// clusters, another inventories them), each under its own service name
+// (derived from [domain.ResourceType]) but sharing the same
+// [dynamicapi.CollectionConfig.CollectionID].
 type ResourceTypeConfig struct {
 	dynamicapi.CollectionConfig
 
@@ -35,16 +36,10 @@ type ResourceTypeConfig struct {
 	// identifies the addon's specific implementation of the resource
 	// type — it is NOT the platform identity. Two addons modeling
 	// the same platform resource type will have different
-	// ResourceType values but the same CollectionID.
+	// ResourceType values but the same CollectionID. The API
+	// service name is derived from the service component of this
+	// field.
 	ResourceType domain.ResourceType
-
-	// APIServiceName is the versionless AIP-122 service name that
-	// differentiates this extension's API surface from other extensions
-	// and from the platform's canonical service. It appears in full
-	// resource names (e.g. "//kind.fleetshift.io/clusters/foo") and
-	// HTTP path prefixes. The addon chooses this; the platform imposes
-	// no convention beyond uniqueness.
-	APIServiceName string
 
 	// ProtoPackage is the versioned proto package for the generated
 	// service (e.g. "kind.fleetshift.v1"). Combined with Singular to
@@ -78,12 +73,13 @@ func (c *ResourceTypeConfig) ResourceMessageName() string {
 }
 
 // CanonicalHTTPPrefix returns the extension-specific HTTP route prefix
-// (e.g. "/apis/kind.fleetshift.io/v1/clusters"). The APIServiceName
-// segment differentiates this extension's routes from both other
-// extensions and the platform's own canonical routes (which would be at
-// "/apis/fleetshift.io/v1/clusters" for the same identity domain).
+// (e.g. "/apis/kind.fleetshift.io/v1/clusters"). The service name
+// segment (derived from [ResourceType]) differentiates this extension's
+// routes from both other extensions and the platform's own canonical
+// routes (which would be at "/apis/fleetshift.io/v1/clusters" for the
+// same identity domain).
 func (c *ResourceTypeConfig) CanonicalHTTPPrefix() string {
-	return "/apis/" + c.APIServiceName + "/" + c.Version + "/" + c.CollectionID
+	return "/apis/" + string(c.ResourceType.ServiceName()) + "/" + c.Version + "/" + c.CollectionID
 }
 
 // Collection returns the relative resource name collection prefix

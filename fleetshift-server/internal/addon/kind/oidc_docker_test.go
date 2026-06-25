@@ -424,11 +424,8 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		t.Fatalf("RegisterCreateManagedResource: %v", err)
 	}
 
-	typeSvc := application.NewManagedResourceTypeService(store)
-	resourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-	}
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	resourceSvc := application.NewExtensionResourceService(store, createMRWf, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
@@ -445,24 +442,25 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		_ = tx.Commit()
 	}
 
-	// Register managed resource type.
-	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.NewRegisteredSelfTarget("kind-mr-oidc", kindaddon.ClusterManifestType),
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
-			ContentHash:    []byte("hash"),
-			SignatureBytes: []byte("sig"),
+	// Register extension resource type.
+	_, err = typeSvc.Create(ctx, application.CreateExtensionTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation: domain.NewRegisteredSelfTarget("kind-mr-oidc", kindaddon.ClusterManifestType),
+			Signature: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("RegisterType: %v", err)
 	}
 
-	// Create managed resource with authenticated caller context.
+	// Create extension resource with authenticated caller context.
 	spec := json.RawMessage(`{"name":"` + clusterName + `"}`)
 
 	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
@@ -476,13 +474,13 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		Token:    "platform-token",
 	})
 
-	view, err := resourceSvc.Create(authCtx, application.CreateManagedResourceInput{
+	view, err := resourceSvc.Create(authCtx, application.CreateExtensionResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
 		Name:         domain.ResourceName(clusterName),
 		Spec:         spec,
 	})
 	if err != nil {
-		t.Fatalf("Create managed resource: %v", err)
+		t.Fatalf("Create extension resource: %v", err)
 	}
 
 	// Wait for fulfillment to reach Active (includes RBAC bootstrap).

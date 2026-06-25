@@ -187,11 +187,8 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 		t.Fatalf("RegisterCreateManagedResource: %v", err)
 	}
 
-	typeSvc := application.NewManagedResourceTypeService(store)
-	resourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-	}
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	resourceSvc := application.NewExtensionResourceService(store, createMRWf, nil, nil, nil)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -208,33 +205,34 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 		_ = tx.Commit()
 	}
 
-	// --- Step 3: Register managed resource type ---
-	_, err = typeSvc.Create(ctx, application.CreateTypeInput{
-		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
-		Signature: domain.Signature{
-			Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
-			ContentHash:    []byte("hash"),
-			SignatureBytes: []byte("sig"),
+	// --- Step 3: Register extension resource type ---
+	_, err = typeSvc.Create(ctx, application.CreateExtensionTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation: domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
+			Signature: domain.Signature{
+				Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
+				ContentHash:    []byte("hash"),
+				SignatureBytes: []byte("sig"),
+			},
 		},
 	})
 	if err != nil {
 		t.Fatalf("RegisterType: %v", err)
 	}
 
-	// --- Step 4: Create managed resource ---
+	// --- Step 4: Create extension resource ---
 	spec := json.RawMessage(`{"name":"mr-cluster","nodes":[{"role":"control-plane"},{"role":"worker"}]}`)
 
-	view, err := resourceSvc.Create(ctx, application.CreateManagedResourceInput{
+	view, err := resourceSvc.Create(ctx, application.CreateExtensionResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
 		Name:         "mr-cluster",
 		Spec:         spec,
 	})
 	if err != nil {
-		t.Fatalf("Create managed resource: %v", err)
+		t.Fatalf("Create extension resource: %v", err)
 	}
 
 	// --- Step 5: Wait for delivery and verify ---

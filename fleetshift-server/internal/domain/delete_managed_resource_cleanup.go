@@ -43,11 +43,11 @@ func (s *DeleteManagedResourceCleanupWorkflowSpec) DeleteManagedResourceAndFulfi
 		}
 		defer tx.Rollback()
 
-		if err := tx.ManagedResources().DeleteInstance(ctx, input.ResourceType, input.Name); err != nil && !errors.Is(err, ErrNotFound) {
-			return struct{}{}, fmt.Errorf("delete managed resource row: %w", err)
+		if err := tx.ExtensionResources().Delete(ctx, input.ResourceType, input.Name); err != nil && !errors.Is(err, ErrNotFound) {
+			return struct{}{}, fmt.Errorf("delete extension resource row: %w", err)
 		}
-		if err := tx.ManagedResources().DeleteIntents(ctx, input.ResourceType, input.Name); err != nil {
-			return struct{}{}, fmt.Errorf("delete managed resource intents: %w", err)
+		if err := tx.ExtensionResources().DeleteIntents(ctx, input.ResourceType, input.Name); err != nil {
+			return struct{}{}, fmt.Errorf("delete extension resource intents: %w", err)
 		}
 		if err := tx.Fulfillments().Delete(ctx, input.FulfillmentID); err != nil && !errors.Is(err, ErrNotFound) {
 			return struct{}{}, fmt.Errorf("delete fulfillment row: %w", err)

@@ -57,7 +57,6 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 			Plural:       schema.Plural,
 		},
 		ResourceType:   kindaddon.ClusterResourceType,
-		APIServiceName: schema.APIServiceName,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: desc.Message,
@@ -207,12 +206,9 @@ func setupWithDelivery(
 		t.Fatalf("RegisterResumeManagedResource: %v", err)
 	}
 
-	managedResourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-		DeleteWF: deleteMRWf,
-		ResumeWF: resumeMRWf,
-	}
+	extensionResourceSvc := application.NewExtensionResourceService(
+		store, createMRWf, deleteMRWf, resumeMRWf, nil,
+	)
 
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -222,14 +218,15 @@ func setupWithDelivery(
 		t.Fatalf("register target: %v", err)
 	}
 
-	typeSvc := application.NewManagedResourceTypeService(store)
-	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
-		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
-		Signature:      domain.Signature{},
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	if _, err := typeSvc.Create(context.Background(), application.CreateExtensionTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation:  domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
+			Signature: domain.Signature{},
+		},
 	}); err != nil {
 		t.Fatalf("register cluster type: %v", err)
 	}
@@ -258,7 +255,7 @@ func setupWithDelivery(
 	srv := grpc.NewServer(grpc.UnaryInterceptor(testAuthInterceptor))
 
 	svc, err := managedresource.BuildAndRegister(srv, clusterConfig(t), managedresource.Deps{
-		Resources: managedResourceSvc,
+		Resources: extensionResourceSvc,
 		Validator: validator,
 	})
 	if err != nil {
@@ -728,11 +725,11 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "clusters/prov-cluster")
+	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType, "clusters/prov-cluster")
 	if err != nil {
-		t.Fatalf("get managed resource: %v", err)
+		t.Fatalf("get extension resource: %v", err)
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
+	f, err := tx.Fulfillments().Get(ctx, er.Managed().FulfillmentID())
 	if err != nil {
 		t.Fatalf("get fulfillment: %v", err)
 	}
@@ -822,11 +819,11 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	mr, err := tx.ManagedResources().GetInstance(ctx, kindaddon.ClusterResourceType, "clusters/resume-cluster")
+	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType, "clusters/resume-cluster")
 	if err != nil {
-		t.Fatalf("get managed resource: %v", err)
+		t.Fatalf("get extension resource: %v", err)
 	}
-	f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
+	f, err := tx.Fulfillments().Get(ctx, er.Managed().FulfillmentID())
 	if err != nil {
 		t.Fatalf("get fulfillment: %v", err)
 	}

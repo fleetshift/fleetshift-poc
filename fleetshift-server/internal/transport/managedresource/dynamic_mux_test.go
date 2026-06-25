@@ -112,9 +112,9 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 		t.Fatalf("RegisterResumeManagedResource: %v", err)
 	}
 
-	managedResourceSvc := &application.ManagedResourceService{
-		Store: store, CreateWF: createMRWf, DeleteWF: deleteMRWf, ResumeWF: resumeMRWf,
-	}
+	managedResourceSvc := application.NewExtensionResourceService(
+		store, createMRWf, deleteMRWf, resumeMRWf, nil,
+	)
 
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -124,14 +124,15 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 		t.Fatalf("register target: %v", err)
 	}
 
-	typeSvc := application.NewManagedResourceTypeService(store)
-	if _, err := typeSvc.Create(context.Background(), application.CreateTypeInput{
-		ResourceType:   kindaddon.ClusterResourceType,
-		Relation:       domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
-		Signature:      domain.Signature{},
-		APIServiceName: "kind.fleetshift.io",
-		APIVersion:     "v1",
-		CollectionID:   "clusters",
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	if _, err := typeSvc.Create(context.Background(), application.CreateExtensionTypeInput{
+		ResourceType: kindaddon.ClusterResourceType,
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management: &application.CreateExtensionTypeManagementInput{
+			Relation:  domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
+			Signature: domain.Signature{},
+		},
 	}); err != nil {
 		t.Fatalf("register cluster type: %v", err)
 	}
@@ -570,7 +571,7 @@ func TestDynamicHTTPMux_DeregisterReturns404(t *testing.T) {
 func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	kindCfg := clusterConfig(t)
 	gcpCfg := clusterConfig(t)
-	gcpCfg.APIServiceName = "gcphcp.fleetshift.io"
+	gcpCfg.ResourceType = "gcphcp.fleetshift.io/Cluster"
 	gcpCfg.ProtoPackage = "gcphcp.fleetshift.v1"
 
 	validator, err := protovalidate.New()

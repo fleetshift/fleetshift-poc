@@ -267,7 +267,7 @@ func (r *Registry) RegisterResumeManagedResource(spec *domain.ResumeManagedResou
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.ResumeManagedResourceInput) (domain.ManagedResourceView, error) {
+	wfFunc := func(ctx workflow.Context, input domain.ResumeManagedResourceInput) (domain.ExtensionResourceView, error) {
 		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
@@ -345,7 +345,7 @@ func (r *Registry) RegisterCreateManagedResource(spec *domain.CreateManagedResou
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.CreateManagedResourceInput) (domain.ManagedResourceView, error) {
+	wfFunc := func(ctx workflow.Context, input domain.CreateManagedResourceInput) (domain.ExtensionResourceView, error) {
 		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
@@ -374,7 +374,7 @@ func (r *Registry) RegisterDeleteManagedResource(spec *domain.DeleteManagedResou
 		return nil, err
 	}
 
-	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceInput) (domain.ManagedResourceView, error) {
+	wfFunc := func(ctx workflow.Context, input domain.DeleteManagedResourceInput) (domain.ExtensionResourceView, error) {
 		return spec.Run(newBaseRecord(ctx, invokers), input)
 	}
 
@@ -733,7 +733,7 @@ type createManagedResourceWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
@@ -742,7 +742,7 @@ func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.ManagedResourceView]{
+	return &execution[domain.ExtensionResourceView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,
@@ -757,7 +757,7 @@ type deleteManagedResourceWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
@@ -766,7 +766,7 @@ func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.ManagedResourceView]{
+	return &execution[domain.ExtensionResourceView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,
@@ -781,7 +781,7 @@ type resumeManagedResourceWorkflow struct {
 	timeout time.Duration
 }
 
-func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
@@ -793,7 +793,7 @@ func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.
 		return nil, fmt.Errorf("create workflow instance: %w", err)
 	}
 
-	return &execution[domain.ManagedResourceView]{
+	return &execution[domain.ExtensionResourceView]{
 		client:   w.client,
 		instance: instance,
 		timeout:  w.timeout,

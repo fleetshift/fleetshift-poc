@@ -38,7 +38,7 @@ type DeliveryAgentRegistry interface {
 // AddonManagerDeps holds the injected dependencies for [AddonManager].
 type AddonManagerDeps struct {
 	Router    DeliveryAgentRegistry
-	TypeSvc   *ManagedResourceTypeService
+	TypeSvc   *ExtensionResourceTypeService
 	Activator SchemaActivator
 }
 
@@ -52,7 +52,7 @@ type AddonManager struct {
 	now    func() time.Time
 
 	router    DeliveryAgentRegistry
-	typeSvc   *ManagedResourceTypeService
+	typeSvc   *ExtensionResourceTypeService
 	activator SchemaActivator
 }
 
@@ -351,23 +351,23 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 	// side-effect-free with respect to the transport layer, so
 	// a failure here keeps the previous registration intact.
 	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
-		newSvc := domain.ServiceName(schema.APIServiceName)
 		newVer := domain.APIVersion(schema.Version)
 		newCol := domain.CollectionID(schema.CollectionID)
 
-		_, err := m.typeSvc.Create(ctx, CreateTypeInput{
-			ResourceType:   schema.ResourceType,
-			Relation:       schema.Relation,
-			Signature:      domain.Signature{},
-			APIServiceName: newSvc,
-			APIVersion:     newVer,
-			CollectionID:   newCol,
+		_, err := m.typeSvc.Create(ctx, CreateExtensionTypeInput{
+			ResourceType: schema.ResourceType,
+			APIVersion:   newVer,
+			CollectionID: newCol,
+			Management: &CreateExtensionTypeManagementInput{
+				Relation:  schema.Relation,
+				Signature: domain.Signature{},
+			},
 		})
 		if err != nil {
 			if !errors.Is(err, domain.ErrAlreadyExists) {
 				return fmt.Errorf("create type def: %w", err)
 			}
-			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newSvc, newVer, newCol); err != nil {
+			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol); err != nil {
 				return err
 			}
 		}
@@ -397,20 +397,19 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 }
 
 // detectAPIMetadataDrift loads the existing type def and rejects
-// reconnection attempts that change the API identity fields.
-func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newSvc domain.ServiceName, newVer domain.APIVersion, newCol domain.CollectionID) error {
+// reconnection attempts that change the API identity fields. The
+// service name is not checked because it is derived from the
+// [domain.ResourceType], which is already the lookup key.
+func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID) error {
 	existing, err := m.typeSvc.Get(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("load existing type def for drift detection: %w", err)
 	}
-	if existing.APIServiceName != newSvc {
-		return fmt.Errorf("%w: API service name drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIServiceName, newSvc)
+	if existing.APIVersion() != newVer {
+		return fmt.Errorf("%w: API version drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIVersion(), newVer)
 	}
-	if existing.APIVersion != newVer {
-		return fmt.Errorf("%w: API version drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIVersion, newVer)
-	}
-	if existing.CollectionID != newCol {
-		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID, newCol)
+	if existing.CollectionID() != newCol {
+		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID(), newCol)
 	}
 	return nil
 }

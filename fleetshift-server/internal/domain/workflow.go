@@ -252,13 +252,13 @@ type ResumeDeploymentWorkflow interface {
 // CreateManagedResourceWorkflow is a registered create-managed-resource
 // workflow. Returned by [Registry.RegisterCreateManagedResource].
 type CreateManagedResourceWorkflow interface {
-	Start(ctx context.Context, input CreateManagedResourceInput) (Execution[ManagedResourceView], error)
+	Start(ctx context.Context, input CreateManagedResourceInput) (Execution[ExtensionResourceView], error)
 }
 
 // DeleteManagedResourceWorkflow is a registered delete-managed-resource
 // workflow. Returned by [Registry.RegisterDeleteManagedResource].
 type DeleteManagedResourceWorkflow interface {
-	Start(ctx context.Context, input DeleteManagedResourceInput) (Execution[ManagedResourceView], error)
+	Start(ctx context.Context, input DeleteManagedResourceInput) (Execution[ExtensionResourceView], error)
 }
 
 // DeleteManagedResourceCleanupWorkflow is a registered managed resource
@@ -277,7 +277,7 @@ type DeleteManagedResourceCleanupWorkflow interface {
 // observedGen parameter derives a generation-qualified instance ID for
 // same-type dedup.
 type ResumeManagedResourceWorkflow interface {
-	Start(ctx context.Context, input ResumeManagedResourceInput, observedGen Generation) (Execution[ManagedResourceView], error)
+	Start(ctx context.Context, input ResumeManagedResourceInput, observedGen Generation) (Execution[ExtensionResourceView], error)
 }
 
 // ContinueAsNewError is returned by a workflow body to request that

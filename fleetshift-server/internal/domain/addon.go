@@ -89,10 +89,6 @@ func (DeliveryCapability) CapabilityType() string { return "delivery" }
 type ManagedResourceSchema struct {
 	ResourceType ResourceType
 
-	// APIServiceName is the versionless AIP service name used in full
-	// resource names and HTTP prefixes (e.g. "kind.fleetshift.io").
-	APIServiceName string
-
 	// ProtoPackage is the versioned proto package used by gRPC
 	// (e.g. "kind.fleetshift.v1").
 	ProtoPackage string

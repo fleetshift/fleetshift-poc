@@ -91,7 +91,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 	pkgPath := strings.ReplaceAll(schema.ProtoPackage, ".", "/")
 	lower := strings.ToLower(schema.Singular[:1]) + schema.Singular[1:]
 	descriptorPath := fmt.Sprintf("dynamic/%s/%s_service.proto", pkgPath, lower)
-	canonicalPrefix := "/apis/" + schema.APIServiceName + "/" + schema.Version + "/" + schema.CollectionID
+	canonicalPrefix := "/apis/" + string(schema.ResourceType.ServiceName()) + "/" + schema.Version + "/" + schema.CollectionID
 	platformKey := platformKeyForCollection(schema.CollectionID)
 
 	reg := &extensionRegistration{
@@ -135,7 +135,6 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 			Plural:       schema.Plural,
 		},
 		ResourceType:   schema.ResourceType,
-		APIServiceName: schema.APIServiceName,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: specDesc.Message,
@@ -398,7 +397,7 @@ func (a *DynamicSchemaActivator) Deactivate(id application.SchemaRegistrationID)
 // across reconnections.
 func schemaContentHash(s domain.ManagedResourceSchema) [32]byte {
 	h := sha256.New()
-	h.Write([]byte(s.APIServiceName))
+	h.Write([]byte(s.ResourceType.ServiceName()))
 	h.Write([]byte{0})
 	h.Write([]byte(s.ProtoPackage))
 	h.Write([]byte{0})

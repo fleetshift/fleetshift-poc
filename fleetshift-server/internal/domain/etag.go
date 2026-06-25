@@ -18,27 +18,33 @@ func (v DeploymentView) Etag() Etag {
 }
 
 // Etag returns a weak domain-state concurrency token (RFC 9110 Section
-// 8.8.1) that changes whenever any API-visible field of the managed
+// 8.8.1) that changes whenever any API-visible field of the extension
 // resource view changes. The value is opaque, W/-prefixed, and quoted.
-func (v ManagedResourceView) Etag() Etag {
+func (v ExtensionResourceView) Etag() Etag {
 	h := sha256.New()
-	hashManagedResourceFields(h, v)
-	hashFulfillmentFields(h, v.Fulfillment)
+	hashExtensionResourceFields(h, v)
+	if v.Fulfillment != nil {
+		hashFulfillmentFields(h, *v.Fulfillment)
+	}
 	return weakEtag(h)
+}
+
+func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
+	hashString(h, string(v.Resource.resourceType))
+	hashString(h, string(v.Resource.name))
+	hashString(h, v.Resource.uid.String())
+	if v.Resource.managed != nil {
+		binary.Write(h, binary.BigEndian, int64(v.Resource.managed.currentVersion))
+	}
+	if v.Intent != nil {
+		binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
+		hashBytes(h, v.Intent.Spec)
+	}
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
 	hashString(h, string(v.Deployment.name))
 	hashString(h, v.Deployment.uid.String())
-}
-
-func hashManagedResourceFields(h hash.Hash, v ManagedResourceView) {
-	hashString(h, string(v.ManagedResource.resourceType))
-	hashString(h, string(v.ManagedResource.name))
-	hashString(h, v.ManagedResource.uid.String())
-	binary.Write(h, binary.BigEndian, int64(v.ManagedResource.currentVersion))
-	binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
-	hashBytes(h, v.Intent.Spec)
 }
 
 func hashFulfillmentFields(h hash.Hash, f Fulfillment) {
