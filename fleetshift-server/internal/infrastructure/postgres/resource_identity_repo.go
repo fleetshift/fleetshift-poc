@@ -191,7 +191,7 @@ func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domai
 	collectionName := string(relative.Collection())
 	resourceID := string(relative.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, extension_resource_uid, created_at, updated_at
 		 FROM resource_representations
 		 WHERE service_name = $1 AND collection_name = $2 AND resource_id = $3`,
 		service, collectionName, resourceID,
@@ -219,32 +219,21 @@ func (r *ResourceIdentityRepo) reconcileRepresentations(ctx context.Context, s d
 			continue
 		}
 
-		roles, err := json.Marshal(rep.Roles)
-		if err != nil {
-			return fmt.Errorf("marshal roles: %w", err)
-		}
-		labels, err := json.Marshal(rep.Labels)
-		if err != nil {
-			return fmt.Errorf("marshal labels: %w", err)
-		}
-
 		// The WHERE clause makes the ownership check atomic with the
 		// upsert: if a different platform resource already owns this
 		// (service, collection, resource_id) triple, the update is
 		// skipped and RowsAffected returns 0.
 		res, err := r.DB.ExecContext(ctx,
 			`INSERT INTO resource_representations
-			 (platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at)
-			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			 (platform_uid, service_name, version, collection_name, resource_id, extension_resource_uid, created_at, updated_at)
+			 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 			 ON CONFLICT(service_name, collection_name, resource_id) DO UPDATE SET
 			   version = EXCLUDED.version,
-			   roles = EXCLUDED.roles,
-			   labels = EXCLUDED.labels,
+			   extension_resource_uid = EXCLUDED.extension_resource_uid,
 			   updated_at = EXCLUDED.updated_at
 			 WHERE resource_representations.platform_uid = EXCLUDED.platform_uid`,
 			rep.PlatformUID, rep.ServiceName, rep.Version,
-			collectionName, resourceID,
-			string(roles), string(labels),
+			collectionName, resourceID, rep.ExtensionResourceUID.String(),
 			rep.CreatedAt.UTC().Format(time.RFC3339),
 			rep.UpdatedAt.UTC().Format(time.RFC3339),
 		)
@@ -341,7 +330,7 @@ func (r *ResourceIdentityRepo) loadChildren(ctx context.Context, snap domain.Pla
 
 func (r *ResourceIdentityRepo) loadRepresentations(ctx context.Context, uid domain.PlatformResourceUID) ([]domain.ResourceRepresentationSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT platform_uid, service_name, version, collection_name, resource_id, roles, labels, created_at, updated_at
+		`SELECT platform_uid, service_name, version, collection_name, resource_id, extension_resource_uid, created_at, updated_at
 		 FROM resource_representations
 		 WHERE platform_uid = $1
 		 ORDER BY service_name`,
@@ -462,23 +451,19 @@ func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, e
 func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 	var platformUID domain.PlatformResourceUID
 	var serviceName, version, collectionName, resourceID string
-	var rolesJSON, labelsJSON, createdAtStr, updatedAtStr string
+	var extensionResourceUIDStr string
+	var createdAtStr, updatedAtStr string
 
-	if err := s.Scan(&platformUID, &serviceName, &version, &collectionName, &resourceID, &rolesJSON, &labelsJSON, &createdAtStr, &updatedAtStr); err != nil {
+	if err := s.Scan(&platformUID, &serviceName, &version, &collectionName, &resourceID, &extensionResourceUIDStr, &createdAtStr, &updatedAtStr); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return domain.ResourceRepresentation{}, fmt.Errorf("%w", domain.ErrNotFound)
 		}
 		return domain.ResourceRepresentation{}, fmt.Errorf("scan representation: %w", err)
 	}
 
-	var roles []domain.RepresentationRole
-	if err := json.Unmarshal([]byte(rolesJSON), &roles); err != nil {
-		return domain.ResourceRepresentation{}, fmt.Errorf("unmarshal roles: %w", err)
-	}
-
-	var labels map[string]string
-	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
-		return domain.ResourceRepresentation{}, fmt.Errorf("unmarshal labels: %w", err)
+	erUID, err := domain.ParseExtensionResourceUID(extensionResourceUIDStr)
+	if err != nil {
+		return domain.ResourceRepresentation{}, fmt.Errorf("parse extension_resource_uid: %w", err)
 	}
 
 	createdAt, err := time.Parse(time.RFC3339, createdAtStr)
@@ -490,14 +475,14 @@ func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
 		return domain.ResourceRepresentation{}, fmt.Errorf("parse updated_at: %w", err)
 	}
 
-	return domain.ResourceRepresentationFromSnapshot(domain.ResourceRepresentationSnapshot{
-		PlatformUID: platformUID,
-		ServiceName: domain.ServiceName(serviceName),
-		Version:     domain.APIVersion(version),
-		Name:        domain.ResourceName(collectionName + "/" + resourceID),
-		Roles:       roles,
-		Labels:      labels,
-		CreatedAt:   createdAt,
-		UpdatedAt:   updatedAt,
-	}), nil
+	snap := domain.ResourceRepresentationSnapshot{
+		PlatformUID:          platformUID,
+		ServiceName:          domain.ServiceName(serviceName),
+		Version:              domain.APIVersion(version),
+		Name:                 domain.ResourceName(collectionName + "/" + resourceID),
+		ExtensionResourceUID: erUID,
+		CreatedAt:            createdAt,
+		UpdatedAt:            updatedAt,
+	}
+	return domain.ResourceRepresentationFromSnapshot(snap), nil
 }

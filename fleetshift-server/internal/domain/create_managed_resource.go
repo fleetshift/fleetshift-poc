@@ -99,9 +99,9 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		}
 
 		if err := pr.AttachRepresentation(AttachRepresentationInput{
-			ServiceName: in.TypeDef.APIServiceName(),
-			Version:     in.TypeDef.APIVersion(),
-			Roles:       []RepresentationRole{RepresentationRoleManaged},
+			ServiceName:          in.TypeDef.APIServiceName(),
+			Version:              in.TypeDef.APIVersion(),
+			ExtensionResourceUID: er.UID(),
 		}, now); err != nil {
 			return ExtensionResourceView{}, fmt.Errorf("attach representation: %w", err)
 		}

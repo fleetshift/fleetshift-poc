@@ -415,12 +415,12 @@ func TestPlatformResource_AttachRepresentation(t *testing.T) {
 	uid := NewPlatformResourceUID()
 	r := NewPlatformResource(uid, "clusters/prod", nil, now)
 
+	erUID := NewExtensionResourceUID()
 	later := now.Add(time.Hour)
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1alpha1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
-		Labels:      map[string]string{"runtime": "containerd"},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1alpha1",
+		ExtensionResourceUID: erUID,
 	}, later)
 	if err != nil {
 		t.Fatalf("AttachRepresentation: %v", err)
@@ -436,8 +436,8 @@ func TestPlatformResource_AttachRepresentation(t *testing.T) {
 	if reps[0].Version() != "v1alpha1" {
 		t.Errorf("Version = %q, want v1alpha1", reps[0].Version())
 	}
-	if reps[0].Labels()["runtime"] != "containerd" {
-		t.Errorf("Labels[runtime] = %q, want containerd", reps[0].Labels()["runtime"])
+	if reps[0].ExtensionResourceUID() != erUID {
+		t.Errorf("ExtensionResourceUID = %s, want %s", reps[0].ExtensionResourceUID(), erUID)
 	}
 	if reps[0].PlatformUID() != uid {
 		t.Errorf("PlatformUID = %s, want %s", reps[0].PlatformUID(), uid)
@@ -452,11 +452,11 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 	uid := NewPlatformResourceUID()
 	r := NewPlatformResource(uid, "clusters/prod", nil, now)
 
+	erUID := NewExtensionResourceUID()
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1alpha1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
-		Labels:      map[string]string{"v": "1"},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1alpha1",
+		ExtensionResourceUID: erUID,
 	}, now)
 	if err != nil {
 		t.Fatalf("first attach: %v", err)
@@ -464,10 +464,9 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 
 	later := now.Add(time.Hour)
 	err = r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1beta1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged, RepresentationRoleTarget},
-		Labels:      map[string]string{"v": "2"},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1beta1",
+		ExtensionResourceUID: erUID,
 	}, later)
 	if err != nil {
 		t.Fatalf("second attach: %v", err)
@@ -480,23 +479,39 @@ func TestPlatformResource_AttachRepresentation_UpdatesExisting(t *testing.T) {
 	if reps[0].Version() != "v1beta1" {
 		t.Errorf("Version = %q, want v1beta1", reps[0].Version())
 	}
-	if reps[0].Labels()["v"] != "2" {
-		t.Errorf("Labels[v] = %q, want 2", reps[0].Labels()["v"])
-	}
 }
 
-func TestPlatformResource_AttachRepresentation_RejectsInvalidRoles(t *testing.T) {
+func TestPlatformResource_AttachRepresentation_ExtensionResourceUID_RoundTrips(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewPlatformResourceUID()
 	r := NewPlatformResource(uid, "clusters/prod", nil, now)
+	erUID := NewExtensionResourceUID()
 
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged, RepresentationRoleInventory},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1",
+		ExtensionResourceUID: erUID,
 	}, now)
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("managed+inventory: got %v, want ErrInvalidArgument", err)
+	if err != nil {
+		t.Fatalf("AttachRepresentation: %v", err)
+	}
+
+	reps := r.Representations()
+	if len(reps) != 1 {
+		t.Fatalf("len(Representations) = %d, want 1", len(reps))
+	}
+	if reps[0].ExtensionResourceUID() != erUID {
+		t.Errorf("ExtensionResourceUID = %s, want %s", reps[0].ExtensionResourceUID(), erUID)
+	}
+
+	snap := reps[0].Snapshot()
+	if snap.ExtensionResourceUID != erUID {
+		t.Error("snapshot did not preserve ExtensionResourceUID")
+	}
+
+	roundTripped := ResourceRepresentationFromSnapshot(snap)
+	if roundTripped.ExtensionResourceUID() != erUID {
+		t.Error("round-trip from snapshot did not preserve ExtensionResourceUID")
 	}
 }
 
@@ -506,9 +521,9 @@ func TestPlatformResource_DeleteRepresentation(t *testing.T) {
 	r := NewPlatformResource(uid, "clusters/prod", nil, now)
 
 	err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1",
+		ExtensionResourceUID: NewExtensionResourceUID(),
 	}, now)
 	if err != nil {
 		t.Fatalf("attach: %v", err)
@@ -678,74 +693,21 @@ func TestPlatformResource_EffectiveLabels(t *testing.T) {
 	uid := NewPlatformResourceUID()
 	r := NewPlatformResource(uid, "clusters/prod", map[string]string{"env": "prod", "team": "infra"}, now)
 
-	if err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
-		Labels:      map[string]string{"version": "1.29", "runtime": "containerd"},
-	}, now); err != nil {
-		t.Fatalf("attach kind: %v", err)
-	}
-	if err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "gcp.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleInventory},
-		Labels:      map[string]string{"project": "my-proj"},
-	}, now); err != nil {
-		t.Fatalf("attach gcp: %v", err)
-	}
-
 	got := r.EffectiveLabels()
 
 	assertEq(t, "env", got["env"], "prod")
 	assertEq(t, "team", got["team"], "infra")
-	assertEq(t, "kind version", got["kind.fleetshift.io/version"], "1.29")
-	assertEq(t, "kind runtime", got["kind.fleetshift.io/runtime"], "containerd")
-	assertEq(t, "gcp project", got["gcp.fleetshift.io/project"], "my-proj")
-	if len(got) != 5 {
-		t.Errorf("len(EffectiveLabels) = %d, want 5", len(got))
+	if len(got) != 2 {
+		t.Errorf("len(EffectiveLabels) = %d, want 2", len(got))
 	}
 }
 
-func TestPlatformResource_EffectiveLabels_PlatformOverrides(t *testing.T) {
-	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-	uid := NewPlatformResourceUID()
-	r := NewPlatformResource(uid, "clusters/prod", map[string]string{"kind.fleetshift.io/version": "override"}, now)
-
-	if err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
-		Labels:      map[string]string{"version": "1.29"},
-	}, now); err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-
-	got := r.EffectiveLabels()
-	assertEq(t, "override", got["kind.fleetshift.io/version"], "override")
-}
-
-func TestPlatformResource_EffectiveLabels_ExcludesDeletedRepresentations(t *testing.T) {
+func TestPlatformResource_EffectiveLabels_ReturnsCopy(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewPlatformResourceUID()
 	r := NewPlatformResource(uid, "clusters/prod", map[string]string{"env": "prod"}, now)
 
-	if err := r.AttachRepresentation(AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1",
-		Roles:       []RepresentationRole{RepresentationRoleManaged},
-		Labels:      map[string]string{"version": "1.29"},
-	}, now); err != nil {
-		t.Fatalf("attach: %v", err)
-	}
-
-	if err := r.DeleteRepresentation("kind.fleetshift.io", now.Add(time.Hour)); err != nil {
-		t.Fatalf("delete: %v", err)
-	}
-
 	got := r.EffectiveLabels()
-	if _, ok := got["kind.fleetshift.io/version"]; ok {
-		t.Error("deleted representation labels should not appear in effective labels")
-	}
-	assertEq(t, "env", got["env"], "prod")
+	got["env"] = "mutated"
+	assertEq(t, "original unchanged", r.EffectiveLabels()["env"], "prod")
 }

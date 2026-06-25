@@ -270,11 +270,6 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 		repMsg.Set(repDesc.Fields().ByName("service_name"), protoreflect.ValueOfString(string(rep.ServiceName())))
 		repMsg.Set(repDesc.Fields().ByName("version"), protoreflect.ValueOfString(string(rep.Version())))
 		repMsg.Set(repDesc.Fields().ByName("full_resource_name"), protoreflect.ValueOfString(string(rep.FullResourceName())))
-		rolesField := repDesc.Fields().ByName("roles")
-		rolesList := repMsg.Mutable(rolesField).List()
-		for _, role := range rep.Roles() {
-			rolesList.Append(protoreflect.ValueOfString(string(role)))
-		}
 		if !rep.CreatedAt().IsZero() {
 			if tsVal, err := dynamicapi.MarshalTimestamp(repDesc.Fields().ByName("create_time"), rep.CreatedAt()); err == nil {
 				repMsg.Set(repDesc.Fields().ByName("create_time"), tsVal)

@@ -1116,13 +1116,8 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 	if got := rep.Get(repDesc.Fields().ByName("version")).String(); got != "v1" {
 		t.Errorf("representation version = %q, want %q", got, "v1")
 	}
-	roles := rep.Get(repDesc.Fields().ByName("roles")).List()
-	if roles.Len() != 1 || roles.Get(0).String() != string(domain.RepresentationRoleManaged) {
-		var got []string
-		for i := range roles.Len() {
-			got = append(got, roles.Get(i).String())
-		}
-		t.Errorf("representation roles = %v, want [managed]", got)
+	if got := rep.Get(repDesc.Fields().ByName("service_name")).String(); got != "test.fleetshift.io" {
+		t.Errorf("representation service_name (re-check) = %q, want %q", got, "test.fleetshift.io")
 	}
 
 	// Also verify the resource appears in the platform List.

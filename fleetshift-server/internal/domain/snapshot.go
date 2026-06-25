@@ -130,15 +130,14 @@ type PlatformResourceSnapshot struct {
 // ResourceRepresentationSnapshot is the persistence DTO for
 // [ResourceRepresentation].
 type ResourceRepresentationSnapshot struct {
-	PlatformUID PlatformResourceUID
-	ServiceName ServiceName
-	Version     APIVersion
-	Name        ResourceName
-	Roles       []RepresentationRole
-	Labels      map[string]string
-	CreatedAt   time.Time
-	UpdatedAt   time.Time
-	Deleted     bool
+	PlatformUID          PlatformResourceUID
+	ServiceName          ServiceName
+	Version              APIVersion
+	Name                 ResourceName
+	ExtensionResourceUID ExtensionResourceUID
+	CreatedAt            time.Time
+	UpdatedAt            time.Time
+	Deleted              bool
 }
 
 // ResourceAliasSnapshot is the persistence DTO for an [Alias] bound

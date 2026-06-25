@@ -161,16 +161,14 @@ func Run(t *testing.T, factory Factory) {
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/multi"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1alpha1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
-			Labels:      map[string]string{"runtime": "containerd"},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1alpha1",
+			ExtensionResourceUID: domain.NewExtensionResourceUID(),
 		}, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "gcp.fleetshift.io",
-			Version:     "v1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleInventory},
-			Labels:      map[string]string{"project": "my-proj"},
+			ServiceName:          "gcp.fleetshift.io",
+			Version:              "v1",
+			ExtensionResourceUID: domain.NewExtensionResourceUID(),
 		}, now)
 
 		if err := repo.Create(ctx, r); err != nil {
@@ -190,13 +188,13 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
+		erUID := domain.NewExtensionResourceUID()
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/update-rep"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1alpha1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
-			Labels:      map[string]string{"v": "1"},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1alpha1",
+			ExtensionResourceUID: erUID,
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -209,10 +207,9 @@ func Run(t *testing.T, factory Factory) {
 
 		later := now.Add(time.Hour)
 		_ = loaded.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1beta1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged, domain.RepresentationRoleTarget},
-			Labels:      map[string]string{"v": "2"},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1beta1",
+			ExtensionResourceUID: erUID,
 		}, later)
 		if err := repo.Update(ctx, loaded); err != nil {
 			t.Fatalf("Update: %v", err)
@@ -229,9 +226,6 @@ func Run(t *testing.T, factory Factory) {
 		if reps[0].Version() != "v1beta1" {
 			t.Errorf("Version = %q, want v1beta1", reps[0].Version())
 		}
-		if reps[0].Labels()["v"] != "2" {
-			t.Errorf("Labels[v] = %q, want 2", reps[0].Labels()["v"])
-		}
 	})
 
 	t.Run("DeleteRepresentation", func(t *testing.T) {
@@ -241,9 +235,9 @@ func Run(t *testing.T, factory Factory) {
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/tomb"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1",
+			ExtensionResourceUID: domain.NewExtensionResourceUID(),
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -274,6 +268,44 @@ func Run(t *testing.T, factory Factory) {
 		_, err = repo.GetRepresentation(ctx, "//kind.fleetshift.io/clusters/tomb")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("GetRepresentation after delete: got %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("RepresentationExtensionResourceUID_RoundTrips", func(t *testing.T) {
+		repo := factory(t)
+		ctx := context.Background()
+
+		uid := domain.NewPlatformResourceUID()
+		erUID := domain.NewExtensionResourceUID()
+		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/er-link"), nil, now)
+		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1",
+			ExtensionResourceUID: erUID,
+		}, now)
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		got, err := repo.Get(ctx, uid)
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		reps := got.Representations()
+		if len(reps) != 1 {
+			t.Fatalf("representations len = %d, want 1", len(reps))
+		}
+		if reps[0].ExtensionResourceUID() != erUID {
+			t.Errorf("ExtensionResourceUID = %s, want %s", reps[0].ExtensionResourceUID(), erUID)
+		}
+
+		// GetRepresentation should also return the UID.
+		rep, err := repo.GetRepresentation(ctx, "//kind.fleetshift.io/clusters/er-link")
+		if err != nil {
+			t.Fatalf("GetRepresentation: %v", err)
+		}
+		if rep.ExtensionResourceUID() != erUID {
+			t.Errorf("GetRepresentation ExtensionResourceUID = %s, want %s", rep.ExtensionResourceUID(), erUID)
 		}
 	})
 
@@ -495,9 +527,9 @@ func Run(t *testing.T, factory Factory) {
 		uid1 := domain.NewPlatformResourceUID()
 		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/rep-owner"), nil, now)
 		_ = r1.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1",
+			ExtensionResourceUID: domain.NewExtensionResourceUID(),
 		}, now)
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create r1: %v", err)
@@ -514,13 +546,13 @@ func Run(t *testing.T, factory Factory) {
 			CreatedAt: now,
 			UpdatedAt: now,
 			Representations: []domain.ResourceRepresentationSnapshot{{
-				PlatformUID: uid2,
-				ServiceName: "kind.fleetshift.io",
-				Version:     "v1",
-				Name:        domain.ResourceName("clusters/rep-owner"),
-				Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
-				CreatedAt:   now,
-				UpdatedAt:   now,
+				PlatformUID:          uid2,
+				ServiceName:          "kind.fleetshift.io",
+				Version:              "v1",
+				Name:                 domain.ResourceName("clusters/rep-owner"),
+				ExtensionResourceUID: domain.NewExtensionResourceUID(),
+				CreatedAt:            now,
+				UpdatedAt:            now,
 			}},
 		})
 		err := repo.Create(ctx, r2)
@@ -533,12 +565,13 @@ func Run(t *testing.T, factory Factory) {
 		repo := factory(t)
 		ctx := context.Background()
 
+		erUID := domain.NewExtensionResourceUID()
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/rep-idem"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1",
+			ExtensionResourceUID: erUID,
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -551,9 +584,9 @@ func Run(t *testing.T, factory Factory) {
 
 		later := now.Add(time.Hour)
 		_ = loaded.AttachRepresentation(domain.AttachRepresentationInput{
-			ServiceName: "kind.fleetshift.io",
-			Version:     "v1beta1",
-			Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
+			ServiceName:          "kind.fleetshift.io",
+			Version:              "v1beta1",
+			ExtensionResourceUID: erUID,
 		}, later)
 		if err := repo.Update(ctx, loaded); err != nil {
 			t.Fatalf("Update (same owner): %v", err)
