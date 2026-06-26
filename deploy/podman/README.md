@@ -6,7 +6,7 @@ Local container-based deployment using podman and docker-compose. Runs the full 
 
 - **podman** — container runtime
 - **docker-compose** — `podman-compose` is not compatible
-- **jq** — JSON processing
+- **[jq](https://github.com/jqlang/jq)** — JSON processing
 - **kind** — for local cluster provisioning
 - **[mkcert](https://github.com/filosottile/mkcert)** - trusted dev cert for local keycloak
 - `.env` file — copy from `.env.template`
