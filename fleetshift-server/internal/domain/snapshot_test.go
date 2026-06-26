@@ -603,7 +603,6 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing
 
 func TestExtensionResourceSnapshot_RoundTrip_WithInventory(t *testing.T) {
 	uid := NewExtensionResourceUID()
-	fID := FulfillmentID("f-1")
 	snap := ExtensionResourceSnapshot{
 		UID:          uid,
 		ResourceType: "kind.fleetshift.io/Cluster",
@@ -618,9 +617,6 @@ func TestExtensionResourceSnapshot_RoundTrip_WithInventory(t *testing.T) {
 			Observation: json.RawMessage(`{"version":"1.29"}`),
 			Conditions: []ConditionSnapshot{
 				{Type: "Ready", Status: ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: refTime},
-			},
-			Source: InventorySourceSnapshot{
-				FulfillmentID: &fID,
 			},
 			ObservedAt: refTime,
 			UpdatedAt:  refTime.Add(time.Minute),
@@ -649,10 +645,6 @@ func TestExtensionResourceSnapshot_RoundTrip_WithInventory(t *testing.T) {
 	assertEq(t, "Condition.Type", got.Inventory.Conditions[0].Type, ConditionType("Ready"))
 	assertEq(t, "Condition.Status", got.Inventory.Conditions[0].Status, ConditionTrue)
 	assertEq(t, "Condition.Reason", got.Inventory.Conditions[0].Reason, "AllGood")
-	if got.Inventory.Source.FulfillmentID == nil {
-		t.Fatal("Source.FulfillmentID is nil after round-trip")
-	}
-	assertEq(t, "Source.FulfillmentID", *got.Inventory.Source.FulfillmentID, FulfillmentID("f-1"))
 	assertEq(t, "Inventory.ObservedAt", got.Inventory.ObservedAt, refTime)
 	assertEq(t, "Inventory.UpdatedAt", got.Inventory.UpdatedAt, refTime.Add(time.Minute))
 }

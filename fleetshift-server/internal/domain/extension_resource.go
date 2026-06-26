@@ -176,61 +176,6 @@ func (c Condition) Message() string               { return c.message }
 func (c Condition) LastTransitionTime() time.Time { return c.lastTransitionTime }
 
 // ---------------------------------------------------------------------------
-// InventorySource -- provenance tracking for inventory reports
-// ---------------------------------------------------------------------------
-
-// InventorySource records the provenance of an inventory report: which
-// fulfillment, delivery, target, or manifest produced the observation.
-// All fields are optional.
-type InventorySource struct {
-	fulfillmentID *FulfillmentID
-	deliveryID    *DeliveryID
-	targetID      *TargetID
-	manifestKey   *ManifestKey
-}
-
-// ManifestKey identifies a specific manifest within a delivery.
-type ManifestKey string
-
-// InventorySourceOption configures optional fields on [InventorySource].
-type InventorySourceOption func(*InventorySource)
-
-// WithSourceFulfillmentID sets the originating fulfillment.
-func WithSourceFulfillmentID(id FulfillmentID) InventorySourceOption {
-	return func(s *InventorySource) { s.fulfillmentID = &id }
-}
-
-// WithSourceDeliveryID sets the originating delivery.
-func WithSourceDeliveryID(id DeliveryID) InventorySourceOption {
-	return func(s *InventorySource) { s.deliveryID = &id }
-}
-
-// WithSourceTargetID sets the originating target.
-func WithSourceTargetID(id TargetID) InventorySourceOption {
-	return func(s *InventorySource) { s.targetID = &id }
-}
-
-// WithSourceManifestKey sets the originating manifest key.
-func WithSourceManifestKey(key ManifestKey) InventorySourceOption {
-	return func(s *InventorySource) { s.manifestKey = &key }
-}
-
-// NewInventorySource constructs an [InventorySource] with the given
-// options. All fields are optional.
-func NewInventorySource(opts ...InventorySourceOption) InventorySource {
-	var s InventorySource
-	for _, opt := range opts {
-		opt(&s)
-	}
-	return s
-}
-
-func (s InventorySource) FulfillmentID() *FulfillmentID { return s.fulfillmentID }
-func (s InventorySource) DeliveryID() *DeliveryID       { return s.deliveryID }
-func (s InventorySource) TargetID() *TargetID           { return s.targetID }
-func (s InventorySource) ManifestKey() *ManifestKey     { return s.manifestKey }
-
-// ---------------------------------------------------------------------------
 // InventoryType -- type-level inventory metadata
 // ---------------------------------------------------------------------------
 
@@ -252,7 +197,6 @@ type InventoryResource struct {
 	labels      map[string]string
 	observation json.RawMessage
 	conditions  []Condition
-	source      InventorySource
 	observedAt  time.Time
 	updatedAt   time.Time
 }
@@ -260,9 +204,136 @@ type InventoryResource struct {
 func (ir *InventoryResource) Labels() map[string]string    { return ir.labels }
 func (ir *InventoryResource) Observation() json.RawMessage { return ir.observation }
 func (ir *InventoryResource) Conditions() []Condition      { return ir.conditions }
-func (ir *InventoryResource) Source() InventorySource      { return ir.source }
 func (ir *InventoryResource) ObservedAt() time.Time        { return ir.observedAt }
 func (ir *InventoryResource) UpdatedAt() time.Time         { return ir.updatedAt }
+
+// ---------------------------------------------------------------------------
+// Observation -- inventory observation history record
+// ---------------------------------------------------------------------------
+
+// ObservationID uniquely identifies an observation history record.
+type ObservationID string
+
+// Observation is a single observation history record for an extension
+// resource instance. It captures the raw observation payload and the
+// time it was observed. Observations are append-only; once persisted
+// they are never modified.
+type Observation struct {
+	id                   ObservationID
+	extensionResourceUID ExtensionResourceUID
+	observation          json.RawMessage
+	observedAt           time.Time
+	createdAt            time.Time
+}
+
+// NewObservation constructs an [Observation].
+func NewObservation(
+	id ObservationID,
+	erUID ExtensionResourceUID,
+	observation json.RawMessage,
+	observedAt time.Time,
+	createdAt time.Time,
+) Observation {
+	return Observation{
+		id:                   id,
+		extensionResourceUID: erUID,
+		observation:          observation,
+		observedAt:           observedAt,
+		createdAt:            createdAt,
+	}
+}
+
+func (o Observation) ID() ObservationID                          { return o.id }
+func (o Observation) ExtensionResourceUID() ExtensionResourceUID { return o.extensionResourceUID }
+func (o Observation) Observation() json.RawMessage               { return o.observation }
+func (o Observation) ObservedAt() time.Time                      { return o.observedAt }
+func (o Observation) CreatedAt() time.Time                       { return o.createdAt }
+
+// ---------------------------------------------------------------------------
+// ConditionReport -- observed condition state submitted by reporters
+// ---------------------------------------------------------------------------
+
+// ConditionReport is the observed state of a single condition on an
+// extension resource. Reporters submit reports without knowing whether
+// they represent a genuine transition; that determination is made by
+// the repository when it records the condition (see
+// [ExtensionResourceRepository.RecordConditions]).
+type ConditionReport struct {
+	extensionResourceUID ExtensionResourceUID
+	conditionType        ConditionType
+	status               ConditionStatus
+	reason               string
+	message              string
+	lastTransitionTime   time.Time
+	observedAt           time.Time
+}
+
+// NewConditionReport constructs a [ConditionReport].
+func NewConditionReport(
+	erUID ExtensionResourceUID,
+	conditionType ConditionType,
+	status ConditionStatus,
+	reason, message string,
+	lastTransitionTime time.Time,
+	observedAt time.Time,
+) ConditionReport {
+	return ConditionReport{
+		extensionResourceUID: erUID,
+		conditionType:        conditionType,
+		status:               status,
+		reason:               reason,
+		message:              message,
+		lastTransitionTime:   lastTransitionTime,
+		observedAt:           observedAt,
+	}
+}
+
+func (r ConditionReport) ExtensionResourceUID() ExtensionResourceUID { return r.extensionResourceUID }
+func (r ConditionReport) ConditionType() ConditionType               { return r.conditionType }
+func (r ConditionReport) Status() ConditionStatus                    { return r.status }
+func (r ConditionReport) Reason() string                             { return r.reason }
+func (r ConditionReport) Message() string                            { return r.message }
+func (r ConditionReport) LastTransitionTime() time.Time              { return r.lastTransitionTime }
+func (r ConditionReport) ObservedAt() time.Time                      { return r.observedAt }
+
+// ---------------------------------------------------------------------------
+// ConditionTransition -- realized condition state change
+// ---------------------------------------------------------------------------
+
+// ConditionTransitionID uniquely identifies a recorded condition
+// transition. Generated by the repository when a [ConditionReport]
+// survives the deduplication constraint.
+type ConditionTransitionID string
+
+// ConditionTransition is a persisted condition state change. It is
+// produced by the repository when a [ConditionReport] represents a
+// genuine transition (the (status, reason, message) tuple differs from
+// the latest entry for the same (resource, condition type) pair).
+// Callers never construct transitions directly; they are returned by
+// [ExtensionResourceRepository.ListConditionTransitions].
+type ConditionTransition struct {
+	id                   ConditionTransitionID
+	extensionResourceUID ExtensionResourceUID
+	conditionType        ConditionType
+	status               ConditionStatus
+	reason               string
+	message              string
+	lastTransitionTime   time.Time
+	observedAt           time.Time
+	createdAt            time.Time
+}
+
+func (t ConditionTransition) ID() ConditionTransitionID { return t.id }
+func (t ConditionTransition) ExtensionResourceUID() ExtensionResourceUID {
+	return t.extensionResourceUID
+}
+func (t ConditionTransition) ConditionType() ConditionType  { return t.conditionType }
+func (t ConditionTransition) Status() ConditionStatus       { return t.status }
+func (t ConditionTransition) Reason() string                { return t.reason }
+func (t ConditionTransition) Message() string               { return t.message }
+func (t ConditionTransition) LastTransitionTime() time.Time { return t.lastTransitionTime }
+func (t ConditionTransition) ObservedAt() time.Time         { return t.observedAt }
+func (t ConditionTransition) CreatedAt() time.Time          { return t.createdAt }
 
 // ---------------------------------------------------------------------------
 // ExtensionResourceType -- type definition for extension resources

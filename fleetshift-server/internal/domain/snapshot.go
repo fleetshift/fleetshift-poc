@@ -179,22 +179,36 @@ type ConditionSnapshot struct {
 	LastTransitionTime time.Time
 }
 
-// InventorySourceSnapshot is the persistence DTO for [InventorySource].
-type InventorySourceSnapshot struct {
-	FulfillmentID *FulfillmentID
-	DeliveryID    *DeliveryID
-	TargetID      *TargetID
-	ManifestKey   *ManifestKey
-}
-
 // InventoryResourceSnapshot is the persistence DTO for [InventoryResource].
 type InventoryResourceSnapshot struct {
 	Labels      map[string]string
 	Observation json.RawMessage
 	Conditions  []ConditionSnapshot
-	Source      InventorySourceSnapshot
 	ObservedAt  time.Time
 	UpdatedAt   time.Time
+}
+
+// ObservationSnapshot is the persistence DTO for [Observation].
+type ObservationSnapshot struct {
+	ID                   ObservationID
+	ExtensionResourceUID ExtensionResourceUID
+	Observation          json.RawMessage
+	ObservedAt           time.Time
+	CreatedAt            time.Time
+}
+
+// ConditionTransitionSnapshot is the persistence DTO for
+// [ConditionTransition].
+type ConditionTransitionSnapshot struct {
+	ID                   ConditionTransitionID
+	ExtensionResourceUID ExtensionResourceUID
+	ConditionType        ConditionType
+	Status               ConditionStatus
+	Reason               string
+	Message              string
+	LastTransitionTime   time.Time
+	ObservedAt           time.Time
+	CreatedAt            time.Time
 }
 
 // ExtensionResourceTypeSnapshot is the persistence DTO for
@@ -348,6 +362,31 @@ func (e SignerEnrollment) Snapshot() SignerEnrollmentSnapshot {
 	}
 }
 
+// Snapshot returns an [InventoryResourceSnapshot] capturing all state.
+func (ir InventoryResource) Snapshot() InventoryResourceSnapshot {
+	conds := make([]ConditionSnapshot, len(ir.conditions))
+	for i, c := range ir.conditions {
+		conds[i] = ConditionSnapshot{
+			Type:               c.conditionType,
+			Status:             c.status,
+			Reason:             c.reason,
+			Message:            c.message,
+			LastTransitionTime: c.lastTransitionTime,
+		}
+	}
+	labels := make(map[string]string, len(ir.labels))
+	for k, v := range ir.labels {
+		labels[k] = v
+	}
+	return InventoryResourceSnapshot{
+		Labels:      labels,
+		Observation: ir.observation,
+		Conditions:  conds,
+		ObservedAt:  ir.observedAt,
+		UpdatedAt:   ir.updatedAt,
+	}
+}
+
 // Snapshot returns an [ExtensionResourceTypeSnapshot] capturing all
 // persisted state.
 func (t ExtensionResourceType) Snapshot() ExtensionResourceTypeSnapshot {
@@ -407,14 +446,8 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 			Labels:      invLabels,
 			Observation: r.inventory.observation,
 			Conditions:  conds,
-			Source: InventorySourceSnapshot{
-				FulfillmentID: r.inventory.source.fulfillmentID,
-				DeliveryID:    r.inventory.source.deliveryID,
-				TargetID:      r.inventory.source.targetID,
-				ManifestKey:   r.inventory.source.manifestKey,
-			},
-			ObservedAt: r.inventory.observedAt,
-			UpdatedAt:  r.inventory.updatedAt,
+			ObservedAt:  r.inventory.observedAt,
+			UpdatedAt:   r.inventory.updatedAt,
 		}
 	}
 	return ExtensionResourceSnapshot{
@@ -642,14 +675,8 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 			labels:      invLabels,
 			observation: s.Inventory.Observation,
 			conditions:  conds,
-			source: InventorySource{
-				fulfillmentID: s.Inventory.Source.FulfillmentID,
-				deliveryID:    s.Inventory.Source.DeliveryID,
-				targetID:      s.Inventory.Source.TargetID,
-				manifestKey:   s.Inventory.Source.ManifestKey,
-			},
-			observedAt: s.Inventory.ObservedAt,
-			updatedAt:  s.Inventory.UpdatedAt,
+			observedAt:  s.Inventory.ObservedAt,
+			updatedAt:   s.Inventory.UpdatedAt,
 		}
 	}
 	return &ExtensionResource{
@@ -661,6 +688,86 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 		inventory:    inv,
 		createdAt:    s.CreatedAt,
 		updatedAt:    s.UpdatedAt,
+	}
+}
+
+// InventoryResourceFromSnapshot constructs an [InventoryResource] from
+// a snapshot. Used by repository implementations to reconstitute
+// inventory state from storage.
+func InventoryResourceFromSnapshot(s InventoryResourceSnapshot) *InventoryResource {
+	conds := make([]Condition, len(s.Conditions))
+	for i, cs := range s.Conditions {
+		conds[i] = Condition{
+			conditionType:      cs.Type,
+			status:             cs.Status,
+			reason:             cs.Reason,
+			message:            cs.Message,
+			lastTransitionTime: cs.LastTransitionTime,
+		}
+	}
+	labels := make(map[string]string, len(s.Labels))
+	for k, v := range s.Labels {
+		labels[k] = v
+	}
+	return &InventoryResource{
+		labels:      labels,
+		observation: s.Observation,
+		conditions:  conds,
+		observedAt:  s.ObservedAt,
+		updatedAt:   s.UpdatedAt,
+	}
+}
+
+// ObservationFromSnapshot constructs an [Observation] from a snapshot.
+func ObservationFromSnapshot(s ObservationSnapshot) Observation {
+	return Observation{
+		id:                   s.ID,
+		extensionResourceUID: s.ExtensionResourceUID,
+		observation:          s.Observation,
+		observedAt:           s.ObservedAt,
+		createdAt:            s.CreatedAt,
+	}
+}
+
+// ConditionTransitionFromSnapshot constructs a [ConditionTransition]
+// from a snapshot.
+func ConditionTransitionFromSnapshot(s ConditionTransitionSnapshot) ConditionTransition {
+	return ConditionTransition{
+		id:                   s.ID,
+		extensionResourceUID: s.ExtensionResourceUID,
+		conditionType:        s.ConditionType,
+		status:               s.Status,
+		reason:               s.Reason,
+		message:              s.Message,
+		lastTransitionTime:   s.LastTransitionTime,
+		observedAt:           s.ObservedAt,
+		createdAt:            s.CreatedAt,
+	}
+}
+
+// Snapshot returns an [ObservationSnapshot] capturing all state.
+func (o Observation) Snapshot() ObservationSnapshot {
+	return ObservationSnapshot{
+		ID:                   o.id,
+		ExtensionResourceUID: o.extensionResourceUID,
+		Observation:          o.observation,
+		ObservedAt:           o.observedAt,
+		CreatedAt:            o.createdAt,
+	}
+}
+
+// Snapshot returns a [ConditionTransitionSnapshot] capturing all state.
+func (t ConditionTransition) Snapshot() ConditionTransitionSnapshot {
+	return ConditionTransitionSnapshot{
+		ID:                   t.id,
+		ExtensionResourceUID: t.extensionResourceUID,
+		ConditionType:        t.conditionType,
+		Status:               t.status,
+		Reason:               t.reason,
+		Message:              t.message,
+		LastTransitionTime:   t.lastTransitionTime,
+		ObservedAt:           t.observedAt,
+		CreatedAt:            t.createdAt,
 	}
 }
 

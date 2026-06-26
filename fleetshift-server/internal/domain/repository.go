@@ -82,7 +82,7 @@ type ExtensionResourceRepository interface {
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
 	Delete(ctx context.Context, rt ResourceType, name ResourceName) error
 
-	// Read views (join extension resource + managed state + intent + fulfillment)
+	// Read views (join extension resource + managed state + intent + fulfillment + inventory)
 	GetView(ctx context.Context, rt ResourceType, name ResourceName) (ExtensionResourceView, error)
 	ListViewsByType(ctx context.Context, rt ResourceType) ([]ExtensionResourceView, error)
 
@@ -91,6 +91,26 @@ type ExtensionResourceRepository interface {
 	// Hard-delete all intent versions for an extension resource instance.
 	// Used by managed-resource cleanup after delivery-side deletion completes.
 	DeleteIntents(ctx context.Context, rt ResourceType, name ResourceName) error
+
+	// Inventory latest-state upsert (narrow, not a general Save)
+	UpsertInventory(ctx context.Context, updates []InventoryUpdate) error
+
+	// Observation history (append-only)
+	AppendObservations(ctx context.Context, observations []Observation) error
+	ListObservations(ctx context.Context, uid ExtensionResourceUID, limit int) ([]Observation, error)
+
+	// Condition history -- reporters submit [ConditionReport] values;
+	// the repository deduplicates and persists only genuine transitions
+	// as [ConditionTransition] records.
+	RecordConditions(ctx context.Context, reports []ConditionReport) error
+	ListConditionTransitions(ctx context.Context, uid ExtensionResourceUID, conditionType *ConditionType, limit int) ([]ConditionTransition, error)
+}
+
+// InventoryUpdate pairs an extension resource UID with the inventory
+// state to upsert. It is a command-style DTO, not a domain object.
+type InventoryUpdate struct {
+	ExtensionResourceUID ExtensionResourceUID
+	Inventory            InventoryResource
 }
 
 // ResourceIdentityRepository persists and retrieves canonical platform
