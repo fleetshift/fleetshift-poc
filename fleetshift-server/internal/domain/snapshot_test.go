@@ -538,6 +538,160 @@ func TestExtensionResourceSnapshot_CapturesPendingIntents(t *testing.T) {
 	assertEq(t, "PendingIntents[0].Version", snap.PendingIntents[0].Version, IntentVersion(1))
 }
 
+// ---------------------------------------------------------------------------
+// ExtensionResourceType snapshot round-trips with inventory
+// ---------------------------------------------------------------------------
+
+func TestExtensionResourceTypeSnapshot_RoundTrip_WithInventory(t *testing.T) {
+	snap := ExtensionResourceTypeSnapshot{
+		ResourceType: "kind.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Inventory: &InventoryTypeSnapshot{
+			ObservationMessage: "fleetshift.kind.v1.ClusterStatus",
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	ert := ExtensionResourceTypeFromSnapshot(snap)
+	got := ert.Snapshot()
+
+	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
+	assertEq(t, "APIVersion", got.APIVersion, snap.APIVersion)
+	assertEq(t, "CollectionID", got.CollectionID, snap.CollectionID)
+	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
+	assertEq(t, "UpdatedAt", got.UpdatedAt, snap.UpdatedAt)
+	if got.Management != nil {
+		t.Error("expected nil Management")
+	}
+	if got.Inventory == nil {
+		t.Fatal("Inventory is nil after round-trip")
+	}
+	assertEq(t, "Inventory.ObservationMessage", got.Inventory.ObservationMessage, "fleetshift.kind.v1.ClusterStatus")
+}
+
+func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing.T) {
+	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
+	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "iss"}}
+
+	snap := ExtensionResourceTypeSnapshot{
+		ResourceType: "kind.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management: &ManagementTypeSnapshot{
+			Relation:  relation,
+			Signature: sig,
+		},
+		Inventory: &InventoryTypeSnapshot{
+			ObservationMessage: "fleetshift.kind.v1.ClusterStatus",
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	ert := ExtensionResourceTypeFromSnapshot(snap)
+	got := ert.Snapshot()
+
+	if got.Management == nil {
+		t.Fatal("Management is nil after round-trip")
+	}
+	assertEq(t, "Management.Signature.Signer.Subject", got.Management.Signature.Signer.Subject, "addon")
+	if got.Inventory == nil {
+		t.Fatal("Inventory is nil after round-trip")
+	}
+	assertEq(t, "Inventory.ObservationMessage", got.Inventory.ObservationMessage, "fleetshift.kind.v1.ClusterStatus")
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResource snapshot round-trips with inventory
+// ---------------------------------------------------------------------------
+
+func TestExtensionResourceSnapshot_RoundTrip_WithInventory(t *testing.T) {
+	uid := NewExtensionResourceUID()
+	fID := FulfillmentID("f-1")
+	snap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		Labels:       map[string]string{"env": "dev"},
+		Managed: &ManagedStateSnapshot{
+			CurrentVersion: 3,
+			FulfillmentID:  "f-1",
+		},
+		Inventory: &InventoryResourceSnapshot{
+			Labels:      map[string]string{"tier": "prod"},
+			Observation: json.RawMessage(`{"version":"1.29"}`),
+			Conditions: []ConditionSnapshot{
+				{Type: "Ready", Status: ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: refTime},
+			},
+			Source: InventorySourceSnapshot{
+				FulfillmentID: &fID,
+			},
+			ObservedAt: refTime,
+			UpdatedAt:  refTime.Add(time.Minute),
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	r := ExtensionResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	assertEq(t, "UID", got.UID, snap.UID)
+	assertEq(t, "ResourceType", got.ResourceType, snap.ResourceType)
+	if got.Managed == nil {
+		t.Fatal("Managed is nil after round-trip")
+	}
+	assertEq(t, "Managed.CurrentVersion", got.Managed.CurrentVersion, IntentVersion(3))
+	if got.Inventory == nil {
+		t.Fatal("Inventory is nil after round-trip")
+	}
+	assertEq(t, "Inventory.Labels[tier]", got.Inventory.Labels["tier"], "prod")
+	assertEq(t, "Inventory.Observation", string(got.Inventory.Observation), `{"version":"1.29"}`)
+	if len(got.Inventory.Conditions) != 1 {
+		t.Fatalf("Inventory.Conditions len = %d, want 1", len(got.Inventory.Conditions))
+	}
+	assertEq(t, "Condition.Type", got.Inventory.Conditions[0].Type, ConditionType("Ready"))
+	assertEq(t, "Condition.Status", got.Inventory.Conditions[0].Status, ConditionTrue)
+	assertEq(t, "Condition.Reason", got.Inventory.Conditions[0].Reason, "AllGood")
+	if got.Inventory.Source.FulfillmentID == nil {
+		t.Fatal("Source.FulfillmentID is nil after round-trip")
+	}
+	assertEq(t, "Source.FulfillmentID", *got.Inventory.Source.FulfillmentID, FulfillmentID("f-1"))
+	assertEq(t, "Inventory.ObservedAt", got.Inventory.ObservedAt, refTime)
+	assertEq(t, "Inventory.UpdatedAt", got.Inventory.UpdatedAt, refTime.Add(time.Minute))
+}
+
+func TestExtensionResourceSnapshot_RoundTrip_InventoryOnly(t *testing.T) {
+	uid := NewExtensionResourceUID()
+	snap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		Labels:       map[string]string{},
+		Inventory: &InventoryResourceSnapshot{
+			Observation: json.RawMessage(`{"status":"ready"}`),
+			ObservedAt:  refTime,
+			UpdatedAt:   refTime.Add(time.Minute),
+		},
+		CreatedAt: refTime,
+		UpdatedAt: refTime.Add(time.Hour),
+	}
+
+	r := ExtensionResourceFromSnapshot(snap)
+	got := r.Snapshot()
+
+	if got.Managed != nil {
+		t.Error("expected nil Managed for inventory-only resource")
+	}
+	if got.Inventory == nil {
+		t.Fatal("Inventory is nil after round-trip")
+	}
+	assertEq(t, "Inventory.Observation", string(got.Inventory.Observation), `{"status":"ready"}`)
+	assertEq(t, "Inventory.ObservedAt", got.Inventory.ObservedAt, refTime)
+}
+
 // assertEq is a generic test helper that compares two comparable values.
 func assertEq[T comparable](t *testing.T, field string, got, want T) {
 	t.Helper()

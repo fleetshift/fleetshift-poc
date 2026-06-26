@@ -50,7 +50,7 @@ func (r *TargetRegistrar) Register(ctx context.Context, target TargetInfo) error
 		now := r.now()
 		if err := r.Inventory.Create(ctx, NewInventoryItem(
 			target.InventoryItemID(),
-			InventoryType(target.Type()),
+			InventoryItemType(target.Type()),
 			target.Name(),
 			props,
 			target.Labels(),

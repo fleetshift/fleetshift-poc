@@ -676,7 +676,7 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 			invID := InventoryItemID("target:" + string(pt.ID))
 			if err := tx.Inventory().CreateOrUpdate(ctx, NewInventoryItem(
 				invID,
-				InventoryType(pt.Type),
+				InventoryItemType(pt.Type),
 				pt.Name,
 				props,
 				pt.Labels,

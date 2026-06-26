@@ -15,7 +15,7 @@ import (
 // methods.
 type InventoryItem struct {
 	id               InventoryItemID
-	inventoryType    InventoryType
+	inventoryType    InventoryItemType
 	name             string
 	properties       json.RawMessage
 	labels           map[string]string
@@ -27,7 +27,7 @@ type InventoryItem struct {
 // NewInventoryItem creates a brand-new [InventoryItem]. Use this on
 // creation paths; use [InventoryItemFromSnapshot] only for
 // reconstituting from persistence.
-func NewInventoryItem(id InventoryItemID, invType InventoryType, name string, properties json.RawMessage, labels map[string]string, sourceDeliveryID *DeliveryID, now time.Time) InventoryItem {
+func NewInventoryItem(id InventoryItemID, invType InventoryItemType, name string, properties json.RawMessage, labels map[string]string, sourceDeliveryID *DeliveryID, now time.Time) InventoryItem {
 	return InventoryItem{
 		id:               id,
 		inventoryType:    invType,
@@ -43,8 +43,8 @@ func NewInventoryItem(id InventoryItemID, invType InventoryType, name string, pr
 // ID returns the item's unique identifier.
 func (i InventoryItem) ID() InventoryItemID { return i.id }
 
-// Type returns the inventory type.
-func (i InventoryItem) Type() InventoryType { return i.inventoryType }
+// Type returns the inventory item type.
+func (i InventoryItem) Type() InventoryItemType { return i.inventoryType }
 
 // Name returns the item's human-readable name.
 func (i InventoryItem) Name() string { return i.name }

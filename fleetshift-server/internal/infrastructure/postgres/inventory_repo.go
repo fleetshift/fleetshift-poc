@@ -103,7 +103,7 @@ func (r *InventoryRepo) List(ctx context.Context) ([]domain.InventoryItem, error
 		 FROM inventory_items`)
 }
 
-func (r *InventoryRepo) ListByType(ctx context.Context, t domain.InventoryType) ([]domain.InventoryItem, error) {
+func (r *InventoryRepo) ListByType(ctx context.Context, t domain.InventoryItemType) ([]domain.InventoryItem, error) {
 	return r.queryItems(ctx,
 		`SELECT id, type, name, properties, labels, source_delivery_id, created_at, updated_at
 		 FROM inventory_items WHERE type = $1`,
@@ -184,7 +184,7 @@ func scanInventoryItemSnapshot(s scanner) (domain.InventoryItemSnapshot, error) 
 		return snap, fmt.Errorf("scan inventory item: %w", err)
 	}
 	snap.ID = domain.InventoryItemID(id)
-	snap.Type = domain.InventoryType(itemType)
+	snap.Type = domain.InventoryItemType(itemType)
 	snap.Name = name
 	snap.Properties = json.RawMessage(propsJSON)
 	if err := json.Unmarshal([]byte(labelsJSON), &snap.Labels); err != nil {

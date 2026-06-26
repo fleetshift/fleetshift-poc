@@ -42,7 +42,7 @@ type InventoryRepository interface {
 	CreateOrUpdate(ctx context.Context, item InventoryItem) error
 	Get(ctx context.Context, id InventoryItemID) (InventoryItem, error)
 	List(ctx context.Context) ([]InventoryItem, error)
-	ListByType(ctx context.Context, t InventoryType) ([]InventoryItem, error)
+	ListByType(ctx context.Context, t InventoryItemType) ([]InventoryItem, error)
 	Update(ctx context.Context, item InventoryItem) error
 	Delete(ctx context.Context, id InventoryItemID) error
 }

@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -109,27 +110,214 @@ type managementTypeJSON struct {
 }
 
 // ---------------------------------------------------------------------------
+// ConditionType, ConditionStatus, Condition -- inventory condition value objects
+// ---------------------------------------------------------------------------
+
+// ConditionType identifies a category of condition (e.g. "Ready",
+// "Provisioned"). Non-empty, free-form string value object.
+type ConditionType string
+
+// NewConditionType validates and returns a [ConditionType]. Rejects
+// empty values.
+func NewConditionType(s string) (ConditionType, error) {
+	if s == "" {
+		return "", fmt.Errorf("condition type: %w: must not be empty", ErrInvalidArgument)
+	}
+	return ConditionType(s), nil
+}
+
+// ConditionStatus represents the status of a condition. Uses the
+// Kubernetes-standard True/False/Unknown trichotomy.
+type ConditionStatus string
+
+const (
+	ConditionTrue    ConditionStatus = "True"
+	ConditionFalse   ConditionStatus = "False"
+	ConditionUnknown ConditionStatus = "Unknown"
+)
+
+// validConditionStatuses is the closed set accepted by [NewCondition].
+var validConditionStatuses = map[ConditionStatus]struct{}{
+	ConditionTrue:    {},
+	ConditionFalse:   {},
+	ConditionUnknown: {},
+}
+
+// Condition represents an observed condition on an inventory resource,
+// following the Kubernetes conditions convention (type, status, reason,
+// message, lastTransitionTime).
+type Condition struct {
+	conditionType      ConditionType
+	status             ConditionStatus
+	reason             string
+	message            string
+	lastTransitionTime time.Time
+}
+
+// NewCondition constructs a [Condition], validating that the status
+// is one of True/False/Unknown. Reason and message are informational
+// and may be empty.
+func NewCondition(ct ConditionType, status ConditionStatus, reason, message string, transitionTime time.Time) (Condition, error) {
+	if _, ok := validConditionStatuses[status]; !ok {
+		return Condition{}, fmt.Errorf("condition status %q: %w: must be True, False, or Unknown", status, ErrInvalidArgument)
+	}
+	return Condition{
+		conditionType:      ct,
+		status:             status,
+		reason:             reason,
+		message:            message,
+		lastTransitionTime: transitionTime,
+	}, nil
+}
+
+func (c Condition) Type() ConditionType           { return c.conditionType }
+func (c Condition) Status() ConditionStatus       { return c.status }
+func (c Condition) Reason() string                { return c.reason }
+func (c Condition) Message() string               { return c.message }
+func (c Condition) LastTransitionTime() time.Time { return c.lastTransitionTime }
+
+// ---------------------------------------------------------------------------
+// InventorySource -- provenance tracking for inventory reports
+// ---------------------------------------------------------------------------
+
+// InventorySource records the provenance of an inventory report: which
+// fulfillment, delivery, target, or manifest produced the observation.
+// All fields are optional.
+type InventorySource struct {
+	fulfillmentID *FulfillmentID
+	deliveryID    *DeliveryID
+	targetID      *TargetID
+	manifestKey   *ManifestKey
+}
+
+// ManifestKey identifies a specific manifest within a delivery.
+type ManifestKey string
+
+// InventorySourceOption configures optional fields on [InventorySource].
+type InventorySourceOption func(*InventorySource)
+
+// WithSourceFulfillmentID sets the originating fulfillment.
+func WithSourceFulfillmentID(id FulfillmentID) InventorySourceOption {
+	return func(s *InventorySource) { s.fulfillmentID = &id }
+}
+
+// WithSourceDeliveryID sets the originating delivery.
+func WithSourceDeliveryID(id DeliveryID) InventorySourceOption {
+	return func(s *InventorySource) { s.deliveryID = &id }
+}
+
+// WithSourceTargetID sets the originating target.
+func WithSourceTargetID(id TargetID) InventorySourceOption {
+	return func(s *InventorySource) { s.targetID = &id }
+}
+
+// WithSourceManifestKey sets the originating manifest key.
+func WithSourceManifestKey(key ManifestKey) InventorySourceOption {
+	return func(s *InventorySource) { s.manifestKey = &key }
+}
+
+// NewInventorySource constructs an [InventorySource] with the given
+// options. All fields are optional.
+func NewInventorySource(opts ...InventorySourceOption) InventorySource {
+	var s InventorySource
+	for _, opt := range opts {
+		opt(&s)
+	}
+	return s
+}
+
+func (s InventorySource) FulfillmentID() *FulfillmentID { return s.fulfillmentID }
+func (s InventorySource) DeliveryID() *DeliveryID       { return s.deliveryID }
+func (s InventorySource) TargetID() *TargetID           { return s.targetID }
+func (s InventorySource) ManifestKey() *ManifestKey     { return s.manifestKey }
+
+// ---------------------------------------------------------------------------
+// InventoryType -- type-level inventory metadata
+// ---------------------------------------------------------------------------
+
+// InventoryType holds inventory-specific metadata for an extension
+// resource type. When present on an [ExtensionResourceType], it
+// indicates that instances of the type support inventory reporting.
+type InventoryType struct {
+	observationMessage string
+}
+
+// InventoryTypeOption configures optional fields on [InventoryType].
+type InventoryTypeOption func(*InventoryType)
+
+// WithObservationMessage sets the proto full name of the observation
+// message schema. Optional in the first pass.
+func WithObservationMessage(msg string) InventoryTypeOption {
+	return func(it *InventoryType) { it.observationMessage = msg }
+}
+
+// NewInventoryType constructs an [InventoryType] with the given options.
+func NewInventoryType(opts ...InventoryTypeOption) InventoryType {
+	var it InventoryType
+	for _, opt := range opts {
+		opt(&it)
+	}
+	return it
+}
+
+// ObservationMessage returns the proto full name of the observation
+// message, or empty if not configured.
+func (it InventoryType) ObservationMessage() string { return it.observationMessage }
+
+// ---------------------------------------------------------------------------
+// InventoryResource -- instance-level inventory state
+// ---------------------------------------------------------------------------
+
+// InventoryResource holds the latest inventory state for an extension
+// resource instance. Created/replaced by [ExtensionResource.ReportInventory].
+type InventoryResource struct {
+	labels      map[string]string
+	observation json.RawMessage
+	conditions  []Condition
+	source      InventorySource
+	observedAt  time.Time
+	updatedAt   time.Time
+}
+
+func (ir *InventoryResource) Labels() map[string]string    { return ir.labels }
+func (ir *InventoryResource) Observation() json.RawMessage { return ir.observation }
+func (ir *InventoryResource) Conditions() []Condition      { return ir.conditions }
+func (ir *InventoryResource) Source() InventorySource      { return ir.source }
+func (ir *InventoryResource) ObservedAt() time.Time        { return ir.observedAt }
+func (ir *InventoryResource) UpdatedAt() time.Time         { return ir.updatedAt }
+
+// InventoryReport is the input to [ExtensionResource.ReportInventory].
+// It carries the latest observation, conditions, and provenance.
+type InventoryReport struct {
+	Labels      map[string]string
+	Observation json.RawMessage
+	Conditions  []Condition
+	Source      InventorySource
+	ObservedAt  time.Time
+}
+
+// ---------------------------------------------------------------------------
 // ExtensionResourceType -- type definition for extension resources
 // ---------------------------------------------------------------------------
 
 // ExtensionResourceType is the type definition that describes an
 // extension resource kind. It carries API identity fields (service
-// name, version, collection) and optional management metadata
-// (fulfillment relation and attestation signature).
+// name, version, collection) and optional capability metadata for
+// management (fulfillment relation and attestation signature) and/or
+// inventory (observation schema).
 //
 // Unlike the former ManagedResourceTypeDef which used public fields,
 // this type uses private fields with accessors per domain.md
 // conventions.
 //
-// For now, all persisted types have management metadata because
-// inventory-only types are deferred. The management field is modeled
-// as optional (*ManagementType) to establish the boundary for future
-// non-managed types.
+// Both management and inventory are modeled as optional pointers so a
+// type can be managed-only, inventory-only, or both.
 type ExtensionResourceType struct {
 	resourceType ResourceType
 	apiVersion   APIVersion
 	collectionID CollectionID
 	management   *ManagementType
+	inventory    *InventoryType
 	createdAt    time.Time
 	updatedAt    time.Time
 }
@@ -144,6 +332,16 @@ type ExtensionResourceTypeOption func(*ExtensionResourceType)
 func WithManagement(relation FulfillmentRelation, sig Signature) ExtensionResourceTypeOption {
 	return func(t *ExtensionResourceType) {
 		t.management = &ManagementType{relation: relation, signature: sig}
+	}
+}
+
+// WithInventory sets inventory metadata on an extension resource type,
+// indicating that instances support inventory reporting. Use
+// [InventoryTypeOption] functions to configure the observation schema.
+func WithInventory(opts ...InventoryTypeOption) ExtensionResourceTypeOption {
+	return func(t *ExtensionResourceType) {
+		it := NewInventoryType(opts...)
+		t.inventory = &it
 	}
 }
 
@@ -186,9 +384,13 @@ func (t ExtensionResourceType) APIVersion() APIVersion { return t.apiVersion }
 // CollectionID returns the collection identifier (e.g. "clusters").
 func (t ExtensionResourceType) CollectionID() CollectionID { return t.collectionID }
 
-// Management returns the management metadata, or nil for future
+// Management returns the management metadata, or nil for
 // inventory-only types.
 func (t ExtensionResourceType) Management() *ManagementType { return t.management }
+
+// Inventory returns the inventory metadata, or nil for types that do
+// not support inventory reporting.
+func (t ExtensionResourceType) Inventory() *InventoryType { return t.inventory }
 
 // CreatedAt returns the creation timestamp.
 func (t ExtensionResourceType) CreatedAt() time.Time { return t.createdAt }
@@ -213,6 +415,7 @@ func (t ExtensionResourceType) MarshalJSON() ([]byte, error) {
 		APIVersion:   t.apiVersion,
 		CollectionID: t.collectionID,
 		Management:   mgmt,
+		Inventory:    t.inventory,
 		CreatedAt:    t.createdAt,
 		UpdatedAt:    t.updatedAt,
 	})
@@ -227,6 +430,7 @@ func (t *ExtensionResourceType) UnmarshalJSON(data []byte) error {
 	t.resourceType = j.ResourceType
 	t.apiVersion = j.APIVersion
 	t.collectionID = j.CollectionID
+	t.inventory = j.Inventory
 	t.createdAt = j.CreatedAt
 	t.updatedAt = j.UpdatedAt
 	if j.Management != nil {
@@ -244,6 +448,7 @@ type extensionResourceTypeJSON struct {
 	APIVersion   APIVersion          `json:"APIVersion"`
 	CollectionID CollectionID        `json:"CollectionID"`
 	Management   *managementTypeJSON `json:"Management,omitempty"`
+	Inventory    *InventoryType      `json:"Inventory,omitempty"`
 	CreatedAt    time.Time           `json:"CreatedAt"`
 	UpdatedAt    time.Time           `json:"UpdatedAt"`
 }
@@ -277,10 +482,8 @@ func (s ManagedState) FulfillmentID() FulfillmentID { return s.fulfillmentID }
 // It is the single extension-side aggregate for a fully qualified
 // extension resource name such as //kind.fleetshift.io/clusters/dev.
 //
-// For now, every persisted extension resource is managed because
-// inventory-only resources are deferred. The managed field is modeled
-// as optional (*ManagedState) to establish the boundary for future
-// non-managed types.
+// A resource may have managed state (fulfillment lifecycle),
+// inventory state (observed conditions and observations), or both.
 //
 // Construct new instances with [NewExtensionResource]; reconstitute
 // from persistence with [ExtensionResourceFromSnapshot]. Intent
@@ -291,7 +494,8 @@ type ExtensionResource struct {
 	name         ResourceName
 	labels       map[string]string
 
-	managed *ManagedState
+	managed   *ManagedState
+	inventory *InventoryResource
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -387,15 +591,45 @@ func (r *ExtensionResource) Name() ResourceName { return r.name }
 // Labels returns the user-defined extension resource labels.
 func (r *ExtensionResource) Labels() map[string]string { return r.labels }
 
-// Managed returns the managed lifecycle state, or nil for future
+// Managed returns the managed lifecycle state, or nil for
 // inventory-only resources.
 func (r *ExtensionResource) Managed() *ManagedState { return r.managed }
+
+// Inventory returns the latest inventory state, or nil if no inventory
+// has been reported.
+func (r *ExtensionResource) Inventory() *InventoryResource { return r.inventory }
 
 // CreatedAt returns the creation timestamp.
 func (r *ExtensionResource) CreatedAt() time.Time { return r.createdAt }
 
 // UpdatedAt returns the last-updated timestamp.
 func (r *ExtensionResource) UpdatedAt() time.Time { return r.updatedAt }
+
+// ReportInventory sets or replaces the latest inventory state from
+// the given report. The resource's updatedAt is advanced to now.
+//
+// Condition event deduplication (detecting transitions) is deferred to
+// the repository's UpsertInventory (Step 2), which compares old vs new
+// conditions internally.
+func (r *ExtensionResource) ReportInventory(report InventoryReport, now time.Time) error {
+	labels := maps.Clone(report.Labels)
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	conditions := make([]Condition, len(report.Conditions))
+	copy(conditions, report.Conditions)
+
+	r.inventory = &InventoryResource{
+		labels:      labels,
+		observation: report.Observation,
+		conditions:  conditions,
+		source:      report.Source,
+		observedAt:  report.ObservedAt,
+		updatedAt:   now,
+	}
+	r.updatedAt = now
+	return nil
+}
 
 // ---------------------------------------------------------------------------
 // ExtensionResourceView -- read DTO
@@ -407,9 +641,11 @@ func (r *ExtensionResource) UpdatedAt() time.Time { return r.updatedAt }
 // repository via joins; never written directly.
 //
 // Intent and Fulfillment are populated when the resource has managed
-// state and are nil for future non-managed resources.
+// state and are nil for non-managed resources. Inventory is populated
+// from the resource's embedded inventory state.
 type ExtensionResourceView struct {
 	Resource    ExtensionResource
 	Intent      *ResourceIntent
 	Fulfillment *Fulfillment
+	Inventory   *InventoryResource
 }

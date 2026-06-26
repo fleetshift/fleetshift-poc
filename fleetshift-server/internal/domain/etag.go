@@ -40,6 +40,17 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 		binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
 		hashBytes(h, v.Intent.Spec)
 	}
+	if v.Resource.inventory != nil {
+		hashBytes(h, v.Resource.inventory.observation)
+		binary.Write(h, binary.BigEndian, int64(len(v.Resource.inventory.conditions)))
+		for _, c := range v.Resource.inventory.conditions {
+			hashString(h, string(c.conditionType))
+			hashString(h, string(c.status))
+			hashString(h, c.reason)
+			hashString(h, c.message)
+		}
+		binary.Write(h, binary.BigEndian, v.Resource.inventory.observedAt.UnixNano())
+	}
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {

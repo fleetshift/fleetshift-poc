@@ -84,7 +84,7 @@ type TargetInfoSnapshot struct {
 // InventoryItemSnapshot is the persistence DTO for [InventoryItem].
 type InventoryItemSnapshot struct {
 	ID               InventoryItemID
-	Type             InventoryType
+	Type             InventoryItemType
 	Name             string
 	Properties       json.RawMessage
 	Labels           map[string]string
@@ -166,6 +166,38 @@ type ManagementTypeSnapshot struct {
 	Signature Signature
 }
 
+// InventoryTypeSnapshot is the persistence DTO for [InventoryType].
+type InventoryTypeSnapshot struct {
+	ObservationMessage string
+}
+
+// ConditionSnapshot is the persistence DTO for [Condition].
+type ConditionSnapshot struct {
+	Type               ConditionType
+	Status             ConditionStatus
+	Reason             string
+	Message            string
+	LastTransitionTime time.Time
+}
+
+// InventorySourceSnapshot is the persistence DTO for [InventorySource].
+type InventorySourceSnapshot struct {
+	FulfillmentID *FulfillmentID
+	DeliveryID    *DeliveryID
+	TargetID      *TargetID
+	ManifestKey   *ManifestKey
+}
+
+// InventoryResourceSnapshot is the persistence DTO for [InventoryResource].
+type InventoryResourceSnapshot struct {
+	Labels      map[string]string
+	Observation json.RawMessage
+	Conditions  []ConditionSnapshot
+	Source      InventorySourceSnapshot
+	ObservedAt  time.Time
+	UpdatedAt   time.Time
+}
+
 // ExtensionResourceTypeSnapshot is the persistence DTO for
 // [ExtensionResourceType].
 type ExtensionResourceTypeSnapshot struct {
@@ -173,6 +205,7 @@ type ExtensionResourceTypeSnapshot struct {
 	APIVersion   APIVersion
 	CollectionID CollectionID
 	Management   *ManagementTypeSnapshot
+	Inventory    *InventoryTypeSnapshot
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 }
@@ -194,6 +227,7 @@ type ExtensionResourceSnapshot struct {
 	Name         ResourceName
 	Labels       map[string]string
 	Managed      *ManagedStateSnapshot
+	Inventory    *InventoryResourceSnapshot
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 
@@ -325,11 +359,18 @@ func (t ExtensionResourceType) Snapshot() ExtensionResourceTypeSnapshot {
 			Signature: t.management.signature,
 		}
 	}
+	var inv *InventoryTypeSnapshot
+	if t.inventory != nil {
+		inv = &InventoryTypeSnapshot{
+			ObservationMessage: t.inventory.observationMessage,
+		}
+	}
 	return ExtensionResourceTypeSnapshot{
 		ResourceType: t.resourceType,
 		APIVersion:   t.apiVersion,
 		CollectionID: t.collectionID,
 		Management:   mgmt,
+		Inventory:    inv,
 		CreatedAt:    t.createdAt,
 		UpdatedAt:    t.updatedAt,
 	}
@@ -349,12 +390,43 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 	for k, v := range r.labels {
 		labels[k] = v
 	}
+	var inv *InventoryResourceSnapshot
+	if r.inventory != nil {
+		conds := make([]ConditionSnapshot, len(r.inventory.conditions))
+		for i, c := range r.inventory.conditions {
+			conds[i] = ConditionSnapshot{
+				Type:               c.conditionType,
+				Status:             c.status,
+				Reason:             c.reason,
+				Message:            c.message,
+				LastTransitionTime: c.lastTransitionTime,
+			}
+		}
+		invLabels := make(map[string]string, len(r.inventory.labels))
+		for k, v := range r.inventory.labels {
+			invLabels[k] = v
+		}
+		inv = &InventoryResourceSnapshot{
+			Labels:      invLabels,
+			Observation: r.inventory.observation,
+			Conditions:  conds,
+			Source: InventorySourceSnapshot{
+				FulfillmentID: r.inventory.source.fulfillmentID,
+				DeliveryID:    r.inventory.source.deliveryID,
+				TargetID:      r.inventory.source.targetID,
+				ManifestKey:   r.inventory.source.manifestKey,
+			},
+			ObservedAt: r.inventory.observedAt,
+			UpdatedAt:  r.inventory.updatedAt,
+		}
+	}
 	return ExtensionResourceSnapshot{
 		UID:            r.uid,
 		ResourceType:   r.resourceType,
 		Name:           r.name,
 		Labels:         labels,
 		Managed:        managed,
+		Inventory:      inv,
 		CreatedAt:      r.createdAt,
 		UpdatedAt:      r.updatedAt,
 		PendingIntents: r.pendingIntents,
@@ -521,11 +593,17 @@ func ExtensionResourceTypeFromSnapshot(s ExtensionResourceTypeSnapshot) Extensio
 			signature: s.Management.Signature,
 		}
 	}
+	var inv *InventoryType
+	if s.Inventory != nil {
+		it := InventoryType{observationMessage: s.Inventory.ObservationMessage}
+		inv = &it
+	}
 	return ExtensionResourceType{
 		resourceType: s.ResourceType,
 		apiVersion:   s.APIVersion,
 		collectionID: s.CollectionID,
 		management:   mgmt,
+		inventory:    inv,
 		createdAt:    s.CreatedAt,
 		updatedAt:    s.UpdatedAt,
 	}
@@ -547,12 +625,43 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 			fulfillmentID:  s.Managed.FulfillmentID,
 		}
 	}
+	var inv *InventoryResource
+	if s.Inventory != nil {
+		conds := make([]Condition, len(s.Inventory.Conditions))
+		for i, cs := range s.Inventory.Conditions {
+			conds[i] = Condition{
+				conditionType:      cs.Type,
+				status:             cs.Status,
+				reason:             cs.Reason,
+				message:            cs.Message,
+				lastTransitionTime: cs.LastTransitionTime,
+			}
+		}
+		invLabels := make(map[string]string, len(s.Inventory.Labels))
+		for k, v := range s.Inventory.Labels {
+			invLabels[k] = v
+		}
+		inv = &InventoryResource{
+			labels:      invLabels,
+			observation: s.Inventory.Observation,
+			conditions:  conds,
+			source: InventorySource{
+				fulfillmentID: s.Inventory.Source.FulfillmentID,
+				deliveryID:    s.Inventory.Source.DeliveryID,
+				targetID:      s.Inventory.Source.TargetID,
+				manifestKey:   s.Inventory.Source.ManifestKey,
+			},
+			observedAt: s.Inventory.ObservedAt,
+			updatedAt:  s.Inventory.UpdatedAt,
+		}
+	}
 	return &ExtensionResource{
 		uid:          s.UID,
 		resourceType: s.ResourceType,
 		name:         s.Name,
 		labels:       labels,
 		managed:      managed,
+		inventory:    inv,
 		createdAt:    s.CreatedAt,
 		updatedAt:    s.UpdatedAt,
 	}

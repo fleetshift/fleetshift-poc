@@ -217,6 +217,270 @@ func TestExtensionResource_RecordIntent_WithoutManagedState(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ConditionType
+// ---------------------------------------------------------------------------
+
+func TestNewConditionType_Valid(t *testing.T) {
+	ct, err := NewConditionType("Ready")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEq(t, "ConditionType", string(ct), "Ready")
+}
+
+func TestNewConditionType_Empty_Rejected(t *testing.T) {
+	_, err := NewConditionType("")
+	if err == nil {
+		t.Fatal("expected error for empty condition type")
+	}
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("got %v, want ErrInvalidArgument", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Condition
+// ---------------------------------------------------------------------------
+
+func TestNewCondition(t *testing.T) {
+	ct, _ := NewConditionType("Ready")
+	transTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	cond, err := NewCondition(ct, ConditionTrue, "AllGood", "everything is fine", transTime)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	assertEq(t, "Type", cond.Type(), ct)
+	assertEq(t, "Status", cond.Status(), ConditionTrue)
+	assertEq(t, "Reason", cond.Reason(), "AllGood")
+	assertEq(t, "Message", cond.Message(), "everything is fine")
+	assertEq(t, "LastTransitionTime", cond.LastTransitionTime(), transTime)
+}
+
+func TestNewCondition_InvalidStatus_Rejected(t *testing.T) {
+	ct, _ := NewConditionType("Ready")
+	transTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	_, err := NewCondition(ct, ConditionStatus("Bogus"), "reason", "msg", transTime)
+	if err == nil {
+		t.Fatal("expected error for invalid condition status")
+	}
+	if !errors.Is(err, ErrInvalidArgument) {
+		t.Errorf("got %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestNewCondition_AllStatuses(t *testing.T) {
+	ct, _ := NewConditionType("Ready")
+	transTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+	for _, status := range []ConditionStatus{ConditionTrue, ConditionFalse, ConditionUnknown} {
+		_, err := NewCondition(ct, status, "r", "m", transTime)
+		if err != nil {
+			t.Errorf("NewCondition with status %q: unexpected error: %v", status, err)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// InventoryType
+// ---------------------------------------------------------------------------
+
+func TestNewInventoryType(t *testing.T) {
+	it := NewInventoryType()
+	assertEq(t, "ObservationMessage (empty)", it.ObservationMessage(), "")
+}
+
+func TestNewInventoryType_WithObservationMessage(t *testing.T) {
+	it := NewInventoryType(WithObservationMessage("fleetshift.kind.v1.ClusterStatus"))
+	assertEq(t, "ObservationMessage", it.ObservationMessage(), "fleetshift.kind.v1.ClusterStatus")
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResourceType with Inventory
+// ---------------------------------------------------------------------------
+
+func TestExtensionResourceType_WithInventory(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rt := ResourceType("kind.fleetshift.io/Cluster")
+
+	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
+		WithInventory(WithObservationMessage("fleetshift.kind.v1.ClusterStatus")),
+	)
+
+	if ert.Inventory() == nil {
+		t.Fatal("expected non-nil inventory")
+	}
+	assertEq(t, "ObservationMessage", ert.Inventory().ObservationMessage(), "fleetshift.kind.v1.ClusterStatus")
+}
+
+func TestExtensionResourceType_ManagedOnly_NoInventory(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rt := ResourceType("kind.fleetshift.io/Cluster")
+	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
+	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "https://issuer.example.com"}}
+
+	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
+		WithManagement(relation, sig),
+	)
+
+	if ert.Inventory() != nil {
+		t.Error("expected nil inventory for managed-only type")
+	}
+}
+
+func TestExtensionResourceType_InventoryOnly_NoManagement(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rt := ResourceType("kind.fleetshift.io/Cluster")
+
+	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
+		WithInventory(),
+	)
+
+	if ert.Management() != nil {
+		t.Error("expected nil management for inventory-only type")
+	}
+	if ert.Inventory() == nil {
+		t.Fatal("expected non-nil inventory")
+	}
+}
+
+func TestExtensionResourceType_ManagedPlusInventory(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	rt := ResourceType("kind.fleetshift.io/Cluster")
+	relation := NewRegisteredSelfTarget("target-kind", "managed-resource")
+	sig := Signature{Signer: FederatedIdentity{Subject: "addon", Issuer: "https://issuer.example.com"}}
+
+	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
+		WithManagement(relation, sig),
+		WithInventory(WithObservationMessage("fleetshift.kind.v1.ClusterStatus")),
+	)
+
+	if ert.Management() == nil {
+		t.Fatal("expected non-nil management")
+	}
+	if ert.Inventory() == nil {
+		t.Fatal("expected non-nil inventory")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ExtensionResource -- ReportInventory
+// ---------------------------------------------------------------------------
+
+func TestExtensionResource_ReportInventory(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
+
+	ct, _ := NewConditionType("Ready")
+	cond, _ := NewCondition(ct, ConditionTrue, "AllGood", "healthy", now)
+	report := InventoryReport{
+		Labels:      map[string]string{"env": "dev"},
+		Observation: json.RawMessage(`{"version":"1.29"}`),
+		Conditions:  []Condition{cond},
+		Source:      NewInventorySource(WithSourceFulfillmentID("f-1")),
+		ObservedAt:  now,
+	}
+
+	later := now.Add(time.Minute)
+	err := r.ReportInventory(report, later)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	inv := r.Inventory()
+	if inv == nil {
+		t.Fatal("expected non-nil inventory after report")
+	}
+	assertEq(t, "Labels[env]", inv.Labels()["env"], "dev")
+	assertEq(t, "Observation", string(inv.Observation()), `{"version":"1.29"}`)
+	assertEq(t, "len(Conditions)", len(inv.Conditions()), 1)
+	assertEq(t, "Conditions[0].Status", inv.Conditions()[0].Status(), ConditionTrue)
+	assertEq(t, "Source.FulfillmentID", *inv.Source().FulfillmentID(), FulfillmentID("f-1"))
+	assertEq(t, "ObservedAt", inv.ObservedAt(), now)
+	assertEq(t, "UpdatedAt", inv.UpdatedAt(), later)
+	assertEq(t, "Resource.UpdatedAt", r.UpdatedAt(), later)
+}
+
+func TestExtensionResource_ReportInventory_InventoryOnly(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
+
+	report := InventoryReport{
+		Observation: json.RawMessage(`{"status":"ok"}`),
+		ObservedAt:  now,
+	}
+
+	err := r.ReportInventory(report, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Managed() != nil {
+		t.Error("expected nil managed state")
+	}
+	if r.Inventory() == nil {
+		t.Fatal("expected non-nil inventory")
+	}
+}
+
+func TestExtensionResource_ReportInventory_ManagedPlusInventory(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+		WithManagedState("f-1"),
+	)
+
+	report := InventoryReport{
+		Observation: json.RawMessage(`{"replicas":3}`),
+		ObservedAt:  now,
+	}
+
+	err := r.ReportInventory(report, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.Managed() == nil {
+		t.Fatal("expected non-nil managed state (unchanged)")
+	}
+	assertEq(t, "Managed.FulfillmentID", r.Managed().FulfillmentID(), FulfillmentID("f-1"))
+	if r.Inventory() == nil {
+		t.Fatal("expected non-nil inventory")
+	}
+}
+
+func TestExtensionResource_ReportInventory_ReplacesExisting(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	r := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
+
+	ct, _ := NewConditionType("Ready")
+	cond1, _ := NewCondition(ct, ConditionFalse, "NotReady", "initializing", now)
+	report1 := InventoryReport{
+		Observation: json.RawMessage(`{"v":1}`),
+		Conditions:  []Condition{cond1},
+		ObservedAt:  now,
+	}
+	r.ReportInventory(report1, now.Add(time.Minute))
+
+	cond2, _ := NewCondition(ct, ConditionTrue, "AllGood", "ready", now.Add(2*time.Minute))
+	report2 := InventoryReport{
+		Observation: json.RawMessage(`{"v":2}`),
+		Conditions:  []Condition{cond2},
+		ObservedAt:  now.Add(2 * time.Minute),
+	}
+	r.ReportInventory(report2, now.Add(3*time.Minute))
+
+	inv := r.Inventory()
+	assertEq(t, "Observation", string(inv.Observation()), `{"v":2}`)
+	assertEq(t, "Conditions[0].Status", inv.Conditions()[0].Status(), ConditionTrue)
+	assertEq(t, "ObservedAt", inv.ObservedAt(), now.Add(2*time.Minute))
+	assertEq(t, "UpdatedAt", inv.UpdatedAt(), now.Add(3*time.Minute))
+}
+
+// ---------------------------------------------------------------------------
 // JSON round-trip for ExtensionResourceType (workflow replay fidelity)
 // ---------------------------------------------------------------------------
 
