@@ -289,12 +289,9 @@ func TestNewCondition_AllStatuses(t *testing.T) {
 
 func TestNewInventoryType(t *testing.T) {
 	it := NewInventoryType()
-	assertEq(t, "ObservationMessage (empty)", it.ObservationMessage(), "")
-}
-
-func TestNewInventoryType_WithObservationMessage(t *testing.T) {
-	it := NewInventoryType(WithObservationMessage("fleetshift.kind.v1.ClusterStatus"))
-	assertEq(t, "ObservationMessage", it.ObservationMessage(), "fleetshift.kind.v1.ClusterStatus")
+	// InventoryType is a pure capability marker; nothing to assert beyond
+	// successful construction.
+	_ = it
 }
 
 // ---------------------------------------------------------------------------
@@ -306,13 +303,12 @@ func TestExtensionResourceType_WithInventory(t *testing.T) {
 	rt := ResourceType("kind.fleetshift.io/Cluster")
 
 	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
-		WithInventory(WithObservationMessage("fleetshift.kind.v1.ClusterStatus")),
+		WithInventory(),
 	)
 
 	if ert.Inventory() == nil {
 		t.Fatal("expected non-nil inventory")
 	}
-	assertEq(t, "ObservationMessage", ert.Inventory().ObservationMessage(), "fleetshift.kind.v1.ClusterStatus")
 }
 
 func TestExtensionResourceType_ManagedOnly_NoInventory(t *testing.T) {
@@ -354,7 +350,7 @@ func TestExtensionResourceType_ManagedPlusInventory(t *testing.T) {
 
 	ert := NewExtensionResourceType(rt, "v1", "clusters", now,
 		WithManagement(relation, sig),
-		WithInventory(WithObservationMessage("fleetshift.kind.v1.ClusterStatus")),
+		WithInventory(),
 	)
 
 	if ert.Management() == nil {

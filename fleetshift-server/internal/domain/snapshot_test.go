@@ -547,11 +547,9 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_WithInventory(t *testing.T) {
 		ResourceType: "kind.fleetshift.io/Cluster",
 		APIVersion:   "v1",
 		CollectionID: "clusters",
-		Inventory: &InventoryTypeSnapshot{
-			ObservationMessage: "fleetshift.kind.v1.ClusterStatus",
-		},
-		CreatedAt: refTime,
-		UpdatedAt: refTime.Add(time.Hour),
+		Inventory:    &InventoryTypeSnapshot{},
+		CreatedAt:    refTime,
+		UpdatedAt:    refTime.Add(time.Hour),
 	}
 
 	ert := ExtensionResourceTypeFromSnapshot(snap)
@@ -568,7 +566,6 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_WithInventory(t *testing.T) {
 	if got.Inventory == nil {
 		t.Fatal("Inventory is nil after round-trip")
 	}
-	assertEq(t, "Inventory.ObservationMessage", got.Inventory.ObservationMessage, "fleetshift.kind.v1.ClusterStatus")
 }
 
 func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing.T) {
@@ -583,9 +580,7 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing
 			Relation:  relation,
 			Signature: sig,
 		},
-		Inventory: &InventoryTypeSnapshot{
-			ObservationMessage: "fleetshift.kind.v1.ClusterStatus",
-		},
+		Inventory: &InventoryTypeSnapshot{},
 		CreatedAt: refTime,
 		UpdatedAt: refTime.Add(time.Hour),
 	}
@@ -600,7 +595,6 @@ func TestExtensionResourceTypeSnapshot_RoundTrip_ManagedPlusInventory(t *testing
 	if got.Inventory == nil {
 		t.Fatal("Inventory is nil after round-trip")
 	}
-	assertEq(t, "Inventory.ObservationMessage", got.Inventory.ObservationMessage, "fleetshift.kind.v1.ClusterStatus")
 }
 
 // ---------------------------------------------------------------------------

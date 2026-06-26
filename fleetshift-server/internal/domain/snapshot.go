@@ -167,9 +167,8 @@ type ManagementTypeSnapshot struct {
 }
 
 // InventoryTypeSnapshot is the persistence DTO for [InventoryType].
-type InventoryTypeSnapshot struct {
-	ObservationMessage string
-}
+// An empty struct signals "inventory-capable"; nil means not.
+type InventoryTypeSnapshot struct{}
 
 // ConditionSnapshot is the persistence DTO for [Condition].
 type ConditionSnapshot struct {
@@ -361,9 +360,7 @@ func (t ExtensionResourceType) Snapshot() ExtensionResourceTypeSnapshot {
 	}
 	var inv *InventoryTypeSnapshot
 	if t.inventory != nil {
-		inv = &InventoryTypeSnapshot{
-			ObservationMessage: t.inventory.observationMessage,
-		}
+		inv = &InventoryTypeSnapshot{}
 	}
 	return ExtensionResourceTypeSnapshot{
 		ResourceType: t.resourceType,
@@ -595,7 +592,7 @@ func ExtensionResourceTypeFromSnapshot(s ExtensionResourceTypeSnapshot) Extensio
 	}
 	var inv *InventoryType
 	if s.Inventory != nil {
-		it := InventoryType{observationMessage: s.Inventory.ObservationMessage}
+		it := InventoryType{}
 		inv = &it
 	}
 	return ExtensionResourceType{

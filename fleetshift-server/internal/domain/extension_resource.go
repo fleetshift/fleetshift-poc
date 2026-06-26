@@ -235,34 +235,13 @@ func (s InventorySource) ManifestKey() *ManifestKey     { return s.manifestKey }
 // InventoryType -- type-level inventory metadata
 // ---------------------------------------------------------------------------
 
-// InventoryType holds inventory-specific metadata for an extension
-// resource type. When present on an [ExtensionResourceType], it
-// indicates that instances of the type support inventory reporting.
-type InventoryType struct {
-	observationMessage string
-}
+// InventoryType is a capability marker for an extension resource type.
+// When present on an [ExtensionResourceType], it indicates that
+// instances of the type support inventory reporting.
+type InventoryType struct{}
 
-// InventoryTypeOption configures optional fields on [InventoryType].
-type InventoryTypeOption func(*InventoryType)
-
-// WithObservationMessage sets the proto full name of the observation
-// message schema. Optional in the first pass.
-func WithObservationMessage(msg string) InventoryTypeOption {
-	return func(it *InventoryType) { it.observationMessage = msg }
-}
-
-// NewInventoryType constructs an [InventoryType] with the given options.
-func NewInventoryType(opts ...InventoryTypeOption) InventoryType {
-	var it InventoryType
-	for _, opt := range opts {
-		opt(&it)
-	}
-	return it
-}
-
-// ObservationMessage returns the proto full name of the observation
-// message, or empty if not configured.
-func (it InventoryType) ObservationMessage() string { return it.observationMessage }
+// NewInventoryType constructs an [InventoryType].
+func NewInventoryType() InventoryType { return InventoryType{} }
 
 // ---------------------------------------------------------------------------
 // InventoryResource -- instance-level inventory state
@@ -335,12 +314,11 @@ func WithManagement(relation FulfillmentRelation, sig Signature) ExtensionResour
 	}
 }
 
-// WithInventory sets inventory metadata on an extension resource type,
-// indicating that instances support inventory reporting. Use
-// [InventoryTypeOption] functions to configure the observation schema.
-func WithInventory(opts ...InventoryTypeOption) ExtensionResourceTypeOption {
+// WithInventory marks an extension resource type as supporting
+// inventory reporting.
+func WithInventory() ExtensionResourceTypeOption {
 	return func(t *ExtensionResourceType) {
-		it := NewInventoryType(opts...)
+		it := NewInventoryType()
 		t.inventory = &it
 	}
 }
