@@ -34,7 +34,7 @@ cp "$(mkcert -CAROOT)/rootCA.pem" "$CERT_DIR/ca.crt"
 echo "==> Deleting CA private key..."
 rm -f "$(mkcert -CAROOT)/rootCA-key.pem"
 
-chmod 600 "$CERT_DIR/keycloak.key"
+chmod 644 "$CERT_DIR/keycloak.key"
 chmod 644 "$CERT_DIR/keycloak.crt" "$CERT_DIR/ca.crt"
 
 echo "TLS certs generated in $CERT_DIR/"

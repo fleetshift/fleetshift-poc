@@ -45,20 +45,18 @@ tasks:
 
   render-gcphcp-config:
     internal: true
+    env:
+      GCPHCP_ENABLED: '{{.RESOLVED_GCPHCP_ENABLED}}'
+      GCPHCP_GATEWAY_URL: '{{.GCPHCP_GATEWAY_URL | default ""}}'
+      GCPHCP_GATEWAY_AUDIENCE: '{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}'
+      GCPHCP_TARGET_ID: '{{.GCPHCP_TARGET_ID | default ""}}'
+      GCPHCP_GCP_PROJECT: '{{.GCPHCP_GCP_PROJECT | default ""}}'
+      GCPHCP_GCP_REGION: '{{.GCPHCP_GCP_REGION | default ""}}'
+      GCPHCP_WORKFORCE_POOL: '{{.GCPHCP_WORKFORCE_POOL | default ""}}'
+      GCPHCP_WORKFORCE_PROVIDER: '{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}'
+      GCPHCP_BROKER_SA_EMAIL: '{{.GCPHCP_BROKER_SA_EMAIL | default ""}}'
     cmds:
-      - >-
-        env
-        GCPHCP_ENABLED="{{.RESOLVED_GCPHCP_ENABLED}}"
-        GCPHCP_GATEWAY_URL="{{.GCPHCP_GATEWAY_URL | default ""}}"
-        GCPHCP_GATEWAY_AUDIENCE="{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}"
-        GCPHCP_TARGET_ID="{{.GCPHCP_TARGET_ID | default ""}}"
-        GCPHCP_GCP_PROJECT="{{.GCPHCP_GCP_PROJECT | default ""}}"
-        GCPHCP_GCP_REGION="{{.GCPHCP_GCP_REGION | default ""}}"
-        GCPHCP_WORKFORCE_POOL="{{.GCPHCP_WORKFORCE_POOL | default ""}}"
-        GCPHCP_WORKFORCE_PROVIDER="{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}"
-        GCPHCP_BROKER_SA_EMAIL="{{.GCPHCP_BROKER_SA_EMAIL | default ""}}"
-        "{{.ROOT_DIR}}/deploy/render-gcphcp-config.sh"
-        --output "{{.RESOLVED_GCPHCP_CONFIG}}"
+      - '{{.ROOT_DIR}}/deploy/render-gcphcp-config.sh --output {{.RESOLVED_GCPHCP_CONFIG}}'
 
   up:
     desc: Start the FleetShift stack (set DEPLOY_MODE, DB, AUTH to customize)

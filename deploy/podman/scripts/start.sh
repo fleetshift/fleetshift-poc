@@ -112,7 +112,7 @@ echo ""
 echo "==> FleetShift stack is running!"
 echo "    FleetShift:      http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT:-8085}"
 if [ "$AUTH_MODE" = "local" ]; then
-  echo "    Keycloak:        https://keycloak:${KC_HTTPS_PORT:-8443}"
+  echo "    Keycloak Admin:  https://keycloak:${KC_HTTPS_PORT:-8443}"
   echo ""
   echo "  Keycloak Admin Console:"
   echo "    admin / ${KC_BOOTSTRAP_ADMIN_PASSWORD}"

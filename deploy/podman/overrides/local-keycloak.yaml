@@ -12,8 +12,7 @@ services:
       - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/certs/keycloak.crt
       - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/certs/keycloak.key
       - KC_HTTP_RELATIVE_PATH=/auth
-      - KC_HOSTNAME=${KC_HOSTNAME}
-      - KC_HOSTNAME_URL=https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth
+      - KC_HOSTNAME=https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth
       - KC_HOSTNAME_STRICT=false
     ports:
       - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
@@ -22,6 +21,9 @@ services:
       - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro
       - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro
       - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+    networks:
+      - default
+      - kind
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
       interval: 5s
