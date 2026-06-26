@@ -18,9 +18,6 @@ AUTH_MODE="$AUTH"
 DB_BACKEND="$DB"
 ensure_podman_ready
 
-: "${KIND_TEMP_DIR:=${HOME}/.fleetshift/tmp}"
-export KIND_TEMP_DIR
-mkdir -p "$KIND_TEMP_DIR"
 podman network exists kind 2>/dev/null || podman network create kind
 
 REALM_TEMPLATE="${DEPLOY_DIR}/keycloak/fleetshift-realm.json"

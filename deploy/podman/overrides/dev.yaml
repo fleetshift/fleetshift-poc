@@ -24,4 +24,4 @@ services:
       dockerfile: Dockerfile.local
     volumes:
       - ${PODMAN_SOCKET}:/var/run/docker.sock
-      - ${KIND_TEMP_DIR}:${KIND_TEMP_DIR}
+      - /tmp:/tmp

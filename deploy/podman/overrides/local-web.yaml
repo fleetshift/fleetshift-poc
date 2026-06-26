@@ -21,7 +21,7 @@ services:
   fleetshift-server:
     volumes: !override
       - ${PODMAN_SOCKET}:/var/run/docker.sock
-      - ${KIND_TEMP_DIR}:${KIND_TEMP_DIR}
+      - /tmp:/tmp
       - fleetshift-data:/data
       - ./.certs/ca.crt:/certs/ca.crt:ro
       - ${UI_DIR:-../../../fleetshift-user-interface}/web:/srv/web:ro

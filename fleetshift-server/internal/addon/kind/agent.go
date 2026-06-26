@@ -80,7 +80,6 @@ type Agent struct {
 	reporter        domain.DeliveryReporter
 	providerFactory ClusterProviderFactory
 	observer        AgentObserver
-	tempDir         string
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
@@ -100,15 +99,6 @@ type AgentOption func(*Agent)
 // WithObserver sets the [AgentObserver] for delivery lifecycle events.
 func WithObserver(o AgentObserver) AgentOption {
 	return func(a *Agent) { a.observer = o }
-}
-
-// WithTempDir sets the directory for temporary files (e.g., CA certs)
-// that must be visible to the container runtime. If unset, [os.TempDir]
-// is used. Container runtimes like Podman only mount specific host
-// paths into the VM, so callers should set this to a path the runtime
-// can see.
-func WithTempDir(dir string) AgentOption {
-	return func(a *Agent) { a.tempDir = dir }
 }
 
 // WithOIDCCABundle sets a PEM-encoded CA certificate for trusting the
@@ -458,7 +448,7 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		}
 		var caCertHostPath string
 		if len(a.oidcCABundle) > 0 {
-			path, err := writeCABundle(a.oidcCABundle, a.tempDir)
+			path, err := writeCABundle(a.oidcCABundle)
 			if err != nil {
 				return nil, "", err
 			}

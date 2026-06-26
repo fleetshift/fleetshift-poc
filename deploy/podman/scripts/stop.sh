@@ -11,7 +11,6 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 # Export placeholders so compose doesn't warn about unset variables during YAML parsing.
 ensure_podman_ready
 export DB_FLAG="unused"
-export KIND_TEMP_DIR="${KIND_TEMP_DIR:-/tmp}"
 export OIDC_ISSUER_URL="${OIDC_ISSUER_URL:-unused}"
 export GCPHCP_CONFIG="${GCPHCP_CONFIG:-/dev/null}"
 export FLEETSHIFT_SERVER_ADDONS="${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}"

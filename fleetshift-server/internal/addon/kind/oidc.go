@@ -78,11 +78,9 @@ func bootstrapRBAC(ctx context.Context, kubeconfig []byte, issuerURL domain.Issu
 	return nil
 }
 
-// writeCABundle writes the CA bundle to a temp file in dir and returns
-// the path. If dir is empty, [os.TempDir] is used. The caller is
-// responsible for cleanup.
-func writeCABundle(caBundle []byte, dir string) (string, error) {
-	f, err := os.CreateTemp(dir, "kind-oidc-ca-*.pem")
+// writeCABundle writes the CA bundle to a temp file and returns the path.
+func writeCABundle(caBundle []byte) (string, error) {
+	f, err := os.CreateTemp("", "kind-oidc-ca-*.pem")
 	if err != nil {
 		return "", fmt.Errorf("create CA bundle temp file: %w", err)
 	}
