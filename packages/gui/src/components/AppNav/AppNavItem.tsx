@@ -22,12 +22,7 @@ const AppNavItem = ({ page, iconMap }: AppNavItemProps) => {
   const DisplayIcon = enabled ? NavIcon : PuzzlePieceIcon;
 
   const link = (
-    <Link
-      to={fullPath}
-      className={clsx("pf-v6-c-nav__link", {
-        "pf-v6-u-text-color-disabled": !enabled,
-      })}
-    >
+    <Link to={fullPath} className={clsx("pf-v6-c-nav__link")}>
       {DisplayIcon && (
         <Icon isInline className="pf-v6-u-mr-sm">
           <DisplayIcon />
@@ -48,7 +43,10 @@ const AppNavItem = ({ page, iconMap }: AppNavItemProps) => {
       {enabled ? (
         link
       ) : (
-        <Tooltip content="This extension is not enabled. Click to enable it.">
+        <Tooltip
+          position="right"
+          content="This extension is not enabled. Click to enable it."
+        >
           {link}
         </Tooltip>
       )}

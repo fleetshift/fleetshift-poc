@@ -7,7 +7,12 @@ import {
   EmptyStateBody,
   EmptyStateFooter,
 } from "@patternfly/react-core";
-import { ExclamationCircleIcon, OptimizeIcon } from "@patternfly/react-icons";
+import {
+  ExclamationCircleIcon,
+  ExternalLinkAltIcon,
+  OptimizeIcon,
+  ServicesIcon,
+} from "@patternfly/react-icons";
 import { useCallback, useState } from "react";
 
 import InstallProgress from "../components/InstallProgress/InstallProgress";
@@ -87,16 +92,24 @@ export const ExtensionEnablePage = ({
   return (
     <div className="ome-enable-page">
       <EmptyState
-        icon={OptimizeIcon}
+        icon={ServicesIcon}
         headingLevel="h2"
-        titleText={`Enable ${label}`}
+        titleText={`Install the ${label} extension`}
         variant="lg"
       >
         <EmptyStateBody>{description}</EmptyStateBody>
         <EmptyStateFooter>
           <EmptyStateActions>
             <Button variant="primary" onClick={handleEnable}>
-              Enable
+              install
+            </Button>
+            <Button
+              variant="link"
+              href="#"
+              iconPosition="right"
+              icon={<ExternalLinkAltIcon />}
+            >
+              Learn more
             </Button>
           </EmptyStateActions>
         </EmptyStateFooter>
