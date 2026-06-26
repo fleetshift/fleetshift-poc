@@ -14,7 +14,7 @@ type DeleteManagedResourceInput struct {
 	// Auth is persisted so background remove/retry passes use delete-time
 	// auth rather than stale create-time auth.
 	Auth    DeliveryAuth
-	TypeDef ManagedResourceTypeDef
+	TypeDef ExtensionResourceType
 }
 
 // DeleteManagedResourceWorkflowSpec transitions the derived fulfillment
@@ -68,19 +68,26 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		}
 		defer tx.Rollback()
 
-		mr, err := tx.ManagedResources().GetInstance(ctx, in.ResourceType, in.Name)
+		er, err := tx.ExtensionResources().Get(ctx, in.ResourceType, in.Name)
 		if err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, err
 		}
+		managed := er.Managed()
+		if managed == nil {
+			probe.Error(ErrInvalidArgument)
+			return managedResourceMutationResult{}, fmt.Errorf(
+				"%w: extension resource %s/%s has no managed state",
+				ErrInvalidArgument, in.ResourceType, in.Name)
+		}
 
-		intent, err := tx.ManagedResources().GetIntent(ctx, in.ResourceType, in.Name, mr.CurrentVersion())
+		intent, err := tx.ExtensionResources().GetIntent(ctx, in.ResourceType, in.Name, managed.CurrentVersion())
 		if err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}
 
-		f, err := tx.Fulfillments().Get(ctx, mr.FulfillmentID())
+		f, err := tx.Fulfillments().Get(ctx, managed.FulfillmentID())
 		if err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, err
@@ -113,12 +120,12 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		}
 
 		return managedResourceMutationResult{
-			View: ManagedResourceView{
-				ManagedResource: *mr,
-				Intent:          intent,
-				Fulfillment:     *f,
+			View: ExtensionResourceView{
+				Resource:    *er,
+				Intent:      &intent,
+				Fulfillment: f,
 			},
-			FulfillmentID: mr.FulfillmentID(),
+			FulfillmentID: managed.FulfillmentID(),
 			MyGen:         f.Generation(),
 		}, nil
 	})
@@ -165,14 +172,14 @@ func (s *DeleteManagedResourceWorkflowSpec) StartCleanup() Activity[DeleteManage
 // orchestration picks up the new state. Returns the DELETING snapshot
 // immediately; the actual row deletion happens asynchronously in the
 // cleanup workflow.
-func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManagedResourceInput) (ManagedResourceView, error) {
+func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManagedResourceInput) (ExtensionResourceView, error) {
 	_, probe := s.deleteObserver().DeleteManagedResourceStarted(record.Context(), input.ResourceType, input.Name)
 	defer probe.End()
 
 	mr, err := RunActivity(record, s.MutateToDeleting(), input)
 	if err != nil {
 		probe.Error(err)
-		return ManagedResourceView{}, fmt.Errorf("mutate to deleting: %w", err)
+		return ExtensionResourceView{}, fmt.Errorf("mutate to deleting: %w", err)
 	}
 	probe.Mutated(mr.FulfillmentID, mr.MyGen)
 
@@ -182,13 +189,13 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 		FulfillmentID: mr.FulfillmentID,
 	}); err != nil {
 		probe.Error(err)
-		return ManagedResourceView{}, fmt.Errorf("start cleanup: %w", err)
+		return ExtensionResourceView{}, fmt.Errorf("start cleanup: %w", err)
 	}
 	probe.CleanupStarted()
 
 	if err := convergenceLoop(record, s.Orchestration, s.LoadFulfillment(), mr.FulfillmentID, mr.MyGen, true); err != nil {
 		probe.Error(err)
-		return ManagedResourceView{}, err
+		return ExtensionResourceView{}, err
 	}
 
 	return mr.View, nil
@@ -198,13 +205,13 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 // removes the managed representation link. Called within
 // MutateToDeleting's transaction so it is atomic with the fulfillment
 // state transition.
-func deleteRepresentation(ctx context.Context, tx Tx, typeDef ManagedResourceTypeDef, name ResourceName, now time.Time) error {
+func deleteRepresentation(ctx context.Context, tx Tx, typeDef ExtensionResourceType, name ResourceName, now time.Time) error {
 	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
 	if err != nil {
 		return fmt.Errorf("get platform resource %s: %w", name, err)
 	}
 
-	if err := pr.DeleteRepresentation(typeDef.APIServiceName, now); err != nil {
+	if err := pr.DeleteRepresentation(typeDef.APIServiceName(), now); err != nil {
 		return fmt.Errorf("delete representation: %w", err)
 	}
 

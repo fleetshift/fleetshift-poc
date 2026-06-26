@@ -57,33 +57,40 @@ type DeliveryRepository interface {
 	DeleteByFulfillment(ctx context.Context, fID FulfillmentID) error
 }
 
-// ManagedResourceRepository persists managed resource types, versioned
-// intents, and instance HEAD records. Grouped into a single repository
-// because these three tables form a cohesive aggregate boundary.
+// ExtensionResourceRepository persists extension resource types,
+// versioned intents, instance records, and managed state. Grouped into
+// a single repository because these tables form a cohesive aggregate
+// boundary for the extension resource model.
 //
-// Intent versioning is owned by the [ManagedResource] aggregate.
-// CreateInstance (and future UpdateInstance) read pending intents from
-// [ManagedResource.Snapshot] and flush them to storage, then call
-// [ManagedResource.DrainPendingIntents] to clear the buffer.
-type ManagedResourceRepository interface {
+// Intent versioning is owned by the [ExtensionResource] aggregate (via
+// [ManagedState]). Create reads pending intents from the aggregate's
+// [ExtensionResource.Snapshot] and flushes them to storage. The
+// aggregate is only valid within the scope of a single transaction; on
+// the next read, [ExtensionResourceFromSnapshot] naturally produces an
+// aggregate with no pending intents.
+type ExtensionResourceRepository interface {
 	// Type registration
-	CreateType(ctx context.Context, def ManagedResourceTypeDef) error
-	GetType(ctx context.Context, rt ResourceType) (ManagedResourceTypeDef, error)
-	ListTypes(ctx context.Context) ([]ManagedResourceTypeDef, error)
+	CreateType(ctx context.Context, def ExtensionResourceType) error
+	GetType(ctx context.Context, rt ResourceType) (ExtensionResourceType, error)
+	ListTypes(ctx context.Context) ([]ExtensionResourceType, error)
 	DeleteType(ctx context.Context, rt ResourceType) error
+
+	// Instance aggregate
+	Create(ctx context.Context, r *ExtensionResource) error
+	Get(ctx context.Context, rt ResourceType, name ResourceName) (*ExtensionResource, error)
+	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
+	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
+	Delete(ctx context.Context, rt ResourceType, name ResourceName) error
+
+	// Read views (join extension resource + managed state + intent + fulfillment)
+	GetView(ctx context.Context, rt ResourceType, name ResourceName) (ExtensionResourceView, error)
+	ListViewsByType(ctx context.Context, rt ResourceType) ([]ExtensionResourceView, error)
 
 	// Versioned intent (read-only; writes go through the aggregate drain)
 	GetIntent(ctx context.Context, rt ResourceType, name ResourceName, version IntentVersion) (ResourceIntent, error)
-	// Hard-delete all intent versions for a managed resource instance.
+	// Hard-delete all intent versions for an extension resource instance.
 	// Used by managed-resource cleanup after delivery-side deletion completes.
 	DeleteIntents(ctx context.Context, rt ResourceType, name ResourceName) error
-
-	// Instance aggregate (Create drains pending intents)
-	CreateInstance(ctx context.Context, mr *ManagedResource) error
-	GetInstance(ctx context.Context, rt ResourceType, name ResourceName) (*ManagedResource, error)
-	GetView(ctx context.Context, rt ResourceType, name ResourceName) (ManagedResourceView, error)
-	ListViewsByType(ctx context.Context, rt ResourceType) ([]ManagedResourceView, error)
-	DeleteInstance(ctx context.Context, rt ResourceType, name ResourceName) error
 }
 
 // ResourceIdentityRepository persists and retrieves canonical platform

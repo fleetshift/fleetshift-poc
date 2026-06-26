@@ -61,8 +61,8 @@ func TestManagedResourceManifestStrategy_OnRemovedIsNoop(t *testing.T) {
 	}
 }
 
-// seedIntent creates a managed resource with a single intent version
-// via the aggregate's RecordIntent method.
+// seedIntent creates an extension resource with managed state and a
+// single intent version via the aggregate's RecordIntent method.
 func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName, spec json.RawMessage) {
 	t.Helper()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
@@ -73,8 +73,18 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	}
 	defer tx.Rollback()
 
+	relation := domain.NewRegisteredSelfTarget("addon-target", "managed-resource")
+	ert := domain.NewExtensionResourceType(
+		rt, "v1", "resources", now,
+		domain.WithManagement(relation, domain.Signature{}),
+	)
+	if err := tx.ExtensionResources().CreateType(context.Background(), ert); err != nil {
+		t.Fatalf("CreateType: %v", err)
+	}
+
+	fID := domain.FulfillmentID("f-" + string(name))
 	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
-		ID:        domain.FulfillmentID("f-" + string(name)),
+		ID:        fID,
 		State:     domain.FulfillmentStateCreating,
 		CreatedAt: now,
 		UpdatedAt: now,
@@ -92,17 +102,15 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 		t.Fatalf("Create fulfillment: %v", err)
 	}
 
-	mr := domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
-		ResourceType:  rt,
-		Name:          name,
-		UID:           domain.NewManagedResourceUID(),
-		FulfillmentID: f.ID(),
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	})
-	mr.RecordIntent(spec, now)
-	if err := tx.ManagedResources().CreateInstance(context.Background(), mr); err != nil {
-		t.Fatalf("CreateInstance: %v", err)
+	er := domain.NewExtensionResource(
+		domain.NewExtensionResourceUID(), rt, name, now,
+		domain.WithManagedState(fID),
+	)
+	if _, err := er.RecordIntent(spec, now); err != nil {
+		t.Fatalf("RecordIntent: %v", err)
+	}
+	if err := tx.ExtensionResources().Create(context.Background(), er); err != nil {
+		t.Fatalf("Create extension resource: %v", err)
 	}
 
 	if err := tx.Commit(); err != nil {

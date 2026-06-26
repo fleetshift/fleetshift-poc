@@ -206,10 +206,6 @@ type AliasKey string
 // AliasValue is the value of an alias (e.g. "my-project-123").
 type AliasValue string
 
-// RepresentationRole classifies what a representation means relative to
-// the platform resource.
-type RepresentationRole string
-
 // RelationshipType classifies the relationship between two platform
 // resources (e.g. "runs-on", "member-of").
 type RelationshipType string
@@ -221,27 +217,6 @@ func NewRelationshipType(s string) (RelationshipType, error) {
 		return "", fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
 	}
 	return RelationshipType(s), nil
-}
-
-const (
-	// RepresentationRoleManaged marks a representation as managed by the
-	// platform (e.g. a managed Kind cluster).
-	RepresentationRoleManaged RepresentationRole = "managed"
-
-	// RepresentationRoleInventory marks a representation as discovered
-	// by an inventory provider.
-	RepresentationRoleInventory RepresentationRole = "inventory"
-
-	// RepresentationRoleTarget marks a representation as a delivery
-	// target.
-	RepresentationRoleTarget RepresentationRole = "target"
-)
-
-// knownRoles is the set of valid representation roles.
-var knownRoles = map[RepresentationRole]bool{
-	RepresentationRoleManaged:   true,
-	RepresentationRoleInventory: true,
-	RepresentationRoleTarget:    true,
 }
 
 // ---------------------------------------------------------------------------
@@ -346,33 +321,6 @@ func (n FullResourceName) ResourceName() ResourceName {
 		return ""
 	}
 	return ResourceName(parts[1])
-}
-
-// validateRepresentationRoles checks that roles is non-empty, all
-// values are known, and "managed" and "inventory" are not combined.
-// This is an aggregate-internal invariant check used by
-// [PlatformResource.AttachRepresentation].
-func validateRepresentationRoles(roles []RepresentationRole) error {
-	if len(roles) == 0 {
-		return fmt.Errorf("representation roles: %w: at least one role required", ErrInvalidArgument)
-	}
-	hasManaged := false
-	hasInventory := false
-	for _, r := range roles {
-		if !knownRoles[r] {
-			return fmt.Errorf("representation role %q: %w: unknown role", r, ErrInvalidArgument)
-		}
-		if r == RepresentationRoleManaged {
-			hasManaged = true
-		}
-		if r == RepresentationRoleInventory {
-			hasInventory = true
-		}
-	}
-	if hasManaged && hasInventory {
-		return fmt.Errorf("representation roles: %w: managed and inventory must not be combined", ErrInvalidArgument)
-	}
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -487,10 +435,9 @@ func (r *PlatformResource) Relationships() []ResourceRelationship {
 // identity-equivalent across services (see resource_identity_and_api.md).
 // The aggregate stamps them from its own canonical identity.
 type AttachRepresentationInput struct {
-	ServiceName ServiceName
-	Version     APIVersion
-	Roles       []RepresentationRole
-	Labels      map[string]string
+	ServiceName          ServiceName
+	Version              APIVersion
+	ExtensionResourceUID ExtensionResourceUID
 }
 
 // AttachRepresentation adds or updates an extension representation on
@@ -500,19 +447,14 @@ type AttachRepresentationInput struct {
 // are not combined; other value-object invariants are assumed enforced
 // at construction time by callers.
 func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, now time.Time) error {
-	if err := validateRepresentationRoles(in.Roles); err != nil {
-		return err
-	}
-
 	rep := ResourceRepresentation{
-		platformUID: r.uid,
-		serviceName: in.ServiceName,
-		version:     in.Version,
-		name:        r.name,
-		roles:       in.Roles,
-		labels:      in.Labels,
-		createdAt:   now,
-		updatedAt:   now,
+		platformUID:          r.uid,
+		serviceName:          in.ServiceName,
+		version:              in.Version,
+		name:                 r.name,
+		extensionResourceUID: in.ExtensionResourceUID,
+		createdAt:            now,
+		updatedAt:            now,
 	}
 
 	for i, existing := range r.representations {
@@ -593,21 +535,11 @@ func (r *PlatformResource) AddRelationship(rel ResourceRelationship) error {
 	return nil
 }
 
-// EffectiveLabels computes the merged label set. Platform labels remain
-// unprefixed; active representation labels are prefixed with
-// "{service_name}/{key}". Platform labels take priority in the event of
-// a key collision with a prefixed representation label.
+// EffectiveLabels computes the merged label set. For now this returns
+// the platform labels directly; in the future it will merge labels
+// from linked extension resources via their UIDs.
 func (r *PlatformResource) EffectiveLabels() map[string]string {
-	result := make(map[string]string)
-	for _, rep := range r.representations {
-		if rep.deleted {
-			continue
-		}
-		prefix := string(rep.serviceName) + "/"
-		for k, v := range rep.labels {
-			result[prefix+k] = v
-		}
-	}
+	result := make(map[string]string, len(r.labels))
 	for k, v := range r.labels {
 		result[k] = v
 	}
@@ -663,15 +595,14 @@ func (r *PlatformResource) Snapshot() PlatformResourceSnapshot {
 // single platform resource may have multiple representations (e.g. one
 // from Kind, one from GCP Host Connector).
 type ResourceRepresentation struct {
-	platformUID PlatformResourceUID
-	serviceName ServiceName
-	version     APIVersion
-	name        ResourceName
-	roles       []RepresentationRole
-	labels      map[string]string
-	createdAt   time.Time
-	updatedAt   time.Time
-	deleted     bool
+	platformUID          PlatformResourceUID
+	serviceName          ServiceName
+	version              APIVersion
+	name                 ResourceName
+	extensionResourceUID ExtensionResourceUID
+	createdAt            time.Time
+	updatedAt            time.Time
+	deleted              bool
 }
 
 // FullResourceName returns the full resource name for this
@@ -692,11 +623,10 @@ func (rr ResourceRepresentation) Version() APIVersion { return rr.version }
 // Name returns the identity-equivalent resource name.
 func (rr ResourceRepresentation) Name() ResourceName { return rr.name }
 
-// Roles returns the declared representation roles.
-func (rr ResourceRepresentation) Roles() []RepresentationRole { return rr.roles }
-
-// Labels returns the representation-contributed labels.
-func (rr ResourceRepresentation) Labels() map[string]string { return rr.labels }
+// ExtensionResourceUID returns the linked extension resource UID.
+func (rr ResourceRepresentation) ExtensionResourceUID() ExtensionResourceUID {
+	return rr.extensionResourceUID
+}
 
 // CreatedAt returns the creation timestamp.
 func (rr ResourceRepresentation) CreatedAt() time.Time { return rr.createdAt }
@@ -712,30 +642,28 @@ func (rr ResourceRepresentation) Deleted() bool { return rr.deleted }
 // [ResourceRepresentation] from a snapshot.
 func ResourceRepresentationFromSnapshot(s ResourceRepresentationSnapshot) ResourceRepresentation {
 	return ResourceRepresentation{
-		platformUID: s.PlatformUID,
-		serviceName: s.ServiceName,
-		version:     s.Version,
-		name:        s.Name,
-		roles:       s.Roles,
-		labels:      s.Labels,
-		createdAt:   s.CreatedAt,
-		updatedAt:   s.UpdatedAt,
-		deleted:     s.Deleted,
+		platformUID:          s.PlatformUID,
+		serviceName:          s.ServiceName,
+		version:              s.Version,
+		name:                 s.Name,
+		extensionResourceUID: s.ExtensionResourceUID,
+		createdAt:            s.CreatedAt,
+		updatedAt:            s.UpdatedAt,
+		deleted:              s.Deleted,
 	}
 }
 
 // Snapshot returns a [ResourceRepresentationSnapshot].
 func (rr ResourceRepresentation) Snapshot() ResourceRepresentationSnapshot {
 	return ResourceRepresentationSnapshot{
-		PlatformUID: rr.platformUID,
-		ServiceName: rr.serviceName,
-		Version:     rr.version,
-		Name:        rr.name,
-		Roles:       rr.roles,
-		Labels:      rr.labels,
-		CreatedAt:   rr.createdAt,
-		UpdatedAt:   rr.updatedAt,
-		Deleted:     rr.deleted,
+		PlatformUID:          rr.platformUID,
+		ServiceName:          rr.serviceName,
+		Version:              rr.version,
+		Name:                 rr.name,
+		ExtensionResourceUID: rr.extensionResourceUID,
+		CreatedAt:            rr.createdAt,
+		UpdatedAt:            rr.updatedAt,
+		Deleted:              rr.deleted,
 	}
 }
 

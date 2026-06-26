@@ -8,9 +8,9 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/authmethodrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/extensionresourcerepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/managedresourcerepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/resourceidentityrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/storetest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/targetrepotest"
@@ -90,18 +90,6 @@ func TestStore(t *testing.T) {
 	})
 }
 
-func TestManagedResourceRepo(t *testing.T) {
-	managedresourcerepotest.Run(t, func(t *testing.T) domain.Tx {
-		store := beginTestTx(t)
-		tx, err := store.Begin(context.Background())
-		if err != nil {
-			t.Fatalf("Begin: %v", err)
-		}
-		t.Cleanup(func() { tx.Rollback() })
-		return tx
-	})
-}
-
 func TestResourceIdentityRepo(t *testing.T) {
 	resourceidentityrepotest.Run(t, func(t *testing.T) domain.ResourceIdentityRepository {
 		store := beginTestTx(t)
@@ -111,6 +99,18 @@ func TestResourceIdentityRepo(t *testing.T) {
 		}
 		t.Cleanup(func() { tx.Rollback() })
 		return tx.ResourceIdentities()
+	})
+}
+
+func TestExtensionResourceRepo(t *testing.T) {
+	extensionresourcerepotest.Run(t, func(t *testing.T) domain.Tx {
+		store := beginTestTx(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { tx.Rollback() })
+		return tx
 	})
 }
 

@@ -8,13 +8,11 @@ import (
 	"slices"
 	"sync"
 	"testing"
-	"time"
 
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
@@ -75,7 +73,7 @@ func (r *recordingActivator) deactivatedCount() int {
 
 func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
 	h := sha256.New()
-	h.Write([]byte(s.APIServiceName))
+	h.Write([]byte(s.ResourceType.ServiceName()))
 	h.Write([]byte{0})
 	h.Write([]byte(s.ProtoPackage))
 	h.Write([]byte{0})
@@ -107,7 +105,7 @@ type addonManagerEnv struct {
 	mgr       *application.AddonManager
 	activator *recordingActivator
 	router    *delivery.RoutingDeliveryService
-	typeSvc   *application.ManagedResourceTypeService
+	typeSvc   *application.ExtensionResourceTypeService
 	targetSvc *application.TargetService
 }
 
@@ -119,43 +117,7 @@ func setupAddonManager(t *testing.T) *addonManagerEnv {
 
 	router := delivery.NewRoutingDeliveryService()
 
-	reg := &memworkflow.Registry{}
-	orchSpec := domain.NewOrchestrationWorkflowSpec(
-		store, router, domain.StrategyFactory{Store: store}, reg,
-		domain.WithAckRetryInterval(5*time.Second),
-	)
-	orchWf, err := reg.RegisterOrchestration(orchSpec)
-	if err != nil {
-		t.Fatalf("RegisterOrchestration: %v", err)
-	}
-
-	createMRWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
-		Store: store, Orchestration: orchWf,
-	})
-	if err != nil {
-		t.Fatalf("RegisterCreateManagedResource: %v", err)
-	}
-
-	mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store})
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
-	}
-
-	deleteMRWf, err := reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
-		Store: store, Orchestration: orchWf, Cleanup: mrCleanupWf,
-	})
-	if err != nil {
-		t.Fatalf("RegisterDeleteManagedResource: %v", err)
-	}
-
-	// ManagedResourceService is needed by the type service's underlying
-	// store transactions, but is not directly exercised here — the
-	// activator is stubbed.
-	_ = &application.ManagedResourceService{
-		Store: store, CreateWF: createMRWf, DeleteWF: deleteMRWf,
-	}
-
-	typeSvc := application.NewManagedResourceTypeService(store)
+	typeSvc := application.NewExtensionResourceTypeService(store)
 	targetSvc := &application.TargetService{Store: store}
 
 	activator := &recordingActivator{}
@@ -190,16 +152,15 @@ func clusterMgmtDescriptor() domain.AddonDescriptor {
 
 func clusterSchema() domain.ManagedResourceSchema {
 	return domain.ManagedResourceSchema{
-		ResourceType:   "test.fleetshift.io/Cluster",
-		APIServiceName: "test.fleetshift.io",
-		ProtoPackage:   "test.fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "clusters",
-		Singular:       "Cluster",
-		Plural:         "Clusters",
-		ProtoFiles:     map[string]string{"fake.proto": "syntax = \"proto3\";"},
-		SpecMessage:    "fake.ClusterSpec",
-		Relation:       domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+		ResourceType: "test.fleetshift.io/Cluster",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "clusters",
+		Singular:     "Cluster",
+		Plural:       "Clusters",
+		ProtoFiles:   map[string]string{"fake.proto": "syntax = \"proto3\";"},
+		SpecMessage:  "fake.ClusterSpec",
+		Relation:     domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
 	}
 }
 
@@ -278,8 +239,8 @@ func TestAddonManager_ConnectActivatesSchemas(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get type def: %v", err)
 	}
-	if typeDef.ResourceType != "test.fleetshift.io/Cluster" {
-		t.Errorf("type def resource type = %q, want test.fleetshift.io/Cluster", typeDef.ResourceType)
+	if typeDef.ResourceType() != "test.fleetshift.io/Cluster" {
+		t.Errorf("type def resource type = %q, want test.fleetshift.io/Cluster", typeDef.ResourceType())
 	}
 }
 
@@ -535,16 +496,15 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 
 	clusterS := clusterSchema()
 	databaseS := domain.ManagedResourceSchema{
-		ResourceType:   "test.fleetshift.io/Database",
-		APIServiceName: "test.fleetshift.io",
-		ProtoPackage:   "test.fleetshift.v1",
-		Version:        "v1",
-		CollectionID:   "databases",
-		Singular:       "Database",
-		Plural:         "Databases",
-		ProtoFiles:     map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
-		SpecMessage:    "fake.DatabaseSpec",
-		Relation:       domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
+		ResourceType: "test.fleetshift.io/Database",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "databases",
+		Singular:     "Database",
+		Plural:       "Databases",
+		ProtoFiles:   map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
+		SpecMessage:  "fake.DatabaseSpec",
+		Relation:     domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
 	}
 	if err := env.mgr.Connect(ctx, "multi-resource", application.ConnectInput{
 		Schemas: []domain.ManagedResourceSchema{clusterS, databaseS},
@@ -788,7 +748,7 @@ func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
 
 	buildManager := func() *addonManagerEnv {
 		router := delivery.NewRoutingDeliveryService()
-		typeSvc := application.NewManagedResourceTypeService(store)
+		typeSvc := application.NewExtensionResourceTypeService(store)
 		targetSvc := &application.TargetService{Store: store}
 		activator := &recordingActivator{}
 		mgr := application.NewAddonManager(application.AddonManagerDeps{
@@ -831,7 +791,7 @@ func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
 		t.Fatalf("Enable (pod 2): %v", err)
 	}
 	schema2 := clusterSchema()
-	schema2.APIServiceName = "different.service.io"
+	schema2.Version = "v2"
 	err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
 		Schemas: []domain.ManagedResourceSchema{schema2},
 	})
@@ -869,34 +829,8 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 
 	buildManager := func() *addonManagerEnv {
 		router := delivery.NewRoutingDeliveryService()
-		reg := &memworkflow.Registry{}
-		orchSpec := domain.NewOrchestrationWorkflowSpec(
-			store, router, domain.StrategyFactory{Store: store}, reg,
-			domain.WithAckRetryInterval(5*time.Second),
-		)
-		orchWf, err := reg.RegisterOrchestration(orchSpec)
-		if err != nil {
-			t.Fatalf("RegisterOrchestration: %v", err)
-		}
-		createMRWf, err := reg.RegisterCreateManagedResource(&domain.CreateManagedResourceWorkflowSpec{
-			Store: store, Orchestration: orchWf,
-		})
-		if err != nil {
-			t.Fatalf("RegisterCreateManagedResource: %v", err)
-		}
-		mrCleanupWf, err := reg.RegisterDeleteManagedResourceCleanup(&domain.DeleteManagedResourceCleanupWorkflowSpec{Store: store})
-		if err != nil {
-			t.Fatalf("RegisterDeleteManagedResourceCleanup: %v", err)
-		}
-		_, err = reg.RegisterDeleteManagedResource(&domain.DeleteManagedResourceWorkflowSpec{
-			Store: store, Orchestration: orchWf, Cleanup: mrCleanupWf,
-		})
-		if err != nil {
-			t.Fatalf("RegisterDeleteManagedResource: %v", err)
-		}
-		_ = createMRWf
 
-		typeSvc := application.NewManagedResourceTypeService(store)
+		typeSvc := application.NewExtensionResourceTypeService(store)
 		targetSvc := &application.TargetService{Store: store}
 		activator := &recordingActivator{}
 
@@ -950,7 +884,7 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get type def: %v", err)
 	}
-	if typeDef.ResourceType != "test.fleetshift.io/Cluster" {
-		t.Errorf("type def resource type = %q, want test.fleetshift.io/Cluster", typeDef.ResourceType)
+	if typeDef.ResourceType() != "test.fleetshift.io/Cluster" {
+		t.Errorf("type def resource type = %q, want test.fleetshift.io/Cluster", typeDef.ResourceType())
 	}
 }

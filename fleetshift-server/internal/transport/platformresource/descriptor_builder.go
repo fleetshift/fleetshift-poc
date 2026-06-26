@@ -169,7 +169,6 @@ func buildRepresentationMessage(resourceName string) *descriptorpb.DescriptorPro
 			dynamicapi.StringField("service_name", 1),
 			dynamicapi.StringField("version", 2),
 			dynamicapi.StringField("full_resource_name", 3),
-			repeatedStringField("roles", 4),
 			dynamicapi.MessageField("create_time", 5, "google.protobuf.Timestamp"),
 			dynamicapi.MessageField("update_time", 6, "google.protobuf.Timestamp"),
 		},
@@ -263,15 +262,6 @@ func buildService(resourceName, plural, pkg string) *descriptorpb.ServiceDescrip
 }
 
 // --- platform-specific field helpers ---
-
-func repeatedStringField(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_STRING.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
-	}
-}
 
 func buildMapStringStringField(parentFQN, fieldName, entryName string, number int32) (*descriptorpb.FieldDescriptorProto, *descriptorpb.DescriptorProto) {
 	entry := &descriptorpb.DescriptorProto{

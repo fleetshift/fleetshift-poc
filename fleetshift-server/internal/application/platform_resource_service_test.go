@@ -85,10 +85,9 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 		t.Fatalf("GetByName: %v", err)
 	}
 	if err := fetched.AttachRepresentation(domain.AttachRepresentationInput{
-		ServiceName: "kind.fleetshift.io",
-		Version:     "v1alpha1",
-		Roles:       []domain.RepresentationRole{domain.RepresentationRoleManaged},
-		Labels:      map[string]string{"provider": "kind"},
+		ServiceName:          "kind.fleetshift.io",
+		Version:              "v1alpha1",
+		ExtensionResourceUID: domain.NewExtensionResourceUID(),
 	}, time.Now().UTC()); err != nil {
 		tx.Rollback()
 		t.Fatalf("AttachRepresentation: %v", err)
@@ -116,8 +115,8 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 	if reps[0].Version() != "v1alpha1" {
 		t.Errorf("Version = %q, want %q", reps[0].Version(), "v1alpha1")
 	}
-	if reps[0].Roles()[0] != domain.RepresentationRoleManaged {
-		t.Errorf("Role = %q, want %q", reps[0].Roles()[0], domain.RepresentationRoleManaged)
+	if reps[0].ExtensionResourceUID().String() == "" {
+		t.Error("ExtensionResourceUID should be set")
 	}
 }
 

@@ -37,7 +37,7 @@ type RegisteredService struct {
 
 // Deps holds the shared dependencies injected into all dynamic services.
 type Deps struct {
-	Resources *application.ManagedResourceService
+	Resources *application.ExtensionResourceService
 	Validator protovalidate.Validator
 }
 
@@ -130,7 +130,7 @@ func resolveSpecDescriptor(cfg *ResourceTypeConfig) (protoreflect.MessageDescrip
 type dynamicHandler struct {
 	cfg        *ResourceTypeConfig
 	descs      *ServiceDescriptors
-	resources  *application.ManagedResourceService
+	resources  *application.ExtensionResourceService
 	validator  protovalidate.Validator
 	collection string
 }
@@ -202,7 +202,7 @@ func (h *dynamicHandler) doCreate(ctx context.Context, req proto.Message) (proto
 		return nil, status.Errorf(codes.InvalidArgument, "invalid resource name: %v", err)
 	}
 
-	in := application.CreateManagedResourceInput{
+	in := application.CreateExtensionResourceInput{
 		ResourceType: h.cfg.ResourceType,
 		Name:         resourceName,
 		Spec:         json.RawMessage(specJSON),
@@ -390,7 +390,7 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
 	}
 
-	in := application.ResumeManagedResourceInput{
+	in := application.ResumeExtensionResourceInput{
 		ResourceType: h.cfg.ResourceType,
 		Name:         resourceName,
 	}
@@ -447,26 +447,25 @@ func (h *dynamicHandler) parseName(name string) (domain.ResourceName, error) {
 	)
 }
 
-// viewToResource converts a domain ManagedResourceView into a dynamic
+// viewToResource converts a domain ExtensionResourceView into a dynamic
 // resource message populated with the platform envelope and addon spec.
-func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Message, error) {
-	mr := v.ManagedResource
-	f := v.Fulfillment
+func (h *dynamicHandler) viewToResource(v domain.ExtensionResourceView) (proto.Message, error) {
+	er := v.Resource
 
 	resource := dynamicpb.NewMessage(h.descs.Resource)
 
 	// name — ResourceName is already collection-qualified (e.g. "widgets/widget-1")
 	nameField := h.descs.Resource.Fields().ByName("name")
-	resource.Set(nameField, protoreflect.ValueOfString(string(mr.Name())))
+	resource.Set(nameField, protoreflect.ValueOfString(string(er.Name())))
 
 	// uid
 	uidField := h.descs.Resource.Fields().ByName("uid")
-	resource.Set(uidField, protoreflect.ValueOfString(mr.UID().String()))
+	resource.Set(uidField, protoreflect.ValueOfString(er.UID().String()))
 
 	// spec
 	specField := h.descs.Resource.Fields().ByName("spec")
 	specMsg := dynamicpb.NewMessage(h.descs.Spec)
-	if len(v.Intent.Spec) > 0 {
+	if v.Intent != nil && len(v.Intent.Spec) > 0 {
 		if err := protojson.Unmarshal(v.Intent.Spec, specMsg); err != nil {
 			return nil, status.Errorf(codes.Internal, "unmarshal spec: %v", err)
 		}
@@ -475,26 +474,41 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 
 	// intent_version
 	versionField := h.descs.Resource.Fields().ByName("intent_version")
-	resource.Set(versionField, protoreflect.ValueOfInt64(int64(mr.CurrentVersion())))
-
-	// state
-	stateField := h.descs.Resource.Fields().ByName("state")
-	stateNum := int32(stateFromFulfillment(f.State()))
-	resource.Set(stateField, protoreflect.ValueOfEnum(protoreflect.EnumNumber(stateNum)))
-
-	// pause_reason
-	if prField := h.descs.Resource.Fields().ByName("pause_reason"); prField != nil {
-		resource.Set(prField, protoreflect.ValueOfString(f.PauseReason()))
+	if managed := er.Managed(); managed != nil {
+		resource.Set(versionField, protoreflect.ValueOfInt64(int64(managed.CurrentVersion())))
 	}
 
-	// reconciling
-	reconcilingField := h.descs.Resource.Fields().ByName("reconciling")
-	resource.Set(reconcilingField, protoreflect.ValueOfBool(f.Reconciling()))
+	// state and fulfillment-derived fields
+	if v.Fulfillment != nil {
+		f := v.Fulfillment
+		stateField := h.descs.Resource.Fields().ByName("state")
+		stateNum := int32(stateFromFulfillment(f.State()))
+		resource.Set(stateField, protoreflect.ValueOfEnum(protoreflect.EnumNumber(stateNum)))
+
+		if prField := h.descs.Resource.Fields().ByName("pause_reason"); prField != nil {
+			resource.Set(prField, protoreflect.ValueOfString(f.PauseReason()))
+		}
+
+		reconcilingField := h.descs.Resource.Fields().ByName("reconciling")
+		resource.Set(reconcilingField, protoreflect.ValueOfBool(f.Reconciling()))
+
+		if f.Provenance() != nil {
+			provField := h.descs.Resource.Fields().ByName("provenance")
+			if provVal, err := marshalProvenance(provField, f.Provenance()); err != nil {
+				return nil, err
+			} else {
+				resource.Set(provField, provVal)
+			}
+		}
+
+		genField := h.descs.Resource.Fields().ByName("generation")
+		resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation())))
+	}
 
 	// create_time
-	if !mr.CreatedAt().IsZero() {
+	if !er.CreatedAt().IsZero() {
 		createTimeField := h.descs.Resource.Fields().ByName("create_time")
-		if tsVal, err := dynamicapi.MarshalTimestamp(createTimeField, mr.CreatedAt()); err != nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(createTimeField, er.CreatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(createTimeField, tsVal)
@@ -502,42 +516,18 @@ func (h *dynamicHandler) viewToResource(v domain.ManagedResourceView) (proto.Mes
 	}
 
 	// update_time
-	if !mr.UpdatedAt().IsZero() {
+	if !er.UpdatedAt().IsZero() {
 		updateTimeField := h.descs.Resource.Fields().ByName("update_time")
-		if tsVal, err := dynamicapi.MarshalTimestamp(updateTimeField, mr.UpdatedAt()); err != nil {
+		if tsVal, err := dynamicapi.MarshalTimestamp(updateTimeField, er.UpdatedAt()); err != nil {
 			return nil, err
 		} else {
 			resource.Set(updateTimeField, tsVal)
 		}
 	}
 
-	// delete_time
-	if mr.DeletedAt() != nil {
-		deleteTimeField := h.descs.Resource.Fields().ByName("delete_time")
-		if tsVal, err := dynamicapi.MarshalTimestamp(deleteTimeField, *mr.DeletedAt()); err != nil {
-			return nil, err
-		} else {
-			resource.Set(deleteTimeField, tsVal)
-		}
-	}
-
 	// etag (weak domain-state token)
 	etagField := h.descs.Resource.Fields().ByName("etag")
 	resource.Set(etagField, protoreflect.ValueOfString(string(v.Etag())))
-
-	// provenance
-	if f.Provenance() != nil {
-		provField := h.descs.Resource.Fields().ByName("provenance")
-		if provVal, err := marshalProvenance(provField, f.Provenance()); err != nil {
-			return nil, err
-		} else {
-			resource.Set(provField, provVal)
-		}
-	}
-
-	// generation
-	genField := h.descs.Resource.Fields().ByName("generation")
-	resource.Set(genField, protoreflect.ValueOfInt64(int64(f.Generation())))
 
 	return resource, nil
 }

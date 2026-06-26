@@ -8,7 +8,8 @@ import (
 // FulfillmentRelation describes how a managed resource maps to
 // fulfillment strategies. It is the behavioral/structural concept —
 // purely about derivation logic. The addon's cryptographic proof of
-// the relation is stored separately on [ManagedResourceTypeDef].
+// the relation is stored separately on [ExtensionResourceType]'s
+// [ManagementType].
 //
 // Mirrors the hybrid attestation PoC's FulfillmentRelation type union.
 type FulfillmentRelation interface {
@@ -102,7 +103,7 @@ type registeredSelfTargetJSON struct {
 // SignedRelation is self-contained evidence for delivery-side
 // verification. It bundles the resource type scope, the fulfillment
 // relation, and the addon's signature over the claim. Assembled from
-// a [ManagedResourceTypeDef] at delivery time.
+// an [ExtensionResourceType]'s [ManagementType] at delivery time.
 type SignedRelation struct {
 	ResourceType ResourceType        `json:"resource_type"`
 	Relation     FulfillmentRelation `json:"relation"`

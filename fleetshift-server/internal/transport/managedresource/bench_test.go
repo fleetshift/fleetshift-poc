@@ -58,7 +58,6 @@ func setupBench(b *testing.B) *benchEnv {
 			Plural:       schema.Plural,
 		},
 		ResourceType:   kindaddon.ClusterResourceType,
-		APIServiceName: schema.APIServiceName,
 		ProtoPackage:   schema.ProtoPackage,
 		SpecMessage:    schema.SpecMessage,
 		SpecDescriptor: desc.Message,
@@ -288,22 +287,26 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	resourceDesc := env.svc.Descriptors.Resource
 
 	now := time.Now()
-	view := domain.ManagedResourceView{
-		ManagedResource: *domain.ManagedResourceFromSnapshot(domain.ManagedResourceSnapshot{
-			ResourceType:   kindaddon.ClusterResourceType,
-			Name:           "prod-us-east-1",
-			UID:            domain.NewManagedResourceUID(),
-			CurrentVersion: 3,
-			FulfillmentID:  "ful-123",
-			CreatedAt:      now.Add(-1 * time.Hour),
-			UpdatedAt:      now,
+	intent := &domain.ResourceIntent{
+		Spec: json.RawMessage(`{"name":"prod-us-east-1"}`),
+	}
+	fulfillment := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
+		State: domain.FulfillmentStateActive,
+	})
+	view := domain.ExtensionResourceView{
+		Resource: *domain.ExtensionResourceFromSnapshot(domain.ExtensionResourceSnapshot{
+			ResourceType: kindaddon.ClusterResourceType,
+			Name:         "prod-us-east-1",
+			UID:          domain.NewExtensionResourceUID(),
+			Managed: &domain.ManagedStateSnapshot{
+				CurrentVersion: 3,
+				FulfillmentID:  "ful-123",
+			},
+			CreatedAt: now.Add(-1 * time.Hour),
+			UpdatedAt: now,
 		}),
-		Intent: domain.ResourceIntent{
-			Spec: json.RawMessage(`{"name":"prod-us-east-1"}`),
-		},
-		Fulfillment: *domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
-			State: domain.FulfillmentStateActive,
-		}),
+		Intent:      intent,
+		Fulfillment: fulfillment,
 	}
 
 	nameField := resourceDesc.Fields().ByName("name")
@@ -317,17 +320,17 @@ func BenchmarkFullResponsePath(b *testing.B) {
 	b.ResetTimer()
 	for range b.N {
 		msg := dynamicpb.NewMessage(resourceDesc)
-		msg.Set(nameField, protoreflect.ValueOfString("clusters/"+string(view.ManagedResource.Name())))
-		msg.Set(uidField, protoreflect.ValueOfString(view.ManagedResource.UID().String()))
+		msg.Set(nameField, protoreflect.ValueOfString("clusters/"+string(view.Resource.Name())))
+		msg.Set(uidField, protoreflect.ValueOfString(view.Resource.UID().String()))
 
 		specMsg := dynamicpb.NewMessage(env.specDesc)
 		_ = protojson.Unmarshal(view.Intent.Spec, specMsg)
 		msg.Set(specField, protoreflect.ValueOfMessage(specMsg))
 
-		msg.Set(versionField, protoreflect.ValueOfInt64(int64(view.ManagedResource.CurrentVersion())))
+		msg.Set(versionField, protoreflect.ValueOfInt64(int64(view.Resource.Managed().CurrentVersion())))
 		msg.Set(stateField, protoreflect.ValueOfInt32(2))
 		msg.Set(reconcilingField, protoreflect.ValueOfBool(false))
-		msg.Set(etagField, protoreflect.ValueOfString(view.ManagedResource.UID().String()))
+		msg.Set(etagField, protoreflect.ValueOfString(view.Resource.UID().String()))
 
 		// Wire marshal (what gRPC does)
 		out, _ := proto.Marshal(msg)

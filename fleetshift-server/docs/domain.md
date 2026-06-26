@@ -97,7 +97,7 @@ Each aggregate `Foo` has:
 - **Pending buffers are write-path only.** `Snapshot()` captures pending
   objects non-mutatively. `FromSnapshot()` always initializes them symmetrically.
   Of course, pending state is not likely to be hydrated on read, so this state is typically
-  never provided to FromSnapshot in the first place.
+  never provided to FromSnapshot in the first place. In other words, **an aggregate is only valid within its transaction boundary.** After commit, it should be discarded. Trying to use an aggregate from one transaction into another is an error with undefined behavior.
 - **Repositories use snapshots for both reads and writes.** Write paths call
   `obj.Snapshot()` and read individual fields. Read paths scan into a snapshot
   struct and call `FooFromSnapshot(s)` to produce the domain object.

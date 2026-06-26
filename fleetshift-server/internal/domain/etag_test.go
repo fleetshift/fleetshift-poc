@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func fulfillmentValue(s FulfillmentSnapshot) Fulfillment {
@@ -160,48 +161,38 @@ func TestFulfillment_Etag_ResolvedTargetCountMatters(t *testing.T) {
 	}
 }
 
-func managedResourceValue(s ManagedResourceSnapshot) ManagedResource {
-	return *ManagedResourceFromSnapshot(s)
+// ---------------------------------------------------------------------------
+// ExtensionResourceView etag tests
+// ---------------------------------------------------------------------------
+
+// extensionView builds a managed ExtensionResourceView with sensible
+// defaults suitable for etag testing. Callers mutate the returned value
+// before computing the etag.
+func extensionView() ExtensionResourceView {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	er := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now,
+		WithManagedState("f-1"))
+	er.RecordIntent(json.RawMessage(`{"replicas":3}`), now)
+
+	f := FulfillmentFromSnapshot(FulfillmentSnapshot{
+		ID:              "f-1",
+		Generation:      1,
+		State:           FulfillmentStateActive,
+		ResolvedTargets: []TargetID{"t1"},
+	})
+
+	intent := er.Snapshot().PendingIntents[0]
+
+	return ExtensionResourceView{
+		Resource:    *er,
+		Intent:      &intent,
+		Fulfillment: f,
+	}
 }
 
-func TestManagedResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
-	sharedUID := NewManagedResourceUID()
-	a := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "ab", UID: sharedUID}),
-		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
-		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
-	}
-	b := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{ResourceType: "test.fleetshift.io/T", Name: "a", UID: sharedUID}),
-		Intent:          ResourceIntent{Spec: json.RawMessage(`{}`)},
-		Fulfillment:     fulfillmentValue(FulfillmentSnapshot{Generation: 1, State: FulfillmentStateActive}),
-	}
-	if a.Etag() == b.Etag() {
-		t.Error("etags must differ when field values differ, even if concatenation is the same")
-	}
-}
-
-func TestManagedResourceView_Etag_Deterministic(t *testing.T) {
-	v := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType:   "kind.fleetshift.io/Cluster",
-			Name:           "test-cluster",
-			UID:            NewManagedResourceUID(),
-			CurrentVersion: 2,
-		}),
-		Intent: ResourceIntent{
-			ResourceType: "kind.fleetshift.io/Cluster",
-			Name:         "test-cluster",
-			Version:      2,
-			Spec:         json.RawMessage(`{"replicas":3}`),
-		},
-		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
-			ID:         "f-2",
-			Generation: 5,
-			State:      FulfillmentStateActive,
-		}),
-	}
-
+func TestExtensionResourceView_Etag_Deterministic(t *testing.T) {
+	v := extensionView()
 	e1 := v.Etag()
 	e2 := v.Etag()
 	if e1 != e2 {
@@ -209,15 +200,8 @@ func TestManagedResourceView_Etag_Deterministic(t *testing.T) {
 	}
 }
 
-func TestManagedResourceView_Etag_WeakPrefix(t *testing.T) {
-	v := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType: "kind.fleetshift.io/Cluster",
-			Name:         "test-cluster",
-		}),
-		Fulfillment: fulfillmentValue(FulfillmentSnapshot{ID: "f-2", Generation: 1, State: FulfillmentStateCreating}),
-	}
-	etag := string(v.Etag())
+func TestExtensionResourceView_Etag_WeakPrefix(t *testing.T) {
+	etag := string(extensionView().Etag())
 	if !strings.HasPrefix(etag, `W/"`) {
 		t.Errorf("etag should start with W/\", got %q", etag)
 	}
@@ -226,51 +210,116 @@ func TestManagedResourceView_Etag_WeakPrefix(t *testing.T) {
 	}
 }
 
-func TestManagedResourceView_Etag_ChangesOnStateChange(t *testing.T) {
-	base := ManagedResourceView{
-		ManagedResource: managedResourceValue(ManagedResourceSnapshot{
-			ResourceType:   "kind.fleetshift.io/Cluster",
-			Name:           "test-cluster",
-			CurrentVersion: 1,
-		}),
-		Intent: ResourceIntent{
-			Version: 1,
-			Spec:    json.RawMessage(`{"replicas":3}`),
-		},
-		Fulfillment: fulfillmentValue(FulfillmentSnapshot{
-			ID:         "f-2",
-			Generation: 5,
-			State:      FulfillmentStateActive,
-		}),
-	}
+func TestExtensionResourceView_Etag_ChangesOnMutation(t *testing.T) {
+	base := extensionView()
 	baseEtag := base.Etag()
 
-	t.Run("state change", func(t *testing.T) {
+	t.Run("fulfillment state change", func(t *testing.T) {
 		snap := base.Fulfillment.Snapshot()
 		snap.State = FulfillmentStateFailed
 		v := base
-		v.Fulfillment = fulfillmentValue(snap)
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
 		if v.Etag() == baseEtag {
-			t.Error("etag should change when state changes")
+			t.Error("etag should change when fulfillment state changes")
+		}
+	})
+
+	t.Run("fulfillment generation change", func(t *testing.T) {
+		snap := base.Fulfillment.Snapshot()
+		snap.Generation = 99
+		v := base
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when fulfillment generation changes")
 		}
 	})
 
 	t.Run("intent version change", func(t *testing.T) {
-		mrSnap := base.ManagedResource.Snapshot()
-		mrSnap.CurrentVersion = 2
 		v := base
-		v.ManagedResource = managedResourceValue(mrSnap)
-		v.Intent.Version = 2
+		changed := *base.Intent
+		changed.Version = 42
+		v.Intent = &changed
 		if v.Etag() == baseEtag {
 			t.Error("etag should change when intent version changes")
 		}
 	})
 
-	t.Run("spec change", func(t *testing.T) {
+	t.Run("intent spec change", func(t *testing.T) {
 		v := base
-		v.Intent.Spec = json.RawMessage(`{"replicas":5}`)
+		changed := *base.Intent
+		changed.Spec = json.RawMessage(`{"replicas":5}`)
+		v.Intent = &changed
 		if v.Etag() == baseEtag {
-			t.Error("etag should change when spec changes")
+			t.Error("etag should change when intent spec changes")
 		}
 	})
+
+	t.Run("managed version change", func(t *testing.T) {
+		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		er := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
+			UID:          base.Resource.UID(),
+			ResourceType: base.Resource.ResourceType(),
+			Name:         base.Resource.Name(),
+			Managed: &ManagedStateSnapshot{
+				CurrentVersion: 10,
+				FulfillmentID:  "f-1",
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		v := base
+		v.Resource = *er
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when managed version changes")
+		}
+	})
+
+	t.Run("resolved targets change", func(t *testing.T) {
+		snap := base.Fulfillment.Snapshot()
+		snap.ResolvedTargets = []TargetID{"t1", "t2", "t3"}
+		v := base
+		v.Fulfillment = FulfillmentFromSnapshot(snap)
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when resolved targets change")
+		}
+	})
+}
+
+func TestExtensionResourceView_Etag_FieldBoundariesAreUnambiguous(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	sharedUID := NewExtensionResourceUID()
+
+	// ResourceType and Name are adjacent variable-length fields in the
+	// hash. These two pairs have identical raw concatenations
+	// ("svc.io/Foobars/x") but different field boundaries, so they
+	// would collide if hashString stopped length-prefixing.
+	a := ExtensionResourceView{
+		Resource: *NewExtensionResource(sharedUID, "svc.io/Foo", "bars/x", now,
+			WithManagedState("f-1")),
+	}
+	b := ExtensionResourceView{
+		Resource: *NewExtensionResource(sharedUID, "svc.io/Foobar", "s/x", now,
+			WithManagedState("f-1")),
+	}
+	if a.Etag() == b.Etag() {
+		t.Error("etags must differ when field values differ, even if concatenation is the same")
+	}
+}
+
+func TestExtensionResourceView_Etag_NilFulfillmentDiffers(t *testing.T) {
+	withFulfillment := extensionView()
+	without := withFulfillment
+	without.Fulfillment = nil
+	if withFulfillment.Etag() == without.Etag() {
+		t.Error("etag should differ between views with and without fulfillment")
+	}
+}
+
+func TestExtensionResourceView_Etag_NilIntentDiffers(t *testing.T) {
+	withIntent := extensionView()
+	without := withIntent
+	without.Intent = nil
+	if withIntent.Etag() == without.Etag() {
+		t.Error("etag should differ between views with and without intent")
+	}
 }

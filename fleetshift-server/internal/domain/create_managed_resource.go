@@ -16,7 +16,7 @@ type CreateManagedResourceInput struct {
 	ResourceType ResourceType
 	Name         ResourceName
 	Spec         json.RawMessage
-	TypeDef      ManagedResourceTypeDef
+	TypeDef      ExtensionResourceType
 	Provenance   *Provenance
 	Auth         DeliveryAuth
 }
@@ -39,15 +39,23 @@ func (s *CreateManagedResourceWorkflowSpec) now() time.Time {
 
 func (s *CreateManagedResourceWorkflowSpec) Name() string { return "create-managed-resource" }
 
-// PersistManagedResource creates the managed resource aggregate (with
-// its initial intent) and derived fulfillment in a single transaction.
-func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[CreateManagedResourceInput, ManagedResourceView] {
-	return NewActivity("persist-managed-resource", func(ctx context.Context, in CreateManagedResourceInput) (ManagedResourceView, error) {
+// PersistManagedResource creates the extension resource aggregate (with
+// managed state, initial intent, and derived fulfillment) in a single
+// transaction.
+func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[CreateManagedResourceInput, ExtensionResourceView] {
+	return NewActivity("persist-managed-resource", func(ctx context.Context, in CreateManagedResourceInput) (ExtensionResourceView, error) {
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
-			return ManagedResourceView{}, fmt.Errorf("begin tx: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("begin tx: %w", err)
 		}
 		defer tx.Rollback()
+
+		mgmt := in.TypeDef.Management()
+		if mgmt == nil {
+			return ExtensionResourceView{}, fmt.Errorf(
+				"%w: type %q has no management metadata",
+				ErrInvalidArgument, in.ResourceType)
+		}
 
 		now := s.now()
 		fID := FulfillmentID(uuid.New().String())
@@ -57,13 +65,19 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		// resource persistence.
 		pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), in.Name, nil, now)
 		if err != nil {
-			return ManagedResourceView{}, fmt.Errorf("claim identity: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("claim identity: %w", err)
 		}
 
-		mr := NewManagedResource(in.ResourceType, in.Name, NewManagedResourceUID(), fID, now)
-		intent := mr.RecordIntent(in.Spec, now)
+		// Create the extension resource with managed state.
+		er := NewExtensionResource(NewExtensionResourceUID(), in.ResourceType, in.Name, now,
+			WithManagedState(fID),
+		)
+		intent, err := er.RecordIntent(in.Spec, now)
+		if err != nil {
+			return ExtensionResourceView{}, fmt.Errorf("record intent: %w", err)
+		}
 
-		ms, ps, rs := in.TypeDef.Relation.DeriveStrategies(intent)
+		ms, ps, rs := mgmt.Relation().DeriveStrategies(intent)
 
 		var attestRef *AttestationRef
 		if in.Provenance != nil {
@@ -77,31 +91,32 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		f.AdvanceRolloutStrategy(rs, now)
 
 		if err := tx.Fulfillments().Create(ctx, f); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("create fulfillment: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("create fulfillment: %w", err)
 		}
 
-		if err := tx.ManagedResources().CreateInstance(ctx, mr); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("create instance: %w", err)
+		if err := tx.ExtensionResources().Create(ctx, er); err != nil {
+			return ExtensionResourceView{}, fmt.Errorf("create extension resource: %w", err)
 		}
+
 		if err := pr.AttachRepresentation(AttachRepresentationInput{
-			ServiceName: in.TypeDef.APIServiceName,
-			Version:     in.TypeDef.APIVersion,
-			Roles:       []RepresentationRole{RepresentationRoleManaged},
+			ServiceName:          in.TypeDef.APIServiceName(),
+			Version:              in.TypeDef.APIVersion(),
+			ExtensionResourceUID: er.UID(),
 		}, now); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("attach representation: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("attach representation: %w", err)
 		}
 		if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("update platform resource: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("update platform resource: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
-			return ManagedResourceView{}, fmt.Errorf("commit: %w", err)
+			return ExtensionResourceView{}, fmt.Errorf("commit: %w", err)
 		}
 
-		return ManagedResourceView{
-			ManagedResource: *mr,
-			Intent:          intent,
-			Fulfillment:     *f,
+		return ExtensionResourceView{
+			Resource:    *er,
+			Intent:      &intent,
+			Fulfillment: f,
 		}, nil
 	})
 }
@@ -116,14 +131,14 @@ func (s *CreateManagedResourceWorkflowSpec) StartOrchestration() Activity[Fulfil
 }
 
 // Run is the workflow body: persist everything, then start orchestration.
-func (s *CreateManagedResourceWorkflowSpec) Run(record Record, input CreateManagedResourceInput) (ManagedResourceView, error) {
+func (s *CreateManagedResourceWorkflowSpec) Run(record Record, input CreateManagedResourceInput) (ExtensionResourceView, error) {
 	view, err := RunActivity(record, s.PersistManagedResource(), input)
 	if err != nil {
-		return ManagedResourceView{}, fmt.Errorf("persist managed resource: %w", err)
+		return ExtensionResourceView{}, fmt.Errorf("persist managed resource: %w", err)
 	}
 
 	if _, err := RunActivity(record, s.StartOrchestration(), view.Fulfillment.ID()); err != nil {
-		return ManagedResourceView{}, fmt.Errorf("start orchestration: %w", err)
+		return ExtensionResourceView{}, fmt.Errorf("start orchestration: %w", err)
 	}
 
 	return view, nil

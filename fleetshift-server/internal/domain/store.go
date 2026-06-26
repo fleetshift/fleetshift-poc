@@ -35,7 +35,7 @@ type Tx interface {
 	Deployments() DeploymentRepository
 	Deliveries() DeliveryRepository
 	Inventory() InventoryRepository
-	ManagedResources() ManagedResourceRepository
+	ExtensionResources() ExtensionResourceRepository
 	SignerEnrollments() SignerEnrollmentRepository
 	ResourceIdentities() ResourceIdentityRepository
 	Commit() error

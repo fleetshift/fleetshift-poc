@@ -452,13 +452,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		AuthMethods: authMethodRepo,
 	}
 
-	managedResourceSvc := &application.ManagedResourceService{
-		Store:         store,
-		CreateWF:      createMRWf,
-		DeleteWF:      deleteMRWf,
-		ResumeWF:      resumeMRWf,
-		ProvenanceSvc: provenanceSvc,
-	}
+	extensionResourceSvc := application.NewExtensionResourceService(
+		store, createMRWf, deleteMRWf, resumeMRWf, provenanceSvc,
+	)
 
 	// --- kubernetes delivery agent ---
 
@@ -557,14 +553,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- addon lifecycle ---
 
-	typeSvc := application.NewManagedResourceTypeService(store)
+	typeSvc := application.NewExtensionResourceTypeService(store)
 	platformResourceSvc := application.NewPlatformResourceService(store)
 	activator := &managedresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
 		FileRegistry: fileRegistry,
 		Deps: managedresource.Deps{
-			Resources: managedResourceSvc,
+			Resources: extensionResourceSvc,
 			Validator: specValidator,
 		},
 		PlatformDeps: platformresource.Deps{

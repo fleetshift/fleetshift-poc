@@ -8,6 +8,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/authmethodrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deliveryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/deploymentrepotest"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/extensionresourcerepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/fulfillmentrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/inventoryrepotest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/resourceidentityrepotest"
@@ -85,6 +86,19 @@ func TestResourceIdentityRepo(t *testing.T) {
 	t.Parallel()
 	resourceidentityrepotest.Run(t, func(t *testing.T) domain.ResourceIdentityRepository {
 		return newTxRepo(t, domain.Tx.ResourceIdentities)
+	})
+}
+
+func TestExtensionResourceRepo(t *testing.T) {
+	t.Parallel()
+	extensionresourcerepotest.Run(t, func(t *testing.T) domain.Tx {
+		store := newStore(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		return tx
 	})
 }
 

@@ -48,8 +48,8 @@ func (DeploymentContent) inputContent()         {}
 // ManagedResourceContent is the user's signed intent for a managed
 // resource. Contains only what the user knows and authorizes: the
 // resource type, name, and spec. The addon routing (which addon handles
-// it) comes from the [ManagedResourceTypeDef]'s relation and is carried
-// separately as a [SignedRelation] in the attestation bundle.
+// it) comes from the [ExtensionResourceType]'s management metadata and
+// is carried separately as a [SignedRelation] in the attestation bundle.
 //
 // Matches the hybrid attestation PoC's ManagedResourceContent.
 type ManagedResourceContent struct {
@@ -294,14 +294,17 @@ func (AttestationAssembler) Resolve(ctx context.Context, tx Tx, f *Fulfillment) 
 	}
 
 	if f.AttestationRef() != nil && f.AttestationRef().RelationRef != nil {
-		typeDef, err := tx.ManagedResources().GetType(ctx, *f.AttestationRef().RelationRef)
+		extType, err := tx.ExtensionResources().GetType(ctx, *f.AttestationRef().RelationRef)
 		if err != nil {
-			return nil, fmt.Errorf("get managed resource type %q: %w", *f.AttestationRef().RelationRef, err)
+			return nil, fmt.Errorf("get extension resource type %q: %w", *f.AttestationRef().RelationRef, err)
+		}
+		if extType.Management() == nil {
+			return nil, fmt.Errorf("extension resource type %q has no management metadata", *f.AttestationRef().RelationRef)
 		}
 		ev.SignedRelation = &SignedRelation{
 			ResourceType: *f.AttestationRef().RelationRef,
-			Relation:     typeDef.Relation,
-			Signature:    typeDef.Signature,
+			Relation:     extType.Management().Relation(),
+			Signature:    extType.Management().Signature(),
 		}
 	}
 

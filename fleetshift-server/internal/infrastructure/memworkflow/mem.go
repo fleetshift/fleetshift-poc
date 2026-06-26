@@ -433,7 +433,7 @@ type createManagedResourceWorkflow struct {
 	guard guard
 }
 
-func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
 	return startWorkflow(&w.guard, instanceID, ctx,
 		nil, w.spec.Run, input,
@@ -448,7 +448,7 @@ type deleteManagedResourceWorkflow struct {
 	guard    guard
 }
 
-func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
 	return startWorkflow(&w.guard, instanceID, ctx,
 		nil, w.spec.Run, input,
@@ -463,7 +463,7 @@ type resumeManagedResourceWorkflow struct {
 	guard    guard
 }
 
-func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ManagedResourceView], error) {
+func (w *resumeManagedResourceWorkflow) Start(ctx context.Context, input domain.ResumeManagedResourceInput, observedGen domain.Generation) (domain.Execution[domain.ExtensionResourceView], error) {
 	instanceID := fmt.Sprintf("resume-mr-%s-%s-gen-%d", input.ResourceType, input.Name, observedGen)
 	return startWorkflow(&w.guard, instanceID, ctx,
 		nil, w.spec.Run, input,

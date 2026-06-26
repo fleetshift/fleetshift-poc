@@ -166,12 +166,9 @@ func Start(t *testing.T) string {
 		ResumeWF: resumeWf,
 	}
 
-	managedResourceSvc := &application.ManagedResourceService{
-		Store:    store,
-		CreateWF: createMRWf,
-		DeleteWF: deleteMRWf,
-		ResumeWF: resumeMRWf,
-	}
+	extensionResourceSvc := application.NewExtensionResourceService(
+		store, createMRWf, deleteMRWf, resumeMRWf, nil,
+	)
 
 	specValidator, err := protovalidate.New()
 	if err != nil {
@@ -205,7 +202,7 @@ func Start(t *testing.T) string {
 		GRPCMux:      dynamicMux,
 		FileRegistry: fileRegistry,
 		Deps: managedresource.Deps{
-			Resources: managedResourceSvc,
+			Resources: extensionResourceSvc,
 			Validator: specValidator,
 		},
 	}
@@ -213,7 +210,7 @@ func Start(t *testing.T) string {
 	// Use the AddonManager lifecycle (Enable → Connect) to match
 	// production wiring in serve.go. This registers targets, creates
 	// managed resource type definitions, and activates schemas.
-	typeSvc := application.NewManagedResourceTypeService(store)
+	typeSvc := application.NewExtensionResourceTypeService(store)
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router:    router,
 		TypeSvc:   typeSvc,

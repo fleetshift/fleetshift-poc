@@ -88,7 +88,7 @@ func TestBuildServiceDescriptors_Success(t *testing.T) {
 	if repMsg == nil {
 		t.Fatal("representations message descriptor is nil")
 	}
-	if got, want := repMsg.Fields().Len(), 6; got != want {
+	if got, want := repMsg.Fields().Len(), 5; got != want {
 		t.Errorf("Representation fields = %d, want %d", got, want)
 	}
 
