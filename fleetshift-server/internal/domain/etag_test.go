@@ -331,79 +331,51 @@ func TestExtensionResourceView_Etag_NilIntentDiffers(t *testing.T) {
 func TestExtensionResourceView_Etag_ChangesOnInventoryState(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
-	er := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
 
-	ct, _ := NewConditionType("Ready")
-	cond, _ := NewCondition(ct, ConditionTrue, "OK", "ready", now)
-	report := InventoryReport{
-		Observation: json.RawMessage(`{"v":1}`),
-		Conditions:  []Condition{cond},
-		ObservedAt:  now,
+	baseSnap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		Inventory: &InventoryResourceSnapshot{
+			Observation: json.RawMessage(`{"v":1}`),
+			Conditions: []ConditionSnapshot{
+				{Type: "Ready", Status: ConditionTrue, Reason: "OK", Message: "ready", LastTransitionTime: now},
+			},
+			ObservedAt: now,
+			UpdatedAt:  now.Add(time.Minute),
+		},
+		CreatedAt: now,
+		UpdatedAt: now.Add(time.Minute),
 	}
-	er.ReportInventory(report, now.Add(time.Minute))
-
-	base := ExtensionResourceView{Resource: *er}
+	base := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(baseSnap)}
 	baseEtag := base.Etag()
 
 	// Change the observation.
-	er2 := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-	report2 := InventoryReport{
+	changedObsSnap := baseSnap
+	changedObsSnap.Inventory = &InventoryResourceSnapshot{
 		Observation: json.RawMessage(`{"v":2}`),
-		Conditions:  []Condition{cond},
+		Conditions:  baseSnap.Inventory.Conditions,
 		ObservedAt:  now,
+		UpdatedAt:   now.Add(time.Minute),
 	}
-	er2.ReportInventory(report2, now.Add(time.Minute))
-	changed := ExtensionResourceView{Resource: *er2}
+	changed := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(changedObsSnap)}
 	if changed.Etag() == baseEtag {
 		t.Error("etag should change when inventory observation changes")
 	}
 
 	// Change a condition status.
-	er3 := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-	cond3, _ := NewCondition(ct, ConditionFalse, "NotReady", "degraded", now)
-	report3 := InventoryReport{
+	changedCondSnap := baseSnap
+	changedCondSnap.Inventory = &InventoryResourceSnapshot{
 		Observation: json.RawMessage(`{"v":1}`),
-		Conditions:  []Condition{cond3},
-		ObservedAt:  now,
+		Conditions: []ConditionSnapshot{
+			{Type: "Ready", Status: ConditionFalse, Reason: "NotReady", Message: "degraded", LastTransitionTime: now},
+		},
+		ObservedAt: now,
+		UpdatedAt:  now.Add(time.Minute),
 	}
-	er3.ReportInventory(report3, now.Add(time.Minute))
-	condChanged := ExtensionResourceView{Resource: *er3}
+	condChanged := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(changedCondSnap)}
 	if condChanged.Etag() == baseEtag {
 		t.Error("etag should change when condition status changes")
-	}
-}
-
-func TestExtensionResourceView_Etag_NoInventoryHistoryDependency(t *testing.T) {
-	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
-	uid := NewExtensionResourceUID()
-
-	// Build resource that went through two reports.
-	er1 := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-	ct, _ := NewConditionType("Ready")
-	cond, _ := NewCondition(ct, ConditionTrue, "OK", "ready", now)
-	er1.ReportInventory(InventoryReport{
-		Observation: json.RawMessage(`{"v":1}`),
-		Conditions:  []Condition{cond},
-		ObservedAt:  now,
-	}, now.Add(time.Minute))
-	er1.ReportInventory(InventoryReport{
-		Observation: json.RawMessage(`{"v":2}`),
-		Conditions:  []Condition{cond},
-		ObservedAt:  now.Add(time.Minute),
-	}, now.Add(2*time.Minute))
-
-	// Build resource that went directly to the same final state.
-	er2 := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-	er2.ReportInventory(InventoryReport{
-		Observation: json.RawMessage(`{"v":2}`),
-		Conditions:  []Condition{cond},
-		ObservedAt:  now.Add(time.Minute),
-	}, now.Add(2*time.Minute))
-
-	v1 := ExtensionResourceView{Resource: *er1}
-	v2 := ExtensionResourceView{Resource: *er2}
-	if v1.Etag() != v2.Etag() {
-		t.Error("same final inventory state should yield same etag regardless of history")
 	}
 }
 
@@ -411,16 +383,28 @@ func TestExtensionResourceView_Etag_NilInventoryDiffers(t *testing.T) {
 	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()
 
-	withInv := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-	withInv.ReportInventory(InventoryReport{
-		Observation: json.RawMessage(`{}`),
-		ObservedAt:  now,
-	}, now.Add(time.Minute))
+	withInvSnap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		Inventory: &InventoryResourceSnapshot{
+			Observation: json.RawMessage(`{}`),
+			ObservedAt:  now,
+			UpdatedAt:   now.Add(time.Minute),
+		},
+		CreatedAt: now,
+		UpdatedAt: now.Add(time.Minute),
+	}
+	withoutInvSnap := ExtensionResourceSnapshot{
+		UID:          uid,
+		ResourceType: "kind.fleetshift.io/Cluster",
+		Name:         "clusters/dev",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	}
 
-	withoutInv := NewExtensionResource(uid, "kind.fleetshift.io/Cluster", "clusters/dev", now)
-
-	v1 := ExtensionResourceView{Resource: *withInv}
-	v2 := ExtensionResourceView{Resource: *withoutInv}
+	v1 := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(withInvSnap)}
+	v2 := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(withoutInvSnap)}
 	if v1.Etag() == v2.Etag() {
 		t.Error("etag should differ between nil and non-nil inventory")
 	}

@@ -4,7 +4,6 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"fmt"
-	"maps"
 	"time"
 
 	"github.com/google/uuid"
@@ -248,7 +247,7 @@ func NewInventoryType() InventoryType { return InventoryType{} }
 // ---------------------------------------------------------------------------
 
 // InventoryResource holds the latest inventory state for an extension
-// resource instance. Created/replaced by [ExtensionResource.ReportInventory].
+// resource instance. Reconstituted from persistence via snapshot.
 type InventoryResource struct {
 	labels      map[string]string
 	observation json.RawMessage
@@ -264,16 +263,6 @@ func (ir *InventoryResource) Conditions() []Condition      { return ir.condition
 func (ir *InventoryResource) Source() InventorySource      { return ir.source }
 func (ir *InventoryResource) ObservedAt() time.Time        { return ir.observedAt }
 func (ir *InventoryResource) UpdatedAt() time.Time         { return ir.updatedAt }
-
-// InventoryReport is the input to [ExtensionResource.ReportInventory].
-// It carries the latest observation, conditions, and provenance.
-type InventoryReport struct {
-	Labels      map[string]string
-	Observation json.RawMessage
-	Conditions  []Condition
-	Source      InventorySource
-	ObservedAt  time.Time
-}
 
 // ---------------------------------------------------------------------------
 // ExtensionResourceType -- type definition for extension resources
@@ -582,32 +571,6 @@ func (r *ExtensionResource) CreatedAt() time.Time { return r.createdAt }
 
 // UpdatedAt returns the last-updated timestamp.
 func (r *ExtensionResource) UpdatedAt() time.Time { return r.updatedAt }
-
-// ReportInventory sets or replaces the latest inventory state from
-// the given report. The resource's updatedAt is advanced to now.
-//
-// Condition event deduplication (detecting transitions) is deferred to
-// the repository's UpsertInventory (Step 2), which compares old vs new
-// conditions internally.
-func (r *ExtensionResource) ReportInventory(report InventoryReport, now time.Time) error {
-	labels := maps.Clone(report.Labels)
-	if labels == nil {
-		labels = map[string]string{}
-	}
-	conditions := make([]Condition, len(report.Conditions))
-	copy(conditions, report.Conditions)
-
-	r.inventory = &InventoryResource{
-		labels:      labels,
-		observation: report.Observation,
-		conditions:  conditions,
-		source:      report.Source,
-		observedAt:  report.ObservedAt,
-		updatedAt:   now,
-	}
-	r.updatedAt = now
-	return nil
-}
 
 // ---------------------------------------------------------------------------
 // ExtensionResourceView -- read DTO
