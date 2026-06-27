@@ -45,7 +45,6 @@ cp "$CAROOT_CERT" "$CA_FILE"
 echo "==> Deleting CA private key..."
 rm -f "$CAROOT_KEY"
 
-chmod 644 "$KEY_FILE"
-chmod 644 "$CERT_FILE" "$CA_FILE"
+chmod 644 "$KEY_FILE" "$CERT_FILE" "$CA_FILE"
 
 echo "TLS certs generated in $CERT_DIR/"
