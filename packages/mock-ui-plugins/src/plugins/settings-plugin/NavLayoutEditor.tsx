@@ -13,7 +13,6 @@ import {
   buildLayout,
   CORE_EXTENSION_META,
   flattenLayout,
-  getDescendantIds,
   getProjection,
   INDENTATION,
   mergeLayout,
@@ -132,36 +131,6 @@ function TreeItem({ node, index, label, onResetItem }: TreeItemProps) {
   );
 }
 
-function TreeItemOverlay({
-  label,
-  isSection,
-  descendantCount,
-}: {
-  label: string;
-  isSection: boolean;
-  descendantCount: number;
-}) {
-  const kindClass = isSection ? "section" : "page";
-
-  return (
-    <div
-      className={`ome-settings-tree-overlay ome-settings-tree-overlay--${kindClass}`}
-    >
-      <GripVerticalIcon className="pf-v6-u-icon-color-subtle" />
-      <span
-        className={`ome-settings-tree-overlay__label ome-settings-tree-overlay__label--${kindClass}`}
-      >
-        {label}
-      </span>
-      {descendantCount > 0 && (
-        <span className="ome-settings-tree-overlay__badge">
-          {descendantCount}
-        </span>
-      )}
-    </div>
-  );
-}
-
 // ---------------------------------------------------------------------------
 // SortableSection — one dnd-kit sortable list for main or bottom
 // ---------------------------------------------------------------------------
@@ -181,13 +150,11 @@ function SortableSection({
   onReorder,
   onResetItem,
 }: SortableSectionProps) {
-  const [activeId, setActiveId] = useState<string | null>(null);
   const initialDepthRef = useRef(0);
 
   const handleDragStart = useCallback(
     (event: DragStartEvent) => {
       const id = String(event.operation.source?.id ?? "");
-      setActiveId(id);
       const node = nodes.find((n) => n.id === id);
       initialDepthRef.current = node?.depth ?? 0;
     },
@@ -197,20 +164,14 @@ function SortableSection({
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const { source, target } = event.operation;
-      if (!target || !source) {
-        setActiveId(null);
-        return;
-      }
+      if (!target || !source) return;
 
       const sourceIndex =
         "index" in source.sortable ? (source.sortable.index as number) : -1;
       const targetIndex =
         "index" in target.sortable ? (target.sortable.index as number) : -1;
 
-      if (sourceIndex === -1 || targetIndex === -1) {
-        setActiveId(null);
-        return;
-      }
+      if (sourceIndex === -1 || targetIndex === -1) return;
 
       let reordered = arrayMove(nodes, sourceIndex, targetIndex);
 
@@ -232,23 +193,9 @@ function SortableSection({
       );
 
       onReorder(reordered);
-      setActiveId(null);
     },
     [nodes, onReorder],
   );
-
-  const activeNode = activeId ? nodes.find((n) => n.id === activeId) : null;
-
-  const activeLabel = activeNode
-    ? (activeNode.label ??
-      (activeNode.pageId
-        ? resolveLabel(activeNode.pageId, pageMap)
-        : activeNode.id))
-    : "";
-
-  const activeDescendantCount = activeNode
-    ? getDescendantIds(nodes, activeNode.id).length
-    : 0;
 
   return (
     <div>
@@ -276,15 +223,6 @@ function SortableSection({
             );
           })}
         </ul>
-        {activeNode && (
-          <TreeItemOverlay
-            label={activeLabel}
-            isSection={
-              activeNode.kind === "group" || activeNode.kind === "section"
-            }
-            descendantCount={activeDescendantCount}
-          />
-        )}
       </DragDropProvider>
     </div>
   );
@@ -296,7 +234,7 @@ function SortableSection({
 
 const NavLayoutEditor = () => {
   const { api } = useScalprum<{ api: FleetShiftApi }>();
-  const { override, loaded, setOverride } = useNavLayout();
+  const { override, loaded, setOverride, clearOverride } = useNavLayout();
   const [resetItemId, setResetItemId] = useState<string | null>(null);
   const [showFullReset, setShowFullReset] = useState(false);
 
@@ -382,9 +320,9 @@ const NavLayoutEditor = () => {
   }, [resetItemId, override, backendLayout, persistLayout]);
 
   const confirmFullReset = useCallback(() => {
-    persistLayout(backendLayout);
+    clearOverride();
     setShowFullReset(false);
-  }, [backendLayout, persistLayout]);
+  }, [clearOverride]);
 
   if (!loaded) return null;
 

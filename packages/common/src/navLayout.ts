@@ -102,33 +102,49 @@ export function flattenLayout(layout: NavLayoutEntry[]): FlatNode[] {
   return result;
 }
 
-/** Reconstruct a NavLayoutEntry[] from a flat node list. */
+/** Reconstruct a NavLayoutEntry[] from a flat node list.
+ *
+ * Children are associated with their parent via `parentId` rather than
+ * positional adjacency.  This ensures groups/sections cannot be
+ * "interrupted" by a top-level item placed between their children
+ * during drag-and-drop — the children always stay with their container.
+ */
 export function buildLayout(nodes: FlatNode[]): NavLayoutEntry[] {
-  const result: NavLayoutEntry[] = [];
-  let currentGroup: NavLayoutGroup | null = null;
-  let currentSection: NavLayoutSection | null = null;
-
+  // Pre-collect children per parentId (preserving relative order).
+  const childrenByParent = new Map<string, FlatNode[]>();
   for (const node of nodes) {
+    if (node.parentId) {
+      let list = childrenByParent.get(node.parentId);
+      if (!list) {
+        list = [];
+        childrenByParent.set(node.parentId, list);
+      }
+      list.push(node);
+    }
+  }
+
+  const result: NavLayoutEntry[] = [];
+  for (const node of nodes) {
+    // Skip children — they are emitted with their parent container.
+    if (node.parentId) continue;
+
     if (node.kind === "group" && node.groupMeta) {
-      currentGroup = { ...node.groupMeta, children: [] };
-      currentSection = null;
-      result.push(currentGroup);
+      const children = (childrenByParent.get(node.id) ?? []).map((c) => ({
+        type: "page" as const,
+        pageId: c.pageId!,
+      }));
+      result.push({ ...node.groupMeta, children });
     } else if (node.kind === "section") {
-      currentSection = {
+      const children = (childrenByParent.get(node.id) ?? []).map((c) => ({
+        pageId: c.pageId!,
+      }));
+      result.push({
         type: "section",
         id: node.id,
         label: node.label || "Untitled",
-        children: [],
-      };
-      currentGroup = null;
-      result.push(currentSection);
-    } else if (node.depth === 1 && currentGroup) {
-      currentGroup.children.push({ type: "page", pageId: node.pageId! });
-    } else if (node.depth === 1 && currentSection) {
-      currentSection.children.push({ pageId: node.pageId! });
+        children,
+      });
     } else {
-      currentGroup = null;
-      currentSection = null;
       result.push({ type: "page", pageId: node.pageId! });
     }
   }

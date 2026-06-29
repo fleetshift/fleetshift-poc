@@ -12,6 +12,8 @@ export interface UseNavLayoutResult {
   loaded: boolean;
   /** Persist a new override to IndexedDB. */
   setOverride: (override: NavLayoutOverride) => Promise<void>;
+  /** Remove the override from IndexedDB, reverting to backend layout. */
+  clearOverride: () => Promise<void>;
 }
 
 /**
@@ -76,9 +78,11 @@ function useNavLayout(): UseNavLayoutResult {
     [store],
   );
 
+  const clearOverride = useCallback(() => store.clearNavLayout(), [store]);
+
   return useMemo(
-    () => ({ override, legacyOrder, loaded, setOverride }),
-    [override, legacyOrder, loaded, setOverride],
+    () => ({ override, legacyOrder, loaded, setOverride, clearOverride }),
+    [override, legacyOrder, loaded, setOverride, clearOverride],
   );
 }
 

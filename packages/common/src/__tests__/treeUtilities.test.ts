@@ -97,6 +97,103 @@ describe("buildLayout", () => {
       { type: "page", pageId: "b" },
     ]);
   });
+
+  it("keeps group children together when a top-level item interrupts them", () => {
+    const groupMeta = {
+      type: "group" as const,
+      groupId: "core-group",
+      pluginKey: "core",
+      label: "Core",
+      children: [],
+    };
+    // Simulate a top-level page dropped between group children
+    const nodes: FlatNode[] = [
+      {
+        id: "core-group",
+        kind: "group",
+        depth: 0,
+        parentId: null,
+        groupMeta,
+      },
+      {
+        id: "clusters",
+        kind: "page",
+        depth: 1,
+        parentId: "core-group",
+        pageId: "clusters",
+      },
+      // A top-level page interrupting the group:
+      {
+        id: "overview",
+        kind: "page",
+        depth: 0,
+        parentId: null,
+        pageId: "overview",
+      },
+      {
+        id: "nodes",
+        kind: "page",
+        depth: 1,
+        parentId: "core-group",
+        pageId: "nodes",
+      },
+    ];
+    const layout = buildLayout(nodes);
+    expect(layout).toEqual([
+      {
+        ...groupMeta,
+        children: [
+          { type: "page", pageId: "clusters" },
+          { type: "page", pageId: "nodes" },
+        ],
+      },
+      { type: "page", pageId: "overview" },
+    ]);
+  });
+
+  it("preserves child order after reorder within a group", () => {
+    const groupMeta = {
+      type: "group" as const,
+      groupId: "signing",
+      pluginKey: "signing",
+      label: "Signing",
+      children: [],
+    };
+    // Children in reordered position (B before A)
+    const nodes: FlatNode[] = [
+      {
+        id: "signing",
+        kind: "group",
+        depth: 0,
+        parentId: null,
+        groupMeta,
+      },
+      {
+        id: "signing-policies",
+        kind: "page",
+        depth: 1,
+        parentId: "signing",
+        pageId: "signing-policies",
+      },
+      {
+        id: "signing-keys",
+        kind: "page",
+        depth: 1,
+        parentId: "signing",
+        pageId: "signing-keys",
+      },
+    ];
+    const layout = buildLayout(nodes);
+    expect(layout).toEqual([
+      {
+        ...groupMeta,
+        children: [
+          { type: "page", pageId: "signing-policies" },
+          { type: "page", pageId: "signing-keys" },
+        ],
+      },
+    ]);
+  });
 });
 
 describe("getDescendantIds", () => {
