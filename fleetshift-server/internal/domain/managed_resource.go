@@ -53,6 +53,12 @@ func (rt ResourceType) ServiceName() ServiceName {
 	return ""
 }
 
+// FullName composes a [FullResourceName] by combining the service
+// component of this resource type with the given resource name.
+func (rt ResourceType) FullName(name ResourceName) FullResourceName {
+	return NewFullResourceName(rt.ServiceName(), name)
+}
+
 // TypeName extracts the type component from a resource type.
 // Returns empty for malformed values.
 func (rt ResourceType) TypeName() string {
@@ -84,11 +90,12 @@ type IntentVersion int64
 
 // ResourceIntent is an immutable version of a managed resource spec.
 // INSERT only — never updated. The managed resource HEAD table tracks
-// which version is current.
+// which version is current. Keyed by the owning extension resource's
+// UID + version; the resource type and name can be joined from the
+// parent extension_resources row when needed.
 type ResourceIntent struct {
-	ResourceType ResourceType
-	Name         ResourceName
-	Version      IntentVersion
-	Spec         json.RawMessage
-	CreatedAt    time.Time
+	ExtensionResourceUID ExtensionResourceUID
+	Version              IntentVersion
+	Spec                 json.RawMessage
+	CreatedAt            time.Time
 }

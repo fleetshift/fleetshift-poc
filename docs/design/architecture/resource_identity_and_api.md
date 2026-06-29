@@ -204,6 +204,8 @@ A resource name is unique within a **platform identity domain**. Extension colle
 
 Once `clusters/foo` exists, it is one logical resource regardless of how many extensions define APIs for it.
 
+At the extension level, the unique key for an extension resource is `(service_name, resource_name)` — the full resource name. The type name is metadata about the resource, not a namespace for it: you cannot have two resources with the same full resource name, regardless of type.
+
 ### Claiming protocol
 
 The first extension to create a resource with a given name establishes the identity (and triggers platform resource materialization). Subsequent extensions link to the same identity when they either:

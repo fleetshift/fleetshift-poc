@@ -166,7 +166,8 @@ func (s *ExtensionResourceService) Get(ctx context.Context, rt domain.ResourceTy
 	}
 	defer tx.Rollback()
 
-	view, err := tx.ExtensionResources().GetView(ctx, rt, name)
+	fullName := rt.FullName(name)
+	view, err := tx.ExtensionResources().GetView(ctx, fullName)
 	if err != nil {
 		return domain.ExtensionResourceView{}, err
 	}
@@ -262,15 +263,16 @@ func (s *ExtensionResourceService) Resume(ctx context.Context, in ResumeExtensio
 	}
 	defer tx.Rollback()
 
-	er, err := tx.ExtensionResources().Get(ctx, in.ResourceType, in.Name)
+	fullName := in.ResourceType.FullName(in.Name)
+	er, err := tx.ExtensionResources().Get(ctx, fullName)
 	if err != nil {
 		return domain.ExtensionResourceView{}, err
 	}
 	managed := er.Managed()
 	if managed == nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf(
-			"%w: extension resource %s/%s has no managed state",
-			domain.ErrInvalidArgument, in.ResourceType, in.Name)
+			"%w: extension resource %s has no managed state",
+			domain.ErrInvalidArgument, fullName)
 	}
 	f, err := tx.Fulfillments().Get(ctx, managed.FulfillmentID())
 	if err != nil {

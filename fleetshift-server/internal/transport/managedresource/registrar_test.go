@@ -725,7 +725,7 @@ func TestDynamic_ProvenanceOnResponse(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType, "clusters/prov-cluster")
+	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType.FullName("clusters/prov-cluster"))
 	if err != nil {
 		t.Fatalf("get extension resource: %v", err)
 	}
@@ -819,7 +819,7 @@ func TestDynamic_ResumeRPC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType, "clusters/resume-cluster")
+	er, err := tx.ExtensionResources().Get(ctx, kindaddon.ClusterResourceType.FullName("clusters/resume-cluster"))
 	if err != nil {
 		t.Fatalf("get extension resource: %v", err)
 	}

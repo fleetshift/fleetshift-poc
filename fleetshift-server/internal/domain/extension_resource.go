@@ -605,11 +605,10 @@ func (r *ExtensionResource) RecordIntent(spec json.RawMessage, now time.Time) (R
 	}
 	r.managed.currentVersion++
 	intent := ResourceIntent{
-		ResourceType: r.resourceType,
-		Name:         r.name,
-		Version:      r.managed.currentVersion,
-		Spec:         spec,
-		CreatedAt:    now,
+		ExtensionResourceUID: r.uid,
+		Version:              r.managed.currentVersion,
+		Spec:                 spec,
+		CreatedAt:            now,
 	}
 	r.pendingIntents = append(r.pendingIntents, intent)
 	return intent, nil
@@ -625,6 +624,15 @@ func (r *ExtensionResource) ResourceType() ResourceType { return r.resourceType 
 
 // Name returns the resource instance name.
 func (r *ExtensionResource) Name() ResourceName { return r.name }
+
+// ServiceName returns the service name derived from the resource type.
+func (r *ExtensionResource) ServiceName() ServiceName { return r.resourceType.ServiceName() }
+
+// FullResourceName returns the globally unique name of the form
+// "//{service}/{name}".
+func (r *ExtensionResource) FullResourceName() FullResourceName {
+	return r.name.FullName(r.ServiceName())
+}
 
 // Labels returns the user-defined extension resource labels.
 func (r *ExtensionResource) Labels() map[string]string { return r.labels }

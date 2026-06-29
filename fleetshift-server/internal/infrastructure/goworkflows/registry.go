@@ -734,7 +734,8 @@ type createManagedResourceWorkflow struct {
 }
 
 func (w *createManagedResourceWorkflow) Start(ctx context.Context, input domain.CreateManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
-	instanceID := domain.CreateManagedResourceWorkflowID(input.ResourceType, input.Name)
+	fullName := input.ResourceType.FullName(input.Name)
+	instanceID := domain.CreateManagedResourceWorkflowID(fullName)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)
@@ -758,7 +759,8 @@ type deleteManagedResourceWorkflow struct {
 }
 
 func (w *deleteManagedResourceWorkflow) Start(ctx context.Context, input domain.DeleteManagedResourceInput) (domain.Execution[domain.ExtensionResourceView], error) {
-	instanceID := domain.DeleteManagedResourceWorkflowID(input.ResourceType, input.Name)
+	fullName := input.ResourceType.FullName(input.Name)
+	instanceID := domain.DeleteManagedResourceWorkflowID(fullName)
 	instance, err := w.client.CreateWorkflowInstance(ctx, client.WorkflowInstanceOptions{
 		InstanceID: instanceID,
 	}, w.wfName, input)

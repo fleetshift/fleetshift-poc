@@ -1039,19 +1039,20 @@ func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.Clie
 
 func awaitFulfillmentActive(ctx context.Context, t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName) {
 	t.Helper()
+	fullName := rt.FullName(name)
 	for {
 		tx, err := store.BeginReadOnly(ctx)
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
-		view, err := tx.ExtensionResources().GetView(ctx, rt, name)
+		view, err := tx.ExtensionResources().GetView(ctx, fullName)
 		tx.Rollback()
 		if err == nil && view.Fulfillment != nil && view.Fulfillment.State() == domain.FulfillmentStateActive {
 			return
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for %s/%s fulfillment to reach active", rt, name)
+			t.Fatalf("timed out waiting for %s fulfillment to reach active", fullName)
 		case <-time.After(5 * time.Millisecond):
 		}
 	}

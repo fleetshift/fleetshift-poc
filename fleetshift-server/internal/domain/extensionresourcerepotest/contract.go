@@ -253,7 +253,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/prod")
+		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/prod")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -301,7 +301,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("UniqueResourceTypeName", func(t *testing.T) {
+	t.Run("UniqueServiceNameResourceName", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
@@ -318,6 +318,32 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("second: got %v, want ErrAlreadyExists", err)
+		}
+	})
+
+	// CrossTypeSameNameUnique verifies the new uniqueness constraint:
+	// two resources in the same service cannot share the same resource
+	// name even if they have different resource types.
+	t.Run("CrossTypeSameNameUnique", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ExtensionResources()
+
+		seedType(t, tx, "test.fleetshift.io/Cluster")
+		seedType(t, tx, "test.fleetshift.io/Database")
+
+		fID := domain.FulfillmentID("f-er-cross")
+		seedFulfillment(t, tx, fID, fixedTime)
+
+		r1 := newER("test.fleetshift.io/Cluster", "resources/shared-name", fID)
+		if err := repo.Create(ctx, r1); err != nil {
+			t.Fatalf("first (Cluster): %v", err)
+		}
+
+		r2 := newER("test.fleetshift.io/Database", "resources/shared-name", fID)
+		err := repo.Create(ctx, r2)
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			t.Fatalf("second (Database, same name): got %v, want ErrAlreadyExists", err)
 		}
 	})
 
@@ -349,7 +375,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ExtensionResources().Get(ctx, "test.fleetshift.io/Cluster", "clusters/ghost")
+		_, err := tx.ExtensionResources().Get(ctx, "//test.fleetshift.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -368,10 +394,10 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if err := repo.Delete(ctx, "test.fleetshift.io/Cluster", "clusters/del"); err != nil {
+		if err := repo.Delete(ctx, "//test.fleetshift.io/clusters/del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		_, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/del")
+		_, err := repo.Get(ctx, "//test.fleetshift.io/clusters/del")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
 		}
@@ -381,7 +407,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		err := tx.ExtensionResources().Delete(ctx, "test.fleetshift.io/Cluster", "clusters/ghost")
+		err := tx.ExtensionResources().Delete(ctx, "//test.fleetshift.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -401,7 +427,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/managed")
+		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/managed")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -432,7 +458,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.Get(ctx, "test.fleetshift.io/Cluster", "clusters/labeled")
+		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/labeled")
 		if err != nil {
 			t.Fatalf("Get: %v", err)
 		}
@@ -462,7 +488,7 @@ func runIntentTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		got, err := repo.GetIntent(ctx, "test.fleetshift.io/Cluster", "clusters/intent", 1)
+		got, err := repo.GetIntent(ctx, r.UID(), 1)
 		if err != nil {
 			t.Fatalf("GetIntent: %v", err)
 		}
@@ -476,13 +502,15 @@ func runIntentTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ExtensionResources().GetIntent(ctx, "test.fleetshift.io/Cluster", "nope", 99)
+		_, err := tx.ExtensionResources().GetIntent(ctx, domain.NewExtensionResourceUID(), 99)
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
 	})
 
-	t.Run("DeleteIntents", func(t *testing.T) {
+	// IntentsCascadeOnDelete verifies that ON DELETE CASCADE removes
+	// intents when the parent extension resource is deleted.
+	t.Run("IntentsCascadeOnDelete", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
 		repo := tx.ExtensionResources()
@@ -492,24 +520,17 @@ func runIntentTests(t *testing.T, factory Factory) {
 		seedFulfillment(t, tx, fID, fixedTime)
 
 		r := newER("test.fleetshift.io/Cluster", "clusters/intent-del", fID)
+		uid := r.UID()
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		if err := repo.Delete(ctx, "test.fleetshift.io/Cluster", "clusters/intent-del"); err != nil {
+		if err := repo.Delete(ctx, "//test.fleetshift.io/clusters/intent-del"); err != nil {
 			t.Fatalf("Delete: %v", err)
 		}
-		if err := repo.DeleteIntents(ctx, "test.fleetshift.io/Cluster", "clusters/intent-del"); err != nil {
-			t.Fatalf("DeleteIntents: %v", err)
-		}
 
-		_, err := repo.GetIntent(ctx, "test.fleetshift.io/Cluster", "clusters/intent-del", 1)
+		_, err := repo.GetIntent(ctx, uid, 1)
 		if !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("GetIntent after DeleteIntents: got %v, want ErrNotFound", err)
-		}
-
-		// Idempotent
-		if err := repo.DeleteIntents(ctx, "test.fleetshift.io/Cluster", "clusters/intent-del"); err != nil {
-			t.Fatalf("DeleteIntents second call: %v", err)
+			t.Fatalf("GetIntent after Delete: got %v, want ErrNotFound (CASCADE)", err)
 		}
 	})
 }
@@ -535,7 +556,7 @@ func runViewTests(t *testing.T, factory Factory) {
 			t.Fatalf("Create: %v", err)
 		}
 
-		v, err := repo.GetView(ctx, "test.fleetshift.io/Cluster", "clusters/view")
+		v, err := repo.GetView(ctx, "//test.fleetshift.io/clusters/view")
 		if err != nil {
 			t.Fatalf("GetView: %v", err)
 		}
@@ -557,7 +578,7 @@ func runViewTests(t *testing.T, factory Factory) {
 		tx := factory(t)
 		defer tx.Rollback()
 
-		_, err := tx.ExtensionResources().GetView(ctx, "test.fleetshift.io/Cluster", "clusters/ghost")
+		_, err := tx.ExtensionResources().GetView(ctx, "//test.fleetshift.io/clusters/ghost")
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Fatalf("got %v, want ErrNotFound", err)
 		}
@@ -690,7 +711,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create: %v", err)
 			}
 
-			got, err := repo.Get(ctx, "inv.fleetshift.io/Node", "nodes/n1")
+			got, err := repo.Get(ctx, "//inv.fleetshift.io/nodes/n1")
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -730,7 +751,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create: %v", err)
 			}
 
-			got, err := repo.Get(ctx, rt, "gadgets/g1")
+			got, err := repo.Get(ctx, rt.FullName("gadgets/g1"))
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
@@ -774,7 +795,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("UpsertInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/upsert1")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -828,7 +849,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("second UpsertInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/upsert2")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert2")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -877,7 +898,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				{"nodes/batch1", `{"n":1}`},
 				{"nodes/batch2", `{"n":2}`},
 			} {
-				view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", tc.name)
+				view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", tc.name))
 				if err != nil {
 					t.Fatalf("GetView %s: %v", tc.name, err)
 				}
@@ -916,7 +937,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("UpsertInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/view1")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/view1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1008,7 +1029,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("UpsertInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, rt, "things/t1")
+			view, err := repo.GetView(ctx, rt.FullName("things/t1"))
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1038,7 +1059,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "test.fleetshift.io/Cluster", "clusters/managed-v")
+			view, err := repo.GetView(ctx, "//test.fleetshift.io/clusters/managed-v")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1411,7 +1432,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionTrue)
 
 			// Latest state should reflect the second upsert
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/upsert-genuine")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert-genuine")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1482,7 +1503,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
 
 			// Latest state should reflect the final report
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/report-upsert-report")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/report-upsert-report")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1514,7 +1535,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			// The condition should be visible via GetView (latest state)
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/record-latest")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/record-latest")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
@@ -1562,7 +1583,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				{"r1", "nodes/multi-a"},
 				{"r2", "nodes/multi-b"},
 			} {
-				view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", tc.rn)
+				view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", tc.rn))
 				if err != nil {
 					t.Fatalf("GetView %s: %v", tc.name, err)
 				}
@@ -1677,7 +1698,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
 
 			// Latest state should reflect the final upsert
-			view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", "nodes/cross-path")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/cross-path")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}

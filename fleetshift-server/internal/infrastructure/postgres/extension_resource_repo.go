@@ -40,9 +40,9 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 	}
 	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO extension_resource_types
-			(resource_type, api_version, collection_id, management, inventory, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-		snap.ResourceType,
+			(service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		string(snap.ResourceType.ServiceName()), snap.ResourceType.TypeName(),
 		string(snap.APIVersion), string(snap.CollectionID),
 		nullStringFromBytes(mgmtJSON),
 		invJSON,
@@ -58,15 +58,16 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 
 func (r *ExtensionResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, api_version, collection_id, management, inventory, created_at, updated_at
-		 FROM extension_resource_types WHERE resource_type = $1`, rt)
+		`SELECT service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at
+		 FROM extension_resource_types WHERE service_name = $1 AND type_name = $2`,
+		string(rt.ServiceName()), rt.TypeName())
 	return scanExtensionResourceType(row)
 }
 
 func (r *ExtensionResourceRepo) ListTypes(ctx context.Context) ([]domain.ExtensionResourceType, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_type, api_version, collection_id, management, inventory, created_at, updated_at
-		 FROM extension_resource_types ORDER BY resource_type`)
+		`SELECT service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at
+		 FROM extension_resource_types ORDER BY service_name, type_name`)
 	if err != nil {
 		return nil, err
 	}
@@ -75,7 +76,8 @@ func (r *ExtensionResourceRepo) ListTypes(ctx context.Context) ([]domain.Extensi
 
 func (r *ExtensionResourceRepo) DeleteType(ctx context.Context, rt domain.ResourceType) error {
 	res, err := r.DB.ExecContext(ctx,
-		`DELETE FROM extension_resource_types WHERE resource_type = $1`, rt)
+		`DELETE FROM extension_resource_types WHERE service_name = $1 AND type_name = $2`,
+		string(rt.ServiceName()), rt.TypeName())
 	if err != nil {
 		return err
 	}
@@ -93,35 +95,35 @@ func (r *ExtensionResourceRepo) DeleteType(ctx context.Context, rt domain.Resour
 func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.ExtensionResource) error {
 	snap := er.Snapshot()
 
-	// Flush pending intents to the shared resource_intents table.
-	for _, intent := range snap.PendingIntents {
-		if _, err := r.DB.ExecContext(ctx,
-			`INSERT INTO resource_intents (resource_type, name, version, spec, created_at)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			intent.ResourceType, intent.Name, intent.Version, string(intent.Spec),
-			intent.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
-			if isUniqueViolation(err) {
-				return fmt.Errorf("%w: intent %s/%s v%d", domain.ErrAlreadyExists, intent.ResourceType, intent.Name, intent.Version)
-			}
-			return err
-		}
-	}
-
 	labelsJSON, err := json.Marshal(snap.Labels)
 	if err != nil {
 		return fmt.Errorf("marshal labels: %w", err)
 	}
 	_, err = r.DB.ExecContext(ctx,
-		`INSERT INTO extension_resources (uid, resource_type, resource_name, labels, created_at, updated_at)
-		 VALUES ($1, $2, $3, $4, $5, $6)`,
-		snap.UID.String(), snap.ResourceType, snap.Name,
+		`INSERT INTO extension_resources (uid, service_name, type_name, resource_name, labels, created_at, updated_at)
+		 VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+		snap.UID.String(), string(snap.ResourceType.ServiceName()), snap.ResourceType.TypeName(), snap.Name,
 		string(labelsJSON),
 		snap.CreatedAt.UTC(), snap.UpdatedAt.UTC())
 	if err != nil {
 		if isUniqueViolation(err) {
-			return fmt.Errorf("%w: extension resource %s/%s", domain.ErrAlreadyExists, snap.ResourceType, snap.Name)
+			return fmt.Errorf("%w: extension resource %s/%s", domain.ErrAlreadyExists, snap.ResourceType.ServiceName(), snap.Name)
 		}
 		return err
+	}
+
+	// Flush pending intents to the resource_intents table keyed by UID.
+	for _, intent := range snap.PendingIntents {
+		if _, err := r.DB.ExecContext(ctx,
+			`INSERT INTO resource_intents (extension_resource_uid, version, spec, created_at)
+			 VALUES ($1, $2, $3, $4)`,
+			intent.ExtensionResourceUID.String(), intent.Version, string(intent.Spec),
+			intent.CreatedAt.UTC().Format(time.RFC3339)); err != nil {
+			if isUniqueViolation(err) {
+				return fmt.Errorf("%w: intent %s v%d", domain.ErrAlreadyExists, intent.ExtensionResourceUID, intent.Version)
+			}
+			return err
+		}
 	}
 
 	if snap.Managed != nil {
@@ -145,13 +147,13 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 	return nil
 }
 
-func (r *ExtensionResourceRepo) Get(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) (*domain.ExtensionResource, error) {
+func (r *ExtensionResourceRepo) Get(ctx context.Context, name domain.FullResourceName) (*domain.ExtensionResource, error) {
 	row := r.DB.QueryRowContext(ctx,
 		erSelectColumns+`
 		FROM extension_resources er
 		LEFT JOIN extension_resource_managed erm ON erm.extension_resource_uid = er.uid
-		WHERE er.resource_type = $1 AND er.resource_name = $2`,
-		rt, name)
+		WHERE er.service_name = $1 AND er.resource_name = $2`,
+		string(name.ServiceName()), string(name.ResourceName()))
 	snap, err := scanExtensionResourceSnapshot(row)
 	if err != nil {
 		return nil, err
@@ -178,8 +180,8 @@ func (r *ExtensionResourceRepo) ListByResourceType(ctx context.Context, rt domai
 		erSelectColumns+`
 		FROM extension_resources er
 		LEFT JOIN extension_resource_managed erm ON erm.extension_resource_uid = er.uid
-		WHERE er.resource_type = $1 ORDER BY er.resource_name`,
-		rt)
+		WHERE er.service_name = $1 AND er.type_name = $2 ORDER BY er.resource_name`,
+		string(rt.ServiceName()), rt.TypeName())
 	if err != nil {
 		return nil, err
 	}
@@ -194,16 +196,16 @@ func (r *ExtensionResourceRepo) ListByResourceType(ctx context.Context, rt domai
 	return result, nil
 }
 
-func (r *ExtensionResourceRepo) Delete(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) error {
+func (r *ExtensionResourceRepo) Delete(ctx context.Context, name domain.FullResourceName) error {
 	res, err := r.DB.ExecContext(ctx,
-		`DELETE FROM extension_resources WHERE resource_type = $1 AND resource_name = $2`,
-		rt, name)
+		`DELETE FROM extension_resources WHERE service_name = $1 AND resource_name = $2`,
+		string(name.ServiceName()), string(name.ResourceName()))
 	if err != nil {
 		return err
 	}
 	n, _ := res.RowsAffected()
 	if n == 0 {
-		return fmt.Errorf("%w: extension resource %s/%s", domain.ErrNotFound, rt, name)
+		return fmt.Errorf("%w: extension resource %s", domain.ErrNotFound, name)
 	}
 	return nil
 }
@@ -212,17 +214,17 @@ func (r *ExtensionResourceRepo) Delete(ctx context.Context, rt domain.ResourceTy
 // Views
 // ---------------------------------------------------------------------------
 
-func (r *ExtensionResourceRepo) GetView(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) (domain.ExtensionResourceView, error) {
+func (r *ExtensionResourceRepo) GetView(ctx context.Context, name domain.FullResourceName) (domain.ExtensionResourceView, error) {
 	q := erViewQueryPG + `
-		WHERE er.resource_type = $1 AND er.resource_name = $2`
-	row := r.DB.QueryRowContext(ctx, q, rt, name)
+		WHERE er.service_name = $1 AND er.resource_name = $2`
+	row := r.DB.QueryRowContext(ctx, q, string(name.ServiceName()), string(name.ResourceName()))
 	return scanExtensionResourceView(row)
 }
 
 func (r *ExtensionResourceRepo) ListViewsByType(ctx context.Context, rt domain.ResourceType) ([]domain.ExtensionResourceView, error) {
 	q := erViewQueryPG + `
-		WHERE er.resource_type = $1 ORDER BY er.resource_name`
-	rows, err := r.DB.QueryContext(ctx, q, rt)
+		WHERE er.service_name = $1 AND er.type_name = $2 ORDER BY er.resource_name`
+	rows, err := r.DB.QueryContext(ctx, q, string(rt.ServiceName()), rt.TypeName())
 	if err != nil {
 		return nil, err
 	}
@@ -233,16 +235,16 @@ func (r *ExtensionResourceRepo) ListViewsByType(ctx context.Context, rt domain.R
 // Intents (reuses the shared resource_intents table)
 // ---------------------------------------------------------------------------
 
-func (r *ExtensionResourceRepo) GetIntent(ctx context.Context, rt domain.ResourceType, name domain.ResourceName, version domain.IntentVersion) (domain.ResourceIntent, error) {
+func (r *ExtensionResourceRepo) GetIntent(ctx context.Context, uid domain.ExtensionResourceUID, version domain.IntentVersion) (domain.ResourceIntent, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT resource_type, name, version, spec, created_at
-		 FROM resource_intents WHERE resource_type = $1 AND name = $2 AND version = $3`,
-		rt, name, version)
+		`SELECT extension_resource_uid, version, spec, created_at
+		 FROM resource_intents WHERE extension_resource_uid = $1 AND version = $2`,
+		uid.String(), version)
 	var ri domain.ResourceIntent
 	var specStr, createdAt string
-	if err := row.Scan(&ri.ResourceType, &ri.Name, &ri.Version, &specStr, &createdAt); err != nil {
+	if err := row.Scan(&ri.ExtensionResourceUID, &ri.Version, &specStr, &createdAt); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ResourceIntent{}, fmt.Errorf("%w: intent %s/%s v%d", domain.ErrNotFound, rt, name, version)
+			return domain.ResourceIntent{}, fmt.Errorf("%w: intent %s v%d", domain.ErrNotFound, uid, version)
 		}
 		return domain.ResourceIntent{}, err
 	}
@@ -253,25 +255,15 @@ func (r *ExtensionResourceRepo) GetIntent(ctx context.Context, rt domain.Resourc
 	return ri, nil
 }
 
-func (r *ExtensionResourceRepo) DeleteIntents(ctx context.Context, rt domain.ResourceType, name domain.ResourceName) error {
-	_, err := r.DB.ExecContext(ctx,
-		`DELETE FROM resource_intents WHERE resource_type = $1 AND name = $2`,
-		rt, name)
-	if err != nil {
-		return fmt.Errorf("delete intents for extension resource %s/%s: %w", rt, name, err)
-	}
-	return nil
-}
-
 // ---------------------------------------------------------------------------
 // Scan helpers and query fragments
 // ---------------------------------------------------------------------------
 
-const erSelectColumns = `SELECT er.uid, er.resource_type, er.resource_name, er.labels, er.created_at, er.updated_at,
+const erSelectColumns = `SELECT er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
 	erm.current_version, erm.fulfillment_id `
 
 var erViewQueryPG = `SELECT
-	er.uid, er.resource_type, er.resource_name, er.labels, er.created_at, er.updated_at,
+	er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
 	erm.current_version, erm.fulfillment_id,
 	ri.spec, ri.created_at,
 	` + fulfillmentColumnsJoined("f") + `,
@@ -288,7 +280,7 @@ var erViewQueryPG = `SELECT
 FROM extension_resources er
 LEFT JOIN extension_resource_managed erm ON erm.extension_resource_uid = er.uid
 LEFT JOIN resource_intents ri
-  ON ri.resource_type = er.resource_type AND ri.name = er.resource_name AND ri.version = erm.current_version
+  ON ri.extension_resource_uid = er.uid AND ri.version = erm.current_version
 LEFT JOIN fulfillments f ON f.id = erm.fulfillment_id
 ` + strategyJoins("f") + `
 LEFT JOIN extension_resource_inventory inv ON inv.extension_resource_uid = er.uid
@@ -296,11 +288,11 @@ LEFT JOIN extension_resource_inventory inv ON inv.extension_resource_uid = er.ui
 
 func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) {
 	var snap domain.ExtensionResourceTypeSnapshot
-	var apiVersion, collectionID string
+	var serviceName, typeName, apiVersion, collectionID string
 	var mgmtJSON, invJSON sql.NullString
 
 	if err := s.Scan(
-		&snap.ResourceType, &apiVersion, &collectionID,
+		&serviceName, &typeName, &apiVersion, &collectionID,
 		&mgmtJSON, &invJSON, &snap.CreatedAt, &snap.UpdatedAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -309,6 +301,7 @@ func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) 
 		return domain.ExtensionResourceType{}, err
 	}
 
+	snap.ResourceType = domain.ResourceType(serviceName + "/" + typeName)
 	snap.APIVersion = domain.APIVersion(apiVersion)
 	snap.CollectionID = domain.CollectionID(collectionID)
 
@@ -331,12 +324,12 @@ func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) 
 
 func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot, error) {
 	var snap domain.ExtensionResourceSnapshot
-	var labelsStr string
+	var serviceName, typeName, labelsStr string
 	var currentVersion sql.NullInt64
 	var fulfillmentID sql.NullString
 
 	if err := s.Scan(
-		&snap.UID, &snap.ResourceType, &snap.Name, &labelsStr,
+		&snap.UID, &serviceName, &typeName, &snap.Name, &labelsStr,
 		&snap.CreatedAt, &snap.UpdatedAt,
 		&currentVersion, &fulfillmentID,
 	); err != nil {
@@ -345,6 +338,8 @@ func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot,
 		}
 		return snap, fmt.Errorf("scan extension resource: %w", err)
 	}
+
+	snap.ResourceType = domain.ResourceType(serviceName + "/" + typeName)
 
 	if err := json.Unmarshal([]byte(labelsStr), &snap.Labels); err != nil {
 		return snap, fmt.Errorf("unmarshal labels: %w", err)
@@ -364,7 +359,7 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	var v domain.ExtensionResourceView
 
 	var uid domain.ExtensionResourceUID
-	var resourceType domain.ResourceType
+	var serviceName, typeName string
 	var name domain.ResourceName
 	var labelsStr string
 	var erCreatedAt, erUpdatedAt time.Time
@@ -385,7 +380,7 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	var invConditionsJSON sql.NullString
 
 	if err := s.Scan(
-		&uid, &resourceType, &name, &labelsStr,
+		&uid, &serviceName, &typeName, &name, &labelsStr,
 		&erCreatedAt, &erUpdatedAt,
 		&currentVersion, &managedFID,
 		&riSpec, &riCreatedAt,
@@ -407,6 +402,8 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal labels: %w", err)
 	}
 
+	resourceType := domain.ResourceType(serviceName + "/" + typeName)
+
 	erSnap := domain.ExtensionResourceSnapshot{
 		UID:          uid,
 		ResourceType: resourceType,
@@ -426,10 +423,9 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	// Intent and fulfillment are only populated for managed resources.
 	if riSpec.Valid {
 		v.Intent = &domain.ResourceIntent{
-			ResourceType: resourceType,
-			Name:         name,
-			Version:      domain.IntentVersion(currentVersion.Int64),
-			Spec:         compactJSONB(riSpec.String),
+			ExtensionResourceUID: uid,
+			Version:              domain.IntentVersion(currentVersion.Int64),
+			Spec:                 compactJSONB(riSpec.String),
 		}
 		if riCreatedAt.Valid {
 			if t, err := time.Parse(time.RFC3339, riCreatedAt.String); err == nil {

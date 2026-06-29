@@ -451,7 +451,7 @@ func TestExtensionResourceSnapshot_RoundTrip(t *testing.T) {
 		CreatedAt:    refTime,
 		UpdatedAt:    refTime.Add(time.Hour),
 		PendingIntents: []ResourceIntent{
-			{ResourceType: "kind.fleetshift.io/Cluster", Name: "clusters/dev", Version: 1, Spec: json.RawMessage(`{}`)},
+			{ExtensionResourceUID: uid, Version: 1, Spec: json.RawMessage(`{}`)},
 		},
 	}
 

@@ -13,10 +13,10 @@ import (
 func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	store, _ := setupStore(t)
 	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
-	seedIntent(t, store, "test.fleetshift.io/Cluster", "prod-us-east-1", spec)
+	erUID := seedIntent(t, store, "test.fleetshift.io/Cluster", "prod-us-east-1", spec)
 
 	s := &domain.ManagedResourceManifestStrategy{
-		Ref:   domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "prod-us-east-1", Version: 1, ManifestType: "clusters"},
+		Ref:   domain.IntentRef{ExtensionResourceUID: erUID, Version: 1, ManifestType: "clusters"},
 		Store: store,
 	}
 
@@ -41,7 +41,7 @@ func TestManagedResourceManifestStrategy_IntentNotFound(t *testing.T) {
 	store, _ := setupStore(t)
 
 	s := &domain.ManagedResourceManifestStrategy{
-		Ref:   domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "missing", Version: 99},
+		Ref:   domain.IntentRef{ExtensionResourceUID: domain.NewExtensionResourceUID(), Version: 99},
 		Store: store,
 	}
 
@@ -63,7 +63,8 @@ func TestManagedResourceManifestStrategy_OnRemovedIsNoop(t *testing.T) {
 
 // seedIntent creates an extension resource with managed state and a
 // single intent version via the aggregate's RecordIntent method.
-func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName, spec json.RawMessage) {
+// It returns the extension resource UID for use in IntentRef.
+func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName, spec json.RawMessage) domain.ExtensionResourceUID {
 	t.Helper()
 	now := time.Date(2026, 5, 4, 12, 0, 0, 0, time.UTC)
 
@@ -82,6 +83,7 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 		t.Fatalf("CreateType: %v", err)
 	}
 
+	erUID := domain.NewExtensionResourceUID()
 	fID := domain.FulfillmentID("f-" + string(name))
 	f := domain.FulfillmentFromSnapshot(domain.FulfillmentSnapshot{
 		ID:        fID,
@@ -91,7 +93,7 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	})
 	f.AdvanceManifestStrategy(domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyManagedResource,
-		IntentRef: domain.IntentRef{ResourceType: rt, Name: name, Version: 1},
+		IntentRef: domain.IntentRef{ExtensionResourceUID: erUID, Version: 1},
 	}, now)
 	f.AdvancePlacementStrategy(domain.PlacementStrategySpec{
 		Type:    domain.PlacementStrategyStatic,
@@ -103,7 +105,7 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	}
 
 	er := domain.NewExtensionResource(
-		domain.NewExtensionResourceUID(), rt, name, now,
+		erUID, rt, name, now,
 		domain.WithManagedState(fID),
 	)
 	if _, err := er.RecordIntent(spec, now); err != nil {
@@ -116,4 +118,5 @@ func seedIntent(t *testing.T, store domain.Store, rt domain.ResourceType, name d
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
 	}
+	return erUID
 }

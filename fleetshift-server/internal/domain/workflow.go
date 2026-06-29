@@ -116,16 +116,17 @@ type DeleteManagedResourceCleanupInput struct {
 }
 
 // CreateManagedResourceWorkflowID returns the deterministic workflow
-// instance ID for creating a managed resource. It includes the
-// resource type so different types may reuse the same leaf name.
-func CreateManagedResourceWorkflowID(resourceType ResourceType, name ResourceName) string {
-	return fmt.Sprintf("create-mr-%s-%s", resourceType, name)
+// instance ID for creating a managed resource. It embeds the full
+// resource name (e.g. "//kind.fleetshift.io/clusters/prod") for
+// readability in tracing and debugging.
+func CreateManagedResourceWorkflowID(name FullResourceName) string {
+	return fmt.Sprintf("create-mr-%s", name)
 }
 
 // DeleteManagedResourceWorkflowID returns the deterministic workflow
 // instance ID for deleting a managed resource.
-func DeleteManagedResourceWorkflowID(resourceType ResourceType, name ResourceName) string {
-	return fmt.Sprintf("delete-mr-%s-%s", resourceType, name)
+func DeleteManagedResourceWorkflowID(name FullResourceName) string {
+	return fmt.Sprintf("delete-mr-%s", name)
 }
 
 // RunActivity provides type-safe durable activity execution from within

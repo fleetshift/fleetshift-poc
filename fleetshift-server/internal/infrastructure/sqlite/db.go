@@ -42,8 +42,12 @@ func Open(dsn string) (*sql.DB, error) {
 
 // openWithPragmas opens a SQLite connection with standard pragmas
 // but without running migrations.
+//
+// foreign_keys is set in the DSN so the driver applies it to every
+// new connection, not just the first one from the pool.
 func openWithPragmas(dsn string) (*sql.DB, error) {
 	dsn = withTxLock(dsn)
+	dsn = withPragma(dsn, "foreign_keys(1)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)
@@ -56,10 +60,6 @@ func openWithPragmas(dsn string) (*sql.DB, error) {
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("set busy timeout: %w", err)
-	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("enable foreign keys: %w", err)
 	}
 
 	return db, nil
@@ -76,4 +76,14 @@ func withTxLock(dsn string) string {
 		return dsn + "&_txlock=immediate"
 	}
 	return dsn + "?_txlock=immediate"
+}
+
+// withPragma appends a _pragma parameter to the DSN. modernc.org/sqlite
+// applies _pragma values to every new connection, unlike db.Exec which
+// only affects whichever pooled connection happens to run the statement.
+func withPragma(dsn, pragma string) string {
+	if strings.Contains(dsn, "?") {
+		return dsn + "&_pragma=" + pragma
+	}
+	return dsn + "?_pragma=" + pragma
 }

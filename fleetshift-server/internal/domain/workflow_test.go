@@ -7,12 +7,18 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-func TestCreateManagedResourceWorkflowID_IncludesResourceType(t *testing.T) {
-	a := domain.CreateManagedResourceWorkflowID("test.fleetshift.io/Cluster", "prod")
-	b := domain.CreateManagedResourceWorkflowID("test.fleetshift.io/Database", "prod")
+func TestCreateManagedResourceWorkflowID_UsesFullResourceName(t *testing.T) {
+	a := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/clusters/prod")
+	b := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/databases/prod")
 
 	if a == b {
-		t.Fatalf("workflow IDs must differ for same-name managed resources of different types: %q", a)
+		t.Fatalf("workflow IDs must differ for different full resource names: %q", a)
+	}
+
+	// Same full name should produce the same workflow ID.
+	c := domain.CreateManagedResourceWorkflowID("//test.fleetshift.io/clusters/prod")
+	if a != c {
+		t.Fatalf("same full name should produce same workflow ID: got %q and %q", a, c)
 	}
 }
 

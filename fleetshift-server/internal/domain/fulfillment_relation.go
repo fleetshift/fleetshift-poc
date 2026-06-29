@@ -46,10 +46,9 @@ func (r RegisteredSelfTarget) DeriveStrategies(intent ResourceIntent) (ManifestS
 	ms := ManifestStrategySpec{
 		Type: ManifestStrategyManagedResource,
 		IntentRef: IntentRef{
-			ResourceType: intent.ResourceType,
-			Name:         intent.Name,
-			Version:      intent.Version,
-			ManifestType: r.manifestType,
+			ExtensionResourceUID: intent.ExtensionResourceUID,
+			Version:              intent.Version,
+			ManifestType:         r.manifestType,
 		},
 	}
 	ps := PlacementStrategySpec{

@@ -334,6 +334,26 @@ func TestFullResourceName_ConstructsAndParses(t *testing.T) {
 	}
 }
 
+func TestServiceName_FullName(t *testing.T) {
+	sn := ServiceName("kind.fleetshift.io")
+	got := sn.FullName("clusters/prod")
+	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+
+	if got != want {
+		t.Errorf("ServiceName.FullName() = %q, want %q", got, want)
+	}
+}
+
+func TestResourceName_FullName(t *testing.T) {
+	rn := ResourceName("clusters/prod")
+	got := rn.FullName("kind.fleetshift.io")
+	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+
+	if got != want {
+		t.Errorf("ResourceName.FullName() = %q, want %q", got, want)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // PlatformResourceUID
 // ---------------------------------------------------------------------------

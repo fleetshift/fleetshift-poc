@@ -180,8 +180,7 @@ func TestExtensionResource_RecordIntent(t *testing.T) {
 	}
 
 	assertEq(t, "intent.Version", intent.Version, IntentVersion(1))
-	assertEq(t, "intent.ResourceType", intent.ResourceType, ResourceType("kind.fleetshift.io/Cluster"))
-	assertEq(t, "intent.Name", intent.Name, ResourceName("clusters/dev"))
+	assertEq(t, "intent.ExtensionResourceUID", intent.ExtensionResourceUID, uid)
 	assertEq(t, "managed.CurrentVersion", r.Managed().CurrentVersion(), IntentVersion(1))
 }
 

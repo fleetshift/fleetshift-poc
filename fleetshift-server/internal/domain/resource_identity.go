@@ -153,6 +153,12 @@ func (n CollectionName) Parent() (ResourceName, bool) {
 // distinguish from [FullResourceName].
 type ResourceName string
 
+// FullName composes a [FullResourceName] from this service name and
+// the given resource name.
+func (s ServiceName) FullName(name ResourceName) FullResourceName {
+	return NewFullResourceName(s, name)
+}
+
 // FullResourceName is the globally unique name of the form
 // "//{service}/{relative_name}" (e.g. "//kind.fleetshift.io/clusters/prod").
 type FullResourceName string
@@ -268,6 +274,12 @@ func ParseResourceName(s string) (ResourceName, error) {
 		return "", fmt.Errorf("resource name: %w: must have an even number of segments (e.g. \"clusters/prod\")", ErrInvalidArgument)
 	}
 	return ResourceName(s), nil
+}
+
+// FullName composes a [FullResourceName] from the given service name
+// and this resource name.
+func (n ResourceName) FullName(service ServiceName) FullResourceName {
+	return NewFullResourceName(service, n)
 }
 
 // Collection returns the full collection path (everything before the
@@ -608,7 +620,7 @@ type ResourceRepresentation struct {
 // FullResourceName returns the full resource name for this
 // representation: "//{service}/{name}".
 func (rr ResourceRepresentation) FullResourceName() FullResourceName {
-	return NewFullResourceName(rr.serviceName, rr.name)
+	return rr.name.FullName(rr.serviceName)
 }
 
 // PlatformUID returns the owning platform resource identifier.

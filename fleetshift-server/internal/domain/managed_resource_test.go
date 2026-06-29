@@ -151,3 +151,13 @@ func TestResourceType_Accessors_Malformed(t *testing.T) {
 		t.Errorf("TypeName() on malformed = %q, want empty", got)
 	}
 }
+
+func TestResourceType_FullName(t *testing.T) {
+	rt := ResourceType("kind.fleetshift.io/Cluster")
+	got := rt.FullName("clusters/prod")
+	want := FullResourceName("//kind.fleetshift.io/clusters/prod")
+
+	if got != want {
+		t.Errorf("ResourceType.FullName() = %q, want %q", got, want)
+	}
+}

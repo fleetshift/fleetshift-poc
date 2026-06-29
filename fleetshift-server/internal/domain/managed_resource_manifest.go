@@ -18,13 +18,13 @@ func (s *ManagedResourceManifestStrategy) Generate(ctx context.Context, _ Genera
 	}
 	defer tx.Rollback()
 
-	intent, err := tx.ExtensionResources().GetIntent(ctx, s.Ref.ResourceType, s.Ref.Name, s.Ref.Version)
+	intent, err := tx.ExtensionResources().GetIntent(ctx, s.Ref.ExtensionResourceUID, s.Ref.Version)
 	if err != nil {
 		return nil, err
 	}
 	return []Manifest{{
 		ManifestType: s.Ref.ManifestType,
-		ManifestID:   ManifestID(s.Ref.Name),
+		ManifestID:   ManifestID(s.Ref.ExtensionResourceUID.String()),
 		Raw:          intent.Spec,
 	}}, nil
 }

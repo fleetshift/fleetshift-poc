@@ -27,9 +27,10 @@ func TestStrategyFactory_ManifestStrategy_Inline(t *testing.T) {
 func TestStrategyFactory_ManifestStrategy_ManagedResource(t *testing.T) {
 	store, _ := setupStore(t)
 	factory := domain.StrategyFactory{Store: store}
+	uid := domain.NewExtensionResourceUID()
 	spec := domain.ManifestStrategySpec{
 		Type:      domain.ManifestStrategyManagedResource,
-		IntentRef: domain.IntentRef{ResourceType: "test.fleetshift.io/Cluster", Name: "prod", Version: 1},
+		IntentRef: domain.IntentRef{ExtensionResourceUID: uid, Version: 1},
 	}
 
 	s, err := factory.ManifestStrategy(spec)
@@ -40,8 +41,8 @@ func TestStrategyFactory_ManifestStrategy_ManagedResource(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *ManagedResourceManifestStrategy, got %T", s)
 	}
-	if mrs.Ref.ResourceType != "test.fleetshift.io/Cluster" {
-		t.Errorf("Ref.ResourceType = %q, want %q", mrs.Ref.ResourceType, "test.fleetshift.io/Cluster")
+	if mrs.Ref.ExtensionResourceUID != uid {
+		t.Errorf("Ref.ExtensionResourceUID = %v, want %v", mrs.Ref.ExtensionResourceUID, uid)
 	}
 }
 

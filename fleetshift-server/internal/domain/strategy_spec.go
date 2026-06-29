@@ -10,12 +10,13 @@ const (
 
 // IntentRef identifies a specific versioned resource intent. Used by the
 // managed_resource manifest strategy to resolve the spec at generation
-// time rather than copying it inline.
+// time rather than copying it inline. The intent is keyed by extension
+// resource UID + version; the manifest type determines delivery
+// encoding.
 type IntentRef struct {
-	ResourceType ResourceType
-	Name         ResourceName
-	Version      IntentVersion
-	ManifestType ManifestType
+	ExtensionResourceUID ExtensionResourceUID
+	Version              IntentVersion
+	ManifestType         ManifestType
 }
 
 // ManifestStrategySpec is the user-provided specification for manifest generation.

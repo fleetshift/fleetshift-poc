@@ -47,18 +47,19 @@ func (s *ResumeManagedResourceWorkflowSpec) MutateToResumed() Activity[ResumeMan
 		}
 		defer tx.Rollback()
 
-		er, err := tx.ExtensionResources().Get(ctx, in.ResourceType, in.Name)
+		fullName := in.ResourceType.FullName(in.Name)
+		er, err := tx.ExtensionResources().Get(ctx, fullName)
 		if err != nil {
 			return managedResourceMutationResult{}, err
 		}
 		managed := er.Managed()
 		if managed == nil {
 			return managedResourceMutationResult{}, fmt.Errorf(
-				"%w: extension resource %s/%s has no managed state",
-				ErrInvalidArgument, in.ResourceType, in.Name)
+				"%w: extension resource %s has no managed state",
+				ErrInvalidArgument, fullName)
 		}
 
-		intent, err := tx.ExtensionResources().GetIntent(ctx, in.ResourceType, in.Name, managed.CurrentVersion())
+		intent, err := tx.ExtensionResources().GetIntent(ctx, er.UID(), managed.CurrentVersion())
 		if err != nil {
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)
 		}

@@ -268,19 +268,8 @@ Each user-facing concept defines its own API surface, lifecycle rules, and edita
 
 Managed resource specs are stored as immutable versions — the user-facing version history. Each update to a managed resource creates a new version; the managed resource HEAD table tracks which version is current.
 
-```sql
-CREATE TABLE resource_intents (
-  resource_type TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  version       INTEGER NOT NULL,
-  spec          TEXT NOT NULL,       -- jsonb in Postgres
-  provenance    TEXT,
-  created_at    TEXT NOT NULL,
-  PRIMARY KEY (resource_type, name, version)
-);
-```
 
-Each version is immutable — INSERT only, never UPDATE. Postgres: `PARTITION BY LIST (resource_type)`, partitions at addon registration. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
+Each version is immutable — INSERT only, never UPDATE. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
 
 Resource intent versioning is a managed resource layer concern, distinct from Fulfillment strategy versioning (see [below](#fulfillment-strategy-versioning)). When a new resource intent version is created, the platform creates a corresponding manifest strategy version on the Fulfillment (referencing the new intent version), which bumps the Fulfillment's generation and triggers reconciliation. But the two version histories are independent: the resource intent tracks what the user asked for; the Fulfillment's manifest strategy tracks what the system was configured to deliver.
 
@@ -403,33 +392,10 @@ GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
 
 A thin identity/HEAD table provides the entry point for all managed resource queries. It holds only pointers — no denormalized state, no cached lifecycle state.
 
-```sql
-CREATE TABLE managed_resources (
-  resource_type TEXT NOT NULL,
-  name          TEXT NOT NULL,
-  uid           TEXT NOT NULL UNIQUE,
-  current_version INTEGER NOT NULL,  -- → resource_intents.version
-  fulfillment_id  TEXT NOT NULL,     -- → fulfillments.id
-  created_at    TEXT NOT NULL,
-  updated_at    TEXT NOT NULL,
-  deleted_at    TEXT,                 -- soft delete
-  PRIMARY KEY (resource_type, name)
-);
-```
+The unique key is `(service_name, resource_name)` — i.e. the full resource name. A resource name is unique within a service regardless of type; the type name is metadata about the resource, not a namespace for it.
 
-The managed resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.fleetshift.io/v1/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state:
+The extension resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.fleetshift.io/v1/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state.
 
-```sql
-SELECT mr.*, ri.spec, ri.provenance, f.state
-FROM managed_resources mr
-JOIN resource_intents ri
-  ON ri.resource_type = mr.resource_type
-  AND ri.name = mr.name
-  AND ri.version = mr.current_version
-JOIN fulfillments f ON f.id = mr.fulfillment_id
-WHERE mr.resource_type = 'clusters'
-  AND mr.deleted_at IS NULL;
-```
 
 State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present). Properties and observations come from inventory.
 

@@ -68,7 +68,8 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		}
 		defer tx.Rollback()
 
-		er, err := tx.ExtensionResources().Get(ctx, in.ResourceType, in.Name)
+		fullName := in.ResourceType.FullName(in.Name)
+		er, err := tx.ExtensionResources().Get(ctx, fullName)
 		if err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, err
@@ -77,11 +78,11 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		if managed == nil {
 			probe.Error(ErrInvalidArgument)
 			return managedResourceMutationResult{}, fmt.Errorf(
-				"%w: extension resource %s/%s has no managed state",
-				ErrInvalidArgument, in.ResourceType, in.Name)
+				"%w: extension resource %s has no managed state",
+				ErrInvalidArgument, fullName)
 		}
 
-		intent, err := tx.ExtensionResources().GetIntent(ctx, in.ResourceType, in.Name, managed.CurrentVersion())
+		intent, err := tx.ExtensionResources().GetIntent(ctx, er.UID(), managed.CurrentVersion())
 		if err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("get intent: %w", err)

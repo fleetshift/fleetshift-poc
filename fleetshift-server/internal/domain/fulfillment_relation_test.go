@@ -41,12 +41,12 @@ func TestNewRegisteredSelfTarget(t *testing.T) {
 
 func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 	rel := domain.NewRegisteredSelfTarget("addon-cluster-mgmt", "api.kind.cluster")
+	uid := domain.NewExtensionResourceUID()
 	intent := domain.ResourceIntent{
-		ResourceType: "test.fleetshift.io/Cluster",
-		Name:         "prod-us-east-1",
-		Version:      1,
-		Spec:         json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
-		CreatedAt:    time.Now(),
+		ExtensionResourceUID: uid,
+		Version:              1,
+		Spec:                 json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`),
+		CreatedAt:            time.Now(),
 	}
 
 	ms, ps, rs := rel.DeriveStrategies(intent)
@@ -54,11 +54,8 @@ func TestRegisteredSelfTarget_DeriveStrategies(t *testing.T) {
 	if ms.Type != domain.ManifestStrategyManagedResource {
 		t.Errorf("ManifestStrategy.Type = %q, want %q", ms.Type, domain.ManifestStrategyManagedResource)
 	}
-	if ms.IntentRef.ResourceType != "test.fleetshift.io/Cluster" {
-		t.Errorf("IntentRef.ResourceType = %q, want %q", ms.IntentRef.ResourceType, "test.fleetshift.io/Cluster")
-	}
-	if ms.IntentRef.Name != "prod-us-east-1" {
-		t.Errorf("IntentRef.Name = %q, want %q", ms.IntentRef.Name, "prod-us-east-1")
+	if ms.IntentRef.ExtensionResourceUID != uid {
+		t.Errorf("IntentRef.ExtensionResourceUID = %v, want %v", ms.IntentRef.ExtensionResourceUID, uid)
 	}
 	if ms.IntentRef.Version != 1 {
 		t.Errorf("IntentRef.Version = %d, want 1", ms.IntentRef.Version)
