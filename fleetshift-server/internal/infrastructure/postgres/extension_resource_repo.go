@@ -527,7 +527,7 @@ func unmarshalConditionSnapshots(data []byte) ([]domain.ConditionSnapshot, error
 			Status:             domain.ConditionStatus(r.Status),
 			Reason:             r.Reason,
 			Message:            r.Message,
-			LastTransitionTime: r.LastTransitionTime,
+			LastTransitionTime: r.LastTransitionTime.UTC(),
 		}
 	}
 	return snaps, nil
