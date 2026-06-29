@@ -1566,34 +1566,69 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create r2: %v", err)
 			}
 
+			// Distinct payloads per UID so a batch bug that copies the
+			// first report to every row would be caught.
 			t1 := fixedTime.Add(time.Minute)
-			// Single batch with reports for two different UIDs.
+			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r1.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
-				domain.NewConditionReport(r2.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
+				domain.NewConditionReport(r1.UID(), "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1, t1),
+				domain.NewConditionReport(r2.UID(), "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2, t2),
 			}); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
 			}
 
-			// Both UIDs must have an inventory row.
-			for _, tc := range []struct {
-				name string
-				rn   domain.ResourceName
-			}{
-				{"r1", "nodes/multi-a"},
-				{"r2", "nodes/multi-b"},
-			} {
-				view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", tc.rn))
-				if err != nil {
-					t.Fatalf("GetView %s: %v", tc.name, err)
-				}
-				if view.Inventory == nil {
-					t.Fatalf("%s: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch", tc.name)
-				}
-				if len(view.Inventory.Conditions()) != 1 {
-					t.Fatalf("%s: Conditions len = %d, want 1", tc.name, len(view.Inventory.Conditions()))
-				}
+			// Verify r1 condition via GetView.
+			v1, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-a"))
+			if err != nil {
+				t.Fatalf("GetView r1: %v", err)
 			}
+			if v1.Inventory == nil {
+				t.Fatal("r1: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
+			}
+			if len(v1.Inventory.Conditions()) != 1 {
+				t.Fatalf("r1: Conditions len = %d, want 1", len(v1.Inventory.Conditions()))
+			}
+			assertEqual(t, "r1.Condition.Status", v1.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "r1.Condition.Reason", v1.Inventory.Conditions()[0].Reason(), "AllGood")
+			assertEqual(t, "r1.Condition.Message", v1.Inventory.Conditions()[0].Message(), "node is healthy")
+			assertEqual(t, "r1.Condition.LastTransitionTime", v1.Inventory.Conditions()[0].LastTransitionTime(), t1)
+
+			// Verify r2 condition via GetView.
+			v2, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-b"))
+			if err != nil {
+				t.Fatalf("GetView r2: %v", err)
+			}
+			if v2.Inventory == nil {
+				t.Fatal("r2: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
+			}
+			if len(v2.Inventory.Conditions()) != 1 {
+				t.Fatalf("r2: Conditions len = %d, want 1", len(v2.Inventory.Conditions()))
+			}
+			assertEqual(t, "r2.Condition.Status", v2.Inventory.Conditions()[0].Status(), domain.ConditionFalse)
+			assertEqual(t, "r2.Condition.Reason", v2.Inventory.Conditions()[0].Reason(), "Degraded")
+			assertEqual(t, "r2.Condition.Message", v2.Inventory.Conditions()[0].Message(), "disk pressure")
+			assertEqual(t, "r2.Condition.LastTransitionTime", v2.Inventory.Conditions()[0].LastTransitionTime(), t2)
+
+			// Verify per-UID transitions were recorded independently.
+			tr1, err := repo.ListConditionTransitions(ctx, r1.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions r1: %v", err)
+			}
+			if len(tr1) != 1 {
+				t.Fatalf("r1 transitions = %d, want 1", len(tr1))
+			}
+			assertEqual(t, "r1.Transition.Status", tr1[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "r1.Transition.Reason", tr1[0].Reason(), "AllGood")
+
+			tr2, err := repo.ListConditionTransitions(ctx, r2.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions r2: %v", err)
+			}
+			if len(tr2) != 1 {
+				t.Fatalf("r2 transitions = %d, want 1", len(tr2))
+			}
+			assertEqual(t, "r2.Transition.Status", tr2[0].Status(), domain.ConditionFalse)
+			assertEqual(t, "r2.Transition.Reason", tr2[0].Reason(), "Degraded")
 		})
 
 		// CrossPathConsistency exercises a sequence that alternates
