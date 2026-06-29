@@ -5,22 +5,50 @@ package resourceidentityrepotest
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// Factory creates a fresh [domain.ResourceIdentityRepository] for each
-// test.
-type Factory func(t *testing.T) domain.ResourceIdentityRepository
+// Factory creates a fresh [domain.Tx] for each test. The Tx is needed
+// because resource representations reference extension resources
+// (foreign key on extension_resource_uid).
+type Factory func(t *testing.T) domain.Tx
+
+// seedExtensionResource creates a minimal extension resource type and
+// instance so that FK constraints on resource_representations are
+// satisfied. Returns the UID of the created extension resource.
+func seedExtensionResource(t *testing.T, tx domain.Tx, now time.Time) domain.ExtensionResourceUID {
+	t.Helper()
+	ctx := context.Background()
+
+	uid := domain.NewExtensionResourceUID()
+	suffix := uid.String()[:8]
+	rt := domain.ResourceType(fmt.Sprintf("seed-%s.test.io/Seed", suffix))
+
+	typeDef := domain.NewExtensionResourceType(rt, "v1", "seeds", now)
+	if err := tx.ExtensionResources().CreateType(ctx, typeDef); err != nil {
+		t.Fatalf("seed extension resource type: %v", err)
+	}
+
+	name := domain.ResourceName(fmt.Sprintf("seeds/s-%s", suffix))
+	r := domain.NewExtensionResource(uid, rt, name, now)
+	if err := tx.ExtensionResources().Create(ctx, r); err != nil {
+		t.Fatalf("seed extension resource: %v", err)
+	}
+	return uid
+}
 
 // Run exercises the [domain.ResourceIdentityRepository] contract.
 func Run(t *testing.T, factory Factory) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
 	t.Run("CreateAndGetByUID", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -51,7 +79,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("GetByRelativeName", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -70,7 +100,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("DuplicateRelativeName", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid1 := domain.NewPlatformResourceUID()
@@ -88,7 +120,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("ListByCollection", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uidL1 := domain.NewPlatformResourceUID()
@@ -121,7 +155,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("UpdateLabels", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -155,20 +191,25 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("CreateWithRepresentations", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
+
+		erUID1 := seedExtensionResource(t, tx, now)
+		erUID2 := seedExtensionResource(t, tx, now)
 
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/multi"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName:          "kind.fleetshift.io",
 			Version:              "v1alpha1",
-			ExtensionResourceUID: domain.NewExtensionResourceUID(),
+			ExtensionResourceUID: erUID1,
 		}, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName:          "gcp.fleetshift.io",
 			Version:              "v1",
-			ExtensionResourceUID: domain.NewExtensionResourceUID(),
+			ExtensionResourceUID: erUID2,
 		}, now)
 
 		if err := repo.Create(ctx, r); err != nil {
@@ -185,10 +226,12 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("UpdateRepresentation", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
-		erUID := domain.NewExtensionResourceUID()
+		erUID := seedExtensionResource(t, tx, now)
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/update-rep"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
@@ -229,15 +272,18 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("DeleteRepresentation", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
+		erUID := seedExtensionResource(t, tx, now)
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/tomb"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName:          "kind.fleetshift.io",
 			Version:              "v1",
-			ExtensionResourceUID: domain.NewExtensionResourceUID(),
+			ExtensionResourceUID: erUID,
 		}, now)
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
@@ -272,11 +318,13 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("RepresentationExtensionResourceUID_RoundTrips", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
+		erUID := seedExtensionResource(t, tx, now)
 		uid := domain.NewPlatformResourceUID()
-		erUID := domain.NewExtensionResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/er-link"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName:          "kind.fleetshift.io",
@@ -310,7 +358,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("CreateWithAliases", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -342,7 +392,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("AliasIdempotentForSameUID", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -368,7 +420,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("AliasConflictsForDifferentUID", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid1 := domain.NewPlatformResourceUID()
@@ -393,7 +447,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("CreateWithRelationships", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid1 := domain.NewPlatformResourceUID()
@@ -429,7 +485,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("ListByCollection_NestedExcludesDescendants", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		// Create a resource in a nested collection: publishers/123/books
@@ -465,7 +523,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("ListByCollection_NestedParentDoesNotIncludeChildren", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		// Parent resource: publishers/123
@@ -495,7 +555,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("CreateAndGetByName_NestedCollection", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid := domain.NewPlatformResourceUID()
@@ -521,15 +583,20 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("RepresentationOwnershipConflict", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
+
+		erUID1 := seedExtensionResource(t, tx, now)
+		erUID2 := seedExtensionResource(t, tx, now)
 
 		uid1 := domain.NewPlatformResourceUID()
 		r1 := domain.NewPlatformResource(uid1, domain.ResourceName("clusters/rep-owner"), nil, now)
 		_ = r1.AttachRepresentation(domain.AttachRepresentationInput{
 			ServiceName:          "kind.fleetshift.io",
 			Version:              "v1",
-			ExtensionResourceUID: domain.NewExtensionResourceUID(),
+			ExtensionResourceUID: erUID1,
 		}, now)
 		if err := repo.Create(ctx, r1); err != nil {
 			t.Fatalf("Create r1: %v", err)
@@ -550,7 +617,7 @@ func Run(t *testing.T, factory Factory) {
 				ServiceName:          "kind.fleetshift.io",
 				Version:              "v1",
 				Name:                 domain.ResourceName("clusters/rep-owner"),
-				ExtensionResourceUID: domain.NewExtensionResourceUID(),
+				ExtensionResourceUID: erUID2,
 				CreatedAt:            now,
 				UpdatedAt:            now,
 			}},
@@ -562,10 +629,12 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("RepresentationOwnershipIdempotent", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
-		erUID := domain.NewExtensionResourceUID()
+		erUID := seedExtensionResource(t, tx, now)
 		uid := domain.NewPlatformResourceUID()
 		r := domain.NewPlatformResource(uid, domain.ResourceName("clusters/rep-idem"), nil, now)
 		_ = r.AttachRepresentation(domain.AttachRepresentationInput{
@@ -594,7 +663,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("ListByCollection_ReturnsAllResources", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		uid1 := domain.NewPlatformResourceUID()
@@ -619,7 +690,9 @@ func Run(t *testing.T, factory Factory) {
 	})
 
 	t.Run("GetNotFoundCases", func(t *testing.T) {
-		repo := factory(t)
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
 		ctx := context.Background()
 
 		missingUID := domain.NewPlatformResourceUID()

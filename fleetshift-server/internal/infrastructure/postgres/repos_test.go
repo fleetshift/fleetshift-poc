@@ -84,8 +84,14 @@ func TestStore(t *testing.T) {
 
 func TestResourceIdentityRepo(t *testing.T) {
 	t.Parallel()
-	resourceidentityrepotest.Run(t, func(t *testing.T) domain.ResourceIdentityRepository {
-		return newTxRepo(t, domain.Tx.ResourceIdentities)
+	resourceidentityrepotest.Run(t, func(t *testing.T) domain.Tx {
+		store := newStore(t)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		t.Cleanup(func() { _ = tx.Rollback() })
+		return tx
 	})
 }
 

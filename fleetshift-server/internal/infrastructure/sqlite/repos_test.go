@@ -91,14 +91,14 @@ func TestStore(t *testing.T) {
 }
 
 func TestResourceIdentityRepo(t *testing.T) {
-	resourceidentityrepotest.Run(t, func(t *testing.T) domain.ResourceIdentityRepository {
+	resourceidentityrepotest.Run(t, func(t *testing.T) domain.Tx {
 		store := beginTestTx(t)
 		tx, err := store.Begin(context.Background())
 		if err != nil {
 			t.Fatalf("Begin: %v", err)
 		}
 		t.Cleanup(func() { tx.Rollback() })
-		return tx.ResourceIdentities()
+		return tx
 	})
 }
 
