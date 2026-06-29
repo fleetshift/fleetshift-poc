@@ -73,7 +73,7 @@ CREATE TABLE fulfillments (
 
 CREATE TABLE deployments (
     name           TEXT PRIMARY KEY,
-    uid            UUID NOT NULL DEFAULT gen_random_uuid(),
+    uid            UUID NOT NULL,
     fulfillment_id TEXT NOT NULL REFERENCES fulfillments(id),
     created_at     TEXT NOT NULL DEFAULT NOW(),
     updated_at     TEXT NOT NULL DEFAULT NOW()
@@ -199,7 +199,8 @@ CREATE TABLE resource_representations (
     version                TEXT NOT NULL,
     collection_name        TEXT NOT NULL,
     resource_id            TEXT NOT NULL,
-    extension_resource_uid UUID NOT NULL,
+    extension_resource_uid TEXT NOT NULL
+        REFERENCES extension_resources(uid) ON DELETE CASCADE,
     created_at             TIMESTAMPTZ NOT NULL,
     updated_at             TIMESTAMPTZ NOT NULL,
     PRIMARY KEY (service_name, collection_name, resource_id)
