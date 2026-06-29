@@ -6,15 +6,24 @@ import "context"
 // [Store.Begin] to start a read-write transaction or
 // [Store.BeginReadOnly] for a read-only transaction, then access
 // repositories through the returned [Tx].
+//
+// Both backends use serializable isolation:
+//   - PostgreSQL: SERIALIZABLE (SSI). Concurrent transactions that
+//     would produce a non-serializable history are aborted with
+//     SQLSTATE 40001 (serialization_failure). Callers inside durable
+//     workflow activities get automatic retries from the workflow
+//     engine; application-service callers should anticipate adding
+//     retry logic in the future.
+//   - SQLite: BEGIN IMMEDIATE + WAL, which serializes writers and
+//     prevents read-lock-upgrade deadlocks.
 type Store interface {
-	// Begin starts a read-write transaction. On SQLite this issues
-	// BEGIN IMMEDIATE so writers are serialized and read-lock-upgrade
-	// deadlocks cannot occur.
+	// Begin starts a read-write transaction with serializable
+	// isolation. On PostgreSQL this is SERIALIZABLE (SSI); on SQLite
+	// this issues BEGIN IMMEDIATE.
 	Begin(ctx context.Context) (Tx, error)
 
-	// BeginReadOnly starts a read-only transaction. It uses a
-	// deferred lock so it never contends with other readers or
-	// writers. Use this for queries that do not mutate state.
+	// BeginReadOnly starts a read-only transaction with serializable
+	// isolation. Use this for queries that do not mutate state.
 	BeginReadOnly(ctx context.Context) (Tx, error)
 }
 

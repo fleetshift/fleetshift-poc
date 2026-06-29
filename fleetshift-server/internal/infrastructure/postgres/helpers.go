@@ -17,6 +17,11 @@ func isUniqueViolation(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
+func isSerializationFailure(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "40001"
+}
+
 func collectRows[T any](rows *sql.Rows, scan func(scanner) (T, error)) ([]T, error) {
 	defer rows.Close()
 	var items []T

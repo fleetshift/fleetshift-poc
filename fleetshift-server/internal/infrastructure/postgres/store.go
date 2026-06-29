@@ -16,7 +16,9 @@ type Store struct {
 }
 
 func (s *Store) Begin(ctx context.Context) (domain.Tx, error) {
-	tx, err := s.DB.BeginTx(ctx, nil)
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
@@ -24,7 +26,10 @@ func (s *Store) Begin(ctx context.Context) (domain.Tx, error) {
 }
 
 func (s *Store) BeginReadOnly(ctx context.Context) (domain.Tx, error) {
-	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	tx, err := s.DB.BeginTx(ctx, &sql.TxOptions{
+		Isolation: sql.LevelSerializable,
+		ReadOnly:  true,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("begin read-only tx: %w", err)
 	}
@@ -58,7 +63,11 @@ func (t *storeTx) Commit() error {
 		return nil
 	}
 	t.done = true
-	return t.tx.Commit()
+	err := t.tx.Commit()
+	if isSerializationFailure(err) {
+		return fmt.Errorf("%w: %w", domain.ErrSerializationFailure, err)
+	}
+	return err
 }
 
 func (t *storeTx) Rollback() error {

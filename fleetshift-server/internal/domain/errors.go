@@ -39,6 +39,17 @@ var (
 	// generation. This means the fulfillment was concurrently
 	// modified and the client should re-fetch and retry.
 	ErrStaleGeneration = errors.New("stale generation")
+
+	// ErrSerializationFailure indicates that a transaction was
+	// aborted due to a serialization conflict (e.g. write-skew
+	// under PostgreSQL SSI). The caller should retry the entire
+	// transaction from the beginning.
+	//
+	// Under durable workflows this retry happens automatically
+	// (unclassified errors are retried by the engine). Application
+	// services that operate outside a workflow will need explicit
+	// retry loops in the future.
+	ErrSerializationFailure = errors.New("serialization failure")
 )
 
 // terminalPrefix is the marker prepended to terminal errors.
@@ -85,4 +96,16 @@ func IsAuthExpired(err error) bool {
 		return true
 	}
 	return err != nil && strings.Contains(err.Error(), ErrAuthExpired.Error())
+}
+
+// IsSerializationFailure reports whether err indicates a
+// transaction was aborted due to a serialization conflict. Like
+// [IsTerminal], it checks the Go error chain first, then falls
+// back to string matching so the classification survives
+// serialization across workflow engine boundaries.
+func IsSerializationFailure(err error) bool {
+	if errors.Is(err, ErrSerializationFailure) {
+		return true
+	}
+	return err != nil && strings.Contains(err.Error(), ErrSerializationFailure.Error())
 }
