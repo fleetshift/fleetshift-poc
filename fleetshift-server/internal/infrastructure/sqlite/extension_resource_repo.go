@@ -165,34 +165,43 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 	return nil
 }
 
+// erInstanceQuerySQLite is the shared SELECT + FROM + JOINs for
+// instance aggregate reads. Callers append a WHERE clause.
+var erInstanceQuerySQLite = `SELECT er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
+	m.current_version, m.fulfillment_id,
+	inv.labels, inv.observation, inv.observed_at, inv.updated_at,
+	(SELECT json_group_array(json_object(
+		'type', c.type,
+		'status', c.status,
+		'reason', c.reason,
+		'message', c.message,
+		'last_transition_time', c.last_transition_time
+	))
+	 FROM (SELECT type, status, reason, message, last_transition_time
+	       FROM extension_resource_inventory_conditions
+	       WHERE extension_resource_uid = er.uid
+	       ORDER BY type) c) AS inv_conditions
+FROM extension_resources er
+LEFT JOIN extension_resource_managed m ON m.extension_resource_uid = er.uid
+LEFT JOIN extension_resource_inventory inv ON inv.extension_resource_uid = er.uid
+`
+
 func (r *ExtensionResourceRepo) Get(ctx context.Context, name domain.FullResourceName) (*domain.ExtensionResource, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
-		        m.current_version, m.fulfillment_id
-		 FROM extension_resources er
-		 LEFT JOIN extension_resource_managed m ON m.extension_resource_uid = er.uid
-		 WHERE er.service_name = ? AND er.resource_name = ?`,
+		erInstanceQuerySQLite+`WHERE er.service_name = ? AND er.resource_name = ?`,
 		string(name.ServiceName()), string(name.ResourceName()))
 	return r.scanInstance(row)
 }
 
 func (r *ExtensionResourceRepo) GetByUID(ctx context.Context, uid domain.ExtensionResourceUID) (*domain.ExtensionResource, error) {
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
-		        m.current_version, m.fulfillment_id
-		 FROM extension_resources er
-		 LEFT JOIN extension_resource_managed m ON m.extension_resource_uid = er.uid
-		 WHERE er.uid = ?`, uid.String())
+		erInstanceQuerySQLite+`WHERE er.uid = ?`, uid.String())
 	return r.scanInstance(row)
 }
 
 func (r *ExtensionResourceRepo) ListByResourceType(ctx context.Context, rt domain.ResourceType) ([]*domain.ExtensionResource, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT er.uid, er.service_name, er.type_name, er.resource_name, er.labels, er.created_at, er.updated_at,
-		        m.current_version, m.fulfillment_id
-		 FROM extension_resources er
-		 LEFT JOIN extension_resource_managed m ON m.extension_resource_uid = er.uid
-		 WHERE er.service_name = ? AND er.type_name = ? ORDER BY er.resource_name`,
+		erInstanceQuerySQLite+`WHERE er.service_name = ? AND er.type_name = ? ORDER BY er.resource_name`,
 		string(rt.ServiceName()), rt.TypeName())
 	if err != nil {
 		return nil, err
@@ -353,9 +362,13 @@ func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) 
 	var uidStr, serviceName, typeName, nameStr, labelsJSON, createdAt, updatedAt string
 	var mVersion sql.NullInt64
 	var mFulfillmentID sql.NullString
+	var invLabels, invObservation, invObservedAt, invUpdatedAt sql.NullString
+	var invConditionsJSON sql.NullString
 
 	if err := s.Scan(&uidStr, &serviceName, &typeName, &nameStr, &labelsJSON, &createdAt, &updatedAt,
-		&mVersion, &mFulfillmentID); err != nil {
+		&mVersion, &mFulfillmentID,
+		&invLabels, &invObservation, &invObservedAt, &invUpdatedAt,
+		&invConditionsJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, domain.ErrNotFound
 		}
@@ -389,6 +402,29 @@ func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) 
 			CurrentVersion: domain.IntentVersion(mVersion.Int64),
 			FulfillmentID:  domain.FulfillmentID(mFulfillmentID.String),
 		}
+	}
+	if invObservedAt.Valid {
+		invSnap := domain.InventoryResourceSnapshot{
+			Labels: map[string]string{},
+		}
+		if invLabels.Valid {
+			json.Unmarshal([]byte(invLabels.String), &invSnap.Labels)
+		}
+		if invObservation.Valid {
+			invSnap.Observation = json.RawMessage(invObservation.String)
+		}
+		if t, err := time.Parse(time.RFC3339Nano, invObservedAt.String); err == nil {
+			invSnap.ObservedAt = t
+		}
+		if invUpdatedAt.Valid {
+			if t, err := time.Parse(time.RFC3339Nano, invUpdatedAt.String); err == nil {
+				invSnap.UpdatedAt = t
+			}
+		}
+		if invConditionsJSON.Valid {
+			invSnap.Conditions, _ = unmarshalConditionSnapshots([]byte(invConditionsJSON.String))
+		}
+		snap.Inventory = &invSnap
 	}
 	return domain.ExtensionResourceFromSnapshot(snap), nil
 }

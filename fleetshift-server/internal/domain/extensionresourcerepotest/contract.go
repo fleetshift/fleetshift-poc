@@ -438,6 +438,79 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		assertEqual(t, "FulfillmentID", got.Managed().FulfillmentID(), fID)
 	})
 
+	// InventoryRoundTrip verifies that Get, GetByUID, and
+	// ListByResourceType all hydrate ExtensionResource.Inventory
+	// after UpsertInventory has written inventory state.
+	t.Run("InventoryRoundTrip", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ExtensionResources()
+
+		rt := domain.ResourceType("inv.fleetshift.io/Node")
+		if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
+			t.Fatalf("CreateType: %v", err)
+		}
+		r := newInventoryER(rt, "nodes/inv-rt")
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		now := fixedTime.Add(time.Minute)
+		inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
+			Labels:      map[string]string{"zone": "us-east-1"},
+			Observation: json.RawMessage(`{"cpu":4}`),
+			Conditions: []domain.ConditionSnapshot{
+				{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: now},
+			},
+			ObservedAt: now,
+			UpdatedAt:  now,
+		})
+		if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			ExtensionResourceUID: r.UID(),
+			Inventory:            *inv,
+		}}); err != nil {
+			t.Fatalf("UpsertInventory: %v", err)
+		}
+
+		assertInventory := func(label string, got *domain.ExtensionResource) {
+			t.Helper()
+			if got.Inventory() == nil {
+				t.Fatalf("%s: Inventory is nil after round-trip", label)
+			}
+			assertEqual(t, label+" Labels[zone]", got.Inventory().Labels()["zone"], "us-east-1")
+			assertEqual(t, label+" Observation", string(got.Inventory().Observation()), `{"cpu":4}`)
+			if !got.Inventory().ObservedAt().Equal(now) {
+				t.Errorf("%s: ObservedAt = %v, want %v", label, got.Inventory().ObservedAt(), now)
+			}
+			if len(got.Inventory().Conditions()) != 1 {
+				t.Fatalf("%s: Conditions len = %d, want 1", label, len(got.Inventory().Conditions()))
+			}
+			assertEqual(t, label+" Condition.Type", got.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
+			assertEqual(t, label+" Condition.Status", got.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
+		}
+
+		byName, err := repo.Get(ctx, rt.FullName("nodes/inv-rt"))
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		assertInventory("Get", byName)
+
+		byUID, err := repo.GetByUID(ctx, r.UID())
+		if err != nil {
+			t.Fatalf("GetByUID: %v", err)
+		}
+		assertInventory("GetByUID", byUID)
+
+		list, err := repo.ListByResourceType(ctx, rt)
+		if err != nil {
+			t.Fatalf("ListByResourceType: %v", err)
+		}
+		if len(list) != 1 {
+			t.Fatalf("ListByResourceType len = %d, want 1", len(list))
+		}
+		assertInventory("ListByResourceType", list[0])
+	})
+
 	t.Run("LabelsRoundTrip", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
