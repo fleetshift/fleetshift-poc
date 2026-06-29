@@ -1528,6 +1528,53 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "Condition.Status", view.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
 		})
 
+		t.Run("RecordConditionsMultipleUIDsGetInventoryRows", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r1 := newInventoryER("inv.fleetshift.io/Node", "nodes/multi-a")
+			r2 := newInventoryER("inv.fleetshift.io/Node", "nodes/multi-b")
+			if err := repo.Create(ctx, r1); err != nil {
+				t.Fatalf("Create r1: %v", err)
+			}
+			if err := repo.Create(ctx, r2); err != nil {
+				t.Fatalf("Create r2: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			// Single batch with reports for two different UIDs.
+			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
+				domain.NewConditionReport(r1.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
+				domain.NewConditionReport(r2.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
+			}); err != nil {
+				t.Fatalf("RecordConditions: %v", err)
+			}
+
+			// Both UIDs must have an inventory row.
+			for _, tc := range []struct {
+				name string
+				rn   domain.ResourceName
+			}{
+				{"r1", "nodes/multi-a"},
+				{"r2", "nodes/multi-b"},
+			} {
+				view, err := repo.GetView(ctx, "inv.fleetshift.io/Node", tc.rn)
+				if err != nil {
+					t.Fatalf("GetView %s: %v", tc.name, err)
+				}
+				if view.Inventory == nil {
+					t.Fatalf("%s: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch", tc.name)
+				}
+				if len(view.Inventory.Conditions()) != 1 {
+					t.Fatalf("%s: Conditions len = %d, want 1", tc.name, len(view.Inventory.Conditions()))
+				}
+			}
+		})
+
 		// CrossPathConsistency exercises a sequence that alternates
 		// between UpsertInventory and RecordConditions, mixing genuine
 		// transitions with duplicates in both directions.

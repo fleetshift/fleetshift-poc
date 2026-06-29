@@ -612,11 +612,18 @@ func (r *ExtensionResourceRepo) RecordConditions(ctx context.Context, reports []
 	if len(reports) == 0 {
 		return nil
 	}
-	// Ensure a minimal inventory row exists so conditions can be
-	// reported before a full inventory upsert.
-	first := reports[0]
-	if err := r.ensureInventoryRow(ctx, first.ExtensionResourceUID()); err != nil {
-		return err
+	// Ensure a minimal inventory row exists for every unique UID in the
+	// batch so conditions can be reported before a full inventory upsert.
+	seen := make(map[domain.ExtensionResourceUID]struct{})
+	for _, rpt := range reports {
+		uid := rpt.ExtensionResourceUID()
+		if _, ok := seen[uid]; ok {
+			continue
+		}
+		seen[uid] = struct{}{}
+		if err := r.ensureInventoryRow(ctx, uid); err != nil {
+			return err
+		}
 	}
 	now := time.Now().UTC()
 	for _, rpt := range reports {
