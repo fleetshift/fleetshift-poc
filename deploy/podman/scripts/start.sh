@@ -63,25 +63,28 @@ if [ "$AUTH_MODE" = "local" ]; then
   KC_URL="https://${KC_HOSTNAME:-keycloak}:${KC_HTTPS_PORT:-8443}/auth"
 
   echo "==> Waiting for Keycloak API..."
-  api_deadline=$((SECONDS + 30))
+  api_deadline=$((SECONDS + 90))
   while true; do
     if curl -sf --connect-timeout 2 --max-time 3 \
+      --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
       "$KC_URL/realms/master" >/dev/null 2>&1; then
       break
     fi
     if (( SECONDS >= api_deadline )); then
-      echo "ERROR: Keycloak API not reachable after 30 seconds." >&2
+      echo "ERROR: Keycloak API not reachable after 90 seconds." >&2
       echo "  Check local mkcert trust or rerun ./deploy/podman/scripts/generate-certs.sh." >&2
       exit 1
     fi
     sleep 1
   done
 
-  ADMIN_TOKEN=$(curl -sf "$KC_URL/realms/master/protocol/openid-connect/token" \
+  ADMIN_TOKEN=$(curl -sf --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
+    "$KC_URL/realms/master/protocol/openid-connect/token" \
     -d "grant_type=password&client_id=admin-cli&username=admin&password=${KC_BOOTSTRAP_ADMIN_PASSWORD}" \
     | jq -r .access_token)
 
-  PROFILE_JSON=$(curl -sf "$KC_URL/admin/realms/fleetshift/users/profile" \
+  PROFILE_JSON=$(curl -sf --cacert "${COMPOSE_DIR}/.certs/ca.crt" \
+    "$KC_URL/admin/realms/fleetshift/users/profile" \
     -H "Authorization: Bearer $ADMIN_TOKEN")
 
   if echo "$PROFILE_JSON" | jq -e '.attributes[] | select(.name == "github_username")' >/dev/null 2>&1; then
@@ -96,7 +99,7 @@ if [ "$AUTH_MODE" = "local" ]; then
       "permissions": {"view": ["admin", "user"], "edit": ["admin"]},
       "multivalued": false
     }]')
-    curl -sf -o /dev/null -X PUT \
+    curl -sf -o /dev/null --cacert "${COMPOSE_DIR}/.certs/ca.crt" -X PUT \
       "$KC_URL/admin/realms/fleetshift/users/profile" \
       -H "Authorization: Bearer $ADMIN_TOKEN" \
       -H "Content-Type: application/json" \
