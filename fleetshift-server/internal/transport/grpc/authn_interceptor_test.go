@@ -253,23 +253,19 @@ func TestAuthnInterceptor_NoToken_WithMethodsConfigured(t *testing.T) {
 	}
 
 	verifier := &fakeOIDCTokenVerifier{acceptToken: "valid-token"}
-	client, capture := setupAuthnTest(t, repo, verifier)
+	client, _ := setupAuthnTest(t, repo, verifier)
 
-	// No authorization header
+	// No authorization header — should be rejected
 	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
-	if err != nil {
-		t.Fatalf("ListDeployments: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-
-	if capture.authCtx == nil {
-		t.Fatal("AuthorizationContext is nil")
-	}
-	if capture.authCtx.Subject != nil {
-		t.Errorf("Subject = %v, want nil (anonymous, no token sent)", capture.authCtx.Subject)
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated", status.Code(err))
 	}
 }
 
-func TestAuthnInterceptor_NilOIDCConfig_Anonymous(t *testing.T) {
+func TestAuthnInterceptor_NilOIDCConfig_Unauthenticated(t *testing.T) {
 	repo := newFakeAuthMethodRepo()
 	ctx := context.Background()
 	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
@@ -281,18 +277,14 @@ func TestAuthnInterceptor_NilOIDCConfig_Anonymous(t *testing.T) {
 	}
 
 	verifier := &fakeOIDCTokenVerifier{acceptToken: "valid-token"}
-	client, capture := setupAuthnTest(t, repo, verifier)
+	client, _ := setupAuthnTest(t, repo, verifier)
 
 	ctx = metadata.AppendToOutgoingContext(ctx, "authorization", "Bearer valid-token")
 	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
-	if err != nil {
-		t.Fatalf("ListDeployments: %v", err)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
-
-	if capture.authCtx == nil {
-		t.Fatal("AuthorizationContext is nil")
-	}
-	if capture.authCtx.Subject != nil {
-		t.Errorf("Subject = %v, want nil (nil OIDC config should be skipped)", capture.authCtx.Subject)
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
+		t.Errorf("code = %v, want Unauthenticated", status.Code(err))
 	}
 }

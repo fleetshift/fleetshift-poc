@@ -130,6 +130,9 @@ func (a *AuthnInterceptor) authenticate(ctx context.Context, fullMethod string) 
 
 	if subject != nil {
 		probe.Authenticated(matchedType, *subject)
+	} else if len(methods) > 0 {
+		probe.Anonymous()
+		return ctx, status.Errorf(codes.Unauthenticated, "unauthenticated")
 	} else {
 		probe.Anonymous()
 	}
