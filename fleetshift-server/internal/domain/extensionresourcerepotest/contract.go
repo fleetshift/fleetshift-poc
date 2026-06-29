@@ -1201,8 +1201,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
 			reports := []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionFalse, "Starting", "not yet", t1, t1),
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Starting", "not yet", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
 			}
 			if err := repo.RecordConditions(ctx, reports); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
@@ -1253,14 +1253,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			// First report: Ready=True
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
 			}); err != nil {
 				t.Fatalf("first record: %v", err)
 			}
 
 			// Duplicate: same (type, status, reason, message) -- should be skipped
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
 			}); err != nil {
 				t.Fatalf("duplicate record: %v", err)
 			}
@@ -1276,7 +1276,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			// Genuine transition: different status
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionFalse, "Failed", "oops", t3, t3),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Failed", "oops", t3, t3),
 			}); err != nil {
 				t.Fatalf("transition record: %v", err)
 			}
@@ -1311,14 +1311,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			// c1: Ready=True
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
 			}); err != nil {
 				t.Fatalf("c1: %v", err)
 			}
 
 			// c2: Ready=False (genuine transition)
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionFalse, "Degraded", "something broke", t2, t2),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Degraded", "something broke", t2, t2),
 			}); err != nil {
 				t.Fatalf("c2: %v", err)
 			}
@@ -1326,7 +1326,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// c1 again: Ready=True -- looks like c1 but the latest is c2,
 			// so this is a genuine third transition and must NOT be dropped.
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t3, t3),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t3, t3),
 			}); err != nil {
 				t.Fatalf("c1 again: %v", err)
 			}
@@ -1362,8 +1362,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			reports := []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
-				domain.NewConditionReport(r.UID(), "Provisioned", domain.ConditionTrue, "done", "", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
+				mustConditionReport(t, r.UID(), "Provisioned", domain.ConditionTrue, "done", "", t1, t1),
 			}
 			if err := repo.RecordConditions(ctx, reports); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
@@ -1534,7 +1534,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			// Step 1: RecordConditions sets Ready=True
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
 			}); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
 			}
@@ -1557,7 +1557,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			// Step 3: RecordConditions transitions Ready=True again
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "Recovered", "back", t3, t3),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "Recovered", "back", t3, t3),
 			}); err != nil {
 				t.Fatalf("RecordConditions again: %v", err)
 			}
@@ -1602,7 +1602,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
+				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
 			}); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
 			}
@@ -1644,8 +1644,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				domain.NewConditionReport(r1.UID(), "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1, t1),
-				domain.NewConditionReport(r2.UID(), "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2, t2),
+				mustConditionReport(t, r1.UID(), "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1, t1),
+				mustConditionReport(t, r2.UID(), "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2, t2),
 			}); err != nil {
 				t.Fatalf("RecordConditions: %v", err)
 			}
@@ -1756,7 +1756,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			reportWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
 				if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-					domain.NewConditionReport(r.UID(), "Ready", status, reason, msg, ts, ts),
+					mustConditionReport(t, r.UID(), "Ready", status, reason, msg, ts, ts),
 				}); err != nil {
 					t.Fatalf("%s RecordConditions: %v", step, err)
 				}
@@ -1824,4 +1824,21 @@ func assertEqual[T comparable](t *testing.T, field string, got, want T) {
 	if got != want {
 		t.Errorf("%s = %v, want %v", field, got, want)
 	}
+}
+
+func mustConditionReport(
+	t *testing.T,
+	erUID domain.ExtensionResourceUID,
+	conditionType domain.ConditionType,
+	status domain.ConditionStatus,
+	reason, message string,
+	lastTransitionTime time.Time,
+	observedAt time.Time,
+) domain.ConditionReport {
+	t.Helper()
+	r, err := domain.NewConditionReport(erUID, conditionType, status, reason, message, lastTransitionTime, observedAt)
+	if err != nil {
+		t.Fatalf("NewConditionReport: %v", err)
+	}
+	return r
 }

@@ -126,7 +126,10 @@ func NewConditionType(s string) (ConditionType, error) {
 }
 
 // ConditionStatus represents the status of a condition. Uses the
-// Kubernetes-standard True/False/Unknown trichotomy.
+// Kubernetes-standard True/False/Unknown trichotomy. Construct via
+// [NewConditionStatus] at parse boundaries; use the package-level
+// constants ([ConditionTrue], [ConditionFalse], [ConditionUnknown])
+// when the value is statically known.
 type ConditionStatus string
 
 const (
@@ -135,11 +138,22 @@ const (
 	ConditionUnknown ConditionStatus = "Unknown"
 )
 
-// validConditionStatuses is the closed set accepted by [NewCondition].
+// validConditionStatuses is the closed set accepted by
+// [NewConditionStatus].
 var validConditionStatuses = map[ConditionStatus]struct{}{
 	ConditionTrue:    {},
 	ConditionFalse:   {},
 	ConditionUnknown: {},
+}
+
+// NewConditionStatus validates and returns a [ConditionStatus].
+// Rejects values outside the True/False/Unknown trichotomy.
+func NewConditionStatus(s string) (ConditionStatus, error) {
+	cs := ConditionStatus(s)
+	if _, ok := validConditionStatuses[cs]; !ok {
+		return "", fmt.Errorf("condition status %q: %w: must be True, False, or Unknown", s, ErrInvalidArgument)
+	}
+	return cs, nil
 }
 
 // Condition represents an observed condition on an inventory resource,
@@ -153,13 +167,9 @@ type Condition struct {
 	lastTransitionTime time.Time
 }
 
-// NewCondition constructs a [Condition], validating that the status
-// is one of True/False/Unknown. Reason and message are informational
-// and may be empty.
+// NewCondition constructs a [Condition]. Reason and message are
+// informational and may be empty.
 func NewCondition(ct ConditionType, status ConditionStatus, reason, message string, transitionTime time.Time) (Condition, error) {
-	if _, ok := validConditionStatuses[status]; !ok {
-		return Condition{}, fmt.Errorf("condition status %q: %w: must be True, False, or Unknown", status, ErrInvalidArgument)
-	}
 	return Condition{
 		conditionType:      ct,
 		status:             status,
@@ -276,7 +286,7 @@ func NewConditionReport(
 	reason, message string,
 	lastTransitionTime time.Time,
 	observedAt time.Time,
-) ConditionReport {
+) (ConditionReport, error) {
 	return ConditionReport{
 		extensionResourceUID: erUID,
 		conditionType:        conditionType,
@@ -285,7 +295,7 @@ func NewConditionReport(
 		message:              message,
 		lastTransitionTime:   lastTransitionTime,
 		observedAt:           observedAt,
-	}
+	}, nil
 }
 
 func (r ConditionReport) ExtensionResourceUID() ExtensionResourceUID { return r.extensionResourceUID }

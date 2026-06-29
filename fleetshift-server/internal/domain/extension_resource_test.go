@@ -238,6 +238,32 @@ func TestNewConditionType_Empty_Rejected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// ConditionStatus
+// ---------------------------------------------------------------------------
+
+func TestNewConditionStatus_Valid(t *testing.T) {
+	for _, s := range []string{"True", "False", "Unknown"} {
+		cs, err := NewConditionStatus(s)
+		if err != nil {
+			t.Errorf("NewConditionStatus(%q): unexpected error: %v", s, err)
+		}
+		assertEq(t, "ConditionStatus", string(cs), s)
+	}
+}
+
+func TestNewConditionStatus_Invalid_Rejected(t *testing.T) {
+	for _, s := range []string{"", "Bogus", "true", "false"} {
+		_, err := NewConditionStatus(s)
+		if err == nil {
+			t.Errorf("NewConditionStatus(%q): expected error", s)
+		}
+		if !errors.Is(err, ErrInvalidArgument) {
+			t.Errorf("NewConditionStatus(%q): got %v, want ErrInvalidArgument", s, err)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Condition
 // ---------------------------------------------------------------------------
 
@@ -257,29 +283,27 @@ func TestNewCondition(t *testing.T) {
 	assertEq(t, "LastTransitionTime", cond.LastTransitionTime(), transTime)
 }
 
-func TestNewCondition_InvalidStatus_Rejected(t *testing.T) {
+// ---------------------------------------------------------------------------
+// ConditionReport
+// ---------------------------------------------------------------------------
+
+func TestNewConditionReport(t *testing.T) {
+	uid := NewExtensionResourceUID()
 	ct, _ := NewConditionType("Ready")
-	transTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	ts := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
-	_, err := NewCondition(ct, ConditionStatus("Bogus"), "reason", "msg", transTime)
-	if err == nil {
-		t.Fatal("expected error for invalid condition status")
+	report, err := NewConditionReport(uid, ct, ConditionTrue, "AllGood", "ok", ts, ts)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if !errors.Is(err, ErrInvalidArgument) {
-		t.Errorf("got %v, want ErrInvalidArgument", err)
-	}
-}
 
-func TestNewCondition_AllStatuses(t *testing.T) {
-	ct, _ := NewConditionType("Ready")
-	transTime := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-
-	for _, status := range []ConditionStatus{ConditionTrue, ConditionFalse, ConditionUnknown} {
-		_, err := NewCondition(ct, status, "r", "m", transTime)
-		if err != nil {
-			t.Errorf("NewCondition with status %q: unexpected error: %v", status, err)
-		}
-	}
+	assertEq(t, "ExtensionResourceUID", report.ExtensionResourceUID(), uid)
+	assertEq(t, "ConditionType", report.ConditionType(), ct)
+	assertEq(t, "Status", report.Status(), ConditionTrue)
+	assertEq(t, "Reason", report.Reason(), "AllGood")
+	assertEq(t, "Message", report.Message(), "ok")
+	assertEq(t, "LastTransitionTime", report.LastTransitionTime(), ts)
+	assertEq(t, "ObservedAt", report.ObservedAt(), ts)
 }
 
 // ---------------------------------------------------------------------------
