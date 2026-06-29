@@ -268,8 +268,7 @@ Each user-facing concept defines its own API surface, lifecycle rules, and edita
 
 Managed resource specs are stored as immutable versions — the user-facing version history. Each update to a managed resource creates a new version; the managed resource HEAD table tracks which version is current.
 
-
-Each version is immutable — INSERT only, never UPDATE. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
+Each version is immutable — INSERT only, never UPDATE. Postgres: `PARTITION BY LIST (resource_type)`, partitions at addon registration. Benefits: rollback (point to version N-1), audit (what spec when), attestation (per-version signature), debugging (diff versions).
 
 Resource intent versioning is a managed resource layer concern, distinct from Fulfillment strategy versioning (see [below](#fulfillment-strategy-versioning)). When a new resource intent version is created, the platform creates a corresponding manifest strategy version on the Fulfillment (referencing the new intent version), which bumps the Fulfillment's generation and triggers reconciliation. But the two version histories are independent: the resource intent tracks what the user asked for; the Fulfillment's manifest strategy tracks what the system was configured to deliver.
 
