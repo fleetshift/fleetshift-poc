@@ -21,6 +21,7 @@ import (
 // fakeAuthMethodRepo is an in-memory implementation of AuthMethodRepository.
 type fakeAuthMethodRepo struct {
 	methods map[domain.AuthMethodID]domain.AuthMethod
+	listErr error // if non-nil, List() returns this error
 }
 
 func newFakeAuthMethodRepo() *fakeAuthMethodRepo {
@@ -41,6 +42,9 @@ func (r *fakeAuthMethodRepo) Get(ctx context.Context, id domain.AuthMethodID) (d
 }
 
 func (r *fakeAuthMethodRepo) List(ctx context.Context) ([]domain.AuthMethod, error) {
+	if r.listErr != nil {
+		return nil, r.listErr
+	}
 	out := make([]domain.AuthMethod, 0, len(r.methods))
 	for _, m := range r.methods {
 		out = append(out, m)
@@ -286,5 +290,104 @@ func TestAuthnInterceptor_NilOIDCConfig_Unauthenticated(t *testing.T) {
 	}
 	if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
 		t.Errorf("code = %v, want Unauthenticated", status.Code(err))
+	}
+}
+
+func TestAuthnInterceptor_StoreError_ReturnsInternal(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	ctx := context.Background()
+	// Save an auth method first so repo is not empty
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "oidc-1",
+		Type: domain.AuthMethodTypeOIDC,
+		OIDC: &domain.OIDCConfig{
+			IssuerURL: "https://issuer.example.com",
+			Audience:  "test-audience",
+			JWKSURI:   "https://issuer.example.com/jwks",
+
+			AuthorizationEndpoint: "https://issuer.example.com/authorize",
+			TokenEndpoint:         "https://issuer.example.com/token",
+		},
+	})); err != nil {
+		t.Fatalf("Save auth method: %v", err)
+	}
+
+	// Now make List() fail
+	repo.listErr = errors.New("database connection failed")
+
+	verifier := &fakeOIDCTokenVerifier{}
+	client, _ := setupAuthnTest(t, repo, verifier)
+
+	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.Internal {
+		t.Errorf("code = %v, want Internal", status.Code(err))
+	}
+}
+
+func TestAuthnInterceptor_SetupToEnforcedTransition(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	verifier := &fakeOIDCTokenVerifier{acceptToken: "valid-token"}
+	client, capture := setupAuthnTest(t, repo, verifier)
+
+	ctx := context.Background()
+
+	// Phase 1: No auth methods — request succeeds anonymously
+	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
+	if err != nil {
+		t.Fatalf("ListDeployments with no auth methods: %v", err)
+	}
+	if capture.authCtx == nil {
+		t.Fatal("AuthorizationContext is nil")
+	}
+	if capture.authCtx.Subject != nil {
+		t.Errorf("Phase 1: Subject = %v, want nil (anonymous)", capture.authCtx.Subject)
+	}
+
+	// Phase 2: Save an auth method
+	if err := repo.Save(ctx, domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "oidc-1",
+		Type: domain.AuthMethodTypeOIDC,
+		OIDC: &domain.OIDCConfig{
+			IssuerURL: "https://issuer.example.com",
+			Audience:  "test-audience",
+			JWKSURI:   "https://issuer.example.com/jwks",
+
+			AuthorizationEndpoint: "https://issuer.example.com/authorize",
+			TokenEndpoint:         "https://issuer.example.com/token",
+		},
+	})); err != nil {
+		t.Fatalf("Save auth method: %v", err)
+	}
+
+	// Phase 3: Request without token should now be rejected
+	_, err = client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
+	if err == nil {
+		t.Fatal("expected error after auth method configured, got nil")
+	}
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.Unauthenticated {
+		t.Errorf("Phase 3: code = %v, want Unauthenticated", status.Code(err))
+	}
+}
+
+func TestAuthnInterceptor_TokenInSetupMode_Anonymous(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	verifier := &fakeOIDCTokenVerifier{}
+	client, capture := setupAuthnTest(t, repo, verifier)
+
+	// No auth methods configured, but send a token anyway
+	ctx := metadata.AppendToOutgoingContext(context.Background(), "authorization", "Bearer some-token")
+	_, err := client.ListDeployments(ctx, &pb.ListDeploymentsRequest{})
+	if err != nil {
+		t.Fatalf("ListDeployments: %v", err)
+	}
+
+	if capture.authCtx == nil {
+		t.Fatal("AuthorizationContext is nil")
+	}
+	if capture.authCtx.Subject != nil {
+		t.Errorf("Subject = %v, want nil (token ignored in setup mode)", capture.authCtx.Subject)
 	}
 }
