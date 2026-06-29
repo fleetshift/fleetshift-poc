@@ -416,20 +416,24 @@ func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.Res
 	// reconnections. Uses JSON serialization because FulfillmentRelation
 	// is a sealed interface whose future implementations may not be
 	// comparable with ==.
-	var existingRelation domain.FulfillmentRelation
+	//
+	// When the persisted type def has no management metadata yet
+	// (existing.Management() is nil), the missing relation is treated as
+	// repairable/backfillable rather than drift — only reject when both
+	// sides are present and truly differ.
 	if mgmt := existing.Management(); mgmt != nil {
-		existingRelation = mgmt.Relation()
-	}
-	existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
-	if err != nil {
-		return fmt.Errorf("marshal existing relation for drift detection: %w", err)
-	}
-	newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
-	if err != nil {
-		return fmt.Errorf("marshal new relation for drift detection: %w", err)
-	}
-	if string(existingRelJSON) != string(newRelJSON) {
-		return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, rt)
+		existingRelation := mgmt.Relation()
+		existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
+		if err != nil {
+			return fmt.Errorf("marshal existing relation for drift detection: %w", err)
+		}
+		newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
+		if err != nil {
+			return fmt.Errorf("marshal new relation for drift detection: %w", err)
+		}
+		if string(existingRelJSON) != string(newRelJSON) {
+			return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, rt)
+		}
 	}
 
 	return nil

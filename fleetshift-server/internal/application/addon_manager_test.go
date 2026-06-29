@@ -868,6 +868,60 @@ func TestAddonManager_ConnectRejectsConflictingManagementRelation(t *testing.T) 
 	}
 }
 
+// TestAddonManager_ConnectAllowsBackfillWhenManagementNil verifies that
+// reconnecting an addon whose persisted type def has no management
+// metadata (Management() == nil) does NOT produce a drift error. The
+// missing metadata is treated as repairable/backfillable.
+func TestAddonManager_ConnectAllowsBackfillWhenManagementNil(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	// Pre-create a type def WITHOUT management metadata so that
+	// Management() returns nil after hydration.
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	_, err := typeSvc.Create(context.Background(), application.CreateExtensionTypeInput{
+		ResourceType: "test.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management:   nil, // no management metadata
+	})
+	if err != nil {
+		t.Fatalf("pre-create type def: %v", err)
+	}
+
+	// Build a fresh manager sharing the same DB.
+	router := delivery.NewRoutingDeliveryService()
+	activator := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:    router,
+		TypeSvc:   typeSvc,
+		Activator: activator,
+	})
+
+	ctx := context.Background()
+
+	if err := mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	targetSvc := &application.TargetService{Store: store}
+	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+
+	// Connect with a non-nil relation — should succeed because existing
+	// management is nil (backfillable), not conflicting.
+	schema := clusterSchema()
+	if err := mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect should allow backfill when existing management is nil, got: %v", err)
+	}
+}
+
 // stubDeliveryAgent is a minimal stub for testing delivery agent
 // registration through the addon lifecycle. It satisfies the
 // domain.DeliveryAgent interface without performing real delivery.
