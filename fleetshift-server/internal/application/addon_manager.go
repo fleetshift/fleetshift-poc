@@ -367,7 +367,7 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 			if !errors.Is(err, domain.ErrAlreadyExists) {
 				return fmt.Errorf("create type def: %w", err)
 			}
-			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol); err != nil {
+			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol, schema.Relation); err != nil {
 				return err
 			}
 		}
@@ -400,7 +400,7 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 // reconnection attempts that change the API identity fields. The
 // service name is not checked because it is derived from the
 // [domain.ResourceType], which is already the lookup key.
-func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID) error {
+func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID, newRelation domain.FulfillmentRelation) error {
 	existing, err := m.typeSvc.Get(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("load existing type def for drift detection: %w", err)
@@ -411,5 +411,26 @@ func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.Res
 	if existing.CollectionID() != newCol {
 		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID(), newCol)
 	}
+
+	// Compare management relation to detect stale metadata from addon
+	// reconnections. Uses JSON serialization because FulfillmentRelation
+	// is a sealed interface whose future implementations may not be
+	// comparable with ==.
+	var existingRelation domain.FulfillmentRelation
+	if mgmt := existing.Management(); mgmt != nil {
+		existingRelation = mgmt.Relation()
+	}
+	existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
+	if err != nil {
+		return fmt.Errorf("marshal existing relation for drift detection: %w", err)
+	}
+	newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
+	if err != nil {
+		return fmt.Errorf("marshal new relation for drift detection: %w", err)
+	}
+	if string(existingRelJSON) != string(newRelJSON) {
+		return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, rt)
+	}
+
 	return nil
 }
