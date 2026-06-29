@@ -452,6 +452,29 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 			FulfillmentID:  domain.FulfillmentID(managedFID.String),
 		}
 	}
+
+	// Inventory: include in snapshot so ExtensionResourceFromSnapshot
+	// hydrates Resource.Inventory().
+	if invObservedAt != nil {
+		invSnap := domain.InventoryResourceSnapshot{
+			Labels:     map[string]string{},
+			ObservedAt: *invObservedAt,
+		}
+		if invLabels.Valid {
+			json.Unmarshal([]byte(invLabels.String), &invSnap.Labels)
+		}
+		if invObservation.Valid {
+			invSnap.Observation = compactJSONB(invObservation.String)
+		}
+		if invUpdatedAt != nil {
+			invSnap.UpdatedAt = *invUpdatedAt
+		}
+		if invConditionsJSON.Valid {
+			invSnap.Conditions, _ = unmarshalConditionSnapshots([]byte(invConditionsJSON.String))
+		}
+		erSnap.Inventory = &invSnap
+	}
+
 	v.Resource = *domain.ExtensionResourceFromSnapshot(erSnap)
 
 	// Intent and fulfillment are only populated for managed resources.
@@ -480,27 +503,6 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 			return domain.ExtensionResourceView{}, err
 		}
 		v.Fulfillment = domain.FulfillmentFromSnapshot(fSnap)
-	}
-
-	// Inventory: build snapshot including conditions, hydrate once.
-	if invObservedAt != nil {
-		invSnap := domain.InventoryResourceSnapshot{
-			Labels:     map[string]string{},
-			ObservedAt: *invObservedAt,
-		}
-		if invLabels.Valid {
-			json.Unmarshal([]byte(invLabels.String), &invSnap.Labels)
-		}
-		if invObservation.Valid {
-			invSnap.Observation = compactJSONB(invObservation.String)
-		}
-		if invUpdatedAt != nil {
-			invSnap.UpdatedAt = *invUpdatedAt
-		}
-		if invConditionsJSON.Valid {
-			invSnap.Conditions, _ = unmarshalConditionSnapshots([]byte(invConditionsJSON.String))
-		}
-		v.Inventory = domain.InventoryResourceFromSnapshot(invSnap)
 	}
 
 	return v, nil

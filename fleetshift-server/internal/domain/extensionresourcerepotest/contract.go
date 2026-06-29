@@ -872,15 +872,15 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if view.Inventory == nil {
+			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil after upsert")
 			}
-			assertEqual(t, "Labels[zone]", view.Inventory.Labels()["zone"], "us-east-1")
-			assertEqual(t, "Observation", string(view.Inventory.Observation()), `{"cpu":4}`)
-			if len(view.Inventory.Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Inventory.Conditions()))
+			assertEqual(t, "Labels[zone]", view.Resource.Inventory().Labels()["zone"], "us-east-1")
+			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"cpu":4}`)
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "Condition.Type", view.Inventory.Conditions()[0].Type(), domain.ConditionType("Ready"))
+			assertEqual(t, "Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
 		})
 
 		t.Run("UpsertInventoryUpdatesExisting", func(t *testing.T) {
@@ -926,10 +926,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if view.Inventory == nil {
+			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil after second upsert")
 			}
-			assertEqual(t, "Observation", string(view.Inventory.Observation()), `{"cpu":8}`)
+			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"cpu":8}`)
 		})
 
 		t.Run("UpsertInventoryBatch", func(t *testing.T) {
@@ -975,10 +975,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				if err != nil {
 					t.Fatalf("GetView %s: %v", tc.name, err)
 				}
-				if view.Inventory == nil {
+				if view.Resource.Inventory() == nil {
 					t.Fatalf("Inventory for %s is nil", tc.name)
 				}
-				assertEqual(t, fmt.Sprintf("%s Observation", tc.name), string(view.Inventory.Observation()), tc.want)
+				assertEqual(t, fmt.Sprintf("%s Observation", tc.name), string(view.Resource.Inventory().Observation()), tc.want)
 			}
 		})
 	})
@@ -1021,10 +1021,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if view.Fulfillment != nil {
 				t.Error("expected nil Fulfillment for inventory-only resource")
 			}
-			if view.Inventory == nil {
+			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil, want non-nil")
 			}
-			assertEqual(t, "Observation", string(view.Inventory.Observation()), `{"ready":true}`)
+			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"ready":true}`)
 		})
 
 		t.Run("ListViewsByTypeIncludesInventoryOnly", func(t *testing.T) {
@@ -1112,10 +1112,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if view.Fulfillment == nil {
 				t.Fatal("Fulfillment is nil for managed+inventory resource")
 			}
-			if view.Inventory == nil {
+			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil for managed+inventory resource")
 			}
-			assertEqual(t, "Observation", string(view.Inventory.Observation()), `{"version":"2.0"}`)
+			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"version":"2.0"}`)
 		})
 
 		t.Run("GetViewManagedStillRequiresIntentAndFulfillment", func(t *testing.T) {
@@ -1142,7 +1142,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if view.Fulfillment == nil {
 				t.Fatal("Fulfillment is nil for managed resource")
 			}
-			if view.Inventory != nil {
+			if view.Resource.Inventory() != nil {
 				t.Error("expected nil Inventory for managed-only resource")
 			}
 		})
@@ -1509,10 +1509,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if len(view.Inventory.Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Inventory.Conditions()))
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "latest Status", view.Inventory.Conditions()[0].Status(), domain.ConditionFalse)
+			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionFalse)
 		})
 
 		t.Run("ReportUpsertReport", func(t *testing.T) {
@@ -1580,11 +1580,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if len(view.Inventory.Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Inventory.Conditions()))
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "latest Status", view.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "latest Reason", view.Inventory.Conditions()[0].Reason(), "Recovered")
+			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "latest Reason", view.Resource.Inventory().Conditions()[0].Reason(), "Recovered")
 		})
 
 		t.Run("RecordConditionsUpdatesLatestState", func(t *testing.T) {
@@ -1612,14 +1612,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if view.Inventory == nil {
+			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil; RecordConditions should create a minimal inventory row")
 			}
-			if len(view.Inventory.Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Inventory.Conditions()))
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "Condition.Type", view.Inventory.Conditions()[0].Type(), domain.ConditionType("Ready"))
-			assertEqual(t, "Condition.Status", view.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
+			assertEqual(t, "Condition.Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
 		})
 
 		t.Run("RecordConditionsMultipleUIDsGetInventoryRows", func(t *testing.T) {
@@ -1655,32 +1655,32 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView r1: %v", err)
 			}
-			if v1.Inventory == nil {
+			if v1.Resource.Inventory() == nil {
 				t.Fatal("r1: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
 			}
-			if len(v1.Inventory.Conditions()) != 1 {
-				t.Fatalf("r1: Conditions len = %d, want 1", len(v1.Inventory.Conditions()))
+			if len(v1.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("r1: Conditions len = %d, want 1", len(v1.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "r1.Condition.Status", v1.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "r1.Condition.Reason", v1.Inventory.Conditions()[0].Reason(), "AllGood")
-			assertEqual(t, "r1.Condition.Message", v1.Inventory.Conditions()[0].Message(), "node is healthy")
-			assertEqual(t, "r1.Condition.LastTransitionTime", v1.Inventory.Conditions()[0].LastTransitionTime(), t1)
+			assertEqual(t, "r1.Condition.Status", v1.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "r1.Condition.Reason", v1.Resource.Inventory().Conditions()[0].Reason(), "AllGood")
+			assertEqual(t, "r1.Condition.Message", v1.Resource.Inventory().Conditions()[0].Message(), "node is healthy")
+			assertEqual(t, "r1.Condition.LastTransitionTime", v1.Resource.Inventory().Conditions()[0].LastTransitionTime(), t1)
 
 			// Verify r2 condition via GetView.
 			v2, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-b"))
 			if err != nil {
 				t.Fatalf("GetView r2: %v", err)
 			}
-			if v2.Inventory == nil {
+			if v2.Resource.Inventory() == nil {
 				t.Fatal("r2: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
 			}
-			if len(v2.Inventory.Conditions()) != 1 {
-				t.Fatalf("r2: Conditions len = %d, want 1", len(v2.Inventory.Conditions()))
+			if len(v2.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("r2: Conditions len = %d, want 1", len(v2.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "r2.Condition.Status", v2.Inventory.Conditions()[0].Status(), domain.ConditionFalse)
-			assertEqual(t, "r2.Condition.Reason", v2.Inventory.Conditions()[0].Reason(), "Degraded")
-			assertEqual(t, "r2.Condition.Message", v2.Inventory.Conditions()[0].Message(), "disk pressure")
-			assertEqual(t, "r2.Condition.LastTransitionTime", v2.Inventory.Conditions()[0].LastTransitionTime(), t2)
+			assertEqual(t, "r2.Condition.Status", v2.Resource.Inventory().Conditions()[0].Status(), domain.ConditionFalse)
+			assertEqual(t, "r2.Condition.Reason", v2.Resource.Inventory().Conditions()[0].Reason(), "Degraded")
+			assertEqual(t, "r2.Condition.Message", v2.Resource.Inventory().Conditions()[0].Message(), "disk pressure")
+			assertEqual(t, "r2.Condition.LastTransitionTime", v2.Resource.Inventory().Conditions()[0].LastTransitionTime(), t2)
 
 			// Verify per-UID transitions were recorded independently.
 			tr1, err := repo.ListConditionTransitions(ctx, r1.UID(), nil, 10)
@@ -1810,11 +1810,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			if len(view.Inventory.Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Inventory.Conditions()))
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
-			assertEqual(t, "latest Status", view.Inventory.Conditions()[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "latest Reason", view.Inventory.Conditions()[0].Reason(), "Recovered")
+			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "latest Reason", view.Resource.Inventory().Conditions()[0].Reason(), "Recovered")
 		})
 	})
 }

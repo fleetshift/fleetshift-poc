@@ -483,6 +483,32 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 		}
 	}
 
+	// Inventory: include in snapshot so ExtensionResourceFromSnapshot
+	// hydrates Resource.Inventory().
+	if invObservedAt.Valid {
+		invSnap := domain.InventoryResourceSnapshot{
+			Labels: map[string]string{},
+		}
+		if invLabels.Valid {
+			json.Unmarshal([]byte(invLabels.String), &invSnap.Labels)
+		}
+		if invObservation.Valid {
+			invSnap.Observation = json.RawMessage(invObservation.String)
+		}
+		if t, err := time.Parse(time.RFC3339Nano, invObservedAt.String); err == nil {
+			invSnap.ObservedAt = t
+		}
+		if invUpdatedAt.Valid {
+			if t, err := time.Parse(time.RFC3339Nano, invUpdatedAt.String); err == nil {
+				invSnap.UpdatedAt = t
+			}
+		}
+		if invConditionsJSON.Valid {
+			invSnap.Conditions, _ = unmarshalConditionSnapshots([]byte(invConditionsJSON.String))
+		}
+		snap.Inventory = &invSnap
+	}
+
 	resource := domain.ExtensionResourceFromSnapshot(snap)
 
 	var v domain.ExtensionResourceView
@@ -511,31 +537,6 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 			return domain.ExtensionResourceView{}, err
 		}
 		v.Fulfillment = domain.FulfillmentFromSnapshot(fs)
-	}
-
-	// Inventory: build snapshot including conditions, hydrate once.
-	if invObservedAt.Valid {
-		invSnap := domain.InventoryResourceSnapshot{
-			Labels: map[string]string{},
-		}
-		if invLabels.Valid {
-			json.Unmarshal([]byte(invLabels.String), &invSnap.Labels)
-		}
-		if invObservation.Valid {
-			invSnap.Observation = json.RawMessage(invObservation.String)
-		}
-		if t, err := time.Parse(time.RFC3339Nano, invObservedAt.String); err == nil {
-			invSnap.ObservedAt = t
-		}
-		if invUpdatedAt.Valid {
-			if t, err := time.Parse(time.RFC3339Nano, invUpdatedAt.String); err == nil {
-				invSnap.UpdatedAt = t
-			}
-		}
-		if invConditionsJSON.Valid {
-			invSnap.Conditions, _ = unmarshalConditionSnapshots([]byte(invConditionsJSON.String))
-		}
-		v.Inventory = domain.InventoryResourceFromSnapshot(invSnap)
 	}
 
 	return v, nil

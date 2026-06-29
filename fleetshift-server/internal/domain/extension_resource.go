@@ -661,11 +661,10 @@ func (r *ExtensionResource) UpdatedAt() time.Time { return r.updatedAt }
 // repository via joins; never written directly.
 //
 // Intent and Fulfillment are populated when the resource has managed
-// state and are nil for non-managed resources. Inventory is populated
-// from the resource's embedded inventory state.
+// state and are nil for non-managed resources. Inventory state lives
+// on the embedded [ExtensionResource] (see [ExtensionResource.Inventory]).
 type ExtensionResourceView struct {
 	Resource    ExtensionResource
 	Intent      *ResourceIntent
 	Fulfillment *Fulfillment
-	Inventory   *InventoryResource
 }
