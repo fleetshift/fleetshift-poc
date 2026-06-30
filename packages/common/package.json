@@ -11,7 +11,8 @@
       "types": "./dist/esm/index.d.ts",
       "import": "./dist/esm/index.js",
       "require": "./dist/cjs/index.js"
-    }
+    },
+    "./generated/pf-icons.json": "./src/generated/pf-icons.json"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p tsconfig.cjs.json && echo '{\"type\":\"commonjs\"}' > dist/cjs/package.json && echo '{\"type\":\"module\"}' > dist/esm/package.json"

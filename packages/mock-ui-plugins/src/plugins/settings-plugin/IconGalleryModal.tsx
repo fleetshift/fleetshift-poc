@@ -3,7 +3,7 @@ import "./IconGalleryModal.scss";
 import { getCachedPfIcon, loadPfIcon } from "@fleetshift/common";
 // The manifest is a flat string[] of PascalCase icon names, generated at
 // build time by scripts/generate-icons.mjs.
-import pfIcons from "@fleetshift/common/src/generated/pf-icons.json";
+import pfIcons from "@fleetshift/common/generated/pf-icons.json";
 import { create, insert, search } from "@orama/orama";
 import {
   Button,
