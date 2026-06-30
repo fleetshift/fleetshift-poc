@@ -263,11 +263,11 @@ func TestAgent_Remove_TrustBundle_RemovesStoredIssuerEntry(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_UsesEnvelopeNameNotManifestID(t *testing.T) {
+func TestAgent_Deliver_UsesSpecNameNotManifestID(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	manifest := envelopedClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 
 	_ = agent.Deliver(
 		context.Background(),
@@ -282,7 +282,7 @@ func TestAgent_Deliver_UsesEnvelopeNameNotManifestID(t *testing.T) {
 	select {
 	case result := <-reporter.done:
 		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "invalid cluster name") {
-			t.Fatalf("should have used envelope name, not ManifestID; got: %s", result.Message)
+			t.Fatalf("should have used spec name, not ManifestID; got: %s", result.Message)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout")
@@ -293,7 +293,7 @@ func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	manifest := envelopedClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 
 	// First delivery with generation 10 — accepted (will fail async since no real backend, but generation is accepted)
 	err := agent.Deliver(
@@ -347,7 +347,7 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	manifest := envelopedClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 
 	// First: accept generation 10 via Deliver (it will fail async, but the generation is recorded)
 	_ = agent.Deliver(
@@ -427,15 +427,15 @@ func validClusterSpecJSON(t *testing.T) json.RawMessage {
 	return raw
 }
 
-func envelopedClusterManifest(t *testing.T, clusterName string, specJSON json.RawMessage) domain.Manifest {
+func managedResourceClusterManifest(t *testing.T, clusterName string, specJSON json.RawMessage) domain.Manifest {
 	t.Helper()
-	raw, err := domain.WrapManifestEnvelope(
+	raw, err := domain.WrapManagedResourceSpec(
 		domain.ResourceName("clusters/"+clusterName),
 		domain.NewExtensionResourceUID(),
 		specJSON,
 	)
 	if err != nil {
-		t.Fatalf("WrapManifestEnvelope() error = %v", err)
+		t.Fatalf("WrapManagedResourceSpec() error = %v", err)
 	}
 	return domain.Manifest{
 		ManifestType: gcphcp.ClusterManifestType,
@@ -506,14 +506,14 @@ func (r *recoveryReporter) ListActiveDeliveries(_ context.Context, _ []domain.Ta
 	return r.active, r.activeErr
 }
 
-func mustWrapEnvelope(name string, spec json.RawMessage) json.RawMessage {
-	raw, err := domain.WrapManifestEnvelope(
+func mustWrapManagedResourceSpec(name string, spec json.RawMessage) json.RawMessage {
+	raw, err := domain.WrapManagedResourceSpec(
 		domain.ResourceName(name),
 		domain.NewExtensionResourceUID(),
 		spec,
 	)
 	if err != nil {
-		panic(fmt.Sprintf("WrapManifestEnvelope: %v", err))
+		panic(fmt.Sprintf("WrapManagedResourceSpec: %v", err))
 	}
 	return raw
 }
@@ -529,7 +529,7 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
 				ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-				Raw:          mustWrapEnvelope("clusters/"+clusterName, spec),
+				Raw:          mustWrapManagedResourceSpec("clusters/"+clusterName, spec),
 			}},
 		}),
 		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -653,7 +653,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 	agent := newTestAgent(reporter)
 
 	// Accept generation 10 via a normal Deliver call.
-	manifest := envelopedClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 	_ = agent.Deliver(
 		context.Background(),
 		domain.TargetInfo{},
@@ -676,7 +676,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 	// with the recovery reporter, then seed its generation.
 	agent2 := newTestAgent(recovReporter)
 	// Seed generation 10
-	manifest2 := envelopedClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+	manifest2 := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 	_ = agent2.Deliver(
 		context.Background(),
 		domain.TargetInfo{},

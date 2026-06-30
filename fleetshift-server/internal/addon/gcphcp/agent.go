@@ -124,17 +124,17 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 			continue
 		}
 
-		envelope, err := domain.UnwrapManifestEnvelope(clusterManifest.Raw)
+		mrs, err := domain.UnwrapManagedResourceSpec(clusterManifest.Raw)
 		if err != nil {
-			a.observer.Error("recovery: failed to unwrap manifest envelope", "delivery", ad.Delivery.ID(), "error", err)
+			a.observer.Error("recovery: failed to unwrap managed resource spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec, err := ParseClusterSpec(envelope.Spec)
+		spec, err := ParseClusterSpec(mrs.Spec)
 		if err != nil {
 			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec.Name = string(envelope.Name.ID())
+		spec.Name = string(mrs.Name.ID())
 
 		if spec.Name == "" {
 			a.observer.Error("recovery: empty cluster name", "delivery", ad.Delivery.ID())
@@ -234,17 +234,17 @@ func (a *Agent) Deliver(
 	}
 
 	clusterManifest := clusterManifests[0]
-	envelope, err := domain.UnwrapManifestEnvelope(clusterManifest.Raw)
+	mrs, err := domain.UnwrapManagedResourceSpec(clusterManifest.Raw)
 	if err != nil {
-		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to unwrap manifest envelope: %v", err))
+		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to unwrap managed resource spec: %v", err))
 		return nil
 	}
-	spec, err := ParseClusterSpec(envelope.Spec)
+	spec, err := ParseClusterSpec(mrs.Spec)
 	if err != nil {
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to parse cluster spec: %v", err))
 		return nil
 	}
-	spec.Name = string(envelope.Name.ID())
+	spec.Name = string(mrs.Name.ID())
 	if err := ValidateClusterName(spec.Name); err != nil {
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("invalid cluster name: %v", err))
 		return nil
@@ -389,17 +389,17 @@ func (a *Agent) Remove(
 			continue
 		}
 
-		envelope, err := domain.UnwrapManifestEnvelope(m.Raw)
+		mrs, err := domain.UnwrapManagedResourceSpec(m.Raw)
 		if err != nil {
-			a.observer.Error("failed to unwrap manifest envelope for removal", "error", err)
-			return fmt.Errorf("failed to unwrap manifest envelope: %w", err)
+			a.observer.Error("failed to unwrap managed resource spec for removal", "error", err)
+			return fmt.Errorf("failed to unwrap managed resource spec: %w", err)
 		}
-		spec, err := ParseClusterSpec(envelope.Spec)
+		spec, err := ParseClusterSpec(mrs.Spec)
 		if err != nil {
 			a.observer.Error("failed to parse cluster spec for removal", "error", err)
 			return fmt.Errorf("failed to parse cluster spec: %w", err)
 		}
-		spec.Name = string(envelope.Name.ID())
+		spec.Name = string(mrs.Name.ID())
 
 		if !a.acceptGeneration(spec.Name, generation) {
 			a.observer.Info("rejecting stale removal", "cluster", spec.Name, "generation", generation)
