@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"time"
+)
 
 // FulfillmentObserver is called at key points during fulfillment
 // orchestration. Implementations should embed [NoOpFulfillmentObserver]
@@ -70,6 +73,10 @@ type FulfillmentRunProbe interface {
 	// restart reconciliation because the generation advanced during
 	// the current pass.
 	ReconciliationRestarting(generation Generation)
+
+	// RetryDelayStarted is called when the workflow begins a durable
+	// sleep before restarting via ContinueAsNew.
+	RetryDelayStarted(delay time.Duration)
 
 	// ContinueAsNewTriggered is called when the workflow returns a
 	// [ContinueAsNew] error to restart with a fresh history.
@@ -290,6 +297,7 @@ func (NoOpFulfillmentRunProbe) StateChanged(FulfillmentState)                   
 func (NoOpFulfillmentRunProbe) RolloutStepStarted(int, int, bool)                   {}
 func (NoOpFulfillmentRunProbe) GenerationAdvancedMidRollout(Generation, Generation) {}
 func (NoOpFulfillmentRunProbe) ReconciliationRestarting(Generation)                 {}
+func (NoOpFulfillmentRunProbe) RetryDelayStarted(time.Duration)                     {}
 func (NoOpFulfillmentRunProbe) ContinueAsNewTriggered()                             {}
 func (NoOpFulfillmentRunProbe) DeleteStarted(int)                                   {}
 func (NoOpFulfillmentRunProbe) ManifestsFiltered(TargetInfo, int, int)              {}
