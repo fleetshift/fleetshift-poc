@@ -131,6 +131,11 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 		}
 		spec.Name = string(clusterManifest.ResourceName.ID())
 
+		if spec.Name == "" {
+			a.observer.Error("recovery: empty cluster name", "delivery", ad.Delivery.ID())
+			continue
+		}
+
 		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation()) {
 			continue
 		}
