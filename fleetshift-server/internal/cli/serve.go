@@ -506,9 +506,20 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// the gateway's /v1/ catch-all.
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
+
+	// HTTP auth middleware — mirrors the gRPC authn interceptor: if
+	// auth methods are configured require a valid OIDC Bearer token,
+	// otherwise allow anonymous (setup mode). Applied selectively to
+	// endpoints that need protection; /api/ui/config and
+	// /api/ui/setup/ws intentionally remain unauthenticated.
+	httpAuthn := &transporthttp.AuthnMiddleware{
+		Methods:  authMethodSvc,
+		Verifier: tokenVerifier,
+	}
+
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
-	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
-	topMux.HandleFunc("GET /api/ui/github-signing-keys/{username}", transporthttp.HandleGitHubSigningKeys)
+	topMux.Handle("GET /api/ui/events/ws", httpAuthn.Wrap(http.HandlerFunc(eventHub.HandleWS)))
+	topMux.Handle("GET /api/ui/github-signing-keys/{username}", httpAuthn.Wrap(http.HandlerFunc(transporthttp.HandleGitHubSigningKeys)))
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
 		AuthMethods:   authMethodSvc,
 		Verifier:      tokenVerifier,
@@ -528,6 +539,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			OIDCAuthority:  f.oidcUIAuthority,
 			OIDCUIClientID: f.oidcUIClientID,
 			Logger:         logger,
+			AuthMiddleware: httpAuthn.Wrap,
 		})
 		topMux.Handle("/api/ui/", uiMux)
 		topMux.Handle("/", transporthttp.NewStaticHandler(f.webDir))

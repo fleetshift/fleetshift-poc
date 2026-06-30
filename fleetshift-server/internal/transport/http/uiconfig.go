@@ -16,6 +16,10 @@ type UIConfigOptions struct {
 	OIDCAuthority  string
 	OIDCUIClientID string
 	Logger         *slog.Logger
+	// AuthMiddleware, when non-nil, wraps routes that require
+	// authentication (e.g. /api/ui/user-config). Routes that must
+	// remain publicly accessible (/api/ui/config) are never wrapped.
+	AuthMiddleware func(http.Handler) http.Handler
 }
 
 type pluginManifest struct {
@@ -72,9 +76,15 @@ type moduleGroupMeta struct {
 
 func NewUIConfigMux(opts UIConfigOptions) *http.ServeMux {
 	mux := http.NewServeMux()
+	// /api/ui/config must remain unauthenticated — the frontend needs
+	// it before the user has logged in (OIDC bootstrap).
 	mux.HandleFunc("GET /api/ui/config", handleConfig(opts))
 	mux.HandleFunc("GET /api/ui/plugin-registry", handlePluginRegistry(opts))
-	mux.HandleFunc("GET /api/ui/user-config", handleUserConfig(opts))
+	if opts.AuthMiddleware != nil {
+		mux.Handle("GET /api/ui/user-config", opts.AuthMiddleware(http.HandlerFunc(handleUserConfig(opts))))
+	} else {
+		mux.HandleFunc("GET /api/ui/user-config", handleUserConfig(opts))
+	}
 	return mux
 }
 
