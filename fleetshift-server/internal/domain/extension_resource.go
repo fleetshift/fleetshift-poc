@@ -127,7 +127,7 @@ func NewConditionType(s string) (ConditionType, error) {
 
 // ConditionStatus represents the status of a condition. Uses the
 // Kubernetes-standard True/False/Unknown trichotomy. Construct via
-// [NewConditionStatus] at parse boundaries; use the package-level
+// [ParseConditionStatus] at parse boundaries; use the package-level
 // constants ([ConditionTrue], [ConditionFalse], [ConditionUnknown])
 // when the value is statically known.
 type ConditionStatus string
@@ -139,16 +139,16 @@ const (
 )
 
 // validConditionStatuses is the closed set accepted by
-// [NewConditionStatus].
+// [ParseConditionStatus].
 var validConditionStatuses = map[ConditionStatus]struct{}{
 	ConditionTrue:    {},
 	ConditionFalse:   {},
 	ConditionUnknown: {},
 }
 
-// NewConditionStatus validates and returns a [ConditionStatus].
+// ParseConditionStatus validates and returns a [ConditionStatus].
 // Rejects values outside the True/False/Unknown trichotomy.
-func NewConditionStatus(s string) (ConditionStatus, error) {
+func ParseConditionStatus(s string) (ConditionStatus, error) {
 	cs := ConditionStatus(s)
 	if _, ok := validConditionStatuses[cs]; !ok {
 		return "", fmt.Errorf("condition status %q: %w: must be True, False, or Unknown", s, ErrInvalidArgument)

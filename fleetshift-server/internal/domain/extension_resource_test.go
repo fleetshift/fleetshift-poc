@@ -241,24 +241,24 @@ func TestNewConditionType_Empty_Rejected(t *testing.T) {
 // ConditionStatus
 // ---------------------------------------------------------------------------
 
-func TestNewConditionStatus_Valid(t *testing.T) {
+func TestParseConditionStatus_Valid(t *testing.T) {
 	for _, s := range []string{"True", "False", "Unknown"} {
-		cs, err := NewConditionStatus(s)
+		cs, err := ParseConditionStatus(s)
 		if err != nil {
-			t.Errorf("NewConditionStatus(%q): unexpected error: %v", s, err)
+			t.Errorf("ParseConditionStatus(%q): unexpected error: %v", s, err)
 		}
 		assertEq(t, "ConditionStatus", string(cs), s)
 	}
 }
 
-func TestNewConditionStatus_Invalid_Rejected(t *testing.T) {
+func TestParseConditionStatus_Invalid_Rejected(t *testing.T) {
 	for _, s := range []string{"", "Bogus", "true", "false"} {
-		_, err := NewConditionStatus(s)
+		_, err := ParseConditionStatus(s)
 		if err == nil {
-			t.Errorf("NewConditionStatus(%q): expected error", s)
+			t.Errorf("ParseConditionStatus(%q): expected error", s)
 		}
 		if !errors.Is(err, ErrInvalidArgument) {
-			t.Errorf("NewConditionStatus(%q): got %v, want ErrInvalidArgument", s, err)
+			t.Errorf("ParseConditionStatus(%q): got %v, want ErrInvalidArgument", s, err)
 		}
 	}
 }
