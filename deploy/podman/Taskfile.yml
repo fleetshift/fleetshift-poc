@@ -143,6 +143,11 @@ tasks:
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env ps
 
+  clock-drift:
+    desc: Check Podman machine clock drift from the host
+    cmds:
+      - ./scripts/check-clock-drift.sh {{.CLI_ARGS}}
+
   'restart:*':
     desc: "Restart a specific container (e.g. task podman:restart:keycloak)"
     env: *deploy_env
