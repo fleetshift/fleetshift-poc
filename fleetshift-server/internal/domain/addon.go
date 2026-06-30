@@ -7,7 +7,17 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-// AddonID uniquely identifies an addon within the platform.
+// AddonID uniquely identifies an addon within the platform. The value
+// must equal the [ServiceName] under which the addon's extension
+// resource types are registered (e.g. "kind.fleetshift.io"). This
+// makes resource type ownership structural: a ResourceType's service
+// name prefix implicitly identifies the owning addon. Delivery-only
+// addons (no extension resources) follow the same naming convention
+// for consistency.
+//
+// TODO: consider unifying AddonID and ServiceName into a single type.
+// They are kept separate today because ServiceName has an established
+// meaning under AIP-122, but the values are intentionally equal.
 type AddonID string
 
 // AddonState represents the lifecycle phase of an addon.

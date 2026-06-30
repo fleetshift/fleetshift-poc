@@ -598,7 +598,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// registered, targets seeded. Happens AFTER the servers are serving
 	// so the DynamicServiceMux can dispatch immediately.
 	if enabledAddons["kind"] {
-		if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
+		if err := addonMgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
 			Agent: kindAgent,
 			Targets: []domain.TargetInfo{domain.NewTargetInfo(
 				"kind-local",
@@ -616,7 +616,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	}
 
 	if enabledAddons["kubernetes"] {
-		if err := addonMgr.Connect(ctx, "kubernetes", application.ConnectInput{
+		if err := addonMgr.Connect(ctx, kubernetesaddon.Descriptor().ID, application.ConnectInput{
 			Agent: kubeAgent,
 		}); err != nil {
 			return fmt.Errorf("connect kubernetes addon: %w", err)
@@ -626,7 +626,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if enabledAddons["gcphcp"] {
 		activeTarget := gcphcpCfg.Targets[0]
 		targetID := domain.TargetID(activeTarget.ID)
-		if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
+		if err := addonMgr.Connect(ctx, gcphcpaddon.Descriptor().ID, application.ConnectInput{
 			Agent: gcphcpAgent,
 			Targets: []domain.TargetInfo{domain.NewTargetInfo(
 				targetID,

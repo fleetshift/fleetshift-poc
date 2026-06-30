@@ -107,6 +107,14 @@ func NewAddonManager(deps AddonManagerDeps, opts ...AddonManagerOption) *AddonMa
 // If the addon was previously disabled (state [domain.AddonStateDefined]),
 // Enable re-enables it by updating the record in place.
 func (m *AddonManager) Enable(_ context.Context, desc domain.AddonDescriptor) error {
+	for _, cap := range desc.Capabilities {
+		if rt, ok := capabilityResourceType(cap); ok {
+			if err := validateResourceTypeOwnership(desc.ID, rt); err != nil {
+				return err
+			}
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -222,6 +230,9 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 	}
 
 	for _, schema := range schemas {
+		if err := validateResourceTypeOwnership(rec.addon.ID, schema.ResourceType); err != nil {
+			return err
+		}
 		if err := validateSchemaCapabilities(rec, schema); err != nil {
 			return err
 		}
@@ -346,6 +357,37 @@ func (m *AddonManager) Get(addonID domain.AddonID) (domain.Addon, error) {
 		return domain.Addon{}, fmt.Errorf("%w: addon %q not found", domain.ErrNotFound, addonID)
 	}
 	return rec.addon, nil
+}
+
+// validateResourceTypeOwnership checks that the resource type's
+// service name matches the addon's ID. This enforces that an addon
+// can only register extension resource types under its own service
+// namespace.
+func validateResourceTypeOwnership(addonID domain.AddonID, rt domain.ResourceType) error {
+	expected := domain.ServiceName(addonID)
+	actual := rt.ServiceName()
+	if expected != actual {
+		return fmt.Errorf(
+			"%w: addon %q cannot register resource type %q (service name %q does not match addon ID)",
+			domain.ErrInvalidArgument, addonID, rt, actual,
+		)
+	}
+	return nil
+}
+
+// capabilityResourceType extracts the [domain.ResourceType] from a
+// capability, if the capability type carries one. Returns false for
+// capability types like [domain.DeliveryCapability] that don't own
+// extension resource types.
+func capabilityResourceType(cap domain.Capability) (domain.ResourceType, bool) {
+	switch c := cap.(type) {
+	case domain.ManagedResourceCapability:
+		return c.ResourceType, true
+	case domain.InventoryResourceCapability:
+		return c.ResourceType, true
+	default:
+		return "", false
+	}
 }
 
 // validateSchemaCapabilities checks that each non-nil section of the

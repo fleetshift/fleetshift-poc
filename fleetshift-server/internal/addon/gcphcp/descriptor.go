@@ -31,7 +31,7 @@ const KubernetesTargetType domain.TargetType = "kubernetes"
 // and a managed resource capability for GCP HCP cluster provisioning.
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
-		ID:   "gcphcp",
+		ID:   "gcphcp.fleetshift.io",
 		Name: "GCP Hosted Control Plane Provider",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},

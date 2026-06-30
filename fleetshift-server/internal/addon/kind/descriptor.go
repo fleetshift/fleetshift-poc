@@ -16,7 +16,7 @@ var kindClusterSpecProto string
 // and a managed resource capability for kind cluster provisioning.
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
-		ID:   "kind",
+		ID:   "kind.fleetshift.io",
 		Name: "Kind Cluster Provider",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
