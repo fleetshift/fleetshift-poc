@@ -506,7 +506,7 @@ func (r *recoveryReporter) ListActiveDeliveries(_ context.Context, _ []domain.Ta
 	return r.active, r.activeErr
 }
 
-func mustWrapManagedResourceSpec(name string, spec json.RawMessage) json.RawMessage {
+func managedResourceRaw(name string, spec json.RawMessage) json.RawMessage {
 	raw, err := domain.WrapManagedResourceSpec(
 		domain.ResourceName(name),
 		domain.NewExtensionResourceUID(),
@@ -529,7 +529,7 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
 				ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
-				Raw:          mustWrapManagedResourceSpec("clusters/"+clusterName, spec),
+				Raw:          managedResourceRaw("clusters/"+clusterName, spec),
 			}},
 		}),
 		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
