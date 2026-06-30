@@ -59,6 +59,12 @@ type Capability interface {
 	CapabilityType() string
 }
 
+// TODO: We may want to reorganize capabilities that introduce & extend ExtensionResource
+// e.g. may be a single extension resource capability with
+// declared management or inventory subsections.
+// This makes it clearer what capabilities a single resource type has,
+// and is more symmetrical with ExtensionResourceSchema.
+
 // ManagedResourceCapability declares that the addon will provide a
 // managed resource type. The full schema and fulfillment relation come
 // from the workload at connect time via [ExtensionResourceSchema].

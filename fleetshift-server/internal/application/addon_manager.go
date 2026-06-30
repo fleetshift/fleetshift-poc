@@ -221,6 +221,7 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		if err := m.registerSchemaTypeDef(ctx, rec, schema); err != nil {
 			return fmt.Errorf("register type def for %q: %w", schema.ResourceType, err)
 		}
+		// TODO: no inventory schema yet
 		if schema.Management != nil {
 			if err := m.activateSchema(ctx, rec, schema); err != nil {
 				return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
@@ -405,11 +406,13 @@ func (m *AddonManager) registerSchemaTypeDef(ctx context.Context, rec *addonReco
 	}
 	if schema.Management != nil {
 		input.Management = &CreateExtensionTypeManagementInput{
-			Relation:  schema.Management.Relation,
+			Relation: schema.Management.Relation,
+			// TODO: support relation signatures and validation through attestation evidence
 			Signature: domain.Signature{},
 		}
 	}
 	if schema.Inventory != nil {
+		// TODO: schema support for inventory
 		input.Inventory = &CreateExtensionTypeInventoryInput{}
 	}
 
