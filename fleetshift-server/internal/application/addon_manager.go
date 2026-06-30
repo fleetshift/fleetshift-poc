@@ -229,6 +229,7 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		}
 	}
 
+	// TODO: handle duplicate resource types
 	for _, schema := range schemas {
 		if err := validateResourceTypeOwnership(rec.addon.ID, schema.ResourceType); err != nil {
 			return err
@@ -245,6 +246,7 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 				return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
 			}
 		}
+		// TODO: handle if schema stays but drops capability
 	}
 	return nil
 }
@@ -256,6 +258,7 @@ func (m *AddonManager) teardownSchema(ctx context.Context, rec *addonRecord, rt 
 		if reg.activation != nil {
 			m.activator.Deactivate(*reg.activation)
 		}
+		// TODO: do something about the failed delete
 		_ = m.typeSvc.Delete(ctx, rt)
 		delete(rec.registeredSchemas, rt)
 	}
