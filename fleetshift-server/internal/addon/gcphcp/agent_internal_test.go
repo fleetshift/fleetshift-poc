@@ -16,6 +16,18 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+func managedResourceRaw(name string, spec json.RawMessage) json.RawMessage {
+	raw, err := domain.WrapManagedResourceSpec(
+		domain.ResourceName(name),
+		domain.NewExtensionResourceUID(),
+		spec,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("WrapManagedResourceSpec: %v", err))
+	}
+	return raw
+}
+
 type reconcileContextKey string
 
 func TestNewReconcileContext_AddsDeadlineAndPreservesValues(t *testing.T) {
@@ -327,8 +339,8 @@ func TestAgent_Deliver_SuccessReportsProvisionedTargetAndSecrets(t *testing.T) {
 		domain.DeliveryID("delivery-success"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
+			ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			Raw:          managedResourceRaw("clusters/test-cls", spec),
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},
 		nil,
@@ -380,9 +392,11 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 	}
 
 	var deleteRequested atomic.Bool
+	var resolvedName atomic.Value
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters":
+			resolvedName.Store("test-cls")
 			fmt.Fprint(w, `{"clusters":[{"id":"c-del","name":"test-cls"}]}`)
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/clusters/c-del":
 			deleteRequested.Store(true)
@@ -426,8 +440,8 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 		domain.DeliveryID("remove-1"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
+			ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			Raw:          managedResourceRaw("clusters/test-cls", spec),
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},
 		nil,
@@ -441,6 +455,9 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 	}
 	if infra.waitPSCCalls != 1 {
 		t.Fatalf("expected PSC cleanup, got %d calls", infra.waitPSCCalls)
+	}
+	if name, ok := resolvedName.Load().(string); !ok || name != "test-cls" {
+		t.Fatalf("CLS resolved cluster name = %q, want %q", name, "test-cls")
 	}
 
 	select {
@@ -508,8 +525,8 @@ func TestAgent_Remove_ClearsGenerationSoRecreateIsAccepted(t *testing.T) {
 	}})
 	manifest := domain.Manifest{
 		ManifestType: ClusterManifestType,
-		ManifestID:   "test-cls",
-		Raw:          spec,
+		ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		Raw:          managedResourceRaw("clusters/test-cls", spec),
 	}
 
 	// Seed generation high-water mark as if prior deliveries happened.
@@ -582,8 +599,8 @@ func TestAgent_Remove_AuthExpiredSignalsAuthFailed(t *testing.T) {
 		domain.DeliveryID("remove-auth-fail"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
+			ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			Raw:          managedResourceRaw("clusters/test-cls", spec),
 		}},
 		domain.DeliveryAuth{Token: "stale-token"},
 		nil,
@@ -669,8 +686,8 @@ func TestAgent_Remove_SubprocessInvalidGrantSignalsAuthFailed(t *testing.T) {
 		domain.DeliveryID("remove-invalid-grant"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
+			ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+			Raw:          managedResourceRaw("clusters/test-cls", spec),
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},
 		nil,
