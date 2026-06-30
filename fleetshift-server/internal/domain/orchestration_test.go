@@ -9,7 +9,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/delivery"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
@@ -729,6 +732,7 @@ func newTestWorkflow(store domain.Store, delivery domain.DeliveryAgent, events c
 	wf := domain.NewOrchestrationWorkflowSpec(
 		store, delivery, domain.StrategyFactory{Store: store}, reg,
 		domain.WithAckRetryInterval(5*time.Second),
+		domain.WithRetryDelay(1*time.Millisecond),
 	)
 	for _, opt := range opts {
 		opt(wf)
@@ -2830,6 +2834,110 @@ func TestOrchestration_DeletedFulfillment_StopsCleanly(t *testing.T) {
 	_, err := wf.Run(rec, domain.FulfillmentID("nonexistent"))
 	if err != nil {
 		t.Fatalf("Run should return nil for deleted fulfillment, got: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Late target registration
+// ---------------------------------------------------------------------------
+
+// TestOrchestration_StaticTarget_LateRegistration verifies that a
+// deployment targeting a not-yet-registered target eventually reaches
+// active once the target appears in the pool.
+//
+// Scenario:
+//  1. Create a fulfillment with static placement targeting "late-target"
+//  2. "late-target" does NOT exist in the target pool
+//  3. Start orchestration (runs asynchronously via memworkflow)
+//  4. Register "late-target" after a short delay
+//  5. Verify the fulfillment reaches active with "late-target" resolved
+func TestOrchestration_StaticTarget_LateRegistration(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	depName := domain.ResourceName("deployments/late-dep")
+	fID := domain.FulfillmentID(depName)
+
+	seedFulfillmentAndDeployment(t, store, depName, domain.FulfillmentSnapshot{
+		Generation: 1,
+		ManifestStrategy: domain.ManifestStrategySpec{
+			Type:      domain.ManifestStrategyInline,
+			Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"kind":"ConfigMap"}`)}},
+		},
+		PlacementStrategy: domain.PlacementStrategySpec{
+			Type:    domain.PlacementStrategyStatic,
+			Targets: []domain.TargetID{"late-target"},
+		},
+		State:     domain.FulfillmentStateCreating,
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	reg := &memworkflow.Registry{}
+
+	recordingAgent := &sqlite.RecordingDeliveryService{
+		Store: store,
+		Now:   func() time.Time { return now },
+	}
+	router := delivery.NewRoutingDeliveryService()
+	router.Register("test", recordingAgent)
+
+	reporter := application.NewDeliveryReportService(store, reg)
+	recordingAgent.Reporter = reporter
+
+	orchSpec := domain.NewOrchestrationWorkflowSpec(
+		store, router, domain.StrategyFactory{Store: store}, reg,
+		domain.WithAckRetryInterval(5*time.Second),
+		domain.WithRetryDelay(10*time.Millisecond),
+	)
+	orchWf, err := reg.RegisterOrchestration(orchSpec)
+	if err != nil {
+		t.Fatalf("RegisterOrchestration: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	exec, err := orchWf.Start(ctx, fID)
+	if err != nil {
+		t.Fatalf("Start orchestration: %v", err)
+	}
+
+	// Register the target after a short delay — this simulates a kind
+	// cluster finishing provisioning while the deployment's orchestration
+	// is already running.
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		tx, err := store.Begin(context.Background())
+		if err != nil {
+			t.Errorf("begin tx for late target: %v", err)
+			return
+		}
+		defer tx.Rollback()
+		if err := tx.Targets().Create(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID:   "late-target",
+			Type: "test",
+			Name: "late-cluster",
+		})); err != nil {
+			t.Errorf("create late target: %v", err)
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			t.Errorf("commit late target: %v", err)
+		}
+	}()
+
+	if _, err := exec.AwaitResult(ctx); err != nil {
+		t.Fatalf("orchestration should complete successfully, got: %v", err)
+	}
+
+	f := getFulfillment(t, store, depName)
+	if f.State() != domain.FulfillmentStateActive {
+		t.Errorf("State = %q, want %q", f.State(), domain.FulfillmentStateActive)
+	}
+	if len(f.ResolvedTargets()) != 1 || f.ResolvedTargets()[0] != "late-target" {
+		t.Errorf("ResolvedTargets = %v, want [late-target]", f.ResolvedTargets())
 	}
 }
 
