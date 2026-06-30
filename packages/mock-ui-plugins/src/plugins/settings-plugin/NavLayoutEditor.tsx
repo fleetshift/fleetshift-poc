@@ -4,13 +4,17 @@ import type {
   FlatNode,
   FleetShiftApi,
   NavLayoutEntry,
+  NavLayoutGroup,
 } from "@fleetshift/common";
 import {
   buildLayout,
   CORE_EXTENSION_META,
+  CUSTOM_GROUP_PREFIX,
   flattenLayout,
+  isCustomGroup,
   mergeLayout,
   normalizeOrder,
+  slugify,
   useNavLayout,
 } from "@fleetshift/common";
 import {
@@ -22,12 +26,20 @@ import {
   ModalHeader,
   Title,
 } from "@patternfly/react-core";
-import { RhUiGripVerticalFillIcon, UndoIcon } from "@patternfly/react-icons";
+import {
+  PencilAltIcon,
+  PlusCircleIcon,
+  RhUiGripVerticalFillIcon,
+  TrashIcon,
+  UndoIcon,
+} from "@patternfly/react-icons";
 import { useScalprum } from "@scalprum/react-core";
 import clsx from "clsx";
 import { motion, type MotionValue } from "motion/react";
 import { useCallback, useMemo, useState } from "react";
 
+import type { GroupFormData } from "./GroupFormModal";
+import GroupFormModal from "./GroupFormModal";
 import type { DragState } from "./useDragTree";
 import { useDragTree } from "./useDragTree";
 
@@ -104,6 +116,8 @@ interface TreeItemProps {
   dragX?: MotionValue<number>;
   dragY?: MotionValue<number>;
   onResetItem?: () => void;
+  onEditGroup?: () => void;
+  onDeleteGroup?: () => void;
 }
 
 function TreeItem({
@@ -117,9 +131,15 @@ function TreeItem({
   dragX,
   dragY,
   onResetItem,
+  onEditGroup,
+  onDeleteGroup,
 }: TreeItemProps) {
   const isContainer = node.kind === "group" || node.kind === "section";
   const kindClass = isContainer ? "section" : "page";
+  const isUserGroup =
+    node.kind === "group" &&
+    node.groupMeta !== undefined &&
+    isCustomGroup(node.groupMeta);
 
   return (
     <motion.li
@@ -159,6 +179,26 @@ function TreeItem({
           {label}
         </span>
 
+        {isUserGroup && onEditGroup && (
+          <Button
+            variant="plain"
+            size="sm"
+            aria-label={`Edit group ${label}`}
+            onClick={onEditGroup}
+            icon={<PencilAltIcon />}
+          />
+        )}
+
+        {isUserGroup && onDeleteGroup && (
+          <Button
+            variant="plain"
+            size="sm"
+            aria-label={`Delete group ${label}`}
+            onClick={onDeleteGroup}
+            icon={<TrashIcon />}
+          />
+        )}
+
         {!isContainer && onResetItem && (
           <Button
             variant="plain"
@@ -193,6 +233,8 @@ interface SortableSectionProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLElement>) => void;
   onBlur: (e: React.FocusEvent<HTMLElement>) => void;
   onResetItem?: (pageId: string) => void;
+  onEditGroup?: (groupId: string) => void;
+  onDeleteGroup?: (groupId: string) => void;
 }
 
 function SortableSection({
@@ -211,6 +253,8 @@ function SortableSection({
   onKeyDown,
   onBlur,
   onResetItem,
+  onEditGroup,
+  onDeleteGroup,
 }: SortableSectionProps) {
   const parentTopIdxMap = new Map<string, number>();
   const intraGroup =
@@ -290,6 +334,16 @@ function SortableSection({
             ? () => onResetItem(node.pageId!)
             : undefined
         }
+        onEditGroup={
+          onEditGroup && node.kind === "group"
+            ? () => onEditGroup(node.id)
+            : undefined
+        }
+        onDeleteGroup={
+          onDeleteGroup && node.kind === "group"
+            ? () => onDeleteGroup(node.id)
+            : undefined
+        }
       />,
     );
 
@@ -321,6 +375,48 @@ function SortableSection({
 // NavLayoutEditor (main export)
 // ---------------------------------------------------------------------------
 
+/** Find a NavLayoutGroup in a layout by groupId. */
+function findGroup(
+  layout: NavLayoutEntry[],
+  groupId: string,
+): NavLayoutGroup | undefined {
+  for (const entry of layout) {
+    if (entry.type === "group" && entry.groupId === groupId) return entry;
+  }
+  return undefined;
+}
+
+/** Collect all group IDs present in a layout. */
+function collectGroupIds(layout: NavLayoutEntry[]): Set<string> {
+  const ids = new Set<string>();
+  for (const entry of layout) {
+    if (entry.type === "group") ids.add(entry.groupId);
+  }
+  return ids;
+}
+
+/**
+ * Delete a custom group, promoting its children to top-level pages
+ * at the group's position in the layout.
+ */
+function deleteGroupFromLayout(
+  layout: NavLayoutEntry[],
+  groupId: string,
+): NavLayoutEntry[] {
+  const result: NavLayoutEntry[] = [];
+  for (const entry of layout) {
+    if (entry.type === "group" && entry.groupId === groupId) {
+      // Promote children to top-level pages at this position
+      for (const child of entry.children) {
+        result.push({ type: "page", pageId: child.pageId });
+      }
+    } else {
+      result.push(entry);
+    }
+  }
+  return result;
+}
+
 const NavLayoutEditor = () => {
   const { api } = useScalprum<{ api: FleetShiftApi }>();
   const { override, loaded, setOverride, clearOverride } = useNavLayout(
@@ -328,6 +424,9 @@ const NavLayoutEditor = () => {
   );
   const [resetItemId, setResetItemId] = useState<string | null>(null);
   const [showFullReset, setShowFullReset] = useState(false);
+  const [showGroupForm, setShowGroupForm] = useState(false);
+  const [editGroupId, setEditGroupId] = useState<string | null>(null);
+  const [deleteGroupId, setDeleteGroupId] = useState<string | null>(null);
 
   const backendLayout = useMemo(() => api.fleetshift.getBackendLayout(), [api]);
 
@@ -343,6 +442,11 @@ const NavLayoutEditor = () => {
   const effectiveLayout = useMemo(
     () => mergeLayout(backendLayout, override),
     [backendLayout, override],
+  );
+
+  const existingGroupIds = useMemo(
+    () => collectGroupIds(effectiveLayout),
+    [effectiveLayout],
   );
 
   const { mainNodes, bottomNodes } = useMemo(() => {
@@ -420,6 +524,100 @@ const NavLayoutEditor = () => {
     setShowFullReset(false);
   }, [clearOverride]);
 
+  // --- Custom group CRUD ---
+
+  const handleOpenAddGroup = useCallback(() => {
+    setEditGroupId(null);
+    setShowGroupForm(true);
+  }, []);
+
+  const handleOpenEditGroup = useCallback((groupId: string) => {
+    setEditGroupId(groupId);
+    setShowGroupForm(true);
+  }, []);
+
+  const handleCloseGroupForm = useCallback(() => {
+    setShowGroupForm(false);
+    setEditGroupId(null);
+  }, []);
+
+  const editGroup = useMemo(
+    () =>
+      editGroupId ? (findGroup(effectiveLayout, editGroupId) ?? null) : null,
+    [editGroupId, effectiveLayout],
+  );
+
+  const handleSaveGroup = useCallback(
+    (data: GroupFormData) => {
+      const groupId = `${CUSTOM_GROUP_PREFIX}${slugify(data.name)}`;
+      const currentLayout = override?.layout ?? effectiveLayout;
+
+      if (editGroupId) {
+        // Edit existing group — update metadata, preserve children + position
+        const updated = currentLayout.map((entry) => {
+          if (entry.type === "group" && entry.groupId === editGroupId) {
+            return {
+              ...entry,
+              groupId,
+              label: data.name,
+              description: data.description || undefined,
+              keywords: data.keywords.length > 0 ? data.keywords : undefined,
+              icon: data.icon || undefined,
+            };
+          }
+          return entry;
+        });
+        persistLayout(updated);
+      } else {
+        // Create new group — append to layout with empty children
+        const newGroup: NavLayoutGroup = {
+          type: "group",
+          groupId,
+          pluginKey: "",
+          label: data.name,
+          children: [],
+          description: data.description || undefined,
+          keywords: data.keywords.length > 0 ? data.keywords : undefined,
+          icon: data.icon || undefined,
+        };
+        persistLayout([...currentLayout, newGroup]);
+      }
+
+      handleCloseGroupForm();
+    },
+    [
+      editGroupId,
+      override,
+      effectiveLayout,
+      persistLayout,
+      handleCloseGroupForm,
+    ],
+  );
+
+  const handleRequestDeleteGroup = useCallback((groupId: string) => {
+    setDeleteGroupId(groupId);
+  }, []);
+
+  const confirmDeleteGroup = useCallback(() => {
+    if (!deleteGroupId) return;
+    const currentLayout = override?.layout ?? effectiveLayout;
+    const updated = deleteGroupFromLayout(currentLayout, deleteGroupId);
+    persistLayout(updated);
+    setDeleteGroupId(null);
+  }, [deleteGroupId, override, effectiveLayout, persistLayout]);
+
+  const deleteGroupLabel = useMemo(() => {
+    if (!deleteGroupId) return "";
+    const group = findGroup(effectiveLayout, deleteGroupId);
+    return group?.label ?? deleteGroupId;
+  }, [deleteGroupId, effectiveLayout]);
+
+  const deleteGroupChildCount = useMemo(() => {
+    if (!deleteGroupId) return 0;
+    const group = findGroup(effectiveLayout, deleteGroupId);
+    return group?.children.length ?? 0;
+  }, [deleteGroupId, effectiveLayout]);
+
   if (!loaded) return null;
 
   const resetItemLabel = resetItemId ? resolveLabel(resetItemId, pageMap) : "";
@@ -428,9 +626,18 @@ const NavLayoutEditor = () => {
     <div className="ome-settings-nav-editor">
       <div className="ome-settings-nav-editor__header">
         <Title headingLevel="h2">Navigation layout</Title>
-        <Button variant="link" onClick={() => setShowFullReset(true)}>
-          Reset all to default
-        </Button>
+        <div className="ome-settings-nav-editor__header-actions">
+          <Button
+            variant="link"
+            icon={<PlusCircleIcon />}
+            onClick={handleOpenAddGroup}
+          >
+            Add group
+          </Button>
+          <Button variant="link" onClick={() => setShowFullReset(true)}>
+            Reset all to default
+          </Button>
+        </div>
       </div>
       <Content component="p">
         Drag items to reorder the navigation sidebar. Groups move with their
@@ -454,6 +661,8 @@ const NavLayoutEditor = () => {
         onKeyDown={mainDrag.handleKeyDown}
         onBlur={mainDrag.handleBlur}
         onResetItem={override ? handleResetItem : undefined}
+        onEditGroup={handleOpenEditGroup}
+        onDeleteGroup={handleRequestDeleteGroup}
       />
 
       {bottomNodes.length > 0 && (
@@ -473,8 +682,45 @@ const NavLayoutEditor = () => {
           onKeyDown={bottomDrag.handleKeyDown}
           onBlur={bottomDrag.handleBlur}
           onResetItem={override ? handleResetItem : undefined}
+          onEditGroup={handleOpenEditGroup}
+          onDeleteGroup={handleRequestDeleteGroup}
         />
       )}
+
+      <GroupFormModal
+        isOpen={showGroupForm}
+        editGroup={editGroup}
+        existingGroupIds={existingGroupIds}
+        onSave={handleSaveGroup}
+        onClose={handleCloseGroupForm}
+      />
+
+      <Modal
+        variant="small"
+        isOpen={deleteGroupId !== null}
+        onClose={() => setDeleteGroupId(null)}
+      >
+        <ModalHeader title="Delete group" />
+        <ModalBody>
+          Delete group <strong>{deleteGroupLabel}</strong>?
+          {deleteGroupChildCount > 0 && (
+            <>
+              {" "}
+              Its {deleteGroupChildCount}{" "}
+              {deleteGroupChildCount === 1 ? "child" : "children"} will be moved
+              to the top level.
+            </>
+          )}
+        </ModalBody>
+        <ModalFooter>
+          <Button variant="danger" onClick={confirmDeleteGroup}>
+            Delete
+          </Button>
+          <Button variant="link" onClick={() => setDeleteGroupId(null)}>
+            Cancel
+          </Button>
+        </ModalFooter>
+      </Modal>
 
       <Modal
         variant="small"

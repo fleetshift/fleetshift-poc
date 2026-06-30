@@ -11,6 +11,31 @@ export interface NavLayoutGroup {
   pluginKey: string;
   label: string;
   children: NavLayoutPage[];
+  /** User-facing description (custom groups only). */
+  description?: string;
+  /** Search keywords for custom groups. */
+  keywords?: string[];
+  /** PF icon name for custom groups (e.g. "folder-open"). */
+  icon?: string;
+}
+
+/** Prefix used for user-created custom groups. */
+export const CUSTOM_GROUP_PREFIX = "user-";
+
+/** Check whether a group was created by the user (not plugin-defined). */
+export function isCustomGroup(group: NavLayoutGroup): boolean {
+  return group.groupId.startsWith(CUSTOM_GROUP_PREFIX);
+}
+
+/** Convert a human-readable name to a URL-safe slug. */
+export function slugify(text: string): string {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s-]/g, "")
+    .replace(/[\s_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
 }
 
 export interface NavLayoutSection {

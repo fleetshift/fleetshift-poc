@@ -33,13 +33,16 @@ export {
   arrayMoveBlock,
   buildLayout,
   collectPageIds,
+  CUSTOM_GROUP_PREFIX,
   flattenLayout,
   getDescendantIds,
   getProjection,
   INDENTATION,
+  isCustomGroup,
   isNavLayoutOverride,
   mergeLayout,
   normalizeOrder,
+  slugify,
 } from "./navLayout.js";
 export { orderByIds } from "./orderByIds.js";
 export type { PluginLinkProps } from "./PluginLink.js";

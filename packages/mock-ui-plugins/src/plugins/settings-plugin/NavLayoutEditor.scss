@@ -8,6 +8,12 @@
     margin-bottom: var(--pf-t--global--spacer--sm);
   }
 
+  &__header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--pf-t--global--spacer--sm);
+  }
+
   &__section-label {
     font-weight: var(--pf-t--global--font--weight--heading--default);
     font-size: var(--pf-t--global--font--size--sm);
