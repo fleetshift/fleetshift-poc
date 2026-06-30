@@ -1,6 +1,7 @@
 package http
 
 import (
+	"log/slog"
 	"net/http"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
@@ -17,6 +18,16 @@ import (
 type AuthnMiddleware struct {
 	Methods  *application.AuthMethodService
 	Verifier domain.OIDCTokenVerifier
+	Logger   *slog.Logger
+}
+
+// log returns the middleware's logger, falling back to the default logger
+// when none is configured (avoids nil-checks at every call site).
+func (a *AuthnMiddleware) log() *slog.Logger {
+	if a.Logger != nil {
+		return a.Logger
+	}
+	return slog.Default()
 }
 
 // Wrap returns an [http.Handler] that authenticates the request before
@@ -24,14 +35,19 @@ type AuthnMiddleware struct {
 // attached to the request context.
 func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		logger := a.log()
+		endpoint := r.Method + " " + r.URL.Path
+
 		methods, err := a.Methods.List(r.Context())
 		if err != nil {
+			logger.ErrorContext(r.Context(), "failed to load auth methods", "endpoint", endpoint, "error", err)
 			writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "load auth methods"})
 			return
 		}
 
 		// Setup mode: no auth methods configured — allow anonymous.
 		if len(methods) == 0 {
+			logger.DebugContext(r.Context(), "no auth methods configured, allowing anonymous", "endpoint", endpoint)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -39,6 +55,7 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 		// Auth enforced: require a valid Bearer token.
 		token := extractBearer(r)
 		if token == "" {
+			logger.DebugContext(r.Context(), "missing bearer token", "endpoint", endpoint, "peer", r.RemoteAddr)
 			w.Header().Set("WWW-Authenticate", "Bearer")
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "missing bearer token"})
 			return
@@ -53,6 +70,8 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 			}
 			claims, verifyErr := a.Verifier.Verify(r.Context(), *m.OIDC(), token)
 			if verifyErr != nil {
+				logger.DebugContext(r.Context(), "token verification failed for method",
+					"endpoint", endpoint, "method_id", m.ID(), "audience", m.OIDC().Audience, "error", verifyErr)
 				continue
 			}
 			subject = &claims
@@ -61,10 +80,15 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		if subject == nil {
+			logger.DebugContext(r.Context(), "no auth method accepted the token",
+				"endpoint", endpoint, "peer", r.RemoteAddr, "methods_checked", len(methods))
 			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "token verification failed"})
 			return
 		}
+
+		logger.DebugContext(r.Context(), "request authenticated",
+			"endpoint", endpoint, "subject", subject.Subject, "issuer", subject.Issuer)
 
 		// Propagate the same AuthorizationContext that the gRPC layer
 		// uses, so downstream application services see a consistent

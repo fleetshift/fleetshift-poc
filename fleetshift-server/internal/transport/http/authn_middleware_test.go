@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -102,6 +103,7 @@ func setupMiddleware(repo *fakeAuthMethodRepo, verifier *fakeOIDCTokenVerifier) 
 	return &AuthnMiddleware{
 		Methods:  &application.AuthMethodService{Methods: repo},
 		Verifier: verifier,
+		Logger:   slog.Default(),
 	}
 }
 
@@ -347,6 +349,7 @@ func TestAuthnMiddleware_MultipleOIDCMethods_TriesAll(t *testing.T) {
 	mw := &AuthnMiddleware{
 		Methods:  &application.AuthMethodService{Methods: repo},
 		Verifier: verifier,
+		Logger:   slog.Default(),
 	}
 
 	var captured *application.AuthorizationContext
@@ -368,6 +371,25 @@ func TestAuthnMiddleware_MultipleOIDCMethods_TriesAll(t *testing.T) {
 	}
 	if captured.Subject.Subject != wantClaims.Subject {
 		t.Errorf("Subject.Subject = %q, want %q", captured.Subject.Subject, wantClaims.Subject)
+	}
+}
+
+func TestAuthnMiddleware_NilLogger_UsesDefault(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	verifier := &fakeOIDCTokenVerifier{}
+	mw := &AuthnMiddleware{
+		Methods:  &application.AuthMethodService{Methods: repo},
+		Verifier: verifier,
+		// Logger intentionally nil — should fall back to slog.Default().
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/user-config", nil)
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(echoHandler).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
 	}
 }
 
