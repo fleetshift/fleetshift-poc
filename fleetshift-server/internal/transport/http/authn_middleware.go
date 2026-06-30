@@ -53,9 +53,7 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 			}
 			claims, verifyErr := a.Verifier.Verify(r.Context(), *m.OIDC(), token)
 			if verifyErr != nil {
-				w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
-				writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "token verification failed"})
-				return
+				continue
 			}
 			subject = &claims
 			matchedAudience = []domain.Audience{m.OIDC().Audience}
@@ -63,8 +61,8 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 		}
 
 		if subject == nil {
-			w.Header().Set("WWW-Authenticate", "Bearer")
-			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "no matching auth method"})
+			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
+			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "token verification failed"})
 			return
 		}
 

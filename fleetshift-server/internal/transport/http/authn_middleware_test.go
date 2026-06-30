@@ -63,6 +63,20 @@ func (f *fakeOIDCTokenVerifier) Verify(_ context.Context, _ domain.OIDCConfig, r
 	return f.claims, nil
 }
 
+// fakePerAudienceVerifier accepts tokens only for a specific audience,
+// allowing tests to exercise the multi-method loop path.
+type fakePerAudienceVerifier struct {
+	acceptAudience domain.Audience
+	claims         domain.SubjectClaims
+}
+
+func (f *fakePerAudienceVerifier) Verify(_ context.Context, cfg domain.OIDCConfig, _ string) (domain.SubjectClaims, error) {
+	if cfg.Audience != f.acceptAudience {
+		return domain.SubjectClaims{}, errors.New("audience mismatch")
+	}
+	return f.claims, nil
+}
+
 // echoHandler is a simple handler that writes "ok" — used to verify
 // the middleware allows the request through.
 var echoHandler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
@@ -286,6 +300,74 @@ func TestAuthnMiddleware_AZPClaim_ClientCaptured(t *testing.T) {
 	}
 	if captured.Client.ID != "my-client-id" {
 		t.Errorf("Client.ID = %q, want %q", captured.Client.ID, "my-client-id")
+	}
+}
+
+func TestAuthnMiddleware_MultipleOIDCMethods_TriesAll(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	// First method — audience that the verifier will reject.
+	if err := repo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "oidc-reject",
+		Type: domain.AuthMethodTypeOIDC,
+		OIDC: &domain.OIDCConfig{
+			IssuerURL:             "https://issuer-a.example.com",
+			Audience:              "audience-a",
+			JWKSURI:               "https://issuer-a.example.com/jwks",
+			AuthorizationEndpoint: "https://issuer-a.example.com/authorize",
+			TokenEndpoint:         "https://issuer-a.example.com/token",
+		},
+	})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+	// Second method — audience the verifier accepts.
+	if err := repo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "oidc-accept",
+		Type: domain.AuthMethodTypeOIDC,
+		OIDC: &domain.OIDCConfig{
+			IssuerURL:             "https://issuer-b.example.com",
+			Audience:              "audience-b",
+			JWKSURI:               "https://issuer-b.example.com/jwks",
+			AuthorizationEndpoint: "https://issuer-b.example.com/authorize",
+			TokenEndpoint:         "https://issuer-b.example.com/token",
+		},
+	})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	wantClaims := domain.SubjectClaims{
+		FederatedIdentity: domain.FederatedIdentity{
+			Subject: "multi-user",
+			Issuer:  "https://issuer-b.example.com",
+		},
+	}
+	verifier := &fakePerAudienceVerifier{
+		acceptAudience: "audience-b",
+		claims:         wantClaims,
+	}
+	mw := &AuthnMiddleware{
+		Methods:  &application.AuthMethodService{Methods: repo},
+		Verifier: verifier,
+	}
+
+	var captured *application.AuthorizationContext
+	inner := http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		captured = application.AuthFromContext(r.Context())
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/user-config", nil)
+	req.Header.Set("Authorization", "Bearer any-token")
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(inner).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (first method should fail, second should match)", rec.Code, http.StatusOK)
+	}
+	if captured == nil || captured.Subject == nil {
+		t.Fatal("AuthorizationContext or Subject is nil")
+	}
+	if captured.Subject.Subject != wantClaims.Subject {
+		t.Errorf("Subject.Subject = %q, want %q", captured.Subject.Subject, wantClaims.Subject)
 	}
 }
 
