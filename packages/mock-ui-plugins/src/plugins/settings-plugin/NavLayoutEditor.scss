@@ -1,0 +1,128 @@
+.ome-settings-nav-editor {
+  max-width: 560px;
+
+  &__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--pf-t--global--spacer--sm);
+  }
+
+  &__section-label {
+    font-weight: var(--pf-t--global--font--weight--heading--default);
+    font-size: var(--pf-t--global--font--size--sm);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--pf-t--global--text--color--subtle);
+    padding: var(--pf-t--global--spacer--sm) 0;
+  }
+
+  &__tree-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+}
+
+// TreeItem styles — visual parity with @patternfly/react-drag-drop
+.ome-settings-tree-item {
+  list-style: none;
+  margin-bottom: 2px;
+  touch-action: none;
+  cursor: var(--pf-v6-c-draggable--Cursor, auto);
+
+  &--nested {
+    margin-left: 30px;
+  }
+
+  // Elevated (floating) item — matches pf-v6-c-draggable.pf-m-dragging
+  &--elevated {
+    position: relative;
+    z-index: 100;
+    cursor: var(--pf-v6-c-draggable--m-dragging--Cursor, grabbing);
+    background-color: var(--pf-t--global--background--color--floating--default);
+    box-shadow: var(--pf-v6-c-draggable--m-dragging--BoxShadow, var(--pf-t--global--box-shadow--md));
+
+    &::after {
+      position: absolute;
+      inset-block: 0;
+      inset-inline: 0;
+      content: "";
+      border: var(--pf-v6-c-draggable--m-dragging--after--BorderWidth, var(--pf-t--global--border--width--regular))
+        solid
+        var(--pf-v6-c-draggable--m-dragging--after--BorderColor, var(--pf-t--global--border--color--brand--default));
+      border-radius: var(--pf-v6-c-draggable--m-dragging--after--BorderRadius, var(--pf-t--global--border--radius--small));
+    }
+  }
+
+  // Ghost (source placeholder) — matches pf-v6-c-droppable.pf-m-dragging
+  &--ghost {
+    position: relative;
+
+    &::before {
+      position: absolute;
+      inset-block: 0;
+      inset-inline: 0;
+      pointer-events: none;
+      content: "";
+      background-color: var(--pf-v6-c-droppable--m-dragging--before--BackgroundColor, var(--pf-t--global--background--color--primary--default));
+      opacity: var(--pf-v6-c-droppable--m-dragging--before--Opacity, 0.6);
+    }
+
+    &::after {
+      position: absolute;
+      inset-block: 0;
+      inset-inline: 0;
+      pointer-events: none;
+      content: "";
+      border: var(--pf-v6-c-droppable--m-dragging--after--BorderWidth, var(--pf-t--global--border--width--regular))
+        solid
+        var(--pf-v6-c-droppable--m-dragging--after--BorderColor, var(--pf-t--global--border--color--brand--default));
+      border-radius: var(--pf-v6-c-droppable--m-dragging--after--BorderRadius, var(--pf-t--global--border--radius--small));
+    }
+  }
+
+  &__row {
+    display: flex;
+    align-items: center;
+    gap: var(--pf-t--global--spacer--sm);
+    padding: var(--pf-t--global--spacer--xs) var(--pf-t--global--spacer--sm);
+    border-radius: var(--pf-t--global--border--radius--small);
+  }
+
+  &__handle {
+    cursor: grab;
+    display: flex;
+    align-items: center;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--pf-v6-c-data-list__item-draggable-button-icon--Color, var(--pf-t--global--icon--color--subtle));
+
+    &:hover {
+      color: var(--pf-v6-c-data-list__item-draggable-button--hover__draggable-icon--Color, var(--pf-t--global--icon--color--regular));
+    }
+
+    &:focus-visible {
+      outline: var(--pf-t--global--border--width--regular) solid var(--pf-t--global--border--color--brand--default);
+      outline-offset: 2px;
+      border-radius: var(--pf-t--global--border--radius--small);
+    }
+  }
+
+  &__label {
+    flex: 1;
+
+    &--section {
+      font-weight: var(--pf-t--global--font--weight--heading--default);
+      font-size: var(--pf-t--global--font--size--sm);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--pf-t--global--text--color--subtle);
+    }
+
+    &--page {
+      font-weight: var(--pf-t--global--font--weight--body--default);
+    }
+  }
+}

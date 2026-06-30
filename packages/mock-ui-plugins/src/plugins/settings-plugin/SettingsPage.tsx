@@ -1,6 +1,6 @@
 import { Content, Title } from "@patternfly/react-core";
 
-import NavOrderEditor from "./NavOrderEditor";
+import NavLayoutEditor from "./NavLayoutEditor";
 
 const SettingsPage = () => (
   <>
@@ -8,7 +8,7 @@ const SettingsPage = () => (
     <Content component="p" className="pf-v6-u-mb-lg">
       Manage your workspace preferences.
     </Content>
-    <NavOrderEditor />
+    <NavLayoutEditor />
   </>
 );
 

@@ -1,3 +1,4 @@
+import { getExtensionStore } from "@fleetshift/common";
 import { AnimationsProvider } from "@patternfly/react-core";
 import { ScalprumProvider } from "@scalprum/react-core";
 import { PropsWithChildren, useMemo, useRef } from "react";
@@ -35,15 +36,29 @@ const ScalprumShell = ({ children }: PropsWithChildren) => {
               const p = pageMap.get(entry.pageId);
               if (p) result.push({ id: p.id, scope: p.scope, title: p.title });
             } else if (entry.type === "group") {
+              const groupScope = `${entry.pluginKey}-plugin`;
               result.push({
                 id: entry.groupId,
-                scope: `${entry.pluginKey}-plugin`,
+                scope: groupScope,
                 title: entry.label,
               });
+              for (const child of entry.children) {
+                const p = pageMap.get(child.pageId);
+                if (p)
+                  result.push({ id: p.id, scope: p.scope, title: p.title });
+              }
+            } else if (entry.type === "section") {
+              for (const child of entry.children) {
+                const p = pageMap.get(child.pageId);
+                if (p)
+                  result.push({ id: p.id, scope: p.scope, title: p.title });
+              }
             }
           }
           return result;
         },
+        getBackendLayout: () => navLayoutRef.current,
+        extensionStore: getExtensionStore(),
         getClusterIdsForPlugin: () => [] as string[],
         getClusterName: (clusterId: string) => clusterId,
         onClustersChange: () => () => {},

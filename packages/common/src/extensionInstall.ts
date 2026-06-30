@@ -112,7 +112,11 @@ export async function setNavLayout(override: NavLayoutOverride): Promise<void> {
   await navLayoutStore.put("layout", override);
 }
 
-type ExtensionStore = {
+export async function clearNavLayout(): Promise<void> {
+  await navLayoutStore.delete("layout");
+}
+
+export type ExtensionStore = {
   init: typeof initializeDefaults;
   setInstalled: typeof setInstalled;
   getInstallState: typeof getInstallState;
@@ -122,6 +126,7 @@ type ExtensionStore = {
   subscribeNavOrder: (listener: (order: string[] | null) => void) => () => void;
   getNavLayout: typeof getNavLayout;
   setNavLayout: typeof setNavLayout;
+  clearNavLayout: typeof clearNavLayout;
   subscribeNavLayout: (
     listener: (override: NavLayoutOverride | null) => void,
   ) => () => void;
@@ -186,6 +191,10 @@ export function getExtensionStore(): ExtensionStore {
       getNavLayout,
       setNavLayout: async (override) => {
         await setNavLayout(override);
+        await notifyNavLayout();
+      },
+      clearNavLayout: async () => {
+        await clearNavLayout();
         await notifyNavLayout();
       },
       subscribeNavLayout(cb) {

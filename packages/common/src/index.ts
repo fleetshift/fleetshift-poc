@@ -6,7 +6,7 @@ export type {
   PlacementStrategy,
 } from "./canonical.js";
 export { buildSignedInputEnvelope, hashIntent } from "./canonical.js";
-export type { CoreExtensionMeta } from "./extensionInstall.js";
+export type { CoreExtensionMeta, ExtensionStore } from "./extensionInstall.js";
 export {
   CORE_EXTENSION_DEFAULTS,
   CORE_EXTENSION_META,
@@ -20,6 +20,7 @@ export type {
 } from "./idb/index.js";
 export { createIDBStore, useIDBMap, useIDBValue } from "./idb/index.js";
 export type {
+  FlatNode,
   NavLayoutEntry,
   NavLayoutGroup,
   NavLayoutOverride,
@@ -28,9 +29,17 @@ export type {
   StoredNavLayout,
 } from "./navLayout.js";
 export {
+  arrayMove,
+  arrayMoveBlock,
+  buildLayout,
   collectPageIds,
+  flattenLayout,
+  getDescendantIds,
+  getProjection,
+  INDENTATION,
   isNavLayoutOverride,
   mergeLayout,
+  normalizeOrder,
 } from "./navLayout.js";
 export { orderByIds } from "./orderByIds.js";
 export type { PluginLinkProps } from "./PluginLink.js";
