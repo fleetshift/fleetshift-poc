@@ -1,6 +1,9 @@
 package domain
 
-import "context"
+import (
+	"context"
+	"fmt"
+)
 
 // ManagedResourceManifestStrategy resolves a [ResourceIntent] by
 // reference and produces a single manifest containing the spec. This
@@ -28,11 +31,15 @@ func (s *ManagedResourceManifestStrategy) Generate(ctx context.Context, _ Genera
 		return nil, err
 	}
 
+	raw, err := WrapManifestEnvelope(resource.Name(), s.Ref.ExtensionResourceUID, intent.Spec)
+	if err != nil {
+		return nil, fmt.Errorf("wrap manifest envelope: %w", err)
+	}
+
 	return []Manifest{{
 		ManifestType: s.Ref.ManifestType,
 		ManifestID:   ManifestID(s.Ref.ExtensionResourceUID.String()),
-		ResourceName: resource.Name(),
-		Raw:          intent.Spec,
+		Raw:          raw,
 	}}, nil
 }
 

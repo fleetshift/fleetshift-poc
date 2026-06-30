@@ -32,11 +32,15 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	if got[0].ManifestType != "clusters" {
 		t.Errorf("ManifestType = %q, want %q", got[0].ManifestType, "clusters")
 	}
-	if string(got[0].Raw) != string(spec) {
-		t.Errorf("Raw = %s, want %s", got[0].Raw, spec)
+	envelope, err := domain.UnwrapManifestEnvelope(got[0].Raw)
+	if err != nil {
+		t.Fatalf("UnwrapManifestEnvelope() error = %v", err)
 	}
-	if got[0].ResourceName != "prod-us-east-1" {
-		t.Errorf("ResourceName = %q, want %q", got[0].ResourceName, "prod-us-east-1")
+	if envelope.Name != "prod-us-east-1" {
+		t.Errorf("envelope.Name = %q, want %q", envelope.Name, "prod-us-east-1")
+	}
+	if string(envelope.Spec) != string(spec) {
+		t.Errorf("envelope.Spec = %s, want %s", envelope.Spec, spec)
 	}
 }
 

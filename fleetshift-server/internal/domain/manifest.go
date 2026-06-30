@@ -31,7 +31,6 @@ type ManifestID string
 type Manifest struct {
 	ManifestType ManifestType
 	ManifestID   ManifestID
-	ResourceName ResourceName
 	Raw          json.RawMessage
 }
 
