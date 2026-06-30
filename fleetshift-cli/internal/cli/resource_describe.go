@@ -29,7 +29,7 @@ func newResourceDescribeCmd(ctx *cmdContext) *cobra.Command {
 			}
 
 			out := cmd.OutOrStdout()
-			fmt.Fprintf(out, "Type:     %s\n", rt.Plural)
+			fmt.Fprintf(out, "Type:     %s\n", rt.QualifiedName())
 			fmt.Fprintf(out, "Singular: %s\n", rt.Singular)
 			fmt.Fprintf(out, "Service:  %s\n", rt.ServiceName)
 			fmt.Fprintln(out)

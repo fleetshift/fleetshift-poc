@@ -85,11 +85,12 @@ func TestClient_ResolveType_AmbiguousCollection(t *testing.T) {
 	if !strings.Contains(err.Error(), "ambiguous") {
 		t.Fatalf("expected ambiguity error, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "kind.fleetshift.v1.ClusterService") {
-		t.Errorf("error should list Kind service, got: %v", err)
+	// The error should suggest qualified names, not bare service names.
+	if !strings.Contains(err.Error(), "kind.fleetshift.v1/clusters") {
+		t.Errorf("error should suggest kind qualified name, got: %v", err)
 	}
-	if !strings.Contains(err.Error(), "gcphcp.fleetshift.v1.ClusterService") {
-		t.Errorf("error should list GCP HCP service, got: %v", err)
+	if !strings.Contains(err.Error(), "gcphcp.fleetshift.v1/clusters") {
+		t.Errorf("error should suggest gcphcp qualified name, got: %v", err)
 	}
 
 	// Resolving with an explicit service should succeed.
@@ -99,6 +100,49 @@ func TestClient_ResolveType_AmbiguousCollection(t *testing.T) {
 	}
 	if rt.ServiceName != "kind.fleetshift.v1.ClusterService" {
 		t.Errorf("service = %q, want kind.fleetshift.v1.ClusterService", rt.ServiceName)
+	}
+}
+
+func TestClient_ResolveType_QualifiedName(t *testing.T) {
+	addr := testserver.Start(t)
+
+	conn, err := grpc.NewClient(addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	defer conn.Close()
+
+	client := dynamic.NewClient(conn)
+
+	// Qualified name should resolve without ambiguity, even though
+	// "clusters" alone is ambiguous.
+	rt, err := client.ResolveType(context.Background(), "kind.fleetshift.v1/clusters", "")
+	if err != nil {
+		t.Fatalf("ResolveType qualified: %v", err)
+	}
+	if rt.ServiceName != "kind.fleetshift.v1.ClusterService" {
+		t.Errorf("service = %q, want kind.fleetshift.v1.ClusterService", rt.ServiceName)
+	}
+	if rt.QualifiedName() != "kind.fleetshift.v1/clusters" {
+		t.Errorf("qualified = %q, want kind.fleetshift.v1/clusters", rt.QualifiedName())
+	}
+
+	// GCP HCP qualified name should also resolve.
+	rt, err = client.ResolveType(context.Background(), "gcphcp.fleetshift.v1/clusters", "")
+	if err != nil {
+		t.Fatalf("ResolveType gcphcp qualified: %v", err)
+	}
+	if rt.ServiceName != "gcphcp.fleetshift.v1.ClusterService" {
+		t.Errorf("service = %q, want gcphcp.fleetshift.v1.ClusterService", rt.ServiceName)
+	}
+
+	// Unknown qualified name should error.
+	_, err = client.ResolveType(context.Background(), "nonexistent.v1/clusters", "")
+	if err == nil {
+		t.Fatal("expected error for unknown qualified name, got nil")
+	}
+	if !strings.Contains(err.Error(), "unknown resource type") {
+		t.Errorf("expected unknown type error, got: %v", err)
 	}
 }
 

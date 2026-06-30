@@ -18,8 +18,12 @@ func TestResource_TypesCommand(t *testing.T) {
 
 	out := runCLI(t, "--server", addr, "resource", "types")
 
-	if !strings.Contains(out, "Clusters") {
-		t.Fatalf("expected 'Clusters' in output, got:\n%s", out)
+	// The TYPE column shows qualified names: {protoPackage}/{collectionID}.
+	if !strings.Contains(out, "kind.fleetshift.v1/clusters") {
+		t.Fatalf("expected 'kind.fleetshift.v1/clusters' in output, got:\n%s", out)
+	}
+	if !strings.Contains(out, "gcphcp.fleetshift.v1/clusters") {
+		t.Fatalf("expected 'gcphcp.fleetshift.v1/clusters' in output, got:\n%s", out)
 	}
 	if !strings.Contains(out, "kind.fleetshift.v1.ClusterService") {
 		t.Fatalf("expected 'kind.fleetshift.v1.ClusterService' in output, got:\n%s", out)
@@ -83,6 +87,41 @@ func TestResource_CreateGetListDelete(t *testing.T) {
 		t.Fatalf("dial: %v", err)
 	}
 	defer conn.Close()
+}
+
+func TestResource_QualifiedTypeCRUD(t *testing.T) {
+	addr := testserver.Start(t)
+
+	specJSON := `{"name": "qualified-cluster"}`
+	specFile := writeSpecFile(t, specJSON)
+
+	// Use the qualified type form directly — no --service needed.
+	qualifiedType := "kind.fleetshift.v1/clusters"
+
+	// Create
+	out := runCLI(t, "--server", addr, "resource", "create", qualifiedType,
+		"--id", "qualified-cluster",
+		"--spec-file", specFile,
+		"--output", "json",
+	)
+	assertJSONHasField(t, out, "name", "clusters/qualified-cluster")
+	assertJSONHasField(t, out, "state", "CREATING")
+
+	// Get
+	out = runCLI(t, "--server", addr, "resource", "get", qualifiedType, "qualified-cluster", "--output", "json")
+	assertJSONHasField(t, out, "name", "clusters/qualified-cluster")
+
+	// List
+	out = runCLI(t, "--server", addr, "resource", "list", qualifiedType, "--output", "json")
+	if !strings.Contains(out, "clusters/qualified-cluster") {
+		t.Fatalf("expected resource in list output, got:\n%s", out)
+	}
+
+	// Delete
+	out = runCLI(t, "--server", addr, "resource", "delete", qualifiedType, "qualified-cluster", "--output", "json")
+	if !strings.Contains(out, "clusters/qualified-cluster") {
+		t.Fatalf("expected deleted resource in output, got:\n%s", out)
+	}
 }
 
 func TestResource_GetTableOutput(t *testing.T) {

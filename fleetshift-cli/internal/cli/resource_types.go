@@ -26,9 +26,9 @@ func newResourceTypesCmd(ctx *cmdContext) *cobra.Command {
 			}
 
 			w := tabwriter.NewWriter(cmd.OutOrStdout(), 0, 4, 2, ' ', 0)
-			fmt.Fprintln(w, "PLURAL\tSINGULAR\tSERVICE")
+			fmt.Fprintln(w, "TYPE\tSINGULAR\tSERVICE")
 			for _, rt := range types {
-				fmt.Fprintf(w, "%s\t%s\t%s\n", rt.Plural, rt.Singular, rt.ServiceName)
+				fmt.Fprintf(w, "%s\t%s\t%s\n", rt.QualifiedName(), rt.Singular, rt.ServiceName)
 			}
 			return w.Flush()
 		},

@@ -41,6 +41,14 @@ type ResourceType struct {
 	CollectionID string // AIP collection identifier (e.g. "clusters")
 }
 
+// QualifiedName returns the unique type token in the form
+// "{ProtoPackage}/{CollectionID}" (e.g. "kind.fleetshift.v1/clusters").
+// This is the canonical CLI identifier for a resource type — always
+// unambiguous, even when multiple services share a collection ID.
+func (rt ResourceType) QualifiedName() string {
+	return rt.ProtoPackage + "/" + rt.CollectionID
+}
+
 // ResourceCollection returns the resource name prefix (e.g. "clusters/").
 func (rt ResourceType) ResourceCollection() string {
 	return rt.CollectionID + "/"
@@ -468,17 +476,37 @@ func (c *Client) Delete(ctx context.Context, rt ResourceType, id string) (proto.
 	return resp, nil
 }
 
-// ResolveType finds a resource type by collection ID (or plural) among
-// the available types. If service is non-empty, it is used to
-// disambiguate when multiple services expose the same collection. If
-// service is empty and the collection is ambiguous, an error listing
-// the candidates is returned.
+// ResolveType finds a resource type by qualified name, collection ID,
+// or plural among the available types.
+//
+// Accepted forms for the collection argument:
+//   - Qualified: "{protoPackage}/{collectionID}" (e.g. "kind.fleetshift.v1/clusters")
+//     — always unique, no --service needed.
+//   - Short: a bare collection ID or plural (e.g. "clusters" or "Clusters")
+//     — works only when unambiguous across services.
+//
+// If service is non-empty, it filters short-form matches to the given
+// gRPC service name. If service is empty and the short form is
+// ambiguous, an error listing the qualified names is returned.
 func (c *Client) ResolveType(ctx context.Context, collection string, service string) (ResourceType, error) {
 	types, err := c.ListResourceTypes(ctx)
 	if err != nil {
 		return ResourceType{}, err
 	}
 
+	// Try qualified name match first: "protoPackage/collectionID".
+	if idx := strings.IndexByte(collection, '/'); idx > 0 && idx < len(collection)-1 {
+		pkg := collection[:idx]
+		col := collection[idx+1:]
+		for _, rt := range types {
+			if rt.ProtoPackage == pkg && strings.EqualFold(rt.CollectionID, col) {
+				return rt, nil
+			}
+		}
+		return ResourceType{}, fmt.Errorf("unknown resource type %q", collection)
+	}
+
+	// Fall back to short-form matching on collection ID or plural.
 	var matches []ResourceType
 	for _, rt := range types {
 		if strings.EqualFold(rt.CollectionID, collection) || strings.EqualFold(rt.Plural, collection) {
@@ -497,10 +525,10 @@ func (c *Client) ResolveType(ctx context.Context, collection string, service str
 	default:
 		var candidates []string
 		for _, rt := range matches {
-			candidates = append(candidates, rt.ServiceName)
+			candidates = append(candidates, rt.QualifiedName())
 		}
 		return ResourceType{}, fmt.Errorf(
-			"ambiguous collection %q: multiple services match (%s); use --service to disambiguate",
+			"ambiguous type %q: multiple services match (%s); use the qualified form or --service to disambiguate",
 			collection, strings.Join(candidates, ", "),
 		)
 	}
