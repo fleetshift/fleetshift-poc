@@ -162,6 +162,7 @@ export function useDragTree(
         isBlock,
         activeSlots,
         dragParentId,
+        INDENTATION,
       );
 
       let nestGap = 0;
@@ -216,6 +217,7 @@ export function useDragTree(
         data.isBlock,
         activeSlots,
         data.dragParentId,
+        INDENTATION,
       );
 
       let nestGap = 0;

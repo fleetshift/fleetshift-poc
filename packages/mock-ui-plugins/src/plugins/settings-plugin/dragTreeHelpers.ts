@@ -1,5 +1,4 @@
 import type { FlatNode } from "@fleetshift/common";
-import { INDENTATION } from "@fleetshift/common";
 
 export interface DragState {
   dragId: string;
@@ -92,19 +91,20 @@ export function resolveDepthAndParent(
   isBlock: boolean,
   slots: Slot[],
   dragParentId: string | null,
+  indentation: number,
 ): { depth: number; parentId: string | null } {
   if (isBlock) return { depth: 0, parentId: null };
 
   if (dragParentId) {
     const relX = pointerX - containerLeft;
-    if (relX >= INDENTATION * 0.5) {
+    if (relX >= indentation * 0.5) {
       return { depth: 1, parentId: dragParentId };
     }
     return { depth: 0, parentId: null };
   }
 
   const relX = pointerX - containerLeft;
-  const wantsNest = relX > INDENTATION * 1.5;
+  const wantsNest = relX > indentation * 1.5;
 
   if (!wantsNest) return { depth: 0, parentId: null };
 
