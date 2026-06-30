@@ -50,15 +50,13 @@ spec:
             - name: grpc
               containerPort: 50051
           livenessProbe:
-            httpGet:
-              path: /v1/deployments
+            tcpSocket:
               port: 8085
             initialDelaySeconds: 15
             periodSeconds: 10
             failureThreshold: 3
           readinessProbe:
-            httpGet:
-              path: /v1/deployments
+            tcpSocket:
               port: 8085
             initialDelaySeconds: 10
             periodSeconds: 5

@@ -15,24 +15,18 @@ x-fleetshift-server: &fleetshift-server
   privileged: true
   user: "0:0"
   environment:
-    KIND_TEMP_DIR: "${KIND_TEMP_DIR:-/tmp}"
     KIND_EXPERIMENTAL_DOCKER_NETWORK: kind
     CONTAINER_HOST: "unix:///var/run/docker.sock"
   ports:
     - "${FLEETSHIFT_SERVER_HTTP_PORT}:${FLEETSHIFT_SERVER_HTTP_PORT}"
     - "${FLEETSHIFT_SERVER_GRPC_PORT}:${FLEETSHIFT_SERVER_GRPC_PORT}"
   volumes:
-    - ${PODMAN_SOCKET:-/dev/null}:/var/run/docker.sock
-    - ${KIND_TEMP_DIR:-/tmp}:${KIND_TEMP_DIR:-/tmp}
+    - ${PODMAN_SOCKET}:/var/run/docker.sock
+    - /tmp:/tmp
     - web-assets:/srv/web:ro
   networks:
     - default
     - kind
-  healthcheck:
-    test: ["CMD", "curl", "-sf", "http://localhost:${FLEETSHIFT_SERVER_HTTP_PORT}/v1/deployments"]
-    interval: 5s
-    timeout: 3s
-    retries: 30
 
 services:
 

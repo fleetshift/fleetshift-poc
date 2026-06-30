@@ -85,7 +85,6 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 		func(logger log.Logger) kindaddon.ClusterProvider {
 			return cluster.NewProvider(cluster.ProviderWithLogger(logger))
 		},
-		kindaddon.WithTempDir(t.TempDir()),
 		kindaddon.WithOIDCCABundle(idp.CACertPEM()),
 	)
 
@@ -401,7 +400,6 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		func(logger log.Logger) kindaddon.ClusterProvider {
 			return cluster.NewProvider(cluster.ProviderWithLogger(logger))
 		},
-		kindaddon.WithTempDir(t.TempDir()),
 		kindaddon.WithOIDCCABundle(idp.CACertPEM()),
 	)
 	router := delivery.NewRoutingDeliveryService()

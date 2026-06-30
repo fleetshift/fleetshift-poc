@@ -1,34 +1,50 @@
-#!/bin/sh
-set -eu
+#!/usr/bin/env bash
+set -euo pipefail
 
-# Generate self-signed TLS certificates for the local Keycloak instance.
-# Runs as an init container via overrides/local-keycloak.yaml.
-# Skips if certs already exist (idempotent).
+# Generate TLS certificates for the local Keycloak instance using mkcert.
+# Called by 'task podman:cert-init'. Skips if certs already exist (idempotent).
 
-if [ -f /certs/keycloak.crt ]; then
-  echo "TLS certs already exist, skipping generation"
-  exit 0
+CERT_DIR="$(cd "$(dirname "$0")/.." && pwd)/.certs"
+CERT_FILE="$CERT_DIR/keycloak.crt"
+KEY_FILE="$CERT_DIR/keycloak.key"
+CA_FILE="$CERT_DIR/ca.crt"
+
+mkdir -p "$CERT_DIR"
+
+CAROOT="$(mkcert -CAROOT)"
+CAROOT_CERT="$CAROOT/rootCA.pem"
+CAROOT_KEY="$CAROOT/rootCA-key.pem"
+
+echo "==> Installing CA into system trust store..."
+mkcert -install
+
+if [ -f "$CERT_FILE" ] && [ -f "$KEY_FILE" ] && [ -f "$CA_FILE" ]; then
+  if [ -f "$CAROOT_CERT" ] && cmp -s "$CA_FILE" "$CAROOT_CERT"; then
+    echo "TLS certs already exist in $CERT_DIR, skipping generation"
+    exit 0
+  fi
+  echo "==> Existing cert bundle does not match current mkcert CA — regenerating..."
 fi
 
-apk add --no-cache openssl > /dev/null
+if [ ! -f "$CAROOT_KEY" ]; then
+  echo "==> CA key missing — removing old CA and generating fresh one..."
+  mkcert -uninstall 2>/dev/null || true
+  rm -f "$CAROOT_CERT" "$CAROOT_KEY"
+  echo "==> Installing CA into system trust store..."
+  mkcert -install
+fi
 
-echo "Generating CA..."
-openssl req -x509 -newkey rsa:2048 -nodes \
-  -keyout /certs/ca.key -out /certs/ca.crt \
-  -days 3650 -subj "/CN=FleetShift Local CA" 2>/dev/null
+echo "==> Generating Keycloak certificate..."
+mkcert -key-file "$KEY_FILE" \
+       -cert-file "$CERT_FILE" \
+       keycloak
 
-echo "Generating Keycloak server certificate..."
-openssl req -newkey rsa:2048 -nodes \
-  -keyout /certs/keycloak.key -out /tmp/keycloak.csr \
-  -subj "/CN=keycloak" 2>/dev/null
+echo "==> Copying CA cert for container mounting..."
+cp "$CAROOT_CERT" "$CA_FILE"
 
-printf "subjectAltName=DNS:keycloak,DNS:localhost" > /tmp/san.cnf
-openssl x509 -req -in /tmp/keycloak.csr \
-  -CA /certs/ca.crt -CAkey /certs/ca.key -CAcreateserial \
-  -out /certs/keycloak.crt -days 3650 \
-  -extfile /tmp/san.cnf 2>/dev/null
+echo "==> Deleting CA private key..."
+rm -f "$CAROOT_KEY"
 
-rm -f /tmp/keycloak.csr /tmp/san.cnf /certs/ca.srl
-chmod 644 /certs/*.crt
-chmod 644 /certs/*.key
-echo "TLS certs generated in /certs/"
+chmod 644 "$KEY_FILE" "$CERT_FILE" "$CA_FILE"
+
+echo "TLS certs generated in $CERT_DIR/"

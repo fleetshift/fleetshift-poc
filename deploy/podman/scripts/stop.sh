@@ -9,6 +9,7 @@ source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 
 # compose down never executes commands — it stops containers by name.
 # Export placeholders so compose doesn't warn about unset variables during YAML parsing.
+ensure_podman_ready
 export DB_FLAG="unused"
 export OIDC_ISSUER_URL="${OIDC_ISSUER_URL:-unused}"
 export GCPHCP_CONFIG="${GCPHCP_CONFIG:-/dev/null}"

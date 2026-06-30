@@ -208,20 +208,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		kindOpts := []kindaddon.AgentOption{
 			kindaddon.WithObserver(kindaddon.NewSlogAgentObserver(logger)),
 		}
-		if tempDir := os.Getenv("KIND_TEMP_DIR"); tempDir != "" {
-			kindOpts = append(kindOpts, kindaddon.WithTempDir(tempDir))
-			logger.Info("kind agent: using temp dir " + tempDir)
-		}
 		if oidcCABundle != nil {
 			kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
-		}
-		if containerHost := os.Getenv("CONTAINER_HOST"); containerHost != "" {
-			kindOpts = append(kindOpts, kindaddon.WithContainerHost(containerHost))
-			logger.Info("kind agent: rewriting localhost OIDC issuer URLs to " + containerHost)
-		}
-		if httpsPort := os.Getenv("OIDC_HTTPS_PORT"); httpsPort != "" {
-			kindOpts = append(kindOpts, kindaddon.WithOIDCHTTPSPort(httpsPort))
-			logger.Info("kind agent: upgrading HTTP OIDC issuer URLs to HTTPS on port " + httpsPort)
 		}
 		kindAgent = kindaddon.NewAgent(
 			deliveryReporter,

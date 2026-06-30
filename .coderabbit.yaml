@@ -1,0 +1,6 @@
+reviews:
+  tools:
+    golangci-lint:
+      working_directories:
+        - fleetshift-server
+        - fleetshift-cli

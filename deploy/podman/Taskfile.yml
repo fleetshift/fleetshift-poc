@@ -21,7 +21,7 @@ vars:
         *) echo "false" ;;
       esac
   RESOLVED_GCPHCP_CONFIG: '{{.ROOT_DIR}}/deploy/podman/.gcphcp.yaml'
-  RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}http://{{.KC_HOSTNAME | default "localhost"}}:{{.KC_HTTP_PORT | default "8180"}}/auth/realms/fleetshift{{end}}'
+  RESOLVED_OIDC_URL: '{{if eq .RESOLVED_AUTH "external"}}{{.OIDC_ISSUER_URL}}{{else}}https://{{.KC_HOSTNAME | default "keycloak"}}:{{.KC_HTTPS_PORT | default "8443"}}/auth/realms/fleetshift{{end}}'
   RESOLVED_SERVER_ADDONS: '{{if eq .RESOLVED_GCPHCP_ENABLED "true"}}kind,kubernetes,gcphcp{{else}}kind,kubernetes{{end}}'
   RESOLVED_DB_FLAG:
     sh: |
@@ -31,28 +31,46 @@ vars:
         echo "--db=/data/fleetshift.db"
       fi
   RESOLVED_COMPOSE_FILES: '-f compose.yaml -f overrides/{{.RESOLVED_DB}}.yaml -f overrides/{{if eq .RESOLVED_AUTH "local"}}local-keycloak{{else}}external-oidc{{end}}.yaml'
+  RESOLVED_PODMAN_SOCKET:
+    sh: './scripts/detect-podman-socket.sh'
 
 tasks:
-  render-gcphcp-config:
+  ensure-podman:
     internal: true
     cmds:
-      - >-
-        env
-        GCPHCP_ENABLED="{{.RESOLVED_GCPHCP_ENABLED}}"
-        GCPHCP_GATEWAY_URL="{{.GCPHCP_GATEWAY_URL | default ""}}"
-        GCPHCP_GATEWAY_AUDIENCE="{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}"
-        GCPHCP_TARGET_ID="{{.GCPHCP_TARGET_ID | default ""}}"
-        GCPHCP_GCP_PROJECT="{{.GCPHCP_GCP_PROJECT | default ""}}"
-        GCPHCP_GCP_REGION="{{.GCPHCP_GCP_REGION | default ""}}"
-        GCPHCP_WORKFORCE_POOL="{{.GCPHCP_WORKFORCE_POOL | default ""}}"
-        GCPHCP_WORKFORCE_PROVIDER="{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}"
-        GCPHCP_BROKER_SA_EMAIL="{{.GCPHCP_BROKER_SA_EMAIL | default ""}}"
-        "{{.ROOT_DIR}}/deploy/render-gcphcp-config.sh"
-        --output "{{.RESOLVED_GCPHCP_CONFIG}}"
+      - bash -c 'source ./scripts/common.sh && ensure_podman_ready'
+    preconditions:
+      - sh: command -v podman
+        msg: "podman is not installed."
+      - sh: command -v docker-compose
+        msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not compatible)"
+
+  cert-init:
+    desc: Generate local TLS certs for Keycloak (one-time, requires mkcert)
+    cmds:
+      - ./scripts/generate-certs.sh
+    preconditions:
+      - sh: command -v mkcert
+        msg: "mkcert is not installed. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
+
+  render-gcphcp-config:
+    internal: true
+    env:
+      GCPHCP_ENABLED: '{{.RESOLVED_GCPHCP_ENABLED}}'
+      GCPHCP_GATEWAY_URL: '{{.GCPHCP_GATEWAY_URL | default ""}}'
+      GCPHCP_GATEWAY_AUDIENCE: '{{.GCPHCP_GATEWAY_AUDIENCE | default ""}}'
+      GCPHCP_TARGET_ID: '{{.GCPHCP_TARGET_ID | default ""}}'
+      GCPHCP_GCP_PROJECT: '{{.GCPHCP_GCP_PROJECT | default ""}}'
+      GCPHCP_GCP_REGION: '{{.GCPHCP_GCP_REGION | default ""}}'
+      GCPHCP_WORKFORCE_POOL: '{{.GCPHCP_WORKFORCE_POOL | default ""}}'
+      GCPHCP_WORKFORCE_PROVIDER: '{{.GCPHCP_WORKFORCE_PROVIDER | default ""}}'
+      GCPHCP_BROKER_SA_EMAIL: '{{.GCPHCP_BROKER_SA_EMAIL | default ""}}'
+    cmds:
+      - '{{.ROOT_DIR}}/deploy/scripts/render-gcphcp-config.sh --output {{.RESOLVED_GCPHCP_CONFIG}}'
 
   up:
     desc: Start the FleetShift stack (set DEPLOY_MODE, DB, AUTH to customize)
-    deps: [render-gcphcp-config]
+    deps: [ensure-podman, render-gcphcp-config]
     env: &deploy_env
       DEPLOY_MODE: '{{.RESOLVED_DEPLOY_MODE}}'
       DB: '{{.RESOLVED_DB}}'
@@ -64,13 +82,12 @@ tasks:
       OIDC_URL: '{{.RESOLVED_OIDC_URL}}'
       GCPHCP_CONFIG: '{{.RESOLVED_GCPHCP_CONFIG}}'
       FLEETSHIFT_SERVER_ADDONS: '{{.RESOLVED_SERVER_ADDONS}}'
+      PODMAN_SOCKET: '{{.RESOLVED_PODMAN_SOCKET}}'
     preconditions:
       - sh: test -f {{.ROOT_DIR}}/.env
         msg: "No .env found. Copy .env.template to .env first."
-      - sh: command -v podman
-        msg: "podman is not installed."
-      - sh: command -v docker-compose
-        msg: "docker-compose is not installed. Install: brew install docker-compose (podman-compose is not compatible)"
+      - sh: '{{if eq .RESOLVED_AUTH "local"}}command -v mkcert{{else}}true{{end}}'
+        msg: "mkcert is required for AUTH=local. Install: brew install mkcert (macOS) or go install filippo.io/mkcert@latest"
       - sh: echo "{{.RESOLVED_DEPLOY_MODE}}" | grep -qE '^(demo|prod)$'
         msg: "DEPLOY_MODE must be demo or prod, got: {{.RESOLVED_DEPLOY_MODE}}"
       - sh: echo "{{.RESOLVED_DB}}" | grep -qE '^(sqlite|postgres)$'
@@ -80,6 +97,7 @@ tasks:
       - sh: '{{if eq .RESOLVED_AUTH "external"}}[ "{{.OIDC_ISSUER_URL}}" != "<no value>" ] && test -n "{{.OIDC_ISSUER_URL}}"{{else}}true{{end}}'
         msg: "OIDC_ISSUER_URL is required when AUTH=external"
     cmds:
+      - '{{if eq .RESOLVED_AUTH "local"}}./scripts/generate-certs.sh{{else}}true{{end}}'
       - ./scripts/start.sh
       - printf 'AUTH={{.RESOLVED_AUTH}}\nDB={{.RESOLVED_DB}}\nDEV={{.DEV}}\n' > .active-deploy
 
@@ -190,6 +208,6 @@ tasks:
     cmds:
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env stop keycloak
       - podman compose $COMPOSE_FILES --env-file {{.ROOT_DIR}}/.env rm -f keycloak
-      - podman volume rm fleetshift_keycloak-certs 2>/dev/null || podman volume rm keycloak-certs 2>/dev/null || true
+      - rm -rf .certs/
       - rm -f .realm.json
       - echo "Keycloak state wiped. Run 'task podman:up' to restart with fresh realm and passwords."

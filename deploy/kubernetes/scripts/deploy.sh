@@ -62,7 +62,7 @@ if is_truthy "${GCPHCP_ENABLED:-false}"; then
   GCPHCP_CONFIG_PATH="/etc/fleetshift/gcphcp/gcphcp.yaml"
 fi
 
-"${ROOT_DIR}/deploy/render-gcphcp-config.sh" --output "${K8S_DIR}/gcphcp.yaml"
+"${ROOT_DIR}/deploy/scripts/render-gcphcp-config.sh" --output "${K8S_DIR}/gcphcp.yaml"
 
 cat > "${K8S_DIR}/config.env" <<EOF
 OIDC_ISSUER_URL=${OIDC_ISSUER_URL}

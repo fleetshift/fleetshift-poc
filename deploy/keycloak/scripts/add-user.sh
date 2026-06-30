@@ -58,7 +58,7 @@ if [[ -n "$ADMIN_URL" && -n "$ADMIN_PASSWORD" ]]; then
 elif [[ -n "$ADMIN_PASSWORD" ]]; then
     # Password provided but no URL — use local deployment
     set -a; source "$ROOT_DIR/.env"; set +a
-    KC_URL="http://${KC_HOSTNAME:-localhost}:${KC_HTTP_PORT:-8180}/auth"
+    KC_URL="https://${KC_HOSTNAME:-keycloak}:${KC_HTTPS_PORT:-8443}/auth"
 else
     # No credentials — discover from OpenShift
     command -v oc &>/dev/null || error "'oc' CLI not found. For local usage, pass --admin-password."

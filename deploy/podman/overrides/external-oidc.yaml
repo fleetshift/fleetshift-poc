@@ -4,18 +4,22 @@ services:
     entrypoint: ["/bin/sh", "-c"]
     command:
       - |
-        fleetctl auth setup \
-          --server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT} \
-          --issuer-url ${OIDC_ISSUER_URL} \
-          --client-id ${OIDC_CLI_CLIENT_ID} \
-          --audience ${OIDC_AUDIENCE} \
-          --key-enrollment-client-id fleetshift-signing \
-          --registry-id github.com \
-          --registry-subject-expression "claims.github_username" \
-        && echo "Auth method registered." \
-        || echo "Auth setup failed (may already exist) — continuing."
+        ARGS="--server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT}"
+        ARGS="$$ARGS --issuer-url ${OIDC_ISSUER_URL}"
+        ARGS="$$ARGS --client-id ${OIDC_CLI_CLIENT_ID}"
+        ARGS="$$ARGS --audience ${OIDC_AUDIENCE}"
+        ARGS="$$ARGS --key-enrollment-client-id fleetshift-signing"
+        ARGS="$$ARGS --registry-id github.com"
+        ARGS="$$ARGS --registry-subject-expression claims.github_username"
+        for i in $(seq 1 5); do
+          fleetctl auth setup $$ARGS && exit 0
+          echo "Server not ready, retrying in 2s... ($$i/5)"
+          sleep 2
+        done
+        echo "auth setup failed after 5 attempts" >&2
+        exit 1
     depends_on:
       fleetshift-server:
-        condition: service_healthy
+        condition: service_started
     networks:
       - default

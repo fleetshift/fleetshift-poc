@@ -8,10 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/url"
 	"os"
 	"slices"
-	"strings"
 	"sync"
 	"time"
 
@@ -82,12 +80,9 @@ type Agent struct {
 	reporter        domain.DeliveryReporter
 	providerFactory ClusterProviderFactory
 	observer        AgentObserver
-	tempDir         string
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
-	containerHost   string // hostname containers use to reach the host machine (replaces localhost)
-	oidcHTTPSPort   string // when set, rewrite HTTP issuer URLs to HTTPS with this port (e.g. "8443")
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -106,38 +101,12 @@ func WithObserver(o AgentObserver) AgentOption {
 	return func(a *Agent) { a.observer = o }
 }
 
-// WithTempDir sets the directory for temporary files (e.g., CA certs)
-// that must be visible to the container runtime. If unset, [os.TempDir]
-// is used. Container runtimes like Podman only mount specific host
-// paths into the VM, so callers should set this to a path the runtime
-// can see.
-func WithTempDir(dir string) AgentOption {
-	return func(a *Agent) { a.tempDir = dir }
-}
-
 // WithOIDCCABundle sets a PEM-encoded CA certificate for trusting the
 // OIDC issuer's TLS. When set, the agent mounts it into kind nodes and
 // configures --oidc-ca-file. When empty, the API server uses its system
 // trust store.
 func WithOIDCCABundle(pem []byte) AgentOption {
 	return func(a *Agent) { a.oidcCABundle = pem }
-}
-
-// WithContainerHost sets the hostname that containers use to reach
-// the host machine. When set, localhost and 127.0.0.1 in OIDC issuer
-// URLs are rewritten to this value before injecting into the kubeadm
-// config. Typical value: "host.docker.internal" (Docker Desktop).
-// Falls back to the original URL when empty.
-func WithContainerHost(host string) AgentOption {
-	return func(a *Agent) { a.containerHost = host }
-}
-
-// WithOIDCHTTPSPort enables HTTP→HTTPS upgrade for OIDC issuer URLs
-// passed to kube-apiserver (which requires HTTPS). The port is the
-// HTTPS port of the OIDC provider (e.g. "8443"). When unset, the
-// issuer URL is passed through unchanged.
-func WithOIDCHTTPSPort(port string) AgentOption {
-	return func(a *Agent) { a.oidcHTTPSPort = port }
 }
 
 // WithTokenVerifier configures the agent to verify the caller's JWT
@@ -479,7 +448,7 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		}
 		var caCertHostPath string
 		if len(a.oidcCABundle) > 0 {
-			path, err := writeCABundle(a.oidcCABundle, a.tempDir)
+			path, err := writeCABundle(a.oidcCABundle)
 			if err != nil {
 				return nil, "", err
 			}
@@ -492,7 +461,7 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		// TODO: audience policy -- for now we use the first audience from
 		// the caller's token. This couples the cluster's oidc-client-id to
 		// whatever audience the platform validated the user against.
-		issuer := a.rewriteIssuerForDocker(auth.Caller.Issuer)
+		issuer := auth.Caller.Issuer
 
 		config := toKindConfig(spec)
 		applyOIDCOverlay(&config, oidcSpec, string(issuer), string(auth.Audience[0]), caCertHostPath)
@@ -511,49 +480,6 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		return cfg, ConfigSourceCustom, nil
 	}
 	return nil, ConfigSourceDefault, nil
-}
-
-// rewriteIssuerForDocker replaces localhost/127.0.0.1 in the issuer
-// URL with the configured docker host so the URL is reachable from
-// inside kind containers. When oidcHTTPSPort is set, it also upgrades
-// HTTP issuer URLs to HTTPS on that port (kube-apiserver requires
-// HTTPS for --oidc-issuer-url). Returns the original URL when no
-// rewriting is needed.
-func (a *Agent) rewriteIssuerForDocker(issuer domain.IssuerURL) domain.IssuerURL {
-	u, err := url.Parse(string(issuer))
-	if err != nil {
-		return issuer
-	}
-
-	changed := false
-
-	// Replace localhost/127.0.0.1 with the container host.
-	if a.containerHost != "" {
-		host := strings.Split(u.Host, ":")[0]
-		if host == "localhost" || host == "127.0.0.1" {
-			port := u.Port()
-			if port != "" {
-				u.Host = a.containerHost + ":" + port
-			} else {
-				u.Host = a.containerHost
-			}
-			changed = true
-		}
-	}
-
-	// kube-apiserver requires HTTPS for --oidc-issuer-url. When
-	// oidcHTTPSPort is configured, upgrade HTTP to HTTPS on that port.
-	if u.Scheme == "http" && a.oidcHTTPSPort != "" {
-		u.Scheme = "https"
-		host := strings.Split(u.Host, ":")[0]
-		u.Host = host + ":" + a.oidcHTTPSPort
-		changed = true
-	}
-
-	if changed {
-		return domain.IssuerURL(u.String())
-	}
-	return issuer
 }
 
 func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {

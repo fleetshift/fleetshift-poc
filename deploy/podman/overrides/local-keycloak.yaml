@@ -1,11 +1,4 @@
 services:
-  keycloak-certs:
-    image: alpine:3
-    command: /scripts/generate-certs.sh
-    volumes:
-      - keycloak-certs:/certs
-      - ./scripts/generate-certs.sh:/scripts/generate-certs.sh:ro
-
   keycloak:
     image: quay.io/keycloak/keycloak:26.2
     command: start-dev --import-realm
@@ -13,29 +6,29 @@ services:
     environment:
       - KC_BOOTSTRAP_ADMIN_USERNAME=admin
       - KC_BOOTSTRAP_ADMIN_PASSWORD
-      - KC_HTTP_ENABLED=true
-      - KC_HTTP_PORT=${KC_HTTP_PORT}
+      - KC_HTTP_ENABLED=false
       - KC_HTTPS_PORT=${KC_HTTPS_PORT}
       - KC_HTTPS_CERTIFICATE_FILE=/opt/keycloak/certs/keycloak.crt
       - KC_HTTPS_CERTIFICATE_KEY_FILE=/opt/keycloak/certs/keycloak.key
       - KC_HTTP_RELATIVE_PATH=/auth
-      - KC_HOSTNAME=${KC_HOSTNAME}
-      - KC_HOSTNAME_PORT=${KC_HTTP_PORT}
+      - KC_HOSTNAME=https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth
       - KC_HOSTNAME_STRICT=false
+      - KC_HEALTH_ENABLED=true
     ports:
       - "${KC_HTTPS_PORT}:${KC_HTTPS_PORT}"
-      - "${KC_HTTP_PORT}:${KC_HTTP_PORT}"
     volumes:
-      - keycloak-certs:/opt/keycloak/certs:ro
+      - ./.certs/keycloak.crt:/opt/keycloak/certs/keycloak.crt:ro
+      - ./.certs/keycloak.key:/opt/keycloak/certs/keycloak.key:ro
       - ./.realm.json:/opt/keycloak/data/import/fleetshift-realm.json:ro
+    networks:
+      - default
+      - kind
     healthcheck:
-      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/${KC_HTTP_PORT}"]
-      interval: 5s
-      timeout: 3s
-      retries: 30
-    depends_on:
-      keycloak-certs:
-        condition: service_completed_successfully
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/9000"]
+      start_period: 30s
+      interval: 10s
+      timeout: 5s
+      retries: 3
 
   fleetshift-server:
     command:
@@ -47,15 +40,10 @@ services:
       - --addons=${FLEETSHIFT_SERVER_ADDONS:-kind,kubernetes}
       - --web-dir=${FLEETSHIFT_WEB_DIR:-/srv/web}
       - --oidc-ca-file=/certs/ca.crt
-      - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift}
+      - --oidc-ui-authority=${OIDC_UI_AUTHORITY:-https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth/realms/fleetshift}
       - --oidc-ui-client-id=${OIDC_UI_CLIENT_ID:-fleetshift-ui}
-    environment:
-      OIDC_HTTPS_PORT: "${KC_HTTPS_PORT}"
     volumes:
-      - keycloak-certs:/certs:ro
-    depends_on:
-      keycloak-certs:
-        condition: service_completed_successfully
+      - ./.certs/ca.crt:/certs/ca.crt:ro
 
   auth-setup:
     image: ${FLEETSHIFT_SERVER_IMAGE:-quay.io/stolostron/fleetshift-server-local:latest}
@@ -63,19 +51,20 @@ services:
     command:
       - |
         ARGS="--server fleetshift-server:${FLEETSHIFT_SERVER_GRPC_PORT}"
-        ARGS="$$ARGS --issuer-url http://${KC_HOSTNAME}:${KC_HTTP_PORT}/auth/realms/fleetshift"
+        ARGS="$$ARGS --issuer-url https://${KC_HOSTNAME}:${KC_HTTPS_PORT}/auth/realms/fleetshift"
         ARGS="$$ARGS --client-id ${OIDC_CLI_CLIENT_ID}"
         ARGS="$$ARGS --audience ${OIDC_AUDIENCE}"
         [ -n "${KEY_ENROLLMENT_CLIENT_ID:-}" ] && ARGS="$$ARGS --key-enrollment-client-id ${KEY_ENROLLMENT_CLIENT_ID:-}"
         [ -n "${KEY_REGISTRY_ID:-}" ] && ARGS="$$ARGS --registry-id ${KEY_REGISTRY_ID:-}"
         [ -n "${KEY_REGISTRY_SUBJECT_EXPR:-}" ] && ARGS="$$ARGS --registry-subject-expression ${KEY_REGISTRY_SUBJECT_EXPR:-}"
         [ -n "${PUBLIC_KEY_CLAIM_EXPR:-}" ] && ARGS="$$ARGS --public-key-claim-expression ${PUBLIC_KEY_CLAIM_EXPR:-}"
-        fleetctl auth setup $$ARGS \
-          && echo "Auth method registered." \
-          || echo "Auth setup failed (may already exist) — continuing."
+        for i in $(seq 1 5); do
+          fleetctl auth setup $$ARGS && exit 0
+          echo "Server not ready, retrying in 2s... ($$i/5)"
+          sleep 2
+        done
+        echo "auth setup failed after 5 attempts" >&2
+        exit 1
     depends_on:
       fleetshift-server:
-        condition: service_healthy
-
-volumes:
-  keycloak-certs:
+        condition: service_started
