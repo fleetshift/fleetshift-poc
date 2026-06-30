@@ -4,7 +4,7 @@ import { getCachedPfIcon, loadPfIcon } from "@fleetshift/common";
 // The manifest is a flat string[] of PascalCase icon names, generated at
 // build time by scripts/generate-icons.mjs.
 import pfIcons from "@fleetshift/common/generated/pf-icons.json";
-import { create, insert, search } from "@orama/orama";
+import { create, insertMultiple, search } from "@orama/orama";
 import {
   Button,
   EmptyState,
@@ -48,6 +48,29 @@ function nameToWords(name: string): string {
     .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
     .replace(/([A-Z])([A-Z][a-z])/g, "$1 $2")
     .toLowerCase();
+}
+
+// ---------------------------------------------------------------------------
+// Module-level lazy Orama index — built once, reused across opens
+// ---------------------------------------------------------------------------
+
+let indexPromise: Promise<Awaited<ReturnType<typeof create>>> | null = null;
+
+function getOramaIndex() {
+  indexPromise ??= (async () => {
+    const db = await create({
+      schema: {
+        name: "string" as const,
+        words: "string" as const,
+      },
+    });
+    await insertMultiple(
+      db,
+      (pfIcons as string[]).map((name) => ({ name, words: nameToWords(name) })),
+    );
+    return db;
+  })();
+  return indexPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -123,7 +146,7 @@ function IconGalleryModal({
   const oramaRef = useRef<Awaited<ReturnType<typeof create>> | null>(null);
   const [indexReady, setIndexReady] = useState(false);
 
-  // Build Orama index on open, destroy on close
+  // Acquire shared Orama index on open, reset state on close
   useEffect(() => {
     if (!isOpen) {
       oramaRef.current = null;
@@ -134,26 +157,13 @@ function IconGalleryModal({
 
     let cancelled = false;
 
-    async function buildIndex() {
-      const db = await create({
-        schema: {
-          name: "string" as const,
-          words: "string" as const,
-        },
-      });
-
-      for (const name of pfIcons as string[]) {
-        if (cancelled) return;
-        await insert(db, { name, words: nameToWords(name) });
-      }
-
+    getOramaIndex().then((db) => {
       if (!cancelled) {
         oramaRef.current = db;
         setIndexReady(true);
       }
-    }
+    });
 
-    buildIndex();
     return () => {
       cancelled = true;
     };
