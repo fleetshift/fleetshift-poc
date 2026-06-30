@@ -11,11 +11,8 @@ import (
 // ExtensionResourceTypeService manages the lifecycle of extension
 // resource type definitions. These are metadata records registered by
 // addons to declare an extension resource type, optionally with
-// management metadata (fulfillment relation and attestation signature).
-//
-// For now, all registered types carry management metadata; the
-// management field is modeled as optional to establish the boundary for
-// future inventory-only types.
+// management metadata (fulfillment relation and attestation signature)
+// and/or inventory metadata.
 type ExtensionResourceTypeService struct {
 	store domain.Store
 	now   func() time.Time

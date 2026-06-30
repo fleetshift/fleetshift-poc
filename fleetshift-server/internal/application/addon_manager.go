@@ -10,11 +10,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// SchemaRegistrationID is an opaque token returned by
-// [SchemaActivator.Activate] that identifies a schema registration.
-// The application layer stores it and passes it back to Deactivate;
-// it must not interpret or parse the value.
-type SchemaRegistrationID string
+// SchemaActivationID is an opaque token returned by
+// [SchemaActivator.Activate] that identifies an active transport
+// registration. The application layer stores it and passes it back to
+// Deactivate; it must not interpret or parse the value.
+type SchemaActivationID string
 
 // SchemaActivator compiles and registers the transport-layer API
 // surface for an extension resource schema's management section. The
@@ -22,8 +22,8 @@ type SchemaRegistrationID string
 // gRPC service descriptors, or HTTP muxes — the implementation lives
 // in the transport layer.
 type SchemaActivator interface {
-	Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (SchemaRegistrationID, error)
-	Deactivate(id SchemaRegistrationID)
+	Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (SchemaActivationID, error)
+	Deactivate(id SchemaActivationID)
 }
 
 // DeliveryAgentRegistry manages the mapping from [domain.TargetType] to
@@ -71,10 +71,17 @@ type addonRecord struct {
 	addon domain.Addon
 	agent domain.DeliveryAgent
 	// Keyed by resource type so connectSchemas can reconcile the new
-	// input against existing state and deactivate stale schemas.
+	// input against existing state and tear down stale schemas.
 	// Content-change detection is handled by the SchemaActivator itself.
-	schemaRegistrations map[domain.ResourceType]SchemaRegistrationID
-	registeredTypeDefs  map[domain.ResourceType]struct{}
+	registeredSchemas map[domain.ResourceType]registeredSchema
+}
+
+// registeredSchema tracks a schema that has been registered (type def
+// created) and optionally activated in the transport layer.
+type registeredSchema struct {
+	// activation is non-nil when the schema has a live transport
+	// registration (managed schemas). Nil for inventory-only schemas.
+	activation *SchemaActivationID
 }
 
 // NewAddonManager creates a new manager with the given dependencies
@@ -193,12 +200,12 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 	return nil
 }
 
-// connectSchemas reconciles the addon's active schema registrations
-// against the new input:
-//  1. Deactivates schemas that are no longer provided (stale).
+// connectSchemas reconciles the addon's registered schemas against the
+// new input:
+//  1. Tears down schemas that are no longer provided (stale).
 //  2. Validates each schema section against the addon's declared
 //     capabilities.
-//  3. Registers the type definition.
+//  3. Registers the schema (creates the type definition).
 //  4. For schemas with a Management section, calls
 //     [SchemaActivator.Activate] to compile the transport API surface.
 //     Inventory-only schemas skip activation (no dynamic API yet).
@@ -208,9 +215,9 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		newTypes[s.ResourceType] = struct{}{}
 	}
 
-	for rt := range rec.schemaRegistrations {
+	for rt := range rec.registeredSchemas {
 		if _, stillPresent := newTypes[rt]; !stillPresent {
-			m.deactivateSchema(ctx, rec, rt)
+			m.teardownSchema(ctx, rec, rt)
 		}
 	}
 
@@ -218,8 +225,8 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		if err := validateSchemaCapabilities(rec, schema); err != nil {
 			return err
 		}
-		if err := m.registerSchemaTypeDef(ctx, rec, schema); err != nil {
-			return fmt.Errorf("register type def for %q: %w", schema.ResourceType, err)
+		if err := m.registerSchema(ctx, rec, schema); err != nil {
+			return fmt.Errorf("register schema for %q: %w", schema.ResourceType, err)
 		}
 		// TODO: no inventory schema yet
 		if schema.Management != nil {
@@ -231,14 +238,15 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 	return nil
 }
 
-func (m *AddonManager) deactivateSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
-	if id, ok := rec.schemaRegistrations[rt]; ok {
-		m.activator.Deactivate(id)
-		delete(rec.schemaRegistrations, rt)
-	}
-	if _, ok := rec.registeredTypeDefs[rt]; ok {
+// teardownSchema deactivates the transport surface (if active) and
+// deletes the type definition from the store.
+func (m *AddonManager) teardownSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
+	if reg, ok := rec.registeredSchemas[rt]; ok {
+		if reg.activation != nil {
+			m.activator.Deactivate(*reg.activation)
+		}
 		_ = m.typeSvc.Delete(ctx, rt)
-		delete(rec.registeredTypeDefs, rt)
+		delete(rec.registeredSchemas, rt)
 	}
 }
 
@@ -317,14 +325,10 @@ func (m *AddonManager) Disable(ctx context.Context, addonID domain.AddonID) erro
 		rec.agent = nil
 	}
 
-	// Deactivate schemas that have a transport registration first.
-	for rt := range rec.schemaRegistrations {
-		m.deactivateSchema(ctx, rec, rt)
-	}
-	// Clean up type defs that had no transport registration (e.g.
-	// inventory-only schemas).
-	for rt := range rec.registeredTypeDefs {
-		m.deactivateSchema(ctx, rec, rt)
+	// Tear down all registered schemas (both activated and
+	// inventory-only).
+	for rt := range rec.registeredSchemas {
+		m.teardownSchema(ctx, rec, rt)
 	}
 
 	rec.addon.State = domain.AddonStateDefined
@@ -388,11 +392,11 @@ func hasCapabilityFor[C resourceCapability](rec *addonRecord, rt domain.Resource
 	return false
 }
 
-// registerSchemaTypeDef ensures the extension resource type definition
-// exists in the store. It is called for every schema (managed,
-// inventory, or both) before any transport activation.
-func (m *AddonManager) registerSchemaTypeDef(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
-	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; ok {
+// registerSchema ensures the extension resource type definition exists
+// in the store. It is called for every schema (managed, inventory, or
+// both) before any transport activation.
+func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
+	if _, ok := rec.registeredSchemas[schema.ResourceType]; ok {
 		return nil
 	}
 
@@ -425,33 +429,29 @@ func (m *AddonManager) registerSchemaTypeDef(ctx context.Context, rec *addonReco
 			return err
 		}
 	}
-	if rec.registeredTypeDefs == nil {
-		rec.registeredTypeDefs = make(map[domain.ResourceType]struct{})
+	if rec.registeredSchemas == nil {
+		rec.registeredSchemas = make(map[domain.ResourceType]registeredSchema)
 	}
-	rec.registeredTypeDefs[schema.ResourceType] = struct{}{}
+	rec.registeredSchemas[schema.ResourceType] = registeredSchema{}
 	return nil
 }
 
 // activateSchema delegates to the SchemaActivator and records the
-// resulting registration ID. Only called for schemas with a Management
-// section — the type def has already been registered by
-// [registerSchemaTypeDef].
+// resulting activation ID. Only called for schemas with a Management
+// section — the schema has already been registered by [registerSchema].
 func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
 	id, err := m.activator.Activate(ctx, schema)
 	if err != nil {
 		return err
 	}
-	if rec.schemaRegistrations == nil {
-		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
-	}
 
-	// If the registration ID changed (e.g. the gRPC service name
+	// If the activation ID changed (e.g. the gRPC service name
 	// changed due to a package rename), deactivate the old one so
 	// its gRPC/HTTP routes don't leak.
-	if prev, ok := rec.schemaRegistrations[schema.ResourceType]; ok && prev != id {
-		m.activator.Deactivate(prev)
+	if reg, ok := rec.registeredSchemas[schema.ResourceType]; ok && reg.activation != nil && *reg.activation != id {
+		m.activator.Deactivate(*reg.activation)
 	}
-	rec.schemaRegistrations[schema.ResourceType] = id
+	rec.registeredSchemas[schema.ResourceType] = registeredSchema{activation: &id}
 
 	return nil
 }

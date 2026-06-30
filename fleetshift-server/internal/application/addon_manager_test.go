@@ -23,12 +23,12 @@ import (
 type recordingActivator struct {
 	mu          sync.Mutex
 	activated   []domain.ExtensionResourceSchema
-	deactivated []application.SchemaRegistrationID
+	deactivated []application.SchemaActivationID
 	nextErr     error
 	hashes      map[string][32]byte
 }
 
-func (r *recordingActivator) Activate(_ context.Context, schema domain.ExtensionResourceSchema) (application.SchemaRegistrationID, error) {
+func (r *recordingActivator) Activate(_ context.Context, schema domain.ExtensionResourceSchema) (application.SchemaActivationID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.nextErr != nil {
@@ -44,15 +44,15 @@ func (r *recordingActivator) Activate(_ context.Context, schema domain.Extension
 		r.hashes = make(map[string][32]byte)
 	}
 	if prev, ok := r.hashes[serviceName]; ok && prev == hash {
-		return application.SchemaRegistrationID(serviceName), nil
+		return application.SchemaActivationID(serviceName), nil
 	}
 
 	r.activated = append(r.activated, schema)
 	r.hashes[serviceName] = hash
-	return application.SchemaRegistrationID(serviceName), nil
+	return application.SchemaActivationID(serviceName), nil
 }
 
-func (r *recordingActivator) Deactivate(id application.SchemaRegistrationID) {
+func (r *recordingActivator) Deactivate(id application.SchemaActivationID) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.deactivated = append(r.deactivated, id)

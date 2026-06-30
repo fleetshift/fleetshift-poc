@@ -197,7 +197,7 @@ func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
 	}
 
 	// Deactivate.
-	activator.Deactivate(application.SchemaRegistrationID(kindClusterServiceName))
+	activator.Deactivate(application.SchemaActivationID(kindClusterServiceName))
 
 	// Verify service is removed from listing.
 	services = listServices(t, conn)

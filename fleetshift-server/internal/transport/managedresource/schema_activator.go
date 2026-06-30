@@ -58,7 +58,7 @@ type DynamicSchemaActivator struct {
 
 // extensionRegistration tracks the transport details for one activated
 // extension schema. Purely internal — the application layer only sees
-// an opaque [application.SchemaRegistrationID].
+// an opaque [application.SchemaActivationID].
 type extensionRegistration struct {
 	grpcServiceName string
 	httpPrefix      string
@@ -80,7 +80,7 @@ var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
 // with identical content, the existing registration ID is returned
 // without recompilation. If the content has changed, the mux entry is
 // atomically replaced.
-func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaRegistrationID, error) {
+func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaActivationID, error) {
 	if schema.Management == nil {
 		return "", fmt.Errorf("schema for %q has no management section; cannot activate transport", schema.ResourceType)
 	}
@@ -105,7 +105,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 		descriptorPath:  descriptorPath,
 	}
 	hash := schemaContentHash(schema)
-	id := application.SchemaRegistrationID(serviceName)
+	id := application.SchemaActivationID(serviceName)
 
 	a.mu.Lock()
 	if a.hashes == nil {
@@ -366,10 +366,10 @@ func resolveEntryFile(schema domain.ExtensionResourceSchema) (string, error) {
 }
 
 // Deactivate removes the gRPC, HTTP, and file descriptor registrations
-// for the extension identified by its registration ID, and clears the
+// for the extension identified by its activation ID, and clears the
 // cached content hash. If this was the last extension referencing a
 // platform service, the platform service is deregistered as well.
-func (a *DynamicSchemaActivator) Deactivate(id application.SchemaRegistrationID) {
+func (a *DynamicSchemaActivator) Deactivate(id application.SchemaActivationID) {
 	serviceName := string(id)
 
 	a.mu.Lock()
