@@ -129,7 +129,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec.Name = string(clusterManifest.ManifestID)
+		spec.Name = string(clusterManifest.ResourceName.ID())
 
 		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation()) {
 			continue
@@ -230,7 +230,7 @@ func (a *Agent) Deliver(
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to parse cluster spec: %v", err))
 		return nil
 	}
-	spec.Name = string(clusterManifest.ManifestID)
+	spec.Name = string(clusterManifest.ResourceName.ID())
 	if err := ValidateClusterName(spec.Name); err != nil {
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("invalid cluster name: %v", err))
 		return nil
@@ -381,7 +381,7 @@ func (a *Agent) Remove(
 			a.observer.Error("failed to parse cluster spec for removal", "error", err)
 			return fmt.Errorf("failed to parse cluster spec: %w", err)
 		}
-		spec.Name = string(m.ManifestID)
+		spec.Name = string(m.ResourceName.ID())
 
 		if !a.acceptGeneration(spec.Name, generation) {
 			a.observer.Info("rejecting stale removal", "cluster", spec.Name, "generation", generation)

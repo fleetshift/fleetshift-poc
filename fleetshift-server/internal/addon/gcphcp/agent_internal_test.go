@@ -327,7 +327,8 @@ func TestAgent_Deliver_SuccessReportsProvisionedTargetAndSecrets(t *testing.T) {
 		domain.DeliveryID("delivery-success"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},
@@ -426,7 +427,8 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 		domain.DeliveryID("remove-1"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},
@@ -508,7 +510,8 @@ func TestAgent_Remove_ClearsGenerationSoRecreateIsAccepted(t *testing.T) {
 	}})
 	manifest := domain.Manifest{
 		ManifestType: ClusterManifestType,
-		ManifestID:   "test-cls",
+		ManifestID:   "uid-1234",
+		ResourceName: "clusters/test-cls",
 		Raw:          spec,
 	}
 
@@ -582,7 +585,8 @@ func TestAgent_Remove_AuthExpiredSignalsAuthFailed(t *testing.T) {
 		domain.DeliveryID("remove-auth-fail"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "stale-token"},
@@ -669,7 +673,8 @@ func TestAgent_Remove_SubprocessInvalidGrantSignalsAuthFailed(t *testing.T) {
 		domain.DeliveryID("remove-invalid-grant"),
 		[]domain.Manifest{{
 			ManifestType: ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "caller-token"},

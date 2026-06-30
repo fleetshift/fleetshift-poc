@@ -270,7 +270,8 @@ func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 	spec := validClusterSpecJSON(t)
 	manifest := domain.Manifest{
 		ManifestType: gcphcp.ClusterManifestType,
-		ManifestID:   "test-cls",
+		ManifestID:   "uid-1234",
+		ResourceName: "clusters/test-cls",
 		Raw:          spec,
 	}
 
@@ -329,7 +330,8 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 	spec := validClusterSpecJSON(t)
 	manifest := domain.Manifest{
 		ManifestType: gcphcp.ClusterManifestType,
-		ManifestID:   "test-cls",
+		ManifestID:   "uid-1234",
+		ResourceName: "clusters/test-cls",
 		Raw:          spec,
 	}
 
@@ -483,7 +485,8 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			Operation:  domain.DeliveryOperationDeliver,
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
-				ManifestID:   domain.ManifestID(clusterName),
+				ManifestID:   "uid-1234",
+				ResourceName: domain.ResourceName("clusters/" + clusterName),
 				Raw:          spec,
 			}},
 		}),
@@ -581,6 +584,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsNonClusterManifests(t *testing.T) {
 			Manifests: []domain.Manifest{{
 				ManifestType: "some.other.type",
 				ManifestID:   "something",
+				ResourceName: "clusters/something",
 				Raw:          json.RawMessage(`{}`),
 			}},
 		}),
@@ -615,7 +619,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 		domain.DeliveryID("seed"),
 		[]domain.Manifest{{
 			ManifestType: gcphcp.ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "token"},
@@ -641,7 +646,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 		domain.DeliveryID("seed2"),
 		[]domain.Manifest{{
 			ManifestType: gcphcp.ClusterManifestType,
-			ManifestID:   "test-cls",
+			ManifestID:   "uid-1234",
+			ResourceName: "clusters/test-cls",
 			Raw:          spec,
 		}},
 		domain.DeliveryAuth{Token: "token"},
@@ -676,7 +682,8 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 			State:      domain.DeliveryStateProgressing,
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
-				ManifestID:   "test-cls",
+				ManifestID:   "uid-1234",
+				ResourceName: "clusters/test-cls",
 				Raw:          json.RawMessage(`{{{not json`),
 			}},
 		}),
