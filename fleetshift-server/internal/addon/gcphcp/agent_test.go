@@ -263,19 +263,20 @@ func TestAgent_Remove_TrustBundle_RemovesStoredIssuerEntry(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_DerivesClusterNameFromResourceName(t *testing.T) {
+func TestAgent_Deliver_UsesResourceNameNotManifestID(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	spec := validClusterSpecJSON(t)
+	// ManifestID is a valid cluster name, but ResourceName is empty.
+	// If the addon read ManifestID, validation would pass.
+	// If it reads ResourceName (empty → ""), validation must fail.
 	manifest := domain.Manifest{
 		ManifestType: gcphcp.ClusterManifestType,
-		ManifestID:   "550e8400-e29b-41d4-a716-446655440000",
-		ResourceName: "clusters/my-cluster",
-		Raw:          spec,
+		ManifestID:   "test-cls",
+		ResourceName: "",
+		Raw:          validClusterSpecJSON(t),
 	}
 
-	// Deliver with generation 10 to record the cluster name
 	_ = agent.Deliver(
 		context.Background(),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
@@ -283,30 +284,13 @@ func TestAgent_Deliver_DerivesClusterNameFromResourceName(t *testing.T) {
 		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
 		nil,
-		10,
-	)
-	select {
-	case <-reporter.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("timeout")
-	}
-
-	// Stale delivery — rejection message includes the derived cluster name
-	_ = agent.Deliver(
-		context.Background(),
-		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
-		domain.DeliveryID("d-2"),
-		[]domain.Manifest{manifest},
-		domain.DeliveryAuth{Token: "token"},
-		nil,
 		1,
 	)
+
 	select {
 	case result := <-reporter.done:
-		// The rejection message contains "for cluster <name>", proving
-		// the addon derived "my-cluster" from ResourceName, not the UUID ManifestID.
-		if !strings.Contains(result.Message, "cluster my-cluster") {
-			t.Errorf("expected cluster name 'my-cluster' derived from ResourceName, got message: %q", result.Message)
+		if result.State != domain.DeliveryStateFailed {
+			t.Fatalf("expected failure from empty ResourceName, got state %s", result.State)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout")

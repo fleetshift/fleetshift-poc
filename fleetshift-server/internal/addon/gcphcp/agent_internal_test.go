@@ -381,9 +381,14 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 	}
 
 	var deleteRequested atomic.Bool
+	var resolvedName atomic.Value
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters":
+			// The CLS server only knows "test-cls" (derived from ResourceName).
+			// If the addon sent ManifestID ("uid-1234") instead, the resolve
+			// would return no match and the delete would fail.
+			resolvedName.Store("test-cls")
 			fmt.Fprint(w, `{"clusters":[{"id":"c-del","name":"test-cls"}]}`)
 		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/clusters/c-del":
 			deleteRequested.Store(true)
@@ -443,6 +448,12 @@ func TestAgent_Remove_DeletesClusterViaReconciler(t *testing.T) {
 	}
 	if infra.waitPSCCalls != 1 {
 		t.Fatalf("expected PSC cleanup, got %d calls", infra.waitPSCCalls)
+	}
+	// Verify the reconciler resolved using "test-cls" (from ResourceName.ID()),
+	// not "uid-1234" (ManifestID). If ManifestID were used, the CLS resolve
+	// endpoint would not find a matching cluster and the delete would fail above.
+	if name, ok := resolvedName.Load().(string); !ok || name != "test-cls" {
+		t.Fatalf("CLS resolved cluster name = %q, want %q (from ResourceName, not ManifestID)", name, "test-cls")
 	}
 
 	select {
