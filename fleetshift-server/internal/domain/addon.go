@@ -61,13 +61,24 @@ type Capability interface {
 
 // ManagedResourceCapability declares that the addon will provide a
 // managed resource type. The full schema and fulfillment relation come
-// from the workload at connect time via [ManagedResourceSchema].
+// from the workload at connect time via [ExtensionResourceSchema].
 type ManagedResourceCapability struct {
 	ResourceType ResourceType
 }
 
 func (ManagedResourceCapability) addonCapability()       {}
 func (ManagedResourceCapability) CapabilityType() string { return "managed_resource" }
+
+// InventoryResourceCapability declares that the addon will report
+// inventory for the given resource type. The addon provides an
+// [InventorySchema] section inside its [ExtensionResourceSchema] at
+// connect time.
+type InventoryResourceCapability struct {
+	ResourceType ResourceType
+}
+
+func (InventoryResourceCapability) addonCapability()       {}
+func (InventoryResourceCapability) CapabilityType() string { return "inventory_resource" }
 
 // DeliveryCapability declares that the addon provides a
 // [DeliveryAgent] for the given target type.
@@ -78,15 +89,18 @@ type DeliveryCapability struct {
 func (DeliveryCapability) addonCapability()       {}
 func (DeliveryCapability) CapabilityType() string { return "delivery" }
 
-// ManagedResourceSchema is provided by the workload at connect time.
-// It carries the full schema and fulfillment relation that the platform
-// validates against the declared [ManagedResourceCapability].
+// ExtensionResourceSchema is provided by the workload at connect time.
+// It carries the shared resource identity fields and optional
+// capability-specific sections ([ManagementSchema], [InventorySchema]).
+// The platform validates each section against the addon's declared
+// capabilities: Management requires a [ManagedResourceCapability],
+// Inventory requires an [InventoryResourceCapability].
 //
 // Proto definitions are provided inline as content, not as file paths.
 // This parallels how an application carries its DB migration SQL — the
 // workload owns and transmits its schema. The compiler combines inline
 // sources with a built-in resolver for well-known imports.
-type ManagedResourceSchema struct {
+type ExtensionResourceSchema struct {
 	ResourceType ResourceType
 
 	// ProtoPackage is the versioned proto package used by gRPC
@@ -118,7 +132,25 @@ type ManagedResourceSchema struct {
 	// infers it automatically.
 	EntryFile string
 
-	SpecMessage protoreflect.FullName
+	// Management carries the management-specific fields. When non-nil,
+	// the addon must declare a [ManagedResourceCapability] for this
+	// resource type.
+	Management *ManagementSchema
 
-	Relation FulfillmentRelation
+	// Inventory carries inventory-specific fields. When non-nil, the
+	// addon must declare an [InventoryResourceCapability] for this
+	// resource type.
+	Inventory *InventorySchema
 }
+
+// ManagementSchema carries the management-specific fields extracted
+// from the schema. These are only relevant for managed resource types.
+type ManagementSchema struct {
+	SpecMessage protoreflect.FullName
+	Relation    FulfillmentRelation
+}
+
+// InventorySchema is a capability marker for inventory-reportable
+// extension resource types. It carries no fields today but exists as a
+// struct to support future inventory-specific schema configuration.
+type InventorySchema struct{}

@@ -199,7 +199,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
 	}
 	schema.EntryFile = "cluster_spec.proto"
-	schema.SpecMessage = "ClusterSpecV2"
+	schema.Management.SpecMessage = "ClusterSpecV2"
 
 	id2, err := activator.Activate(context.Background(), schema)
 	if err != nil {
@@ -255,12 +255,14 @@ func TestDynamicSchemaActivator_EmptyProtoFilesReturnsError(t *testing.T) {
 }
 
 func TestSchemaContentHash_Deterministic(t *testing.T) {
-	s := domain.ManagedResourceSchema{
+	s := domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Cluster",
 		Singular:     "Cluster",
 		Plural:       "Clusters",
-		SpecMessage:  "ClusterSpec",
-		ProtoFiles:   map[string]string{"a.proto": "syntax=\"proto3\";", "b.proto": "message B {}"},
+		Management: &domain.ManagementSchema{
+			SpecMessage: "ClusterSpec",
+		},
+		ProtoFiles: map[string]string{"a.proto": "syntax=\"proto3\";", "b.proto": "message B {}"},
 	}
 
 	h1 := managedresource.SchemaContentHash(s)
@@ -270,7 +272,7 @@ func TestSchemaContentHash_Deterministic(t *testing.T) {
 	}
 
 	s2 := s
-	s2.SpecMessage = "ClusterSpecV2"
+	s2.Management = &domain.ManagementSchema{SpecMessage: "ClusterSpecV2"}
 	h3 := managedresource.SchemaContentHash(s2)
 	if h1 == h3 {
 		t.Fatal("expected different hash for different SpecMessage")
@@ -356,7 +358,7 @@ func TestDynamicSchemaActivator_ChangedContentSwapsHTTPRoutes(t *testing.T) {
 		"cluster_spec.proto": `syntax = "proto3"; message ClusterSpecV2 { string name = 1; }`,
 	}
 	schema.EntryFile = "cluster_spec.proto"
-	schema.SpecMessage = "ClusterSpecV2"
+	schema.Management.SpecMessage = "ClusterSpecV2"
 
 	_, err = env.activator.Activate(context.Background(), schema)
 	if err != nil {
@@ -393,7 +395,7 @@ func TestDynamicSchemaActivator_ReplaceWithChangedHTTPIdentity(t *testing.T) {
 		"cluster_spec.proto": `syntax = "proto3"; message KindClusterSpecV2 { string name = 1; }`,
 	}
 	schema.EntryFile = "cluster_spec.proto"
-	schema.SpecMessage = "KindClusterSpecV2"
+	schema.Management.SpecMessage = "KindClusterSpecV2"
 
 	_, err = env.activator.Activate(context.Background(), schema)
 	if err != nil {
@@ -519,8 +521,11 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 // descriptors needed to construct dynamic gRPC messages. This is
 // separate from the activator (which does its own compilation) — it
 // just gives the test access to the message descriptors.
-func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *managedresource.ServiceDescriptors {
+func widgetDescriptors(t *testing.T, schema domain.ExtensionResourceSchema) *managedresource.ServiceDescriptors {
 	t.Helper()
+	if schema.Management == nil {
+		t.Fatal("widgetDescriptors requires a schema with Management")
+	}
 	var entryFile string
 	for name := range schema.ProtoFiles {
 		entryFile = name
@@ -530,7 +535,7 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
@@ -544,7 +549,7 @@ func widgetDescriptors(t *testing.T, schema domain.ManagedResourceSchema) *manag
 		},
 		ResourceType:   schema.ResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    protoreflect.FullName(schema.SpecMessage),
+		SpecMessage:    protoreflect.FullName(schema.Management.SpecMessage),
 		SpecDescriptor: specDesc.Message,
 	}, specDesc.Message)
 	if err != nil {
@@ -558,14 +563,13 @@ func TestDynamicSchemaActivator_SwapChangesRequestHandling(t *testing.T) {
 	ctx := context.Background()
 
 	// v1: name is required.
-	v1 := domain.ManagedResourceSchema{
+	v1 := domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Widget",
 		ProtoPackage: "fleetshift.v1",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
 		Plural:       "Widgets",
-		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 import "buf/validate/validate.proto";
@@ -573,25 +577,30 @@ message WidgetSpec {
   string name = 1 [(buf.validate.field).required = true];
 }`,
 		},
-		Relation: widgetRel(),
+		Management: &domain.ManagementSchema{
+			SpecMessage: "WidgetSpec",
+			Relation:    widgetRel(),
+		},
 	}
 
 	// v2: name is optional.
-	v2 := domain.ManagedResourceSchema{
+	v2 := domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Widget",
 		ProtoPackage: "fleetshift.v1",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
 		Plural:       "Widgets",
-		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: widgetRel(),
+		Management: &domain.ManagementSchema{
+			SpecMessage: "WidgetSpec",
+			Relation:    widgetRel(),
+		},
 	}
 
 	// Register the widget type in the store so Create can look it up.
@@ -974,22 +983,24 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 
 // --- Shared helpers for cross-API contract tests ---
 
-func platformTestWidgetSchema() domain.ManagedResourceSchema {
-	return domain.ManagedResourceSchema{
+func platformTestWidgetSchema() domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Widget",
 		ProtoPackage: "fleetshift.v1",
 		Version:      "v1",
 		CollectionID: "widgets",
 		Singular:     "Widget",
 		Plural:       "Widgets",
-		SpecMessage:  "WidgetSpec",
 		ProtoFiles: map[string]string{
 			"widget_spec.proto": `syntax = "proto3";
 message WidgetSpec {
   string name = 1;
 }`,
 		},
-		Relation: widgetRel(),
+		Management: &domain.ManagementSchema{
+			SpecMessage: "WidgetSpec",
+			Relation:    widgetRel(),
+		},
 	}
 }
 
@@ -1013,7 +1024,7 @@ func platformWidgetDescs(t *testing.T) *platformresource.ServiceDescriptors {
 // createWidgetViaExtension sends a CreateWidget gRPC request through the
 // extension service and returns the extension descriptors for follow-up
 // requests (e.g. delete).
-func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.ClientConn, schema domain.ManagedResourceSchema, id string) *managedresource.ServiceDescriptors {
+func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.ClientConn, schema domain.ExtensionResourceSchema, id string) *managedresource.ServiceDescriptors {
 	t.Helper()
 	descs := widgetDescriptors(t, schema)
 

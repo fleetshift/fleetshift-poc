@@ -33,9 +33,9 @@ import (
 //
 // Platform-canonical services use the activator-selected platform API
 // version (defaulting to [platformresource.APIVersion]). Extension
-// [domain.ManagedResourceSchema.Version] applies only to the extension's
-// own transport surface; it does not control the platform route or gRPC
-// identity for the shared collection.
+// [domain.ExtensionResourceSchema.Version] applies only to the
+// extension's own transport surface; it does not control the platform
+// route or gRPC identity for the shared collection.
 type DynamicSchemaActivator struct {
 	GRPCMux      *dynamicapi.DynamicServiceMux
 	HTTPMux      *dynamicapi.DynamicHTTPMux
@@ -80,10 +80,15 @@ var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
 // with identical content, the existing registration ID is returned
 // without recompilation. If the content has changed, the mux entry is
 // atomically replaced.
-func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ManagedResourceSchema) (application.SchemaRegistrationID, error) {
+func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaRegistrationID, error) {
+	if schema.Management == nil {
+		return "", fmt.Errorf("schema for %q has no management section; cannot activate transport", schema.ResourceType)
+	}
 	if len(schema.ProtoFiles) == 0 {
 		return "", fmt.Errorf("schema for %q has no proto files", schema.ResourceType)
 	}
+
+	mgmt := schema.Management
 
 	// Compute registration identity and content hash before expensive
 	// compilation so we can short-circuit when the schema is unchanged.
@@ -121,7 +126,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		ctx,
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(mgmt.SpecMessage),
 	)
 	if err != nil {
 		return "", fmt.Errorf("compile proto: %w", err)
@@ -136,7 +141,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Man
 		},
 		ResourceType:   schema.ResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.SpecMessage,
+		SpecMessage:    mgmt.SpecMessage,
 		SpecDescriptor: specDesc.Message,
 	}
 
@@ -273,7 +278,7 @@ func (a *DynamicSchemaActivator) initPlatformMaps() {
 
 // registerPlatformService builds and registers the platform-canonical
 // service for the schema's collection. Must be called with a.mu held.
-func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ManagedResourceSchema) error {
+func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ExtensionResourceSchema) error {
 	platformVersion := a.platformAPIVersion()
 	platCfg := &platformresource.Config{
 		CollectionConfig: dynamicapi.CollectionConfig{
@@ -345,7 +350,7 @@ func (a *DynamicSchemaActivator) decrementRefCount(platformKey string) {
 // If EntryFile is set, it is used directly. For single-file schemas,
 // the sole file is used. Multi-file schemas without an explicit
 // entry file are rejected.
-func resolveEntryFile(schema domain.ManagedResourceSchema) (string, error) {
+func resolveEntryFile(schema domain.ExtensionResourceSchema) (string, error) {
 	if schema.EntryFile != "" {
 		if _, ok := schema.ProtoFiles[schema.EntryFile]; !ok {
 			return "", fmt.Errorf("entry file %q not found in schema proto files for %q", schema.EntryFile, schema.ResourceType)
@@ -395,7 +400,7 @@ func (a *DynamicSchemaActivator) Deactivate(id application.SchemaRegistrationID)
 // schemaContentHash returns a deterministic SHA-256 over the schema's
 // transport identity and proto content. Used to detect content changes
 // across reconnections.
-func schemaContentHash(s domain.ManagedResourceSchema) [32]byte {
+func schemaContentHash(s domain.ExtensionResourceSchema) [32]byte {
 	h := sha256.New()
 	h.Write([]byte(s.ResourceType.ServiceName()))
 	h.Write([]byte{0})
@@ -405,7 +410,9 @@ func schemaContentHash(s domain.ManagedResourceSchema) [32]byte {
 	h.Write([]byte{0})
 	h.Write([]byte(s.CollectionID))
 	h.Write([]byte{0})
-	h.Write([]byte(s.SpecMessage))
+	if s.Management != nil {
+		h.Write([]byte(s.Management.SpecMessage))
+	}
 	h.Write([]byte{0})
 	h.Write([]byte(s.Singular))
 	h.Write([]byte{0})
@@ -437,7 +444,7 @@ func (a *DynamicSchemaActivator) ContentHash(grpcServiceName string) ([32]byte, 
 }
 
 // SchemaContentHash is exported for testing the deterministic hash.
-func SchemaContentHash(s domain.ManagedResourceSchema) string {
+func SchemaContentHash(s domain.ExtensionResourceSchema) string {
 	h := schemaContentHash(s)
 	var b strings.Builder
 	for _, v := range h {

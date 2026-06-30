@@ -25,12 +25,12 @@ func Descriptor() domain.AddonDescriptor {
 	}
 }
 
-// Schema returns the managed resource schema for the kind cluster
+// Schema returns the extension resource schema for the kind cluster
 // resource type. It carries the proto definition and fulfillment
 // relation that the platform uses to compile the dynamic API surface
 // and route fulfillments to the kind delivery agent.
-func Schema() domain.ManagedResourceSchema {
-	return domain.ManagedResourceSchema{
+func Schema() domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
 		ResourceType: ClusterResourceType,
 		ProtoPackage: "kind.fleetshift.v1",
 		Version:      "v1",
@@ -40,8 +40,10 @@ func Schema() domain.ManagedResourceSchema {
 		ProtoFiles: map[string]string{
 			specProtoPath: kindClusterSpecProto,
 		},
-		EntryFile:   specProtoPath,
-		SpecMessage: "addons.kind.v1.KindClusterSpec",
-		Relation:    domain.NewRegisteredSelfTarget("kind-local", ClusterManifestType),
+		EntryFile: specProtoPath,
+		Management: &domain.ManagementSchema{
+			SpecMessage: "addons.kind.v1.KindClusterSpec",
+			Relation:    domain.NewRegisteredSelfTarget("kind-local", ClusterManifestType),
+		},
 	}
 }

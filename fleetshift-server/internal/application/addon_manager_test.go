@@ -22,13 +22,13 @@ import (
 // as new activations.
 type recordingActivator struct {
 	mu          sync.Mutex
-	activated   []domain.ManagedResourceSchema
+	activated   []domain.ExtensionResourceSchema
 	deactivated []application.SchemaRegistrationID
 	nextErr     error
 	hashes      map[string][32]byte
 }
 
-func (r *recordingActivator) Activate(_ context.Context, schema domain.ManagedResourceSchema) (application.SchemaRegistrationID, error) {
+func (r *recordingActivator) Activate(_ context.Context, schema domain.ExtensionResourceSchema) (application.SchemaRegistrationID, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if r.nextErr != nil {
@@ -71,7 +71,7 @@ func (r *recordingActivator) deactivatedCount() int {
 	return len(r.deactivated)
 }
 
-func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
+func testSchemaHash(s domain.ExtensionResourceSchema) [32]byte {
 	h := sha256.New()
 	h.Write([]byte(s.ResourceType.ServiceName()))
 	h.Write([]byte{0})
@@ -81,7 +81,9 @@ func testSchemaHash(s domain.ManagedResourceSchema) [32]byte {
 	h.Write([]byte{0})
 	h.Write([]byte(s.CollectionID))
 	h.Write([]byte{0})
-	h.Write([]byte(s.SpecMessage))
+	if s.Management != nil {
+		h.Write([]byte(s.Management.SpecMessage))
+	}
 	h.Write([]byte{0})
 	h.Write([]byte(s.Singular))
 	h.Write([]byte{0})
@@ -150,8 +152,8 @@ func clusterMgmtDescriptor() domain.AddonDescriptor {
 	}
 }
 
-func clusterSchema() domain.ManagedResourceSchema {
-	return domain.ManagedResourceSchema{
+func clusterSchema() domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Cluster",
 		ProtoPackage: "test.fleetshift.v1",
 		Version:      "v1",
@@ -159,8 +161,10 @@ func clusterSchema() domain.ManagedResourceSchema {
 		Singular:     "Cluster",
 		Plural:       "Clusters",
 		ProtoFiles:   map[string]string{"fake.proto": "syntax = \"proto3\";"},
-		SpecMessage:  "fake.ClusterSpec",
-		Relation:     domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+		Management: &domain.ManagementSchema{
+			SpecMessage: "fake.ClusterSpec",
+			Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+		},
 	}
 }
 
@@ -218,7 +222,7 @@ func TestAddonManager_ConnectActivatesSchemas(t *testing.T) {
 
 	schema := clusterSchema()
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -281,7 +285,7 @@ func TestAddonManager_ConnectSchemaMismatchReturnsError(t *testing.T) {
 
 	schema := clusterSchema()
 	err := env.mgr.Connect(ctx, "kind", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	})
 	if err == nil {
 		t.Fatal("expected error when schema resource type doesn't match declared capabilities")
@@ -303,7 +307,7 @@ func TestAddonManager_ConnectActivationFailureReturnsError(t *testing.T) {
 	env.activator.nextErr = fmt.Errorf("compilation failed")
 
 	err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterSchema()},
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
 	})
 	if err == nil {
 		t.Fatal("expected error when activator fails")
@@ -359,7 +363,7 @@ func TestAddonManager_DisconnectDoesNotDeactivateSchemas(t *testing.T) {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterSchema()},
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -387,7 +391,7 @@ func TestAddonManager_DisableDeactivatesSchemas(t *testing.T) {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterSchema()},
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -495,7 +499,7 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 	}
 
 	clusterS := clusterSchema()
-	databaseS := domain.ManagedResourceSchema{
+	databaseS := domain.ExtensionResourceSchema{
 		ResourceType: "test.fleetshift.io/Database",
 		ProtoPackage: "test.fleetshift.v1",
 		Version:      "v1",
@@ -503,11 +507,13 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 		Singular:     "Database",
 		Plural:       "Databases",
 		ProtoFiles:   map[string]string{"fake_db.proto": "syntax = \"proto3\";"},
-		SpecMessage:  "fake.DatabaseSpec",
-		Relation:     domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
+		Management: &domain.ManagementSchema{
+			SpecMessage: "fake.DatabaseSpec",
+			Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.fake.database"),
+		},
 	}
 	if err := env.mgr.Connect(ctx, "multi-resource", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterS, databaseS},
+		Schemas: []domain.ExtensionResourceSchema{clusterS, databaseS},
 	}); err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
@@ -523,7 +529,7 @@ func TestAddonManager_ReconnectReconcilesStaleSchemasOnConnect(t *testing.T) {
 	}
 
 	if err := env.mgr.Connect(ctx, "multi-resource", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterS},
+		Schemas: []domain.ExtensionResourceSchema{clusterS},
 	}); err != nil {
 		t.Fatalf("second Connect: %v", err)
 	}
@@ -559,7 +565,7 @@ func TestAddonManager_ReconnectWithSameSchemasIsIdempotent(t *testing.T) {
 
 	schema := clusterSchema()
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
@@ -569,7 +575,7 @@ func TestAddonManager_ReconnectWithSameSchemasIsIdempotent(t *testing.T) {
 	}
 
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("second Connect: %v", err)
 	}
@@ -600,7 +606,7 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 
 	v1 := clusterSchema()
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{v1},
+		Schemas: []domain.ExtensionResourceSchema{v1},
 	}); err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
@@ -612,10 +618,13 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 	// Reconnect with an updated schema (different proto content).
 	v2 := clusterSchema()
 	v2.ProtoFiles = map[string]string{"fake.proto": "syntax = \"proto3\";\nmessage ClusterSpecV2 {}"}
-	v2.SpecMessage = "fake.ClusterSpecV2"
+	v2.Management = &domain.ManagementSchema{
+		SpecMessage: "fake.ClusterSpecV2",
+		Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+	}
 
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{v2},
+		Schemas: []domain.ExtensionResourceSchema{v2},
 	}); err != nil {
 		t.Fatalf("second Connect: %v", err)
 	}
@@ -631,8 +640,8 @@ func TestAddonManager_ReconnectWithUpdatedSchemaReactivates(t *testing.T) {
 	}
 
 	lastActivated := env.activator.activated[1]
-	if lastActivated.SpecMessage != "fake.ClusterSpecV2" {
-		t.Errorf("last activated spec = %q, want fake.ClusterSpecV2", lastActivated.SpecMessage)
+	if lastActivated.Management.SpecMessage != "fake.ClusterSpecV2" {
+		t.Errorf("last activated spec = %q, want fake.ClusterSpecV2", lastActivated.Management.SpecMessage)
 	}
 }
 
@@ -652,7 +661,7 @@ func TestAddonManager_ReconnectDeactivatesOldRegistrationOnIDChange(t *testing.T
 
 	v1 := clusterSchema()
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{v1},
+		Schemas: []domain.ExtensionResourceSchema{v1},
 	}); err != nil {
 		t.Fatalf("first Connect: %v", err)
 	}
@@ -666,10 +675,13 @@ func TestAddonManager_ReconnectDeactivatesOldRegistrationOnIDChange(t *testing.T
 	v2 := clusterSchema()
 	v2.ProtoPackage = "test.fleetshift.v2"
 	v2.ProtoFiles = map[string]string{"fake.proto": "syntax = \"proto3\";\nmessage ClusterSpecV2 {}"}
-	v2.SpecMessage = "fake.ClusterSpecV2"
+	v2.Management = &domain.ManagementSchema{
+		SpecMessage: "fake.ClusterSpecV2",
+		Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.kind.cluster"),
+	}
 
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{v2},
+		Schemas: []domain.ExtensionResourceSchema{v2},
 	}); err != nil {
 		t.Fatalf("second Connect: %v", err)
 	}
@@ -698,7 +710,7 @@ func TestAddonManager_ReEnableAfterDisable(t *testing.T) {
 		t.Fatalf("register target: %v", err)
 	}
 	if err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{clusterSchema()},
+		Schemas: []domain.ExtensionResourceSchema{clusterSchema()},
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}
@@ -780,7 +792,7 @@ func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
 	}
 	schema1 := clusterSchema()
 	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema1},
+		Schemas: []domain.ExtensionResourceSchema{schema1},
 	}); err != nil {
 		t.Fatalf("Connect (pod 1): %v", err)
 	}
@@ -793,7 +805,7 @@ func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
 	schema2 := clusterSchema()
 	schema2.Version = "v2"
 	err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema2},
+		Schemas: []domain.ExtensionResourceSchema{schema2},
 	})
 	if err == nil {
 		t.Fatal("expected error when reconnecting with conflicting API metadata")
@@ -863,7 +875,7 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		t.Fatalf("register target (pod 1): %v", err)
 	}
 	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("Connect (pod 1): %v", err)
 	}
@@ -874,7 +886,7 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 		t.Fatalf("Enable (pod 2): %v", err)
 	}
 	if err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("Connect (pod 2) should succeed when type def already exists: %v", err)
 	}
@@ -886,5 +898,213 @@ func TestAddonManager_ConnectTypeDefAlreadyExistsIsIdempotent(t *testing.T) {
 	}
 	if typeDef.ResourceType() != "test.fleetshift.io/Cluster" {
 		t.Errorf("type def resource type = %q, want test.fleetshift.io/Cluster", typeDef.ResourceType())
+	}
+}
+
+// --- Inventory capability tests ---
+
+func inventoryOnlyDescriptor() domain.AddonDescriptor {
+	return domain.AddonDescriptor{
+		ID:   "inventory-provider",
+		Name: "Inventory Provider",
+		Capabilities: []domain.Capability{
+			domain.InventoryResourceCapability{ResourceType: "test.fleetshift.io/Node"},
+		},
+	}
+}
+
+func inventoryOnlySchema() domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
+		ResourceType: "test.fleetshift.io/Node",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "nodes",
+		Singular:     "Node",
+		Plural:       "Nodes",
+		Inventory:    &domain.InventorySchema{},
+	}
+}
+
+func managedAndInventoryDescriptor() domain.AddonDescriptor {
+	return domain.AddonDescriptor{
+		ID:   "full-provider",
+		Name: "Full Provider",
+		Capabilities: []domain.Capability{
+			domain.ManagedResourceCapability{ResourceType: "test.fleetshift.io/Cluster"},
+			domain.InventoryResourceCapability{ResourceType: "test.fleetshift.io/Cluster"},
+		},
+	}
+}
+
+func managedAndInventorySchema() domain.ExtensionResourceSchema {
+	s := clusterSchema()
+	s.Inventory = &domain.InventorySchema{}
+	return s
+}
+
+func TestAddonManager_ConnectInventoryOnlyRegistersTypeDefWithoutActivation(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, inventoryOnlyDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	schema := inventoryOnlySchema()
+	if err := env.mgr.Connect(ctx, "inventory-provider", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	addon, _ := env.mgr.Get("inventory-provider")
+	if addon.State != domain.AddonStateConnected {
+		t.Errorf("state = %d, want %d (connected)", addon.State, domain.AddonStateConnected)
+	}
+
+	// Inventory-only schemas must NOT trigger schema activation (no
+	// dynamic API surface yet).
+	if env.activator.activatedCount() != 0 {
+		t.Errorf("activated count = %d, want 0 (inventory-only addon)", env.activator.activatedCount())
+	}
+
+	// The type def should exist with Inventory set and Management nil.
+	typeDef, err := env.typeSvc.Get(ctx, "test.fleetshift.io/Node")
+	if err != nil {
+		t.Fatalf("Get type def: %v", err)
+	}
+	if typeDef.Inventory() == nil {
+		t.Error("type def Inventory() is nil, want non-nil")
+	}
+	if typeDef.Management() != nil {
+		t.Error("type def Management() is non-nil, want nil for inventory-only type")
+	}
+}
+
+func TestAddonManager_ConnectManagedAndInventoryActivatesSchemaAndSetsInventory(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, managedAndInventoryDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	if err := env.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+
+	schema := managedAndInventorySchema()
+	if err := env.mgr.Connect(ctx, "full-provider", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	addon, _ := env.mgr.Get("full-provider")
+	if addon.State != domain.AddonStateConnected {
+		t.Errorf("state = %d, want %d (connected)", addon.State, domain.AddonStateConnected)
+	}
+
+	// Managed+inventory schemas activate the transport (management part).
+	if env.activator.activatedCount() != 1 {
+		t.Fatalf("activated count = %d, want 1", env.activator.activatedCount())
+	}
+
+	// Type def should have both Management and Inventory set.
+	typeDef, err := env.typeSvc.Get(ctx, "test.fleetshift.io/Cluster")
+	if err != nil {
+		t.Fatalf("Get type def: %v", err)
+	}
+	if typeDef.Management() == nil {
+		t.Error("type def Management() is nil, want non-nil")
+	}
+	if typeDef.Inventory() == nil {
+		t.Error("type def Inventory() is nil, want non-nil")
+	}
+}
+
+func TestAddonManager_ConnectRejectsInventoryWithoutCapability(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// Addon only declares ManagedResourceCapability, not inventory.
+	if err := env.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	schema := clusterSchema()
+	schema.Inventory = &domain.InventorySchema{}
+	err := env.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{schema},
+	})
+	if err == nil {
+		t.Fatal("expected error when schema has Inventory but addon lacks InventoryResourceCapability")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+
+	if env.activator.activatedCount() != 0 {
+		t.Error("activator should not have been called when capability validation fails")
+	}
+}
+
+func TestAddonManager_ConnectRejectsManagementWithoutCapability(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	// Addon only declares InventoryResourceCapability, not managed.
+	if err := env.mgr.Enable(ctx, inventoryOnlyDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	schema := inventoryOnlySchema()
+	schema.Management = &domain.ManagementSchema{
+		SpecMessage: "fake.NodeSpec",
+		Relation:    domain.NewRegisteredSelfTarget("kind-local", "api.fake.node"),
+	}
+	err := env.mgr.Connect(ctx, "inventory-provider", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{schema},
+	})
+	if err == nil {
+		t.Fatal("expected error when schema has Management but addon lacks ManagedResourceCapability")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestAddonManager_DisableDeactivatesInventoryOnlyTypeDef(t *testing.T) {
+	env := setupAddonManager(t)
+	ctx := context.Background()
+
+	if err := env.mgr.Enable(ctx, inventoryOnlyDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+	if err := env.mgr.Connect(ctx, "inventory-provider", application.ConnectInput{
+		Schemas: []domain.ExtensionResourceSchema{inventoryOnlySchema()},
+	}); err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+
+	if err := env.mgr.Disable(ctx, "inventory-provider"); err != nil {
+		t.Fatalf("Disable: %v", err)
+	}
+
+	addon, _ := env.mgr.Get("inventory-provider")
+	if addon.State != domain.AddonStateDefined {
+		t.Errorf("state = %d, want %d (defined)", addon.State, domain.AddonStateDefined)
+	}
+
+	// Type def should be deleted.
+	_, err := env.typeSvc.Get(ctx, "test.fleetshift.io/Node")
+	if err == nil {
+		t.Error("expected type def to be deleted after Disable")
+	}
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got: %v", err)
 	}
 }

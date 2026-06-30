@@ -609,7 +609,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				nil,
 				[]domain.ManifestType{kindaddon.ClusterManifestType, domain.TrustBundleManifestType},
 			)},
-			Schemas: []domain.ManagedResourceSchema{kindaddon.Schema()},
+			Schemas: []domain.ExtensionResourceSchema{kindaddon.Schema()},
 		}); err != nil {
 			return fmt.Errorf("connect kind addon: %w", err)
 		}
@@ -637,7 +637,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				activeTarget.TargetProperties(),
 				[]domain.ManifestType{gcphcpaddon.ClusterManifestType, domain.TrustBundleManifestType},
 			)},
-			Schemas: []domain.ManagedResourceSchema{gcphcpaddon.Schema(targetID)},
+			Schemas: []domain.ExtensionResourceSchema{gcphcpaddon.Schema(targetID)},
 		}); err != nil {
 			return fmt.Errorf("connect gcphcp addon: %w", err)
 		}

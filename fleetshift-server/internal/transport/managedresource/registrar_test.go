@@ -43,7 +43,7 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
@@ -58,7 +58,7 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 		},
 		ResourceType:   kindaddon.ClusterResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.SpecMessage,
+		SpecMessage:    schema.Management.SpecMessage,
 		SpecDescriptor: desc.Message,
 	}
 }

@@ -230,7 +230,7 @@ func Start(t *testing.T) string {
 			Name:                  "Local Kind Provider",
 			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		})},
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)
 	}
@@ -247,7 +247,7 @@ func Start(t *testing.T) string {
 			Name:                  "Test GCP HCP Provider",
 			AcceptedManifestTypes: []domain.ManifestType{gcphcpaddon.ClusterManifestType},
 		})},
-		Schemas: []domain.ManagedResourceSchema{gcpSchema},
+		Schemas: []domain.ExtensionResourceSchema{gcpSchema},
 	}); err != nil {
 		t.Fatalf("connect gcphcp addon: %v", err)
 	}

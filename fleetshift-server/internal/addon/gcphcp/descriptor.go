@@ -40,12 +40,12 @@ func Descriptor() domain.AddonDescriptor {
 	}
 }
 
-// Schema returns the managed resource schema for the GCP HCP cluster
+// Schema returns the extension resource schema for the GCP HCP cluster
 // resource type. It carries the proto definition and fulfillment
 // relation that the platform uses to compile the dynamic API surface
 // and route fulfillments to the GCP HCP delivery agent.
-func Schema(addonTargetID domain.TargetID) domain.ManagedResourceSchema {
-	return domain.ManagedResourceSchema{
+func Schema(addonTargetID domain.TargetID) domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
 		ResourceType: ClusterResourceType,
 		ProtoPackage: "gcphcp.fleetshift.v1",
 		Version:      "v1",
@@ -55,8 +55,10 @@ func Schema(addonTargetID domain.TargetID) domain.ManagedResourceSchema {
 		ProtoFiles: map[string]string{
 			specProtoPath: gcphcpClusterSpecProto,
 		},
-		EntryFile:   specProtoPath,
-		SpecMessage: "addons.gcphcp.v1.GCPHCPClusterSpec",
-		Relation:    domain.NewRegisteredSelfTarget(addonTargetID, ClusterManifestType),
+		EntryFile: specProtoPath,
+		Management: &domain.ManagementSchema{
+			SpecMessage: "addons.gcphcp.v1.GCPHCPClusterSpec",
+			Relation:    domain.NewRegisteredSelfTarget(addonTargetID, ClusterManifestType),
+		},
 	}
 }

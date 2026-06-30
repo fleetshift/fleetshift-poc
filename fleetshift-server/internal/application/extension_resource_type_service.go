@@ -65,10 +65,14 @@ type CreateExtensionTypeInput struct {
 
 	// Management is optional. When present, the type's instances are
 	// managed resources with a fulfillment relation and attestation.
-	// For now, management metadata is required for all registered types;
-	// this is enforced by callers (e.g. AddonManager), not here, because
-	// the type service should support future inventory-only types.
+	// Enforcement of when management is required is left to callers
+	// (e.g. AddonManager), not here, because the type service should
+	// support inventory-only types.
 	Management *CreateExtensionTypeManagementInput
+
+	// Inventory is optional. When present, the type's instances support
+	// inventory reporting (condition/observation lifecycle).
+	Inventory *CreateExtensionTypeInventoryInput
 }
 
 // CreateExtensionTypeManagementInput carries management-specific fields
@@ -77,6 +81,12 @@ type CreateExtensionTypeManagementInput struct {
 	Relation  domain.FulfillmentRelation
 	Signature domain.Signature
 }
+
+// CreateExtensionTypeInventoryInput is a marker input that opts a type
+// into inventory reporting. It carries no fields today but exists as a
+// struct so future inventory-specific registration parameters have a
+// natural home.
+type CreateExtensionTypeInventoryInput struct{}
 
 // Create registers a new extension resource type.
 func (s *ExtensionResourceTypeService) Create(ctx context.Context, in CreateExtensionTypeInput) (domain.ExtensionResourceType, error) {
@@ -88,6 +98,9 @@ func (s *ExtensionResourceTypeService) Create(ctx context.Context, in CreateExte
 			return domain.ExtensionResourceType{}, fmt.Errorf("%w: management relation is required", domain.ErrInvalidArgument)
 		}
 		opts = append(opts, domain.WithManagement(in.Management.Relation, in.Management.Signature))
+	}
+	if in.Inventory != nil {
+		opts = append(opts, domain.WithInventory())
 	}
 
 	def := domain.NewExtensionResourceType(

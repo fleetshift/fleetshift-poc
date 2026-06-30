@@ -39,7 +39,7 @@ func setupBench(b *testing.B) *benchEnv {
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		b.Fatalf("CompileInline: %v", err)
@@ -59,7 +59,7 @@ func setupBench(b *testing.B) *benchEnv {
 		},
 		ResourceType:   kindaddon.ClusterResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.SpecMessage,
+		SpecMessage:    schema.Management.SpecMessage,
 		SpecDescriptor: desc.Message,
 	}
 

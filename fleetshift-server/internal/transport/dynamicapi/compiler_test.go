@@ -27,7 +27,7 @@ func TestCompileInline(t *testing.T) {
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
@@ -59,7 +59,7 @@ func TestCompileSpec_DynamicMessageRoundTrip(t *testing.T) {
 		context.Background(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
