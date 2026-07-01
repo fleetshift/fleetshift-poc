@@ -64,24 +64,49 @@ export function AppConfigProvider({ children }: { children: ReactNode }) {
   const [config, setConfig] = useState<AppConfigContextValue | null>(null);
 
   useEffect(() => {
-    fetch("/api/ui/user-config")
-      .then((res) => {
-        if (!res.ok) throw new Error(`${res.status}`);
-        return res.json();
-      })
-      .then((data) => {
-        setConfig({
-          scalprumConfig: data.scalprumConfig,
-          pluginPages: data.pluginPages,
-          navLayout: data.navLayout,
-          pluginEntries: data.pluginEntries,
-          assetsHost: data.assetsHost,
-        });
-      })
-      .catch((err) => {
-        console.error("Failed to load app config:", err);
-        setConfig(FALLBACK_CONFIG);
+    async function loadConfig() {
+      // Global UI bootstrap data (scalprum, plugin pages, entries) is
+      // served by /api/ui/config (unauthenticated). User-specific data
+      // (navLayout) comes from /api/ui/user-config (authenticated when
+      // OIDC is configured).
+      //
+      // Backward compatibility: older backends serve everything from
+      // /api/ui/user-config. When /api/ui/config lacks scalprumConfig
+      // we fall back to user-config for global fields too.
+      const [configData, userConfigData] = await Promise.all([
+        fetch("/api/ui/config")
+          .then((res) => (res.ok ? res.json() : {}))
+          .catch(() => ({})),
+        fetch("/api/ui/user-config")
+          .then((res) => (res.ok ? res.json() : {}))
+          .catch(() => ({})),
+      ]);
+
+      setConfig({
+        scalprumConfig:
+          configData.scalprumConfig ??
+          userConfigData.scalprumConfig ??
+          FALLBACK_CONFIG.scalprumConfig,
+        pluginPages:
+          configData.pluginPages ??
+          userConfigData.pluginPages ??
+          FALLBACK_CONFIG.pluginPages,
+        pluginEntries:
+          configData.pluginEntries ??
+          userConfigData.pluginEntries ??
+          FALLBACK_CONFIG.pluginEntries,
+        assetsHost:
+          configData.assetsHost ??
+          userConfigData.assetsHost ??
+          FALLBACK_CONFIG.assetsHost,
+        navLayout: userConfigData.navLayout ?? FALLBACK_CONFIG.navLayout,
       });
+    }
+
+    loadConfig().catch((err) => {
+      console.error("Failed to load app config:", err);
+      setConfig(FALLBACK_CONFIG);
+    });
   }, []);
 
   if (!config) return null;
