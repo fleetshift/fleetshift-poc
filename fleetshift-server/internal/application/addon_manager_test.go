@@ -803,6 +803,125 @@ func TestAddonManager_ConnectRejectsConflictingAPIMetadata(t *testing.T) {
 	}
 }
 
+// TestAddonManager_ConnectRejectsConflictingManagementRelation verifies that
+// when an existing type def has a management relation and the reconnecting
+// addon provides a different relation, Connect fails. This prevents stale
+// management metadata from persisting across addon reconnections.
+func TestAddonManager_ConnectRejectsConflictingManagementRelation(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	buildManager := func() *addonManagerEnv {
+		router := delivery.NewRoutingDeliveryService()
+		typeSvc := application.NewExtensionResourceTypeService(store)
+		targetSvc := &application.TargetService{Store: store}
+		activator := &recordingActivator{}
+		mgr := application.NewAddonManager(application.AddonManagerDeps{
+			Router:    router,
+			TypeSvc:   typeSvc,
+			Activator: activator,
+		})
+		return &addonManagerEnv{
+			mgr:       mgr,
+			activator: activator,
+			router:    router,
+			typeSvc:   typeSvc,
+			targetSvc: targetSvc,
+		}
+	}
+
+	ctx := context.Background()
+
+	// --- first "pod": creates type def with relation targeting kind-local ---
+	env1 := buildManager()
+	if err := env1.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 1): %v", err)
+	}
+	if err := env1.targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+	schema1 := clusterSchema()
+	if err := env1.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema1},
+	}); err != nil {
+		t.Fatalf("Connect (pod 1): %v", err)
+	}
+
+	// --- second "pod": reconnects with DIFFERENT management relation ---
+	env2 := buildManager()
+	if err := env2.mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable (pod 2): %v", err)
+	}
+	schema2 := clusterSchema()
+	schema2.Relation = domain.NewRegisteredSelfTarget("kind-remote", "api.kind.cluster")
+	err := env2.mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema2},
+	})
+	if err == nil {
+		t.Fatal("expected error when reconnecting with conflicting management relation")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+// TestAddonManager_ConnectAllowsBackfillWhenManagementNil verifies that
+// reconnecting an addon whose persisted type def has no management
+// metadata (Management() == nil) does NOT produce a drift error. The
+// missing metadata is treated as repairable/backfillable.
+func TestAddonManager_ConnectAllowsBackfillWhenManagementNil(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+	store := &sqlite.Store{DB: db}
+
+	// Pre-create a type def WITHOUT management metadata so that
+	// Management() returns nil after hydration.
+	typeSvc := application.NewExtensionResourceTypeService(store)
+	_, err := typeSvc.Create(context.Background(), application.CreateExtensionTypeInput{
+		ResourceType: "test.fleetshift.io/Cluster",
+		APIVersion:   "v1",
+		CollectionID: "clusters",
+		Management:   nil, // no management metadata
+	})
+	if err != nil {
+		t.Fatalf("pre-create type def: %v", err)
+	}
+
+	// Build a fresh manager sharing the same DB.
+	router := delivery.NewRoutingDeliveryService()
+	activator := &recordingActivator{}
+	mgr := application.NewAddonManager(application.AddonManagerDeps{
+		Router:    router,
+		TypeSvc:   typeSvc,
+		Activator: activator,
+	})
+
+	ctx := context.Background()
+
+	if err := mgr.Enable(ctx, clusterMgmtDescriptor()); err != nil {
+		t.Fatalf("Enable: %v", err)
+	}
+
+	targetSvc := &application.TargetService{Store: store}
+	if err := targetSvc.Register(ctx, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID: "kind-local", Type: "kind", Name: "Local Kind",
+		AcceptedManifestTypes: []domain.ManifestType{"clusters"},
+	})); err != nil {
+		t.Fatalf("register target: %v", err)
+	}
+
+	// Connect with a non-nil relation — should succeed because existing
+	// management is nil (backfillable), not conflicting.
+	schema := clusterSchema()
+	if err := mgr.Connect(ctx, "cluster-mgmt", application.ConnectInput{
+		Schemas: []domain.ManagedResourceSchema{schema},
+	}); err != nil {
+		t.Fatalf("Connect should allow backfill when existing management is nil, got: %v", err)
+	}
+}
+
 // stubDeliveryAgent is a minimal stub for testing delivery agent
 // registration through the addon lifecycle. It satisfies the
 // domain.DeliveryAgent interface without performing real delivery.
