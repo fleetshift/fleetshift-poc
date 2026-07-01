@@ -548,6 +548,18 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			OIDCUIClientID: f.oidcUIClientID,
 			Logger:         logger,
 			AuthMiddleware: httpAuthn.Wrap,
+			AuthConfigured: func(ctx context.Context) (bool, error) {
+				methods, err := authMethodSvc.List(ctx)
+				if err != nil {
+					return false, err
+				}
+				for _, m := range methods {
+					if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+						return true, nil
+					}
+				}
+				return false, nil
+			},
 		})
 		topMux.Handle("/api/ui/", uiMux)
 		topMux.Handle("/", transporthttp.NewStaticHandler(f.webDir))

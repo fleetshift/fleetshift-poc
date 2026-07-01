@@ -1,6 +1,7 @@
 package http
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,12 @@ type UIConfigOptions struct {
 	// Global bootstrap routes (/api/ui/config, /api/ui/plugin-registry)
 	// are never wrapped.
 	AuthMiddleware func(http.Handler) http.Handler
+	// AuthConfigured, when non-nil, is called to check whether at
+	// least one OIDC auth method has been configured. The result is
+	// surfaced as "authConfigured" in the /api/ui/config response so
+	// the frontend can enable auth gating on setup routes even when
+	// the user has no token yet.
+	AuthConfigured func(ctx context.Context) (bool, error)
 }
 
 type pluginManifest struct {
@@ -105,6 +112,20 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]interface{}{
 			"oidc": oidc,
+		}
+
+		// Surface whether auth has been configured so the frontend
+		// can gate setup routes appropriately (e.g. require login
+		// when revisiting /setup/auth after auth was configured).
+		if opts.AuthConfigured != nil {
+			configured, err := opts.AuthConfigured(r.Context())
+			if err != nil {
+				opts.Logger.ErrorContext(r.Context(), "failed to check auth configuration", "error", err)
+				// Non-fatal — omit the field rather than failing
+				// the entire config response.
+			} else {
+				resp["authConfigured"] = configured
+			}
 		}
 
 		// Augment with plugin-derived global config when webDir is
