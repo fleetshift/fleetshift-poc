@@ -41,7 +41,9 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 		hashBytes(h, v.Intent.Spec)
 	}
 	if v.Resource.inventory != nil {
-		hashBytes(h, v.Resource.inventory.observation)
+		if v.Resource.inventory.observation != nil {
+			hashBytes(h, *v.Resource.inventory.observation)
+		}
 		binary.Write(h, binary.BigEndian, int64(len(v.Resource.inventory.conditions)))
 		for _, c := range v.Resource.inventory.conditions {
 			hashString(h, string(c.conditionType))

@@ -34,6 +34,13 @@ func Run(t *testing.T, factory Factory) {
 
 var fixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
+// wallClockDistantPast is a sentinel ReceivedAt value used to prove
+// inventory writes use the caller-supplied ReceivedAt for timestamps
+// rather than computing them from time.Now() internally: it is far
+// enough in the past that it can never collide with a real wall-clock
+// read.
+var wallClockDistantPast = time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
+
 func seedFulfillment(t *testing.T, tx domain.Tx, fID domain.FulfillmentID, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -439,8 +446,8 @@ func runInstanceTests(t *testing.T, factory Factory) {
 	})
 
 	// InventoryRoundTrip verifies that Get, GetByUID, and
-	// ListByResourceType all hydrate ExtensionResource.Inventory
-	// after UpsertInventory has written inventory state.
+	// ListByResourceType all hydrate ExtensionResource.Inventory after
+	// ReplaceInventory has written inventory state.
 	t.Run("InventoryRoundTrip", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
@@ -456,20 +463,16 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		}
 
 		now := fixedTime.Add(time.Minute)
-		inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-			Labels:      map[string]string{"zone": "us-east-1"},
-			Observation: json.RawMessage(`{"cpu":4}`),
-			Conditions: []domain.ConditionSnapshot{
-				{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: now},
-			},
-			ObservedAt: now,
-			UpdatedAt:  now,
-		})
-		if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+		obs := json.RawMessage(`{"cpu":4}`)
+		if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 			ExtensionResourceUID: r.UID(),
-			Inventory:            *inv,
+			Labels:               map[string]string{"zone": "us-east-1"},
+			Observation:          &obs,
+			Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
+			ObservedAt:           now,
+			ReceivedAt:           now,
 		}}); err != nil {
-			t.Fatalf("UpsertInventory: %v", err)
+			t.Fatalf("ReplaceInventory: %v", err)
 		}
 
 		assertInventory := func(label string, got *domain.ExtensionResource) {
@@ -478,7 +481,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 				t.Fatalf("%s: Inventory is nil after round-trip", label)
 			}
 			assertEqual(t, label+" Labels[zone]", got.Inventory().Labels()["zone"], "us-east-1")
-			assertEqual(t, label+" Observation", string(got.Inventory().Observation()), `{"cpu":4}`)
+			assertObservation(t, label+" Observation", got.Inventory().Observation(), `{"cpu":4}`)
 			if !got.Inventory().ObservedAt().Equal(now) {
 				t.Errorf("%s: ObservedAt = %v, want %v", label, got.Inventory().ObservedAt(), now)
 			}
@@ -835,8 +838,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 		})
 	})
 
-	t.Run("Upsert", func(t *testing.T) {
-		t.Run("UpsertInventoryCreatesLatestState", func(t *testing.T) {
+	t.Run("Replace", func(t *testing.T) {
+		t.Run("CreatesLatestStateObservationHistoryAndTransitions", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -844,46 +847,59 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/upsert1")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace1")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
 			now := fixedTime.Add(time.Minute)
-			invRes := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Labels:      map[string]string{"zone": "us-east-1"},
-				Observation: json.RawMessage(`{"cpu":4}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: now},
-				},
-				ObservedAt: now,
-				UpdatedAt:  now,
-			})
-
-			err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			obs := json.RawMessage(`{"cpu":4}`)
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ExtensionResourceUID: r.UID(),
-				Inventory:            *invRes,
+				Labels:               map[string]string{"zone": "us-east-1"},
+				Observation:          &obs,
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
+				ObservedAt:           now,
+				ReceivedAt:           now,
 			}})
 			if err != nil {
-				t.Fatalf("UpsertInventory: %v", err)
+				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert1")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace1")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
 			if view.Resource.Inventory() == nil {
-				t.Fatal("Inventory is nil after upsert")
+				t.Fatal("Inventory is nil after replace")
 			}
 			assertEqual(t, "Labels[zone]", view.Resource.Inventory().Labels()["zone"], "us-east-1")
-			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"cpu":4}`)
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
 			if len(view.Resource.Inventory().Conditions()) != 1 {
 				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
 			}
 			assertEqual(t, "Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
+
+			obsHistory, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(obsHistory) != 1 {
+				t.Fatalf("observation history len = %d, want 1", len(obsHistory))
+			}
+			assertEqual(t, "history Observation", string(obsHistory[0].Observation()), `{"cpu":4}`)
+
+			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(transitions) != 1 {
+				t.Fatalf("transitions len = %d, want 1 (initial condition)", len(transitions))
+			}
+			assertEqual(t, "transition Status", transitions[0].Status(), domain.ConditionTrue)
 		})
 
-		t.Run("UpsertInventoryUpdatesExisting", func(t *testing.T) {
+		t.Run("UpdatesExisting", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -891,48 +907,44 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/upsert2")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace2")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
 			now := fixedTime.Add(time.Minute)
-			inv1 := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":2}`),
-				ObservedAt:  now,
-				UpdatedAt:   now,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			obs1 := json.RawMessage(`{"cpu":2}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv1,
+				Observation:          &obs1,
+				ObservedAt:           now,
+				ReceivedAt:           now,
 			}}); err != nil {
-				t.Fatalf("first UpsertInventory: %v", err)
+				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
 			later := now.Add(time.Minute)
-			inv2 := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":8}`),
-				ObservedAt:  later,
-				UpdatedAt:   later,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			obs2 := json.RawMessage(`{"cpu":8}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv2,
+				Observation:          &obs2,
+				ObservedAt:           later,
+				ReceivedAt:           later,
 			}}); err != nil {
-				t.Fatalf("second UpsertInventory: %v", err)
+				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert2")
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace2")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
 			if view.Resource.Inventory() == nil {
-				t.Fatal("Inventory is nil after second upsert")
+				t.Fatal("Inventory is nil after second replace")
 			}
-			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"cpu":8}`)
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":8}`)
 		})
 
-		t.Run("UpsertInventoryBatch", func(t *testing.T) {
+		t.Run("Batch", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -949,19 +961,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			now := fixedTime.Add(time.Minute)
-			mkInv := func(obs string) domain.InventoryResource {
-				return *domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-					Observation: json.RawMessage(obs),
-					ObservedAt:  now,
-					UpdatedAt:   now,
-				})
-			}
-			err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{
-				{ExtensionResourceUID: r1.UID(), Inventory: mkInv(`{"n":1}`)},
-				{ExtensionResourceUID: r2.UID(), Inventory: mkInv(`{"n":2}`)},
+			obs1 := json.RawMessage(`{"n":1}`)
+			obs2 := json.RawMessage(`{"n":2}`)
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{ExtensionResourceUID: r1.UID(), Observation: &obs1, ObservedAt: now, ReceivedAt: now},
+				{ExtensionResourceUID: r2.UID(), Observation: &obs2, ObservedAt: now, ReceivedAt: now},
 			})
 			if err != nil {
-				t.Fatalf("UpsertInventory batch: %v", err)
+				t.Fatalf("ReplaceInventory batch: %v", err)
 			}
 
 			for _, tc := range []struct {
@@ -978,7 +985,863 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				if view.Resource.Inventory() == nil {
 					t.Fatalf("Inventory for %s is nil", tc.name)
 				}
-				assertEqual(t, fmt.Sprintf("%s Observation", tc.name), string(view.Resource.Inventory().Observation()), tc.want)
+				assertObservation(t, fmt.Sprintf("%s Observation", tc.name), view.Resource.Inventory().Observation(), tc.want)
+			}
+		})
+
+		t.Run("SameConditionDoesNotDuplicateTransition", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-dedup")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t2)},
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+
+			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(got) != 1 {
+				t.Fatalf("len = %d, want 1 (repeated condition should not duplicate)", len(got))
+			}
+		})
+
+		t.Run("ChangedConditionRecordsTransition", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-genuine")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+
+			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(got) != 2 {
+				t.Fatalf("len = %d, want 2 (changed condition is a genuine transition)", len(got))
+			}
+			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionFalse)
+			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionTrue)
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-genuine")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
+			}
+			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionFalse)
+		})
+
+		t.Run("ReturnToPastStateRecordsGenuineTransition", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-bounce")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			t2 := fixedTime.Add(2 * time.Minute)
+			t3 := fixedTime.Add(3 * time.Minute)
+
+			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
+				t.Helper()
+				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ExtensionResourceUID: r.UID(),
+					Conditions:           []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt:           ts,
+					ReceivedAt:           ts,
+				}}); err != nil {
+					t.Fatalf("%s ReplaceInventory: %v", step, err)
+				}
+			}
+
+			replaceWith("c1", domain.ConditionTrue, "AllGood", "ok", t1)
+			replaceWith("c2", domain.ConditionFalse, "Degraded", "broke", t2)
+			// c1 again: looks like c1 but the latest is c2, so this is a
+			// genuine third transition and must not be dropped.
+			replaceWith("c3", domain.ConditionTrue, "AllGood", "ok", t3)
+
+			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(got) != 3 {
+				t.Fatalf("len = %d, want 3 (return to past state is a genuine transition)", len(got))
+			}
+			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
+			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
+			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
+		})
+
+		t.Run("RemovesConditionsAbsentFromReplacement", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-remove-cond")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions: []domain.Condition{
+					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
+					mustCondition(t, "Provisioned", domain.ConditionTrue, "Done", "done", t1),
+				},
+				ObservedAt: t1,
+				ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-remove-cond")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			if len(view.Resource.Inventory().Conditions()) != 1 {
+				t.Fatalf("Conditions len = %d, want 1 (Provisioned should be removed)", len(view.Resource.Inventory().Conditions()))
+			}
+			assertEqual(t, "remaining Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
+		})
+
+		t.Run("NilObservationLeavesLatestUnchanged", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-nil-obs")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          nil,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory (nil observation): %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-nil-obs")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+
+			// A nil observation must not append history.
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (only the first non-nil observation)", len(hist))
+			}
+		})
+
+		t.Run("NullLiteralObservationLeavesLatestUnchanged", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-null-literal-obs")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			// A non-nil pointer to the JSON literal null must behave
+			// identically to a nil pointer: untouched, no history.
+			nullLiteral := json.RawMessage(`null`)
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &nullLiteral,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory (null literal observation): %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-null-literal-obs")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (null literal appends no history)", len(hist))
+			}
+		})
+
+		t.Run("DeduplicatesIdenticalObservationHistory", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-obs-dedup")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			// Byte-identical observation on a resync must not append a
+			// second history row.
+			t2 := fixedTime.Add(2 * time.Minute)
+			sameObs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &sameObs,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory (same observation): %v", err)
+			}
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (identical observation must dedup)", len(hist))
+			}
+
+			// A genuinely different value appends a second row.
+			t3 := fixedTime.Add(3 * time.Minute)
+			diffObs := json.RawMessage(`{"cpu":8}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &diffObs,
+				ObservedAt:           t3,
+				ReceivedAt:           t3,
+			}}); err != nil {
+				t.Fatalf("third ReplaceInventory (different observation): %v", err)
+			}
+
+			hist, err = repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 2 {
+				t.Fatalf("history len = %d, want 2 (different observation appends a row)", len(hist))
+			}
+			assertEqual(t, "hist[0].Observation", string(hist[0].Observation()), `{"cpu":8}`)
+		})
+
+		t.Run("RejectsUnknownUID", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			now := fixedTime.Add(time.Minute)
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: domain.NewExtensionResourceUID(),
+				ObservedAt:           now,
+				ReceivedAt:           now,
+			}})
+			if err == nil {
+				t.Fatal("expected error for unknown extension resource UID, got nil")
+			}
+		})
+
+		t.Run("UsesReceivedAtNotWallClock", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-receivedat")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			observedAt := fixedTime.Add(time.Minute)
+			receivedAt := wallClockDistantPast
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
+				ObservedAt:           observedAt,
+				ReceivedAt:           receivedAt,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-receivedat")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			if !view.Resource.Inventory().UpdatedAt().Equal(receivedAt) {
+				t.Errorf("Inventory.UpdatedAt = %v, want %v (ReceivedAt, not wall clock)", view.Resource.Inventory().UpdatedAt(), receivedAt)
+			}
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1", len(hist))
+			}
+			if !hist[0].CreatedAt().Equal(receivedAt) {
+				t.Errorf("observation CreatedAt = %v, want %v (ReceivedAt, not wall clock)", hist[0].CreatedAt(), receivedAt)
+			}
+
+			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(transitions) != 1 {
+				t.Fatalf("transitions len = %d, want 1", len(transitions))
+			}
+			if !transitions[0].CreatedAt().Equal(receivedAt) {
+				t.Errorf("transition CreatedAt = %v, want %v (ReceivedAt, not wall clock)", transitions[0].CreatedAt(), receivedAt)
+			}
+		})
+	})
+
+	t.Run("Delta", func(t *testing.T) {
+		t.Run("SetsAndDeletesLabelsWithoutTouchingUnrelated", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-labels")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Labels:               map[string]string{"zone": "us-east-1", "tier": "1"},
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				SetLabels:            map[string]string{"zone": "us-west-2"},
+				DeleteLabels:         []string{"tier"},
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-labels")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			labels := view.Resource.Inventory().Labels()
+			assertEqual(t, "Labels[zone]", labels["zone"], "us-west-2")
+			if _, ok := labels["tier"]; ok {
+				t.Errorf("Labels[tier] = %q, want deleted", labels["tier"])
+			}
+		})
+
+		t.Run("ObservationUnchanged", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-unchanged")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				SetLabels:            map[string]string{"zone": "us-east-1"},
+				Observation:          nil,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-unchanged")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (unchanged appends no history)", len(hist))
+			}
+		})
+
+		t.Run("ObservationReplace", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-replace")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs1 := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs1,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			obs2 := json.RawMessage(`{"cpu":8}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs2,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-replace")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":8}`)
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 2 {
+				t.Fatalf("history len = %d, want 2 (replace appends history)", len(hist))
+			}
+			assertEqual(t, "hist[0].Observation", string(hist[0].Observation()), `{"cpu":8}`)
+		})
+
+		t.Run("NullLiteralObservationLeavesLatestUnchanged", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-null-literal")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			// A non-nil pointer to the JSON literal null must behave
+			// identically to a nil pointer: untouched, no history.
+			nullLiteral := json.RawMessage(`null`)
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &nullLiteral,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-obs-null-literal")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (null literal appends no history)", len(hist))
+			}
+		})
+
+		t.Run("DeduplicatesIdenticalObservationHistory", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-dedup")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			// Byte-identical observation via a delta must not append a
+			// second history row.
+			t2 := fixedTime.Add(2 * time.Minute)
+			sameObs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &sameObs,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas (same observation): %v", err)
+			}
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1 (identical observation must dedup)", len(hist))
+			}
+		})
+
+		t.Run("UpsertsAndDeletesConditionsLeavingOmittedUntouched", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-conditions")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions: []domain.Condition{
+					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
+					mustCondition(t, "Provisioned", domain.ConditionTrue, "Done", "done", t1),
+					mustCondition(t, "Healthy", domain.ConditionTrue, "Nominal", "nominal", t1),
+				},
+				ObservedAt: t1,
+				ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				DeleteConditions:     []domain.ConditionType{"Provisioned"},
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-conditions")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			byType := make(map[domain.ConditionType]domain.Condition)
+			for _, c := range view.Resource.Inventory().Conditions() {
+				byType[c.Type()] = c
+			}
+			if len(byType) != 2 {
+				t.Fatalf("Conditions len = %d, want 2 (Provisioned deleted)", len(byType))
+			}
+			ready, ok := byType["Ready"]
+			if !ok {
+				t.Fatal("Ready condition missing")
+			}
+			assertEqual(t, "Ready.Status", ready.Status(), domain.ConditionFalse)
+			healthy, ok := byType["Healthy"]
+			if !ok {
+				t.Fatal("Healthy condition missing, should be untouched by the delta")
+			}
+			assertEqual(t, "Healthy.Status", healthy.Status(), domain.ConditionTrue)
+			if _, ok := byType["Provisioned"]; ok {
+				t.Error("Provisioned condition should have been deleted")
+			}
+		})
+
+		t.Run("HeartbeatWithNoFieldChanges", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-heartbeat")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Labels:               map[string]string{"zone": "us-east-1"},
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("heartbeat ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-heartbeat")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertEqual(t, "Labels[zone] unchanged", view.Resource.Inventory().Labels()["zone"], "us-east-1")
+			if !view.Resource.Inventory().ObservedAt().Equal(t2) {
+				t.Errorf("ObservedAt = %v, want %v (heartbeat still bumps freshness)", view.Resource.Inventory().ObservedAt(), t2)
+			}
+			if !view.Resource.Inventory().UpdatedAt().Equal(t2) {
+				t.Errorf("UpdatedAt = %v, want %v (heartbeat still bumps freshness)", view.Resource.Inventory().UpdatedAt(), t2)
+			}
+		})
+
+		t.Run("RejectsUnknownUID", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			now := fixedTime.Add(time.Minute)
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: domain.NewExtensionResourceUID(),
+				ObservedAt:           now,
+				ReceivedAt:           now,
+			}})
+			if err == nil {
+				t.Fatal("expected error for unknown extension resource UID, got nil")
+			}
+		})
+
+		t.Run("UsesReceivedAtNotWallClock", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-receivedat")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			observedAt := fixedTime.Add(time.Minute)
+			receivedAt := wallClockDistantPast
+			obs := json.RawMessage(`{"cpu":4}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs,
+				UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
+				ObservedAt:           observedAt,
+				ReceivedAt:           receivedAt,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-receivedat")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			if !view.Resource.Inventory().UpdatedAt().Equal(receivedAt) {
+				t.Errorf("Inventory.UpdatedAt = %v, want %v (ReceivedAt, not wall clock)", view.Resource.Inventory().UpdatedAt(), receivedAt)
+			}
+
+			hist, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(hist) != 1 {
+				t.Fatalf("history len = %d, want 1", len(hist))
+			}
+			if !hist[0].CreatedAt().Equal(receivedAt) {
+				t.Errorf("observation CreatedAt = %v, want %v (ReceivedAt, not wall clock)", hist[0].CreatedAt(), receivedAt)
+			}
+
+			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
+			}
+			if len(transitions) != 1 {
+				t.Fatalf("transitions len = %d, want 1", len(transitions))
+			}
+			if !transitions[0].CreatedAt().Equal(receivedAt) {
+				t.Errorf("transition CreatedAt = %v, want %v (ReceivedAt, not wall clock)", transitions[0].CreatedAt(), receivedAt)
 			}
 		})
 	})
@@ -998,16 +1861,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			now := fixedTime.Add(time.Minute)
-			inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"ready":true}`),
-				ObservedAt:  now,
-				UpdatedAt:   now,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			obs := json.RawMessage(`{"ready":true}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv,
+				Observation:          &obs,
+				ObservedAt:           now,
+				ReceivedAt:           now,
 			}}); err != nil {
-				t.Fatalf("UpsertInventory: %v", err)
+				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
 			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/view1")
@@ -1024,7 +1885,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil, want non-nil")
 			}
-			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"ready":true}`)
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"ready":true}`)
 		})
 
 		t.Run("ListViewsByTypeIncludesInventoryOnly", func(t *testing.T) {
@@ -1090,16 +1951,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			now := fixedTime.Add(time.Minute)
-			inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"version":"2.0"}`),
-				ObservedAt:  now,
-				UpdatedAt:   now,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+			obs := json.RawMessage(`{"version":"2.0"}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv,
+				Observation:          &obs,
+				ObservedAt:           now,
+				ReceivedAt:           now,
 			}}); err != nil {
-				t.Fatalf("UpsertInventory: %v", err)
+				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
 			view, err := repo.GetView(ctx, rt.FullName("things/t1"))
@@ -1115,7 +1974,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if view.Resource.Inventory() == nil {
 				t.Fatal("Inventory is nil for managed+inventory resource")
 			}
-			assertEqual(t, "Observation", string(view.Resource.Inventory().Observation()), `{"version":"2.0"}`)
+			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"version":"2.0"}`)
 		})
 
 		t.Run("GetViewManagedStillRequiresIntentAndFulfillment", func(t *testing.T) {
@@ -1149,7 +2008,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 	})
 
 	t.Run("History", func(t *testing.T) {
-		t.Run("AppendAndListObservations", func(t *testing.T) {
+		t.Run("ListObservationsOrdersByObservedAtDescWithDistinctIDs", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -1164,12 +2023,23 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			obs := []domain.Observation{
-				domain.NewObservation("obs-1", r.UID(), json.RawMessage(`{"v":1}`), t1, t1),
-				domain.NewObservation("obs-2", r.UID(), json.RawMessage(`{"v":2}`), t2, t2),
+			obs1 := json.RawMessage(`{"v":1}`)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs1,
+				ObservedAt:           t1,
+				ReceivedAt:           t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
 			}
-			if err := repo.AppendObservations(ctx, obs); err != nil {
-				t.Fatalf("AppendObservations: %v", err)
+			obs2 := json.RawMessage(`{"v":2}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ExtensionResourceUID: r.UID(),
+				Observation:          &obs2,
+				ObservedAt:           t2,
+				ReceivedAt:           t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
 			got, err := repo.ListObservations(ctx, r.UID(), 10)
@@ -1180,171 +2050,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("len = %d, want 2", len(got))
 			}
 			// Most recent first (ordered by observed_at DESC)
-			assertEqual(t, "got[0].ID", got[0].ID(), domain.ObservationID("obs-2"))
-			assertEqual(t, "got[1].ID", got[1].ID(), domain.ObservationID("obs-1"))
 			assertEqual(t, "got[0].Observation", string(got[0].Observation()), `{"v":2}`)
-		})
-
-		t.Run("RecordAndListConditionTransitions", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/ct1")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			reports := []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Starting", "not yet", t1, t1),
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
-			}
-			if err := repo.RecordConditions(ctx, reports); err != nil {
-				t.Fatalf("RecordConditions: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 2 {
-				t.Fatalf("len = %d, want 2", len(got))
-			}
-			// Most recent first (ordered by observed_at DESC)
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
-			// Auto-generated IDs should be non-empty and distinct
-			if got[0].ID() == "" {
-				t.Error("got[0].ID() is empty, want auto-generated")
-			}
-			if got[1].ID() == "" {
-				t.Error("got[1].ID() is empty, want auto-generated")
+			assertEqual(t, "got[1].Observation", string(got[1].Observation()), `{"v":1}`)
+			if got[0].ID() == "" || got[1].ID() == "" {
+				t.Error("observation IDs should be auto-generated and non-empty")
 			}
 			if got[0].ID() == got[1].ID() {
 				t.Errorf("got[0].ID() == got[1].ID() (%s); want distinct", got[0].ID())
 			}
-			// createdAt is set by the repo, not the reporter
-			if got[0].CreatedAt().IsZero() {
-				t.Error("got[0].CreatedAt() is zero, want repo-generated timestamp")
-			}
-		})
-
-		t.Run("RecordConditionsDeduplicates", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/ct-dedup")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			t3 := fixedTime.Add(3 * time.Minute)
-
-			// First report: Ready=True
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
-			}); err != nil {
-				t.Fatalf("first record: %v", err)
-			}
-
-			// Duplicate: same (type, status, reason, message) -- should be skipped
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t2, t2),
-			}); err != nil {
-				t.Fatalf("duplicate record: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 1 {
-				t.Fatalf("len = %d, want 1 (duplicate should be skipped)", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-
-			// Genuine transition: different status
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Failed", "oops", t3, t3),
-			}); err != nil {
-				t.Fatalf("transition record: %v", err)
-			}
-
-			got, err = repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions after transition: %v", err)
-			}
-			if len(got) != 2 {
-				t.Fatalf("len = %d, want 2", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionTrue)
-		})
-
-		t.Run("RecordConditionsReturnToPastState", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/ct-bounce")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			t3 := fixedTime.Add(3 * time.Minute)
-
-			// c1: Ready=True
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
-			}); err != nil {
-				t.Fatalf("c1: %v", err)
-			}
-
-			// c2: Ready=False (genuine transition)
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionFalse, "Degraded", "something broke", t2, t2),
-			}); err != nil {
-				t.Fatalf("c2: %v", err)
-			}
-
-			// c1 again: Ready=True -- looks like c1 but the latest is c2,
-			// so this is a genuine third transition and must NOT be dropped.
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t3, t3),
-			}); err != nil {
-				t.Fatalf("c1 again: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 3 {
-				t.Fatalf("len = %d, want 3 (return to past state is a genuine transition)", len(got))
-			}
-			// Most recent first
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[0].Reason", got[0].Reason(), "AllGood")
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[1].Reason", got[1].Reason(), "Degraded")
-			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
 		})
 
 		t.Run("ListConditionTransitionsFilterByType", func(t *testing.T) {
@@ -1361,12 +2074,16 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			reports := []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "ok", "", t1, t1),
-				mustConditionReport(t, r.UID(), "Provisioned", domain.ConditionTrue, "done", "", t1, t1),
-			}
-			if err := repo.RecordConditions(ctx, reports); err != nil {
-				t.Fatalf("RecordConditions: %v", err)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ExtensionResourceUID: r.UID(),
+				Conditions: []domain.Condition{
+					mustCondition(t, "Ready", domain.ConditionTrue, "ok", "", t1),
+					mustCondition(t, "Provisioned", domain.ConditionTrue, "done", "", t1),
+				},
+				ObservedAt: t1,
+				ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
 			readyType := domain.ConditionType("Ready")
@@ -1380,249 +2097,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "got[0].ConditionType", got[0].ConditionType(), domain.ConditionType("Ready"))
 		})
 
-		t.Run("UpsertInventoryProducesTransitions", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/upsert-trans")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":4}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: t1},
-				},
-				ObservedAt: t1,
-				UpdatedAt:  t1,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
-				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv,
-			}}); err != nil {
-				t.Fatalf("UpsertInventory: %v", err)
-			}
-
-			// The condition from UpsertInventory should appear as a transition
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 1 {
-				t.Fatalf("len = %d, want 1", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[0].Reason", got[0].Reason(), "AllGood")
-
-			// A second upsert with the same condition should NOT produce another transition
-			t2 := fixedTime.Add(2 * time.Minute)
-			inv2 := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":8}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: t1},
-				},
-				ObservedAt: t2,
-				UpdatedAt:  t2,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
-				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv2,
-			}}); err != nil {
-				t.Fatalf("second UpsertInventory: %v", err)
-			}
-
-			got, err = repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions after dedup: %v", err)
-			}
-			if len(got) != 1 {
-				t.Fatalf("len = %d, want 1 (duplicate should be deduplicated)", len(got))
-			}
-		})
-
-		t.Run("UpsertInventoryGenuineTransition", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/upsert-genuine")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-
-			// First upsert: Ready=True
-			inv1 := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":4}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionTrue, Reason: "AllGood", Message: "ok", LastTransitionTime: t1},
-				},
-				ObservedAt: t1,
-				UpdatedAt:  t1,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
-				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv1,
-			}}); err != nil {
-				t.Fatalf("first UpsertInventory: %v", err)
-			}
-
-			// Second upsert: Ready=False (genuine transition via upsert)
-			inv2 := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":4}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionFalse, Reason: "Degraded", Message: "broke", LastTransitionTime: t2},
-				},
-				ObservedAt: t2,
-				UpdatedAt:  t2,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
-				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv2,
-			}}); err != nil {
-				t.Fatalf("second UpsertInventory: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 2 {
-				t.Fatalf("len = %d, want 2 (two genuine upsert transitions)", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionTrue)
-
-			// Latest state should reflect the second upsert
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/upsert-genuine")
-			if err != nil {
-				t.Fatalf("GetView: %v", err)
-			}
-			if len(view.Resource.Inventory().Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
-			}
-			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionFalse)
-		})
-
-		t.Run("ReportUpsertReport", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/report-upsert-report")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			t3 := fixedTime.Add(3 * time.Minute)
-
-			// Step 1: RecordConditions sets Ready=True
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
-			}); err != nil {
-				t.Fatalf("RecordConditions: %v", err)
-			}
-
-			// Step 2: UpsertInventory transitions Ready=False
-			inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-				Observation: json.RawMessage(`{"cpu":4}`),
-				Conditions: []domain.ConditionSnapshot{
-					{Type: "Ready", Status: domain.ConditionFalse, Reason: "Degraded", Message: "broke", LastTransitionTime: t2},
-				},
-				ObservedAt: t2,
-				UpdatedAt:  t2,
-			})
-			if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
-				ExtensionResourceUID: r.UID(),
-				Inventory:            *inv,
-			}}); err != nil {
-				t.Fatalf("UpsertInventory: %v", err)
-			}
-
-			// Step 3: RecordConditions transitions Ready=True again
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "Recovered", "back", t3, t3),
-			}); err != nil {
-				t.Fatalf("RecordConditions again: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 3 {
-				t.Fatalf("len = %d, want 3 (report -> upsert -> report)", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[0].Reason", got[0].Reason(), "Recovered")
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
-
-			// Latest state should reflect the final report
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/report-upsert-report")
-			if err != nil {
-				t.Fatalf("GetView: %v", err)
-			}
-			if len(view.Resource.Inventory().Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
-			}
-			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "latest Reason", view.Resource.Inventory().Conditions()[0].Reason(), "Recovered")
-		})
-
-		t.Run("RecordConditionsUpdatesLatestState", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/record-latest")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r.UID(), "Ready", domain.ConditionTrue, "AllGood", "ok", t1, t1),
-			}); err != nil {
-				t.Fatalf("RecordConditions: %v", err)
-			}
-
-			// The condition should be visible via GetView (latest state)
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/record-latest")
-			if err != nil {
-				t.Fatalf("GetView: %v", err)
-			}
-			if view.Resource.Inventory() == nil {
-				t.Fatal("Inventory is nil; RecordConditions should create a minimal inventory row")
-			}
-			if len(view.Resource.Inventory().Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
-			}
-			assertEqual(t, "Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
-			assertEqual(t, "Condition.Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
-		})
-
-		t.Run("RecordConditionsMultipleUIDsGetInventoryRows", func(t *testing.T) {
+		t.Run("MultipleUIDsInOneDeltaBatchGetDistinctConditions", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -1640,14 +2115,24 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			// Distinct payloads per UID so a batch bug that copies the
-			// first report to every row would be caught.
+			// first delta to every row would be caught.
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-				mustConditionReport(t, r1.UID(), "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1, t1),
-				mustConditionReport(t, r2.UID(), "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2, t2),
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
+				{
+					ExtensionResourceUID: r1.UID(),
+					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1)},
+					ObservedAt:           t1,
+					ReceivedAt:           t1,
+				},
+				{
+					ExtensionResourceUID: r2.UID(),
+					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2)},
+					ObservedAt:           t2,
+					ReceivedAt:           t2,
+				},
 			}); err != nil {
-				t.Fatalf("RecordConditions: %v", err)
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
 			// Verify r1 condition via GetView.
@@ -1656,7 +2141,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView r1: %v", err)
 			}
 			if v1.Resource.Inventory() == nil {
-				t.Fatal("r1: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
+				t.Fatal("r1: Inventory is nil; ApplyInventoryDeltas should touch inventory rows for all UIDs in the batch")
 			}
 			if len(v1.Resource.Inventory().Conditions()) != 1 {
 				t.Fatalf("r1: Conditions len = %d, want 1", len(v1.Resource.Inventory().Conditions()))
@@ -1672,7 +2157,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView r2: %v", err)
 			}
 			if v2.Resource.Inventory() == nil {
-				t.Fatal("r2: Inventory is nil; RecordConditions should create inventory rows for all UIDs in the batch")
+				t.Fatal("r2: Inventory is nil; ApplyInventoryDeltas should touch inventory rows for all UIDs in the batch")
 			}
 			if len(v2.Resource.Inventory().Conditions()) != 1 {
 				t.Fatalf("r2: Conditions len = %d, want 1", len(v2.Resource.Inventory().Conditions()))
@@ -1704,19 +2189,21 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "r2.Transition.Reason", tr2[0].Reason(), "Degraded")
 		})
 
-		// CrossPathConsistency exercises a sequence that alternates
-		// between UpsertInventory and RecordConditions, mixing genuine
-		// transitions with duplicates in both directions.
+		// CrossPathConsistencyAcrossReplaceAndDelta exercises a sequence
+		// that alternates between ReplaceInventory and
+		// ApplyInventoryDeltas, mixing genuine transitions with
+		// duplicates in both directions, to prove both commands feed the
+		// same transition-detection path.
 		//
-		//   Step  Path    Condition         Transition?
-		//   1     upsert  Ready=True        yes (first)
-		//   2     report  Ready=True        no  (dedup: report sees upsert state)
-		//   3     report  Ready=False       yes (genuine via report)
-		//   4     upsert  Ready=False       no  (dedup: upsert sees report state)
-		//   5     upsert  Ready=True        yes (genuine via upsert)
+		//   Step  Path     Condition         Transition?
+		//   1     replace  Ready=True        yes (first)
+		//   2     delta    Ready=True        no  (dedup: delta sees replace state)
+		//   3     delta    Ready=False       yes (genuine via delta)
+		//   4     replace  Ready=False       no  (dedup: replace sees delta state)
+		//   5     replace  Ready=True        yes (genuine via replace)
 		//
 		// Result: 3 transitions, latest state Ready=True.
-		t.Run("CrossPathConsistency", func(t *testing.T) {
+		t.Run("CrossPathConsistencyAcrossReplaceAndDelta", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -1735,30 +2222,27 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t4 := fixedTime.Add(4 * time.Minute)
 			t5 := fixedTime.Add(5 * time.Minute)
 
-			upsertWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
+			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
-				inv := domain.InventoryResourceFromSnapshot(domain.InventoryResourceSnapshot{
-					Observation: json.RawMessage(`{"cpu":4}`),
-					Conditions: []domain.ConditionSnapshot{
-						{Type: "Ready", Status: status, Reason: reason, Message: msg, LastTransitionTime: ts},
-					},
-					ObservedAt: ts,
-					UpdatedAt:  ts,
-				})
-				if err := repo.UpsertInventory(ctx, []domain.InventoryUpdate{{
+				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 					ExtensionResourceUID: r.UID(),
-					Inventory:            *inv,
+					Conditions:           []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt:           ts,
+					ReceivedAt:           ts,
 				}}); err != nil {
-					t.Fatalf("%s UpsertInventory: %v", step, err)
+					t.Fatalf("%s ReplaceInventory: %v", step, err)
 				}
 			}
 
-			reportWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
+			deltaWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
-				if err := repo.RecordConditions(ctx, []domain.ConditionReport{
-					mustConditionReport(t, r.UID(), "Ready", status, reason, msg, ts, ts),
-				}); err != nil {
-					t.Fatalf("%s RecordConditions: %v", step, err)
+				if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+					ExtensionResourceUID: r.UID(),
+					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt:           ts,
+					ReceivedAt:           ts,
+				}}); err != nil {
+					t.Fatalf("%s ApplyInventoryDeltas: %v", step, err)
 				}
 			}
 
@@ -1773,24 +2257,24 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				}
 			}
 
-			// Step 1: upsert Ready=True → genuine (first)
-			upsertWith("step1", domain.ConditionTrue, "AllGood", "ok", t1)
+			// Step 1: replace Ready=True → genuine (first)
+			replaceWith("step1", domain.ConditionTrue, "AllGood", "ok", t1)
 			assertTransitionCount("step1", 1)
 
-			// Step 2: report Ready=True → dedup (same state set by upsert)
-			reportWith("step2", domain.ConditionTrue, "AllGood", "ok", t2)
+			// Step 2: delta Ready=True → dedup (same state set by replace)
+			deltaWith("step2", domain.ConditionTrue, "AllGood", "ok", t2)
 			assertTransitionCount("step2", 1)
 
-			// Step 3: report Ready=False → genuine transition via report
-			reportWith("step3", domain.ConditionFalse, "Degraded", "broke", t3)
+			// Step 3: delta Ready=False → genuine transition via delta
+			deltaWith("step3", domain.ConditionFalse, "Degraded", "broke", t3)
 			assertTransitionCount("step3", 2)
 
-			// Step 4: upsert Ready=False → dedup (same state set by report)
-			upsertWith("step4", domain.ConditionFalse, "Degraded", "broke", t4)
+			// Step 4: replace Ready=False → dedup (same state set by delta)
+			replaceWith("step4", domain.ConditionFalse, "Degraded", "broke", t4)
 			assertTransitionCount("step4", 2)
 
-			// Step 5: upsert Ready=True → genuine transition via upsert
-			upsertWith("step5", domain.ConditionTrue, "Recovered", "back", t5)
+			// Step 5: replace Ready=True → genuine transition via replace
+			replaceWith("step5", domain.ConditionTrue, "Recovered", "back", t5)
 			assertTransitionCount("step5", 3)
 
 			// Verify full transition history (most recent first)
@@ -1805,7 +2289,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
 			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
 
-			// Latest state should reflect the final upsert
+			// Latest state should reflect the final replace
 			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/cross-path")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
@@ -1826,19 +2310,30 @@ func assertEqual[T comparable](t *testing.T, field string, got, want T) {
 	}
 }
 
-func mustConditionReport(
+// mustCondition constructs a [domain.Condition] for use in
+// [domain.InventoryReplacement.Conditions] / [domain.InventoryDelta]'s
+// condition fields, failing the test on construction error.
+func mustCondition(
 	t *testing.T,
-	erUID domain.ExtensionResourceUID,
 	conditionType domain.ConditionType,
 	status domain.ConditionStatus,
 	reason, message string,
 	lastTransitionTime time.Time,
-	observedAt time.Time,
-) domain.ConditionReport {
+) domain.Condition {
 	t.Helper()
-	r, err := domain.NewConditionReport(erUID, conditionType, status, reason, message, lastTransitionTime, observedAt)
+	c, err := domain.NewCondition(conditionType, status, reason, message, lastTransitionTime)
 	if err != nil {
-		t.Fatalf("NewConditionReport: %v", err)
+		t.Fatalf("NewCondition: %v", err)
 	}
-	return r
+	return c
+}
+
+// assertObservation asserts that a possibly-nil observation pointer is
+// non-nil and matches the expected JSON payload.
+func assertObservation(t *testing.T, field string, got *json.RawMessage, want string) {
+	t.Helper()
+	if got == nil {
+		t.Fatalf("%s is nil, want %q", field, want)
+	}
+	assertEqual(t, field, string(*got), want)
 }

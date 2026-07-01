@@ -214,7 +214,7 @@ CREATE TABLE extension_resource_inventory (
     extension_resource_uid TEXT PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     labels      JSONB NOT NULL DEFAULT '{}',
-    observation JSONB NOT NULL DEFAULT '{}',
+    observation JSONB,
     observed_at TIMESTAMPTZ NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL
 );

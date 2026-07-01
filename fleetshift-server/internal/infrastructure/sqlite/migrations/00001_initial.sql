@@ -213,7 +213,7 @@ CREATE TABLE extension_resource_inventory (
     extension_resource_uid TEXT PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     labels      TEXT NOT NULL DEFAULT '{}',
-    observation TEXT NOT NULL DEFAULT '{}',
+    observation TEXT,
     observed_at TEXT NOT NULL,
     updated_at  TEXT NOT NULL
 );

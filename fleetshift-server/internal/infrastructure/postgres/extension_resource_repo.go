@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -539,75 +540,328 @@ func unmarshalConditionSnapshots(data []byte) ([]domain.ConditionSnapshot, error
 // Inventory methods
 // ---------------------------------------------------------------------------
 
-func (r *ExtensionResourceRepo) upsertInventoryRow(ctx context.Context, uid domain.ExtensionResourceUID, inv *domain.InventoryResourceSnapshot) error {
-	labelsJSON, _ := json.Marshal(inv.Labels)
-	obs := inv.Observation
-	if obs == nil {
-		obs = json.RawMessage("{}")
+// upsertInventoryLatestRow is the single low-level "write latest
+// inventory row" primitive shared by [ExtensionResourceRepo.Create],
+// [ExtensionResourceRepo.ReplaceInventory], and
+// [ExtensionResourceRepo.ApplyInventoryDeltas]. observation == nil
+// means "untouched": the ON CONFLICT clause COALESCEs the observation
+// column so an untouched observation preserves whatever is already
+// latest, entirely at the SQL level. Callers are expected to have
+// already normalized away a null-literal observation (see
+// [normalizeObservation]) before calling this, since a non-nil
+// pointer to the JSON literal null would otherwise be written as a
+// literal jsonb null rather than preserving latest.
+func (r *ExtensionResourceRepo) upsertInventoryLatestRow(
+	ctx context.Context,
+	uid domain.ExtensionResourceUID,
+	labels map[string]string,
+	observation *json.RawMessage,
+	observedAt, updatedAt time.Time,
+) error {
+	labelsJSON, err := marshalLabels(labels)
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
 	}
-	_, err := r.DB.ExecContext(ctx,
+	var obsArg sql.NullString
+	if observation != nil {
+		obsArg = sql.NullString{String: string(*observation), Valid: true}
+	}
+	_, err = r.DB.ExecContext(ctx,
 		`INSERT INTO extension_resource_inventory
 			(extension_resource_uid, labels, observation, observed_at, updated_at)
 		 VALUES ($1, $2, $3, $4, $5)
 		 ON CONFLICT(extension_resource_uid) DO UPDATE SET
 			labels = EXCLUDED.labels,
-			observation = EXCLUDED.observation,
+			observation = COALESCE(EXCLUDED.observation, extension_resource_inventory.observation),
 			observed_at = EXCLUDED.observed_at,
 			updated_at = EXCLUDED.updated_at`,
-		uid.String(), string(labelsJSON), string(obs),
-		inv.ObservedAt.UTC(), inv.UpdatedAt.UTC())
+		uid.String(), labelsJSON, obsArg,
+		observedAt.UTC(), updatedAt.UTC())
 	return err
+}
+
+// normalizeObservation collapses the two "no real observation" input
+// shapes -- a nil pointer and a non-nil pointer to the JSON literal
+// null -- to a single nil result, so the rest of the repository only
+// has to handle one "untouched" case. Per the observation contract
+// (see [domain.InventoryReplacement.Observation]), there is no
+// explicit "clear" operation; only "untouched" and "replace".
+func normalizeObservation(obs *json.RawMessage) *json.RawMessage {
+	if obs == nil {
+		return nil
+	}
+	if bytes.Equal(bytes.TrimSpace(*obs), []byte("null")) {
+		return nil
+	}
+	return obs
+}
+
+// marshalLabels normalizes a nil label map to an empty JSON object so
+// "no labels supplied" and "empty label set" both persist the same way.
+func marshalLabels(labels map[string]string) (string, error) {
+	if labels == nil {
+		labels = map[string]string{}
+	}
+	b, err := json.Marshal(labels)
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
+}
+
+func (r *ExtensionResourceRepo) upsertInventoryRow(ctx context.Context, uid domain.ExtensionResourceUID, inv *domain.InventoryResourceSnapshot) error {
+	var obs *json.RawMessage
+	if inv.Observation != nil {
+		obs = &inv.Observation
+	}
+	return r.upsertInventoryLatestRow(ctx, uid, inv.Labels, obs, inv.ObservedAt, inv.UpdatedAt)
 }
 
 func (r *ExtensionResourceRepo) insertInventory(ctx context.Context, uid domain.ExtensionResourceUID, inv *domain.InventoryResourceSnapshot) error {
 	if err := r.upsertInventoryRow(ctx, uid, inv); err != nil {
 		return err
 	}
-	return r.recordConditionSnapshots(ctx, uid, inv.Conditions, inv.ObservedAt)
-}
-
-func (r *ExtensionResourceRepo) UpsertInventory(ctx context.Context, updates []domain.InventoryUpdate) error {
-	for _, u := range updates {
-		s := u.Inventory.Snapshot()
-		if err := r.upsertInventoryRow(ctx, u.ExtensionResourceUID, &s); err != nil {
-			return fmt.Errorf("upsert inventory for %s: %w", u.ExtensionResourceUID, err)
-		}
-		if err := r.recordConditionSnapshots(ctx, u.ExtensionResourceUID, s.Conditions, s.ObservedAt); err != nil {
-			return fmt.Errorf("record conditions for %s: %w", u.ExtensionResourceUID, err)
-		}
-	}
-	return nil
-}
-
-// recordConditionSnapshots feeds a set of ConditionSnapshots (from an
-// inventory upsert) through the shared condition recording flow.
-func (r *ExtensionResourceRepo) recordConditionSnapshots(ctx context.Context, uid domain.ExtensionResourceUID, conds []domain.ConditionSnapshot, observedAt time.Time) error {
-	now := time.Now().UTC()
-	for _, c := range conds {
+	for _, c := range inv.Conditions {
 		if err := r.recordCondition(ctx, uid,
 			c.Type, c.Status, c.Reason, c.Message,
-			c.LastTransitionTime, observedAt, now); err != nil {
+			c.LastTransitionTime, inv.ObservedAt, inv.UpdatedAt); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (r *ExtensionResourceRepo) AppendObservations(ctx context.Context, observations []domain.Observation) error {
-	for _, o := range observations {
-		obs := o.Observation()
-		if obs == nil {
-			obs = json.RawMessage("{}")
+// ensureInventoryRowExists creates a latest-inventory row with empty
+// labels and no observation if one doesn't already exist for uid. The
+// INSERT enforces the extension_resources foreign key, so an unknown
+// UID fails here rather than the repository silently creating an
+// extension resource (the behavior the report contract rework
+// removed). observedAt/updatedAt only matter for a brand-new row;
+// ApplyInventoryDeltas immediately overwrites them via
+// [ExtensionResourceRepo.upsertInventoryLatestRow] regardless.
+func (r *ExtensionResourceRepo) ensureInventoryRowExists(ctx context.Context, uid domain.ExtensionResourceUID, observedAt, updatedAt time.Time) error {
+	_, err := r.DB.ExecContext(ctx,
+		`INSERT INTO extension_resource_inventory (extension_resource_uid, labels, observation, observed_at, updated_at)
+		 VALUES ($1, '{}', NULL, $2, $3)
+		 ON CONFLICT (extension_resource_uid) DO NOTHING`,
+		uid.String(), observedAt.UTC(), updatedAt.UTC())
+	return err
+}
+
+// currentInventoryLabels reads the current latest labels for uid, for
+// the read-modify-write merge that
+// [ExtensionResourceRepo.ApplyInventoryDeltas] needs. Callers must
+// ensure the row exists first.
+func (r *ExtensionResourceRepo) currentInventoryLabels(ctx context.Context, uid domain.ExtensionResourceUID) (map[string]string, error) {
+	var labelsJSON string
+	if err := r.DB.QueryRowContext(ctx,
+		`SELECT labels FROM extension_resource_inventory WHERE extension_resource_uid = $1`,
+		uid.String()).Scan(&labelsJSON); err != nil {
+		return nil, fmt.Errorf("read latest inventory labels for %s: %w", uid, err)
+	}
+	labels := map[string]string{}
+	if labelsJSON != "" {
+		if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
+			return nil, fmt.Errorf("unmarshal labels: %w", err)
 		}
+	}
+	return labels, nil
+}
+
+// observationDiffersFromLatest reports whether obs (already
+// normalized via [normalizeObservation]) is a real value that differs
+// from the current latest observation for uid, i.e. whether it should
+// append a new observation history row. A nil obs always reports
+// false without reading anything. The comparison happens entirely in
+// SQL via jsonb's IS DISTINCT FROM, using Postgres's native JSONB
+// semantic equality (insensitive to key order and whitespace) rather
+// than a Go-side byte comparison -- important since JSONB storage
+// doesn't preserve the original textual form.
+func (r *ExtensionResourceRepo) observationDiffersFromLatest(ctx context.Context, uid domain.ExtensionResourceUID, obs *json.RawMessage) (bool, error) {
+	if obs == nil {
+		return false, nil
+	}
+	var differs bool
+	err := r.DB.QueryRowContext(ctx,
+		`SELECT observation IS DISTINCT FROM $2::jsonb
+		 FROM extension_resource_inventory WHERE extension_resource_uid = $1`,
+		uid.String(), string(*obs)).Scan(&differs)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No latest-inventory row yet: nothing to dedup against.
+		return true, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("compare current observation for %s: %w", uid, err)
+	}
+	return differs, nil
+}
+
+// mergeLabels applies set/delete deltas onto a base label map without
+// mutating it, returning the merged result.
+func mergeLabels(current, set map[string]string, deleteKeys []string) map[string]string {
+	merged := make(map[string]string, len(current)+len(set))
+	for k, v := range current {
+		merged[k] = v
+	}
+	for k, v := range set {
+		merged[k] = v
+	}
+	for _, k := range deleteKeys {
+		delete(merged, k)
+	}
+	return merged
+}
+
+// deleteConditionsAbsentFrom removes latest condition rows whose type
+// is not present in keep, implementing ReplaceInventory's "the
+// replacement is the complete current condition set" semantics. No
+// transition row is recorded for the removal (per the rework doc's
+// condition transition rules).
+func (r *ExtensionResourceRepo) deleteConditionsAbsentFrom(ctx context.Context, uid domain.ExtensionResourceUID, conditions []domain.Condition) error {
+	if len(conditions) == 0 {
 		_, err := r.DB.ExecContext(ctx,
-			`INSERT INTO extension_resource_inventory_observations
-				(id, extension_resource_uid, observation, observed_at, created_at)
-			 VALUES ($1, $2, $3, $4, $5)`,
-			string(o.ID()), o.ExtensionResourceUID().String(),
-			string(obs), o.ObservedAt().UTC(), o.CreatedAt().UTC())
-		if err != nil {
-			return fmt.Errorf("append observation %s: %w", o.ID(), err)
+			`DELETE FROM extension_resource_inventory_conditions WHERE extension_resource_uid = $1`,
+			uid.String())
+		return err
+	}
+	args := make([]any, 0, len(conditions)+1)
+	args = append(args, uid.String())
+	placeholders := make([]string, len(conditions))
+	for i, c := range conditions {
+		args = append(args, string(c.Type()))
+		placeholders[i] = fmt.Sprintf("$%d", i+2)
+	}
+	_, err := r.DB.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM extension_resource_inventory_conditions
+			WHERE extension_resource_uid = $1 AND type NOT IN (%s)`, strings.Join(placeholders, ", ")),
+		args...)
+	return err
+}
+
+// deleteConditionsByType removes the named latest condition rows. No
+// transition row is recorded (per the rework doc's condition
+// transition rules: deletion isn't a transition in this pass).
+func (r *ExtensionResourceRepo) deleteConditionsByType(ctx context.Context, uid domain.ExtensionResourceUID, types []domain.ConditionType) error {
+	for _, t := range types {
+		if _, err := r.DB.ExecContext(ctx,
+			`DELETE FROM extension_resource_inventory_conditions WHERE extension_resource_uid = $1 AND type = $2`,
+			uid.String(), string(t)); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+// appendObservationHistory inserts an append-only observation history
+// row, generating its ID internally (reporters never supply one).
+func (r *ExtensionResourceRepo) appendObservationHistory(ctx context.Context, uid domain.ExtensionResourceUID, observation json.RawMessage, observedAt, receivedAt time.Time) error {
+	id := domain.NewObservationID()
+	_, err := r.DB.ExecContext(ctx,
+		`INSERT INTO extension_resource_inventory_observations
+			(id, extension_resource_uid, observation, observed_at, created_at)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		string(id), uid.String(), string(observation),
+		observedAt.UTC(), receivedAt.UTC())
+	return err
+}
+
+// ReplaceInventory implements [domain.ExtensionResourceRepository.ReplaceInventory].
+// See the "ReplaceInventory Repository Semantics" section of the
+// inventory report contract rework plan for the per-replacement steps.
+func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacements []domain.InventoryReplacement) error {
+	for _, rep := range replacements {
+		if err := r.replaceInventoryOne(ctx, rep); err != nil {
+			return fmt.Errorf("replace inventory for %s: %w", rep.ExtensionResourceUID, err)
+		}
+	}
+	return nil
+}
+
+func (r *ExtensionResourceRepo) replaceInventoryOne(ctx context.Context, rep domain.InventoryReplacement) error {
+	uid := rep.ExtensionResourceUID
+	obs := normalizeObservation(rep.Observation)
+
+	appendHistory, err := r.observationDiffersFromLatest(ctx, uid, obs)
+	if err != nil {
+		return err
+	}
+
+	// The INSERT here enforces the extension_resources foreign key, so
+	// an unknown UID fails before any conditions/history are touched.
+	if err := r.upsertInventoryLatestRow(ctx, uid, rep.Labels, obs, rep.ObservedAt, rep.ReceivedAt); err != nil {
+		return fmt.Errorf("upsert latest inventory: %w", err)
+	}
+
+	if err := r.deleteConditionsAbsentFrom(ctx, uid, rep.Conditions); err != nil {
+		return fmt.Errorf("delete absent conditions: %w", err)
+	}
+	for _, c := range rep.Conditions {
+		if err := r.recordCondition(ctx, uid,
+			c.Type(), c.Status(), c.Reason(), c.Message(),
+			c.LastTransitionTime(), rep.ObservedAt, rep.ReceivedAt); err != nil {
+			return fmt.Errorf("upsert condition: %w", err)
+		}
+	}
+
+	if appendHistory {
+		if err := r.appendObservationHistory(ctx, uid, *obs, rep.ObservedAt, rep.ReceivedAt); err != nil {
+			return fmt.Errorf("append observation history: %w", err)
+		}
+	}
+	return nil
+}
+
+// ApplyInventoryDeltas implements [domain.ExtensionResourceRepository.ApplyInventoryDeltas].
+// See the "ApplyInventoryDeltas Repository Semantics" section of the
+// inventory report contract rework plan for the per-delta steps.
+func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas []domain.InventoryDelta) error {
+	for _, d := range deltas {
+		if err := r.applyInventoryDeltaOne(ctx, d); err != nil {
+			return fmt.Errorf("apply inventory delta for %s: %w", d.ExtensionResourceUID, err)
+		}
+	}
+	return nil
+}
+
+func (r *ExtensionResourceRepo) applyInventoryDeltaOne(ctx context.Context, d domain.InventoryDelta) error {
+	uid := d.ExtensionResourceUID
+	obs := normalizeObservation(d.Observation)
+
+	// The INSERT here enforces the extension_resources foreign key, so
+	// an unknown UID fails before any conditions/history are touched.
+	if err := r.ensureInventoryRowExists(ctx, uid, d.ObservedAt, d.ReceivedAt); err != nil {
+		return fmt.Errorf("ensure latest inventory row: %w", err)
+	}
+
+	labels, err := r.currentInventoryLabels(ctx, uid)
+	if err != nil {
+		return err
+	}
+	labels = mergeLabels(labels, d.SetLabels, d.DeleteLabels)
+
+	appendHistory, err := r.observationDiffersFromLatest(ctx, uid, obs)
+	if err != nil {
+		return err
+	}
+
+	if err := r.upsertInventoryLatestRow(ctx, uid, labels, obs, d.ObservedAt, d.ReceivedAt); err != nil {
+		return fmt.Errorf("upsert latest inventory: %w", err)
+	}
+	if appendHistory {
+		if err := r.appendObservationHistory(ctx, uid, *obs, d.ObservedAt, d.ReceivedAt); err != nil {
+			return fmt.Errorf("append observation history: %w", err)
+		}
+	}
+
+	for _, c := range d.UpsertConditions {
+		if err := r.recordCondition(ctx, uid,
+			c.Type(), c.Status(), c.Reason(), c.Message(),
+			c.LastTransitionTime(), d.ObservedAt, d.ReceivedAt); err != nil {
+			return fmt.Errorf("upsert condition: %w", err)
+		}
+	}
+	if err := r.deleteConditionsByType(ctx, uid, d.DeleteConditions); err != nil {
+		return fmt.Errorf("delete conditions: %w", err)
 	}
 	return nil
 }
@@ -638,48 +892,6 @@ func (r *ExtensionResourceRepo) ListObservations(ctx context.Context, uid domain
 		snap.Observation = compactJSONB(obsStr)
 		return domain.ObservationFromSnapshot(snap), nil
 	})
-}
-
-func (r *ExtensionResourceRepo) RecordConditions(ctx context.Context, reports []domain.ConditionReport) error {
-	if len(reports) == 0 {
-		return nil
-	}
-	// Ensure a minimal inventory row exists for every unique UID in the
-	// batch so conditions can be reported before a full inventory upsert.
-	seen := make(map[domain.ExtensionResourceUID]struct{})
-	for _, rpt := range reports {
-		uid := rpt.ExtensionResourceUID()
-		if _, ok := seen[uid]; ok {
-			continue
-		}
-		seen[uid] = struct{}{}
-		if err := r.ensureInventoryRow(ctx, uid); err != nil {
-			return err
-		}
-	}
-	now := time.Now().UTC()
-	for _, rpt := range reports {
-		if err := r.recordCondition(ctx, rpt.ExtensionResourceUID(),
-			rpt.ConditionType(), rpt.Status(), rpt.Reason(), rpt.Message(),
-			rpt.LastTransitionTime(), rpt.ObservedAt(), now); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ensureInventoryRow creates a minimal inventory row if one doesn't
-// exist. This allows conditions to be recorded before a full inventory
-// upsert has been performed.
-func (r *ExtensionResourceRepo) ensureInventoryRow(ctx context.Context, uid domain.ExtensionResourceUID) error {
-	now := time.Now().UTC()
-	_, err := r.DB.ExecContext(ctx,
-		`INSERT INTO extension_resource_inventory
-			(extension_resource_uid, labels, observation, observed_at, updated_at)
-		 VALUES ($1, '{}', '{}', $2, $3)
-		 ON CONFLICT (extension_resource_uid) DO NOTHING`,
-		uid.String(), now, now)
-	return err
 }
 
 // recordCondition is the shared condition recording path. It:
