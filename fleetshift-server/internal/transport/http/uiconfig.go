@@ -16,9 +16,10 @@ type UIConfigOptions struct {
 	OIDCAuthority  string
 	OIDCUIClientID string
 	Logger         *slog.Logger
-	// AuthMiddleware, when non-nil, wraps routes that require
-	// authentication (e.g. /api/ui/user-config). Routes that must
-	// remain publicly accessible (/api/ui/config) are never wrapped.
+	// AuthMiddleware, when non-nil, wraps routes that serve
+	// user-specific data (e.g. /api/ui/user-config → navLayout).
+	// Global bootstrap routes (/api/ui/config, /api/ui/plugin-registry)
+	// are never wrapped.
 	AuthMiddleware func(http.Handler) http.Handler
 }
 
@@ -94,19 +95,41 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 		ClientID  string `json:"clientId"`
 		Scope     string `json:"scope"`
 	}
-	type configResponse struct {
-		OIDC oidcConfig `json:"oidc"`
-	}
 
-	resp := configResponse{
-		OIDC: oidcConfig{
-			Authority: opts.OIDCAuthority,
-			ClientID:  opts.OIDCUIClientID,
-			Scope:     "openid profile email roles",
-		},
+	oidc := oidcConfig{
+		Authority: opts.OIDCAuthority,
+		ClientID:  opts.OIDCUIClientID,
+		Scope:     "openid profile email roles",
 	}
 
 	return func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]interface{}{
+			"oidc": oidc,
+		}
+
+		// Augment with plugin-derived global config when webDir is
+		// available. These fields are NOT user-specific — scalprum
+		// bootstrap, plugin pages, and plugin entries must load
+		// regardless of authentication state.
+		if opts.WebDir != "" {
+			path := filepath.Join(opts.WebDir, "plugin-registry.json")
+			data, err := os.ReadFile(path)
+			if err == nil {
+				var registry pluginRegistry
+				if err := json.Unmarshal(data, &registry); err == nil {
+					pages := generatePluginPages(registry)
+					entries := make([]pluginEntry, 0, len(registry.Plugins))
+					for _, e := range registry.Plugins {
+						entries = append(entries, e)
+					}
+					resp["scalprumConfig"] = buildScalprumConfig(registry)
+					resp["pluginPages"] = pages
+					resp["pluginEntries"] = entries
+					resp["assetsHost"] = ""
+				}
+			}
+		}
+
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(resp)
 	}
@@ -126,6 +149,11 @@ func handlePluginRegistry(opts UIConfigOptions) http.HandlerFunc {
 	}
 }
 
+// handleUserConfig returns user-specific configuration only. Currently
+// this is just the navigation layout, which will become identity-aware
+// (per-user or per-org/group) once those concepts are available.
+// Global UI bootstrap data (scalprum, plugin pages, plugin entries) is
+// served by /api/ui/config so the frontend can load without auth.
 func handleUserConfig(opts UIConfigOptions) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		path := filepath.Join(opts.WebDir, "plugin-registry.json")
@@ -143,20 +171,11 @@ func handleUserConfig(opts UIConfigOptions) http.HandlerFunc {
 			return
 		}
 
-		scalprumConfig := buildScalprumConfig(registry)
 		pages := generatePluginPages(registry)
 		navLayout := generateNavLayout(registry, pages)
-		entries := make([]pluginEntry, 0, len(registry.Plugins))
-		for _, e := range registry.Plugins {
-			entries = append(entries, e)
-		}
 
 		resp := map[string]interface{}{
-			"scalprumConfig": scalprumConfig,
-			"pluginPages":    pages,
-			"navLayout":      navLayout,
-			"pluginEntries":  entries,
-			"assetsHost":     "",
+			"navLayout": navLayout,
 		}
 
 		w.Header().Set("Content-Type", "application/json")
