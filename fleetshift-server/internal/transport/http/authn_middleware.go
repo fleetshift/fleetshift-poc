@@ -45,9 +45,20 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 			return
 		}
 
-		// Setup mode: no auth methods configured — allow anonymous.
-		if len(methods) == 0 {
-			logger.DebugContext(r.Context(), "no auth methods configured, allowing anonymous", "endpoint", endpoint)
+		// Pre-filter to OIDC methods — only these participate in
+		// bearer-token authentication on HTTP routes.
+		oidcMethods := make([]domain.AuthMethod, 0, len(methods))
+		for _, m := range methods {
+			if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+				oidcMethods = append(oidcMethods, m)
+			}
+		}
+
+		// Setup mode: no OIDC auth methods configured — allow anonymous.
+		// Non-OIDC methods (e.g. future token-exchange, mTLS) do not
+		// trigger enforced mode on these HTTP routes.
+		if len(oidcMethods) == 0 {
+			logger.DebugContext(r.Context(), "no OIDC auth methods configured, allowing anonymous", "endpoint", endpoint)
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -64,10 +75,7 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 		var subject *domain.SubjectClaims
 		var matchedAudience []domain.Audience
 
-		for _, m := range methods {
-			if m.Type() != domain.AuthMethodTypeOIDC || m.OIDC() == nil {
-				continue
-			}
+		for _, m := range oidcMethods {
 			claims, verifyErr := a.Verifier.Verify(r.Context(), *m.OIDC(), token)
 			if verifyErr != nil {
 				logger.DebugContext(r.Context(), "token verification failed for method",
@@ -81,14 +89,14 @@ func (a *AuthnMiddleware) Wrap(next http.Handler) http.Handler {
 
 		if subject == nil {
 			logger.DebugContext(r.Context(), "no auth method accepted the token",
-				"endpoint", endpoint, "peer", r.RemoteAddr, "methods_checked", len(methods))
+				"endpoint", endpoint, "peer", r.RemoteAddr, "methods_checked", len(oidcMethods))
 			w.Header().Set("WWW-Authenticate", `Bearer error="invalid_token"`)
 			writeJSON(w, http.StatusUnauthorized, map[string]string{"error": "token verification failed"})
 			return
 		}
 
 		logger.DebugContext(r.Context(), "request authenticated",
-			"endpoint", endpoint, "subject", subject.Subject, "issuer", subject.Issuer)
+			"endpoint", endpoint, "issuer", subject.Issuer)
 
 		// Propagate the same AuthorizationContext that the gRPC layer
 		// uses, so downstream application services see a consistent

@@ -111,23 +111,33 @@ func handleConfig(opts UIConfigOptions) http.HandlerFunc {
 		// available. These fields are NOT user-specific — scalprum
 		// bootstrap, plugin pages, and plugin entries must load
 		// regardless of authentication state.
+		//
+		// Failures are surfaced as errors rather than silently
+		// omitted, because the frontend relies on these bootstrap
+		// fields (scalprumConfig, pluginPages, pluginEntries).
 		if opts.WebDir != "" {
 			path := filepath.Join(opts.WebDir, "plugin-registry.json")
 			data, err := os.ReadFile(path)
-			if err == nil {
-				var registry pluginRegistry
-				if err := json.Unmarshal(data, &registry); err == nil {
-					pages := generatePluginPages(registry)
-					entries := make([]pluginEntry, 0, len(registry.Plugins))
-					for _, e := range registry.Plugins {
-						entries = append(entries, e)
-					}
-					resp["scalprumConfig"] = buildScalprumConfig(registry)
-					resp["pluginPages"] = pages
-					resp["pluginEntries"] = entries
-					resp["assetsHost"] = ""
-				}
+			if err != nil {
+				opts.Logger.Error("failed to read plugin-registry.json", "error", err)
+				http.Error(w, "plugin registry not available", http.StatusServiceUnavailable)
+				return
 			}
+			var registry pluginRegistry
+			if err := json.Unmarshal(data, &registry); err != nil {
+				opts.Logger.Error("failed to parse plugin-registry.json", "error", err)
+				http.Error(w, "invalid plugin registry", http.StatusInternalServerError)
+				return
+			}
+			pages := generatePluginPages(registry)
+			entries := make([]pluginEntry, 0, len(registry.Plugins))
+			for _, e := range registry.Plugins {
+				entries = append(entries, e)
+			}
+			resp["scalprumConfig"] = buildScalprumConfig(registry)
+			resp["pluginPages"] = pages
+			resp["pluginEntries"] = entries
+			resp["assetsHost"] = ""
 		}
 
 		w.Header().Set("Content-Type", "application/json")

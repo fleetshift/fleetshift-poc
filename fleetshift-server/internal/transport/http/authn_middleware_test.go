@@ -393,9 +393,10 @@ func TestAuthnMiddleware_NilLogger_UsesDefault(t *testing.T) {
 	}
 }
 
-func TestAuthnMiddleware_NilOIDCConfig_Unauthorized(t *testing.T) {
+func TestAuthnMiddleware_NilOIDCConfig_Anonymous(t *testing.T) {
 	repo := newFakeAuthMethodRepo()
-	// Save a method with nil OIDC config
+	// Save a method with nil OIDC config — should be filtered out
+	// during OIDC pre-filtering, leaving zero valid OIDC methods.
 	if err := repo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
 		ID:   "oidc-broken",
 		Type: domain.AuthMethodTypeOIDC,
@@ -413,9 +414,35 @@ func TestAuthnMiddleware_NilOIDCConfig_Unauthorized(t *testing.T) {
 
 	mw.Wrap(echoHandler).ServeHTTP(rec, req)
 
-	// Method exists but has nil OIDC config — no method can match the
-	// token, so the middleware should reject with "no matching auth method".
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	// Method exists but has nil OIDC config — excluded from OIDC
+	// pre-filter, so the middleware treats this as setup mode
+	// (anonymous access allowed).
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+}
+
+func TestAuthnMiddleware_OnlyNonOIDCMethods_Anonymous(t *testing.T) {
+	repo := newFakeAuthMethodRepo()
+	// Save a non-OIDC method — should not trigger enforced mode.
+	if err := repo.Save(context.Background(), domain.AuthMethodFromSnapshot(domain.AuthMethodSnapshot{
+		ID:   "non-oidc",
+		Type: "api-key", // hypothetical non-OIDC method type
+		OIDC: nil,
+	})); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	verifier := &fakeOIDCTokenVerifier{}
+	mw := setupMiddleware(repo, verifier)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/user-config", nil)
+	// No Authorization header — should still be allowed through.
+	rec := httptest.NewRecorder()
+
+	mw.Wrap(echoHandler).ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d (non-OIDC methods should not trigger enforced mode)", rec.Code, http.StatusOK)
 	}
 }
