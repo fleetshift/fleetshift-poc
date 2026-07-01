@@ -284,29 +284,6 @@ func TestNewCondition(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ConditionReport
-// ---------------------------------------------------------------------------
-
-func TestNewConditionReport(t *testing.T) {
-	uid := NewExtensionResourceUID()
-	ct, _ := NewConditionType("Ready")
-	ts := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
-
-	report, err := NewConditionReport(uid, ct, ConditionTrue, "AllGood", "ok", ts, ts)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	assertEq(t, "ExtensionResourceUID", report.ExtensionResourceUID(), uid)
-	assertEq(t, "ConditionType", report.ConditionType(), ct)
-	assertEq(t, "Status", report.Status(), ConditionTrue)
-	assertEq(t, "Reason", report.Reason(), "AllGood")
-	assertEq(t, "Message", report.Message(), "ok")
-	assertEq(t, "LastTransitionTime", report.LastTransitionTime(), ts)
-	assertEq(t, "ObservedAt", report.ObservedAt(), ts)
-}
-
-// ---------------------------------------------------------------------------
 // InventoryType
 // ---------------------------------------------------------------------------
 

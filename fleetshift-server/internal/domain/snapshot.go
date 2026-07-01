@@ -180,6 +180,9 @@ type ConditionSnapshot struct {
 }
 
 // InventoryResourceSnapshot is the persistence DTO for [InventoryResource].
+//
+// Observation is nil when there is no latest observation, distinct
+// from a present-but-empty JSON object; see [InventoryResource.Observation].
 type InventoryResourceSnapshot struct {
 	Labels      map[string]string
 	Observation json.RawMessage
@@ -380,11 +383,30 @@ func (ir InventoryResource) Snapshot() InventoryResourceSnapshot {
 	}
 	return InventoryResourceSnapshot{
 		Labels:      labels,
-		Observation: ir.observation,
+		Observation: observationToSnapshot(ir.observation),
 		Conditions:  conds,
 		ObservedAt:  ir.observedAt,
 		UpdatedAt:   ir.updatedAt,
 	}
+}
+
+// observationToSnapshot converts a domain observation pointer to its
+// snapshot representation, preserving nil ("no latest observation")
+// faithfully rather than defaulting to an empty JSON object.
+func observationToSnapshot(o *json.RawMessage) json.RawMessage {
+	if o == nil {
+		return nil
+	}
+	return *o
+}
+
+// observationFromSnapshot converts a snapshot observation back to the
+// domain pointer representation, preserving nil faithfully.
+func observationFromSnapshot(o json.RawMessage) *json.RawMessage {
+	if o == nil {
+		return nil
+	}
+	return &o
 }
 
 // Snapshot returns an [ExtensionResourceTypeSnapshot] capturing all
@@ -444,7 +466,7 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 		}
 		inv = &InventoryResourceSnapshot{
 			Labels:      invLabels,
-			Observation: r.inventory.observation,
+			Observation: observationToSnapshot(r.inventory.observation),
 			Conditions:  conds,
 			ObservedAt:  r.inventory.observedAt,
 			UpdatedAt:   r.inventory.updatedAt,
@@ -673,7 +695,7 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 		}
 		inv = &InventoryResource{
 			labels:      invLabels,
-			observation: s.Inventory.Observation,
+			observation: observationFromSnapshot(s.Inventory.Observation),
 			conditions:  conds,
 			observedAt:  s.Inventory.ObservedAt,
 			updatedAt:   s.Inventory.UpdatedAt,
@@ -711,7 +733,7 @@ func InventoryResourceFromSnapshot(s InventoryResourceSnapshot) *InventoryResour
 	}
 	return &InventoryResource{
 		labels:      labels,
-		observation: s.Observation,
+		observation: observationFromSnapshot(s.Observation),
 		conditions:  conds,
 		observedAt:  s.ObservedAt,
 		updatedAt:   s.UpdatedAt,

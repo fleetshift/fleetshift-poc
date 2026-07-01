@@ -2,6 +2,8 @@ package domain
 
 import (
 	"context"
+	"encoding/json"
+	"time"
 )
 
 // TargetRepository persists and retrieves target metadata.
@@ -91,25 +93,85 @@ type ExtensionResourceRepository interface {
 	// handles cleanup when the parent is deleted.
 	GetIntent(ctx context.Context, uid ExtensionResourceUID, version IntentVersion) (ResourceIntent, error)
 
-	// Inventory latest-state upsert (narrow, not a general Save)
-	UpsertInventory(ctx context.Context, updates []InventoryUpdate) error
+	// Inventory mutations -- UID-addressed, narrow command methods (not
+	// a general Save). Both require the extension_resources row to
+	// already exist; callers resolve identity and create the resource
+	// at the application-service layer before calling these.
+	//
+	// ReplaceInventory treats each [InventoryReplacement] as the
+	// complete latest inventory state for its resource: fields absent
+	// from the replacement are cleared/deleted from latest state, with
+	// the exception of Observation -- see its field doc.
+	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) error
 
-	// Observation history (append-only)
-	AppendObservations(ctx context.Context, observations []Observation) error
+	// ApplyInventoryDeltas applies incremental, field-level changes:
+	// fields absent from an [InventoryDelta] are left unchanged.
+	ApplyInventoryDeltas(ctx context.Context, deltas []InventoryDelta) error
+
+	// Observation history (append-only; populated as a side effect of
+	// ReplaceInventory/ApplyInventoryDeltas, never written directly).
 	ListObservations(ctx context.Context, uid ExtensionResourceUID, limit int) ([]Observation, error)
 
-	// Condition history -- reporters submit [ConditionReport] values;
-	// the repository deduplicates and persists only genuine transitions
-	// as [ConditionTransition] records.
-	RecordConditions(ctx context.Context, reports []ConditionReport) error
+	// Condition transition history (append-only; populated as a side
+	// effect of ReplaceInventory/ApplyInventoryDeltas when a supplied
+	// [Condition] represents a genuine state change).
 	ListConditionTransitions(ctx context.Context, uid ExtensionResourceUID, conditionType *ConditionType, limit int) ([]ConditionTransition, error)
 }
 
-// InventoryUpdate pairs an extension resource UID with the inventory
-// state to upsert. It is a command-style DTO, not a domain object.
-type InventoryUpdate struct {
+// InventoryReplacement is a command DTO -- not a domain object --
+// describing the complete latest inventory state for a single
+// extension resource. See [ExtensionResourceRepository.ReplaceInventory].
+//
+// Labels is the complete observed label set; nil and empty both
+// normalize to an empty latest label set. Conditions is the complete
+// current condition set -- conditions absent from the replacement are
+// deleted from latest state (without a transition row in this pass).
+//
+// Observation is the one field that does not follow the
+// "absence = deletion" rule that governs Labels/Conditions above: a
+// nil Observation, or a non-nil Observation pointing to the JSON
+// literal null, leaves the latest observation untouched and appends
+// no history row -- there is no "clear the observation" operation.
+// Any other non-nil value replaces the latest observation and appends
+// a history row, unless it's identical to the current latest
+// observation (repositories dedup to avoid noisy history on repeat
+// resyncs).
+type InventoryReplacement struct {
 	ExtensionResourceUID ExtensionResourceUID
-	Inventory            InventoryResource
+	Labels               map[string]string
+	Observation          *json.RawMessage
+	Conditions           []Condition
+	ObservedAt           time.Time
+	ReceivedAt           time.Time
+}
+
+// InventoryDelta is a command DTO -- not a domain object -- describing
+// incremental, field-level changes to a single extension resource's
+// inventory state. See [ExtensionResourceRepository.ApplyInventoryDeltas].
+//
+// Fields left at their zero value are unchanged: SetLabels/DeleteLabels
+// only touch the named keys, and UpsertConditions/DeleteConditions only
+// touch the named condition types. A delta with no field-level changes
+// is a valid heartbeat that still bumps resource-level freshness.
+//
+// Observation follows the same pointer semantics as
+// [InventoryReplacement.Observation]: nil, or non-nil pointing to the
+// JSON literal null, leaves the latest observation untouched and
+// appends no history row; any other non-nil value replaces latest and
+// appends a history row (subject to the same dedup rule).
+type InventoryDelta struct {
+	ExtensionResourceUID ExtensionResourceUID
+
+	SetLabels    map[string]string
+	DeleteLabels []string
+
+	Observation *json.RawMessage
+
+	UpsertConditions []Condition
+	DeleteConditions []ConditionType
+
+	ObservedAt time.Time
+	ReceivedAt time.Time
 }
 
 // ResourceIdentityRepository persists and retrieves canonical platform
