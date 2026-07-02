@@ -6,6 +6,7 @@ export type {
   PlacementStrategy,
 } from "./canonical.js";
 export { buildSignedInputEnvelope, hashIntent } from "./canonical.js";
+export { default as DynamicPfIcon } from "./DynamicPfIcon.js";
 export type { CoreExtensionMeta, ExtensionStore } from "./extensionInstall.js";
 export {
   CORE_EXTENSION_DEFAULTS,
@@ -53,6 +54,7 @@ export {
   getCachedPfIcon,
   iconNameToFile,
   iconNameToKeywords,
+  iconSlugToName,
   loadPfIcon,
 } from "./pfIconLoader.js";
 export type { PluginLinkProps } from "./PluginLink.js";

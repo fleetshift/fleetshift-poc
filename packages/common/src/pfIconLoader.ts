@@ -83,3 +83,16 @@ export async function loadPfIcon(name: string): Promise<ComponentType | null> {
 export function getCachedPfIcon(name: string): ComponentType | undefined {
   return iconCache.get(name);
 }
+
+/**
+ * Convert a kebab-case icon slug to PascalCase icon component name.
+ * E.g. "folder-open" → "FolderOpenIcon", "cog" → "CogIcon"
+ */
+export function iconSlugToName(slug: string): string {
+  return (
+    slug
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join("") + "Icon"
+  );
+}

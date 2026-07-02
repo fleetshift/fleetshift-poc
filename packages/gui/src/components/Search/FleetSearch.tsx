@@ -1,5 +1,6 @@
 import "./FleetSearch.scss";
 
+import { loadPfIcon } from "@fleetshift/common";
 import {
   Divider,
   Menu,
@@ -10,17 +11,16 @@ import {
   SearchInput,
 } from "@patternfly/react-core";
 import { Popper } from "@patternfly/react-core/dist/esm/helpers/Popper/Popper";
+import { SearchIcon } from "@patternfly/react-icons";
 import {
-  CogIcon,
-  CubesIcon,
-  SearchIcon,
-  ServerIcon,
-} from "@patternfly/react-icons";
-import {
+  ComponentType,
   forwardRef,
   Fragment,
+  lazy,
+  Suspense,
   useCallback,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -37,11 +37,35 @@ const CATEGORY_LABELS: Record<string, string> = {
 
 const KNOWN_CATEGORIES = ["nav", "cluster", "setting"];
 
-const ICON_MAP: Record<string, React.ComponentType> = {
-  CubesIcon,
-  ServerIcon,
-  CogIcon,
-};
+function LazyIcon({
+  name,
+  Fallback,
+}: {
+  name: string;
+  Fallback: ComponentType;
+}) {
+  const IconC = useMemo(
+    () =>
+      name.length === 0
+        ? Fallback
+        : lazy(() =>
+            loadPfIcon(name.replace("IconIcon", "Icon")).then((r) =>
+              r === null ? { default: Fallback } : { default: r },
+            ),
+          ),
+    [name, Fallback],
+  );
+
+  if (name.length === 0) {
+    return <Fallback />;
+  }
+
+  return (
+    <Suspense fallback={<Fallback />}>
+      <IconC />
+    </Suspense>
+  );
+}
 
 function ResultIcon({
   name,
@@ -50,9 +74,8 @@ function ResultIcon({
   name: string;
   IconComponent?: React.ComponentType;
 }) {
-  if (IconComponent) return <IconComponent />;
-  const Icon = ICON_MAP[name] ?? SearchIcon;
-  return <Icon />;
+  const Fallback = IconComponent ?? SearchIcon;
+  return <LazyIcon name={name} Fallback={Fallback} />;
 }
 
 function HighlightedText({ html }: { html: string }) {
@@ -267,73 +290,78 @@ const FleetSearch = ({ onStateChange }: FleetSearchProps) => {
           {(() => {
             const orderedCategories = categoryOrder(results);
             let renderedCount = 0;
+
+            const toFeatureId = (id: string) => {
+              if (id.startsWith("group-")) return `group.${id.slice(6)}`;
+              return id.replace(/^(ext|nav)-/, "");
+            };
+
             return orderedCategories.map((cat) => {
               const items = results[cat];
               if (!items || items.length === 0) return null;
               const isFirst = renderedCount === 0;
               renderedCount++;
 
-              const parents: SearchResultItem[] = [];
+              // Build child lookup: featureId → children
               const childrenByFeature = new Map<string, SearchResultItem[]>();
-              const standalone: SearchResultItem[] = [];
-
-              const toFeatureId = (id: string) =>
-                id.replace(/^(group|ext|nav)-/, "");
-
+              const itemByFeature = new Map<string, SearchResultItem>();
               for (const item of items) {
+                itemByFeature.set(toFeatureId(item.id), item);
                 if (item.feature) {
                   const list = childrenByFeature.get(item.feature) ?? [];
                   list.push(item);
                   childrenByFeature.set(item.feature, list);
-                } else {
-                  const featureId = toFeatureId(item.id);
-                  if (
-                    childrenByFeature.has(featureId) ||
-                    items.some((i) => i.feature === featureId)
-                  ) {
-                    parents.push(item);
-                  } else {
-                    standalone.push(item);
-                  }
                 }
               }
 
-              const orphanChildren: SearchResultItem[] = [];
-              for (const [featureId, children] of childrenByFeature) {
-                if (!parents.some((p) => toFeatureId(p.id) === featureId)) {
-                  orphanChildren.push(...children);
+              // Roots: items with no feature, or whose feature parent isn't in this category
+              const roots = items.filter(
+                (item) => !item.feature || !itemByFeature.has(item.feature),
+              );
+
+              const renderTree = (
+                item: SearchResultItem,
+                isLast: boolean,
+                depth: number,
+              ): React.ReactNode => {
+                const featureId = toFeatureId(item.id);
+                const children = childrenByFeature.get(featureId) ?? [];
+                const hasChildren = children.length > 0;
+
+                if (depth === 0 && !hasChildren) {
+                  return renderItem(item);
                 }
-              }
+
+                const wrapClass =
+                  depth === 0
+                    ? "ome-search__tree-group"
+                    : `ome-search__tree-child${isLast ? " ome-search__tree-child--last" : ""}`;
+
+                return (
+                  <div key={item.id} className={wrapClass}>
+                    {renderItem(item)}
+                    {hasChildren && (
+                      <div className="ome-search__tree-children" role="group">
+                        {children.map((child, idx) =>
+                          renderTree(
+                            child,
+                            idx === children.length - 1,
+                            depth + 1,
+                          ),
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              };
+
               return (
                 <Fragment key={cat}>
                   {!isFirst && <Divider />}
                   <MenuGroup label={CATEGORY_LABELS[cat] ?? cat}>
-                    {parents.map((parent) => {
-                      const featureId = toFeatureId(parent.id);
-                      const children = childrenByFeature.get(featureId) ?? [];
-                      return (
-                        <div key={parent.id} className="ome-search__tree-group">
-                          {renderItem(parent)}
-                          {children.length > 0 && (
-                            <div
-                              className="ome-search__tree-children"
-                              role="group"
-                            >
-                              {children.map((child, idx) => (
-                                <div
-                                  key={child.id}
-                                  className={`ome-search__tree-child${idx === children.length - 1 ? " ome-search__tree-child--last" : ""}`}
-                                >
-                                  {renderItem(child)}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                    {standalone.map((item) => renderItem(item))}
-                    {orphanChildren.map((item) => renderItem(item))}
+                    {roots.map((item, idx) =>
+                      renderTree(item, idx === roots.length - 1, 0),
+                    )}
                   </MenuGroup>
                 </Fragment>
               );

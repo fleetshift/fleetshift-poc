@@ -1,4 +1,14 @@
-import { useExtensionInstall } from "@fleetshift/common";
+import {
+  getCachedPfIcon,
+  iconSlugToName,
+  isCustomGroup,
+  loadPfIcon,
+  mergeLayout,
+  type NavLayoutEntry as CommonNavLayoutEntry,
+  type NavLayoutGroup as CommonNavLayoutGroup,
+  useExtensionInstall,
+  useNavLayout,
+} from "@fleetshift/common";
 import { useResolvedExtensions } from "@openshift/dynamic-plugin-sdk";
 import {
   createContext,
@@ -9,7 +19,6 @@ import {
   useRef,
 } from "react";
 
-import type { NavLayoutGroup } from "../../contexts/AppConfigContext";
 import { useAppConfig } from "../../contexts/AppConfigContext";
 import { isClusterProviderExtension } from "../../extensions/isClusterProviderExtension";
 import { isModuleExtension } from "../../extensions/isModuleExtension";
@@ -108,8 +117,23 @@ const SETTINGS: Omit<SearchEntry, "category" | "icon">[] = [
   },
 ];
 
+/** Walk all layout entries, recursing into "more" children. */
+function forEachEntry(
+  entries: CommonNavLayoutEntry[],
+  cb: (entry: CommonNavLayoutEntry) => void,
+): void {
+  for (const entry of entries) {
+    if (entry.type === "more") {
+      forEachEntry(entry.children, cb);
+    } else {
+      cb(entry);
+    }
+  }
+}
+
 export function SearchProvider({ children }: { children: ReactNode }) {
   const { pluginPages, navLayout } = useAppConfig();
+  const { override } = useNavLayout();
   const {
     loaded: installLoaded,
     isInstalled,
@@ -138,9 +162,19 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!modulesLoaded || !cpLoaded || !installLoaded) return;
+    let cancelled = false;
+
+    // Merge backend layout with user override so search reflects custom groups,
+    // moved modules, and hidden ("more") items.
+    const mergedLayout = override
+      ? mergeLayout(navLayout, override)
+      : navLayout;
 
     const db = createSearchDB();
     dbRef.current = db;
+    componentMapRef.current.clear();
+    iconMapRef.current.clear();
+    featureParentRef.current.clear();
 
     const inserts: ReturnType<typeof insertEntry>[] = [];
 
@@ -160,17 +194,31 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       pageMap.set(page.id, page);
     }
 
-    // Build group lookup: pageId → group, groupId → group metadata
-    const pageToGroup = new Map<string, NavLayoutGroup>();
-    const groupsById = new Map<string, NavLayoutGroup>();
-    for (const entry of navLayout) {
+    // Build group lookup from MERGED layout (including "more" children)
+    const pageToGroup = new Map<string, CommonNavLayoutGroup>();
+    const groupsById = new Map<string, CommonNavLayoutGroup>();
+    forEachEntry(mergedLayout, (entry) => {
       if (entry.type === "group") {
         groupsById.set(entry.groupId, entry);
         for (const child of entry.children) {
           pageToGroup.set(child.pageId, entry);
         }
       }
-    }
+    });
+
+    // Build lookup for page-level icon overrides from merged layout
+    const pageIconOverride = new Map<string, string>();
+    forEachEntry(mergedLayout, (entry) => {
+      if (entry.type === "page" && entry.iconOverride) {
+        pageIconOverride.set(entry.pageId, entry.iconOverride);
+      } else if (entry.type === "group") {
+        for (const child of entry.children) {
+          if (child.iconOverride) {
+            pageIconOverride.set(child.pageId, child.iconOverride);
+          }
+        }
+      }
+    });
 
     // Pages inside groups are indexed via module extensions below — skip them here
     const groupedPageIds = new Set(pageToGroup.keys());
@@ -185,6 +233,8 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const navId = `nav-${page.id}`;
       const pathname = `/${page.path}`;
       const status = isInstalled(page.scope) ? "" : "not-enabled";
+      const pageIcon = pageIconOverride.get(page.id);
+      const iconName = pageIcon ? iconSlugToName(pageIcon) : "CubesIcon";
       inserts.push(
         insertEntry(db, {
           id: navId,
@@ -192,11 +242,23 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           description: `Navigate to ${page.title}`,
           category: "nav",
           pathname,
-          icon: "CubesIcon",
+          icon: iconName,
           status,
           meta: page.path,
         }),
       );
+
+      // Load overridden icon component for search result rendering
+      if (pageIcon) {
+        const cached = getCachedPfIcon(iconName);
+        if (cached) {
+          iconMapRef.current.set(navId, cached);
+        } else {
+          loadPfIcon(iconName).then((comp) => {
+            if (!cancelled && comp) iconMapRef.current.set(navId, comp);
+          });
+        }
+      }
 
       featureParentRef.current.set(page.id, {
         id: navId,
@@ -204,7 +266,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         description: `Navigate to ${page.title}`,
         category: "nav",
         pathname,
-        icon: "CubesIcon",
+        icon: iconName,
         status,
       });
     }
@@ -248,6 +310,15 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       const group = pageToGroup.get(page.id);
       const groupFeature = group ? `group.${group.groupId}` : undefined;
 
+      // Resolve icon: page iconOverride > extension icon > group icon > fallback
+      const extPageIcon = pageIconOverride.get(page.id);
+      let resolvedIconName = "";
+      if (extPageIcon) {
+        resolvedIconName = iconSlugToName(extPageIcon);
+      } else if (!icon && group && isCustomGroup(group) && group.icon) {
+        resolvedIconName = iconSlugToName(group.icon);
+      }
+
       inserts.push(
         insertEntry(db, {
           id: entryId,
@@ -255,7 +326,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
           description: description ?? `Navigate to ${label}`,
           category: "nav",
           pathname: basePath,
-          icon: "",
+          icon: resolvedIconName,
           status: moduleStatus,
           meta: keywords ? keywords.join(" ") : "",
           feature: groupFeature,
@@ -264,6 +335,16 @@ export function SearchProvider({ children }: { children: ReactNode }) {
 
       if (icon) {
         iconMapRef.current.set(entryId, icon);
+      } else if (resolvedIconName) {
+        // Load the overridden or inherited icon component
+        const cached = getCachedPfIcon(resolvedIconName);
+        if (cached) {
+          iconMapRef.current.set(entryId, cached);
+        } else {
+          loadPfIcon(resolvedIconName).then((comp) => {
+            if (!cancelled && comp) iconMapRef.current.set(entryId, comp);
+          });
+        }
       }
       if (searchResult) {
         componentMapRef.current.set(entryId, searchResult);
@@ -275,8 +356,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         description: description ?? `Navigate to ${label}`,
         category: "nav",
         pathname: basePath,
-        icon: "",
+        icon: resolvedIconName,
         status: moduleStatus,
+        feature: groupFeature,
       });
 
       if (extensionPoints) {
@@ -348,8 +430,9 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    // Group parent entries: one per navLayout group so children link via `feature`
+    // Group parent entries: one per merged layout group so children link via `feature`.
     for (const group of groupsById.values()) {
+      const custom = isCustomGroup(group);
       const groupFeatureId = `group.${group.groupId}`;
       const firstChild = group.children[0];
       const firstPage = firstChild ? pageMap.get(firstChild.pageId) : undefined;
@@ -358,31 +441,58 @@ export function SearchProvider({ children }: { children: ReactNode }) {
         : `/${group.groupId}`;
       const entryId = `group-${group.groupId}`;
 
+      const description =
+        custom && group.description
+          ? group.description
+          : `${group.label} settings and configuration`;
+      const meta = [
+        group.label,
+        ...(custom && group.keywords ? group.keywords : []),
+      ].join(" ");
+      const category = "nav";
+      const iconName =
+        custom && group.icon ? iconSlugToName(group.icon) : "CogIcon";
+
       inserts.push(
         insertEntry(db, {
           id: entryId,
           title: group.label,
-          description: `${group.label} settings and configuration`,
-          category: "nav",
+          description,
+          category,
           pathname: groupPath,
-          icon: "CogIcon",
+          icon: iconName,
           status: "",
-          meta: group.label,
+          meta,
         }),
       );
+
+      // Load custom group icon component for search result rendering
+      if (custom && group.icon) {
+        const cached = getCachedPfIcon(iconName);
+        if (cached) {
+          iconMapRef.current.set(entryId, cached);
+        } else {
+          loadPfIcon(iconName).then((comp) => {
+            if (!cancelled && comp) iconMapRef.current.set(entryId, comp);
+          });
+        }
+      }
 
       featureParentRef.current.set(groupFeatureId, {
         id: entryId,
         title: group.label,
-        description: `${group.label} settings and configuration`,
-        category: "nav",
+        description,
+        category,
         pathname: groupPath,
-        icon: "CogIcon",
+        icon: iconName,
         status: "",
       });
     }
 
     Promise.all(inserts);
+    return () => {
+      cancelled = true;
+    };
   }, [
     modulesLoaded,
     cpLoaded,
@@ -392,6 +502,7 @@ export function SearchProvider({ children }: { children: ReactNode }) {
     cpExtensions,
     pluginPages,
     navLayout,
+    override,
     currentInstallVersion,
   ]);
 
@@ -408,23 +519,28 @@ export function SearchProvider({ children }: { children: ReactNode }) {
       }
     }
 
-    for (const [cat, items] of Object.entries(results)) {
-      const resultIds = new Set(items.map((i) => i.id));
-      const needed = new Set<string>();
+    for (const items of Object.values(results)) {
+      const needed: string[] = [];
+      const seen = new Set<string>();
       for (const item of items) {
-        if (!item.feature) continue;
-        const parent = featureParentRef.current.get(item.feature);
-        if (parent && !resultIds.has(parent.id)) {
-          needed.add(item.feature);
-        }
+        if (item.feature) needed.push(item.feature);
       }
-      for (const featureId of needed) {
+      while (needed.length > 0) {
+        const featureId = needed.shift();
+        if (!featureId || seen.has(featureId)) continue;
+        seen.add(featureId);
         const parent = featureParentRef.current.get(featureId);
         if (!parent) continue;
+        const targetCat = parent.category;
+        const targetItems = results[targetCat] ?? [];
+        if (targetItems.some((i) => i.id === parent.id)) continue;
         const parentItem = { ...parent };
         const comp = componentMapRef.current.get(parentItem.id);
         if (comp) parentItem.Component = comp;
-        results[cat] = [parentItem, ...results[cat]];
+        const icon = iconMapRef.current.get(parentItem.id);
+        if (icon) parentItem.IconComponent = icon;
+        results[targetCat] = [parentItem, ...targetItems];
+        if (parentItem.feature) needed.push(parentItem.feature);
       }
     }
 

@@ -6,7 +6,7 @@ import { highlightText } from "./highlightUtils";
 
 export type { SearchEntry };
 
-export type SearchCategory = "nav" | "cluster" | "setting";
+export type SearchCategory = "nav" | "nav-group" | "cluster" | "setting";
 
 export interface SearchResultItem {
   id: string;

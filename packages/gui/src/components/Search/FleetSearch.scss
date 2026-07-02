@@ -41,28 +41,31 @@
     position: relative;
     padding-left: var(--pf-t--global--spacer--lg);
 
+    // Vertical guide — runs full height, aligned to parent's indentation
     &::before {
       content: "";
       position: absolute;
       left: var(--pf-t--global--spacer--md);
       top: 0;
       bottom: 0;
-      width: 1px;
+      width: var(--pf-t--global--border--width--divider--default);
       background: var(--pf-t--global--border--color--default);
     }
 
+    // Horizontal guide — fixed offset matching PF TreeView node center
     &::after {
       content: "";
       position: absolute;
       left: var(--pf-t--global--spacer--md);
-      top: 50%;
-      width: var(--pf-t--global--spacer--sm);
-      height: 1px;
+      top: 1.125rem;
+      width: var(--pf-t--global--spacer--md);
+      height: var(--pf-t--global--border--width--divider--default);
       background: var(--pf-t--global--border--color--default);
     }
 
     &--last::before {
-      bottom: 50%;
+      height: 1.125rem;
+      bottom: auto;
     }
   }
 
