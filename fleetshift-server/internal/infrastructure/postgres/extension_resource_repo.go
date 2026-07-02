@@ -779,12 +779,15 @@ func (r *ExtensionResourceRepo) insertInventory(ctx context.Context, uid domain.
 // ---------------------------------------------------------------------------
 
 // aliasCandidateInput is a flattened (report position, resolved
-// target, alias) input row for the merged inventory statement's
-// alias fold-in.
+// target, alias, received-at) input row for the merged inventory
+// statement's alias fold-in. receivedAt duplicates the same report's
+// input_er.received_at value rather than being looked up from er by
+// idx -- see flattenAliasCandidates's doc comment for why.
 type aliasCandidateInput struct {
-	idx    int
-	target domain.ResourceName
-	alias  domain.Alias
+	idx        int
+	target     domain.ResourceName
+	alias      domain.Alias
+	receivedAt time.Time
 }
 
 // checkAliasBatchConsistency rejects, in pure Go and with zero SQL,
@@ -859,19 +862,38 @@ func checkAliasBatchConsistency(candidates []aliasCandidateInput) (safe []aliasC
 // flattenAliasCandidates converts a slice already vetted by
 // [checkAliasBatchConsistency] into the parallel arrays
 // replaceInventorySQL/applyInventoryDeltasSQL's input_aliases CTE
-// expects.
-func flattenAliasCandidates(candidates []aliasCandidateInput) (idx []int32, namespaces, keys, values []string) {
+// expects. collection_name/resource_id/received_at ride along here
+// even though they're per-report, not per-alias, values: every one of
+// them is already sitting in Go memory (the same rep.Name/d.Name and
+// rep.ReceivedAt/d.ReceivedAt that populated input_er's own arrays for
+// this idx), so passing them again here is cheaper than making
+// input_aliases join er by idx to fetch values er itself only ever
+// passed through from input_er unchanged. An EXPLAIN of the version
+// that did join er (see inventory_bench_test.go's UpdateWithAlias
+// benchmark) showed that join costing ~8ms of a ~70ms statement at
+// batch=1000 -- and paying it twice, once for each of
+// alias_prev_by_resource/alias_resource_check's references, since a
+// plain scan of input_aliases's UNNEST is cheap enough that Postgres
+// no longer has any real materialization cost to amortize across
+// those two references.
+func flattenAliasCandidates(candidates []aliasCandidateInput) (idx []int32, namespaces, keys, values, collectionNames, resourceIDs []string, receivedAts []time.Time) {
 	idx = make([]int32, len(candidates))
 	namespaces = make([]string, len(candidates))
 	keys = make([]string, len(candidates))
 	values = make([]string, len(candidates))
+	collectionNames = make([]string, len(candidates))
+	resourceIDs = make([]string, len(candidates))
+	receivedAts = make([]time.Time, len(candidates))
 	for i, c := range candidates {
 		idx[i] = int32(c.idx)
 		namespaces[i] = string(c.alias.Namespace)
 		keys[i] = string(c.alias.Key)
 		values[i] = string(c.alias.Value)
+		collectionNames[i] = string(c.target.Collection())
+		resourceIDs[i] = string(c.target.ID())
+		receivedAts[i] = c.receivedAt
 	}
-	return idx, namespaces, keys, values
+	return idx, namespaces, keys, values, collectionNames, resourceIDs, receivedAts
 }
 
 // scanAliasConflicts converts the merged inventory statement's final
@@ -904,8 +926,13 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 
 // aliasFoldCTEs is the alias fold-in shared verbatim by
 // replaceInventorySQL and applyInventoryDeltasSQL: it must appear
-// after a statement's er CTE (natural-key-to-uid resolution) and
-// before its final SELECT.
+// after a statement's input_aliases CTE and before its final SELECT.
+// Unlike the rest of the merged inventory statement, nothing here
+// depends on er/resolved_er at all -- see input_aliases's own doc
+// comment (next to replaceInventorySQLWithAliases/
+// applyInventoryDeltasSQLWithAliases) for why aliases correlate to
+// platform_resources/resource_aliases by natural key alone, with no
+// need for the extension resource's own uid.
 //
 // Of resource_aliases' two unique indexes (see the migration's doc
 // comment), only one -- (namespace, key, platform_collection_name,
@@ -922,19 +949,45 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // remaining source). alias_resource_check is a bare LEFT JOIN with no
 // WHERE, computed once and shared by both alias_safe and its exact
 // complement alias_resource_conflicts via a cheap filter each, rather
-// than each re-deriving its own copy of the alias_candidates/
-// alias_prev_by_resource join: an EXPLAIN of an earlier version that
-// did the latter (see inventory_bench_test.go's UpdateWithAlias
-// benchmark) showed alias_candidates costing as much to scan a third
-// time as it cost to compute in the first place, even though it's a
-// plain materialized CTE and Postgres's docs promise a WITH query "is
-// evaluated only once ... even if referred to more than once" --
-// empirically, on this corpus size, that promise held for a CTE's
-// first two referencing sites but not its third and beyond. Structuring
-// the shape-2 detail lookup this way keeps alias_candidates and
-// alias_prev_by_resource down to the two references each actually
-// needs, rather than depending on a third reference being as cheap as
-// the docs suggest it should be.
+// than each re-deriving its own copy of the input_aliases/
+// alias_prev_by_resource join.
+//
+// alias_safe only keeps existing_value IS NULL -- a genuinely new
+// (resource, key) pairing -- rather than also keeping existing_value
+// = value (an idempotent re-report of the alias this resource already
+// has). That distinction matters because ensure_platform/alias_upsert
+// are real writes, not free no-ops: alias_upsert's guarded DO UPDATE
+// (below) still performs the UPDATE whenever the guard is true, even
+// when the values it's setting are identical to what's already
+// there, which means a real tuple rewrite and index maintenance on
+// every steady-state re-report. Benchmarking confirmed this cost:
+// with every report re-sending the same, already-correct alias
+// (inventory_bench_test.go's UpdateWithAlias benchmark), alias_upsert
+// alone accounted for roughly a fifth of the statement's total time,
+// entirely spent rewriting rows back to their own current values.
+// Excluding existing_value = value from alias_safe means that case
+// skips ensure_platform and alias_upsert's INSERT altogether --
+// alias_resource_conflicts already excludes it too (its WHERE
+// requires existing_value <> value), so it's simply absent from both,
+// which aliasConflictSelect's own doc comment already treats as the
+// correct outcome for "nothing to do here."
+//
+// (An earlier version routed input_aliases through an alias_candidates
+// CTE that joined er by idx purely to fetch collection_name/
+// resource_id/received_at -- values er itself only ever passed
+// through from input_er unchanged, and so already sitting in Go
+// memory at the exact call site that builds input_aliases's arrays.
+// An EXPLAIN of that version (see inventory_bench_test.go's
+// UpdateWithAlias benchmark) showed alias_candidates costing as much
+// to scan a second time, in alias_resource_check, as it cost to
+// compute in the first place in alias_prev_by_resource, even though
+// it's a plain materialized CTE and Postgres's docs promise a WITH
+// query "is evaluated only once ... even if referred to more than
+// once" -- empirically, on this corpus size, joining er was expensive
+// enough that even a single extra reference wasn't free. Passing
+// those three columns as part of input_aliases itself, per
+// flattenAliasCandidates's doc comment, removes the join (and the
+// CTE) entirely rather than trying to amortize its cost.)
 //
 // The *other* shape -- "this value already belongs to a different
 // resource" -- doesn't need a pre-read to decide whether to write:
@@ -966,14 +1019,9 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // lose the alias_prev_by_value race; that's harmless (ON CONFLICT DO
 // NOTHING) and cheaper than trying to predict the outcome first.
 const aliasFoldCTEs = `
-alias_candidates AS (
-	SELECT ia.idx, ia.namespace, ia.key, ia.value, e.collection_name, e.resource_id, e.received_at
-	FROM input_aliases ia
-	JOIN er e ON e.idx = ia.idx
-),
 alias_prev_by_resource AS (
 	SELECT ac.idx, ra.existing_value
-	FROM alias_candidates ac
+	FROM input_aliases ac
 	JOIN LATERAL (
 		SELECT value AS existing_value FROM resource_aliases
 		WHERE namespace = ac.namespace AND key = ac.key
@@ -983,13 +1031,13 @@ alias_prev_by_resource AS (
 ),
 alias_resource_check AS (
 	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, pr.existing_value
-	FROM alias_candidates ac
+	FROM input_aliases ac
 	LEFT JOIN alias_prev_by_resource pr ON pr.idx = ac.idx
 ),
 alias_safe AS (
 	SELECT idx, namespace, key, value, collection_name, resource_id, received_at
 	FROM alias_resource_check
-	WHERE existing_value IS NULL OR existing_value = value
+	WHERE existing_value IS NULL
 ),
 alias_resource_conflicts AS (
 	SELECT idx, namespace, key, value, existing_value
@@ -1170,10 +1218,16 @@ hist_conditions AS (
 // replaceInventorySQLWithAliases is ReplaceInventory's single
 // statement for a chunk containing at least one alias to fold in:
 // replaceInventoryCoreCTEs, plus an input_aliases CTE (placeholders
-// $21-$24) feeding aliasFoldCTEs/aliasConflictSelect.
+// $21-$27) feeding aliasFoldCTEs/aliasConflictSelect. input_aliases
+// carries collection_name/resource_id/received_at alongside each
+// alias despite those being per-report rather than per-alias values --
+// see flattenAliasCandidates's doc comment for why duplicating them
+// here, straight from the same Go-side values input_er's own arrays
+// use, is cheaper than making aliasFoldCTEs join er by idx to fetch
+// them.
 const replaceInventorySQLWithAliases = replaceInventoryCoreCTEs + `,
-input_aliases(idx, namespace, key, value) AS (
-	SELECT * FROM UNNEST($21::int[], $22::text[], $23::text[], $24::text[])
+input_aliases(idx, namespace, key, value, collection_name, resource_id, received_at) AS (
+	SELECT * FROM UNNEST($21::int[], $22::text[], $23::text[], $24::text[], $25::text[], $26::text[], $27::timestamptz[])
 ),
 ` + aliasFoldCTEs + aliasConflictSelect
 
@@ -1257,7 +1311,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 			condHistIDs = append(condHistIDs, uuid.New().String())
 		}
 		for _, a := range rep.Aliases {
-			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: rep.Name, alias: a})
+			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: rep.Name, alias: a, receivedAt: receivedAts[i]})
 		}
 	}
 
@@ -1266,12 +1320,12 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	var rows *sql.Rows
 	var err error
 	if len(safeAliases) > 0 {
-		aliasIdx, aliasNamespaces, aliasKeys, aliasValues := flattenAliasCandidates(safeAliases)
+		aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts := flattenAliasCandidates(safeAliases)
 		rows, err = r.DB.QueryContext(ctx, replaceInventorySQLWithAliases,
 			idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs, observations, observedAts, receivedAts, obsHistIDs,
 			labelIdx, labelKeys, labelValues,
 			condIdx, condTypes, condStatuses, condReasons, condMessages, condLastTransitions, condHistIDs,
-			aliasIdx, aliasNamespaces, aliasKeys, aliasValues,
+			aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts,
 		)
 	} else {
 		rows, err = r.DB.QueryContext(ctx, replaceInventorySQLNoAliases,
@@ -1415,13 +1469,14 @@ del_conditions AS (
 
 // applyInventoryDeltasSQLWithAliases is ApplyInventoryDeltas's single
 // statement for a chunk containing at least one alias to fold in --
-// see replaceInventorySQLWithAliases's doc comment for the shape;
-// placeholders $25-$28 here instead of $21-$24 since
-// applyInventoryDeltasCoreCTEs's input CTEs use four more
+// see replaceInventorySQLWithAliases's doc comment for the shape
+// (including why input_aliases carries three report-level columns
+// alongside each alias); placeholders $25-$31 here instead of $21-$27
+// since applyInventoryDeltasCoreCTEs's input CTEs use four more
 // placeholders than replaceInventoryCoreCTEs's do.
 const applyInventoryDeltasSQLWithAliases = applyInventoryDeltasCoreCTEs + `,
-input_aliases(idx, namespace, key, value) AS (
-	SELECT * FROM UNNEST($25::int[], $26::text[], $27::text[], $28::text[])
+input_aliases(idx, namespace, key, value, collection_name, resource_id, received_at) AS (
+	SELECT * FROM UNNEST($25::int[], $26::text[], $27::text[], $28::text[], $29::text[], $30::text[], $31::timestamptz[])
 ),
 ` + aliasFoldCTEs + aliasConflictSelect
 
@@ -1505,7 +1560,7 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 			delCondTypes = append(delCondTypes, string(t))
 		}
 		for _, a := range d.Aliases {
-			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: d.Name, alias: a})
+			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: d.Name, alias: a, receivedAt: receivedAts[i]})
 		}
 	}
 
@@ -1514,14 +1569,14 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	var rows *sql.Rows
 	var err error
 	if len(safeAliases) > 0 {
-		aliasIdx, aliasNamespaces, aliasKeys, aliasValues := flattenAliasCandidates(safeAliases)
+		aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts := flattenAliasCandidates(safeAliases)
 		rows, err = r.DB.QueryContext(ctx, applyInventoryDeltasSQLWithAliases,
 			idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs, observations, observedAts, receivedAts, obsHistIDs,
 			setLabelIdx, setLabelKeys, setLabelValues,
 			delLabelIdx, delLabelKeys,
 			upsertCondIdx, upsertCondTypes, upsertCondStatuses, upsertCondReasons, upsertCondMessages, upsertCondLastTransitions, upsertCondHistIDs,
 			delCondIdx, delCondTypes,
-			aliasIdx, aliasNamespaces, aliasKeys, aliasValues,
+			aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts,
 		)
 	} else {
 		rows, err = r.DB.QueryContext(ctx, applyInventoryDeltasSQLNoAliases,
