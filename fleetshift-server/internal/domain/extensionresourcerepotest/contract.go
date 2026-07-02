@@ -464,13 +464,13 @@ func runInstanceTests(t *testing.T, factory Factory) {
 
 		now := fixedTime.Add(time.Minute)
 		obs := json.RawMessage(`{"cpu":4}`)
-		if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-			ExtensionResourceUID: r.UID(),
-			Labels:               map[string]string{"zone": "us-east-1"},
-			Observation:          &obs,
-			Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
-			ObservedAt:           now,
-			ReceivedAt:           now,
+		if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+			Labels:      map[string]string{"zone": "us-east-1"},
+			Observation: &obs,
+			Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
+			ObservedAt:  now,
+			ReceivedAt:  now,
 		}}); err != nil {
 			t.Fatalf("ReplaceInventory: %v", err)
 		}
@@ -854,13 +854,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Labels:               map[string]string{"zone": "us-east-1"},
-				Observation:          &obs,
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:      map[string]string{"zone": "us-east-1"},
+				Observation: &obs,
+				Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", now)},
+				ObservedAt:  now,
+				ReceivedAt:  now,
 			}})
 			if err != nil {
 				t.Fatalf("ReplaceInventory: %v", err)
@@ -914,22 +914,22 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"cpu":2}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs1,
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs1,
+				ObservedAt:  now,
+				ReceivedAt:  now,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
 			later := now.Add(time.Minute)
 			obs2 := json.RawMessage(`{"cpu":8}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs2,
-				ObservedAt:           later,
-				ReceivedAt:           later,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs2,
+				ObservedAt:  later,
+				ReceivedAt:  later,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
@@ -963,9 +963,9 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"n":1}`)
 			obs2 := json.RawMessage(`{"n":2}`)
-			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{ExtensionResourceUID: r1.UID(), Observation: &obs1, ObservedAt: now, ReceivedAt: now},
-				{ExtensionResourceUID: r2.UID(), Observation: &obs2, ObservedAt: now, ReceivedAt: now},
+			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{ResourceType: r1.ResourceType(), Name: r1.Name(), CandidateUID: domain.NewExtensionResourceUID(), Observation: &obs1, ObservedAt: now, ReceivedAt: now},
+				{ResourceType: r2.ResourceType(), Name: r2.Name(), CandidateUID: domain.NewExtensionResourceUID(), Observation: &obs2, ObservedAt: now, ReceivedAt: now},
 			})
 			if err != nil {
 				t.Fatalf("ReplaceInventory batch: %v", err)
@@ -1004,19 +1004,19 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt: t1,
+				ReceivedAt: t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t2)},
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t2)},
+				ObservedAt: t2,
+				ReceivedAt: t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
@@ -1045,19 +1045,19 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt: t1,
+				ReceivedAt: t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				ObservedAt: t2,
+				ReceivedAt: t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
@@ -1101,11 +1101,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
-				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ExtensionResourceUID: r.UID(),
-					Conditions:           []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt:           ts,
-					ReceivedAt:           ts,
+				if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+					Conditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt: ts,
+					ReceivedAt: ts,
 				}}); err != nil {
 					t.Fatalf("%s ReplaceInventory: %v", step, err)
 				}
@@ -1143,8 +1143,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{
 					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
 					mustCondition(t, "Provisioned", domain.ConditionTrue, "Done", "done", t1),
@@ -1156,11 +1156,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt: t2,
+				ReceivedAt: t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
@@ -1190,21 +1190,21 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          nil,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: nil,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory (nil observation): %v", err)
 			}
@@ -1240,11 +1240,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
@@ -1253,11 +1253,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// identically to a nil pointer: untouched, no history.
 			nullLiteral := json.RawMessage(`null`)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &nullLiteral,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &nullLiteral,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory (null literal observation): %v", err)
 			}
@@ -1292,11 +1292,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
@@ -1305,11 +1305,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// second history row.
 			t2 := fixedTime.Add(2 * time.Minute)
 			sameObs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &sameObs,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &sameObs,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("second ReplaceInventory (same observation): %v", err)
 			}
@@ -1325,11 +1325,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// A genuinely different value appends a second row.
 			t3 := fixedTime.Add(3 * time.Minute)
 			diffObs := json.RawMessage(`{"cpu":8}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &diffObs,
-				ObservedAt:           t3,
-				ReceivedAt:           t3,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &diffObs,
+				ObservedAt:  t3,
+				ReceivedAt:  t3,
 			}}); err != nil {
 				t.Fatalf("third ReplaceInventory (different observation): %v", err)
 			}
@@ -1344,19 +1344,26 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "hist[0].Observation", string(hist[0].Observation()), `{"cpu":8}`)
 		})
 
-		t.Run("RejectsUnknownUID", func(t *testing.T) {
+		t.Run("RejectsUnregisteredResourceType", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
+			// No CreateType call for this type: ReplaceInventory
+			// resolves-or-creates the extension_resources row itself
+			// (there's no "unknown UID" to reject anymore), but that
+			// insert's FK to extension_resource_types still rejects a
+			// resource type that was never registered.
 			now := fixedTime.Add(time.Minute)
-			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: domain.NewExtensionResourceUID(),
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Unregistered",
+				Name:         "nodes/unregistered",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt:   now,
+				ReceivedAt:   now,
 			}})
 			if err == nil {
-				t.Fatal("expected error for unknown extension resource UID, got nil")
+				t.Fatal("expected error for unregistered resource type, got nil")
 			}
 		})
 
@@ -1376,12 +1383,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			observedAt := fixedTime.Add(time.Minute)
 			receivedAt := wallClockDistantPast
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				Conditions:           []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
-				ObservedAt:           observedAt,
-				ReceivedAt:           receivedAt,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
+				ObservedAt:  observedAt,
+				ReceivedAt:  receivedAt,
 			}}); err != nil {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
@@ -1433,22 +1440,22 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Labels:               map[string]string{"zone": "us-east-1", "tier": "1"},
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:     map[string]string{"zone": "us-east-1", "tier": "1"},
+				ObservedAt: t1,
+				ReceivedAt: t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				SetLabels:            map[string]string{"zone": "us-west-2"},
-				DeleteLabels:         []string{"tier"},
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				SetLabels:    map[string]string{"zone": "us-west-2"},
+				DeleteLabels: []string{"tier"},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1479,22 +1486,22 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				SetLabels:            map[string]string{"zone": "us-east-1"},
-				Observation:          nil,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				SetLabels:   map[string]string{"zone": "us-east-1"},
+				Observation: nil,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1529,22 +1536,22 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs1,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs1,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
 			obs2 := json.RawMessage(`{"cpu":8}`)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs2,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs2,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1580,11 +1587,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
@@ -1593,11 +1600,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// identically to a nil pointer: untouched, no history.
 			nullLiteral := json.RawMessage(`null`)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &nullLiteral,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &nullLiteral,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1632,11 +1639,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
@@ -1645,11 +1652,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// second history row.
 			t2 := fixedTime.Add(2 * time.Minute)
 			sameObs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &sameObs,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &sameObs,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas (same observation): %v", err)
 			}
@@ -1677,8 +1684,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{
 					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
 					mustCondition(t, "Provisioned", domain.ConditionTrue, "Done", "done", t1),
@@ -1691,12 +1698,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
-				DeleteConditions:     []domain.ConditionType{"Provisioned"},
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				DeleteConditions: []domain.ConditionType{"Provisioned"},
+				ObservedAt:       t2,
+				ReceivedAt:       t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1741,20 +1748,20 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Labels:               map[string]string{"zone": "us-east-1"},
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:     map[string]string{"zone": "us-east-1"},
+				ObservedAt: t1,
+				ReceivedAt: t1,
 			}}); err != nil {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt: t2,
+				ReceivedAt: t2,
 			}}); err != nil {
 				t.Fatalf("heartbeat ApplyInventoryDeltas: %v", err)
 			}
@@ -1772,19 +1779,23 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
-		t.Run("RejectsUnknownUID", func(t *testing.T) {
+		t.Run("RejectsUnregisteredResourceType", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
 
+			// See the Replace-side RejectsUnregisteredResourceType for
+			// why this is the delta-side equivalent of "unknown UID".
 			now := fixedTime.Add(time.Minute)
-			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: domain.NewExtensionResourceUID(),
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Unregistered",
+				Name:         "nodes/delta-unregistered",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt:   now,
+				ReceivedAt:   now,
 			}})
 			if err == nil {
-				t.Fatal("expected error for unknown extension resource UID, got nil")
+				t.Fatal("expected error for unregistered resource type, got nil")
 			}
 		})
 
@@ -1804,12 +1815,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			observedAt := fixedTime.Add(time.Minute)
 			receivedAt := wallClockDistantPast
 			obs := json.RawMessage(`{"cpu":4}`)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
-				ObservedAt:           observedAt,
-				ReceivedAt:           receivedAt,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation:      &obs,
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
+				ObservedAt:       observedAt,
+				ReceivedAt:       receivedAt,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -1862,11 +1873,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"ready":true}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  now,
+				ReceivedAt:  now,
 			}}); err != nil {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
@@ -1952,11 +1963,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"version":"2.0"}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs,
-				ObservedAt:           now,
-				ReceivedAt:           now,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs,
+				ObservedAt:  now,
+				ReceivedAt:  now,
 			}}); err != nil {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
@@ -2024,20 +2035,20 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
 			obs1 := json.RawMessage(`{"v":1}`)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs1,
-				ObservedAt:           t1,
-				ReceivedAt:           t1,
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs1,
+				ObservedAt:  t1,
+				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 			obs2 := json.RawMessage(`{"v":2}`)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ExtensionResourceUID: r.UID(),
-				Observation:          &obs2,
-				ObservedAt:           t2,
-				ReceivedAt:           t2,
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation: &obs2,
+				ObservedAt:  t2,
+				ReceivedAt:  t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
@@ -2074,8 +2085,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ExtensionResourceUID: r.UID(),
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{
 					mustCondition(t, "Ready", domain.ConditionTrue, "ok", "", t1),
 					mustCondition(t, "Provisioned", domain.ConditionTrue, "done", "", t1),
@@ -2118,18 +2129,18 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// first delta to every row would be caught.
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
 				{
-					ExtensionResourceUID: r1.UID(),
-					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1)},
-					ObservedAt:           t1,
-					ReceivedAt:           t1,
+					ResourceType: r1.ResourceType(), Name: r1.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1)},
+					ObservedAt:       t1,
+					ReceivedAt:       t1,
 				},
 				{
-					ExtensionResourceUID: r2.UID(),
-					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2)},
-					ObservedAt:           t2,
-					ReceivedAt:           t2,
+					ResourceType: r2.ResourceType(), Name: r2.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "disk pressure", t2)},
+					ObservedAt:       t2,
+					ReceivedAt:       t2,
 				},
 			}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
@@ -2224,11 +2235,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
-				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ExtensionResourceUID: r.UID(),
-					Conditions:           []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt:           ts,
-					ReceivedAt:           ts,
+				if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+					Conditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt: ts,
+					ReceivedAt: ts,
 				}}); err != nil {
 					t.Fatalf("%s ReplaceInventory: %v", step, err)
 				}
@@ -2236,11 +2247,11 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			deltaWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
 				t.Helper()
-				if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-					ExtensionResourceUID: r.UID(),
-					UpsertConditions:     []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt:           ts,
-					ReceivedAt:           ts,
+				if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertConditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
+					ObservedAt:       ts,
+					ReceivedAt:       ts,
 				}}); err != nil {
 					t.Fatalf("%s ApplyInventoryDeltas: %v", step, err)
 				}
@@ -2299,6 +2310,492 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionTrue)
 			assertEqual(t, "latest Reason", view.Resource.Inventory().Conditions()[0].Reason(), "Recovered")
+		})
+	})
+
+	// NaturalKeyResolution exercises ReplaceInventory/ApplyInventoryDeltas'
+	// own resolve-or-create of the extension_resources row by natural
+	// key (ResourceType, Name) -- the behavior that replaced the old
+	// UpsertBatch/ClaimOrGetIdentity round trip the application layer
+	// used to need before writing inventory at all.
+	t.Run("NaturalKeyResolution", func(t *testing.T) {
+		t.Run("CreatesRowLazilyWhenNoneExists", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			// No repo.Create call at all: the extension_resources row
+			// does not exist yet, so ReplaceInventory must create it
+			// using the supplied CandidateUID.
+			candidateUID := domain.NewExtensionResourceUID()
+			now := fixedTime.Add(time.Minute)
+			obs := json.RawMessage(`{"cpu":4}`)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/lazy-create",
+				CandidateUID: candidateUID,
+				Observation:  &obs,
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+
+			got, err := repo.GetByUID(ctx, candidateUID)
+			if err != nil {
+				t.Fatalf("GetByUID(candidateUID): %v", err)
+			}
+			assertEqual(t, "Name", got.Name(), domain.ResourceName("nodes/lazy-create"))
+			if got.Inventory() == nil {
+				t.Fatal("Inventory is nil after lazy create")
+			}
+			assertObservation(t, "Observation", got.Inventory().Observation(), `{"cpu":4}`)
+		})
+
+		t.Run("PreservesExistingRowIgnoringCandidateUID", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/already-exists")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			// A different CandidateUID for the same natural key must be
+			// discarded in favor of the row that already exists.
+			staleCandidateUID := domain.NewExtensionResourceUID()
+			now := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(),
+				Name:         r.Name(),
+				CandidateUID: staleCandidateUID,
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+
+			got, err := repo.Get(ctx, r.ResourceType().FullName(r.Name()))
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if got.UID() != r.UID() {
+				t.Errorf("UID = %s, want original UID %s (unchanged)", got.UID(), r.UID())
+			}
+			if got.UID() == staleCandidateUID {
+				t.Error("UID must not become the discarded CandidateUID")
+			}
+			if _, err := repo.GetByUID(ctx, staleCandidateUID); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("GetByUID(staleCandidateUID): got %v, want ErrNotFound (never created)", err)
+			}
+		})
+
+		t.Run("BatchMixesNewAndExistingRows", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			existing := newInventoryER("inv.fleetshift.io/Node", "nodes/mix-existing")
+			if err := repo.Create(ctx, existing); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			newCandidateUID := domain.NewExtensionResourceUID()
+			now := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{
+					ResourceType: existing.ResourceType(),
+					Name:         existing.Name(),
+					CandidateUID: domain.NewExtensionResourceUID(),
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+				{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/mix-new",
+					CandidateUID: newCandidateUID,
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+			}); err != nil {
+				t.Fatalf("ReplaceInventory batch: %v", err)
+			}
+
+			gotExisting, err := repo.GetByUID(ctx, existing.UID())
+			if err != nil {
+				t.Fatalf("GetByUID(existing): %v", err)
+			}
+			assertEqual(t, "existing.Name", gotExisting.Name(), domain.ResourceName("nodes/mix-existing"))
+
+			gotNew, err := repo.GetByUID(ctx, newCandidateUID)
+			if err != nil {
+				t.Fatalf("GetByUID(new): %v", err)
+			}
+			assertEqual(t, "new.Name", gotNew.Name(), domain.ResourceName("nodes/mix-new"))
+		})
+	})
+
+	// Aliases exercises the alias fold-in shared by ReplaceInventory
+	// and ApplyInventoryDeltas: aliases supplied alongside a report are
+	// upserted in the same statement as the inventory write, and any
+	// [domain.AliasConflict] is reported back rather than raising a
+	// hard SQL error or silently overwriting the conflicting state.
+	t.Run("Aliases", func(t *testing.T) {
+		t.Run("ReplaceInventoryFoldsAliasesIntoResourceAliases", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-replace-1")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-replace",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-replace"))
+		})
+
+		t.Run("ApplyInventoryDeltasFoldsAliasesIntoResourceAliases", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-1")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-delta",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}})
+			if err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-delta"))
+		})
+
+		t.Run("ReportsConflictWhenValueClaimedByAnotherResourceAcrossCalls", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-contested")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-owner-a",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory (A): %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-owner-b",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory (B): %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
+			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-owner-b"))
+			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-owner-a"))
+
+			// The alias must still resolve to its real owner (A) --
+			// B's conflicting claim must never overwrite it.
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-owner-a"))
+		})
+
+		t.Run("ReportsConflictWhenResourceHasDifferentValueForSameKeyAcrossCalls", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-value-flip")
+			firstValue, _ := domain.NewAlias("gcp", "instance_id", "alias-value-v1")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{firstValue},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			secondValue, _ := domain.NewAlias("gcp", "instance_id", "alias-value-v2")
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{secondValue},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory (second value): %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictResourceHasDifferentValue)
+			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
+			assertEqual(t, "conflict.ActualValue", conflicts[0].ActualValue, firstValue.Value)
+
+			// The resource's alias must still carry its original value.
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, firstValue)
+			if err != nil {
+				t.Fatalf("ResolveAlias(firstValue): %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, name)
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, secondValue); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias(secondValue): got %v, want ErrNotFound (never inserted)", err)
+			}
+		})
+
+		t.Run("ReportsIntraBatchContradictionWithoutSQLError", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			// Two reports in the *same* call claim the same alias value
+			// for two different resources -- a contradiction that only
+			// exists within this batch, with no pre-existing row on
+			// either side for a unique index to catch.
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-intra-batch")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/alias-intra-a",
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{alias},
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+				{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/alias-intra-b",
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{alias},
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+			})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
+
+			// Exactly one of the two resources won the alias; the other
+			// must not have gotten it either (no silent partial write).
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			if resolved != conflicts[0].ActualName {
+				t.Errorf("resolved name = %q, want the winning resource %q", resolved, conflicts[0].ActualName)
+			}
+		})
+
+		// ReportsNoConflictWhenSameResourceRepeatsSameAliasAcrossCalls
+		// covers the overwhelmingly common steady-state case: a
+		// resource re-reporting an alias it already owns, unchanged,
+		// on every poll. This must never surface as a conflict --
+		// only a genuine contradiction against a *different* target
+		// or value should.
+		t.Run("ReportsNoConflictWhenSameResourceRepeatsSameAliasAcrossCalls", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-steady-state")
+			name := domain.ResourceName("nodes/alias-steady-state")
+			for i, at := range []time.Time{fixedTime.Add(time.Minute), fixedTime.Add(2 * time.Minute), fixedTime.Add(3 * time.Minute)} {
+				conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         name,
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{alias},
+					ObservedAt:   at,
+					ReceivedAt:   at,
+				}})
+				if err != nil {
+					t.Fatalf("ReplaceInventory (poll %d): %v", i, err)
+				}
+				if len(conflicts) != 0 {
+					t.Fatalf("ReplaceInventory (poll %d): conflicts = %+v, want none", i, conflicts)
+				}
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, name)
+		})
+
+		// ReportsConflictsOnlyForActualConflictsInMixedBatch exercises
+		// a single chunk carrying, at once: an idempotent repeat of an
+		// alias its own resource already owns (must succeed silently),
+		// a brand-new alias for an unrelated resource (must succeed),
+		// and a genuine value-claimed-by-another conflict (must be
+		// reported) -- proving the safe and conflicting candidates
+		// within one round trip don't interfere with each other.
+		t.Run("ReportsConflictsOnlyForActualConflictsInMixedBatch", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			ownedAlias, _ := domain.NewAlias("gcp", "instance_id", "alias-mixed-owned")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-mixed-owner",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{ownedAlias},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			newAlias, _ := domain.NewAlias("gcp", "instance_id", "alias-mixed-new")
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{
+					// Idempotent repeat of an alias this exact resource already owns.
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/alias-mixed-owner",
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{ownedAlias},
+					ObservedAt:   t2,
+					ReceivedAt:   t2,
+				},
+				{
+					// Brand-new alias for an unrelated resource.
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/alias-mixed-fresh",
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{newAlias},
+					ObservedAt:   t2,
+					ReceivedAt:   t2,
+				},
+				{
+					// Genuine conflict: claims an alias value already owned by another resource.
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         "nodes/alias-mixed-challenger",
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{ownedAlias},
+					ObservedAt:   t2,
+					ReceivedAt:   t2,
+				},
+			})
+			if err != nil {
+				t.Fatalf("ReplaceInventory (mixed batch): %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
+			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-mixed-challenger"))
+			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-mixed-owner"))
+
+			resolvedOwned, err := tx.ResourceIdentities().ResolveAlias(ctx, ownedAlias)
+			if err != nil {
+				t.Fatalf("ResolveAlias(ownedAlias): %v", err)
+			}
+			assertEqual(t, "resolved owned alias", resolvedOwned, domain.ResourceName("nodes/alias-mixed-owner"))
+
+			resolvedNew, err := tx.ResourceIdentities().ResolveAlias(ctx, newAlias)
+			if err != nil {
+				t.Fatalf("ResolveAlias(newAlias): %v", err)
+			}
+			assertEqual(t, "resolved new alias", resolvedNew, domain.ResourceName("nodes/alias-mixed-fresh"))
 		})
 	})
 }

@@ -3,7 +3,6 @@ package application
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -12,10 +11,14 @@ import (
 
 // InventoryReportService is the application-layer entry point for
 // inventory reporting. It resolves reporter-supplied identity (name
-// and/or aliases) into a [domain.PlatformResource] and
-// [domain.ExtensionResource], creating either if needed, and then
-// issues UID-addressed repository commands. Reporters never need to
-// know an [domain.ExtensionResourceUID].
+// and/or aliases) into a [domain.ResourceName], creating the
+// underlying [domain.ExtensionResource] as needed, and issues
+// natural-key-addressed repository commands. Reporters never need to
+// know a [domain.ExtensionResourceUID], and no platform-resource
+// identity is ever resolved or minted at this layer at all: a
+// platform resource has no UID (see [domain.NewPlatformResource]'s
+// doc), so its identity is exactly its [domain.ResourceName] -- a
+// struct literal, not a lookup.
 //
 // The two methods correspond to the two batched reporting modes
 // described in scratch/inventory_phase4b_report_contract_rework_plan.md:
@@ -24,9 +27,23 @@ import (
 // [InventoryReportService.ApplyDeltaBatch] applies incremental,
 // field-level changes.
 type InventoryReportService struct {
-	store domain.Store
-	now   func() time.Time
+	store     domain.Store
+	now       func() time.Time
+	chunkSize int
 }
+
+// defaultReportChunkSize caps the number of reports resolved and
+// written together in a single round of SQL calls. Even a
+// pathologically large call is split into chunks of this size, which
+// keeps every chunk's multi-row statements safely under Postgres's
+// hard per-statement parameter limit (65535) and bounds the cost of
+// any one round trip -- see the nameless-platform-identity plan's
+// "cost model" section for the round-trip analysis this is based on.
+// Chunking only bounds per-statement size: it does not change
+// all-or-nothing batch semantics or split the transaction -- every
+// chunk runs inside the same transaction and commits together (see
+// [reportResolver], which tracks duplicates across chunk boundaries).
+const defaultReportChunkSize = 1000
 
 // InventoryReportServiceOption configures an [InventoryReportService].
 type InventoryReportServiceOption func(*InventoryReportService)
@@ -42,11 +59,24 @@ func WithInventoryReportClock(fn func() time.Time) InventoryReportServiceOption 
 	}
 }
 
+// WithInventoryReportChunkSize overrides [defaultReportChunkSize].
+// Primarily useful for tests that want to exercise chunk-boundary
+// behavior without constructing an enormous batch. n <= 0 is treated
+// as a no-op.
+func WithInventoryReportChunkSize(n int) InventoryReportServiceOption {
+	return func(s *InventoryReportService) {
+		if n > 0 {
+			s.chunkSize = n
+		}
+	}
+}
+
 // NewInventoryReportService creates a service with the given store and options.
 func NewInventoryReportService(store domain.Store, opts ...InventoryReportServiceOption) *InventoryReportService {
 	s := &InventoryReportService{
-		store: store,
-		now:   time.Now,
+		store:     store,
+		now:       time.Now,
+		chunkSize: defaultReportChunkSize,
 	}
 	for _, o := range opts {
 		o(s)
@@ -120,13 +150,16 @@ type InventoryDeltaInput struct {
 	ObservedAt time.Time
 }
 
-// ReplaceBatch resolves identity for every report, creating platform
-// and extension resources as needed, then replaces each resolved
-// resource's latest inventory state in a single transaction. The
+// ReplaceBatch resolves identity for every report -- in pure Go for a
+// by-Name report, or via one batched alias lookup for an alias-only
+// report -- then replaces each resolved resource's latest inventory
+// state, folding any supplied aliases into the same statement. The
 // batch is all-or-nothing: a duplicate resolved
-// [domain.ExtensionResourceUID] within the batch, a contradictory
-// alias, or a type without inventory metadata fails the whole call
-// before any inventory write.
+// [domain.ResourceName] within the batch, a contradictory alias, a
+// type without inventory metadata, or an [domain.AliasConflict]
+// returned by the write fails the whole call before any inventory
+// write commits, regardless of how many chunks (see
+// [defaultReportChunkSize]) the batch is split across internally.
 func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryReplacementBatchInput) error {
 	if len(in.Reports) == 0 {
 		return nil
@@ -140,46 +173,62 @@ func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryR
 
 	now := s.now()
 	res := newReportResolver(tx)
-	replacements := make([]domain.InventoryReplacement, 0, len(in.Reports))
 
-	for _, report := range in.Reports {
-		uid, err := res.resolve(ctx, reportIdentity{
-			ResourceType: report.ResourceType,
-			Name:         report.Name,
-			Aliases:      report.Aliases,
-		}, now)
+	err = forEachReportChunk(len(in.Reports), s.chunkSize, func(start, end int) error {
+		chunk := in.Reports[start:end]
+		identities := make([]reportIdentity, len(chunk))
+		for i, report := range chunk {
+			identities[i] = reportIdentity{
+				ResourceType: report.ResourceType,
+				Name:         report.Name,
+				Aliases:      report.Aliases,
+			}
+		}
+		targets, err := res.resolveBatch(ctx, identities, start)
 		if err != nil {
 			return err
 		}
 
-		replacements = append(replacements, domain.InventoryReplacement{
-			ExtensionResourceUID: uid,
-			Labels:               report.Labels,
-			Observation:          report.Observation,
-			Conditions:           report.Conditions,
-			ObservedAt:           report.ObservedAt,
-			ReceivedAt:           now,
-		})
-	}
-
-	if err := tx.ExtensionResources().ReplaceInventory(ctx, replacements); err != nil {
-		return fmt.Errorf("replace inventory: %w", err)
-	}
-
-	if err := res.persistTouchedIdentities(ctx); err != nil {
+		replacements := make([]domain.InventoryReplacement, len(chunk))
+		for i, report := range chunk {
+			replacements[i] = domain.InventoryReplacement{
+				ResourceType: report.ResourceType,
+				Name:         targets[i],
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      report.Aliases,
+				Labels:       report.Labels,
+				Observation:  report.Observation,
+				Conditions:   report.Conditions,
+				ObservedAt:   report.ObservedAt,
+				ReceivedAt:   now,
+			}
+		}
+		conflicts, err := tx.ExtensionResources().ReplaceInventory(ctx, replacements)
+		if err != nil {
+			return fmt.Errorf("replace inventory: %w", err)
+		}
+		if err := rejectAliasConflicts(conflicts); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
 }
 
-// ApplyDeltaBatch resolves identity for every report, creating
-// platform and extension resources as needed, then applies each
-// resolved resource's incremental inventory changes in a single
-// transaction. The batch is all-or-nothing: a duplicate resolved
-// [domain.ExtensionResourceUID] within the batch, a contradictory
-// alias, an internally conflicting report, or a type without
-// inventory metadata fails the whole call before any inventory write.
+// ApplyDeltaBatch resolves identity for every report the same way
+// [InventoryReportService.ReplaceBatch] does, then applies each
+// resolved resource's incremental inventory changes, folding any
+// supplied aliases into the same statement. The batch is
+// all-or-nothing: a duplicate resolved [domain.ResourceName] within
+// the batch, a contradictory alias, an internally conflicting report,
+// a type without inventory metadata, or an [domain.AliasConflict]
+// returned by the write fails the whole call before any inventory
+// write commits, regardless of how many chunks (see
+// [defaultReportChunkSize]) the batch is split across internally.
 func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in InventoryDeltaBatchInput) error {
 	if len(in.Reports) == 0 {
 		return nil
@@ -199,39 +248,65 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 
 	now := s.now()
 	res := newReportResolver(tx)
-	deltas := make([]domain.InventoryDelta, 0, len(in.Reports))
 
-	for _, report := range in.Reports {
-		uid, err := res.resolve(ctx, reportIdentity{
-			ResourceType: report.ResourceType,
-			Name:         report.Name,
-			Aliases:      report.Aliases,
-		}, now)
+	err = forEachReportChunk(len(in.Reports), s.chunkSize, func(start, end int) error {
+		chunk := in.Reports[start:end]
+		identities := make([]reportIdentity, len(chunk))
+		for i, report := range chunk {
+			identities[i] = reportIdentity{
+				ResourceType: report.ResourceType,
+				Name:         report.Name,
+				Aliases:      report.Aliases,
+			}
+		}
+		targets, err := res.resolveBatch(ctx, identities, start)
 		if err != nil {
 			return err
 		}
 
-		deltas = append(deltas, domain.InventoryDelta{
-			ExtensionResourceUID: uid,
-			SetLabels:            report.SetLabels,
-			DeleteLabels:         report.DeleteLabels,
-			Observation:          report.Observation,
-			UpsertConditions:     report.UpsertConditions,
-			DeleteConditions:     report.DeleteConditions,
-			ObservedAt:           report.ObservedAt,
-			ReceivedAt:           now,
-		})
-	}
-
-	if err := tx.ExtensionResources().ApplyInventoryDeltas(ctx, deltas); err != nil {
-		return fmt.Errorf("apply inventory deltas: %w", err)
-	}
-
-	if err := res.persistTouchedIdentities(ctx); err != nil {
+		deltas := make([]domain.InventoryDelta, len(chunk))
+		for i, report := range chunk {
+			deltas[i] = domain.InventoryDelta{
+				ResourceType:     report.ResourceType,
+				Name:             targets[i],
+				CandidateUID:     domain.NewExtensionResourceUID(),
+				Aliases:          report.Aliases,
+				SetLabels:        report.SetLabels,
+				DeleteLabels:     report.DeleteLabels,
+				Observation:      report.Observation,
+				UpsertConditions: report.UpsertConditions,
+				DeleteConditions: report.DeleteConditions,
+				ObservedAt:       report.ObservedAt,
+				ReceivedAt:       now,
+			}
+		}
+		conflicts, err := tx.ExtensionResources().ApplyInventoryDeltas(ctx, deltas)
+		if err != nil {
+			return fmt.Errorf("apply inventory deltas: %w", err)
+		}
+		if err := rejectAliasConflicts(conflicts); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
 		return err
 	}
 
 	return tx.Commit()
+}
+
+// rejectAliasConflicts turns a non-empty []domain.AliasConflict from
+// ReplaceInventory/ApplyInventoryDeltas into an error, which the
+// caller's deferred tx.Rollback() then applies to the whole batch --
+// an alias conflict is rejected exactly like an inventory-level error
+// would be, not partially applied.
+func rejectAliasConflicts(conflicts []domain.AliasConflict) error {
+	if len(conflicts) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %d alias(es) conflict with existing or concurrently reported identity: %+v",
+		domain.ErrInvalidArgument, len(conflicts), conflicts)
 }
 
 // validateDeltaReport catches internally conflicting delta fields
@@ -255,6 +330,27 @@ func validateDeltaReport(report InventoryDeltaInput) error {
 	return nil
 }
 
+// forEachReportChunk calls fn once per contiguous chunk of at most
+// size report indices spanning [0, n), passing each chunk's [start,
+// end) bounds. size <= 0 or size >= n runs fn exactly once, covering
+// the whole range in a single "chunk." A caller stops iterating and
+// propagates the first error fn returns.
+func forEachReportChunk(n, size int, fn func(start, end int) error) error {
+	if size <= 0 || size > n {
+		size = n
+	}
+	for start := 0; start < n; start += size {
+		end := start + size
+		if end > n {
+			end = n
+		}
+		if err := fn(start, end); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // reportIdentity is the identity-resolution-relevant subset shared by
 // [InventoryReplacementInput] and [InventoryDeltaInput].
 type reportIdentity struct {
@@ -263,73 +359,96 @@ type reportIdentity struct {
 	Aliases      []domain.Alias
 }
 
-// reportResolver implements the shared identity/type/representation
-// resolution path used by both [InventoryReportService.ReplaceBatch]
-// and [InventoryReportService.ApplyDeltaBatch]. It caches looked-up
-// types, tracks every platform resource touched so callers persist
-// each exactly once, and rejects a resolved
-// [domain.ExtensionResourceUID] that repeats within the same batch.
+// reportResolver implements the shared identity/type resolution path
+// used by both [InventoryReportService.ReplaceBatch] and
+// [InventoryReportService.ApplyDeltaBatch]. Resolving an entire batch
+// costs one type lookup per distinct [domain.ResourceType] (cached),
+// plus at most one [domain.ResourceIdentityRepository.ResolveAliasesBatch]
+// round trip covering every by-Alias-only report in the chunk --
+// skipped entirely when the chunk has none. A by-Name report's target
+// is its own [domain.ResourceName]: no lookup, no mutation, no SQL at
+// all, since a platform resource has no UID to mint or claim (see
+// [domain.NewPlatformResource]'s doc) and its representations/aliases
+// are derived/additive rather than reconciled. Aliases themselves are
+// never upserted here -- every report's Aliases travel with it into
+// [domain.InventoryReplacement]/[domain.InventoryDelta], and the
+// repository folds their upsert into the same statement that writes
+// inventory (see extension_resource_repo.go's alias fold-in).
+//
+// A single resolver instance is reused across every chunk (see
+// [defaultReportChunkSize]) of one [InventoryReportService.ReplaceBatch]/
+// [InventoryReportService.ApplyDeltaBatch] call, both to keep the type
+// cache warm and so duplicate-report detection (seenNames) spans the
+// whole call, not just one chunk.
 type reportResolver struct {
 	tx domain.Tx
 
 	typeCache map[domain.ResourceType]domain.ExtensionResourceType
-	touched   map[domain.PlatformResourceUID]*domain.PlatformResource
-	resolved  map[domain.ExtensionResourceUID]struct{}
+	seenNames map[domain.FullResourceName]int
 }
 
 func newReportResolver(tx domain.Tx) *reportResolver {
 	return &reportResolver{
 		tx:        tx,
 		typeCache: make(map[domain.ResourceType]domain.ExtensionResourceType),
-		touched:   make(map[domain.PlatformResourceUID]*domain.PlatformResource),
-		resolved:  make(map[domain.ExtensionResourceUID]struct{}),
+		seenNames: make(map[domain.FullResourceName]int),
 	}
 }
 
-// resolve resolves in to an [domain.ExtensionResourceUID], claiming or
-// loading the platform resource, getting or creating the extension
-// resource, and attaching the representation and any supplied
-// aliases. None of this is persisted until the caller commits the
+// resolveBatch resolves every report in items to its target
+// [domain.ResourceName], in the same order. baseIndex is items[0]'s
+// position within the overall call (0 unless the caller is
+// chunking), used only to produce accurate cross-chunk
+// duplicate-report error messages. It's all-or-nothing: any
+// resolution failure (a type without inventory metadata, a missing
+// Name/Aliases, an unresolvable or contradictory alias, or a
+// duplicate resolved target anywhere in the call, even in an earlier
+// chunk) returns an error before any inventory write for items is
+// attempted. None of this is persisted until the caller commits the
 // transaction.
-func (r *reportResolver) resolve(ctx context.Context, in reportIdentity, now time.Time) (domain.ExtensionResourceUID, error) {
-	typeDef, err := r.lookupInventoryType(ctx, in.ResourceType)
-	if err != nil {
-		return domain.ExtensionResourceUID{}, err
+func (r *reportResolver) resolveBatch(ctx context.Context, items []reportIdentity, baseIndex int) ([]domain.ResourceName, error) {
+	if len(items) == 0 {
+		return nil, nil
 	}
 
-	pr, err := r.resolveIdentity(ctx, in, now)
-	if err != nil {
-		return domain.ExtensionResourceUID{}, err
-	}
-
-	fullName := in.ResourceType.FullName(pr.Name())
-	er, err := r.tx.ExtensionResources().Get(ctx, fullName)
-	switch {
-	case errors.Is(err, domain.ErrNotFound):
-		er = domain.NewExtensionResource(domain.NewExtensionResourceUID(), in.ResourceType, pr.Name(), now)
-		if err := r.tx.ExtensionResources().Create(ctx, er); err != nil {
-			return domain.ExtensionResourceUID{}, fmt.Errorf("create extension resource %s: %w", fullName, err)
+	for _, in := range items {
+		if _, err := r.lookupInventoryType(ctx, in.ResourceType); err != nil {
+			return nil, err
 		}
-	case err != nil:
-		return domain.ExtensionResourceUID{}, fmt.Errorf("get extension resource %s: %w", fullName, err)
+		if in.Name == nil && len(in.Aliases) == 0 {
+			return nil, fmt.Errorf("%w: report must set Name or Aliases", domain.ErrInvalidArgument)
+		}
 	}
 
-	if _, dup := r.resolved[er.UID()]; dup {
-		return domain.ExtensionResourceUID{}, fmt.Errorf(
-			"%w: extension resource %s reported more than once in this batch", domain.ErrInvalidArgument, er.UID())
+	var aliasQuery []domain.Alias
+	for _, in := range items {
+		if in.Name == nil {
+			aliasQuery = append(aliasQuery, in.Aliases...)
+		}
 	}
-	r.resolved[er.UID()] = struct{}{}
-
-	if err := pr.AttachRepresentation(domain.AttachRepresentationInput{
-		ServiceName:          typeDef.APIServiceName(),
-		Version:              typeDef.APIVersion(),
-		ExtensionResourceUID: er.UID(),
-	}, now); err != nil {
-		return domain.ExtensionResourceUID{}, fmt.Errorf("attach representation: %w", err)
+	aliasResolved, err := r.tx.ResourceIdentities().ResolveAliasesBatch(ctx, aliasQuery)
+	if err != nil {
+		return nil, fmt.Errorf("resolve aliases batch: %w", err)
 	}
-	r.touched[pr.UID()] = pr
 
-	return er.UID(), nil
+	targets := make([]domain.ResourceName, len(items))
+	for i, in := range items {
+		if in.Name != nil {
+			targets[i] = *in.Name
+			continue
+		}
+		target, err := resolveByAliases(in.Aliases, aliasResolved)
+		if err != nil {
+			return nil, err
+		}
+		targets[i] = target
+	}
+
+	if err := r.rejectDuplicateReports(items, targets, baseIndex); err != nil {
+		return nil, err
+	}
+
+	return targets, nil
 }
 
 // lookupInventoryType resolves and caches an [domain.ExtensionResourceType],
@@ -350,85 +469,48 @@ func (r *reportResolver) lookupInventoryType(ctx context.Context, rt domain.Reso
 	return typeDef, nil
 }
 
-// resolveIdentity claims or loads the platform resource named or
-// aliased by in, then attaches any additional supplied aliases via
-// [domain.PlatformResource.AddAlias] before any persistence so a
-// contradicting alias fails the whole call before writes. A
-// newly-claimed platform resource is seeded with no labels: reporter-
-// observed labels belong on the [domain.InventoryResource] (handled
-// separately via ReplaceInventory/ApplyInventoryDeltas), not on the
-// platform-level identity, which has its own separate user-managed
-// label concept.
-func (r *reportResolver) resolveIdentity(ctx context.Context, in reportIdentity, now time.Time) (*domain.PlatformResource, error) {
-	repo := r.tx.ResourceIdentities()
-
-	var pr *domain.PlatformResource
-	switch {
-	case in.Name != nil:
-		var err error
-		pr, err = domain.ClaimOrGetIdentity(ctx, repo, *in.Name, nil, now)
-		if err != nil {
-			return nil, fmt.Errorf("claim identity %s: %w", *in.Name, err)
-		}
-	case len(in.Aliases) > 0:
-		var err error
-		pr, err = r.resolveByAliases(ctx, in.Aliases)
-		if err != nil {
-			return nil, err
-		}
-	default:
-		return nil, fmt.Errorf("%w: report must set Name or Aliases", domain.ErrInvalidArgument)
-	}
-
-	for _, alias := range in.Aliases {
-		if err := pr.AddAlias(alias); err != nil {
-			return nil, fmt.Errorf("add alias %+v: %w", alias, err)
-		}
-	}
-
-	return pr, nil
-}
-
-// resolveByAliases resolves a platform resource purely from aliases,
-// requiring that every alias that does resolve agrees on the same
-// [domain.PlatformResourceUID]. It never auto-creates an identity --
-// at least one alias must resolve to an existing platform resource.
-func (r *reportResolver) resolveByAliases(ctx context.Context, aliases []domain.Alias) (*domain.PlatformResource, error) {
-	repo := r.tx.ResourceIdentities()
-
-	var resolved domain.PlatformResourceUID
+// resolveByAliases picks the single platform resource that every
+// alias in aliases agrees on, using resolved (the whole batch's
+// [domain.ResourceIdentityRepository.ResolveAliasesBatch] result) to
+// look each one up. It never auto-creates an identity -- at least one
+// alias must resolve to an existing platform resource, and any two
+// that do resolve must agree on the same one.
+func resolveByAliases(aliases []domain.Alias, resolved map[domain.Alias]domain.ResourceName) (domain.ResourceName, error) {
+	var target domain.ResourceName
 	var found bool
 	for _, alias := range aliases {
-		uid, err := repo.ResolveAlias(ctx, alias)
-		if errors.Is(err, domain.ErrNotFound) {
+		name, ok := resolved[alias]
+		if !ok {
 			continue
 		}
-		if err != nil {
-			return nil, fmt.Errorf("resolve alias %+v: %w", alias, err)
+		if found && name != target {
+			return "", fmt.Errorf("%w: aliases resolve to different platform resources", domain.ErrInvalidArgument)
 		}
-		if found && uid != resolved {
-			return nil, fmt.Errorf("%w: aliases resolve to different platform resources", domain.ErrInvalidArgument)
-		}
-		resolved, found = uid, true
+		target, found = name, true
 	}
 	if !found {
-		return nil, fmt.Errorf("%w: no alias resolved to an existing platform resource", domain.ErrNotFound)
+		return "", fmt.Errorf("%w: no alias resolved to an existing platform resource", domain.ErrNotFound)
 	}
-
-	pr, err := repo.Get(ctx, resolved)
-	if err != nil {
-		return nil, fmt.Errorf("get platform resource %s: %w", resolved, err)
-	}
-	return pr, nil
+	return target, nil
 }
 
-// persistTouchedIdentities flushes every platform resource touched
-// during resolution, exactly once each.
-func (r *reportResolver) persistTouchedIdentities(ctx context.Context) error {
-	for _, pr := range r.touched {
-		if err := r.tx.ResourceIdentities().Update(ctx, pr); err != nil {
-			return fmt.Errorf("update platform resource %s: %w", pr.UID(), err)
+// rejectDuplicateReports catches two reports resolving to the exact
+// same extension resource before any inventory-write SQL runs --
+// whether because two reports named the same resource directly, or
+// because a by-Name and a by-Alias report both resolved to the same
+// underlying resource. This is a superset of the old by-Name-only
+// check: it runs after every report's target is known, so it catches
+// both shapes with one pass. Tracking r.seenNames on the resolver
+// itself, rather than locally to this call, catches a duplicate split
+// across two different chunks of the same overall batch.
+func (r *reportResolver) rejectDuplicateReports(items []reportIdentity, targets []domain.ResourceName, baseIndex int) error {
+	for i, in := range items {
+		full := in.ResourceType.FullName(targets[i])
+		if first, dup := r.seenNames[full]; dup {
+			return fmt.Errorf("%w: resource %s reported more than once in this batch (reports %d and %d)",
+				domain.ErrInvalidArgument, full, first, baseIndex+i)
 		}
+		r.seenNames[full] = baseIndex + i
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package application_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -329,6 +330,198 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ContradictoryAliasesFai
 	er2 := getExtensionResource(t, store, name2)
 	if er2.Inventory().Observation() != nil {
 		t.Errorf("c2 Observation = %v, want nil (untouched)", er2.Inventory().Observation())
+	}
+}
+
+func TestInventoryReportService_ReplaceBatch_CrossReportNewAliasContradictionRejected(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name1 := domain.ResourceName("clusters/c1")
+	name2 := domain.ResourceName("clusters/c2")
+	contested, err := domain.NewAlias("gcp", "project_id", "contested-project")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+
+	// Two different, brand-new reports in the same batch both claim
+	// the very same never-before-seen alias for different resources.
+	// A single multi-row INSERT ON CONFLICT DO NOTHING can't detect
+	// this on its own (neither row conflicts with anything that
+	// existed before the statement started), so this must be caught
+	// in Go before any SQL is issued.
+	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// No partial writes: the whole transaction must have rolled back,
+	// including the platform identities that would otherwise have
+	// been claimed before the alias contradiction was discovered.
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ResourceIdentities().GetByName(ctx, name1); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name1, err)
+	}
+	if _, err := tx.ResourceIdentities().GetByName(ctx, name2); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name2, err)
+	}
+}
+
+func TestInventoryReportService_ReplaceBatch_CrossReportSameKeyDifferentValueRejected(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	zoneA, err := domain.NewAlias("gcp", "zone", "us-central1-a")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	zoneB, err := domain.NewAlias("gcp", "zone", "us-central1-b")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+
+	// A single report asserting two different values for the same
+	// (namespace, key) is internally contradictory.
+	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name, Aliases: []domain.Alias{zoneA, zoneB}, ObservedAt: time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestInventoryReportService_ReplaceBatch_LargeMixedBatchResolvesEveryReport(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	// A deliberately small, non-round chunk size forces this batch
+	// across many chunk boundaries (~43 chunks for 300 reports),
+	// exercising forEachReportChunk without needing a batch large
+	// enough to hit the real default chunk size.
+	svc := application.NewInventoryReportService(store, application.WithInventoryReportChunkSize(7))
+	ctx := context.Background()
+
+	const total = 300
+	const preexistingEvery = 4 // every 4th resource is pre-seeded (by name) before the batch
+	const aliasEvery = 5       // every 5th resource is additionally resolved via a pre-seeded alias
+
+	names := make([]domain.ResourceName, total)
+	aliasFor := make(map[int]domain.Alias)
+	for i := 0; i < total; i++ {
+		names[i] = domain.ResourceName(fmt.Sprintf("clusters/mixed-%03d", i))
+	}
+
+	// Pre-seed every preexistingEvery'th resource (and, for a subset
+	// of those, an alias) via its own prior ReplaceBatch call, before
+	// the single large batch under test runs.
+	for i := 0; i < total; i += preexistingEvery {
+		report := application.InventoryReplacementInput{
+			ResourceType: inventoryReportTestType,
+			Name:         &names[i],
+			Observation:  rawMsg(`{"seed":true}`),
+			ObservedAt:   time.Now(),
+		}
+		if i%aliasEvery == 0 {
+			alias, err := domain.NewAlias("gcp", "project_id", domain.AliasValue(fmt.Sprintf("proj-%03d", i)))
+			if err != nil {
+				t.Fatalf("NewAlias: %v", err)
+			}
+			report.Aliases = []domain.Alias{alias}
+			aliasFor[i] = alias
+		}
+		if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{Reports: []application.InventoryReplacementInput{report}}); err != nil {
+			t.Fatalf("seed report %d: %v", i, err)
+		}
+	}
+
+	// Build one large batch: resources with a pre-seeded alias
+	// resolve purely by alias; everything else resolves by name,
+	// whether or not it already exists.
+	reports := make([]application.InventoryReplacementInput, total)
+	for i := 0; i < total; i++ {
+		observation := rawMsg(fmt.Sprintf(`{"v":%d}`, i))
+		if alias, ok := aliasFor[i]; ok {
+			reports[i] = application.InventoryReplacementInput{
+				ResourceType: inventoryReportTestType,
+				Aliases:      []domain.Alias{alias},
+				Observation:  observation,
+				ObservedAt:   time.Now(),
+			}
+			continue
+		}
+		reports[i] = application.InventoryReplacementInput{
+			ResourceType: inventoryReportTestType,
+			Name:         &names[i],
+			Observation:  observation,
+			ObservedAt:   time.Now(),
+		}
+	}
+
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{Reports: reports}); err != nil {
+		t.Fatalf("ReplaceBatch: %v", err)
+	}
+
+	for i := 0; i < total; i++ {
+		er := getExtensionResource(t, store, names[i])
+		want := fmt.Sprintf(`{"v":%d}`, i)
+		if er.Inventory().Observation() == nil || string(*er.Inventory().Observation()) != want {
+			t.Fatalf("resource %d Observation = %v, want %s", i, er.Inventory().Observation(), want)
+		}
+	}
+}
+
+func TestInventoryReportService_ReplaceBatch_DuplicateAcrossChunkBoundaryFails(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	// Chunk size 2 puts report 0 and report 3 in different chunks
+	// ([0,1], [2,3], [4]), so the duplicate can only be caught by
+	// duplicate tracking that spans the whole call, not just one
+	// chunk's own reportResolver.resolveBatch invocation.
+	svc := application.NewInventoryReportService(store, application.WithInventoryReportChunkSize(2))
+	ctx := context.Background()
+
+	name0 := domain.ResourceName("clusters/chunked-0")
+	name1 := domain.ResourceName("clusters/chunked-1")
+	name2 := domain.ResourceName("clusters/chunked-2")
+
+	err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &name0, Observation: rawMsg(`{"v":0}`), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name1, Observation: rawMsg(`{"v":1}`), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name2, Observation: rawMsg(`{"v":2}`), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name0, Observation: rawMsg(`{"v":3}`), ObservedAt: time.Now()}, // duplicate of report 0, in a later chunk
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// No partial writes: earlier chunks must not have been committed
+	// just because the duplicate was only discovered in a later one.
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	for _, name := range []domain.ResourceName{name0, name1, name2} {
+		if _, err := tx.ResourceIdentities().GetByName(ctx, name); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write across chunks)", name, err)
+		}
 	}
 }
 

@@ -50,16 +50,16 @@ func (s *DeleteManagedResourceWorkflowSpec) deleteObserver() DeleteObserver {
 
 func (s *DeleteManagedResourceWorkflowSpec) Name() string { return "delete-managed-resource" }
 
-// MutateToDeleting transitions the fulfillment to deleting, stores the
-// delete request auth for later background remove/retry passes, removes
-// the managed representation link, and bumps the generation inside a
-// serialized write transaction.
+// MutateToDeleting transitions the fulfillment to deleting and stores
+// the delete request auth for later background remove/retry passes,
+// bumping the generation inside a serialized write transaction. The
+// managed representation link is not touched here -- it's derived on
+// read and disappears on its own once the extension resource row is
+// physically removed by the cleanup workflow.
 func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteManagedResourceInput, managedResourceMutationResult] {
 	return NewActivity("mr-mutate-to-deleting", func(ctx context.Context, in DeleteManagedResourceInput) (managedResourceMutationResult, error) {
 		ctx, probe := s.deleteObserver().MutateManagedResourceStarted(ctx, in.ResourceType, in.Name)
 		defer probe.End()
-
-		now := s.now()
 
 		tx, err := s.Store.Begin(ctx)
 		if err != nil {
@@ -99,20 +99,6 @@ func (s *DeleteManagedResourceWorkflowSpec) MutateToDeleting() Activity[DeleteMa
 		if err := tx.Fulfillments().Update(ctx, f); err != nil {
 			probe.Error(err)
 			return managedResourceMutationResult{}, fmt.Errorf("update fulfillment: %w", err)
-		}
-
-		// Identity integration: remove the managed representation link,
-		// atomic with the fulfillment state transition.
-		err = deleteRepresentation(ctx, tx, in.TypeDef, in.Name, now)
-		if err != nil {
-			alreadyDeleting := f.State() == FulfillmentStateDeleting
-			if alreadyDeleting && errors.Is(err, ErrNotFound) {
-				err = nil
-			}
-		}
-		if err != nil {
-			probe.Error(err)
-			return managedResourceMutationResult{}, fmt.Errorf("delete representation: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -200,24 +186,4 @@ func (s *DeleteManagedResourceWorkflowSpec) Run(record Record, input DeleteManag
 	}
 
 	return mr.View, nil
-}
-
-// deleteRepresentation looks up the platform resource by name and
-// removes the managed representation link. Called within
-// MutateToDeleting's transaction so it is atomic with the fulfillment
-// state transition.
-func deleteRepresentation(ctx context.Context, tx Tx, typeDef ExtensionResourceType, name ResourceName, now time.Time) error {
-	pr, err := tx.ResourceIdentities().GetByName(ctx, name)
-	if err != nil {
-		return fmt.Errorf("get platform resource %s: %w", name, err)
-	}
-
-	if err := pr.DeleteRepresentation(typeDef.APIServiceName(), now); err != nil {
-		return fmt.Errorf("delete representation: %w", err)
-	}
-
-	if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
-		return fmt.Errorf("update platform resource: %w", err)
-	}
-	return nil
 }

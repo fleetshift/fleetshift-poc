@@ -117,37 +117,69 @@ CREATE TABLE rollout_strategies (
 );
 
 -- ── Platform resource identity ──────────────────────────────────
+--
+-- No uid column: per AIP-148, a UID is only warranted for resources
+-- that can be deleted and recreated under the same name yet still
+-- need to be told apart across that gap. Platform resources have no
+-- such generational concept -- (collection_name, resource_id) is the
+-- sole, permanent identifier, so it's the primary key directly.
+--
+-- Platform resources are also virtual by default: a name with
+-- representations (derived from extension_resources, see below) but
+-- no labels/aliases/relationships of its own never needs a physical
+-- row here at all. A row only exists once something -- labels, an
+-- alias, a relationship -- actually needs to be stored against the
+-- name.
 
 CREATE TABLE platform_resources (
-    uid             UUID PRIMARY KEY,
     collection_name TEXT NOT NULL,
     resource_id     TEXT NOT NULL,
     labels          JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL,
     updated_at      TIMESTAMPTZ NOT NULL,
-    UNIQUE (collection_name, resource_id)
+    PRIMARY KEY (collection_name, resource_id)
 );
 
-CREATE INDEX idx_platform_resources_collection ON platform_resources(collection_name);
-
+-- Two unique indexes make value<->resource a bijection per
+-- (namespace, key): the primary key stops two different resources
+-- from claiming the same value, and this second index stops the same
+-- resource from claiming two different values for the same key. An
+-- INSERT's ON CONFLICT can only name one of the two as its arbiter,
+-- so only the primary-key shape is caught without a read before the
+-- insert (a guarded ON CONFLICT ... DO UPDATE, so an idempotent
+-- re-report of an already-owned value still counts as success); the
+-- second-index shape still needs a read first, since a conflict
+-- against an unnamed constraint aborts the whole statement rather
+-- than skipping gracefully (see extension_resource_repo.go's
+-- inventory-report alias fold-in).
 CREATE TABLE resource_aliases (
-    namespace    TEXT NOT NULL,
-    key          TEXT NOT NULL,
-    value        TEXT NOT NULL,
-    platform_uid UUID NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
-    created_at   TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (namespace, key, value)
+    namespace                 TEXT NOT NULL,
+    key                       TEXT NOT NULL,
+    value                     TEXT NOT NULL,
+    platform_collection_name  TEXT NOT NULL,
+    platform_resource_id      TEXT NOT NULL,
+    created_at                TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (namespace, key, value),
+    UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
+    FOREIGN KEY (platform_collection_name, platform_resource_id)
+        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
 );
 
-CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_uid);
+CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
 
 CREATE TABLE resource_relationships (
-    source_uid     UUID NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
-    type           TEXT NOT NULL,
-    target_uid     UUID NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
-    source_service TEXT NOT NULL,
-    created_at     TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (source_uid, type, target_uid)
+    source_collection_name TEXT NOT NULL,
+    source_resource_id     TEXT NOT NULL,
+    type                   TEXT NOT NULL,
+    target_collection_name TEXT NOT NULL,
+    target_resource_id     TEXT NOT NULL,
+    source_service         TEXT NOT NULL,
+    created_at              TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source_collection_name, source_resource_id, type, target_collection_name, target_resource_id),
+    FOREIGN KEY (source_collection_name, source_resource_id)
+        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE,
+    FOREIGN KEY (target_collection_name, target_resource_id)
+        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
 );
 
 -- ── Extension resources ─────────────────────────────────────────
@@ -164,28 +196,38 @@ CREATE TABLE extension_resource_types (
     PRIMARY KEY (service_name, type_name)
 );
 
+-- collection_name/resource_id mirror platform_resources so a
+-- representation can be derived on read by joining the two tables on
+-- that pair, rather than maintained as its own reconciled table (see
+-- resource_representations' removal below).
 CREATE TABLE extension_resources (
-    uid           TEXT PRIMARY KEY,
-    service_name  TEXT NOT NULL,
-    type_name     TEXT NOT NULL,
-    resource_name TEXT NOT NULL,
-    labels        JSONB NOT NULL DEFAULT '{}',
-    created_at    TIMESTAMPTZ NOT NULL,
-    updated_at    TIMESTAMPTZ NOT NULL,
-    UNIQUE (service_name, resource_name),
+    uid             UUID PRIMARY KEY,
+    service_name    TEXT NOT NULL,
+    type_name       TEXT NOT NULL,
+    collection_name TEXT NOT NULL,
+    resource_id     TEXT NOT NULL,
+    labels          JSONB NOT NULL DEFAULT '{}',
+    created_at      TIMESTAMPTZ NOT NULL,
+    updated_at      TIMESTAMPTZ NOT NULL,
+    UNIQUE (service_name, collection_name, resource_id),
     FOREIGN KEY (service_name, type_name)
         REFERENCES extension_resource_types(service_name, type_name)
 );
 
+-- Supports deriving representations for a platform resource: join on
+-- (collection_name, resource_id) rather than service_name-prefixed.
+CREATE INDEX idx_extension_resources_collection_resource
+    ON extension_resources(collection_name, resource_id);
+
 CREATE TABLE extension_resource_managed (
-    extension_resource_uid TEXT PRIMARY KEY
+    extension_resource_uid UUID PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     current_version        INTEGER NOT NULL,
     fulfillment_id         TEXT NOT NULL
 );
 
 CREATE TABLE resource_intents (
-    extension_resource_uid TEXT NOT NULL
+    extension_resource_uid UUID NOT NULL
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     version    INTEGER NOT NULL,
     spec       JSONB NOT NULL,
@@ -193,34 +235,38 @@ CREATE TABLE resource_intents (
     PRIMARY KEY (extension_resource_uid, version)
 );
 
-CREATE TABLE resource_representations (
-    platform_uid           UUID NOT NULL REFERENCES platform_resources(uid) ON DELETE CASCADE,
-    service_name           TEXT NOT NULL,
-    version                TEXT NOT NULL,
-    collection_name        TEXT NOT NULL,
-    resource_id            TEXT NOT NULL,
-    extension_resource_uid TEXT NOT NULL
-        REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    created_at             TIMESTAMPTZ NOT NULL,
-    updated_at             TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (service_name, collection_name, resource_id)
-);
-
-CREATE INDEX idx_resource_representations_platform ON resource_representations(platform_uid);
+-- Representations are not persisted: a platform resource's
+-- representations are derived on read by joining extension_resources
+-- to platform_resources on (collection_name, resource_id) and to
+-- extension_resource_types for its declared roles/version. This
+-- removes the read-modify-write reconciliation that used to be
+-- required on every extension resource create/delete, and means a
+-- managed resource's representation disappears exactly when its
+-- extension_resources row is physically deleted (not before).
 
 -- ── Extension resource inventory ────────────────────────────────
 
 CREATE TABLE extension_resource_inventory (
-    extension_resource_uid TEXT PRIMARY KEY
+    extension_resource_uid UUID PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    labels      JSONB NOT NULL DEFAULT '{}',
     observation JSONB,
     observed_at TIMESTAMPTZ NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL
 );
 
+-- Normalized out of extension_resource_inventory.labels (previously
+-- JSONB) so batch label writes can be blind multi-row upserts/deletes
+-- against a real table instead of a read-modify-write on a JSON blob.
+CREATE TABLE extension_resource_inventory_labels (
+    extension_resource_uid UUID NOT NULL
+        REFERENCES extension_resource_inventory(extension_resource_uid) ON DELETE CASCADE,
+    key                    TEXT NOT NULL,
+    value                  TEXT NOT NULL,
+    PRIMARY KEY (extension_resource_uid, key)
+);
+
 CREATE TABLE extension_resource_inventory_conditions (
-    extension_resource_uid TEXT NOT NULL
+    extension_resource_uid UUID NOT NULL
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     type                   TEXT NOT NULL,
     status                 TEXT NOT NULL,
@@ -234,7 +280,7 @@ CREATE TABLE extension_resource_inventory_conditions (
 
 CREATE TABLE extension_resource_inventory_condition_events (
     id                     TEXT PRIMARY KEY,
-    extension_resource_uid TEXT NOT NULL
+    extension_resource_uid UUID NOT NULL
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     type                   TEXT NOT NULL,
     status                 TEXT NOT NULL,
@@ -250,7 +296,7 @@ CREATE INDEX idx_er_inv_condition_events_resource
 
 CREATE TABLE extension_resource_inventory_observations (
     id                     TEXT PRIMARY KEY,
-    extension_resource_uid TEXT NOT NULL
+    extension_resource_uid UUID NOT NULL
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     observation            JSONB NOT NULL DEFAULT '{}',
     observed_at            TIMESTAMPTZ NOT NULL,
@@ -264,8 +310,8 @@ CREATE INDEX idx_er_inv_observations_resource
 DROP TABLE IF EXISTS extension_resource_inventory_observations;
 DROP TABLE IF EXISTS extension_resource_inventory_condition_events;
 DROP TABLE IF EXISTS extension_resource_inventory_conditions;
+DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
-DROP TABLE IF EXISTS resource_representations;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;
 DROP TABLE IF EXISTS extension_resources;

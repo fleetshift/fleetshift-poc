@@ -75,26 +75,24 @@ func TestPlatformResourceService_GetReturnsRepresentations(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 
+	// Representations are derived on read by joining extension
+	// resources to platform resources on name -- seed an extension
+	// resource sharing pr's name to make one appear.
 	tx, err := store.Begin(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	fetched, err := tx.ResourceIdentities().GetByName(ctx, pr.Name())
-	if err != nil {
+	now := time.Now().UTC()
+	rt := domain.ResourceType("kind.fleetshift.io/Cluster")
+	typeDef := domain.NewExtensionResourceType(rt, "v1alpha1", "clusters", now)
+	if err := tx.ExtensionResources().CreateType(ctx, typeDef); err != nil {
 		tx.Rollback()
-		t.Fatalf("GetByName: %v", err)
+		t.Fatalf("CreateType: %v", err)
 	}
-	if err := fetched.AttachRepresentation(domain.AttachRepresentationInput{
-		ServiceName:          "kind.fleetshift.io",
-		Version:              "v1alpha1",
-		ExtensionResourceUID: domain.NewExtensionResourceUID(),
-	}, time.Now().UTC()); err != nil {
+	er := domain.NewExtensionResource(domain.NewExtensionResourceUID(), rt, pr.Name(), now)
+	if err := tx.ExtensionResources().Create(ctx, er); err != nil {
 		tx.Rollback()
-		t.Fatalf("AttachRepresentation: %v", err)
-	}
-	if err := tx.ResourceIdentities().Update(ctx, fetched); err != nil {
-		tx.Rollback()
-		t.Fatalf("Update: %v", err)
+		t.Fatalf("Create extension resource: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("Commit: %v", err)
