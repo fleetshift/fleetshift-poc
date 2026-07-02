@@ -83,6 +83,14 @@ type ExtensionResourceRepository interface {
 	Get(ctx context.Context, name FullResourceName) (*ExtensionResource, error)
 	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
+
+	// Delete removes the extension resource, along with its
+	// derived representation (see [ResourceRepresentation]'s doc).
+	// Like a later report that omits a previously-contributed alias
+	// (see [InventoryReplacement.Aliases]), deleting the extension
+	// resource retracts every alias it contributed, unless another
+	// extension resource representing the same [ResourceName] is
+	// still asserting it.
 	Delete(ctx context.Context, name FullResourceName) error
 
 	// Read views (join extension resource + managed state + intent + fulfillment + inventory)
@@ -136,8 +144,22 @@ type ExtensionResourceRepository interface {
 // already exists, CandidateUID is discarded and the row's own UID is
 // used instead.
 //
-// Aliases, if non-empty, are additively upserted for Name in the same
-// statement (see [AliasConflict] for how contradictions surface).
+// Aliases is the complete set of aliases *this extension resource*
+// currently contributes for Name -- the same "absence = removal" rule
+// as Labels below, but scoped to this one contributor rather than to
+// Name as a whole. Many different extension resources (identified by
+// their own natural key above) can represent the same Name at once
+// -- e.g. a cluster represented by both a cloud-provider addon and a
+// Kubernetes addon -- and each one's alias contribution is replaced
+// independently: an alias this extension resource stops reporting is
+// retracted, unless another extension resource currently representing
+// the same Name is still contributing it, in which case it remains in
+// effect. Across different contributing extension resources, aliases
+// are additive: agreeing on the same (namespace, key, value) is fine,
+// but two contributors for the same Name asserting different values
+// for the same (namespace, key), or two contributors resolving to
+// different Names asserting the very same (namespace, key, value),
+// are both rejected -- see [AliasConflict].
 //
 // Labels is the complete observed label set; nil and empty both
 // normalize to an empty latest label set. Conditions is the complete
@@ -170,8 +192,16 @@ type InventoryReplacement struct {
 // incremental, field-level changes to a single extension resource's
 // inventory state, identified by natural key. See
 // [InventoryReplacement]'s doc for the natural-key resolve-or-create
-// and Aliases semantics, both shared with
-// [ExtensionResourceRepository.ApplyInventoryDeltas].
+// semantics, shared with [ExtensionResourceRepository.ApplyInventoryDeltas].
+//
+// Aliases here is additive/upsert-only, unlike
+// [InventoryReplacement.Aliases]'s full per-contributor replace:
+// consistent with every other field on this type, an alias absent
+// from Aliases is simply left unchanged, never retracted. Conflict
+// detection against other contributing extension resources is
+// identical to ReplaceInventory's (see [AliasConflict]); retracting a
+// previously-contributed alias requires an [InventoryReplacement]
+// call instead.
 //
 // Fields left at their zero value are unchanged: SetLabels/DeleteLabels
 // only touch the named keys, and UpsertConditions/DeleteConditions only
@@ -266,23 +296,42 @@ type ResourceIdentityRepository interface {
 
 // AliasConflictKind classifies why an alias submitted alongside an
 // inventory report ([InventoryReplacement.Aliases] /
-// [InventoryDelta.Aliases]) did not take effect. Two unique indexes on
-// resource_aliases -- (namespace, key, value) and (namespace, key,
-// platform_collection_name, platform_resource_id) -- together make
-// value<->resource a bijection per (namespace, key), and each maps to
-// one of these kinds.
+// [InventoryDelta.Aliases]) did not take effect.
+//
+// Aliases are contributed per extension resource (see
+// [InventoryReplacement.Aliases]'s doc for the full contract): many
+// different extension resources can legitimately represent the same
+// platform [ResourceName] at once -- e.g. one per addon -- and each
+// contributes its own aliases, additively. The two kinds below are
+// what keeps that additive union consistent:
+//
+//   - AliasConflictResourceHasDifferentValue catches two contributing
+//     extension resources for the *same* Name disagreeing about the
+//     value of the *same* (namespace, key).
+//   - AliasConflictValueClaimedByOther catches the same
+//     (namespace, key, value) being claimed by extension resources
+//     that resolve to two *different* Names.
+//
+// Neither fires when a single extension resource replaces its own
+// prior contribution (a value change, or dropping a key it no longer
+// asserts) with no other contributor left disagreeing.
 type AliasConflictKind int
 
 const (
 	// AliasConflictValueClaimedByOther means (Alias.Namespace,
 	// Alias.Key, Alias.Value) already exists, owned by a platform
 	// resource other than the one the report targeted. ActualName
-	// identifies the actual owner.
+	// identifies the actual owner. This holds regardless of which
+	// extension resource(s) contributed the existing claim.
 	AliasConflictValueClaimedByOther AliasConflictKind = iota + 1
 
-	// AliasConflictResourceHasDifferentValue means the report's target
-	// resource already has a different value recorded for
-	// (Alias.Namespace, Alias.Key). ActualValue holds that value.
+	// AliasConflictResourceHasDifferentValue means another extension
+	// resource currently representing the report's target Name has
+	// already contributed a different value for (Alias.Namespace,
+	// Alias.Key). ActualValue holds that value. This does not fire
+	// when the report's own extension resource previously contributed
+	// the old value itself -- that's a replace, not a conflict; see
+	// [InventoryReplacement.Aliases].
 	AliasConflictResourceHasDifferentValue
 )
 
