@@ -2781,6 +2781,179 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
+		// The three tests below round out single-contributor replace
+		// coverage: SameExtensionResourceReplacingOwnAliasValueSucceeds
+		// above only exercises a 1-alias resource changing its one
+		// value, and AliasRetractedWhenSoleContributingExtensionResourceStopsReportingIt
+		// (further down) only exercises going from 1 alias to 0. A
+		// resource that carries *several* aliases at once can replace
+		// them unevenly -- keep some, drop some, add new ones, or
+		// swap the whole set -- in a single report, mirroring
+		// RemovesLabelsAbsentFromReplacement's "keep some, drop some"
+		// shape for Labels.
+
+		t.Run("PartialReplaceKeepsUnchangedAliasesAndRetractsDroppedOnesWithinSameExtensionResource", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-partial-replace")
+			keep, _ := domain.NewAlias("gcp", "instance_id", "alias-partial-keep")
+			drop, _ := domain.NewAlias("gcp", "zone", "alias-partial-drop")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{keep, drop},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			// Second report carries only "keep" -- "drop" is simply
+			// absent, not reasserted with a different value.
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{keep},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolvedKeep, err := tx.ResourceIdentities().ResolveAlias(ctx, keep)
+			if err != nil {
+				t.Fatalf("ResolveAlias(keep): %v", err)
+			}
+			assertEqual(t, "resolved keep", resolvedKeep, name)
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, drop); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias(drop): got %v, want ErrNotFound (retracted, not resubmitted)", err)
+			}
+		})
+
+		t.Run("ReplaceGrowsAliasSetWithNewKeyFromSameExtensionResource", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-grow")
+			original, _ := domain.NewAlias("gcp", "instance_id", "alias-grow-original")
+			grown, _ := domain.NewAlias("gcp", "zone", "alias-grow-new")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{original},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{original, grown},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			for _, a := range []domain.Alias{original, grown} {
+				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
+				if err != nil {
+					t.Fatalf("ResolveAlias(%+v): %v", a, err)
+				}
+				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			}
+		})
+
+		t.Run("ReplaceFullySwapsAliasSetWithNoOverlapWithinSameExtensionResource", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-full-swap")
+			oldA, _ := domain.NewAlias("gcp", "instance_id", "alias-swap-old-a")
+			oldB, _ := domain.NewAlias("gcp", "zone", "alias-swap-old-b")
+			newC, _ := domain.NewAlias("gcp", "instance_id", "alias-swap-new-c")
+			newD, _ := domain.NewAlias("gcp", "zone", "alias-swap-new-d")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{oldA, oldB},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			// Second report shares no aliases at all with the first --
+			// every key keeps existing, but every value moves.
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{newC, newD},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			for _, a := range []domain.Alias{newC, newD} {
+				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
+				if err != nil {
+					t.Fatalf("ResolveAlias(%+v): %v", a, err)
+				}
+				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			}
+			for _, a := range []domain.Alias{oldA, oldB} {
+				if _, err := tx.ResourceIdentities().ResolveAlias(ctx, a); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("ResolveAlias(%+v): got %v, want ErrNotFound (retracted on swap)", a, err)
+				}
+			}
+		})
+
 		t.Run("ReportsIntraBatchContradictionWithoutSQLError", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
