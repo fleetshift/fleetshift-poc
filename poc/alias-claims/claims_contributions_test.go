@@ -73,6 +73,8 @@ func TestClaimsContributionsPlans(t *testing.T) {
 	}
 	t.Logf("seeded %d resources, %d claims, %d contributions", corpusSize, claimCount, contribCount)
 
+	assertClaimDeleteRestricted(ctx, t, db)
+
 	for _, scenario := range scenarios {
 		t.Run(scenario.name, func(t *testing.T) {
 			plan, err := explain(ctx, db, scenario.sql)
@@ -116,6 +118,22 @@ func explain(ctx context.Context, db *sql.DB, query string) (string, error) {
 		out.WriteByte('\n')
 	}
 	return out.String(), rows.Err()
+}
+
+func assertClaimDeleteRestricted(ctx context.Context, t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	_, err := db.ExecContext(ctx, `
+DELETE FROM resource_alias_claims
+WHERE id = (
+	SELECT claim_id
+	FROM resource_alias_contributions
+	LIMIT 1
+)`)
+	if err == nil {
+		t.Fatal("deleting a claim with live contributions unexpectedly succeeded")
+	}
+	t.Logf("claim delete with live contributions is restricted: %v", err)
 }
 
 func summarizePlan(plan string) string {
@@ -165,8 +183,16 @@ type scenario struct {
 
 var scenarios = []scenario{
 	{
+		name: "never_alias_defensive_retract_noop",
+		sql:  defensiveRetractNoopSQL(1_001, 2_000, "bench.fleetshift.io"),
+	},
+	{
+		name: "same_alias_fingerprint_skip",
+		sql:  fingerprintSkipSQL(15_001, 16_000, "bench.fleetshift.io"),
+	},
+	{
 		name: "steady_source_first_noop_classification",
-		sql:  inputAliasesSQL(15_001, 16_000, "bench.fleetshift.io", "source-id", "ext") + `
+		sql: inputAliasesSQL(15_001, 16_000, "bench.fleetshift.io", "source-id", "ext") + `
 , self_claim AS (
 	SELECT ia.*, c.claim_id, cl.value AS existing_value, cl.platform_collection_name, cl.platform_resource_id
 	FROM input_aliases ia
@@ -316,6 +342,30 @@ deleted_orphan_claims AS (
 )
 SELECT count(*) FROM deleted_orphan_claims`,
 	},
+	{
+		name: "retract_alias_cleanup_orphan_claims_refcount_single_statement",
+		sql:  retractWithRefcountCleanupSQL(56_001, 57_000, "bench.fleetshift.io"),
+	},
+	{
+		name: "retract_alias_cleanup_orphan_claims_refcount_direct_delete",
+		sql:  retractWithDirectDeleteRefcountCleanupSQL(59_001, 60_000, "bench.fleetshift.io"),
+	},
+	{
+		name: "crossing_path_refcount_cleanup_keeps_claim",
+		sql:  crossingPathRefcountCleanupSQL(80_001, 81_000),
+	},
+	{
+		name: "crossing_path_refcount_direct_delete_keeps_claim",
+		sql:  crossingPathDirectDeleteRefcountCleanupSQL(81_001, 82_000),
+	},
+	{
+		name: "extension_resource_delete_refcount_cleanup_orphan_claims",
+		sql:  extensionResourceDeleteWithRefcountCleanupSQL(58_001, 59_000, "bench.fleetshift.io"),
+	},
+	{
+		name: "extension_resource_delete_direct_contribution_cleanup",
+		sql:  extensionResourceDeleteWithDirectContributionCleanupSQL(60_001, 61_000, "bench.fleetshift.io"),
+	},
 }
 
 func inputAliasesSQL(start, end int, serviceName, key, valuePrefix string) string {
@@ -437,15 +487,474 @@ LEFT JOIN by_resource br ON br.idx = ch.idx
 LEFT JOIN sibling s ON s.idx = ch.idx`
 }
 
+func defensiveRetractNoopSQL(start, end int, serviceName string) string {
+	return inputSourcesSQL(start, end, serviceName) + `
+, deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING input_sources s
+	WHERE c.source_extension_resource_uid = s.source_uid
+	  AND c.namespace = 'ext-id'
+	  AND c.key = 'source-id'
+	RETURNING c.claim_id
+)
+SELECT count(*) FROM deleted_contributions`
+}
+
+func fingerprintSkipSQL(start, end int, serviceName string) string {
+	return fmt.Sprintf(`WITH reported AS (
+	SELECT er.uid AS source_uid,
+	       er.alias_fingerprint AS stored_fingerprint,
+	       digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256') AS reported_fingerprint
+	FROM generate_series(%[1]d, %[2]d) AS g
+	JOIN extension_resources er
+	  ON er.service_name = %[3]s
+	 AND er.collection_name = 'widgets'
+	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
+),
+needs_alias_processing AS (
+	SELECT source_uid
+	FROM reported
+	WHERE reported_fingerprint IS DISTINCT FROM stored_fingerprint
+)
+SELECT count(*) FROM needs_alias_processing`, start, end, sqlQuote(serviceName))
+}
+
+func retractWithRefcountCleanupSQL(start, end int, serviceName string) string {
+	return inputSourcesSQL(start, end, serviceName) + `
+, old_contributions AS (
+	SELECT c.source_extension_resource_uid, c.namespace, c.key, c.claim_id
+	FROM input_sources s
+	JOIN LATERAL (
+		SELECT c.source_extension_resource_uid, c.namespace, c.key, c.claim_id
+		FROM resource_alias_contributions c
+		WHERE c.source_extension_resource_uid = s.source_uid
+		  AND c.namespace = 'ext-id'
+		  AND c.key = 'source-id'
+		LIMIT 1 OFFSET 0
+	) c ON true
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM old_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING old_contributions old
+	WHERE c.source_extension_resource_uid = old.source_extension_resource_uid
+	  AND c.namespace = old.namespace
+	  AND c.key = old.key
+	RETURNING c.claim_id
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM deleted_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_contributions) AS deleted_contributions,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`
+}
+
+func retractWithDirectDeleteRefcountCleanupSQL(start, end int, serviceName string) string {
+	return inputSourcesSQL(start, end, serviceName) + `
+, deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING input_sources s
+	WHERE c.source_extension_resource_uid = s.source_uid
+	  AND c.namespace = 'ext-id'
+	  AND c.key = 'source-id'
+	RETURNING c.claim_id
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM deleted_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM deleted_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_contributions) AS deleted_contributions,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`
+}
+
+func crossingPathRefcountCleanupSQL(start, end int) string {
+	return fmt.Sprintf(`WITH input_retractions AS (
+	SELECT er.uid AS source_uid,
+	       'ext-id'::text AS namespace,
+	       'source-id'::text AS key
+	FROM generate_series(%[1]d, %[2]d) AS g
+	JOIN extension_resources er
+	  ON er.service_name = 'bench.fleetshift.io'
+	 AND er.collection_name = 'widgets'
+	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
+),
+input_additions AS (
+	SELECT er.uid AS source_uid,
+	       'ext-id'::text AS namespace,
+	       'source-id'::text AS key,
+	       ('ext-' || lpad(g::text, 8, '0'))::text AS value,
+	       'widgets'::text AS collection_name,
+	       ('r-' || lpad(g::text, 8, '0'))::text AS resource_id
+	FROM generate_series(%[1]d, %[2]d) AS g
+	JOIN extension_resources er
+	  ON er.service_name = 'bench-b.fleetshift.io'
+	 AND er.collection_name = 'widgets'
+	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
+),
+addition_claims AS (
+	SELECT ia.*, cl.id AS claim_id
+	FROM input_additions ia
+	JOIN LATERAL (
+		SELECT id
+		FROM resource_alias_claims
+		WHERE namespace = ia.namespace
+		  AND key = ia.key
+		  AND value = ia.value
+		  AND platform_collection_name = ia.collection_name
+		  AND platform_resource_id = ia.resource_id
+		LIMIT 1 OFFSET 0
+	) cl ON true
+),
+old_contributions AS (
+	SELECT c.source_extension_resource_uid, c.namespace, c.key, c.claim_id
+	FROM input_retractions r
+	JOIN LATERAL (
+		SELECT c.source_extension_resource_uid, c.namespace, c.key, c.claim_id
+		FROM resource_alias_contributions c
+		WHERE c.source_extension_resource_uid = r.source_uid
+		  AND c.namespace = r.namespace
+		  AND c.key = r.key
+		LIMIT 1 OFFSET 0
+	) c ON true
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM old_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING old_contributions old
+	WHERE c.source_extension_resource_uid = old.source_extension_resource_uid
+	  AND c.namespace = old.namespace
+	  AND c.key = old.key
+	RETURNING c.claim_id
+),
+upserted_contributions AS (
+	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id)
+	SELECT source_uid, namespace, key, claim_id
+	FROM addition_claims
+	ON CONFLICT (source_extension_resource_uid, namespace, key)
+	DO UPDATE SET claim_id = EXCLUDED.claim_id
+	RETURNING claim_id
+),
+refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM deleted_contributions
+	GROUP BY claim_id
+	UNION ALL
+	SELECT claim_id, count(*)::bigint AS delta_refs
+	FROM upserted_contributions
+	GROUP BY claim_id
+),
+net_refcount_deltas AS (
+	SELECT claim_id, sum(delta_refs)::bigint AS delta_refs
+	FROM refcount_deltas
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_contributions) AS deleted_contributions,
+	(SELECT count(*) FROM upserted_contributions) AS added_contributions,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`, start, end)
+}
+
+func crossingPathDirectDeleteRefcountCleanupSQL(start, end int) string {
+	return fmt.Sprintf(`WITH input_retractions AS (
+	SELECT er.uid AS source_uid,
+	       'ext-id'::text AS namespace,
+	       'source-id'::text AS key
+	FROM generate_series(%[1]d, %[2]d) AS g
+	JOIN extension_resources er
+	  ON er.service_name = 'bench.fleetshift.io'
+	 AND er.collection_name = 'widgets'
+	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
+),
+input_additions AS (
+	SELECT er.uid AS source_uid,
+	       'ext-id'::text AS namespace,
+	       'source-id'::text AS key,
+	       ('ext-' || lpad(g::text, 8, '0'))::text AS value,
+	       'widgets'::text AS collection_name,
+	       ('r-' || lpad(g::text, 8, '0'))::text AS resource_id
+	FROM generate_series(%[1]d, %[2]d) AS g
+	JOIN extension_resources er
+	  ON er.service_name = 'bench-b.fleetshift.io'
+	 AND er.collection_name = 'widgets'
+	 AND er.resource_id = 'r-' || lpad(g::text, 8, '0')
+),
+addition_claims AS (
+	SELECT ia.*, cl.id AS claim_id
+	FROM input_additions ia
+	JOIN LATERAL (
+		SELECT id
+		FROM resource_alias_claims
+		WHERE namespace = ia.namespace
+		  AND key = ia.key
+		  AND value = ia.value
+		  AND platform_collection_name = ia.collection_name
+		  AND platform_resource_id = ia.resource_id
+		LIMIT 1 OFFSET 0
+	) cl ON true
+),
+deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING input_retractions r
+	WHERE c.source_extension_resource_uid = r.source_uid
+	  AND c.namespace = r.namespace
+	  AND c.key = r.key
+	RETURNING c.claim_id
+),
+upserted_contributions AS (
+	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id)
+	SELECT source_uid, namespace, key, claim_id
+	FROM addition_claims
+	ON CONFLICT (source_extension_resource_uid, namespace, key)
+	DO UPDATE SET claim_id = EXCLUDED.claim_id
+	RETURNING claim_id
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM deleted_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM deleted_contributions
+	GROUP BY claim_id
+	UNION ALL
+	SELECT claim_id, count(*)::bigint AS delta_refs
+	FROM upserted_contributions
+	GROUP BY claim_id
+),
+net_refcount_deltas AS (
+	SELECT claim_id, sum(delta_refs)::bigint AS delta_refs
+	FROM refcount_deltas
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_contributions) AS deleted_contributions,
+	(SELECT count(*) FROM upserted_contributions) AS added_contributions,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`, start, end)
+}
+
+func extensionResourceDeleteWithRefcountCleanupSQL(start, end int, serviceName string) string {
+	return inputSourcesSQL(start, end, serviceName) + `
+, old_contributions AS (
+	SELECT c.source_extension_resource_uid, c.claim_id
+	FROM input_sources s
+	JOIN LATERAL (
+		SELECT c.source_extension_resource_uid, c.claim_id
+		FROM resource_alias_contributions c
+		WHERE c.source_extension_resource_uid = s.source_uid
+		OFFSET 0
+	) c ON true
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM old_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+deleted_extension_resources AS (
+	DELETE FROM extension_resources er
+	USING input_sources s
+	WHERE er.uid = s.source_uid
+	RETURNING er.uid
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM old_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	  AND (SELECT count(*) FROM deleted_extension_resources) >= 0
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_extension_resources) AS deleted_extension_resources,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`
+}
+
+func extensionResourceDeleteWithDirectContributionCleanupSQL(start, end int, serviceName string) string {
+	return inputSourcesSQL(start, end, serviceName) + `
+, deleted_contributions AS (
+	DELETE FROM resource_alias_contributions c
+	USING input_sources s
+	WHERE c.source_extension_resource_uid = s.source_uid
+	RETURNING c.claim_id
+),
+deleted_extension_resources AS (
+	DELETE FROM extension_resources er
+	USING input_sources s
+	WHERE er.uid = s.source_uid
+	RETURNING er.uid
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM deleted_contributions
+),
+existing_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM deleted_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(ecc.baseline_ct, 0)
+	       + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN existing_contrib_counts ecc ON ecc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM deleted_contributions) AS deleted_contributions,
+	(SELECT count(*) FROM deleted_extension_resources) AS deleted_extension_resources,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims`
+}
+
 const schemaSQL = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
-
-CREATE TABLE platform_resources (
-	collection_name text NOT NULL,
-	resource_id text NOT NULL,
-	created_at timestamptz NOT NULL DEFAULT now(),
-	PRIMARY KEY (collection_name, resource_id)
-);
 
 CREATE TABLE extension_resources (
 	uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -471,9 +980,7 @@ CREATE TABLE resource_alias_claims (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	UNIQUE (namespace, key, value),
 	UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
-	UNIQUE (id, namespace, key),
-	FOREIGN KEY (platform_collection_name, platform_resource_id)
-		REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
+	UNIQUE (id, namespace, key)
 );
 
 CREATE TABLE resource_alias_contributions (
@@ -485,7 +992,7 @@ CREATE TABLE resource_alias_contributions (
 	created_at timestamptz NOT NULL DEFAULT now(),
 	PRIMARY KEY (source_extension_resource_uid, namespace, key),
 	FOREIGN KEY (claim_id, namespace, key)
-		REFERENCES resource_alias_claims(id, namespace, key) ON DELETE CASCADE
+		REFERENCES resource_alias_claims(id, namespace, key)
 );
 
 CREATE INDEX resource_alias_contributions_claim_idx
@@ -496,10 +1003,6 @@ CREATE INDEX resource_alias_contributions_claim_source_idx
 `
 
 const seedSQL = `
-INSERT INTO platform_resources (collection_name, resource_id)
-SELECT 'widgets', 'r-' || lpad(g::text, 8, '0')
-FROM generate_series(1, 100000) AS g;
-
 INSERT INTO extension_resources (uid, service_name, collection_name, resource_id, alias_fingerprint)
 SELECT gen_random_uuid(), 'bench.fleetshift.io', 'widgets', 'r-' || lpad(g::text, 8, '0'), digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
 FROM generate_series(1, 100000) AS g;
@@ -521,15 +1024,10 @@ JOIN extension_resources er
  AND er.resource_id = cl.platform_resource_id
 WHERE cl.key = 'source-id';
 
-INSERT INTO platform_resources (collection_name, resource_id)
-SELECT 'widgets', 'victim-' || lpad(g::text, 8, '0')
-FROM generate_series(1, 2500) AS g;
-
 INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, platform_owned)
 SELECT 'ext-id', 'secondary-id', 'victim-' || lpad(g::text, 8, '0'), 'widgets', 'victim-' || lpad(g::text, 8, '0'), true
 FROM generate_series(1, 2500) AS g;
 
-ANALYZE platform_resources;
 ANALYZE extension_resources;
 ANALYZE resource_alias_claims;
 ANALYZE resource_alias_contributions;
