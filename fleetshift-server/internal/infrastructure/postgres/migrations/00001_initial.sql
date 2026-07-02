@@ -1,5 +1,11 @@
 -- +goose Up
 
+-- btree_gist supplies GiST-compatible operator classes for plain
+-- scalar types (text, uuid, ...), which resource_aliases' EXCLUDE
+-- constraints need below -- EXCLUDE requires a GiST (or SP-GiST)
+-- index, which the builtin B-tree operator classes alone can't back.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
 -- ── Standalone tables (no foreign keys) ─────────────────────────
 
 CREATE TABLE targets (
@@ -140,33 +146,6 @@ CREATE TABLE platform_resources (
     PRIMARY KEY (collection_name, resource_id)
 );
 
--- Two unique indexes make value<->resource a bijection per
--- (namespace, key): the primary key stops two different resources
--- from claiming the same value, and this second index stops the same
--- resource from claiming two different values for the same key. An
--- INSERT's ON CONFLICT can only name one of the two as its arbiter,
--- so only the primary-key shape is caught without a read before the
--- insert (a guarded ON CONFLICT ... DO UPDATE, so an idempotent
--- re-report of an already-owned value still counts as success); the
--- second-index shape still needs a read first, since a conflict
--- against an unnamed constraint aborts the whole statement rather
--- than skipping gracefully (see extension_resource_repo.go's
--- inventory-report alias fold-in).
-CREATE TABLE resource_aliases (
-    namespace                 TEXT NOT NULL,
-    key                       TEXT NOT NULL,
-    value                     TEXT NOT NULL,
-    platform_collection_name  TEXT NOT NULL,
-    platform_resource_id      TEXT NOT NULL,
-    created_at                TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (namespace, key, value),
-    UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
-    FOREIGN KEY (platform_collection_name, platform_resource_id)
-        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
-
 CREATE TABLE resource_relationships (
     source_collection_name TEXT NOT NULL,
     source_resource_id     TEXT NOT NULL,
@@ -218,6 +197,91 @@ CREATE TABLE extension_resources (
 -- (collection_name, resource_id) rather than service_name-prefixed.
 CREATE INDEX idx_extension_resources_collection_resource
     ON extension_resources(collection_name, resource_id);
+
+-- Aliases are contributed per extension resource, additive across
+-- the (possibly many) extension resources that represent the same
+-- platform resource, and replaced independently per contributor --
+-- see docs/design/architecture/resource_identity_and_api.md's
+-- "Aliases" section for the full contract this table enforces, and
+-- extension_resource_repo.go's alias fold-in for how a report is
+-- turned into inserts/deletes against it.
+--
+-- source_extension_resource_uid makes a contributor's claim its own
+-- row rather than collapsing every contributor's identical claim
+-- into one: many rows can legitimately share (namespace, key, value)
+-- -- e.g. two addons agreeing a cluster's instance_id is "i-123" --
+-- and the alias only disappears once every contributing row does
+-- (whether via an inventory report that stops asserting it, or via
+-- that extension resource's own deletion -- ON DELETE CASCADE here
+-- covers the latter for free). It's nullable to also accommodate
+-- resource_identity_repo.go's reconcileAliases, which attaches an
+-- alias directly to a platform resource with no extension resource
+-- of its own behind it at all.
+--
+-- Two EXCLUDE constraints (needing btree_gist -- see this file's
+-- CREATE EXTENSION above) replace what used to be a pair of plain
+-- UNIQUE indexes, back when (namespace, key, value) alone was the
+-- primary key and a row could have only one contributor by
+-- construction: unique indexes can't express "these two rows may
+-- coexist if source_extension_resource_uid matches, but not
+-- otherwise," which is exactly what letting multiple contributors
+-- corroborate the same claim, while still rejecting genuine
+-- disagreement, requires.
+--
+--   - The first EXCLUDE keeps (namespace, key, value) a function of
+--     resource: rows sharing all three may never disagree on which
+--     resource they belong to, regardless of contributor. Needs the
+--     collection_name/resource_id pair concatenated into one
+--     expression, since EXCLUDE's WITH operators are per-column.
+--   - The second EXCLUDE keeps (namespace, key, resource) a function
+--     of value: rows sharing all three may never disagree on value,
+--     regardless of contributor.
+--
+-- Both are DEFERRABLE INITIALLY DEFERRED, checked at end of
+-- transaction/statement rather than per-row: a contributor legitimately
+-- replacing its own value for a key runs as a delete-old-row +
+-- insert-new-row pair within the very same statement (see
+-- extension_resource_repo.go's del_aliases_replaced), and Postgres
+-- doesn't guarantee the delete is visible to the insert's constraint
+-- check within one statement unless that check is deferred to the
+-- end. (The plain UNIQUE constraint below stays non-deferrable --
+-- ON CONFLICT can't target a deferrable constraint as its arbiter --
+-- but it never needs to be deferred anyway: re-asserting the exact
+-- same (namespace, key, value, source) tuple was never a real
+-- conflict in the first place, just a redundant write.)
+CREATE TABLE resource_aliases (
+    namespace                     TEXT NOT NULL,
+    key                           TEXT NOT NULL,
+    value                         TEXT NOT NULL,
+    platform_collection_name      TEXT NOT NULL,
+    platform_resource_id          TEXT NOT NULL,
+    source_extension_resource_uid UUID
+        REFERENCES extension_resources(uid) ON DELETE CASCADE,
+    created_at                    TIMESTAMPTZ NOT NULL,
+    UNIQUE NULLS NOT DISTINCT (namespace, key, value, source_extension_resource_uid),
+    EXCLUDE USING gist (
+        namespace WITH =,
+        key WITH =,
+        value WITH =,
+        (platform_collection_name || '/' || platform_resource_id) WITH <>
+    ) DEFERRABLE INITIALLY DEFERRED,
+    EXCLUDE USING gist (
+        namespace WITH =,
+        key WITH =,
+        platform_collection_name WITH =,
+        platform_resource_id WITH =,
+        value WITH <>
+    ) DEFERRABLE INITIALLY DEFERRED,
+    FOREIGN KEY (platform_collection_name, platform_resource_id)
+        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
+
+-- Supports del_aliases_absent/del_aliases_replaced's per-contributor
+-- lookups (extension_resource_repo.go), and ON DELETE CASCADE's own
+-- lookup when an extension resource is deleted.
+CREATE INDEX idx_resource_aliases_source ON resource_aliases(source_extension_resource_uid);
 
 CREATE TABLE extension_resource_managed (
     extension_resource_uid UUID PRIMARY KEY
@@ -314,10 +378,10 @@ DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;
+DROP TABLE IF EXISTS resource_aliases;
 DROP TABLE IF EXISTS extension_resources;
 DROP TABLE IF EXISTS extension_resource_types;
 DROP TABLE IF EXISTS resource_relationships;
-DROP TABLE IF EXISTS resource_aliases;
 DROP TABLE IF EXISTS platform_resources;
 DROP TABLE IF EXISTS rollout_strategies;
 DROP TABLE IF EXISTS placement_strategies;

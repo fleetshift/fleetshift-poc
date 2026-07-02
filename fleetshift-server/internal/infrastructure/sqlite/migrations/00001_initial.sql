@@ -140,29 +140,6 @@ CREATE TABLE platform_resources (
     PRIMARY KEY (collection_name, resource_id)
 );
 
--- Two unique indexes make value<->resource a bijection per
--- (namespace, key): the primary key stops two different resources
--- from claiming the same value, and this second index stops the same
--- resource from claiming two different values for the same key. Both
--- are checked by a single blind INSERT OR IGNORE (SQLite has no
--- multi-target ON CONFLICT), so a contradictory alias upsert is
--- caught without any read before the insert (see
--- extension_resource_repo.go's inventory-report alias fold-in).
-CREATE TABLE resource_aliases (
-    namespace                TEXT NOT NULL,
-    key                      TEXT NOT NULL,
-    value                    TEXT NOT NULL,
-    platform_collection_name TEXT NOT NULL,
-    platform_resource_id     TEXT NOT NULL,
-    created_at               TEXT NOT NULL,
-    PRIMARY KEY (namespace, key, value),
-    UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
-    FOREIGN KEY (platform_collection_name, platform_resource_id)
-        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
-);
-
-CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
-
 CREATE TABLE resource_relationships (
     source_collection_name TEXT NOT NULL,
     source_resource_id     TEXT NOT NULL,
@@ -214,6 +191,54 @@ CREATE TABLE extension_resources (
 -- (collection_name, resource_id) rather than service_name-prefixed.
 CREATE INDEX idx_extension_resources_collection_resource
     ON extension_resources(collection_name, resource_id);
+
+-- Aliases are contributed per extension resource, additive across
+-- the (possibly many) extension resources that represent the same
+-- platform resource, and replaced independently per contributor --
+-- see docs/design/architecture/resource_identity_and_api.md's
+-- "Aliases" section for the full contract this table enforces, and
+-- extension_resource_repo.go's alias fold-in for how a report is
+-- turned into inserts/deletes against it. source_extension_resource_uid
+-- makes a contributor's claim its own row rather than collapsing
+-- every contributor's identical claim into one -- see the Postgres
+-- migration's resource_aliases doc comment (fleetshift-server/internal/infrastructure/postgres/migrations/00001_initial.sql)
+-- for the full reasoning, which applies here unchanged. It's nullable
+-- to also accommodate resource_identity_repo.go's reconcileAliases,
+-- which attaches an alias directly to a platform resource with no
+-- extension resource of its own behind it at all.
+--
+-- Unlike Postgres, SQLite has no EXCLUDE constraint (it would need a
+-- GiST-equivalent index type SQLite doesn't have), so the two global
+-- invariants an EXCLUDE constraint would enforce there --
+-- (namespace, key, value) can't disagree on resource, and
+-- (namespace, key, resource) can't disagree on value, both regardless
+-- of contributor -- are enforced procedurally in Go instead (see
+-- extension_resource_repo.go's resolveAliasesForWrite). The plain
+-- UNIQUE constraint below only catches the narrower case a real index
+-- still can: the exact same (namespace, key, value, contributor)
+-- tuple reported twice, which is what makes a repeat report of an
+-- unchanged alias idempotent via INSERT OR IGNORE rather than a
+-- SQLite constraint-violation error.
+CREATE TABLE resource_aliases (
+    namespace                     TEXT NOT NULL,
+    key                           TEXT NOT NULL,
+    value                         TEXT NOT NULL,
+    platform_collection_name      TEXT NOT NULL,
+    platform_resource_id          TEXT NOT NULL,
+    source_extension_resource_uid TEXT
+        REFERENCES extension_resources(uid) ON DELETE CASCADE,
+    created_at                    TEXT NOT NULL,
+    UNIQUE (namespace, key, value, source_extension_resource_uid),
+    FOREIGN KEY (platform_collection_name, platform_resource_id)
+        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
+
+-- Supports resolveAliasesForWrite's/retraction's per-contributor
+-- lookups (extension_resource_repo.go), and ON DELETE CASCADE's own
+-- lookup when an extension resource is deleted.
+CREATE INDEX idx_resource_aliases_source ON resource_aliases(source_extension_resource_uid);
 
 CREATE TABLE extension_resource_managed (
     extension_resource_uid TEXT PRIMARY KEY
@@ -311,10 +336,10 @@ DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;
+DROP TABLE IF EXISTS resource_aliases;
 DROP TABLE IF EXISTS extension_resources;
 DROP TABLE IF EXISTS extension_resource_types;
 DROP TABLE IF EXISTS resource_relationships;
-DROP TABLE IF EXISTS resource_aliases;
 DROP TABLE IF EXISTS platform_resources;
 DROP TABLE IF EXISTS rollout_strategies;
 DROP TABLE IF EXISTS placement_strategies;

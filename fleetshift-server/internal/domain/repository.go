@@ -194,14 +194,30 @@ type InventoryReplacement struct {
 // [InventoryReplacement]'s doc for the natural-key resolve-or-create
 // semantics, shared with [ExtensionResourceRepository.ApplyInventoryDeltas].
 //
-// Aliases here is additive/upsert-only, unlike
-// [InventoryReplacement.Aliases]'s full per-contributor replace:
-// consistent with every other field on this type, an alias absent
-// from Aliases is simply left unchanged, never retracted. Conflict
-// detection against other contributing extension resources is
-// identical to ReplaceInventory's (see [AliasConflict]); retracting a
-// previously-contributed alias requires an [InventoryReplacement]
-// call instead.
+// Aliases are identity-bearing, unlike Labels/Conditions below, so
+// unlike those two fields' Set/Upsert-plus-Delete shape, they get a
+// third op: UpsertAliases and DeleteAliases mirror SetLabels/
+// DeleteLabels -- add or update named (namespace, key) contributions,
+// or retract named ones this extension resource previously made --
+// but ReplaceAliases additionally offers the same "this is my
+// complete state" convenience [InventoryReplacement.Aliases] gets,
+// scoped to just this delta's alias contribution rather than the
+// whole resource: every alias this extension resource previously
+// contributed that's absent from ReplaceAliases is retracted, exactly
+// like a ReplaceInventory call's Aliases field (see its doc for the
+// full per-contributor, additive-across-contributors contract, shared
+// verbatim here, including conflict detection -- see [AliasConflict]).
+// ReplaceAliases is mutually exclusive with UpsertAliases/DeleteAliases
+// in the same delta: combining them is rejected by
+// [ValidateInventoryDelta] as an ambiguous request, not merged. A
+// delta using UpsertAliases/DeleteAliases only (no ReplaceAliases)
+// behaves exactly like every other Delta field below: an alias
+// contribution absent from both is simply left unchanged, never
+// retracted -- retracting *every* alias in one call (replacing with
+// none) needs an explicit, non-empty-vs-omitted signal that a plain
+// slice can't carry (see the nil-vs-empty note on
+// [InventoryReplacement.Aliases]'s sibling fields), so that one narrow
+// case still requires a full [InventoryReplacement] call.
 //
 // Fields left at their zero value are unchanged: SetLabels/DeleteLabels
 // only touch the named keys, and UpsertConditions/DeleteConditions only
@@ -217,7 +233,22 @@ type InventoryDelta struct {
 	ResourceType ResourceType
 	Name         ResourceName
 	CandidateUID ExtensionResourceUID
-	Aliases      []Alias
+
+	// UpsertAliases adds or updates specific (namespace, key)
+	// contributions from this extension resource -- see this type's
+	// doc above.
+	UpsertAliases []Alias
+	// DeleteAliases retracts specific (namespace, key) contributions
+	// this extension resource previously made, regardless of their
+	// current value (see [AliasRef]'s doc for why no value is
+	// needed). A no-op for any key this extension resource never
+	// contributed.
+	DeleteAliases []AliasRef
+	// ReplaceAliases, if non-empty, replaces this extension
+	// resource's entire alias contribution in one shot -- see this
+	// type's doc above. Mutually exclusive with UpsertAliases/
+	// DeleteAliases in the same delta.
+	ReplaceAliases []Alias
 
 	SetLabels    map[string]string
 	DeleteLabels []string
@@ -231,34 +262,52 @@ type InventoryDelta struct {
 	ReceivedAt time.Time
 }
 
-// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels
-// or UpsertConditions/DeleteConditions contradict each other -- the
-// same key present in both label sets, or the same [ConditionType] in
-// both condition sets. This can't be left for either backend's
-// ApplyInventoryDeltas to resolve on its own: Postgres's
-// applyInventoryDeltasCoreCTEs runs the corresponding set/delete pair
-// as sibling writable CTEs with no defined execution order between
-// them when they touch the same table, while SQLite's Go orchestration
-// happens to run them as ordered sequential statements -- so the very
-// same contradictory delta would silently resolve differently per
-// backend if it ever reached either one. Both
+// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels,
+// UpsertConditions/DeleteConditions, or UpsertAliases/DeleteAliases
+// contradict each other -- the same key present on both sides of a
+// pair -- or whose ReplaceAliases is combined with UpsertAliases/
+// DeleteAliases in the same delta. The label/condition/alias-pair
+// checks can't be left for either backend's ApplyInventoryDeltas to
+// resolve on its own: Postgres's applyInventoryDeltasCoreCTEs runs a
+// pair's set/upsert and delete sides as sibling writable CTEs with no
+// defined execution order between them when they touch the same
+// table, while SQLite's Go orchestration happens to run them as
+// ordered sequential statements -- so the very same contradictory
+// delta would silently resolve differently per backend if it ever
+// reached either one. The ReplaceAliases check has no such
+// per-backend divergence to guard against -- it's simply an
+// underspecified request, since UpsertAliases/DeleteAliases can't be
+// reconciled against a same-call "this is my complete state" that
+// doesn't mention them either way. Both
 // [ExtensionResourceRepository.ApplyInventoryDeltas] implementations
 // call this for every delta before building any batch argument, so
-// the contradiction is always caught in Go before any SQL runs,
-// regardless of caller.
+// every contradiction here is always caught in Go before any SQL
+// runs, regardless of caller.
 func ValidateInventoryDelta(d InventoryDelta) error {
 	for _, k := range d.DeleteLabels {
 		if _, ok := d.SetLabels[k]; ok {
 			return fmt.Errorf("%w: label %q is present in both SetLabels and DeleteLabels", ErrInvalidArgument, k)
 		}
 	}
-	deleted := make(map[ConditionType]struct{}, len(d.DeleteConditions))
+	deletedConditions := make(map[ConditionType]struct{}, len(d.DeleteConditions))
 	for _, t := range d.DeleteConditions {
-		deleted[t] = struct{}{}
+		deletedConditions[t] = struct{}{}
 	}
 	for _, c := range d.UpsertConditions {
-		if _, ok := deleted[c.Type()]; ok {
+		if _, ok := deletedConditions[c.Type()]; ok {
 			return fmt.Errorf("%w: condition type %q is present in both UpsertConditions and DeleteConditions", ErrInvalidArgument, c.Type())
+		}
+	}
+	if len(d.ReplaceAliases) > 0 && (len(d.UpsertAliases) > 0 || len(d.DeleteAliases) > 0) {
+		return fmt.Errorf("%w: ReplaceAliases cannot be combined with UpsertAliases or DeleteAliases in the same delta", ErrInvalidArgument)
+	}
+	deletedAliases := make(map[AliasRef]struct{}, len(d.DeleteAliases))
+	for _, ref := range d.DeleteAliases {
+		deletedAliases[ref] = struct{}{}
+	}
+	for _, a := range d.UpsertAliases {
+		if _, ok := deletedAliases[AliasRef{Namespace: a.Namespace, Key: a.Key}]; ok {
+			return fmt.Errorf("%w: alias %s/%s is present in both UpsertAliases and DeleteAliases", ErrInvalidArgument, a.Namespace, a.Key)
 		}
 	}
 	return nil
@@ -296,7 +345,8 @@ type ResourceIdentityRepository interface {
 
 // AliasConflictKind classifies why an alias submitted alongside an
 // inventory report ([InventoryReplacement.Aliases] /
-// [InventoryDelta.Aliases]) did not take effect.
+// [InventoryDelta.UpsertAliases] / [InventoryDelta.ReplaceAliases])
+// did not take effect.
 //
 // Aliases are contributed per extension resource (see
 // [InventoryReplacement.Aliases]'s doc for the full contract): many

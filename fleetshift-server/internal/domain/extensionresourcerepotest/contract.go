@@ -1944,6 +1944,110 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
+		// RejectsAliasKeyInBothUpsertAndDelete/RejectsReplaceAliasesCombinedWithUpsertAliases/
+		// RejectsReplaceAliasesCombinedWithDeleteAliases guard
+		// [domain.InventoryDelta]'s alias-specific additions to
+		// [domain.ValidateInventoryDelta]: the same (namespace, key)
+		// on both sides of UpsertAliases/DeleteAliases is exactly the
+		// SetLabels/DeleteLabels contradiction above, scoped to
+		// aliases; ReplaceAliases combined with either is a distinct
+		// "ambiguous request" rejection, since a same-call "this is
+		// my complete contribution" can't be reconciled against
+		// named adds/removes that don't appear in it either way.
+		t.Run("RejectsAliasKeyInBothUpsertAndDelete", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-overlap")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			original, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-overlap-original")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{original},
+				ObservedAt:    t1, ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			replacement, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-overlap-replacement")
+			removeRef, _ := domain.NewAliasRef("gcp", "instance_id")
+			t2 := fixedTime.Add(2 * time.Minute)
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{replacement},
+				DeleteAliases: []domain.AliasRef{removeRef},
+				ObservedAt:    t2, ReceivedAt: t2,
+			}})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, original)
+			if err != nil {
+				t.Fatalf("ResolveAlias(original): %v (rejected before any write, so original must still resolve)", err)
+			}
+			assertEqual(t, "resolved original", resolved, r.Name())
+		})
+
+		t.Run("RejectsReplaceAliasesCombinedWithUpsertAliases", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-upsert-conflict")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			replaceAlias, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-upsert-replace")
+			upsertAlias, _ := domain.NewAlias("gcp", "zone", "delta-replace-upsert-upsert")
+			now := fixedTime.Add(time.Minute)
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				ReplaceAliases: []domain.Alias{replaceAlias},
+				UpsertAliases:  []domain.Alias{upsertAlias},
+				ObservedAt:     now, ReceivedAt: now,
+			}})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			}
+		})
+
+		t.Run("RejectsReplaceAliasesCombinedWithDeleteAliases", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-delete-conflict")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			replaceAlias, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-delete-replace")
+			deleteRef, _ := domain.NewAliasRef("gcp", "zone")
+			now := fixedTime.Add(time.Minute)
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				ReplaceAliases: []domain.Alias{replaceAlias},
+				DeleteAliases:  []domain.AliasRef{deleteRef},
+				ObservedAt:     now, ReceivedAt: now,
+			}})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			}
+		})
+
 		t.Run("UsesReceivedAtNotWallClock", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
@@ -2642,12 +2746,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-1")
 			now := fixedTime.Add(time.Minute)
 			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-delta",
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
-				ObservedAt:   now,
-				ReceivedAt:   now,
+				ResourceType:  "inv.fleetshift.io/Node",
+				Name:          "nodes/alias-delta",
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{alias},
+				ObservedAt:    now,
+				ReceivedAt:    now,
 			}})
 			if err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
@@ -3382,12 +3486,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			name := domain.ResourceName("nodes/alias-multi-delta")
 			now := fixedTime.Add(time.Minute)
 			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{instanceID, zone},
-				ObservedAt:   now,
-				ReceivedAt:   now,
+				ResourceType:  "inv.fleetshift.io/Node",
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{instanceID, zone},
+				ObservedAt:    now,
+				ReceivedAt:    now,
 			}})
 			if err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
@@ -3402,6 +3506,110 @@ func runInventoryTests(t *testing.T, factory Factory) {
 					t.Fatalf("ResolveAlias(%+v): %v", a, err)
 				}
 				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			}
+		})
+
+		// ApplyInventoryDeltasDeleteAliasesRetractsOwnContribution and
+		// ApplyInventoryDeltasReplaceAliasesFullySwapsOwnContribution
+		// exercise [domain.InventoryDelta.DeleteAliases]/
+		// [domain.InventoryDelta.ReplaceAliases] for a single
+		// contributor -- the delta-path analogs of ReplaceInventory's
+		// PartialReplaceKeepsUnchangedAliasesAndRetractsDroppedOnesWithinSameExtensionResource/
+		// ReplaceFullySwapsAliasSetWithNoOverlapWithinSameExtensionResource.
+		// Neither backend folds DeleteAliases/ReplaceAliases into
+		// ApplyInventoryDeltas yet (see the ApplyInventoryDeltas loop
+		// building aliasCandidates in extension_resource_repo.go), so
+		// both are expected to fail red until that lands.
+		t.Run("ApplyInventoryDeltasDeleteAliasesRetractsOwnContribution", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			name := domain.ResourceName("nodes/alias-delta-delete")
+			keep, _ := domain.NewAlias("gcp", "zone", "delta-delete-keep")
+			drop, _ := domain.NewAlias("gcp", "instance_id", "delta-delete-drop")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{keep, drop},
+				ObservedAt:    t1, ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			dropRef, _ := domain.NewAliasRef("gcp", "instance_id")
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				DeleteAliases: []domain.AliasRef{dropRef},
+				ObservedAt:    t2, ReceivedAt: t2,
+			}})
+			if err != nil {
+				t.Fatalf("ApplyInventoryDeltas (delete): %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolvedKeep, err := tx.ResourceIdentities().ResolveAlias(ctx, keep)
+			if err != nil {
+				t.Fatalf("ResolveAlias(keep): %v", err)
+			}
+			assertEqual(t, "resolved keep", resolvedKeep, name)
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, drop); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias(drop) err = %v, want ErrNotFound (DeleteAliases should have retracted it)", err)
+			}
+		})
+
+		t.Run("ApplyInventoryDeltasReplaceAliasesFullySwapsOwnContribution", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			name := domain.ResourceName("nodes/alias-delta-replace")
+			oldA, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-old-a")
+			oldB, _ := domain.NewAlias("gcp", "zone", "delta-replace-old-b")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{oldA, oldB},
+				ObservedAt:    t1, ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			newC, _ := domain.NewAlias("gcp", "project_id", "delta-replace-new-c")
+			newD, _ := domain.NewAlias("gcp", "region", "delta-replace-new-d")
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ReplaceAliases: []domain.Alias{newC, newD},
+				ObservedAt:     t2, ReceivedAt: t2,
+			}})
+			if err != nil {
+				t.Fatalf("ApplyInventoryDeltas (replace): %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			for _, old := range []domain.Alias{oldA, oldB} {
+				if _, err := tx.ResourceIdentities().ResolveAlias(ctx, old); !errors.Is(err, domain.ErrNotFound) {
+					t.Errorf("ResolveAlias(%+v) err = %v, want ErrNotFound (ReplaceAliases should have retracted every prior alias)", old, err)
+				}
+			}
+			for _, new := range []domain.Alias{newC, newD} {
+				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, new)
+				if err != nil {
+					t.Fatalf("ResolveAlias(%+v): %v", new, err)
+				}
+				assertEqual(t, fmt.Sprintf("resolved(%+v)", new), resolved, name)
 			}
 		})
 
@@ -4121,20 +4329,20 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
 				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{instanceID},
-					ObservedAt:   now,
-					ReceivedAt:   now,
+					ResourceType:  rtCloud,
+					Name:          name,
+					CandidateUID:  domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{instanceID},
+					ObservedAt:    now,
+					ReceivedAt:    now,
 				},
 				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{nodeName},
-					ObservedAt:   now,
-					ReceivedAt:   now,
+					ResourceType:  rtK8s,
+					Name:          name,
+					CandidateUID:  domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{nodeName},
+					ObservedAt:    now,
+					ReceivedAt:    now,
 				},
 			})
 			if err != nil {
@@ -4155,15 +4363,17 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 		// ApplyInventoryDeltasNeverRetractsAliasesOnOmission locks in
 		// an intentional asymmetry with ReplaceInventory: a delta's
-		// Aliases is additive/upsert-only (like every other Delta
-		// field), so omitting a previously-contributed alias from a
-		// later delta must NOT retract it -- only a ReplaceInventory
-		// call (the "this is my complete state" entry point) can do
-		// that. See [domain.InventoryDelta]'s doc. Unlike the rest of
-		// this group, this describes *current*, already-correct
-		// behavior -- it's here to lock the asymmetry in as
-		// intentional so it isn't "fixed" away by accident once
-		// per-contributor replace lands for ReplaceInventory.
+		// UpsertAliases is additive/upsert-only (like every other
+		// Delta field), so omitting a previously-contributed alias
+		// from a later delta's UpsertAliases must NOT retract it --
+		// only ReplaceAliases (this delta's "this is my complete
+		// alias contribution" op) or a ReplaceInventory call (the
+		// whole-resource equivalent) can do that. See
+		// [domain.InventoryDelta]'s doc. Unlike the rest of this
+		// group, this describes *current*, already-correct behavior
+		// -- it's here to lock the asymmetry in as intentional so it
+		// isn't "fixed" away by accident once per-contributor replace
+		// lands for ReplaceInventory.
 		t.Run("ApplyInventoryDeltasNeverRetractsAliasesOnOmission", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
@@ -4179,24 +4389,24 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
+				ResourceType:  rt,
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{alias},
+				ObservedAt:    t1,
+				ReceivedAt:    t1,
 			}}); err != nil {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
 			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      nil,
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
+				ResourceType:  rt,
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: nil,
+				ObservedAt:    t2,
+				ReceivedAt:    t2,
 			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas (heartbeat, no aliases): %v", err)
 			}
@@ -4206,6 +4416,140 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ResolveAlias: %v", err)
 			}
 			assertEqual(t, "resolved name", resolved, name)
+		})
+
+		// ApplyInventoryDeltasDeleteAliasesRetractsOnlyOwnContributionAcrossContributors
+		// and ApplyInventoryDeltasReplaceAliasesRetractsOnlyOwnContributionAcrossContributors
+		// are DeleteAliases/ReplaceAliases's multi-contributor
+		// counterparts to the group above: retracting or replacing
+		// one contributor's share of a shared alias must never affect
+		// a sibling contributor still asserting it -- exactly the
+		// same per-contributor scoping ReplaceInventory's
+		// AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesStopsReportingIt/
+		// AliasFullyRetractedOnceAllContributingExtensionResourcesStopReportingIt
+		// already lock in for omission-based retraction.
+		t.Run("ApplyInventoryDeltasDeleteAliasesRetractsOnlyOwnContributionAcrossContributors", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
+			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
+			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
+				t.Fatalf("CreateType(cloud): %v", err)
+			}
+			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
+				t.Fatalf("CreateType(k8s): %v", err)
+			}
+
+			name := domain.ResourceName("clusters/multi-contributor-delta-delete")
+			shared, _ := domain.NewAlias("gcp", "cluster_id", "mc-delta-delete-shared")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
+				{
+					ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{shared},
+					ObservedAt:    t1, ReceivedAt: t1,
+				},
+				{
+					ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{shared},
+					ObservedAt:    t1, ReceivedAt: t1,
+				},
+			}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			sharedRef, _ := domain.NewAliasRef("gcp", "cluster_id")
+			t2 := fixedTime.Add(2 * time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				DeleteAliases: []domain.AliasRef{sharedRef},
+				ObservedAt:    t2, ReceivedAt: t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas (cloud deletes its share): %v", err)
+			}
+
+			resolvedAfterOne, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
+			if err != nil {
+				t.Fatalf("ResolveAlias after one contributor's delete: %v (should still resolve via k8s)", err)
+			}
+			assertEqual(t, "resolved after one contributor's delete", resolvedAfterOne, name)
+
+			t3 := fixedTime.Add(3 * time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				DeleteAliases: []domain.AliasRef{sharedRef},
+				ObservedAt:    t3, ReceivedAt: t3,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas (k8s deletes its share): %v", err)
+			}
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, shared); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias after both contributors' delete err = %v, want ErrNotFound", err)
+			}
+		})
+
+		t.Run("ApplyInventoryDeltasReplaceAliasesRetractsOnlyOwnContributionAcrossContributors", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
+			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
+			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
+				t.Fatalf("CreateType(cloud): %v", err)
+			}
+			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
+				t.Fatalf("CreateType(k8s): %v", err)
+			}
+
+			name := domain.ResourceName("clusters/multi-contributor-delta-replace")
+			shared, _ := domain.NewAlias("gcp", "cluster_id", "mc-delta-replace-shared")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
+				{
+					ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{shared},
+					ObservedAt:    t1, ReceivedAt: t1,
+				},
+				{
+					ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					UpsertAliases: []domain.Alias{shared},
+					ObservedAt:    t1, ReceivedAt: t1,
+				},
+			}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			replacement, _ := domain.NewAlias("gcp", "region", "mc-delta-replace-replacement")
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ReplaceAliases: []domain.Alias{replacement},
+				ObservedAt:     t2, ReceivedAt: t2,
+			}})
+			if err != nil {
+				t.Fatalf("ApplyInventoryDeltas (cloud replaces its share): %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			// K8s never mentioned `shared` in a ReplaceAliases of its
+			// own, so its share must survive cloud's replace.
+			resolvedShared, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
+			if err != nil {
+				t.Fatalf("ResolveAlias(shared): %v (should still resolve via k8s)", err)
+			}
+			assertEqual(t, "resolved shared", resolvedShared, name)
+
+			resolvedReplacement, err := tx.ResourceIdentities().ResolveAlias(ctx, replacement)
+			if err != nil {
+				t.Fatalf("ResolveAlias(replacement): %v", err)
+			}
+			assertEqual(t, "resolved replacement", resolvedReplacement, name)
 		})
 	})
 }

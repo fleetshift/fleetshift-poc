@@ -1240,11 +1240,18 @@ func (r *ExtensionResourceRepo) insertInventory(ctx context.Context, uid domain.
 // target, alias) input row for ReplaceInventory/ApplyInventoryDeltas's
 // alias fold-in. receivedAt carries its report's ReceivedAt so
 // writeAliases doesn't need a separate lookup back to the report.
+// sourceUID is the contributing extension resource's own persistent
+// uid -- unlike the Postgres sibling, which has to join it in via SQL
+// (see that file's flattenAliasCandidates doc comment for why), it's
+// simply uids[i] here: resolveOrCreateExtensionResources's own
+// round trip has already resolved it by the time ReplaceInventory/
+// ApplyInventoryDeltas build this slice, no CTE-style deferral needed.
 type aliasCandidateInput struct {
 	idx        int
 	target     domain.ResourceName
 	alias      domain.Alias
 	receivedAt time.Time
+	sourceUID  domain.ExtensionResourceUID
 }
 
 // checkAliasBatchConsistency rejects, in pure Go and with zero SQL,
@@ -1304,24 +1311,50 @@ func checkAliasBatchConsistency(candidates []aliasCandidateInput) (safe []aliasC
 }
 
 // resourceAliasKey identifies a (namespace, key, target) triple --
-// resolveAliasesForWrite's map key for "does this resource already
-// have a value on file for this key."
+// resolveAliasesForWrite's map key for "what does resource_aliases
+// currently say about this resource's value for this key."
 type resourceAliasKey struct {
 	ns     domain.AliasNamespace
 	key    domain.AliasKey
 	target domain.ResourceName
 }
 
+// existingAliasRow is one pre-existing resource_aliases row read back
+// by [ExtensionResourceRepo.resolveAliasesForWrite]'s two queries --
+// either keyed by (namespace, key, value), where every row sharing
+// that key is guaranteed (by this fold-in's own enforcement) to agree
+// on target, or keyed by (namespace, key, target), where every row
+// sharing that key is guaranteed to agree on value. sourceUID lets
+// resolveAliasesForWrite tell "one of these rows is mine" from "every
+// one of these rows belongs to some other contributor" without a
+// third query.
+type existingAliasRow struct {
+	target    domain.ResourceName
+	sourceUID domain.ExtensionResourceUID
+}
+
 // resolveAliasesForWrite runs checkAliasBatchConsistency, then reads
 // pre-existing resource_aliases state for the survivors' (namespace,
-// key, value) and (namespace, key, target) pairs. SQLite has no
+// key, value) and (namespace, key, target) pairs -- across every
+// contributor, not just this candidate's own, since resource_aliases
+// can now hold one row per contributor for the very same claim (see
+// the migration's resource_aliases doc comment). SQLite has no
 // writable CTEs, so this can't fold into one blind INSERT the way the
-// Postgres sibling's alias_safe filter does -- it costs its own reads
+// Postgres sibling's alias fold-in does -- it costs its own reads
 // instead, in exchange for never letting a candidate that would
-// violate either unique index reach the INSERT (see writeAliases),
-// which is what keeps a "resource already has a different value for
-// this key" case a graceful [domain.AliasConflict] instead of a hard
-// constraint-violation error.
+// violate either invariant reach the INSERT (see writeAliases), which
+// is what keeps a genuine cross-contributor disagreement a graceful
+// [domain.AliasConflict] instead of a hard constraint-violation error.
+//
+// A candidate is safe if either read comes back clean for it, per the
+// same two-phase logic as the Postgres sibling's aliasFoldCTEs (see
+// that constant's doc comment for the full reasoning): phase 1
+// (byValue) accepts a candidate whose exact value already belongs to
+// its own target, from any contributor (a no-op or a corroboration);
+// phase 2 (byResource, only reached once phase 1 proves the value is
+// otherwise unclaimed) accepts a candidate replacing a value only its
+// own contributor ever held for that key, and rejects one where a
+// different contributor holds a different value for it.
 func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, candidates []aliasCandidateInput) (safe []aliasCandidateInput, conflicts []domain.AliasConflict, err error) {
 	safe, conflicts = checkAliasBatchConsistency(candidates)
 	if len(safe) == 0 {
@@ -1339,9 +1372,9 @@ func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, cand
 		resourceArgs = append(resourceArgs, string(c.alias.Namespace), string(c.alias.Key), string(c.target.Collection()), string(c.target.ID()))
 	}
 
-	prevByValue := make(map[domain.Alias]domain.ResourceName, len(safe))
+	prevByValue := make(map[domain.Alias][]existingAliasRow, len(safe))
 	rows, err := r.DB.QueryContext(ctx,
-		fmt.Sprintf(`SELECT namespace, key, value, platform_collection_name, platform_resource_id FROM resource_aliases
+		fmt.Sprintf(`SELECT namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid FROM resource_aliases
 			WHERE (namespace, key, value) IN (%s)`, strings.Join(valuePlaceholders, ", ")),
 		valueArgs...)
 	if err != nil {
@@ -1349,12 +1382,18 @@ func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, cand
 	}
 	for rows.Next() {
 		var ns, key, value, collectionName, resourceID string
-		if err := rows.Scan(&ns, &key, &value, &collectionName, &resourceID); err != nil {
+		var sourceUIDStr sql.NullString
+		if err := rows.Scan(&ns, &key, &value, &collectionName, &resourceID, &sourceUIDStr); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan existing alias by value: %w", err)
 		}
-		prevByValue[domain.Alias{Namespace: domain.AliasNamespace(ns), Key: domain.AliasKey(key), Value: domain.AliasValue(value)}] =
-			domain.ResourceName(collectionName + "/" + resourceID)
+		row, err := scanExistingAliasRow(collectionName, resourceID, sourceUIDStr)
+		if err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		a := domain.Alias{Namespace: domain.AliasNamespace(ns), Key: domain.AliasKey(key), Value: domain.AliasValue(value)}
+		prevByValue[a] = append(prevByValue[a], row)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1362,9 +1401,10 @@ func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, cand
 	}
 	rows.Close()
 
-	prevByResource := make(map[resourceAliasKey]domain.AliasValue, len(safe))
+	prevByResource := make(map[resourceAliasKey][]existingAliasRow, len(safe))
+	prevByResourceValue := make(map[resourceAliasKey]domain.AliasValue, len(safe))
 	rows, err = r.DB.QueryContext(ctx,
-		fmt.Sprintf(`SELECT namespace, key, platform_collection_name, platform_resource_id, value FROM resource_aliases
+		fmt.Sprintf(`SELECT namespace, key, platform_collection_name, platform_resource_id, value, source_extension_resource_uid FROM resource_aliases
 			WHERE (namespace, key, platform_collection_name, platform_resource_id) IN (%s)`, strings.Join(resourcePlaceholders, ", ")),
 		resourceArgs...)
 	if err != nil {
@@ -1372,12 +1412,19 @@ func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, cand
 	}
 	for rows.Next() {
 		var ns, key, collectionName, resourceID, value string
-		if err := rows.Scan(&ns, &key, &collectionName, &resourceID, &value); err != nil {
+		var sourceUIDStr sql.NullString
+		if err := rows.Scan(&ns, &key, &collectionName, &resourceID, &value, &sourceUIDStr); err != nil {
 			rows.Close()
 			return nil, nil, fmt.Errorf("scan existing alias by resource: %w", err)
 		}
-		prevByResource[resourceAliasKey{domain.AliasNamespace(ns), domain.AliasKey(key), domain.ResourceName(collectionName + "/" + resourceID)}] =
-			domain.AliasValue(value)
+		row, err := scanExistingAliasRow(collectionName, resourceID, sourceUIDStr)
+		if err != nil {
+			rows.Close()
+			return nil, nil, err
+		}
+		rk := resourceAliasKey{domain.AliasNamespace(ns), domain.AliasKey(key), row.target}
+		prevByResource[rk] = append(prevByResource[rk], row)
+		prevByResourceValue[rk] = domain.AliasValue(value)
 	}
 	if err := rows.Err(); err != nil {
 		rows.Close()
@@ -1387,29 +1434,77 @@ func (r *ExtensionResourceRepo) resolveAliasesForWrite(ctx context.Context, cand
 
 	var stillSafe []aliasCandidateInput
 	for _, c := range safe {
-		if owner, ok := prevByValue[c.alias]; ok && owner != c.target {
+		if valueRows := prevByValue[c.alias]; len(valueRows) > 0 {
+			// Every row sharing (namespace, key, value) is
+			// guaranteed to agree on target -- see
+			// checkAliasBatchConsistency and this fold-in's own
+			// invariant enforcement -- so valueRows[0] speaks for
+			// all of them.
+			if owner := valueRows[0].target; owner != c.target {
+				conflicts = append(conflicts, domain.AliasConflict{
+					Alias: c.alias, Kind: domain.AliasConflictValueClaimedByOther, TargetName: c.target, ActualName: owner,
+				})
+				continue
+			}
+			// Value already belongs to this target, from any
+			// contributor: a no-op (mine) or a corroboration
+			// (a sibling's) -- either way, safe to (re)assert.
+			stillSafe = append(stillSafe, c)
+			continue
+		}
+
+		rk := resourceAliasKey{c.alias.Namespace, c.alias.Key, c.target}
+		resourceRows := prevByResource[rk]
+		if len(resourceRows) == 0 {
+			stillSafe = append(stillSafe, c)
+			continue
+		}
+		siblingHolds := false
+		for _, row := range resourceRows {
+			if row.sourceUID != c.sourceUID {
+				siblingHolds = true
+				break
+			}
+		}
+		if siblingHolds {
 			conflicts = append(conflicts, domain.AliasConflict{
-				Alias: c.alias, Kind: domain.AliasConflictValueClaimedByOther, TargetName: c.target, ActualName: owner,
+				Alias: c.alias, Kind: domain.AliasConflictResourceHasDifferentValue, TargetName: c.target, ActualValue: prevByResourceValue[rk],
 			})
 			continue
 		}
-		if val, ok := prevByResource[resourceAliasKey{c.alias.Namespace, c.alias.Key, c.target}]; ok && val != c.alias.Value {
-			conflicts = append(conflicts, domain.AliasConflict{
-				Alias: c.alias, Kind: domain.AliasConflictResourceHasDifferentValue, TargetName: c.target, ActualValue: val,
-			})
-			continue
-		}
+		// Every existing row for this (namespace, key, target) is
+		// this same contributor's own -- a legitimate replace of a
+		// value only it ever held.
 		stillSafe = append(stillSafe, c)
 	}
 	return stillSafe, conflicts, nil
 }
 
+// scanExistingAliasRow parses the (target, sourceUID) portion shared
+// by resolveAliasesForWrite's two queries.
+func scanExistingAliasRow(collectionName, resourceID string, sourceUIDStr sql.NullString) (existingAliasRow, error) {
+	row := existingAliasRow{target: domain.ResourceName(collectionName + "/" + resourceID)}
+	if sourceUIDStr.Valid {
+		uid, err := domain.ParseExtensionResourceUID(sourceUIDStr.String)
+		if err != nil {
+			return existingAliasRow{}, fmt.Errorf("parse source_extension_resource_uid: %w", err)
+		}
+		row.sourceUID = uid
+	}
+	return row, nil
+}
+
 // writeAliases lazily ensures a (uid-less) platform_resources row for
 // every distinct target among safe (see resource_identity_repo.go's
-// virtual-resource doc), then blind-inserts every alias.
-// resolveAliasesForWrite has already excluded anything that would
-// violate either unique index, so both inserts here are unconditional
-// ON CONFLICT DO NOTHING -- no read-modify-write.
+// virtual-resource doc), then blind-inserts every alias, then deletes
+// each candidate's own stale row for the same (namespace, key) if its
+// value just changed. resolveAliasesForWrite has already excluded
+// anything that would violate either invariant, so the insert is
+// unconditional INSERT OR IGNORE -- no read-modify-write -- and is
+// idempotent against a repeat report of the very same (namespace,
+// key, value) from the very same contributor by the UNIQUE (namespace,
+// key, value, source_extension_resource_uid) constraint (see the
+// migration's doc comment).
 func (r *ExtensionResourceRepo) writeAliases(ctx context.Context, safe []aliasCandidateInput) error {
 	if len(safe) == 0 {
 		return nil
@@ -1435,21 +1530,120 @@ func (r *ExtensionResourceRepo) writeAliases(ctx context.Context, safe []aliasCa
 	}
 
 	aliasPlaceholders := make([]string, len(safe))
-	aliasArgs := make([]any, 0, len(safe)*6)
+	aliasArgs := make([]any, 0, len(safe)*7)
 	for i, c := range safe {
-		aliasPlaceholders[i] = "(?, ?, ?, ?, ?, ?)"
+		aliasPlaceholders[i] = "(?, ?, ?, ?, ?, ?, ?)"
 		aliasArgs = append(aliasArgs,
 			string(c.alias.Namespace), string(c.alias.Key), string(c.alias.Value),
-			string(c.target.Collection()), string(c.target.ID()), c.receivedAt.UTC().Format(time.RFC3339Nano))
+			string(c.target.Collection()), string(c.target.ID()), c.sourceUID.String(), c.receivedAt.UTC().Format(time.RFC3339Nano))
 	}
 	if _, err := r.DB.ExecContext(ctx,
-		fmt.Sprintf(`INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
+		fmt.Sprintf(`INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid, created_at)
 			VALUES %s
-			ON CONFLICT (namespace, key, value) DO NOTHING`, strings.Join(aliasPlaceholders, ", ")),
+			ON CONFLICT (namespace, key, value, source_extension_resource_uid) DO NOTHING`, strings.Join(aliasPlaceholders, ", ")),
 		aliasArgs...); err != nil {
 		return fmt.Errorf("upsert aliases: %w", err)
 	}
+
+	// A contributor legitimately replacing its own value for a key
+	// leaves its old row behind unless explicitly cleaned up here --
+	// the insert above is an unconditional add, not an upsert, since
+	// (namespace, key, value, source_extension_resource_uid) as a
+	// whole is what's unique, not (namespace, key,
+	// source_extension_resource_uid) alone. Scoped by (namespace,
+	// key, source_extension_resource_uid) so this never touches a
+	// sibling contributor's row for the same claim, and NOT IN
+	// the just-written (namespace, key, source_extension_resource_uid,
+	// value) tuples so it never deletes the row(s) this same
+	// statement just inserted -- same shape as batchReplaceLabels's
+	// delete-absent/upsert pair above, just scoped by contributor
+	// instead of by resource alone.
+	scopePlaceholders := make([]string, len(safe))
+	scopeArgs := make([]any, 0, len(safe)*3)
+	keepPlaceholders := make([]string, len(safe))
+	keepArgs := make([]any, 0, len(safe)*4)
+	for i, c := range safe {
+		scopePlaceholders[i] = "(?, ?, ?)"
+		scopeArgs = append(scopeArgs, string(c.alias.Namespace), string(c.alias.Key), c.sourceUID.String())
+		keepPlaceholders[i] = "(?, ?, ?, ?)"
+		keepArgs = append(keepArgs, string(c.alias.Namespace), string(c.alias.Key), c.sourceUID.String(), string(c.alias.Value))
+	}
+	deleteArgs := append(append([]any{}, scopeArgs...), keepArgs...)
+	if _, err := r.DB.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM resource_aliases
+			WHERE (namespace, key, source_extension_resource_uid) IN (%s)
+			  AND (namespace, key, source_extension_resource_uid, value) NOT IN (%s)`,
+			strings.Join(scopePlaceholders, ", "), strings.Join(keepPlaceholders, ", ")),
+		deleteArgs...); err != nil {
+		return fmt.Errorf("retract replaced aliases: %w", err)
+	}
 	return nil
+}
+
+// retractAbsentAliases implements ReplaceInventory's "absence
+// retracts" half of the per-contributor replace contract
+// [domain.InventoryReplacement.Aliases] documents -- see the Postgres
+// sibling's aliasRetractAbsentCTE for the full reasoning, which
+// applies here unchanged: reported carries every (uid, namespace,
+// key) pair originally in this chunk's reports, before
+// checkAliasBatchConsistency's Go-side filtering, so a key rejected
+// as an intra-batch contradiction still counts as "reported" and
+// isn't retracted out from under a good prior value. uids is every
+// resource in the call (including ones with zero reported aliases,
+// whose existing aliases -- if any -- are entirely retracted, per the
+// same "absence means empty" rule labels/conditions already follow).
+// ApplyInventoryDeltas has no counterpart: [domain.InventoryDelta.UpsertAliases]
+// is additive-only, so a delta never calls this for its own upserts
+// (DeleteAliases/ReplaceAliases aren't folded into ApplyInventoryDeltas
+// yet at all -- see its loop building aliasCandidates below).
+func (r *ExtensionResourceRepo) retractAbsentAliases(ctx context.Context, uids []domain.ExtensionResourceUID, reported []resourceAliasKeyByUID) error {
+	if len(uids) == 0 {
+		return nil
+	}
+	uidPlaceholders := make([]string, len(uids))
+	uidArgs := make([]any, len(uids))
+	for i, u := range uids {
+		uidPlaceholders[i] = "?"
+		uidArgs[i] = u.String()
+	}
+	if len(reported) == 0 {
+		_, err := r.DB.ExecContext(ctx,
+			fmt.Sprintf(`DELETE FROM resource_aliases WHERE source_extension_resource_uid IN (%s)`,
+				strings.Join(uidPlaceholders, ", ")),
+			uidArgs...)
+		if err != nil {
+			return fmt.Errorf("retract absent aliases (clear): %w", err)
+		}
+		return nil
+	}
+	keepPlaceholders := make([]string, len(reported))
+	keepArgs := make([]any, 0, len(reported)*3)
+	for i, k := range reported {
+		keepPlaceholders[i] = "(?, ?, ?)"
+		keepArgs = append(keepArgs, k.uid.String(), string(k.ns), string(k.key))
+	}
+	args := append(append([]any{}, uidArgs...), keepArgs...)
+	_, err := r.DB.ExecContext(ctx,
+		fmt.Sprintf(`DELETE FROM resource_aliases
+			WHERE source_extension_resource_uid IN (%s)
+			  AND (source_extension_resource_uid, namespace, key) NOT IN (%s)`,
+			strings.Join(uidPlaceholders, ", "), strings.Join(keepPlaceholders, ", ")),
+		args...)
+	if err != nil {
+		return fmt.Errorf("retract absent aliases: %w", err)
+	}
+	return nil
+}
+
+// resourceAliasKeyByUID is a flattened (contributor, namespace, key)
+// input row for [ExtensionResourceRepo.retractAbsentAliases]'s keep
+// set -- see that method's doc comment for why it's built from every
+// reported alias, not just the ones checkAliasBatchConsistency lets
+// through.
+type resourceAliasKeyByUID struct {
+	uid domain.ExtensionResourceUID
+	ns  domain.AliasNamespace
+	key domain.AliasKey
 }
 
 // ReplaceInventory implements [domain.ExtensionResourceRepository.ReplaceInventory]
@@ -1486,6 +1680,12 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	var conditionKeeps []conditionKey
 	var conditionItems []conditionInput
 	var aliasCandidates []aliasCandidateInput
+	// reportedAliasKeys feeds retractAbsentAliases's keep set and,
+	// unlike aliasCandidates, is never filtered by
+	// checkAliasBatchConsistency -- see retractAbsentAliases's doc
+	// comment for why a candidate this batch goes on to reject must
+	// still count as "reported" for retraction purposes.
+	var reportedAliasKeys []resourceAliasKeyByUID
 
 	for i, rep := range replacements {
 		latestItems[i] = latestRowInput{
@@ -1505,7 +1705,8 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 			})
 		}
 		for _, a := range rep.Aliases {
-			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: rep.Name, alias: a, receivedAt: rep.ReceivedAt})
+			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: rep.Name, alias: a, receivedAt: rep.ReceivedAt, sourceUID: uids[i]})
+			reportedAliasKeys = append(reportedAliasKeys, resourceAliasKeyByUID{uid: uids[i], ns: a.Namespace, key: a.Key})
 		}
 	}
 
@@ -1527,6 +1728,9 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		return nil, fmt.Errorf("replace inventory: %w", err)
 	}
 	if err := r.writeAliases(ctx, safeAliases); err != nil {
+		return nil, fmt.Errorf("replace inventory: %w", err)
+	}
+	if err := r.retractAbsentAliases(ctx, uids, reportedAliasKeys); err != nil {
 		return nil, fmt.Errorf("replace inventory: %w", err)
 	}
 	return conflicts, nil
@@ -1590,8 +1794,12 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 		for _, t := range d.DeleteConditions {
 			deleteConditions = append(deleteConditions, conditionKey{uid: uids[i], condType: t})
 		}
-		for _, a := range d.Aliases {
-			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: d.Name, alias: a, receivedAt: d.ReceivedAt})
+		// DeleteAliases/ReplaceAliases are not yet folded in here --
+		// see [domain.InventoryDelta]'s doc for the target contract
+		// and extensionresourcerepotest's delta alias tests, which
+		// pin it down ahead of this landing.
+		for _, a := range d.UpsertAliases {
+			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: d.Name, alias: a, receivedAt: d.ReceivedAt, sourceUID: uids[i]})
 		}
 	}
 

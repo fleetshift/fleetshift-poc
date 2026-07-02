@@ -211,6 +211,33 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 	return Alias{Namespace: ns, Key: key, Value: value}, nil
 }
 
+// AliasRef identifies one of an extension resource's own alias
+// contributions for removal (see [InventoryDelta.DeleteAliases]), by
+// (namespace, key) alone -- no value. A single extension resource
+// never holds two different values for the same (namespace, key) at
+// once (see [AliasConflictResourceHasDifferentValue]), so (namespace,
+// key) alone unambiguously identifies which of its own contributions
+// to retract -- the same way [InventoryDelta.DeleteLabels] identifies
+// a label to remove by key alone, with no need for its current value.
+//
+// Construct with [NewAliasRef] to enforce invariants.
+type AliasRef struct {
+	Namespace AliasNamespace
+	Key       AliasKey
+}
+
+// NewAliasRef validates and returns an [AliasRef]. Both fields must be
+// non-empty.
+func NewAliasRef(ns AliasNamespace, key AliasKey) (AliasRef, error) {
+	if ns == "" {
+		return AliasRef{}, fmt.Errorf("alias namespace: %w: must not be empty", ErrInvalidArgument)
+	}
+	if key == "" {
+		return AliasRef{}, fmt.Errorf("alias key: %w: must not be empty", ErrInvalidArgument)
+	}
+	return AliasRef{Namespace: ns, Key: key}, nil
+}
+
 // NewResourceName constructs a [ResourceName] from a collection and
 // resource ID.
 func NewResourceName(collection CollectionName, id ResourceID) (ResourceName, error) {
