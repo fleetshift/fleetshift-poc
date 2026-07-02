@@ -233,7 +233,9 @@ Examples:
 - `sig-multicluster/cluster-id:550e8400-e29b-41d4-a716-446655440000`
 - `acs/cluster-id:acs-12345`
 
-Aliases are **additive and immutable once set**: within a given `(namespace, key)` pair, a value maps to exactly one resource and a resource has exactly one value — a true bijection. A second report attempting to change either side of that mapping is a conflict, not an update; nothing ever overwrites an existing alias row. This is enforced by a pair of database uniqueness constraints (one keyed on value, one keyed on resource) rather than an application-level read-modify-write, since aliases are only ever registered alongside a write the system already has to make (an inventory report or a managed-resource create) and never require resolving the platform identity first.
+Many different extension resources can represent the same platform resource at once — one per addon is the common case (see Representations, below). Aliases are contributed **per extension resource, on a replace basis, but additive across the extension resources that represent the same name**: each contributor's alias set for a report is its complete current contribution — an alias it stops reporting, or that it stops existing to report at all (its extension resource is deleted, exactly like a representation disappearing), is retracted, unless another contributor representing the same name is still asserting it — while different contributors are free to add different aliases, or even agree on the very same one, without conflict. What remains a conflict is contributors *disagreeing*: two contributors for the same name asserting different values for the same `(namespace, key)`, or two contributors resolving to different names asserting the very same `(namespace, key, value)`. See Conflict detection, below.
+
+> Not yet implemented: today's repository implementations still treat aliases as immutable once set, with no per-contributor distinction — any value change is rejected outright, and nothing is ever retracted. The contract above is the target; `extensionresourcerepotest`'s multi-contributor alias tests pin it down ahead of the implementation change.
 
 ### Conflict detection
 
@@ -241,8 +243,8 @@ Multiple extensions defining the same resource name is expected and correct — 
 
 Conflicts arise from:
 
-- **Value claimed by a different resource**: extension A asserts `clusters/foo` has `kube-system-ns-uid=1` while extension B asserts `clusters/bar` also has `kube-system-ns-uid=1`.
-- **Resource has a different value for the same key**: a resource that already has `kube-system-ns-uid=1` on file is later reported with `kube-system-ns-uid=2` for the same key — rejected, not replaced, since aliases are immutable once set.
+- **Value claimed by a different resource**: extension A asserts `clusters/foo` has `kube-system-ns-uid=1` while extension B asserts `clusters/bar` also has `kube-system-ns-uid=1` — regardless of which extension resource(s) contributed either claim.
+- **Resource has a different value for the same key**: an extension resource representing `clusters/foo` already has `kube-system-ns-uid=1` on file, and a *different* extension resource also representing `clusters/foo` reports `kube-system-ns-uid=2` for the same key — rejected. This does not fire when the same extension resource that originally set `kube-system-ns-uid=1` reports a new value itself; that's a replace of its own contribution, not a conflict, unless another extension resource representing `clusters/foo` is still asserting the old value.
 - **Unauthorized identity claims**: an extension attempts to claim a resource name without authorization.
 - **Multiple identity binding**: an extension resource attempts to bind to multiple platform identities.
 
