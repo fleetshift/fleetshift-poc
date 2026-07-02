@@ -123,11 +123,18 @@ type InventoryDeltaBatchInput struct {
 // InventoryDeltaInput describes incremental, field-level changes to a
 // single extension resource's inventory state, identified by resource
 // type plus name and/or aliases (never by [domain.ExtensionResourceUID]).
+// Alias identity for *resolving* the report (when Name is nil) is
+// drawn from UpsertAliases/ReplaceAliases only -- see
+// [reportIdentity]'s construction in ApplyDeltaBatch -- since
+// DeleteAliases's whole point is identifying a contribution to retract
+// by (namespace, key) alone, with no value to resolve by.
 //
 // Fields left at their zero value are unchanged: SetLabels/DeleteLabels
 // only touch the named keys, and UpsertConditions/DeleteConditions only
 // touch the named condition types. A delta with no field-level changes
-// is a valid heartbeat that still bumps resource-level freshness.
+// is a valid heartbeat that still bumps resource-level freshness. See
+// [domain.InventoryDelta]'s doc for the full Upsert/Delete/Replace
+// alias contract this passes straight through.
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacementInput.Observation]: nil, or non-nil pointing to
@@ -137,7 +144,10 @@ type InventoryDeltaBatchInput struct {
 type InventoryDeltaInput struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
-	Aliases      []domain.Alias
+
+	UpsertAliases  []domain.Alias
+	DeleteAliases  []domain.AliasRef
+	ReplaceAliases []domain.Alias
 
 	SetLabels    map[string]string
 	DeleteLabels []string
@@ -256,7 +266,7 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 			identities[i] = reportIdentity{
 				ResourceType: report.ResourceType,
 				Name:         report.Name,
-				Aliases:      report.Aliases,
+				Aliases:      deltaIdentityAliases(report),
 			}
 		}
 		targets, err := res.resolveBatch(ctx, identities, start)
@@ -270,7 +280,9 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 				ResourceType:     report.ResourceType,
 				Name:             targets[i],
 				CandidateUID:     domain.NewExtensionResourceUID(),
-				Aliases:          report.Aliases,
+				UpsertAliases:    report.UpsertAliases,
+				DeleteAliases:    report.DeleteAliases,
+				ReplaceAliases:   report.ReplaceAliases,
 				SetLabels:        report.SetLabels,
 				DeleteLabels:     report.DeleteLabels,
 				Observation:      report.Observation,
@@ -318,11 +330,32 @@ func rejectAliasConflicts(conflicts []domain.AliasConflict) error {
 // contract stay backed by exactly one implementation.
 func validateDeltaReport(report InventoryDeltaInput) error {
 	return domain.ValidateInventoryDelta(domain.InventoryDelta{
+		UpsertAliases:    report.UpsertAliases,
+		DeleteAliases:    report.DeleteAliases,
+		ReplaceAliases:   report.ReplaceAliases,
 		SetLabels:        report.SetLabels,
 		DeleteLabels:     report.DeleteLabels,
 		UpsertConditions: report.UpsertConditions,
 		DeleteConditions: report.DeleteConditions,
 	})
+}
+
+// deltaIdentityAliases returns the aliases eligible to resolve
+// report's target when Name is nil: UpsertAliases and ReplaceAliases,
+// both of which assert a (namespace, key, value) triple a resource can
+// be looked up by, but never DeleteAliases -- an [domain.AliasRef] has
+// no value to resolve by, precisely because retracting a contribution
+// doesn't require knowing it (see [domain.AliasRef]'s doc). A delta
+// that only wants to retract an alias must identify its target by
+// Name.
+func deltaIdentityAliases(report InventoryDeltaInput) []domain.Alias {
+	if len(report.ReplaceAliases) == 0 {
+		return report.UpsertAliases
+	}
+	out := make([]domain.Alias, 0, len(report.UpsertAliases)+len(report.ReplaceAliases))
+	out = append(out, report.UpsertAliases...)
+	out = append(out, report.ReplaceAliases...)
+	return out
 }
 
 // forEachReportChunk calls fn once per contiguous chunk of at most

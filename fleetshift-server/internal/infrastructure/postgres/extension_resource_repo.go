@@ -867,15 +867,18 @@ func checkAliasBatchConsistency(candidates []aliasCandidateInput) (safe []aliasC
 // them is already sitting in Go memory (the same rep.Name/d.Name and
 // rep.ReceivedAt/d.ReceivedAt that populated input_er's own arrays for
 // this idx), so passing them again here is cheaper than making
-// input_aliases join er by idx to fetch values er itself only ever
-// passed through from input_er unchanged. An EXPLAIN of the version
-// that did join er (see inventory_bench_test.go's UpdateWithAlias
-// benchmark) showed that join costing ~8ms of a ~70ms statement at
-// batch=1000 -- and paying it twice, once for each of
-// alias_prev_by_resource/alias_resource_check's references, since a
-// plain scan of input_aliases's UNNEST is cheap enough that Postgres
-// no longer has any real materialization cost to amortize across
-// those two references.
+// input_aliases join er by idx a second time to fetch values er
+// itself only ever passed through from input_er unchanged.
+//
+// The one value that can't ride along this way is source_uid:
+// unlike those three, a candidate's owning extension_resources.uid
+// isn't necessarily known in Go memory yet at the time this array is
+// built -- resolved_er may still be about to generate it, lazily, for
+// a genuinely new resource (see [domain.InventoryReplacement.CandidateUID]'s
+// doc for why that's a candidate, not a guarantee) -- so input_aliases
+// does still join er by idx once, purely for that column. See
+// aliasFoldCTEs's doc comment for why source_uid is needed at all now
+// that it wasn't before.
 func flattenAliasCandidates(candidates []aliasCandidateInput) (idx []int32, namespaces, keys, values, collectionNames, resourceIDs []string, receivedAts []time.Time) {
 	idx = make([]int32, len(candidates))
 	namespaces = make([]string, len(candidates))
@@ -926,45 +929,60 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 
 // aliasFoldCTEs is the alias fold-in shared verbatim by
 // replaceInventorySQL and applyInventoryDeltasSQL: it must appear
-// after a statement's input_aliases CTE and before its final SELECT.
-// Unlike the rest of the merged inventory statement, nothing here
-// depends on er/resolved_er at all -- see input_aliases's own doc
-// comment (next to replaceInventorySQLWithAliases/
-// applyInventoryDeltasSQLWithAliases) for why aliases correlate to
-// platform_resources/resource_aliases by natural key alone, with no
-// need for the extension resource's own uid.
+// after a statement's input_aliases CTE and before its final SELECT
+// (replaceInventorySQL appends its own extra fragment after this one
+// too -- see aliasRetractAbsentCTE's doc comment). Unlike the rest of
+// this file's aliasCandidateInput plumbing, input_aliases *does* join
+// er by idx, for source_uid -- see flattenAliasCandidates's doc
+// comment for why that join, once deliberately avoided, is now
+// required.
 //
-// resource_aliases has two unique indexes (see the migration's doc
-// comment): (namespace, key, value) and (namespace, key,
-// platform_collection_name, platform_resource_id). checkAliasBatchConsistency
-// has already ruled out an intra-batch collision against either, so
-// every remaining conflict source is a pre-existing resource_aliases
-// row. This fold-in classifies every candidate against both indexes,
-// by reading, before writing anything -- in an order chosen around
-// which outcome is common: most reports re-send the same alias they
-// sent last time, and classify-before-write turns that into a single
-// read with no write at all, rather than a write whose own conflict
-// machinery discovers afterward that it was a no-op.
+// resource_aliases enforces two invariants regardless of contributor
+// (see the migration's doc comment): (namespace, key, value) can't be
+// claimed by two different resources, and a resource can't be given
+// two different values for the same (namespace, key). A contributor
+// can, however, freely replace *its own* prior contribution -- see
+// [domain.InventoryReplacement.Aliases]'s doc for the full contract.
+// checkAliasBatchConsistency has already ruled out an intra-batch
+// collision against either invariant, so every remaining conflict
+// source is a pre-existing resource_aliases row from a *different*
+// contributor. This fold-in classifies every candidate by reading,
+// before writing anything -- in an order chosen around which outcome
+// is common: most reports re-send the same alias they sent last time,
+// and classify-before-write turns that into a single read with no
+// write at all, rather than a write whose own conflict machinery
+// discovers afterward that it was a no-op.
 //
 // Phase 1 (alias_prev_by_value) reads by (namespace, key, value) --
 // the *reported* value -- for every candidate, answering "does this
-// exact alias already exist, and for whom" in one pass. That splits
-// candidates three ways: alias_value_conflicts (the value exists, for
-// a *different* target -- AliasConflictValueClaimedByOther, resolved
-// without ever touching ensure_platform, alias_upsert, or the second
-// index); a true no-op (the value exists for *this* target already --
-// absent from every CTE from here on, never reaching a write); and
-// alias_value_missing (the value doesn't exist anywhere yet), the
-// only group phase 2 needs to look at.
+// exact alias already exist, for whom, and is one of its rows mine"
+// in one pass. That splits candidates three ways: alias_value_conflicts
+// (the value exists, for a *different* target --
+// AliasConflictValueClaimedByOther, resolved without ever touching
+// phase 2, ensure_platform, or alias_upsert); alias_matches_target
+// (the value already exists for *this* target, whether from me
+// already -- a true no-op -- or from a sibling contributor I'm now
+// corroborating -- both go straight to alias_accepted, since neither
+// can possibly violate either invariant); and alias_value_missing
+// (the value doesn't exist anywhere yet), the only group phase 2
+// needs to look at.
 //
 // Phase 2 (alias_resource_check) reads by (namespace, key,
 // platform_collection_name, platform_resource_id) -- this target's
-// own row for the key -- but only for alias_value_missing candidates.
-// Since phase 1 already proved this exact value doesn't exist
-// anywhere, a match here can only be a *different* value already
-// registered for this target/key: the other index's conflict shape,
-// AliasConflictResourceHasDifferentValue (alias_resource_conflicts).
-// No match at all (alias_safe) means the candidate is genuinely new.
+// own row(s) for the key, from any contributor -- but only for
+// alias_value_missing candidates. Since phase 1 already proved this
+// exact value doesn't exist anywhere, a match here can only be a
+// *different* value already registered for this target/key. Whether
+// that's a conflict now turns on who holds it: sibling_holds (true if
+// any matching row belongs to a contributor other than the candidate's
+// own) distinguishes a genuine cross-contributor disagreement
+// (alias_resource_conflicts, AliasConflictResourceHasDifferentValue)
+// from a contributor legitimately replacing a value only it ever
+// held (alias_safe, alongside the case where no row exists at all).
+// GROUP BY value collapses what could otherwise be multiple rows --
+// one per contributor -- sharing this (namespace, key, resource) back
+// down to at most one, since the invariant above guarantees they all
+// agree on value regardless of contributor count.
 //
 // Both phases fold their existence check directly into a LEFT JOIN
 // LATERAL against the candidate relation (alias_prev_by_value against
@@ -979,23 +997,31 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // match, silently mixing up which lookup belongs to which alias.
 // Folding the check into the same row via LATERAL keeps every derived
 // CTE 1:1 with its input, so no re-join -- and no idx collision -- is
-// ever needed. (alias_leftover_owner, further down, exists for the
-// same reason.)
+// ever needed.
 //
-// Only alias_safe (alias_value_missing rows phase 2 found no existing
-// row for) ever reaches ensure_platform or alias_upsert: lazily
-// upserting the (uid-less) platform_resources row for every name in
-// alias_safe -- see resource_identity_repo.go's virtual-resource doc
-// -- then the alias itself. alias_upsert still needs its own guarded
-// DO UPDATE and post-write diagnosis (alias_leftover,
-// alias_leftover_owner) despite phase 1 already having proved this
-// value didn't exist at read time: a concurrent session could insert
-// the same (namespace, key, value) between that read and this write.
-// The guard -- a no-op write-back of the row's own current owner,
-// distinguishing "raced but same owner" from "raced, different owner"
-// via RETURNING alone, with no read before the INSERT runs --
-// together with the leftover-diagnosis tail now exists purely to
-// handle that (rare) race, not the common case anymore.
+// alias_accepted unions everything phases 1 and 2 cleared --
+// alias_matches_target and alias_safe -- into the one relation
+// ensure_platform, alias_upsert, and del_aliases_replaced all read
+// from: lazily upserting the (uid-less) platform_resources row for
+// every name in alias_accepted -- see resource_identity_repo.go's
+// virtual-resource doc -- then the alias itself, then cleaning up any
+// stale row this exact contributor held under the same key with a
+// different value (a genuine replace, not a fresh claim). Unlike the
+// design this replaced, alias_upsert no longer needs a guarded DO
+// UPDATE or post-write conflict diagnosis: (namespace, key, value,
+// source_extension_resource_uid) is now the row's actual identity, so
+// a same-statement race against a *different* contributor's row can
+// only violate one of the two EXCLUDE constraints below -- a hard
+// error rather than a graceful [domain.AliasConflict], accepted here
+// as a rare-in-practice trade-off given how narrow the race window is
+// (this fold-in's own reads already rule out every conflict phases 1
+// and 2 can see). del_aliases_replaced's own DELETE ... USING
+// alias_accepted, by contrast, is exactly the same-statement,
+// same-contributor case the migration's EXCLUDE constraints document
+// being DEFERRABLE INITIALLY DEFERRED for: the delete and the insert
+// both land in this one statement, so the constraint check has to
+// wait until both have happened before it can tell whether a
+// genuine violation remains.
 //
 // Every LATERAL here uses OFFSET 0, which is load-bearing, not
 // decorative: without it, Postgres "de-correlates" a LATERAL whose
@@ -1006,43 +1032,42 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // what pushes it to a per-candidate indexed nested loop instead of a
 // seq-scan-and-hash-join (its row-count guess for a CTE is a flat,
 // disconnected-from-real-stats default that otherwise steers it the
-// other way at this corpus size).
+// other way at this corpus size). alias_prev_by_value's LATERAL
+// additionally needs ORDER BY is_mine DESC LIMIT 1 ahead of that
+// OFFSET 0, to prefer a row belonging to the candidate's own
+// contributor over some other contributor's row when both exist for
+// the very same (namespace, key, value) -- see alias_matches_target's
+// doc above for why that distinction doesn't actually matter to this
+// fold-in's own branching (both are safe), but it does matter to
+// del_aliases_replaced downstream, which needs is_mine implicitly via
+// source_uid rather than actual_collection_name/actual_resource_id.
 //
-// (An earlier version routed input_aliases through an alias_candidates
-// CTE that joined er by idx purely to fetch collection_name/
-// resource_id/received_at -- values er itself only ever passed
-// through from input_er unchanged, and so already sitting in Go
-// memory at the exact call site that builds input_aliases's arrays.
-// An EXPLAIN of that version (see inventory_bench_test.go's
-// UpdateWithAlias benchmark) showed alias_candidates costing as much
-// to scan a second time, in what's now alias_resource_check, as it
-// cost to compute in the first place, even though it's a plain
-// materialized CTE and Postgres's docs promise a WITH query "is
-// evaluated only once ... even if referred to more than once" --
-// empirically, on this corpus size, joining er was expensive enough
-// that even a single extra reference wasn't free. Passing those three
-// columns as part of input_aliases itself, per flattenAliasCandidates's
-// doc comment, removed the join -- and the CTE -- entirely rather
-// than trying to amortize its cost. A later EXPLAIN of the version
-// that came before this one -- a single read-by-resource-first phase,
-// with no equivalent of phase 1 above -- showed alias_upsert's
-// guarded DO UPDATE doing a real per-row tuple rewrite and index
-// update for every steady-state re-report even though nothing had
-// changed, accounting for roughly a fifth of the whole statement's
-// time on its own. Reading by value first, as phases 1 and 2 above
-// now do, is what lets that common case skip the write -- both
-// ensure_platform and alias_upsert -- rather than just detecting
-// after the fact that it didn't need one.)
+// This is a genuine cost regression from the single-contributor design
+// it replaced (see this file's git history for that version's own
+// EXPLAIN-driven notes): that design could skip input_aliases's join
+// to er entirely, since resource_aliases had no notion of contributor
+// to correlate against. Supporting per-contributor replace requires
+// knowing each candidate's *persistent* extension_resources.uid --
+// not the ephemeral, freshly-generated CandidateUID a caller supplies
+// on every call (see [domain.InventoryReplacement.CandidateUID]'s
+// doc) -- which only er's own natural-key resolution produces. A
+// follow-up benchmark should re-measure this fold-in's cost now that
+// the join is back, and revisit whether the earlier
+// resource-type-declares-no-aliases optimization (deferred during
+// this design's own review) is worth reconsidering to recover it for
+// the common case.
 const aliasFoldCTEs = `
 alias_prev_by_value AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at,
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ac.source_uid,
 	       ra.actual_collection_name, ra.actual_resource_id
 	FROM input_aliases ac
 	LEFT JOIN LATERAL (
-		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id
+		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id,
+		       (source_extension_resource_uid = ac.source_uid) AS is_mine
 		FROM resource_aliases
 		WHERE namespace = ac.namespace AND key = ac.key AND value = ac.value
-		OFFSET 0
+		ORDER BY is_mine DESC
+		LIMIT 1 OFFSET 0
 	) ra ON true
 ),
 alias_value_conflicts AS (
@@ -1051,75 +1076,76 @@ alias_value_conflicts AS (
 	WHERE actual_collection_name IS NOT NULL
 	  AND (actual_collection_name <> collection_name OR actual_resource_id <> resource_id)
 ),
+alias_matches_target AS (
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
+	FROM alias_prev_by_value
+	WHERE actual_collection_name IS NOT NULL
+	  AND actual_collection_name = collection_name AND actual_resource_id = resource_id
+),
 alias_value_missing AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
 	FROM alias_prev_by_value
 	WHERE actual_collection_name IS NULL
 ),
 alias_resource_check AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ra.existing_value
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ac.source_uid,
+	       ra.existing_value, ra.sibling_holds
 	FROM alias_value_missing ac
 	LEFT JOIN LATERAL (
-		SELECT value AS existing_value FROM resource_aliases
+		SELECT value AS existing_value, bool_or(source_extension_resource_uid <> ac.source_uid) AS sibling_holds
+		FROM resource_aliases
 		WHERE namespace = ac.namespace AND key = ac.key
 		  AND platform_collection_name = ac.collection_name AND platform_resource_id = ac.resource_id
+		GROUP BY value
 		OFFSET 0
 	) ra ON true
 ),
 alias_safe AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
 	FROM alias_resource_check
-	WHERE existing_value IS NULL
+	WHERE existing_value IS NULL OR NOT sibling_holds
 ),
 alias_resource_conflicts AS (
 	SELECT idx, namespace, key, value, existing_value
 	FROM alias_resource_check
-	WHERE existing_value IS NOT NULL
+	WHERE existing_value IS NOT NULL AND sibling_holds
+),
+alias_accepted AS (
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid FROM alias_matches_target
+	UNION ALL
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid FROM alias_safe
 ),
 ensure_platform AS (
 	INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
 	SELECT DISTINCT collection_name, resource_id, '{}'::jsonb, received_at, received_at
-	FROM alias_safe
+	FROM alias_accepted
 	ON CONFLICT (collection_name, resource_id) DO NOTHING
 	RETURNING 1
 ),
 alias_upsert AS (
-	INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
-	SELECT DISTINCT namespace, key, value, collection_name, resource_id, received_at
-	FROM alias_safe
-	ON CONFLICT (namespace, key, value) DO UPDATE SET
-		platform_collection_name = EXCLUDED.platform_collection_name,
-		platform_resource_id = EXCLUDED.platform_resource_id
-	WHERE resource_aliases.platform_collection_name = EXCLUDED.platform_collection_name
-	  AND resource_aliases.platform_resource_id = EXCLUDED.platform_resource_id
-	RETURNING namespace, key, value
+	INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid, created_at)
+	SELECT DISTINCT namespace, key, value, collection_name, resource_id, source_uid, received_at
+	FROM alias_accepted
+	ON CONFLICT (namespace, key, value, source_extension_resource_uid) DO NOTHING
+	RETURNING 1
 ),
-alias_leftover AS (
-	SELECT ac.*
-	FROM alias_safe ac
-	LEFT JOIN alias_upsert au ON au.namespace = ac.namespace AND au.key = ac.key AND au.value = ac.value
-	WHERE au.value IS NULL
-),
-alias_leftover_owner AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ra.actual_collection_name, ra.actual_resource_id
-	FROM alias_leftover ac
-	JOIN LATERAL (
-		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id
-		FROM resource_aliases
-		WHERE namespace = ac.namespace AND key = ac.key AND value = ac.value
-		OFFSET 0
-	) ra ON true
+del_aliases_replaced AS (
+	DELETE FROM resource_aliases ra
+	USING alias_accepted aa
+	WHERE ra.source_extension_resource_uid = aa.source_uid
+	  AND ra.namespace = aa.namespace AND ra.key = aa.key
+	  AND ra.value <> aa.value
+	RETURNING 1
 )`
 
 // aliasConflictSelect is the final SELECT shared verbatim by
 // replaceInventorySQL and applyInventoryDeltasSQL, appended after
-// aliasFoldCTEs. Three branches, one per conflict source:
-// alias_value_conflicts (phase 1, read-by-value) and
-// alias_leftover_owner (discovered only after alias_upsert's guarded
-// write actually raced) are both AliasConflictValueClaimedByOther;
+// aliasFoldCTEs (and, for replaceInventorySQL, aliasRetractAbsentCTE).
+// Two branches, one per conflict source: alias_value_conflicts
+// (phase 1, read-by-value) is AliasConflictValueClaimedByOther;
 // alias_resource_conflicts (phase 2, read-by-resource) is
-// AliasConflictResourceHasDifferentValue. A candidate matching none
-// of the three (the common case) is absent from the result entirely.
+// AliasConflictResourceHasDifferentValue. A candidate matching
+// neither (the common case) is absent from the result entirely.
 const aliasConflictSelect = `
 SELECT idx, namespace, key, value,
        actual_collection_name, actual_resource_id, NULL::text AS actual_value
@@ -1127,17 +1153,51 @@ FROM alias_value_conflicts
 UNION ALL
 SELECT idx, namespace, key, value,
        NULL::text AS actual_collection_name, NULL::text AS actual_resource_id, existing_value AS actual_value
-FROM alias_resource_conflicts
-UNION ALL
-SELECT idx, namespace, key, value,
-       actual_collection_name, actual_resource_id, NULL::text AS actual_value
-FROM alias_leftover_owner`
+FROM alias_resource_conflicts`
+
+// aliasRetractAbsentCTE is replaceInventorySQL's own addition after
+// aliasFoldCTEs, implementing the "absence = removal" half of
+// [domain.InventoryReplacement.Aliases]'s per-contributor replace
+// contract that applyInventoryDeltasSQL deliberately doesn't share
+// for its own UpsertAliases (see [domain.InventoryDelta]'s doc --
+// UpsertAliases never retracts; ReplaceAliases would need this same
+// treatment, but doesn't have it yet either).
+// input_reported_alias_keys carries every (idx, namespace,
+// key) pair originally in this chunk's reports, *before*
+// checkAliasBatchConsistency's Go-side filtering -- not
+// input_aliases, which only has the survivors. A key
+// checkAliasBatchConsistency rejected as an intra-batch contradiction
+// was still reported, just not written; deleting the target's
+// existing row for it here, on top of that rejection, would make one
+// bad candidate in a batch destroy state a good one never touched --
+// exactly the kind of interference PartialConflictInMultiAliasReportStillAppliesTheRest
+// and friends exist to rule out. This mirrors del_labels_absent
+// (replaceInventoryCoreCTEs) exactly in shape, just scoped by
+// (namespace, key) instead of a single label key, and by contributor
+// (source_extension_resource_uid) instead of directly by uid -- same
+// thing, since a contributor's rows are always its own
+// extension_resources.uid, but named for what it means here.
+const aliasRetractAbsentCTE = `,
+input_reported_alias_keys(idx, namespace, key) AS (
+	SELECT * FROM UNNEST($28::int[], $29::text[], $30::text[])
+),
+del_aliases_absent AS (
+	DELETE FROM resource_aliases ra
+	USING er e
+	WHERE ra.source_extension_resource_uid = e.uid
+	  AND NOT EXISTS (
+	    SELECT 1 FROM input_reported_alias_keys irk
+	    WHERE irk.idx = e.idx AND irk.namespace = ra.namespace AND irk.key = ra.key
+	  )
+	RETURNING 1
+)`
 
 // replaceInventoryCoreCTEs is the natural-key resolve-or-create +
-// latest-row + label + condition pipeline shared by
-// replaceInventorySQLWithAliases and replaceInventorySQLNoAliases --
+// latest-row + label + condition pipeline underlying replaceInventorySQL --
 // everything ReplaceInventory needs regardless of whether this
-// chunk's replacements carry any aliases. input_er/resolved_er/er
+// chunk's replacements carry any aliases (see replaceInventorySQL's
+// own doc comment for why, unlike applyInventoryDeltasCoreCTEs below,
+// there's no separate alias-free variant here). input_er/resolved_er/er
 // resolve-or-create every replacement's extension_resources row by
 // natural key (see this section's doc comment); upsert_inv/hist_obs
 // write the latest row and its change-guarded observation history;
@@ -1145,11 +1205,10 @@ FROM alias_leftover_owner`
 // latest label set"; del_conditions_absent/upsert_conditions/
 // hist_conditions implement the same for conditions plus
 // change-guarded transition history. Deliberately has no trailing
-// comma after hist_conditions's closing paren -- each of the two
-// callers below supplies its own continuation (either straight into
-// aliasFoldCTEs, or straight into a no-op terminal SELECT).
-// Placeholder count is fixed (20) regardless of chunk size -- only
-// the array arguments grow.
+// comma after hist_conditions's closing paren -- replaceInventorySQL
+// supplies its own continuation straight into input_aliases/
+// aliasFoldCTEs. Placeholder count is fixed (20) regardless of chunk
+// size -- only the array arguments grow.
 const replaceInventoryCoreCTEs = `
 WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, observed_at, received_at, obs_hist_id) AS (
 	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::timestamptz[], $9::timestamptz[], $10::text[])
@@ -1250,47 +1309,36 @@ hist_conditions AS (
 	RETURNING 1
 )`
 
-// replaceInventorySQLWithAliases is ReplaceInventory's single
-// statement for a chunk containing at least one alias to fold in:
-// replaceInventoryCoreCTEs, plus an input_aliases CTE (placeholders
-// $21-$27) feeding aliasFoldCTEs/aliasConflictSelect. input_aliases
-// carries collection_name/resource_id/received_at alongside each
-// alias despite those being per-report rather than per-alias values --
-// see flattenAliasCandidates's doc comment for why duplicating them
-// here, straight from the same Go-side values input_er's own arrays
-// use, is cheaper than making aliasFoldCTEs join er by idx to fetch
-// them.
-const replaceInventorySQLWithAliases = replaceInventoryCoreCTEs + `,
-input_aliases(idx, namespace, key, value, collection_name, resource_id, received_at) AS (
-	SELECT * FROM UNNEST($21::int[], $22::text[], $23::text[], $24::text[], $25::text[], $26::text[], $27::timestamptz[])
+// replaceInventorySQL is ReplaceInventory's single statement,
+// covering every chunk regardless of whether its reports carry any
+// aliases: replaceInventoryCoreCTEs, an input_aliases CTE
+// (placeholders $21-$27) joining er by idx for source_uid (see
+// flattenAliasCandidates's doc comment for why), feeding
+// aliasFoldCTEs, then aliasRetractAbsentCTE (placeholders $28-$30)
+// for the "absence retracts" half of the replace contract, then
+// aliasConflictSelect. Unlike applyInventoryDeltasSQLWithAliases/
+// applyInventoryDeltasSQLNoAliases, there is deliberately no
+// alias-free fast-path variant here: aliasRetractAbsentCTE's
+// del_aliases_absent has to run even for a chunk whose reports supply
+// zero aliases, since under replace semantics an empty Aliases field
+// is itself meaningful -- it means "this resource has no aliases now"
+// -- and must still retract whatever that resource held before. See
+// aliasRetractAbsentCTE's own doc comment for the rest of that
+// reasoning, and its note on a possible future fast path for resource
+// types declared to never carry aliases at all.
+const replaceInventorySQL = replaceInventoryCoreCTEs + `,
+input_aliases AS (
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
+	FROM UNNEST($21::int[], $22::text[], $23::text[], $24::text[], $25::text[], $26::text[], $27::timestamptz[])
+	     AS ac(idx, namespace, key, value, collection_name, resource_id, received_at)
+	JOIN er e ON e.idx = ac.idx
 ),
-` + aliasFoldCTEs + aliasConflictSelect
-
-// replaceInventorySQLNoAliases is ReplaceInventory's single statement
-// for a chunk with no aliases left to fold in (either because none of
-// its reports supplied any, or because every candidate was already
-// rejected in Go by checkAliasBatchConsistency) -- just
-// replaceInventoryCoreCTEs, skipping input_aliases/aliasFoldCTEs/
-// aliasConflictSelect entirely. This is the overwhelming common case
-// (most resource types report no aliases at all), so avoiding five
-// CTEs' worth of joins and two conditional inserts against an input
-// that would otherwise always be empty is worth a second statement
-// variant. The trailing SELECT is a required terminal statement for
-// the WITH clause -- ReplaceInventory never scans it -- and is safe
-// to leave disconnected from the CTEs above it: per the Postgres
-// manual's "Data-Modifying Statements in WITH" section, such
-// statements "are executed exactly once, and always to completion,
-// independently of whether the primary query reads all (or indeed
-// any) of their output," so resolved_er/upsert_inv/hist_obs/etc. all
-// still run even though nothing here selects from them.
-const replaceInventorySQLNoAliases = replaceInventoryCoreCTEs + `
-SELECT 1 WHERE FALSE`
+` + aliasFoldCTEs + aliasRetractAbsentCTE + aliasConflictSelect
 
 // ReplaceInventory implements [domain.ExtensionResourceRepository.ReplaceInventory]
-// as one round trip for the whole chunk: replaceInventorySQLWithAliases
-// or replaceInventorySQLNoAliases, depending on whether this chunk has
-// any aliases left to fold in after checkAliasBatchConsistency. See
-// this section's doc comment for what those statements do and why.
+// as one round trip for the whole chunk via replaceInventorySQL. See
+// that constant's doc comment for what it does and why it has no
+// alias-free fast path the way ApplyInventoryDeltas does.
 func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacements []domain.InventoryReplacement) ([]domain.AliasConflict, error) {
 	if len(replacements) == 0 {
 		return nil, nil
@@ -1315,6 +1363,14 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	var condLastTransitions []time.Time
 	var condHistIDs []string
 	var aliasCandidates []aliasCandidateInput
+	// reportedAlias{Idx,Namespaces,Keys} feed aliasRetractAbsentCTE's
+	// input_reported_alias_keys and, unlike aliasCandidates, are
+	// never filtered by checkAliasBatchConsistency -- see
+	// aliasRetractAbsentCTE's doc comment for why a candidate this
+	// batch goes on to reject must still count as "reported" for
+	// retraction purposes.
+	var reportedAliasIdx []int32
+	var reportedAliasNamespaces, reportedAliasKeys []string
 
 	for i, rep := range replacements {
 		idx[i] = int32(i)
@@ -1347,37 +1403,27 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		}
 		for _, a := range rep.Aliases {
 			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: rep.Name, alias: a, receivedAt: receivedAts[i]})
+			reportedAliasIdx = append(reportedAliasIdx, int32(i))
+			reportedAliasNamespaces = append(reportedAliasNamespaces, string(a.Namespace))
+			reportedAliasKeys = append(reportedAliasKeys, string(a.Key))
 		}
 	}
 
 	safeAliases, conflicts := checkAliasBatchConsistency(aliasCandidates)
+	aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts := flattenAliasCandidates(safeAliases)
 
-	var rows *sql.Rows
-	var err error
-	if len(safeAliases) > 0 {
-		aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts := flattenAliasCandidates(safeAliases)
-		rows, err = r.DB.QueryContext(ctx, replaceInventorySQLWithAliases,
-			idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs, observations, observedAts, receivedAts, obsHistIDs,
-			labelIdx, labelKeys, labelValues,
-			condIdx, condTypes, condStatuses, condReasons, condMessages, condLastTransitions, condHistIDs,
-			aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts,
-		)
-	} else {
-		rows, err = r.DB.QueryContext(ctx, replaceInventorySQLNoAliases,
-			idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs, observations, observedAts, receivedAts, obsHistIDs,
-			labelIdx, labelKeys, labelValues,
-			condIdx, condTypes, condStatuses, condReasons, condMessages, condLastTransitions, condHistIDs,
-		)
-	}
+	rows, err := r.DB.QueryContext(ctx, replaceInventorySQL,
+		idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs, observations, observedAts, receivedAts, obsHistIDs,
+		labelIdx, labelKeys, labelValues,
+		condIdx, condTypes, condStatuses, condReasons, condMessages, condLastTransitions, condHistIDs,
+		aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts,
+		reportedAliasIdx, reportedAliasNamespaces, reportedAliasKeys,
+	)
 	if err != nil {
 		return nil, fmt.Errorf("replace inventory: %w", err)
 	}
 	defer rows.Close()
 
-	// replaceInventorySQLNoAliases's terminal SELECT always returns
-	// zero rows, so scanAliasConflicts's loop body (and thus its
-	// column count assumptions) never runs -- safe to call
-	// unconditionally regardless of which statement variant ran.
 	dbConflicts, err := scanAliasConflicts(rows, func(i int) domain.ResourceName { return replacements[i].Name })
 	if err != nil {
 		return nil, fmt.Errorf("replace inventory: %w", err)
@@ -1504,22 +1550,48 @@ del_conditions AS (
 
 // applyInventoryDeltasSQLWithAliases is ApplyInventoryDeltas's single
 // statement for a chunk containing at least one alias to fold in --
-// see replaceInventorySQLWithAliases's doc comment for the shape
-// (including why input_aliases carries three report-level columns
-// alongside each alias); placeholders $25-$31 here instead of $21-$27
-// since applyInventoryDeltasCoreCTEs's input CTEs use four more
-// placeholders than replaceInventoryCoreCTEs's do.
+// see replaceInventorySQL's doc comment for the shape (including why
+// input_aliases joins er by idx for source_uid); placeholders $25-$31
+// here instead of $21-$27 since applyInventoryDeltasCoreCTEs's input
+// CTEs use four more placeholders than replaceInventoryCoreCTEs's do.
+// Unlike replaceInventorySQL, there's no aliasRetractAbsentCTE here:
+// [domain.InventoryDelta.UpsertAliases] is additive-only by contract,
+// so a delta chunk with no UpsertAliases has nothing at all to do
+// alias-wise -- see applyInventoryDeltasSQLNoAliases just below.
+// (DeleteAliases/ReplaceAliases aren't folded into this statement
+// yet -- see the loop building aliasCandidates in ApplyInventoryDeltas
+// below.)
 const applyInventoryDeltasSQLWithAliases = applyInventoryDeltasCoreCTEs + `,
-input_aliases(idx, namespace, key, value, collection_name, resource_id, received_at) AS (
-	SELECT * FROM UNNEST($25::int[], $26::text[], $27::text[], $28::text[], $29::text[], $30::text[], $31::timestamptz[])
+input_aliases AS (
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
+	FROM UNNEST($25::int[], $26::text[], $27::text[], $28::text[], $29::text[], $30::text[], $31::timestamptz[])
+	     AS ac(idx, namespace, key, value, collection_name, resource_id, received_at)
+	JOIN er e ON e.idx = ac.idx
 ),
 ` + aliasFoldCTEs + aliasConflictSelect
 
 // applyInventoryDeltasSQLNoAliases is ApplyInventoryDeltas's single
-// statement for a chunk with no aliases left to fold in -- see
-// replaceInventorySQLNoAliases's doc comment for why this variant
-// exists and why skipping straight to a no-op terminal SELECT is
-// safe.
+// statement for a chunk with no aliases left to fold in (either
+// because none of its deltas supplied any, or because every candidate
+// was already rejected in Go by checkAliasBatchConsistency) -- just
+// applyInventoryDeltasCoreCTEs, skipping input_aliases/aliasFoldCTEs/
+// aliasConflictSelect entirely. Safe here in a way it no longer is
+// for ReplaceInventory: a delta never retracts (see
+// applyInventoryDeltasSQLWithAliases's doc comment), so "no aliases
+// left to fold in" really does mean "nothing alias-related to do" for
+// this chunk, with no absence-implies-removal case to account for.
+// This is also the overwhelming common case (most resource types
+// report no aliases at all), so avoiding aliasFoldCTEs' joins and
+// conditional inserts against an input that would otherwise always be
+// empty is worth a second statement variant. The trailing SELECT is a
+// required terminal statement for the WITH clause -- ApplyInventoryDeltas
+// never scans it -- and is safe to leave disconnected from the CTEs
+// above it: per the Postgres manual's "Data-Modifying Statements in
+// WITH" section, such statements "are executed exactly once, and
+// always to completion, independently of whether the primary query
+// reads all (or indeed any) of their output," so resolved_er/
+// upsert_inv/hist_obs/etc. all still run even though nothing here
+// selects from them.
 const applyInventoryDeltasSQLNoAliases = applyInventoryDeltasCoreCTEs + `
 SELECT 1 WHERE FALSE`
 
@@ -1599,7 +1671,11 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 			delCondIdx = append(delCondIdx, int32(i))
 			delCondTypes = append(delCondTypes, string(t))
 		}
-		for _, a := range d.Aliases {
+		// DeleteAliases/ReplaceAliases are not yet folded in here --
+		// see [domain.InventoryDelta]'s doc for the target contract
+		// and extensionresourcerepotest's delta alias tests, which
+		// pin it down ahead of this landing.
+		for _, a := range d.UpsertAliases {
 			aliasCandidates = append(aliasCandidates, aliasCandidateInput{idx: i, target: d.Name, alias: a, receivedAt: receivedAts[i]})
 		}
 	}

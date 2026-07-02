@@ -36,13 +36,21 @@ import (
 // ---------------------------------------------------------------------------
 
 // buildAppUpdateReplacements is buildUpdateReplacements's
-// application-layer counterpart: same draw from st.updatePool, same
-// label/observation/condition generators, but as
+// application-layer counterpart: same pool draw (steadyAliasPool or
+// neverAliasPool, depending on withAlias), same label/observation/condition
+// generators, but as
 // application.InventoryReplacementInput (identified by Name/Aliases,
 // not a pre-resolved domain.InventoryReplacement) since resolving that
 // identity is exactly the orchestration this file measures.
 func buildAppUpdateReplacements(st *benchState, n int, withAlias bool) []application.InventoryReplacementInput {
-	indices := st.nextUpdateIndices(n)
+	// See buildUpdateReplacements's matching comment: withAlias picks
+	// the pool, not just the payload.
+	var indices []int
+	if withAlias {
+		indices = st.nextSteadyAliasIndices(n)
+	} else {
+		indices = st.nextNeverAliasIndices(n)
+	}
 	gen := st.nextGen()
 	now := time.Now().UTC()
 	reps := make([]application.InventoryReplacementInput, n)
@@ -74,7 +82,7 @@ func buildAppUpdateReplacements(st *benchState, n int, withAlias bool) []applica
 // resource in [0, benchCorpusSize) exactly one resolvable alias, so
 // every report here resolves successfully on the first try.
 func buildAppUpdateByAliasOnly(st *benchState, n int) []application.InventoryReplacementInput {
-	indices := st.nextUpdateIndices(n)
+	indices := st.nextSteadyAliasIndices(n)
 	gen := st.nextGen()
 	now := time.Now().UTC()
 	reps := make([]application.InventoryReplacementInput, n)
@@ -116,7 +124,7 @@ func buildAppInsertReplacements(st *benchState, n int) []application.InventoryRe
 // buildAppHeartbeatDeltas is buildHeartbeatDeltas's application-layer
 // counterpart.
 func buildAppHeartbeatDeltas(st *benchState, n int) []application.InventoryDeltaInput {
-	indices := st.nextUpdateIndices(n)
+	indices := st.nextNeverAliasIndices(n)
 	now := time.Now().UTC()
 	deltas := make([]application.InventoryDeltaInput, n)
 	for i, idx := range indices {

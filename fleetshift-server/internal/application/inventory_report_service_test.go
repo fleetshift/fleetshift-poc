@@ -810,6 +810,92 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndD
 	}
 }
 
+// TestInventoryReportService_ApplyDeltaBatch_RejectsAliasKeyInBothUpsertAndDelete
+// is RejectsLabelInBothSetAndDelete's alias counterpart, covering
+// validateDeltaReport's UpsertAliases/DeleteAliases overlap guard.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsAliasKeyInBothUpsertAndDelete(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	original, err := domain.NewAlias("gcp", "instance_id", "app-alias-overlap-original")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	if err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			UpsertAliases: []domain.Alias{original}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ApplyDeltaBatch: %v", err)
+	}
+
+	replacement, err := domain.NewAlias("gcp", "instance_id", "app-alias-overlap-replacement")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	removeRef, err := domain.NewAliasRef("gcp", "instance_id")
+	if err != nil {
+		t.Fatalf("NewAliasRef: %v", err)
+	}
+	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			UpsertAliases: []domain.Alias{replacement},
+			DeleteAliases: []domain.AliasRef{removeRef},
+			ObservedAt:    time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// Rejected before any write, and before identity resolution even
+	// begins: re-reporting by the original alias alone must still
+	// resolve to the same resource.
+	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, UpsertAliases: []domain.Alias{original}, ObservedAt: time.Now(),
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDeltaBatch (re-resolve by original alias): %v", err)
+	}
+}
+
+// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesCombinedWithUpsertAliases
+// covers validateDeltaReport's ReplaceAliases mutual-exclusivity guard.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesCombinedWithUpsertAliases(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	replaceAlias, err := domain.NewAlias("gcp", "instance_id", "app-alias-replace-upsert-replace")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	upsertAlias, err := domain.NewAlias("gcp", "zone", "app-alias-replace-upsert-upsert")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			ReplaceAliases: []domain.Alias{replaceAlias},
+			UpsertAliases:  []domain.Alias{upsertAlias},
+			ObservedAt:     time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestInventoryReportService_ApplyDeltaBatch_ObservationNilVsReplace(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
