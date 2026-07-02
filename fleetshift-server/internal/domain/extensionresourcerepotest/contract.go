@@ -1175,6 +1175,53 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "remaining Condition.Type", view.Resource.Inventory().Conditions()[0].Type(), domain.ConditionType("Ready"))
 		})
 
+		t.Run("RemovesLabelsAbsentFromReplacement", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-remove-label")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:     map[string]string{"zone": "us-east-1", "team": "platform"},
+				ObservedAt: t1,
+				ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:     map[string]string{"zone": "us-east-1"},
+				ObservedAt: t2,
+				ReceivedAt: t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-remove-label")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			labels := view.Resource.Inventory().Labels()
+			if len(labels) != 1 {
+				t.Fatalf("Labels len = %d, want 1 (team should be removed): %v", len(labels), labels)
+			}
+			assertEqual(t, "Labels[zone]", labels["zone"], "us-east-1")
+			if _, ok := labels["team"]; ok {
+				t.Errorf("Labels[team] still present, want removed")
+			}
+		})
+
 		t.Run("NilObservationLeavesLatestUnchanged", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
