@@ -60,13 +60,10 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		now := s.now()
 		fID := FulfillmentID(uuid.New().String())
 
-		// Identity integration: claim/create the platform resource and
-		// attach a managed representation, atomic with the managed
-		// resource persistence.
-		pr, err := ClaimOrGetIdentity(ctx, tx.ResourceIdentities(), in.Name, nil, now)
-		if err != nil {
-			return ExtensionResourceView{}, fmt.Errorf("claim identity: %w", err)
-		}
+		// No platform-identity claim is needed here: a platform
+		// resource has no UID of its own and no eager row to create --
+		// its representation is derived on read, by name, once the
+		// extension resource row below exists.
 
 		// Create the extension resource with managed state.
 		er := NewExtensionResource(NewExtensionResourceUID(), in.ResourceType, in.Name, now,
@@ -96,17 +93,6 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 
 		if err := tx.ExtensionResources().Create(ctx, er); err != nil {
 			return ExtensionResourceView{}, fmt.Errorf("create extension resource: %w", err)
-		}
-
-		if err := pr.AttachRepresentation(AttachRepresentationInput{
-			ServiceName:          in.TypeDef.APIServiceName(),
-			Version:              in.TypeDef.APIVersion(),
-			ExtensionResourceUID: er.UID(),
-		}, now); err != nil {
-			return ExtensionResourceView{}, fmt.Errorf("attach representation: %w", err)
-		}
-		if err := tx.ResourceIdentities().Update(ctx, pr); err != nil {
-			return ExtensionResourceView{}, fmt.Errorf("update platform resource: %w", err)
 		}
 
 		if err := tx.Commit(); err != nil {

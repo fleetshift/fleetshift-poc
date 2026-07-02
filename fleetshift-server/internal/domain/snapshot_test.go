@@ -309,17 +309,13 @@ func TestFulfillment_DrainPendingStrategyRecords(t *testing.T) {
 }
 
 func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
-	uid := NewPlatformResourceUID()
-	targetUID := NewPlatformResourceUID()
 	snap := PlatformResourceSnapshot{
-		UID:       uid,
 		Name:      "clusters/prod",
 		Labels:    map[string]string{"env": "prod"},
 		CreatedAt: refTime,
 		UpdatedAt: refTime.Add(time.Hour),
 		Representations: []ResourceRepresentationSnapshot{
 			{
-				PlatformUID:          uid,
 				ServiceName:          "kind.fleetshift.io",
 				Version:              "v1",
 				Name:                 "clusters/prod",
@@ -328,28 +324,25 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 				UpdatedAt:            refTime,
 			},
 			{
-				PlatformUID:          uid,
 				ServiceName:          "gcp.fleetshift.io",
 				Version:              "v1",
 				Name:                 "clusters/prod",
 				ExtensionResourceUID: NewExtensionResourceUID(),
 				CreatedAt:            refTime,
 				UpdatedAt:            refTime,
-				Deleted:              true,
 			},
 		},
 		Aliases: []ResourceAliasSnapshot{
 			{Namespace: "gcp", Key: "project_id", Value: "my-proj"},
 		},
 		Relationships: []ResourceRelationshipSnapshot{
-			{SourceUID: uid, Type: "runs-on", TargetUID: targetUID, SourceService: "kind.fleetshift.io", CreatedAt: refTime},
+			{SourceName: "clusters/prod", Type: "runs-on", TargetName: "clusters/host", SourceService: "kind.fleetshift.io", CreatedAt: refTime},
 		},
 	}
 
 	r := PlatformResourceFromSnapshot(snap)
 	got := r.Snapshot()
 
-	assertEq(t, "UID", got.UID, snap.UID)
 	assertEq(t, "Name", got.Name, snap.Name)
 	assertEq(t, "Labels[env]", got.Labels["env"], snap.Labels["env"])
 	assertEq(t, "CreatedAt", got.CreatedAt, snap.CreatedAt)
@@ -360,13 +353,14 @@ func TestPlatformResourceSnapshot_RoundTrip(t *testing.T) {
 	}
 	assertEq(t, "Rep[0].ServiceName", got.Representations[0].ServiceName, ServiceName("kind.fleetshift.io"))
 	assertEq(t, "Rep[1].ServiceName", got.Representations[1].ServiceName, ServiceName("gcp.fleetshift.io"))
-	if !got.Representations[1].Deleted {
-		t.Fatal("Rep[1].Deleted is false, want true")
-	}
 
+	// Representations() returns every entry populated at hydration
+	// time as-is: there's no "deleted" bookkeeping to filter, since a
+	// representation only exists here because a repository read
+	// derived it from a live extension resource.
 	reps := r.Representations()
-	if len(reps) != 1 {
-		t.Fatalf("Representations() len = %d, want 1", len(reps))
+	if len(reps) != 2 {
+		t.Fatalf("Representations() len = %d, want 2", len(reps))
 	}
 
 	if len(got.Aliases) != 1 {

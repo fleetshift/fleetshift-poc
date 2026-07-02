@@ -1,12 +1,9 @@
 package domain
 
 import (
-	"database/sql/driver"
 	"fmt"
 	"strings"
 	"time"
-
-	"github.com/google/uuid"
 )
 
 // ServiceName identifies the extension service that owns a representation
@@ -163,46 +160,6 @@ func (s ServiceName) FullName(name ResourceName) FullResourceName {
 // "//{service}/{relative_name}" (e.g. "//kind.fleetshift.io/clusters/prod").
 type FullResourceName string
 
-// PlatformResourceUID is the opaque, stable identifier for a platform
-// resource. Generated once at claim time and never changes. The
-// underlying type is [uuid.UUID] so structural validity is encoded
-// in the type system.
-type PlatformResourceUID uuid.UUID
-
-// NewPlatformResourceUID generates a new random [PlatformResourceUID].
-func NewPlatformResourceUID() PlatformResourceUID {
-	return PlatformResourceUID(uuid.New())
-}
-
-// ParsePlatformResourceUID parses a string into a [PlatformResourceUID].
-func ParsePlatformResourceUID(s string) (PlatformResourceUID, error) {
-	u, err := uuid.Parse(s)
-	if err != nil {
-		return PlatformResourceUID{}, fmt.Errorf("platform resource uid: %w", err)
-	}
-	return PlatformResourceUID(u), nil
-}
-
-// String returns the canonical UUID string representation.
-func (u PlatformResourceUID) String() string { return uuid.UUID(u).String() }
-
-// MarshalText implements [encoding.TextMarshaler] for JSON string encoding.
-func (u PlatformResourceUID) MarshalText() ([]byte, error) { return uuid.UUID(u).MarshalText() }
-
-// UnmarshalText implements [encoding.TextUnmarshaler] for JSON string decoding.
-func (u *PlatformResourceUID) UnmarshalText(data []byte) error {
-	return (*uuid.UUID)(u).UnmarshalText(data)
-}
-
-// Value implements [driver.Valuer] for SQL persistence.
-func (u PlatformResourceUID) Value() (driver.Value, error) { return uuid.UUID(u).String(), nil }
-
-// Scan implements [sql.Scanner] for SQL hydration.
-func (u *PlatformResourceUID) Scan(src any) error { return (*uuid.UUID)(u).Scan(src) }
-
-// IsZero returns true when the UID is the zero (nil) UUID.
-func (u PlatformResourceUID) IsZero() bool { return uuid.UUID(u) == uuid.Nil }
-
 // AliasNamespace scopes an alias key-space (e.g. "gcp", "aws").
 type AliasNamespace string
 
@@ -343,12 +300,16 @@ func (n FullResourceName) ResourceName() ResourceName {
 // in the fleet. It aggregates representations from multiple extension
 // services, aliases, and relationships.
 //
+// Representations are not owned/mutated by this aggregate: they are
+// derived on read by the repository (joining extension resources on
+// name) and only ever populated here via [PlatformResourceFromSnapshot]
+// for display. Aliases and relationships remain aggregate-owned.
+//
 // Construct new instances with [NewPlatformResource]; reconstitute from
 // persistence with [PlatformResourceFromSnapshot]. Mutate via domain
-// methods ([PlatformResource.SetLabels], [PlatformResource.AttachRepresentation],
+// methods ([PlatformResource.SetLabels], [PlatformResource.AddAlias],
 // etc.). Read via accessor methods.
 type PlatformResource struct {
-	uid       PlatformResourceUID
 	name      ResourceName
 	labels    map[string]string
 	createdAt time.Time
@@ -362,21 +323,23 @@ type PlatformResource struct {
 // NewPlatformResource creates a brand-new [PlatformResource]. Use this
 // on creation paths; use [PlatformResourceFromSnapshot] only for
 // reconstituting from persistence.
-func NewPlatformResource(uid PlatformResourceUID, name ResourceName, labels map[string]string, now time.Time) *PlatformResource {
+//
+// A platform resource has no UID of its own -- per AIP-148, a UID is
+// only warranted when a resource can be deleted and recreated under
+// the same name yet needs to be distinguished across that gap.
+// Platform resources have no such generational concept: [ResourceName]
+// is the sole, permanent identifier.
+func NewPlatformResource(name ResourceName, labels map[string]string, now time.Time) *PlatformResource {
 	if labels == nil {
 		labels = map[string]string{}
 	}
 	return &PlatformResource{
-		uid:       uid,
 		name:      name,
 		labels:    labels,
 		createdAt: now,
 		updatedAt: now,
 	}
 }
-
-// UID returns the platform resource's stable unique identifier.
-func (r *PlatformResource) UID() PlatformResourceUID { return r.uid }
 
 // Collection returns the collection this resource belongs to,
 // derived from its [ResourceName].
@@ -407,21 +370,11 @@ func (r *PlatformResource) SetLabels(labels map[string]string, now time.Time) {
 // Child entity accessors
 // ---------------------------------------------------------------------------
 
-// Representations returns the active (non-deleted) representations.
+// Representations returns this platform resource's derived
+// representations, as populated by the repository at load time (see
+// [ResourceIdentityRepository.GetRepresentation]). Empty unless the
+// aggregate was hydrated by a repository read that populates them.
 func (r *PlatformResource) Representations() []ResourceRepresentation {
-	var active []ResourceRepresentation
-	for _, rep := range r.representations {
-		if rep.deleted {
-			continue
-		}
-		active = append(active, rep)
-	}
-	return active
-}
-
-// AllRepresentations returns all representations including deleted
-// ones.
-func (r *PlatformResource) AllRepresentations() []ResourceRepresentation {
 	return r.representations
 }
 
@@ -439,71 +392,6 @@ func (r *PlatformResource) Relationships() []ResourceRelationship {
 // ---------------------------------------------------------------------------
 // Aggregate mutation methods
 // ---------------------------------------------------------------------------
-
-// AttachRepresentationInput is the input for
-// [PlatformResource.AttachRepresentation].
-//
-// Collection and Name are not included because the resource name is
-// identity-equivalent across services (see resource_identity_and_api.md).
-// The aggregate stamps them from its own canonical identity.
-type AttachRepresentationInput struct {
-	ServiceName          ServiceName
-	Version              APIVersion
-	ExtensionResourceUID ExtensionResourceUID
-}
-
-// AttachRepresentation adds or updates an extension representation on
-// this platform resource. The representation inherits the aggregate's
-// canonical Collection and Name because the resource name is identity-
-// equivalent across services. It validates that managed+inventory roles
-// are not combined; other value-object invariants are assumed enforced
-// at construction time by callers.
-func (r *PlatformResource) AttachRepresentation(in AttachRepresentationInput, now time.Time) error {
-	rep := ResourceRepresentation{
-		platformUID:          r.uid,
-		serviceName:          in.ServiceName,
-		version:              in.Version,
-		name:                 r.name,
-		extensionResourceUID: in.ExtensionResourceUID,
-		createdAt:            now,
-		updatedAt:            now,
-	}
-
-	for i, existing := range r.representations {
-		if existing.serviceName == in.ServiceName {
-			rep.createdAt = existing.createdAt
-			rep.deleted = false
-			r.representations[i] = rep
-			r.updatedAt = now
-			return nil
-		}
-	}
-
-	r.representations = append(r.representations, rep)
-	r.updatedAt = now
-	return nil
-}
-
-// DeleteRepresentation marks the representation from the given service
-// as deleted. Since the resource name is identity-equivalent across
-// services, the match is by [ServiceName] only. Already-deleted
-// representations are a no-op (idempotent) so that delete retries
-// don't fail on re-entry. Returns [ErrNotFound] if no representation
-// from the service exists at all.
-func (r *PlatformResource) DeleteRepresentation(service ServiceName, now time.Time) error {
-	for i, rep := range r.representations {
-		if rep.serviceName == service {
-			if rep.deleted {
-				return nil
-			}
-			r.representations[i].deleted = true
-			r.representations[i].updatedAt = now
-			r.updatedAt = now
-			return nil
-		}
-	}
-	return fmt.Errorf("representation from %s on %s: %w", service, r.name, ErrNotFound)
-}
 
 // AddAlias appends an alias to the platform resource. Duplicate aliases
 // (same namespace+key+value) are silently ignored (idempotent). An alias
@@ -526,19 +414,19 @@ func (r *PlatformResource) AddAlias(alias Alias) error {
 
 // AddRelationship adds a typed relationship from this platform resource
 // to another. Validates that the relationship type is non-empty and
-// that the source UID matches this aggregate. If a relationship with
-// the same (type, targetUID) already exists, it is updated in place.
+// that the source name matches this aggregate. If a relationship with
+// the same (type, targetName) already exists, it is updated in place.
 func (r *PlatformResource) AddRelationship(rel ResourceRelationship) error {
-	if rel.sourceUID != r.uid {
-		return fmt.Errorf("relationship source UID %q does not match resource UID %q: %w",
-			rel.sourceUID, r.uid, ErrInvalidArgument)
+	if rel.sourceName != r.name {
+		return fmt.Errorf("relationship source name %q does not match resource name %q: %w",
+			rel.sourceName, r.name, ErrInvalidArgument)
 	}
 	if rel.relType == "" {
 		return fmt.Errorf("relationship type: %w: must not be empty", ErrInvalidArgument)
 	}
 
 	for i, existing := range r.relationships {
-		if existing.relType == rel.relType && existing.targetUID == rel.targetUID {
+		if existing.relType == rel.relType && existing.targetName == rel.targetName {
 			r.relationships[i] = rel
 			return nil
 		}
@@ -578,16 +466,15 @@ func (r *PlatformResource) Snapshot() PlatformResourceSnapshot {
 	relSnaps := make([]ResourceRelationshipSnapshot, len(r.relationships))
 	for i, rel := range r.relationships {
 		relSnaps[i] = ResourceRelationshipSnapshot{
-			SourceUID:     rel.sourceUID,
+			SourceName:    rel.sourceName,
 			Type:          rel.relType,
-			TargetUID:     rel.targetUID,
+			TargetName:    rel.targetName,
 			SourceService: rel.sourceService,
 			CreatedAt:     rel.createdAt,
 		}
 	}
 
 	return PlatformResourceSnapshot{
-		UID:             r.uid,
 		Name:            r.name,
 		Labels:          r.labels,
 		CreatedAt:       r.createdAt,
@@ -606,15 +493,18 @@ func (r *PlatformResource) Snapshot() PlatformResourceSnapshot {
 // considers a platform resource to exist within its API surface. A
 // single platform resource may have multiple representations (e.g. one
 // from Kind, one from GCP Host Connector).
+//
+// Representations are never persisted directly: the repository derives
+// them on read by joining extension resources to platform resources on
+// name, so a representation appears and disappears exactly when its
+// backing extension resource is created/deleted.
 type ResourceRepresentation struct {
-	platformUID          PlatformResourceUID
 	serviceName          ServiceName
 	version              APIVersion
 	name                 ResourceName
 	extensionResourceUID ExtensionResourceUID
 	createdAt            time.Time
 	updatedAt            time.Time
-	deleted              bool
 }
 
 // FullResourceName returns the full resource name for this
@@ -622,9 +512,6 @@ type ResourceRepresentation struct {
 func (rr ResourceRepresentation) FullResourceName() FullResourceName {
 	return rr.name.FullName(rr.serviceName)
 }
-
-// PlatformUID returns the owning platform resource identifier.
-func (rr ResourceRepresentation) PlatformUID() PlatformResourceUID { return rr.platformUID }
 
 // ServiceName returns the extension service that owns this representation.
 func (rr ResourceRepresentation) ServiceName() ServiceName { return rr.serviceName }
@@ -646,36 +533,28 @@ func (rr ResourceRepresentation) CreatedAt() time.Time { return rr.createdAt }
 // UpdatedAt returns the last-updated timestamp.
 func (rr ResourceRepresentation) UpdatedAt() time.Time { return rr.updatedAt }
 
-// Deleted reports whether this representation has been marked deleted
-// in the aggregate and should be hard-deleted by the repository.
-func (rr ResourceRepresentation) Deleted() bool { return rr.deleted }
-
 // ResourceRepresentationFromSnapshot constructs a
 // [ResourceRepresentation] from a snapshot.
 func ResourceRepresentationFromSnapshot(s ResourceRepresentationSnapshot) ResourceRepresentation {
 	return ResourceRepresentation{
-		platformUID:          s.PlatformUID,
 		serviceName:          s.ServiceName,
 		version:              s.Version,
 		name:                 s.Name,
 		extensionResourceUID: s.ExtensionResourceUID,
 		createdAt:            s.CreatedAt,
 		updatedAt:            s.UpdatedAt,
-		deleted:              s.Deleted,
 	}
 }
 
 // Snapshot returns a [ResourceRepresentationSnapshot].
 func (rr ResourceRepresentation) Snapshot() ResourceRepresentationSnapshot {
 	return ResourceRepresentationSnapshot{
-		PlatformUID:          rr.platformUID,
 		ServiceName:          rr.serviceName,
 		Version:              rr.version,
 		Name:                 rr.name,
 		ExtensionResourceUID: rr.extensionResourceUID,
 		CreatedAt:            rr.createdAt,
 		UpdatedAt:            rr.updatedAt,
-		Deleted:              rr.deleted,
 	}
 }
 
@@ -685,18 +564,13 @@ func (rr ResourceRepresentation) Snapshot() ResourceRepresentationSnapshot {
 
 // ResourceRelationship records a directed relationship from one
 // platform resource to another, reported by a particular extension
-// service.
-//
-// TODO: Relationships currently reference resources by UID. Resource
-// names ([ResourceName]) are stable, human-readable, and the canonical
-// AIP reference mechanism. UIDs force an extra lookup to understand
-// what a relationship points to. Consider switching to names, possibly
-// with deferred resolution for cases where the target resource doesn't
-// exist yet.
+// service. Resources are referenced by [ResourceName] -- stable,
+// human-readable, and the canonical AIP reference mechanism -- rather
+// than by UID, since platform resources have none.
 type ResourceRelationship struct {
-	sourceUID     PlatformResourceUID
+	sourceName    ResourceName
 	relType       RelationshipType
-	targetUID     PlatformResourceUID
+	targetName    ResourceName
 	sourceService ServiceName
 	createdAt     time.Time
 }
@@ -705,29 +579,29 @@ type ResourceRelationship struct {
 // Aggregate-level invariants are enforced by
 // [PlatformResource.AddRelationship].
 func NewResourceRelationship(
-	sourceUID PlatformResourceUID,
+	sourceName ResourceName,
 	relType RelationshipType,
-	targetUID PlatformResourceUID,
+	targetName ResourceName,
 	sourceService ServiceName,
 	createdAt time.Time,
 ) ResourceRelationship {
 	return ResourceRelationship{
-		sourceUID:     sourceUID,
+		sourceName:    sourceName,
 		relType:       relType,
-		targetUID:     targetUID,
+		targetName:    targetName,
 		sourceService: sourceService,
 		createdAt:     createdAt,
 	}
 }
 
-// SourceUID returns the source platform resource UID.
-func (rr ResourceRelationship) SourceUID() PlatformResourceUID { return rr.sourceUID }
+// SourceName returns the source platform resource name.
+func (rr ResourceRelationship) SourceName() ResourceName { return rr.sourceName }
 
 // Type returns the relationship type.
 func (rr ResourceRelationship) Type() RelationshipType { return rr.relType }
 
-// TargetUID returns the target platform resource UID.
-func (rr ResourceRelationship) TargetUID() PlatformResourceUID { return rr.targetUID }
+// TargetName returns the target platform resource name.
+func (rr ResourceRelationship) TargetName() ResourceName { return rr.targetName }
 
 // SourceService returns the extension service that reported the relationship.
 func (rr ResourceRelationship) SourceService() ServiceName { return rr.sourceService }
@@ -739,9 +613,9 @@ func (rr ResourceRelationship) CreatedAt() time.Time { return rr.createdAt }
 // from a snapshot.
 func ResourceRelationshipFromSnapshot(s ResourceRelationshipSnapshot) ResourceRelationship {
 	return ResourceRelationship{
-		sourceUID:     s.SourceUID,
+		sourceName:    s.SourceName,
 		relType:       s.Type,
-		targetUID:     s.TargetUID,
+		targetName:    s.TargetName,
 		sourceService: s.SourceService,
 		createdAt:     s.CreatedAt,
 	}

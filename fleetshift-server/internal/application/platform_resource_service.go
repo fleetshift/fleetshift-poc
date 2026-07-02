@@ -58,8 +58,7 @@ func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformR
 	defer tx.Rollback()
 
 	now := s.now()
-	uid := domain.NewPlatformResourceUID()
-	pr := domain.NewPlatformResource(uid, in.Name, in.Labels, now)
+	pr := domain.NewPlatformResource(in.Name, in.Labels, now)
 
 	if err := tx.ResourceIdentities().Create(ctx, pr); err != nil {
 		return nil, fmt.Errorf("create: %w", err)

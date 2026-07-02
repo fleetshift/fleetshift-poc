@@ -150,7 +150,10 @@ func buildResourceMessage(
 		},
 		Field: []*descriptorpb.FieldDescriptorProto{
 			dynamicapi.StringField("name", 1),
-			dynamicapi.StringField("uid", 2),
+			// Field 2 (uid) intentionally omitted: platform resources have
+			// no surrogate UID. ResourceName is the sole identifier -- see
+			// docs/design/architecture/resource_identity_and_api.md. The
+			// number is reserved, not reused, per proto3 convention.
 			labelsField,
 			effectiveLabelsField,
 			dynamicapi.RepeatedMessageField("representations", 5, pkg+"."+repMsg.GetName()),
@@ -191,7 +194,7 @@ func buildRelationshipMessage(resourceName string) *descriptorpb.DescriptorProto
 		Name: proto.String(resourceName + "Relationship"),
 		Field: []*descriptorpb.FieldDescriptorProto{
 			dynamicapi.StringField("type", 1),
-			dynamicapi.StringField("target_uid", 2),
+			dynamicapi.StringField("target_name", 2),
 			dynamicapi.StringField("source_service", 3),
 			dynamicapi.MessageField("create_time", 4, "google.protobuf.Timestamp"),
 		},

@@ -115,8 +115,11 @@ type SignerEnrollmentSnapshot struct {
 
 // PlatformResourceSnapshot is the persistence DTO for [PlatformResource].
 // It captures the aggregate's full state including child entities.
+//
+// There is no UID field: [ResourceName] is the sole, permanent
+// identifier for a platform resource (see resource_identity.go's
+// [NewPlatformResource] doc for why).
 type PlatformResourceSnapshot struct {
-	UID       PlatformResourceUID
 	Name      ResourceName
 	Labels    map[string]string
 	CreatedAt time.Time
@@ -128,34 +131,33 @@ type PlatformResourceSnapshot struct {
 }
 
 // ResourceRepresentationSnapshot is the persistence DTO for
-// [ResourceRepresentation].
+// [ResourceRepresentation]. It is never itself persisted -- the
+// repository builds these on read by deriving representations from
+// extension resources (see resource_identity_and_api.md).
 type ResourceRepresentationSnapshot struct {
-	PlatformUID          PlatformResourceUID
 	ServiceName          ServiceName
 	Version              APIVersion
 	Name                 ResourceName
 	ExtensionResourceUID ExtensionResourceUID
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
-	Deleted              bool
 }
 
 // ResourceAliasSnapshot is the persistence DTO for an [Alias] bound
 // to a platform resource.
 type ResourceAliasSnapshot struct {
-	Namespace   AliasNamespace
-	Key         AliasKey
-	Value       AliasValue
-	PlatformUID PlatformResourceUID
-	CreatedAt   time.Time
+	Namespace AliasNamespace
+	Key       AliasKey
+	Value     AliasValue
+	CreatedAt time.Time
 }
 
 // ResourceRelationshipSnapshot is the persistence DTO for
 // [ResourceRelationship].
 type ResourceRelationshipSnapshot struct {
-	SourceUID     PlatformResourceUID
+	SourceName    ResourceName
 	Type          RelationshipType
-	TargetUID     PlatformResourceUID
+	TargetName    ResourceName
 	SourceService ServiceName
 	CreatedAt     time.Time
 }
@@ -624,7 +626,6 @@ func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource 
 	}
 
 	return &PlatformResource{
-		uid:             s.UID,
 		name:            s.Name,
 		labels:          labels,
 		createdAt:       s.CreatedAt,

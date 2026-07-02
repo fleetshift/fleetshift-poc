@@ -181,7 +181,7 @@ func Run(t *testing.T, factory Factory) {
 		ctx := context.Background()
 		fixed := time.Date(2026, 6, 16, 12, 0, 0, 0, time.UTC)
 
-		uid := domain.NewPlatformResourceUID()
+		name := domain.ResourceName("clusters/store-test")
 
 		tx, err := store.Begin(ctx)
 		if err != nil {
@@ -189,7 +189,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx.Rollback()
 
-		r := domain.NewPlatformResource(uid, "clusters/store-test", nil, fixed)
+		r := domain.NewPlatformResource(name, nil, fixed)
 		if err := tx.ResourceIdentities().Create(ctx, r); err != nil {
 			t.Fatalf("ResourceIdentities().Create: %v", err)
 		}
@@ -203,12 +203,12 @@ func Run(t *testing.T, factory Factory) {
 		}
 		defer tx2.Rollback()
 
-		got, err := tx2.ResourceIdentities().Get(ctx, uid)
+		got, err := tx2.ResourceIdentities().GetByName(ctx, name)
 		if err != nil {
-			t.Fatalf("Get after commit: %v", err)
+			t.Fatalf("GetByName after commit: %v", err)
 		}
-		if got.UID() != uid {
-			t.Errorf("UID = %s, want %s", got.UID(), uid)
+		if got.Name() != name {
+			t.Errorf("Name = %s, want %s", got.Name(), name)
 		}
 	})
 

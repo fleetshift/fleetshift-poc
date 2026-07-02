@@ -41,7 +41,6 @@ func TestBuildServiceDescriptors_Success(t *testing.T) {
 
 	expectedFields := map[string]protoreflect.Kind{
 		"name":        protoreflect.StringKind,
-		"uid":         protoreflect.StringKind,
 		"create_time": protoreflect.MessageKind,
 		"update_time": protoreflect.MessageKind,
 	}

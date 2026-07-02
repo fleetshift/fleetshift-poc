@@ -2,6 +2,7 @@ package managedresource_test
 
 import (
 	"context"
+	"errors"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -1069,6 +1070,34 @@ func awaitFulfillmentActive(ctx context.Context, t *testing.T, store domain.Stor
 	}
 }
 
+// awaitExtensionResourceGone polls until an extension resource's row
+// is actually deleted (by the async cleanup workflow), which is also
+// the moment its platform representation -- derived on read, not
+// physically maintained -- stops being visible.
+func awaitExtensionResourceGone(ctx context.Context, t *testing.T, store domain.Store, rt domain.ResourceType, name domain.ResourceName) {
+	t.Helper()
+	fullName := rt.FullName(name)
+	for {
+		tx, err := store.BeginReadOnly(ctx)
+		if err != nil {
+			t.Fatalf("Begin: %v", err)
+		}
+		_, err = tx.ExtensionResources().Get(ctx, fullName)
+		tx.Rollback()
+		if errors.Is(err, domain.ErrNotFound) {
+			return
+		}
+		if err != nil {
+			t.Fatalf("Get(%s): unexpected error: %v", fullName, err)
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("timed out waiting for %s to be deleted", fullName)
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 // --- Cross-API contract tests ---
 
 // TestExtensionCreate_VisibleInPlatformAPI exercises the transport-level
@@ -1154,9 +1183,20 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 
 // TestExtensionDelete_RemovesPlatformRepresentation verifies that
 // deleting a managed resource through the extension gRPC service
-// removes its representation from the platform resource API. The
-// platform resource itself survives — only the active representation
-// list becomes empty.
+// eventually makes it disappear from the platform resource API.
+// Representations are derived on read from the live extension_resources
+// row rather than physically maintained, so the representation stays
+// visible for as long as the row does -- it disappears atomically with
+// the row's actual deletion by the async cleanup workflow, not ahead of
+// it (see docs/design/architecture/resource_identity_and_api.md).
+// Platform resources have no surrogate UID and no independent physical
+// row unless something explicitly created one (an explicit
+// PlatformResourceService.Create, or an alias) -- this managed resource
+// never got either, so once its one and only representation is gone,
+// there's nothing left to derive a virtual platform resource from, and
+// the platform resource disappears along with it (see the
+// nameless-platform-identity plan's "virtual platform resource"
+// semantics).
 func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	env := newActivatorWithResourcesAndPlatform(t)
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)
@@ -1194,26 +1234,32 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 		t.Fatalf("DeleteWidget: %v", err)
 	}
 
-	// Platform Get: resource exists but the representation link is gone.
+	// Wait for the async cleanup workflow to actually remove the
+	// extension_resources row -- the representation is derived from
+	// that row's existence, so it can't disappear any earlier.
+	awaitExtensionResourceGone(ctx, t, env.store, "test.fleetshift.io/Widget", "widgets/widget-1")
+
+	// Platform Get: no explicit Create and no alias ever backed this
+	// resource, so once its only representation is gone, GetByName's
+	// virtual-resource fallback has nothing left to derive from --
+	// NotFound, not a resource with an empty representation list.
 	platDescs := platformWidgetDescs(t)
 
 	getReq := dynamicpb.NewMessage(platDescs.GetRequest)
 	getReq.Set(platDescs.GetRequest.Fields().ByName("name"),
 		protoreflect.ValueOfString("widgets/widget-1"))
 	getResp := dynamicpb.NewMessage(platDescs.Resource)
-	if err := env.conn.Invoke(ctx,
-		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp); err != nil {
-		t.Fatalf("GetPlatformWidget after delete: %v", err)
+	err := env.conn.Invoke(ctx,
+		"/fleetshift.v1.PlatformWidgetService/GetPlatformWidget", getReq, getResp)
+	if err == nil {
+		t.Fatal("GetPlatformWidget after delete: expected NotFound, got nil error")
+	}
+	if st, ok := status.FromError(err); !ok || st.Code() != codes.NotFound {
+		t.Errorf("GetPlatformWidget after delete: got %v, want NotFound", err)
 	}
 
-	repsField := platDescs.Resource.Fields().ByName("representations")
-	if getResp.Get(repsField).List().Len() != 0 {
-		t.Errorf("representations len = %d after delete, want 0",
-			getResp.Get(repsField).List().Len())
-	}
-
-	// Platform List: resource still appears (not soft-deleted at the
-	// platform level — only the representation link is removed).
+	// Platform List: the same virtual resource disappears from listing
+	// once its only representation is gone.
 	listReq := dynamicpb.NewMessage(platDescs.ListRequest)
 	listResp := dynamicpb.NewMessage(platDescs.ListResponse)
 	if err := env.conn.Invoke(ctx,
@@ -1222,8 +1268,8 @@ func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	}
 
 	listField := platDescs.ListResponse.Fields().ByNumber(1)
-	if listResp.Get(listField).List().Len() != 1 {
-		t.Errorf("ListPlatformWidgets after delete = %d resources, want 1 (resource survives representation removal)",
+	if listResp.Get(listField).List().Len() != 0 {
+		t.Errorf("ListPlatformWidgets after delete = %d resources, want 0 (virtual resource gone with its last representation)",
 			listResp.Get(listField).List().Len())
 	}
 }

@@ -96,8 +96,7 @@ The platform resource is the canonical identity for a logical resource. Its mess
 
 | Field              | Writability    | Description                                                                         |
 | ------------------ | -------------- | ----------------------------------------------------------------------------------- |
-| `name`             | Server-managed | AIP-122 resource name (e.g. `clusters/foo`)                                         |
-| `uid`              | Server-managed | Globally unique identifier                                                          |
+| `name`             | Server-managed | AIP-122 resource name (e.g. `clusters/foo`); the sole identifier -- no `uid`        |
 | `labels`           | User-writable  | Direct user labels, declarative-friendly                                            |
 | `effective_labels` | Server-managed | Union of user labels and extension-contributed labels (namespaced), per AIP-129     |
 | `conditions`       | Server-managed | Aggregated from extension representations, namespaced by source                     |
@@ -106,13 +105,24 @@ The platform resource is the canonical identity for a logical resource. Its mess
 | `relationships`    | Server-managed | Links to other platform resource identities (semantic relationships)                |
 
 
+### No surrogate UID
+
+Platform resources have no `uid` field at all — `name` is the sole, permanent identifier. This is allowed by AIP-122/148 (`uid` is explicitly optional), and it is a deliberate choice, not an omission: AIP-148's entire purpose for `uid` is distinguishing a resource from a *different* resource that later reuses the same name after deletion, but a platform resource has no coherent notion of "this specific incarnation" to distinguish. It is a metadata shell aggregating representations across multiple extension resources with independent lifecycles — one service's representation can disappear and reappear (e.g. a transient scrape gap) without that meaning "a new identity now exists." There is no well-defined generation boundary to mint a UID against, so none is minted.
+
+Extension resources (the representations underneath a platform resource) keep their own `uid` — AIP-148 semantics genuinely apply there, since delete/recreate under the same name is a real, observable event with clear boundaries (e.g. a Kubernetes object's replacement).
+
 ### Materialization
 
-Platform resources are implicit by default: auto-created when the first extension resource with that identity is created. They can also be pre-created for label or IAM attachment before any extension resource exists. This makes the platform resource declarative-friendly for the writable subset (labels, existence).
+Platform resources are **virtual by default**: a resource name is visible through the platform API as soon as *anything* backs it — a live extension resource representation, a registered alias, or an explicit `Create`/label attachment — with no independent physical row required for the common case. Reads derive the platform resource from whatever backing data exists for that name; there is nothing to eagerly create or keep in sync, and thus nothing that can go stale.
+
+A physical `platform_resources` row is created lazily, only when something needs to persist independently of any single representation — an explicit `Create` (for label or IAM attachment before any extension resource exists), or the first alias registered for that name. The common case (an extension resource reported or managed with no alias) never needs one.
 
 ### Deletion semantics
 
-The platform resource is declarative-friendly — it can be explicitly created and deleted. Additionally, authorized extensions can signal that the resource no longer exists (e.g., a GCP addon confirms a cluster was destroyed), which can trigger deletion of the platform identity.
+Because materialization is virtual, "deletion" means different things depending on what's backing the name:
+
+- A **purely virtual** platform resource (no explicit `Create`, no alias, no `platform_resources` row) has no independent existence — once its last representation is gone (the underlying extension resource is deleted), the platform resource disappears too. There's nothing left to read a virtual resource from, and nothing to explicitly delete.
+- A platform resource with a **physical row** (explicitly created, or with at least one alias) is declarative-friendly — it can be explicitly created and deleted independently of any single representation coming and going. Additionally, authorized extensions can signal that the resource no longer exists (e.g., a GCP addon confirms a cluster was destroyed), which can trigger deletion of the platform identity.
 
 Open nuance: if the platform identity was pre-created (before any extension resource existed), deletion authority may differ. Whether pre-established identity has stronger persistence guarantees is an open design question.
 
@@ -208,7 +218,7 @@ At the extension level, the unique key for an extension resource is `(service_na
 
 ### Claiming protocol
 
-The first extension to create a resource with a given name establishes the identity (and triggers platform resource materialization). Subsequent extensions link to the same identity when they either:
+The first extension to create a resource with a given name establishes the identity — its representation is immediately visible through the platform API via virtual materialization (see above), with no separate claiming step or physical row required. Subsequent extensions link to the same identity when they either:
 
 1. Use the same registered identity domain and relative name, or
 2. Have aliases that correlate to an existing identity without violating alias uniqueness constraints.
@@ -223,13 +233,16 @@ Examples:
 - `sig-multicluster/cluster-id:550e8400-e29b-41d4-a716-446655440000`
 - `acs/cluster-id:acs-12345`
 
+Aliases are **additive and immutable once set**: within a given `(namespace, key)` pair, a value maps to exactly one resource and a resource has exactly one value — a true bijection. A second report attempting to change either side of that mapping is a conflict, not an update; nothing ever overwrites an existing alias row. This is enforced by a pair of database uniqueness constraints (one keyed on value, one keyed on resource) rather than an application-level read-modify-write, since aliases are only ever registered alongside a write the system already has to make (an inventory report or a managed-resource create) and never require resolving the platform identity first.
+
 ### Conflict detection
 
 Multiple extensions defining the same resource name is expected and correct — they unify on the same identity. Name sharing across extension representations is expected when the representations are registered into the same platform identity domain.
 
 Conflicts arise from:
 
-- **Contradictory alias claims**: extension A asserts `clusters/foo` has `kube-system-ns-uid=1` while extension B asserts `kube-system-ns-uid=2`.
+- **Value claimed by a different resource**: extension A asserts `clusters/foo` has `kube-system-ns-uid=1` while extension B asserts `clusters/bar` also has `kube-system-ns-uid=1`.
+- **Resource has a different value for the same key**: a resource that already has `kube-system-ns-uid=1` on file is later reported with `kube-system-ns-uid=2` for the same key — rejected, not replaced, since aliases are immutable once set.
 - **Unauthorized identity claims**: an extension attempts to claim a resource name without authorization.
 - **Multiple identity binding**: an extension resource attempts to bind to multiple platform identities.
 
