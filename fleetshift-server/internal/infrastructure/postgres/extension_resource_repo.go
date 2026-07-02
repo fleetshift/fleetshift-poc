@@ -934,43 +934,79 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // platform_resources/resource_aliases by natural key alone, with no
 // need for the extension resource's own uid.
 //
-// Of resource_aliases' two unique indexes (see the migration's doc
-// comment), only one -- (namespace, key, platform_collection_name,
-// platform_resource_id), the "resource already has a different value
-// for this key" shape -- needs a read before the write: Postgres lets
-// an INSERT's ON CONFLICT name exactly one arbiter, so a conflict
-// against the *other* index would raise a real constraint-violation
-// error instead of a graceful [domain.AliasConflict] if we let a
-// candidate that would hit it reach the INSERT at all.
-// alias_prev_by_resource / alias_resource_check / alias_safe exist
-// purely to keep that shape out of alias_upsert before it runs
-// (checkAliasBatchConsistency has already ruled out an intra-batch
-// version of it, so pre-existing resource_aliases rows are the only
-// remaining source). alias_resource_check is a bare LEFT JOIN with no
-// WHERE, computed once and shared by both alias_safe and its exact
-// complement alias_resource_conflicts via a cheap filter each, rather
-// than each re-deriving its own copy of the input_aliases/
-// alias_prev_by_resource join.
+// resource_aliases has two unique indexes (see the migration's doc
+// comment): (namespace, key, value) and (namespace, key,
+// platform_collection_name, platform_resource_id). checkAliasBatchConsistency
+// has already ruled out an intra-batch collision against either, so
+// every remaining conflict source is a pre-existing resource_aliases
+// row. This fold-in classifies every candidate against both indexes,
+// by reading, before writing anything -- in an order chosen around
+// which outcome is common: most reports re-send the same alias they
+// sent last time, and classify-before-write turns that into a single
+// read with no write at all, rather than a write whose own conflict
+// machinery discovers afterward that it was a no-op.
 //
-// alias_safe only keeps existing_value IS NULL -- a genuinely new
-// (resource, key) pairing -- rather than also keeping existing_value
-// = value (an idempotent re-report of the alias this resource already
-// has). That distinction matters because ensure_platform/alias_upsert
-// are real writes, not free no-ops: alias_upsert's guarded DO UPDATE
-// (below) still performs the UPDATE whenever the guard is true, even
-// when the values it's setting are identical to what's already
-// there, which means a real tuple rewrite and index maintenance on
-// every steady-state re-report. Benchmarking confirmed this cost:
-// with every report re-sending the same, already-correct alias
-// (inventory_bench_test.go's UpdateWithAlias benchmark), alias_upsert
-// alone accounted for roughly a fifth of the statement's total time,
-// entirely spent rewriting rows back to their own current values.
-// Excluding existing_value = value from alias_safe means that case
-// skips ensure_platform and alias_upsert's INSERT altogether --
-// alias_resource_conflicts already excludes it too (its WHERE
-// requires existing_value <> value), so it's simply absent from both,
-// which aliasConflictSelect's own doc comment already treats as the
-// correct outcome for "nothing to do here."
+// Phase 1 (alias_prev_by_value) reads by (namespace, key, value) --
+// the *reported* value -- for every candidate, answering "does this
+// exact alias already exist, and for whom" in one pass. That splits
+// candidates three ways: alias_value_conflicts (the value exists, for
+// a *different* target -- AliasConflictValueClaimedByOther, resolved
+// without ever touching ensure_platform, alias_upsert, or the second
+// index); a true no-op (the value exists for *this* target already --
+// absent from every CTE from here on, never reaching a write); and
+// alias_value_missing (the value doesn't exist anywhere yet), the
+// only group phase 2 needs to look at.
+//
+// Phase 2 (alias_resource_check) reads by (namespace, key,
+// platform_collection_name, platform_resource_id) -- this target's
+// own row for the key -- but only for alias_value_missing candidates.
+// Since phase 1 already proved this exact value doesn't exist
+// anywhere, a match here can only be a *different* value already
+// registered for this target/key: the other index's conflict shape,
+// AliasConflictResourceHasDifferentValue (alias_resource_conflicts).
+// No match at all (alias_safe) means the candidate is genuinely new.
+//
+// Both phases fold their existence check directly into a LEFT JOIN
+// LATERAL against the candidate relation (alias_prev_by_value against
+// input_aliases, alias_resource_check against alias_value_missing)
+// rather than computing the check as its own CTE and re-joining it
+// back afterward by idx. That's deliberate, not stylistic: idx
+// identifies a *report*, not a single alias -- flattenAliasCandidates
+// emits one input_aliases row per (report, alias) pair, so a report
+// with two aliases produces two rows sharing one idx. Re-joining two
+// already-derived relations "ON x.idx = y.idx" would fan those two
+// rows out against each other's results whenever both happen to
+// match, silently mixing up which lookup belongs to which alias.
+// Folding the check into the same row via LATERAL keeps every derived
+// CTE 1:1 with its input, so no re-join -- and no idx collision -- is
+// ever needed. (alias_leftover_owner, further down, exists for the
+// same reason.)
+//
+// Only alias_safe (alias_value_missing rows phase 2 found no existing
+// row for) ever reaches ensure_platform or alias_upsert: lazily
+// upserting the (uid-less) platform_resources row for every name in
+// alias_safe -- see resource_identity_repo.go's virtual-resource doc
+// -- then the alias itself. alias_upsert still needs its own guarded
+// DO UPDATE and post-write diagnosis (alias_leftover,
+// alias_leftover_owner) despite phase 1 already having proved this
+// value didn't exist at read time: a concurrent session could insert
+// the same (namespace, key, value) between that read and this write.
+// The guard -- a no-op write-back of the row's own current owner,
+// distinguishing "raced but same owner" from "raced, different owner"
+// via RETURNING alone, with no read before the INSERT runs --
+// together with the leftover-diagnosis tail now exists purely to
+// handle that (rare) race, not the common case anymore.
+//
+// Every LATERAL here uses OFFSET 0, which is load-bearing, not
+// decorative: without it, Postgres "de-correlates" a LATERAL whose
+// body is just an equality filter back into an ordinary join it's
+// once again free to hash-and-scan, defeating the point -- OFFSET 0
+// is the standard trick for telling the planner a subquery must
+// actually be evaluated as written, one outer row at a time, which is
+// what pushes it to a per-candidate indexed nested loop instead of a
+// seq-scan-and-hash-join (its row-count guess for a CTE is a flat,
+// disconnected-from-real-stats default that otherwise steers it the
+// other way at this corpus size).
 //
 // (An earlier version routed input_aliases through an alias_candidates
 // CTE that joined er by idx purely to fetch collection_name/
@@ -979,60 +1015,56 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // memory at the exact call site that builds input_aliases's arrays.
 // An EXPLAIN of that version (see inventory_bench_test.go's
 // UpdateWithAlias benchmark) showed alias_candidates costing as much
-// to scan a second time, in alias_resource_check, as it cost to
-// compute in the first place in alias_prev_by_resource, even though
-// it's a plain materialized CTE and Postgres's docs promise a WITH
-// query "is evaluated only once ... even if referred to more than
-// once" -- empirically, on this corpus size, joining er was expensive
-// enough that even a single extra reference wasn't free. Passing
-// those three columns as part of input_aliases itself, per
-// flattenAliasCandidates's doc comment, removes the join (and the
-// CTE) entirely rather than trying to amortize its cost.)
-//
-// The *other* shape -- "this value already belongs to a different
-// resource" -- doesn't need a pre-read to decide whether to write:
-// alias_upsert targets exactly that index, and a guarded DO UPDATE (a
-// no-op write back of the row's own current owner) lets Postgres's
-// own conflict resolution distinguish "already exists, same owner"
-// (guard true, counts as success) from "exists, different owner"
-// (guard false, skipped like DO NOTHING) via RETURNING alone, with no
-// read before the INSERT runs. alias_leftover -- alias_safe rows
-// absent from alias_upsert's RETURNING, i.e. every candidate that
-// guard skipped -- turns that RETURNING signal into a row set so
-// alias_prev_by_value only has to look up *who* the other owner is
-// for candidates already known to have lost the race, rather than for
-// every safe candidate regardless of outcome. Both alias_prev_by_resource
-// and alias_prev_by_value use LATERAL specifically to force Postgres
-// into a per-candidate indexed nested loop rather than a seq-scan-and-
-// hash-join, which is what its row-count guess for a CTE (a flat,
-// disconnected-from-real-stats default) otherwise steers it toward at
-// this corpus size. The inner OFFSET 0 in each is load-bearing, not
-// decorative: without it, Postgres "de-correlates" a LATERAL whose
-// body is just an equality filter back into an ordinary join it's
-// once again free to hash-and-scan, defeating the point -- OFFSET 0
-// is the standard trick for telling the planner a subquery must
-// actually be evaluated as written, one outer row at a time.
-//
-// ensure_platform lazily upserts the (uid-less) platform_resources
-// row -- see resource_identity_repo.go's virtual-resource doc -- for
-// every name in alias_safe, including ones whose alias will ultimately
-// lose the alias_prev_by_value race; that's harmless (ON CONFLICT DO
-// NOTHING) and cheaper than trying to predict the outcome first.
+// to scan a second time, in what's now alias_resource_check, as it
+// cost to compute in the first place, even though it's a plain
+// materialized CTE and Postgres's docs promise a WITH query "is
+// evaluated only once ... even if referred to more than once" --
+// empirically, on this corpus size, joining er was expensive enough
+// that even a single extra reference wasn't free. Passing those three
+// columns as part of input_aliases itself, per flattenAliasCandidates's
+// doc comment, removed the join -- and the CTE -- entirely rather
+// than trying to amortize its cost. A later EXPLAIN of the version
+// that came before this one -- a single read-by-resource-first phase,
+// with no equivalent of phase 1 above -- showed alias_upsert's
+// guarded DO UPDATE doing a real per-row tuple rewrite and index
+// update for every steady-state re-report even though nothing had
+// changed, accounting for roughly a fifth of the whole statement's
+// time on its own. Reading by value first, as phases 1 and 2 above
+// now do, is what lets that common case skip the write -- both
+// ensure_platform and alias_upsert -- rather than just detecting
+// after the fact that it didn't need one.)
 const aliasFoldCTEs = `
-alias_prev_by_resource AS (
-	SELECT ac.idx, ra.existing_value
+alias_prev_by_value AS (
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at,
+	       ra.actual_collection_name, ra.actual_resource_id
 	FROM input_aliases ac
-	JOIN LATERAL (
+	LEFT JOIN LATERAL (
+		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id
+		FROM resource_aliases
+		WHERE namespace = ac.namespace AND key = ac.key AND value = ac.value
+		OFFSET 0
+	) ra ON true
+),
+alias_value_conflicts AS (
+	SELECT idx, namespace, key, value, actual_collection_name, actual_resource_id
+	FROM alias_prev_by_value
+	WHERE actual_collection_name IS NOT NULL
+	  AND (actual_collection_name <> collection_name OR actual_resource_id <> resource_id)
+),
+alias_value_missing AS (
+	SELECT idx, namespace, key, value, collection_name, resource_id, received_at
+	FROM alias_prev_by_value
+	WHERE actual_collection_name IS NULL
+),
+alias_resource_check AS (
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ra.existing_value
+	FROM alias_value_missing ac
+	LEFT JOIN LATERAL (
 		SELECT value AS existing_value FROM resource_aliases
 		WHERE namespace = ac.namespace AND key = ac.key
 		  AND platform_collection_name = ac.collection_name AND platform_resource_id = ac.resource_id
 		OFFSET 0
 	) ra ON true
-),
-alias_resource_check AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, pr.existing_value
-	FROM input_aliases ac
-	LEFT JOIN alias_prev_by_resource pr ON pr.idx = ac.idx
 ),
 alias_safe AS (
 	SELECT idx, namespace, key, value, collection_name, resource_id, received_at
@@ -1042,7 +1074,7 @@ alias_safe AS (
 alias_resource_conflicts AS (
 	SELECT idx, namespace, key, value, existing_value
 	FROM alias_resource_check
-	WHERE existing_value IS NOT NULL AND existing_value <> value
+	WHERE existing_value IS NOT NULL
 ),
 ensure_platform AS (
 	INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
@@ -1068,8 +1100,8 @@ alias_leftover AS (
 	LEFT JOIN alias_upsert au ON au.namespace = ac.namespace AND au.key = ac.key AND au.value = ac.value
 	WHERE au.value IS NULL
 ),
-alias_prev_by_value AS (
-	SELECT ac.idx, ra.actual_collection_name, ra.actual_resource_id
+alias_leftover_owner AS (
+	SELECT ac.idx, ac.namespace, ac.key, ac.value, ra.actual_collection_name, ra.actual_resource_id
 	FROM alias_leftover ac
 	JOIN LATERAL (
 		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id
@@ -1081,22 +1113,25 @@ alias_prev_by_value AS (
 
 // aliasConflictSelect is the final SELECT shared verbatim by
 // replaceInventorySQL and applyInventoryDeltasSQL, appended after
-// aliasFoldCTEs. The first branch is alias_resource_conflicts as-is
-// (AliasConflictResourceHasDifferentValue) -- these never reached
-// alias_upsert at all. The second is every alias_leftover row --
-// exactly the alias_safe candidates alias_upsert's guarded DO UPDATE
-// skipped -- joined to alias_prev_by_value for the other owner's
-// identity (AliasConflictValueClaimedByOther). A candidate matching
-// neither (the common case) is absent from the result entirely.
+// aliasFoldCTEs. Three branches, one per conflict source:
+// alias_value_conflicts (phase 1, read-by-value) and
+// alias_leftover_owner (discovered only after alias_upsert's guarded
+// write actually raced) are both AliasConflictValueClaimedByOther;
+// alias_resource_conflicts (phase 2, read-by-resource) is
+// AliasConflictResourceHasDifferentValue. A candidate matching none
+// of the three (the common case) is absent from the result entirely.
 const aliasConflictSelect = `
+SELECT idx, namespace, key, value,
+       actual_collection_name, actual_resource_id, NULL::text AS actual_value
+FROM alias_value_conflicts
+UNION ALL
 SELECT idx, namespace, key, value,
        NULL::text AS actual_collection_name, NULL::text AS actual_resource_id, existing_value AS actual_value
 FROM alias_resource_conflicts
 UNION ALL
-SELECT ac.idx, ac.namespace, ac.key, ac.value,
-       pv.actual_collection_name, pv.actual_resource_id, NULL::text AS actual_value
-FROM alias_leftover ac
-JOIN alias_prev_by_value pv ON pv.idx = ac.idx`
+SELECT idx, namespace, key, value,
+       actual_collection_name, actual_resource_id, NULL::text AS actual_value
+FROM alias_leftover_owner`
 
 // replaceInventoryCoreCTEs is the natural-key resolve-or-create +
 // latest-row + label + condition pipeline shared by
@@ -1496,6 +1531,11 @@ SELECT 1 WHERE FALSE`
 func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas []domain.InventoryDelta) ([]domain.AliasConflict, error) {
 	if len(deltas) == 0 {
 		return nil, nil
+	}
+	for _, d := range deltas {
+		if err := domain.ValidateInventoryDelta(d); err != nil {
+			return nil, err
+		}
 	}
 
 	n := len(deltas)

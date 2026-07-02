@@ -311,23 +311,18 @@ func rejectAliasConflicts(conflicts []domain.AliasConflict) error {
 
 // validateDeltaReport catches internally conflicting delta fields
 // before any identity resolution or persistence is attempted, per the
-// rework doc's delta semantics.
+// rework doc's delta semantics. It delegates to
+// [domain.ValidateInventoryDelta] -- the same check the repository
+// layer now also runs -- rather than duplicating it, so failing fast
+// here before a single round trip and defending the repository's own
+// contract stay backed by exactly one implementation.
 func validateDeltaReport(report InventoryDeltaInput) error {
-	for _, k := range report.DeleteLabels {
-		if _, ok := report.SetLabels[k]; ok {
-			return fmt.Errorf("%w: label %q is present in both SetLabels and DeleteLabels", domain.ErrInvalidArgument, k)
-		}
-	}
-	deleted := make(map[domain.ConditionType]struct{}, len(report.DeleteConditions))
-	for _, t := range report.DeleteConditions {
-		deleted[t] = struct{}{}
-	}
-	for _, c := range report.UpsertConditions {
-		if _, ok := deleted[c.Type()]; ok {
-			return fmt.Errorf("%w: condition type %q is present in both UpsertConditions and DeleteConditions", domain.ErrInvalidArgument, c.Type())
-		}
-	}
-	return nil
+	return domain.ValidateInventoryDelta(domain.InventoryDelta{
+		SetLabels:        report.SetLabels,
+		DeleteLabels:     report.DeleteLabels,
+		UpsertConditions: report.UpsertConditions,
+		DeleteConditions: report.DeleteConditions,
+	})
 }
 
 // forEachReportChunk calls fn once per contiguous chunk of at most

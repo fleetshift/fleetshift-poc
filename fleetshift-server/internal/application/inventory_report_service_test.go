@@ -378,6 +378,55 @@ func TestInventoryReportService_ReplaceBatch_CrossReportNewAliasContradictionRej
 	}
 }
 
+// TestInventoryReportService_ReplaceBatch_CrossChunkAliasContradictionRejected
+// is CrossReportNewAliasContradictionRejected's harder sibling: the
+// two contradicting reports land in *different* chunks of the same
+// batch/transaction (forced via a chunk size of 1), so
+// reportResolver's per-chunk checkAliasBatchConsistency-equivalent
+// (scoped to whatever aliasCandidates its own chunk assembled) never
+// sees both claims at once and cannot catch the contradiction in Go.
+// It must still be caught -- this time by the second chunk's SQL
+// seeing the first chunk's alias row, already written earlier in the
+// very same transaction -- and still roll back the whole batch.
+func TestInventoryReportService_ReplaceBatch_CrossChunkAliasContradictionRejected(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store, application.WithInventoryReportChunkSize(1))
+	ctx := context.Background()
+
+	name1 := domain.ResourceName("clusters/cc1")
+	name2 := domain.ResourceName("clusters/cc2")
+	contested, err := domain.NewAlias("gcp", "project_id", "cross-chunk-contested")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+
+	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// No partial writes: chunk 1 committing nothing until the whole
+	// transaction commits is what makes this catchable at all, so
+	// this is also a check that the guarantee actually holds.
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ResourceIdentities().GetByName(ctx, name1); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name1, err)
+	}
+	if _, err := tx.ResourceIdentities().GetByName(ctx, name2); !errors.Is(err, domain.ErrNotFound) {
+		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name2, err)
+	}
+}
+
 func TestInventoryReportService_ReplaceBatch_CrossReportSameKeyDifferentValueRejected(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
@@ -573,6 +622,69 @@ func TestInventoryReportService_ReplaceBatch_DuplicateResolvedUIDWithinBatchFail
 	}
 }
 
+// TestInventoryReportService_ReplaceBatch_MixedNameAndAliasDuplicateRejected
+// exercises the specific new shape rejectDuplicateReports's doc
+// comment calls out: not two reports naming the same resource
+// directly (DuplicateResolvedUIDWithinBatchFails, above), but one
+// report identifying a resource by Name and another identifying the
+// very same resource purely by an alias it already owns.
+func TestInventoryReportService_ReplaceBatch_MixedNameAndAliasDuplicateRejected(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/mixed-dup")
+	alias, err := domain.NewAlias("gcp", "project_id", "mixed-dup-project")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	// Seed the resource and its alias via one prior report.
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name, Aliases: []domain.Alias{alias}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &name, Observation: rawMsg(`{"v":1}`), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Aliases: []domain.Alias{alias}, Observation: rawMsg(`{"v":2}`), ObservedAt: time.Now()},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// Neither report's observation should have overwritten the seed.
+	er := getExtensionResource(t, store, name)
+	if er.Inventory().Observation() != nil {
+		t.Errorf("Observation = %v, want nil (untouched by the rejected batch)", er.Inventory().Observation())
+	}
+}
+
+// TestInventoryReportService_ReplaceBatch_RejectsReportWithNeitherNameNorAliases
+// covers resolveBatch's first identity precondition: a report can't
+// be resolved to any target at all without at least one of Name or
+// Aliases set.
+func TestInventoryReportService_ReplaceBatch_RejectsReportWithNeitherNameNorAliases(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Observation: rawMsg(`{"v":1}`), ObservedAt: time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 func TestInventoryReportService_ReplaceBatch_ObservationNilLeavesLatestUnchanged(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
@@ -612,6 +724,89 @@ func TestInventoryReportService_ReplaceBatch_ObservationNilLeavesLatestUnchanged
 	}
 	if len(obs) != 1 {
 		t.Fatalf("ListObservations len = %d, want 1 (nil observation must not append history)", len(obs))
+	}
+}
+
+// TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete
+// covers validateDeltaReport's first guard: a key present in both
+// SetLabels and DeleteLabels is self-contradictory and must be
+// rejected before identity resolution or any SQL runs, rather than
+// left for the repository to interpret (see the label CTEs' doc
+// comments for why the repository itself does not define an ordering
+// between the two).
+func TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			Labels: map[string]string{"zone": "us-east-1"}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			SetLabels:    map[string]string{"zone": "us-west-2"},
+			DeleteLabels: []string{"zone"},
+			ObservedAt:   time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// Rejected before any write: the label must be untouched.
+	er := getExtensionResource(t, store, name)
+	if got := er.Inventory().Labels()["zone"]; got != "us-east-1" {
+		t.Errorf("Labels[zone] = %q, want unchanged %q", got, "us-east-1")
+	}
+}
+
+// TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndDelete
+// is RejectsLabelInBothSetAndDelete's condition counterpart, covering
+// validateDeltaReport's second guard.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndDelete(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	ready := mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", time.Now())
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			Conditions: []domain.Condition{ready}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	degraded := mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", time.Now())
+	err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			UpsertConditions: []domain.Condition{degraded},
+			DeleteConditions: []domain.ConditionType{"Ready"},
+			ObservedAt:       time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+
+	// Rejected before any write: the condition must be untouched.
+	er := getExtensionResource(t, store, name)
+	conds := er.Inventory().Conditions()
+	if len(conds) != 1 || conds[0].Status() != domain.ConditionTrue {
+		t.Errorf("Conditions = %+v, want unchanged [Ready=True]", conds)
 	}
 }
 

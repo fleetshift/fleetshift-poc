@@ -3,6 +3,7 @@ package domain
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 )
 
@@ -198,6 +199,39 @@ type InventoryDelta struct {
 
 	ObservedAt time.Time
 	ReceivedAt time.Time
+}
+
+// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels
+// or UpsertConditions/DeleteConditions contradict each other -- the
+// same key present in both label sets, or the same [ConditionType] in
+// both condition sets. This can't be left for either backend's
+// ApplyInventoryDeltas to resolve on its own: Postgres's
+// applyInventoryDeltasCoreCTEs runs the corresponding set/delete pair
+// as sibling writable CTEs with no defined execution order between
+// them when they touch the same table, while SQLite's Go orchestration
+// happens to run them as ordered sequential statements -- so the very
+// same contradictory delta would silently resolve differently per
+// backend if it ever reached either one. Both
+// [ExtensionResourceRepository.ApplyInventoryDeltas] implementations
+// call this for every delta before building any batch argument, so
+// the contradiction is always caught in Go before any SQL runs,
+// regardless of caller.
+func ValidateInventoryDelta(d InventoryDelta) error {
+	for _, k := range d.DeleteLabels {
+		if _, ok := d.SetLabels[k]; ok {
+			return fmt.Errorf("%w: label %q is present in both SetLabels and DeleteLabels", ErrInvalidArgument, k)
+		}
+	}
+	deleted := make(map[ConditionType]struct{}, len(d.DeleteConditions))
+	for _, t := range d.DeleteConditions {
+		deleted[t] = struct{}{}
+	}
+	for _, c := range d.UpsertConditions {
+		if _, ok := deleted[c.Type()]; ok {
+			return fmt.Errorf("%w: condition type %q is present in both UpsertConditions and DeleteConditions", ErrInvalidArgument, c.Type())
+		}
+	}
+	return nil
 }
 
 // ResourceIdentityRepository persists and retrieves canonical platform

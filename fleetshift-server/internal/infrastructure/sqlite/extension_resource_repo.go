@@ -1540,6 +1540,11 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	if len(deltas) == 0 {
 		return nil, nil
 	}
+	for _, d := range deltas {
+		if err := domain.ValidateInventoryDelta(d); err != nil {
+			return nil, err
+		}
+	}
 
 	resourceTypes := make([]domain.ResourceType, len(deltas))
 	names := make([]domain.ResourceName, len(deltas))
