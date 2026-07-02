@@ -150,7 +150,7 @@ The addon first declares its capabilities at enable time:
 
 ```go
 domain.AddonDescriptor{
-    ID:   "kind",
+    ID:   "kind.fleetshift.io",
     Name: "Kind Cluster Provider",
     Capabilities: []domain.Capability{
         domain.DeliveryCapability{TargetType: "kind"},

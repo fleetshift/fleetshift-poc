@@ -10,20 +10,20 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// SchemaRegistrationID is an opaque token returned by
-// [SchemaActivator.Activate] that identifies a schema registration.
-// The application layer stores it and passes it back to Deactivate;
-// it must not interpret or parse the value.
-type SchemaRegistrationID string
+// SchemaActivationID is an opaque token returned by
+// [SchemaActivator.Activate] that identifies an active transport
+// registration. The application layer stores it and passes it back to
+// Deactivate; it must not interpret or parse the value.
+type SchemaActivationID string
 
 // SchemaActivator compiles and registers the transport-layer API
-// surface for a managed resource schema. The application layer calls
-// this without knowing about proto compilation, gRPC service
-// descriptors, or HTTP muxes — the implementation lives in the
-// transport layer.
+// surface for an extension resource schema's management section. The
+// application layer calls this without knowing about proto compilation,
+// gRPC service descriptors, or HTTP muxes — the implementation lives
+// in the transport layer.
 type SchemaActivator interface {
-	Activate(ctx context.Context, schema domain.ManagedResourceSchema) (SchemaRegistrationID, error)
-	Deactivate(id SchemaRegistrationID)
+	Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (SchemaActivationID, error)
+	Deactivate(id SchemaActivationID)
 }
 
 // DeliveryAgentRegistry manages the mapping from [domain.TargetType] to
@@ -71,10 +71,17 @@ type addonRecord struct {
 	addon domain.Addon
 	agent domain.DeliveryAgent
 	// Keyed by resource type so connectSchemas can reconcile the new
-	// input against existing state and deactivate stale schemas.
+	// input against existing state and tear down stale schemas.
 	// Content-change detection is handled by the SchemaActivator itself.
-	schemaRegistrations map[domain.ResourceType]SchemaRegistrationID
-	registeredTypeDefs  map[domain.ResourceType]struct{}
+	registeredSchemas map[domain.ResourceType]registeredSchema
+}
+
+// registeredSchema tracks a schema that has been registered (type def
+// created) and optionally activated in the transport layer.
+type registeredSchema struct {
+	// activation is non-nil when the schema has a live transport
+	// registration (managed schemas). Nil for inventory-only schemas.
+	activation *SchemaActivationID
 }
 
 // NewAddonManager creates a new manager with the given dependencies
@@ -100,6 +107,14 @@ func NewAddonManager(deps AddonManagerDeps, opts ...AddonManagerOption) *AddonMa
 // If the addon was previously disabled (state [domain.AddonStateDefined]),
 // Enable re-enables it by updating the record in place.
 func (m *AddonManager) Enable(_ context.Context, desc domain.AddonDescriptor) error {
+	for _, cap := range desc.Capabilities {
+		if rt, ok := capabilityResourceType(cap); ok {
+			if err := validateResourceTypeOwnership(desc.ID, rt); err != nil {
+				return err
+			}
+		}
+	}
+
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -141,9 +156,10 @@ type ConnectInput struct {
 	// are consistent. Existing targets are silently skipped.
 	Targets []domain.TargetInfo
 
-	// Schemas are the managed resource schemas for addons that declare
-	// a [domain.ManagedResourceCapability]. Nil for delivery-only addons.
-	Schemas []domain.ManagedResourceSchema
+	// Schemas are the extension resource schemas for addons that declare
+	// a [domain.ManagedResourceCapability] and/or
+	// [domain.InventoryResourceCapability]. Nil for delivery-only addons.
+	Schemas []domain.ExtensionResourceSchema
 }
 
 // Connect activates an addon's runtime capabilities. The [ConnectInput]
@@ -154,8 +170,10 @@ type ConnectInput struct {
 // schemas that are unchanged are left in place.
 //
 // The addon must be in [domain.AddonStateEnabled] (or re-connecting
-// after a disconnect). Schemas are validated against the addon's
-// declared [domain.ManagedResourceCapability] entries.
+// after a disconnect). Each schema section is validated against the
+// addon's declared capabilities: Management requires a
+// [domain.ManagedResourceCapability], Inventory requires a
+// [domain.InventoryResourceCapability].
 func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in ConnectInput) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -190,43 +208,59 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 	return nil
 }
 
-// connectSchemas reconciles the addon's active schema registrations
-// against the new input:
-//  1. Deactivates schemas that are no longer provided (stale).
-//  2. Calls Activate for every schema in the input — the
-//     [SchemaActivator] handles content-change detection internally
-//     (via hashing) and atomically swaps or no-ops as appropriate.
-func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, schemas []domain.ManagedResourceSchema) error {
+// connectSchemas reconciles the addon's registered schemas against the
+// new input:
+//  1. Tears down schemas that are no longer provided (stale).
+//  2. Validates each schema section against the addon's declared
+//     capabilities.
+//  3. Registers the schema (creates the type definition).
+//  4. For schemas with a Management section, calls
+//     [SchemaActivator.Activate] to compile the transport API surface.
+//     Inventory-only schemas skip activation (no dynamic API yet).
+func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, schemas []domain.ExtensionResourceSchema) error {
 	newTypes := make(map[domain.ResourceType]struct{}, len(schemas))
 	for _, s := range schemas {
 		newTypes[s.ResourceType] = struct{}{}
 	}
 
-	for rt := range rec.schemaRegistrations {
+	for rt := range rec.registeredSchemas {
 		if _, stillPresent := newTypes[rt]; !stillPresent {
-			m.deactivateSchema(ctx, rec, rt)
+			m.teardownSchema(ctx, rec, rt)
 		}
 	}
 
+	// TODO: handle duplicate resource types
 	for _, schema := range schemas {
-		if err := validateSchemaCapability(rec, schema); err != nil {
+		if err := validateResourceTypeOwnership(rec.addon.ID, schema.ResourceType); err != nil {
 			return err
 		}
-		if err := m.activateSchema(ctx, rec, schema); err != nil {
-			return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
+		if err := validateSchemaCapabilities(rec, schema); err != nil {
+			return err
 		}
+		if err := m.registerSchema(ctx, rec, schema); err != nil {
+			return fmt.Errorf("register schema for %q: %w", schema.ResourceType, err)
+		}
+		// TODO: no inventory schema yet
+		if schema.Management != nil {
+			if err := m.activateSchema(ctx, rec, schema); err != nil {
+				return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
+			}
+		}
+		// TODO: handle if schema stays but drops capability
 	}
 	return nil
 }
 
-func (m *AddonManager) deactivateSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
-	if id, ok := rec.schemaRegistrations[rt]; ok {
-		m.activator.Deactivate(id)
-		delete(rec.schemaRegistrations, rt)
-	}
-	if _, ok := rec.registeredTypeDefs[rt]; ok {
+// teardownSchema deactivates the transport surface (if active) and
+// deletes the type definition from the store.
+func (m *AddonManager) teardownSchema(ctx context.Context, rec *addonRecord, rt domain.ResourceType) {
+	if reg, ok := rec.registeredSchemas[rt]; ok {
+		if reg.activation != nil {
+			m.activator.Deactivate(*reg.activation)
+		}
+		// TODO: do something about the failed delete
 		_ = m.typeSvc.Delete(ctx, rt)
-		delete(rec.registeredTypeDefs, rt)
+		delete(rec.registeredSchemas, rt)
 	}
 }
 
@@ -285,7 +319,7 @@ func (m *AddonManager) Disconnect(_ context.Context, addonID domain.AddonID) err
 
 // Disable fully removes an addon's API surface and type definitions.
 // Schema activations are torn down, delivery agents are removed, and
-// managed resource type defs are deleted. The addon transitions to
+// extension resource type defs are deleted. The addon transitions to
 // [domain.AddonStateDefined].
 func (m *AddonManager) Disable(ctx context.Context, addonID domain.AddonID) error {
 	m.mu.Lock()
@@ -305,8 +339,10 @@ func (m *AddonManager) Disable(ctx context.Context, addonID domain.AddonID) erro
 		rec.agent = nil
 	}
 
-	for rt := range rec.schemaRegistrations {
-		m.deactivateSchema(ctx, rec, rt)
+	// Tear down all registered schemas (both activated and
+	// inventory-only).
+	for rt := range rec.registeredSchemas {
+		m.teardownSchema(ctx, rec, rt)
 	}
 
 	rec.addon.State = domain.AddonStateDefined
@@ -326,72 +362,145 @@ func (m *AddonManager) Get(addonID domain.AddonID) (domain.Addon, error) {
 	return rec.addon, nil
 }
 
-// validateSchemaCapability checks that the schema's ResourceType
-// matches a declared ManagedResourceCapability on the addon.
-func validateSchemaCapability(rec *addonRecord, schema domain.ManagedResourceSchema) error {
+// validateResourceTypeOwnership checks that the resource type's
+// service name matches the addon's ID. This enforces that an addon
+// can only register extension resource types under its own service
+// namespace.
+func validateResourceTypeOwnership(addonID domain.AddonID, rt domain.ResourceType) error {
+	expected := domain.ServiceName(addonID)
+	actual := rt.ServiceName()
+	if expected != actual {
+		return fmt.Errorf(
+			"%w: addon %q cannot register resource type %q (service name %q does not match addon ID)",
+			domain.ErrInvalidArgument, addonID, rt, actual,
+		)
+	}
+	return nil
+}
+
+// capabilityResourceType extracts the [domain.ResourceType] from a
+// capability, if the capability type carries one. Returns false for
+// capability types like [domain.DeliveryCapability] that don't own
+// extension resource types.
+func capabilityResourceType(cap domain.Capability) (domain.ResourceType, bool) {
+	switch c := cap.(type) {
+	case domain.ManagedResourceCapability:
+		return c.ResourceType, true
+	case domain.InventoryResourceCapability:
+		return c.ResourceType, true
+	default:
+		return "", false
+	}
+}
+
+// validateSchemaCapabilities checks that each non-nil section of the
+// schema is backed by a matching capability declaration on the addon.
+func validateSchemaCapabilities(rec *addonRecord, schema domain.ExtensionResourceSchema) error {
+	if schema.Management != nil {
+		if !hasCapabilityFor[domain.ManagedResourceCapability](rec, schema.ResourceType) {
+			return fmt.Errorf("%w: addon %q has no ManagedResourceCapability for resource type %q",
+				domain.ErrInvalidArgument, rec.addon.ID, schema.ResourceType)
+		}
+	}
+	if schema.Inventory != nil {
+		if !hasCapabilityFor[domain.InventoryResourceCapability](rec, schema.ResourceType) {
+			return fmt.Errorf("%w: addon %q has no InventoryResourceCapability for resource type %q",
+				domain.ErrInvalidArgument, rec.addon.ID, schema.ResourceType)
+		}
+	}
+	return nil
+}
+
+// resourceCapability is the constraint for capability types that carry
+// a ResourceType field.
+type resourceCapability interface {
+	domain.ManagedResourceCapability | domain.InventoryResourceCapability
+}
+
+// hasCapabilityFor returns true if the addon has a capability of type C
+// matching the given resource type.
+func hasCapabilityFor[C resourceCapability](rec *addonRecord, rt domain.ResourceType) bool {
 	for _, cap := range rec.addon.Capabilities {
-		if mrc, ok := cap.(domain.ManagedResourceCapability); ok {
-			if mrc.ResourceType == schema.ResourceType {
-				return nil
+		if c, ok := cap.(C); ok {
+			switch v := any(c).(type) {
+			case domain.ManagedResourceCapability:
+				if v.ResourceType == rt {
+					return true
+				}
+			case domain.InventoryResourceCapability:
+				if v.ResourceType == rt {
+					return true
+				}
 			}
 		}
 	}
-	return fmt.Errorf("%w: addon %q has no ManagedResourceCapability for resource type %q",
-		domain.ErrInvalidArgument, rec.addon.ID, schema.ResourceType)
+	return false
+}
+
+// registerSchema ensures the extension resource type definition exists
+// in the store. It is called for every schema (managed, inventory, or
+// both) before any transport activation.
+func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
+	if _, ok := rec.registeredSchemas[schema.ResourceType]; ok {
+		return nil
+	}
+
+	newVer := domain.APIVersion(schema.Version)
+	newCol := domain.CollectionID(schema.CollectionID)
+
+	// Relation is only meaningful for schemas with a Management
+	// section; inventory-only schemas compare against a nil relation.
+	var newRelation domain.FulfillmentRelation
+	input := CreateExtensionTypeInput{
+		ResourceType: schema.ResourceType,
+		APIVersion:   newVer,
+		CollectionID: newCol,
+	}
+	if schema.Management != nil {
+		newRelation = schema.Management.Relation
+		input.Management = &CreateExtensionTypeManagementInput{
+			Relation: schema.Management.Relation,
+			// TODO: support relation signatures and validation through attestation evidence
+			Signature: domain.Signature{},
+		}
+	}
+	if schema.Inventory != nil {
+		// TODO: schema support for inventory
+		input.Inventory = &CreateExtensionTypeInventoryInput{}
+	}
+
+	_, err := m.typeSvc.Create(ctx, input)
+	if err != nil {
+		if !errors.Is(err, domain.ErrAlreadyExists) {
+			return fmt.Errorf("create type def: %w", err)
+		}
+		if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol, newRelation); err != nil {
+			return err
+		}
+	}
+	if rec.registeredSchemas == nil {
+		rec.registeredSchemas = make(map[domain.ResourceType]registeredSchema)
+	}
+	rec.registeredSchemas[schema.ResourceType] = registeredSchema{}
+	return nil
 }
 
 // activateSchema delegates to the SchemaActivator and records the
-// resulting registration ID and type def.
-//
-// Type metadata is validated before activation so that a CreateType or
-// drift-detection failure never leaves routes live with no matching
-// type definition (and never tears down the previous registration).
-func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ManagedResourceSchema) error {
-	// Validate / register the type definition first — this is
-	// side-effect-free with respect to the transport layer, so
-	// a failure here keeps the previous registration intact.
-	if _, ok := rec.registeredTypeDefs[schema.ResourceType]; !ok {
-		newVer := domain.APIVersion(schema.Version)
-		newCol := domain.CollectionID(schema.CollectionID)
-
-		_, err := m.typeSvc.Create(ctx, CreateExtensionTypeInput{
-			ResourceType: schema.ResourceType,
-			APIVersion:   newVer,
-			CollectionID: newCol,
-			Management: &CreateExtensionTypeManagementInput{
-				Relation:  schema.Relation,
-				Signature: domain.Signature{},
-			},
-		})
-		if err != nil {
-			if !errors.Is(err, domain.ErrAlreadyExists) {
-				return fmt.Errorf("create type def: %w", err)
-			}
-			if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol, schema.Relation); err != nil {
-				return err
-			}
-		}
-		if rec.registeredTypeDefs == nil {
-			rec.registeredTypeDefs = make(map[domain.ResourceType]struct{})
-		}
-		rec.registeredTypeDefs[schema.ResourceType] = struct{}{}
-	}
-
+// resulting activation ID. Only called for schemas with a Management
+// section — the schema has already been registered by [registerSchema].
+func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
 	id, err := m.activator.Activate(ctx, schema)
 	if err != nil {
 		return err
 	}
-	if rec.schemaRegistrations == nil {
-		rec.schemaRegistrations = make(map[domain.ResourceType]SchemaRegistrationID)
-	}
 
-	// If the registration ID changed (e.g. the gRPC service name
+	// If the activation ID changed (e.g. the gRPC service name
 	// changed due to a package rename), deactivate the old one so
 	// its gRPC/HTTP routes don't leak.
-	if prev, ok := rec.schemaRegistrations[schema.ResourceType]; ok && prev != id {
-		m.activator.Deactivate(prev)
+	if reg, ok := rec.registeredSchemas[schema.ResourceType]; ok && reg.activation != nil && *reg.activation != id {
+		m.activator.Deactivate(*reg.activation)
 	}
-	rec.schemaRegistrations[schema.ResourceType] = id
+	rec.registeredSchemas[schema.ResourceType] = registeredSchema{activation: &id}
 
 	return nil
 }

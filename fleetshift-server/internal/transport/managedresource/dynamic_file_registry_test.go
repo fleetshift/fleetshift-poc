@@ -22,7 +22,7 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 		t.Context(),
 		schema.ProtoFiles,
 		entryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
@@ -37,7 +37,7 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 		},
 		ResourceType:   kindaddon.ClusterResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.SpecMessage,
+		SpecMessage:    schema.Management.SpecMessage,
 		SpecDescriptor: spec.Message,
 	}
 	descs, err := managedresource.BuildServiceDescriptors(cfg, spec.Message)
@@ -54,7 +54,7 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 		t.Context(),
 		schema.ProtoFiles,
 		schema.EntryFile,
-		protoreflect.FullName(schema.SpecMessage),
+		protoreflect.FullName(schema.Management.SpecMessage),
 	)
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
@@ -69,7 +69,7 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 		},
 		ResourceType:   gcphcpaddon.ClusterResourceType,
 		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.SpecMessage,
+		SpecMessage:    schema.Management.SpecMessage,
 		SpecDescriptor: spec.Message,
 	}
 	descs, err := managedresource.BuildServiceDescriptors(cfg, spec.Message)

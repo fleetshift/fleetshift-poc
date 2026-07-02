@@ -223,14 +223,14 @@ func Start(t *testing.T) string {
 	}
 
 	schema := kindaddon.Schema()
-	if err := addonMgr.Connect(ctx, "kind", application.ConnectInput{
+	if err := addonMgr.Connect(ctx, kindaddon.Descriptor().ID, application.ConnectInput{
 		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
 			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		})},
-		Schemas: []domain.ManagedResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)
 	}
@@ -240,14 +240,14 @@ func Start(t *testing.T) string {
 	}
 
 	gcpSchema := gcphcpaddon.Schema("gcphcp-test")
-	if err := addonMgr.Connect(ctx, "gcphcp", application.ConnectInput{
+	if err := addonMgr.Connect(ctx, gcphcpaddon.Descriptor().ID, application.ConnectInput{
 		Targets: []domain.TargetInfo{domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID:                    "gcphcp-test",
 			Type:                  gcphcpaddon.TargetType,
 			Name:                  "Test GCP HCP Provider",
 			AcceptedManifestTypes: []domain.ManifestType{gcphcpaddon.ClusterManifestType},
 		})},
-		Schemas: []domain.ManagedResourceSchema{gcpSchema},
+		Schemas: []domain.ExtensionResourceSchema{gcpSchema},
 	}); err != nil {
 		t.Fatalf("connect gcphcp addon: %v", err)
 	}

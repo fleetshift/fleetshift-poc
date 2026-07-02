@@ -7,7 +7,7 @@ import "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 // targets using token-passthrough delivery (no fleetlet).
 func Descriptor() domain.AddonDescriptor {
 	return domain.AddonDescriptor{
-		ID:   "kubernetes",
+		ID:   "kubernetes.fleetshift.io",
 		Name: "Kubernetes Delivery Agent",
 		Capabilities: []domain.Capability{
 			domain.DeliveryCapability{TargetType: TargetType},
