@@ -1846,6 +1846,104 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
+		// RejectsLabelInBothSetAndDelete/RejectsConditionInBothUpsertAndDelete
+		// guard an invariant [InventoryReportService]'s
+		// validateDeltaReport also checks before identity resolution
+		// even begins -- but that's an application-layer courtesy,
+		// not a substitute for the repository defending its own
+		// contract against a delta built any other way. The two
+		// backends' applyInventoryDeltasCoreCTEs/ApplyInventoryDeltas
+		// implementations have no defined ordering between a field's
+		// set/upsert and its delete when both target the same
+		// key/type in one delta (Postgres's sibling writable CTEs
+		// touching the same table have no guaranteed execution order;
+		// SQLite's sequential statements would happen to let the
+		// delete win, but only incidentally) -- so without this
+		// check, the very same contradictory delta could silently
+		// resolve differently per backend.
+		t.Run("RejectsLabelInBothSetAndDelete", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-label-contradiction")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				SetLabels:  map[string]string{"zone": "us-east-1"},
+				ObservedAt: t1, ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				SetLabels:    map[string]string{"zone": "us-west-2"},
+				DeleteLabels: []string{"zone"},
+				ObservedAt:   t2, ReceivedAt: t2,
+			}})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-label-contradiction")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			if got := view.Resource.Inventory().Labels()["zone"]; got != "us-east-1" {
+				t.Errorf("Labels[zone] = %q, want unchanged %q (rejected before any write)", got, "us-east-1")
+			}
+		})
+
+		t.Run("RejectsConditionInBothUpsertAndDelete", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-condition-contradiction")
+			if err := repo.Create(ctx, r); err != nil {
+				t.Fatalf("Create: %v", err)
+			}
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt:       t1, ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				DeleteConditions: []domain.ConditionType{"Ready"},
+				ObservedAt:       t2, ReceivedAt: t2,
+			}})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			}
+
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/delta-condition-contradiction")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			conds := view.Resource.Inventory().Conditions()
+			if len(conds) != 1 || conds[0].Status() != domain.ConditionTrue {
+				t.Errorf("Conditions = %+v, want unchanged [Ready=True] (rejected before any write)", conds)
+			}
+		})
+
 		t.Run("UsesReceivedAtNotWallClock", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
@@ -2843,6 +2941,281 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ResolveAlias(newAlias): %v", err)
 			}
 			assertEqual(t, "resolved new alias", resolvedNew, domain.ResourceName("nodes/alias-mixed-fresh"))
+		})
+
+		// The tests above all report exactly one alias per report.
+		// The ones below exercise a single report carrying *multiple*
+		// aliases at once -- e.g. a cloud resource identified by both
+		// an instance ID and a zone -- since every alias in a report
+		// is flattened into its own independent candidate row before
+		// checkAliasBatchConsistency/SQL ever sees it (see
+		// aliasCandidateInput's doc comment), and that per-alias
+		// independence is exactly what could silently break under
+		// future optimization without being caught by any
+		// single-alias test.
+
+		t.Run("ResolvesMultipleDistinctAliasesFromSingleReport", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			instanceID, _ := domain.NewAlias("gcp", "instance_id", "multi-instance-1")
+			zone, _ := domain.NewAlias("gcp", "zone", "multi-zone-1")
+			name := domain.ResourceName("nodes/alias-multi-distinct")
+			t1 := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{instanceID, zone},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			for _, a := range []domain.Alias{instanceID, zone} {
+				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
+				if err != nil {
+					t.Fatalf("ResolveAlias(%+v): %v", a, err)
+				}
+				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			}
+
+			// Steady-state repeat: re-reporting both aliases unchanged
+			// on a later call must not conflict either, the same as
+			// the single-alias case above.
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err = repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{instanceID, zone},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("second ReplaceInventory: conflicts = %+v, want none", conflicts)
+			}
+		})
+
+		// PartialConflictInMultiAliasReportStillAppliesTheRest proves
+		// aliases within one report are resolved independently of
+		// each other *and* of the report's own inventory write: one
+		// bad alias must not sink the good alias or the observation
+		// riding along in the very same report.
+		t.Run("PartialConflictInMultiAliasReportStillAppliesTheRest", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			contested, _ := domain.NewAlias("gcp", "instance_id", "multi-partial-contested")
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-multi-partial-owner",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{contested},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			safe, _ := domain.NewAlias("gcp", "zone", "multi-partial-zone")
+			obs := json.RawMessage(`{"cpu":4}`)
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         "nodes/alias-multi-partial-challenger",
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{contested, safe},
+				Observation:  &obs,
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Alias", conflicts[0].Alias, contested)
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
+			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-multi-partial-challenger"))
+			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-multi-partial-owner"))
+
+			// The contested alias must still belong to its original owner.
+			resolvedContested, err := tx.ResourceIdentities().ResolveAlias(ctx, contested)
+			if err != nil {
+				t.Fatalf("ResolveAlias(contested): %v", err)
+			}
+			assertEqual(t, "resolved contested", resolvedContested, domain.ResourceName("nodes/alias-multi-partial-owner"))
+
+			// But the safe alias, from the very same losing report,
+			// must have been written to the challenger.
+			resolvedSafe, err := tx.ResourceIdentities().ResolveAlias(ctx, safe)
+			if err != nil {
+				t.Fatalf("ResolveAlias(safe): %v", err)
+			}
+			assertEqual(t, "resolved safe", resolvedSafe, domain.ResourceName("nodes/alias-multi-partial-challenger"))
+
+			// And the challenger's own inventory write (unrelated to
+			// aliases entirely) must have gone through too.
+			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/alias-multi-partial-challenger")
+			if err != nil {
+				t.Fatalf("GetView: %v", err)
+			}
+			assertObservation(t, "challenger Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+		})
+
+		// IntraReportSameKeyDifferentValuesConflictsAndKeepsFirst
+		// covers checkAliasBatchConsistency's other invariant reached
+		// *within* a single report instead of across two reports:
+		// one report asserting two different values for the same
+		// (namespace, key) is self-contradictory, exactly like
+		// ReportsConflictWhenResourceHasDifferentValueForSameKeyAcrossCalls
+		// but discovered in one call instead of two.
+		t.Run("IntraReportSameKeyDifferentValuesConflictsAndKeepsFirst", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			zoneA, _ := domain.NewAlias("gcp", "zone", "multi-samekey-a")
+			zoneB, _ := domain.NewAlias("gcp", "zone", "multi-samekey-b")
+			name := domain.ResourceName("nodes/alias-multi-samekey")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{zoneA, zoneB},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 1 {
+				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
+			}
+			assertEqual(t, "conflict.Alias", conflicts[0].Alias, zoneB)
+			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictResourceHasDifferentValue)
+			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
+			assertEqual(t, "conflict.ActualValue", conflicts[0].ActualValue, zoneA.Value)
+
+			// zoneA (listed first in the report) must have won; zoneB
+			// must never have been written at all.
+			resolvedA, err := tx.ResourceIdentities().ResolveAlias(ctx, zoneA)
+			if err != nil {
+				t.Fatalf("ResolveAlias(zoneA): %v", err)
+			}
+			assertEqual(t, "resolved zoneA", resolvedA, name)
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, zoneB); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias(zoneB): got %v, want ErrNotFound (never written)", err)
+			}
+		})
+
+		// DuplicateAliasWithinReportIsNotAConflict covers the one
+		// case checkAliasBatchConsistency deliberately lets through
+		// unflagged: the exact same (namespace, key, value) listed
+		// twice for the same target in one report is redundant, not
+		// contradictory, and must not surface as a conflict or a hard
+		// SQL error from either backend's underlying multi-row insert.
+		t.Run("DuplicateAliasWithinReportIsNotAConflict", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			alias, _ := domain.NewAlias("gcp", "instance_id", "multi-exact-duplicate")
+			name := domain.ResourceName("nodes/alias-multi-duplicate")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias, alias},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}})
+			if err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, name)
+		})
+
+		// ApplyInventoryDeltasResolvesMultipleAliasesFromSingleReport
+		// is ResolvesMultipleDistinctAliasesFromSingleReport's Delta
+		// counterpart: the two entry points assemble aliasCandidates
+		// independently (see ApplyInventoryDeltas/ReplaceInventory in
+		// extension_resource_repo.go), so multi-alias support on one
+		// path is never a guarantee it also works on the other.
+		t.Run("ApplyInventoryDeltasResolvesMultipleAliasesFromSingleReport", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			instanceID, _ := domain.NewAlias("gcp", "instance_id", "multi-delta-instance-1")
+			zone, _ := domain.NewAlias("gcp", "zone", "multi-delta-zone-1")
+			name := domain.ResourceName("nodes/alias-multi-delta")
+			now := fixedTime.Add(time.Minute)
+			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{instanceID, zone},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}})
+			if err != nil {
+				t.Fatalf("ApplyInventoryDeltas: %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			for _, a := range []domain.Alias{instanceID, zone} {
+				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
+				if err != nil {
+					t.Fatalf("ResolveAlias(%+v): %v", a, err)
+				}
+				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			}
 		})
 	})
 }

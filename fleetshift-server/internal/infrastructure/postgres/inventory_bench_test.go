@@ -70,6 +70,27 @@ const benchResourceType = domain.ResourceType(benchServiceName + "/" + benchType
 const (
 	benchAliasNamespace domain.AliasNamespace = "ext-id"
 	benchAliasKey       domain.AliasKey       = "source-id"
+
+	// benchSecondaryAliasKey is never seeded for anyone -- it exists
+	// purely so buildMixedAliasReplacements can report a "genuinely
+	// new alias" for an already-existing resource without that report
+	// colliding with the resource's own steady-state benchAliasKey
+	// alias (which would make it a no-op instead).
+	benchSecondaryAliasKey domain.AliasKey = "secondary-id"
+
+	// benchConflictVictimCount is the number of dedicated platform
+	// resources seeded (see seedConflictVictims) purely to be the
+	// "other, pre-existing owner" in buildMixedAliasReplacements's
+	// AliasConflictValueClaimedByOther rows. It must be at least the
+	// largest shape-1 bucket size any benchBatchSizes entry produces
+	// (2500/20 = 125) so that bucket assigns each row a distinct
+	// victim -- reusing a victim within one batch would make two
+	// different targets claim the same alias value in the same call,
+	// which checkAliasBatchConsistency rejects as an intra-batch
+	// contradiction before the SQL ever runs, rather than exercising
+	// the against-pre-existing-state conflict path this benchmark
+	// wants to measure.
+	benchConflictVictimCount = 200
 )
 
 // benchBatchSizes are the report-batch sizes every benchmark family
@@ -82,6 +103,14 @@ func benchResourceID(idx int) string { return fmt.Sprintf("r-%08d", idx) }
 func benchACMUID(idx int) string     { return fmt.Sprintf("acm-%08d", idx) }
 func benchAliasValue(idx int) string { return fmt.Sprintf("ext-%08d", idx) }
 func benchClusterOf(idx int) string  { return fmt.Sprintf("cluster-%d", idx%500) }
+
+// benchConflictVictimResourceID/benchConflictVictimAliasValue name
+// the dedicated platform resources seedConflictVictims creates -- a
+// naming scheme distinct from benchResourceID/benchAliasValue so a
+// victim can never accidentally be the same identity/value pair a
+// normal corpus resource already owns.
+func benchConflictVictimResourceID(i int) string { return fmt.Sprintf("conflict-victim-%08d", i) }
+func benchConflictVictimAliasValue(i int) string { return fmt.Sprintf("victim-alias-%08d", i) }
 
 func benchResourceName(idx int) domain.ResourceName {
 	return domain.ResourceName(benchCollectionName + "/" + benchResourceID(idx))
@@ -380,6 +409,9 @@ func buildBenchState() (*benchState, error) {
 	if err := seedAliasCorpus(ctx, db, benchCorpusSize); err != nil {
 		return nil, err
 	}
+	if err := seedConflictVictims(ctx, db, benchConflictVictimCount); err != nil {
+		return nil, err
+	}
 	if err := seedACMCorpus(ctx, db, benchCorpusSize); err != nil {
 		return nil, err
 	}
@@ -540,6 +572,60 @@ func seedAliasCorpus(ctx context.Context, db *sql.DB, n int) error {
 	return nil
 }
 
+// seedConflictVictims seeds n dedicated platform resources, each
+// already owning one benchSecondaryAliasKey alias, purely so
+// buildMixedAliasReplacements has pre-existing "other owners" to
+// generate genuine AliasConflictValueClaimedByOther rows against.
+// These are platform_resources/resource_aliases rows only -- no
+// extension_resources/inventory rows at all -- since alias resolution
+// depends on the platform natural key alone (see aliasFoldCTEs's doc
+// comment), not on an extension resource existing.
+//
+// This deliberately uses benchSecondaryAliasKey, not benchAliasKey:
+// every corpus resource already owns a benchAliasKey alias (see
+// seedAliasCorpus), so a victim seeded under benchAliasKey would make
+// the "value claimed by other" bucket ambiguous with "resource has a
+// different value for this key" -- whichever check the CTE runs first
+// (by-resource in the small/one-phase version, by-value in the
+// two-phase version) would "win" and mask the other outcome entirely,
+// which is itself a genuine, interesting divergence between the two
+// designs (see buildMixedAliasReplacements's doc comment) but not one
+// a clean per-outcome performance comparison can share a bucket with.
+// Keying victims off the otherwise-untouched benchSecondaryAliasKey
+// keeps the "value claimed by other" bucket a pure case: the reporting
+// resource has no existing entry under that key at all.
+func seedConflictVictims(ctx context.Context, db *sql.DB, n int) error {
+	collectionNames := make([]string, n)
+	resourceIDs := make([]string, n)
+	namespaces := make([]string, n)
+	keys := make([]string, n)
+	values := make([]string, n)
+	createdAts := make([]time.Time, n)
+	now := time.Now().UTC()
+	for i := range n {
+		collectionNames[i] = benchCollectionName
+		resourceIDs[i] = benchConflictVictimResourceID(i)
+		namespaces[i] = string(benchAliasNamespace)
+		keys[i] = string(benchSecondaryAliasKey)
+		values[i] = benchConflictVictimAliasValue(i)
+		createdAts[i] = now
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
+		SELECT c, r, '{}'::jsonb, t, t
+		FROM UNNEST($1::text[], $2::text[], $3::timestamptz[]) AS x(c, r, t)
+	`, collectionNames, resourceIDs, createdAts); err != nil {
+		return fmt.Errorf("seed conflict victim platform_resources: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
+		SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::timestamptz[])
+	`, namespaces, keys, values, collectionNames, resourceIDs, createdAts); err != nil {
+		return fmt.Errorf("seed conflict victim resource_aliases: %w", err)
+	}
+	return nil
+}
+
 func seedACMCorpus(ctx context.Context, db *sql.DB, n int) error {
 	for start := 0; start < n; start += benchSeedChunkRows {
 		end := min(start+benchSeedChunkRows, n)
@@ -607,6 +693,76 @@ func buildUpdateReplacements(st *benchState, n int, withAlias bool) []domain.Inv
 		}
 		if withAlias {
 			rep.Aliases = []domain.Alias{{Namespace: benchAliasNamespace, Key: benchAliasKey, Value: domain.AliasValue(benchAliasValue(idx))}}
+		}
+		reps[i] = rep
+	}
+	return reps
+}
+
+// buildMixedAliasReplacements builds a batch of n existing-resource
+// reports whose Aliases exercise all four outcomes aliasFoldCTEs
+// classifies, roughly modeling a fleet where most polls repeat an
+// already-resolved alias, a small trickle of resources register a new
+// alias for the first time, and conflicts -- rarer still, but not
+// impossible in practice (a misconfigured reporter, a duplicate
+// identity) -- show up in both shapes:
+//   - 80% (remainder): steady-state no-op, same as buildUpdateReplacements'
+//     withAlias=true -- the resource re-sends the exact alias it
+//     already owns.
+//   - 10%: a genuinely new alias under benchSecondaryAliasKey, which
+//     nothing has ever claimed -- exercises alias_safe's actual write.
+//   - 5%: AliasConflictResourceHasDifferentValue -- the resource's own
+//     benchAliasKey alias, but a value that contradicts what it
+//     already has on file.
+//   - 5%: AliasConflictValueClaimedByOther -- benchSecondaryAliasKey
+//     (like the "new" bucket, so this resource has no existing entry
+//     under that key to confound the classification -- see
+//     seedConflictVictims's doc comment) with a value one of
+//     seedConflictVictims's dedicated victims already owns. Each row
+//     in this bucket gets a distinct victim (via its position within
+//     the bucket, not its resource idx) so two rows in the same batch
+//     never claim the same value -- see benchConflictVictimCount's
+//     doc comment for why that matters.
+func buildMixedAliasReplacements(st *benchState, n int) []domain.InventoryReplacement {
+	indices := st.nextUpdateIndices(n)
+	gen := st.nextGen()
+	now := time.Now().UTC()
+	reps := make([]domain.InventoryReplacement, n)
+
+	newCount := n / 10
+	shape2Count := n / 20
+	shape1Count := n / 20
+
+	for i, idx := range indices {
+		obs := json.RawMessage(benchObservationJSON(gen*int64(benchCorpusSize) + int64(idx)))
+		rep := domain.InventoryReplacement{
+			ResourceType: benchResourceType,
+			Name:         benchResourceName(idx),
+			CandidateUID: domain.NewExtensionResourceUID(),
+			Labels:       benchLabels(gen, idx),
+			Observation:  &obs,
+			Conditions:   benchConditions(now, idx, gen),
+			ObservedAt:   now,
+			ReceivedAt:   now,
+		}
+		switch {
+		case i < newCount:
+			rep.Aliases = []domain.Alias{{
+				Namespace: benchAliasNamespace, Key: benchSecondaryAliasKey, Value: domain.AliasValue(benchAliasValue(idx)),
+			}}
+		case i < newCount+shape2Count:
+			rep.Aliases = []domain.Alias{{
+				Namespace: benchAliasNamespace, Key: benchAliasKey, Value: domain.AliasValue(benchAliasValue(idx) + "-changed"),
+			}}
+		case i < newCount+shape2Count+shape1Count:
+			victim := i - newCount - shape2Count
+			rep.Aliases = []domain.Alias{{
+				Namespace: benchAliasNamespace, Key: benchSecondaryAliasKey, Value: domain.AliasValue(benchConflictVictimAliasValue(victim)),
+			}}
+		default:
+			rep.Aliases = []domain.Alias{{
+				Namespace: benchAliasNamespace, Key: benchAliasKey, Value: domain.AliasValue(benchAliasValue(idx)),
+			}}
 		}
 		reps[i] = rep
 	}
@@ -783,6 +939,7 @@ var (
 	explainReplaceUpdateOnce      sync.Once
 	explainReplaceInsertOnce      sync.Once
 	explainReplaceUpdateAliasOnce sync.Once
+	explainReplaceMixedAliasOnce  sync.Once
 	explainDeltaHeartbeatOnce     sync.Once
 	explainACMUpdateOnce          sync.Once
 	explainACMInsertOnce          sync.Once
@@ -885,6 +1042,54 @@ func BenchmarkCTE_ReplaceInventory_UpdateWithAlias(b *testing.B) {
 			b.ResetTimer()
 			for range b.N {
 				if _, err := repo.ReplaceInventory(ctx, buildUpdateReplacements(st, batchSize, true)); err != nil {
+					b.Fatalf("ReplaceInventory: %v", err)
+				}
+			}
+			reportPerItem(b, batchSize)
+		})
+	}
+}
+
+// BenchmarkCTE_ReplaceInventory_UpdateWithMixedAlias contrasts with
+// UpdateWithAlias's 100%-no-op traffic: see
+// buildMixedAliasReplacements's doc comment for the mix. It exists to
+// answer a specific question about aliasFoldCTEs' two-phase,
+// read-by-value-then-by-resource design (phase 1 = alias_prev_by_value,
+// phase 2 = alias_resource_check, gated on alias_value_missing): phase
+// 2 only running for phase 1's "value missing" leftovers is a win
+// exactly when phase 1 alone resolves a row (the no-op and
+// AliasConflictValueClaimedByOther cases) -- for a genuinely new
+// alias or an AliasConflictResourceHasDifferentValue, phase 2 always
+// runs too, meaning the value-first design pays for *both* reads
+// where the simpler by-resource-only design (this session's "small
+// version" -- see git history) paid for exactly one. Whether that
+// trade nets out favorably depends on the real mix of these four
+// outcomes in production traffic, which is exactly what this
+// benchmark can't determine on its own (the percentages above are
+// illustrative, not measured) -- it's here so that question can be
+// re-asked, with real query plans, if that mix ever becomes known.
+func BenchmarkCTE_ReplaceInventory_UpdateWithMixedAlias(b *testing.B) {
+	st := setupBenchOnce(b)
+	repo := &ExtensionResourceRepo{DB: st.db}
+	ctx := context.Background()
+
+	for _, batchSize := range benchBatchSizes {
+		b.Run(fmt.Sprintf("batch=%d", batchSize), func(b *testing.B) {
+			if batchSize == benchExplainBatchSize {
+				explainReplaceMixedAliasOnce.Do(func() {
+					explainRepo := &ExtensionResourceRepo{DB: &explainCapturingDB{inner: st.db, b: b,
+						label: fmt.Sprintf("ReplaceInventory, update existing, WITH alias (mixed outcomes), batch=%d", batchSize)}}
+					conflicts, err := explainRepo.ReplaceInventory(ctx, buildMixedAliasReplacements(st, batchSize))
+					if err != nil {
+						b.Fatalf("explain replace update+mixed alias: %v", err)
+					}
+					fmt.Printf("[bench] mixed-alias batch=%d produced %d conflicts (expect ~%d: %d shape-2 + %d shape-1)\n",
+						batchSize, len(conflicts), batchSize/20+batchSize/20, batchSize/20, batchSize/20)
+				})
+			}
+			b.ResetTimer()
+			for range b.N {
+				if _, err := repo.ReplaceInventory(ctx, buildMixedAliasReplacements(st, batchSize)); err != nil {
 					b.Fatalf("ReplaceInventory: %v", err)
 				}
 			}
