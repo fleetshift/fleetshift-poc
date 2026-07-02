@@ -448,12 +448,16 @@ func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, sch
 	newVer := domain.APIVersion(schema.Version)
 	newCol := domain.CollectionID(schema.CollectionID)
 
+	// Relation is only meaningful for schemas with a Management
+	// section; inventory-only schemas compare against a nil relation.
+	var newRelation domain.FulfillmentRelation
 	input := CreateExtensionTypeInput{
 		ResourceType: schema.ResourceType,
 		APIVersion:   newVer,
 		CollectionID: newCol,
 	}
 	if schema.Management != nil {
+		newRelation = schema.Management.Relation
 		input.Management = &CreateExtensionTypeManagementInput{
 			Relation: schema.Management.Relation,
 			// TODO: support relation signatures and validation through attestation evidence
@@ -470,7 +474,7 @@ func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, sch
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			return fmt.Errorf("create type def: %w", err)
 		}
-		if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol); err != nil {
+		if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol, newRelation); err != nil {
 			return err
 		}
 	}
@@ -505,7 +509,7 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 // reconnection attempts that change the API identity fields. The
 // service name is not checked because it is derived from the
 // [domain.ResourceType], which is already the lookup key.
-func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID) error {
+func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID, newRelation domain.FulfillmentRelation) error {
 	existing, err := m.typeSvc.Get(ctx, rt)
 	if err != nil {
 		return fmt.Errorf("load existing type def for drift detection: %w", err)
@@ -516,5 +520,30 @@ func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.Res
 	if existing.CollectionID() != newCol {
 		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID(), newCol)
 	}
+
+	// Compare management relation to detect stale metadata from addon
+	// reconnections. Uses JSON serialization because FulfillmentRelation
+	// is a sealed interface whose future implementations may not be
+	// comparable with ==.
+	//
+	// When the persisted type def has no management metadata yet
+	// (existing.Management() is nil), the missing relation is treated as
+	// repairable/backfillable rather than drift — only reject when both
+	// sides are present and truly differ.
+	if mgmt := existing.Management(); mgmt != nil {
+		existingRelation := mgmt.Relation()
+		existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
+		if err != nil {
+			return fmt.Errorf("marshal existing relation for drift detection: %w", err)
+		}
+		newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
+		if err != nil {
+			return fmt.Errorf("marshal new relation for drift detection: %w", err)
+		}
+		if string(existingRelJSON) != string(newRelJSON) {
+			return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, rt)
+		}
+	}
+
 	return nil
 }

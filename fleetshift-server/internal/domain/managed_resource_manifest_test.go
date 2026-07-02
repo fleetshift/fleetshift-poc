@@ -32,8 +32,15 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	if got[0].ManifestType != "clusters" {
 		t.Errorf("ManifestType = %q, want %q", got[0].ManifestType, "clusters")
 	}
-	if string(got[0].Raw) != string(spec) {
-		t.Errorf("Raw = %s, want %s", got[0].Raw, spec)
+	m, err := domain.UnwrapManagedResourceSpec(got[0].Raw)
+	if err != nil {
+		t.Fatalf("UnwrapManagedResourceSpec() error = %v", err)
+	}
+	if m.Name != "prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", m.Name, "prod-us-east-1")
+	}
+	if string(m.Spec) != string(spec) {
+		t.Errorf("Spec = %s, want %s", m.Spec, spec)
 	}
 }
 
@@ -58,6 +65,55 @@ func TestManagedResourceManifestStrategy_OnRemovedIsNoop(t *testing.T) {
 	s := &domain.ManagedResourceManifestStrategy{Store: store}
 	if err := s.OnRemoved(context.Background(), "t1"); err != nil {
 		t.Fatalf("OnRemoved should be a no-op, got error: %v", err)
+	}
+}
+
+func TestManagedResourceSpecManifest_RoundTrip(t *testing.T) {
+	name := domain.ResourceName("clusters/prod")
+	uid := domain.NewExtensionResourceUID()
+	spec := json.RawMessage(`{"endpointAccess":"PublicAndPrivate"}`)
+
+	raw, err := domain.WrapManagedResourceSpec(name, uid, spec)
+	if err != nil {
+		t.Fatalf("WrapManagedResourceSpec() error = %v", err)
+	}
+
+	got, err := domain.UnwrapManagedResourceSpec(raw)
+	if err != nil {
+		t.Fatalf("UnwrapManagedResourceSpec() error = %v", err)
+	}
+
+	if got.Name != name {
+		t.Errorf("Name = %q, want %q", got.Name, name)
+	}
+	if got.UID != uid {
+		t.Errorf("UID = %q, want %q", got.UID, uid)
+	}
+	if string(got.Spec) != string(spec) {
+		t.Errorf("Spec = %s, want %s", got.Spec, spec)
+	}
+}
+
+func TestUnwrapManagedResourceSpec_InvalidJSON(t *testing.T) {
+	_, err := domain.UnwrapManagedResourceSpec(json.RawMessage(`{{{not json`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestUnwrapManagedResourceSpec_MissingName(t *testing.T) {
+	raw := json.RawMessage(`{"uid":"550e8400-e29b-41d4-a716-446655440000","spec":{}}`)
+	_, err := domain.UnwrapManagedResourceSpec(raw)
+	if err == nil {
+		t.Fatal("expected error for missing name")
+	}
+}
+
+func TestUnwrapManagedResourceSpec_MissingSpec(t *testing.T) {
+	raw := json.RawMessage(`{"name":"clusters/prod","uid":"550e8400-e29b-41d4-a716-446655440000"}`)
+	_, err := domain.UnwrapManagedResourceSpec(raw)
+	if err == nil {
+		t.Fatal("expected error for missing spec")
 	}
 }
 

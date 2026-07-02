@@ -263,16 +263,37 @@ func TestAgent_Remove_TrustBundle_RemovesStoredIssuerEntry(t *testing.T) {
 	}
 }
 
+func TestAgent_Deliver_UsesSpecNameNotManifestID(t *testing.T) {
+	reporter := newRecordingReporter()
+	agent := newTestAgent(reporter)
+
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
+
+	_ = agent.Deliver(
+		context.Background(),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
+		domain.DeliveryID("d-1"),
+		[]domain.Manifest{manifest},
+		domain.DeliveryAuth{Token: "token"},
+		nil,
+		1,
+	)
+
+	select {
+	case result := <-reporter.done:
+		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "invalid cluster name") {
+			t.Fatalf("should have used spec name, not ManifestID; got: %s", result.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout")
+	}
+}
+
 func TestAgent_Deliver_RejectsStaleGeneration(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	spec := validClusterSpecJSON(t)
-	manifest := domain.Manifest{
-		ManifestType: gcphcp.ClusterManifestType,
-		ManifestID:   "test-cls",
-		Raw:          spec,
-	}
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 
 	// First delivery with generation 10 — accepted (will fail async since no real backend, but generation is accepted)
 	err := agent.Deliver(
@@ -326,12 +347,7 @@ func TestAgent_Remove_RejectsStaleGeneration(t *testing.T) {
 	reporter := newRecordingReporter()
 	agent := newTestAgent(reporter)
 
-	spec := validClusterSpecJSON(t)
-	manifest := domain.Manifest{
-		ManifestType: gcphcp.ClusterManifestType,
-		ManifestID:   "test-cls",
-		Raw:          spec,
-	}
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 
 	// First: accept generation 10 via Deliver (it will fail async, but the generation is recorded)
 	_ = agent.Deliver(
@@ -411,6 +427,23 @@ func validClusterSpecJSON(t *testing.T) json.RawMessage {
 	return raw
 }
 
+func managedResourceClusterManifest(t *testing.T, clusterName string, specJSON json.RawMessage) domain.Manifest {
+	t.Helper()
+	raw, err := domain.WrapManagedResourceSpec(
+		domain.ResourceName("clusters/"+clusterName),
+		domain.NewExtensionResourceUID(),
+		specJSON,
+	)
+	if err != nil {
+		t.Fatalf("WrapManagedResourceSpec() error = %v", err)
+	}
+	return domain.Manifest{
+		ManifestType: gcphcp.ClusterManifestType,
+		ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+		Raw:          raw,
+	}
+}
+
 func deliverTrustBundle(t *testing.T, agent *gcphcp.Agent, reporter *recordingReporter, entry domain.TrustBundleEntry) {
 	t.Helper()
 
@@ -473,6 +506,18 @@ func (r *recoveryReporter) ListActiveDeliveries(_ context.Context, _ []domain.Ta
 	return r.active, r.activeErr
 }
 
+func managedResourceRaw(name string, spec json.RawMessage) json.RawMessage {
+	raw, err := domain.WrapManagedResourceSpec(
+		domain.ResourceName(name),
+		domain.NewExtensionResourceUID(),
+		spec,
+	)
+	if err != nil {
+		panic(fmt.Sprintf("WrapManagedResourceSpec: %v", err))
+	}
+	return raw
+}
+
 func makeActiveDelivery(id string, clusterName string, gen domain.Generation, token string) domain.ActiveDelivery {
 	spec := validClusterSpecJSON2()
 	return domain.ActiveDelivery{
@@ -483,8 +528,8 @@ func makeActiveDelivery(id string, clusterName string, gen domain.Generation, to
 			Operation:  domain.DeliveryOperationDeliver,
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
-				ManifestID:   domain.ManifestID(clusterName),
-				Raw:          spec,
+				ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+				Raw:          managedResourceRaw("clusters/"+clusterName, spec),
 			}},
 		}),
 		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -608,16 +653,12 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 	agent := newTestAgent(reporter)
 
 	// Accept generation 10 via a normal Deliver call.
-	spec := validClusterSpecJSON(t)
+	manifest := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 	_ = agent.Deliver(
 		context.Background(),
 		domain.TargetInfo{},
 		domain.DeliveryID("seed"),
-		[]domain.Manifest{{
-			ManifestType: gcphcp.ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
-		}},
+		[]domain.Manifest{manifest},
 		domain.DeliveryAuth{Token: "token"},
 		nil,
 		10,
@@ -635,15 +676,12 @@ func TestAgent_RecoverActiveDeliveries_SkipsStaleGeneration(t *testing.T) {
 	// with the recovery reporter, then seed its generation.
 	agent2 := newTestAgent(recovReporter)
 	// Seed generation 10
+	manifest2 := managedResourceClusterManifest(t, "test-cls", validClusterSpecJSON(t))
 	_ = agent2.Deliver(
 		context.Background(),
 		domain.TargetInfo{},
 		domain.DeliveryID("seed2"),
-		[]domain.Manifest{{
-			ManifestType: gcphcp.ClusterManifestType,
-			ManifestID:   "test-cls",
-			Raw:          spec,
-		}},
+		[]domain.Manifest{manifest2},
 		domain.DeliveryAuth{Token: "token"},
 		nil,
 		10,
@@ -676,7 +714,7 @@ func TestAgent_RecoverActiveDeliveries_SkipsInvalidClusterSpec(t *testing.T) {
 			State:      domain.DeliveryStateProgressing,
 			Manifests: []domain.Manifest{{
 				ManifestType: gcphcp.ClusterManifestType,
-				ManifestID:   "test-cls",
+				ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
 				Raw:          json.RawMessage(`{{{not json`),
 			}},
 		}),

@@ -1,6 +1,12 @@
 package http
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 )
 
@@ -244,5 +250,128 @@ func TestGenerateNavLayout_NoGroups(t *testing.T) {
 		if entry.Type == "group" {
 			t.Error("expected no group entries when no module-group extensions exist")
 		}
+	}
+}
+
+func TestHandleConfig_AuthConfiguredTrue(t *testing.T) {
+	opts := UIConfigOptions{
+		OIDCAuthority:  "https://keycloak.example.com/realms/test",
+		OIDCUIClientID: "ui-client",
+		Logger:         slog.Default(),
+		AuthConfigured: func(_ context.Context) (bool, error) {
+			return true, nil
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	val, ok := resp["authConfigured"]
+	if !ok {
+		t.Fatal("authConfigured field missing from response")
+	}
+	if val != true {
+		t.Errorf("authConfigured = %v, want true", val)
+	}
+}
+
+func TestHandleConfig_AuthConfiguredFalse(t *testing.T) {
+	opts := UIConfigOptions{
+		OIDCAuthority:  "https://keycloak.example.com/realms/test",
+		OIDCUIClientID: "ui-client",
+		Logger:         slog.Default(),
+		AuthConfigured: func(_ context.Context) (bool, error) {
+			return false, nil
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	val, ok := resp["authConfigured"]
+	if !ok {
+		t.Fatal("authConfigured field missing from response")
+	}
+	if val != false {
+		t.Errorf("authConfigured = %v, want false", val)
+	}
+}
+
+func TestHandleConfig_AuthConfiguredNil_OmitsField(t *testing.T) {
+	opts := UIConfigOptions{
+		OIDCAuthority:  "https://keycloak.example.com/realms/test",
+		OIDCUIClientID: "ui-client",
+		Logger:         slog.Default(),
+		// AuthConfigured intentionally nil.
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["authConfigured"]; ok {
+		t.Error("authConfigured should be omitted when AuthConfigured callback is nil")
+	}
+}
+
+func TestHandleConfig_AuthConfiguredError_OmitsField(t *testing.T) {
+	opts := UIConfigOptions{
+		OIDCAuthority:  "https://keycloak.example.com/realms/test",
+		OIDCUIClientID: "ui-client",
+		Logger:         slog.Default(),
+		AuthConfigured: func(_ context.Context) (bool, error) {
+			return false, errors.New("db down")
+		},
+	}
+
+	handler := handleConfig(opts)
+	req := httptest.NewRequest(http.MethodGet, "/api/ui/config", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	// Should still return 200 — authConfigured error is non-fatal.
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(rec.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if _, ok := resp["authConfigured"]; ok {
+		t.Error("authConfigured should be omitted on error (non-fatal)")
 	}
 }

@@ -506,9 +506,28 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// the gateway's /v1/ catch-all.
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
+
+	// HTTP auth middleware — mirrors the gRPC authn interceptor: if
+	// auth methods are configured require a valid OIDC Bearer token,
+	// otherwise allow anonymous (setup mode). Applied selectively to
+	// endpoints that need protection; /api/ui/config,
+	// /api/ui/setup/ws, and /api/ui/events/ws intentionally remain
+	// unauthenticated (events/ws because the browser WebSocket API
+	// cannot set Authorization headers — see TODO below).
+	httpAuthn := &transporthttp.AuthnMiddleware{
+		Methods:  authMethodSvc,
+		Verifier: tokenVerifier,
+		Logger:   logger.With("component", "authn-http"),
+	}
+
 	topMux.HandleFunc("GET /api/ui/setup/ws", setupHub.HandleWS)
+	// TODO(auth): Browser WebSocket API cannot set custom HTTP headers, so
+	// wrapping this endpoint with httpAuthn.Wrap would always 401 once OIDC
+	// is configured. Proper WS auth requires a short-lived OTP/ticket
+	// handshake — passing the JWT as a query param leaks into logs,
+	// referrer, and browser history. Leave unauthenticated for now.
 	topMux.HandleFunc("GET /api/ui/events/ws", eventHub.HandleWS)
-	topMux.HandleFunc("GET /api/ui/github-signing-keys/{username}", transporthttp.HandleGitHubSigningKeys)
+	topMux.Handle("GET /api/ui/github-signing-keys/{username}", httpAuthn.Wrap(http.HandlerFunc(transporthttp.HandleGitHubSigningKeys)))
 	topMux.Handle("POST /api/ui/verify-sign", &transporthttp.VerifySignHandler{
 		AuthMethods:   authMethodSvc,
 		Verifier:      tokenVerifier,
@@ -528,6 +547,19 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			OIDCAuthority:  f.oidcUIAuthority,
 			OIDCUIClientID: f.oidcUIClientID,
 			Logger:         logger,
+			AuthMiddleware: httpAuthn.Wrap,
+			AuthConfigured: func(ctx context.Context) (bool, error) {
+				methods, err := authMethodSvc.List(ctx)
+				if err != nil {
+					return false, err
+				}
+				for _, m := range methods {
+					if m.Type() == domain.AuthMethodTypeOIDC && m.OIDC() != nil {
+						return true, nil
+					}
+				}
+				return false, nil
+			},
 		})
 		topMux.Handle("/api/ui/", uiMux)
 		topMux.Handle("/", transporthttp.NewStaticHandler(f.webDir))
