@@ -166,8 +166,52 @@ func benchLabels(gen int64, idx int) map[string]string {
 	}
 }
 
-func benchConditions(now time.Time) []domain.Condition {
-	ready, _ := domain.NewCondition("Ready", domain.ConditionTrue, "AllGood", "steady", now)
+// benchConditionFlapPeriod controls how often benchConditions reports
+// a genuine status transition for the "Ready" condition instead of
+// repeating its previous steady-state value: on average 1 in
+// benchConditionFlapPeriod calls for a given resource flips status.
+//
+// Before this existed, every UpdateExisting/UpdateWithAlias call
+// reported the exact same (type, status, reason, message) tuple every
+// time, so hist_conditions's change-detection WHERE clause (see
+// replaceInventoryCoreCTEs/applyInventoryDeltasCoreCTEs in
+// extension_resource_repo.go -- it compares status/reason/message,
+// deliberately ignoring the caller-supplied last_transition_time)
+// always evaluated false. Its INSERT branch -- and the write to
+// extension_resource_inventory_condition_events, plus that table's
+// index maintenance -- was therefore never exercised at all, which
+// understated the write path's realistic cost: a real fleet always
+// has some small background rate of resources transitioning between
+// healthy/unhealthy even though most heartbeats really are
+// condition-wise no-ops. 1-in-20 is not a measured real-world rate,
+// just a "clearly non-zero but still a small minority" stand-in.
+const benchConditionFlapPeriod = 20
+
+// benchConditionFlaps decides, deterministically but without the
+// periodicity artifacts a plain modulo on idx or gen alone would have
+// (nextUpdateIndices revisits the same idx roughly every
+// benchCorpusSize/batchSize calls, a gap that shares small common
+// factors with plausible flap periods), whether resource idx's Ready
+// condition flips on this particular call. Multiplying idx and gen by
+// unrelated large odd constants before combining spreads the result
+// across residues well enough for benchmark purposes.
+func benchConditionFlaps(idx int, gen int64) bool {
+	h := uint64(idx)*2654435761 ^ uint64(gen)*0x9E3779B97F4A7C15
+	return h%benchConditionFlapPeriod == 0
+}
+
+// benchConditions returns the pair of conditions a report for
+// resource idx at generation gen carries. Healthy always reports
+// steady True; Ready flips to False on roughly 1 in
+// benchConditionFlapPeriod calls (see benchConditionFlaps), so
+// hist_conditions's INSERT branch actually fires for a small,
+// deterministic fraction of any given batch instead of never firing.
+func benchConditions(now time.Time, idx int, gen int64) []domain.Condition {
+	readyStatus, reason, message := domain.ConditionTrue, "AllGood", "steady"
+	if benchConditionFlaps(idx, gen) {
+		readyStatus, reason, message = domain.ConditionFalse, "ProbeFailed", "liveness probe failing"
+	}
+	ready, _ := domain.NewCondition("Ready", readyStatus, reason, message, now)
 	healthy, _ := domain.NewCondition("Healthy", domain.ConditionTrue, "AllGood", "steady", now)
 	return []domain.Condition{ready, healthy}
 }
@@ -432,10 +476,18 @@ func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int) error {
 				condLastTransitions = append(condLastTransitions, createdAts[i])
 			}
 		}
+		// reason/message must match benchConditions's steady-state
+		// values ("AllGood"/"steady"), not empty strings: hist_conditions
+		// treats any reason/message difference as a genuine transition
+		// (see benchConditions's doc comment), so a mismatched seed here
+		// would make every resource's first post-seed report look like a
+		// transition regardless of benchConditionFlaps, swamping the
+		// intentional ~1-in-benchConditionFlapPeriod flap rate with a
+		// one-time "never touched since seeding" artifact.
 		if _, err := db.ExecContext(ctx, `
 			INSERT INTO extension_resource_inventory_conditions
 				(extension_resource_uid, type, status, reason, message, last_transition_time, observed_at, updated_at)
-			SELECT u, t, s, '', '', lt, lt, lt
+			SELECT u, t, s, 'AllGood', 'steady', lt, lt, lt
 			FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::timestamptz[]) AS x(u, t, s, lt)
 		`, condUIDs, condTypes, condStatuses, condLastTransitions); err != nil {
 			return fmt.Errorf("seed extension_resource_inventory_conditions[%d:%d]: %w", start, end, err)
@@ -549,7 +601,7 @@ func buildUpdateReplacements(st *benchState, n int, withAlias bool) []domain.Inv
 			CandidateUID: domain.NewExtensionResourceUID(),
 			Labels:       benchLabels(gen, idx),
 			Observation:  &obs,
-			Conditions:   benchConditions(now),
+			Conditions:   benchConditions(now, idx, gen),
 			ObservedAt:   now,
 			ReceivedAt:   now,
 		}
@@ -573,7 +625,7 @@ func buildInsertReplacements(st *benchState, n int) []domain.InventoryReplacemen
 			CandidateUID: domain.NewExtensionResourceUID(),
 			Labels:       benchLabels(0, idx),
 			Observation:  &obs,
-			Conditions:   benchConditions(now),
+			Conditions:   benchConditions(now, idx, 0),
 			ObservedAt:   now,
 			ReceivedAt:   now,
 		}
@@ -744,7 +796,10 @@ var (
 // real-world case: a poller re-reporting resources that already exist,
 // with a genuinely changed observation each time, no aliases. Exercises
 // replaceInventorySQLNoAliases's UPDATE branches throughout (upsert_inv,
-// hist_obs, upsert_labels, upsert_conditions, hist_conditions).
+// hist_obs, upsert_labels, upsert_conditions), plus hist_conditions's
+// actual INSERT branch for the benchConditionFlapPeriod-th of the
+// batch whose Ready condition genuinely transitions -- see
+// benchConditions's doc comment for why that matters.
 func BenchmarkCTE_ReplaceInventory_UpdateExisting(b *testing.B) {
 	st := setupBenchOnce(b)
 	repo := &ExtensionResourceRepo{DB: st.db}
