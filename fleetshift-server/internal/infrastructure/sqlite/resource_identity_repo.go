@@ -265,6 +265,13 @@ func (r *ResourceIdentityRepo) listVirtualByCollection(ctx context.Context, coll
 // regardless of how many contributors' resource_alias_contributions
 // rows point at it, so there's no contributor-side ambiguity to
 // resolve here at all.
+//
+// This never reads extension_resources.reported_aliases: those are
+// reporter assertions pending future asynchronous reconciliation, not
+// accepted platform identity (see [domain.InventoryReplacement.Aliases]'s
+// doc), so a newly reported alias that hasn't yet gone through that
+// reconciliation resolves as [domain.ErrNotFound] here, same as if it
+// had never been reported at all.
 func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Alias) (domain.ResourceName, error) {
 	var collectionName, resourceID string
 	err := r.DB.QueryRowContext(ctx,
@@ -289,6 +296,18 @@ func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Al
 // reconcile on Create/Update/Delete -- the representation appears and
 // disappears exactly when the extension_resources row is
 // created/deleted.
+//
+// This is unconditional on extension_resources.reported_aliases: an
+// extension resource with a non-empty pending alias set still
+// represents the platform resource of its own declarative name, the
+// same as one reporting none. Nothing in this branch's read model
+// gates representation on reported_aliases being empty -- there is no
+// explicit accepted-identity projection yet to trust instead (see
+// [domain.InventoryReplacement.Aliases]'s doc), so "derive from
+// extension_resources by name alone" already *is* this branch's
+// no-alias-implicit-acceptance rule in its simplest form: with zero
+// explicit-identity rows to ever contradict it, every representation
+// falls through to the implicit-accepted case.
 func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domain.FullResourceName) (domain.ResourceRepresentation, error) {
 	service := name.ServiceName()
 	relative := name.ResourceName()
@@ -467,6 +486,11 @@ func (r *ResourceIdentityRepo) reconcileRelationships(ctx context.Context, s dom
 // DISTINCT needed either: UNIQUE(namespace, key, value) (see the
 // migration's doc comment) guarantees at most one row per requested
 // alias regardless of how many contributors back it.
+//
+// Like [ResourceIdentityRepo.ResolveAlias], this never consults
+// extension_resources.reported_aliases -- an alias absent here simply
+// isn't in the map ResolveAliasesBatch returns, whether it was never
+// reported or is still pending reconciliation.
 func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases []domain.Alias) (map[domain.Alias]domain.ResourceName, error) {
 	if len(aliases) == 0 {
 		return map[domain.Alias]domain.ResourceName{}, nil

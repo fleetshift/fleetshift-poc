@@ -1,5 +1,24 @@
 # Inventory Identity Reconciliation POC
 
+> [!NOTE]
+> The server implementation that shipped (see
+> `fleetshift-server/internal/infrastructure/postgres/resource_identity_repo.go`'s
+> `GetRepresentation` and
+> `docs/design/architecture/resource_identity_and_api.md`) took a narrower slice
+> of what's explored here. It kept "reported aliases are a pending assertion,
+> not synchronously trusted identity" (below), but did **not** build the
+> `accepted_platform_representations` / `identity_conflicts` /
+> `identity_reconciliation_queue` read model or the async reconciler. Instead,
+> representation is derived purely by name match, unconditionally: an
+> extension resource with a non-empty pending alias set is *already* a
+> representation of the platform resource sharing its declarative name, the
+> same as one reporting no aliases at all -- there's no "hidden until
+> reconciled" state for representations today. That's a deliberate
+> scope decision to keep the write path simple for this iteration, not a
+> rejection of this POC's model: distinguishing accepted from pending (or
+> later, conflicting) representations explicitly is real future work this POC
+> still describes reasonably well, it's just not wired into production yet.
+
 This POC explores a different inventory identity model:
 
 - inventory reports do not fail on alias conflicts

@@ -2,6 +2,7 @@ package domain
 
 import (
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -191,11 +192,16 @@ func NewRelationshipType(s string) (RelationshipType, error) {
 // Alias is a cross-reference from an external naming scheme to a
 // platform resource (e.g. GCP project ID -> platform UID).
 //
+// JSON field tags are lowercase and stable: this is the exact shape
+// persisted as the canonical [ExtensionResource.ReportedAliases]
+// payload (see [CanonicalAliasPayload]), not just an incidental
+// serialization used elsewhere.
+//
 // Construct with [NewAlias] to enforce invariants.
 type Alias struct {
-	Namespace AliasNamespace
-	Key       AliasKey
-	Value     AliasValue
+	Namespace AliasNamespace `json:"namespace"`
+	Key       AliasKey       `json:"key"`
+	Value     AliasValue     `json:"value"`
 }
 
 // NewAlias validates and returns an [Alias]. All three fields must be
@@ -213,18 +219,58 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 	return Alias{Namespace: ns, Key: key, Value: value}, nil
 }
 
+// SortAliases returns a copy of aliases sorted deterministically by
+// (namespace, key, value). The input slice is never mutated. A nil or
+// empty input returns a non-nil, empty slice (never nil), so callers
+// that json.Marshal the result (see [CanonicalAliasPayload]) always
+// get the JSON array literal `[]` rather than `null`: the alias
+// payload contract calls for an explicit empty array to store "this
+// extension resource asserts no aliases," not a missing/null value.
+//
+// Shared by [AliasSetFingerprint] and [CanonicalAliasPayload] so both
+// always agree on exactly which ordering "the canonical form" means.
+func SortAliases(aliases []Alias) []Alias {
+	sorted := make([]Alias, len(aliases))
+	copy(sorted, aliases)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Namespace != sorted[j].Namespace {
+			return sorted[i].Namespace < sorted[j].Namespace
+		}
+		if sorted[i].Key != sorted[j].Key {
+			return sorted[i].Key < sorted[j].Key
+		}
+		return sorted[i].Value < sorted[j].Value
+	})
+	return sorted
+}
+
+// CanonicalAliasPayload marshals aliases into the canonical JSON
+// array persisted as [ExtensionResourceRepository]'s reported-alias
+// payload (see [InventoryReplacement.Aliases]'s doc for the
+// "pending, not yet reconciled" contract this payload now serves).
+// Aliases are sorted via [SortAliases] first, so the same set reported
+// in a different order always serializes identically -- this is what
+// lets [AliasSetFingerprint], computed over the same sorted order,
+// stand in for a byte-for-byte comparison of this payload without
+// repositories re-deriving or re-sorting anything themselves.
+//
+// A nil or empty aliases marshals to the JSON array literal `[]`, per
+// [SortAliases]'s own doc -- never `null`.
+func CanonicalAliasPayload(aliases []Alias) ([]byte, error) {
+	return json.Marshal(SortAliases(aliases))
+}
+
 // AliasSetFingerprint returns a stable, order-independent digest of
 // aliases's complete (namespace, key, value) content. Repository
 // implementations use this to detect a resource whose reported alias
-// set is byte-for-byte identical to the last one it successfully,
-// fully applied (see extension_resource_repo.go's alias fold-in in
-// both infrastructure/postgres and infrastructure/sqlite), letting a
-// repeated report skip alias classification entirely rather than
-// reclassifying every (namespace, key, value) against the database
-// again for no behavioral change.
+// set is byte-for-byte identical to the last one it successfully
+// stored (see extension_resource_repo.go's reported-alias fast path
+// in both infrastructure/postgres and infrastructure/sqlite), letting
+// a repeated report skip the reported-alias payload write entirely
+// rather than re-writing an identical JSON blob for no behavioral
+// change.
 //
-// aliases is sorted by (namespace, key, value) into a local copy
-// first (the input slice is never mutated) so that the same set
+// aliases is canonicalized via [SortAliases] first, so the same set
 // reported in a different order still produces the same fingerprint
 // -- callers can't generally guarantee stable ordering across
 // reports. Each field is length-prefixed via hashString, the same
@@ -239,17 +285,7 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 // basis for skipping alias processing entirely once a resource that
 // never reports aliases has done so once.
 func AliasSetFingerprint(aliases []Alias) []byte {
-	sorted := make([]Alias, len(aliases))
-	copy(sorted, aliases)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Namespace != sorted[j].Namespace {
-			return sorted[i].Namespace < sorted[j].Namespace
-		}
-		if sorted[i].Key != sorted[j].Key {
-			return sorted[i].Key < sorted[j].Key
-		}
-		return sorted[i].Value < sorted[j].Value
-	})
+	sorted := SortAliases(aliases)
 
 	h := sha256.New()
 	for _, a := range sorted {
@@ -260,14 +296,48 @@ func AliasSetFingerprint(aliases []Alias) []byte {
 	return h.Sum(nil)
 }
 
-// AliasRef identifies one of an extension resource's own alias
-// contributions for removal (see [InventoryDelta.DeleteAliases]), by
-// (namespace, key) alone -- no value. A single extension resource
-// never holds two different values for the same (namespace, key) at
-// once (see [AliasConflictResourceHasDifferentValue]), so (namespace,
-// key) alone unambiguously identifies which of its own contributions
-// to retract -- the same way [InventoryDelta.DeleteLabels] identifies
-// a label to remove by key alone, with no need for its current value.
+// MergeAliases folds upserts into current by (namespace, key),
+// overwriting any existing entry for the same pair in place and
+// appending any new pair -- the merge [InventoryDelta.UpsertAliases]
+// documents. Shared by both infrastructure/postgres and
+// infrastructure/sqlite's ApplyInventoryDeltas, which each read a
+// resource's current ReportedAliases, call this, then persist the
+// result through [CanonicalAliasPayload]/[AliasSetFingerprint].
+//
+// The result is not yet canonicalized or deduplicated beyond
+// (namespace, key): callers sort/fingerprint it themselves.
+func MergeAliases(current, upserts []Alias) []Alias {
+	byRef := make(map[AliasRef]Alias, len(current)+len(upserts))
+	order := make([]AliasRef, 0, len(current)+len(upserts))
+	for _, a := range current {
+		ref := AliasRef{Namespace: a.Namespace, Key: a.Key}
+		if _, ok := byRef[ref]; !ok {
+			order = append(order, ref)
+		}
+		byRef[ref] = a
+	}
+	for _, a := range upserts {
+		ref := AliasRef{Namespace: a.Namespace, Key: a.Key}
+		if _, ok := byRef[ref]; !ok {
+			order = append(order, ref)
+		}
+		byRef[ref] = a
+	}
+	merged := make([]Alias, len(order))
+	for i, ref := range order {
+		merged[i] = byRef[ref]
+	}
+	return merged
+}
+
+// AliasRef identifies one of an extension resource's own previously
+// reported aliases for removal (see [InventoryDelta.DeleteAliases]), by
+// (namespace, key) alone -- no value. A single extension resource's
+// own reported alias set never holds two different values for the
+// same (namespace, key) at once, so (namespace, key) alone
+// unambiguously identifies which of its own reported aliases to
+// retract -- the same way [InventoryDelta.DeleteLabels] identifies a
+// label to remove by key alone, with no need for its current value.
 //
 // Construct with [NewAliasRef] to enforce invariants.
 type AliasRef struct {

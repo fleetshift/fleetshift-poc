@@ -176,8 +176,9 @@ CREATE TABLE extension_resource_types (
 -- representation can be derived on read by joining the two tables on
 -- that pair, rather than maintained as its own reconciled table (see
 -- resource_representations' removal below).
--- alias_fingerprint mirrors the Postgres migration's column of the
--- same name -- see that file's doc comment for the full contract.
+-- reported_aliases and alias_fingerprint mirror the Postgres
+-- migration's columns of the same names -- see that file's doc
+-- comment for the full contract.
 CREATE TABLE extension_resources (
     uid               TEXT PRIMARY KEY,
     service_name      TEXT NOT NULL,
@@ -185,6 +186,7 @@ CREATE TABLE extension_resources (
     collection_name   TEXT NOT NULL,
     resource_id       TEXT NOT NULL,
     labels            TEXT NOT NULL DEFAULT '{}',
+    reported_aliases  TEXT NOT NULL DEFAULT '[]',
     alias_fingerprint BLOB,
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
@@ -201,7 +203,9 @@ CREATE INDEX idx_extension_resources_collection_resource
 -- Aliases split into two tables -- mirrors the Postgres migration's
 -- resource_alias_claims/resource_alias_contributions doc comment
 -- (fleetshift-server/internal/infrastructure/postgres/migrations/00001_initial.sql)
--- exactly; that reasoning applies here unchanged. The two invariants
+-- exactly, including that inventory reporting no longer writes to
+-- either table (see that file's doc comment for why); that reasoning
+-- applies here unchanged. The two invariants
 -- an EXCLUDE constraint used to enforce in the old single-table
 -- Postgres design -- (namespace, key, value) can't disagree on
 -- resource, and (namespace, key, resource) can't disagree on value,
@@ -277,37 +281,22 @@ CREATE TABLE resource_intents (
 
 -- ── Extension resource inventory ────────────────────────────────
 
+-- Mirrors the Postgres migration's extension_resource_inventory
+-- table and doc comment exactly (labels/conditions latest-state JSON,
+-- conditions keyed by type, history deferred to a future async
+-- writer) with one gap: SQLite has no GIN-equivalent index, so latest
+-- labels/conditions are not searchable here the way Postgres's GIN
+-- indexes make them. If SQLite search over labels/conditions becomes
+-- necessary, consider generated columns or expression indexes for
+-- known keys at that point -- not added speculatively now.
 CREATE TABLE extension_resource_inventory (
     extension_resource_uid TEXT PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     observation TEXT,
+    labels      TEXT NOT NULL DEFAULT '{}',
+    conditions  TEXT NOT NULL DEFAULT '{}',
     observed_at TEXT NOT NULL,
     updated_at  TEXT NOT NULL
-);
-
--- Normalized out of extension_resource_inventory.labels (previously
--- JSON text) so batch label writes can be blind multi-row
--- upserts/deletes against a real table instead of a
--- read-modify-write on a JSON blob.
-CREATE TABLE extension_resource_inventory_labels (
-    extension_resource_uid TEXT NOT NULL
-        REFERENCES extension_resource_inventory(extension_resource_uid) ON DELETE CASCADE,
-    key                    TEXT NOT NULL,
-    value                  TEXT NOT NULL,
-    PRIMARY KEY (extension_resource_uid, key)
-);
-
-CREATE TABLE extension_resource_inventory_conditions (
-    extension_resource_uid TEXT NOT NULL
-        REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    type                   TEXT NOT NULL,
-    status                 TEXT NOT NULL,
-    reason                 TEXT NOT NULL DEFAULT '',
-    message                TEXT NOT NULL DEFAULT '',
-    last_transition_time   TEXT NOT NULL,
-    observed_at            TEXT NOT NULL,
-    updated_at             TEXT NOT NULL,
-    PRIMARY KEY (extension_resource_uid, type)
 );
 
 CREATE TABLE extension_resource_inventory_condition_events (
@@ -341,8 +330,6 @@ CREATE INDEX idx_er_inv_observations_resource
 -- +goose Down
 DROP TABLE IF EXISTS extension_resource_inventory_observations;
 DROP TABLE IF EXISTS extension_resource_inventory_condition_events;
-DROP TABLE IF EXISTS extension_resource_inventory_conditions;
-DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;

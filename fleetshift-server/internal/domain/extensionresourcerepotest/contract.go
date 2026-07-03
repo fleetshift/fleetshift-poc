@@ -3,6 +3,7 @@
 package extensionresourcerepotest
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -464,7 +465,7 @@ func runInstanceTests(t *testing.T, factory Factory) {
 
 		now := fixedTime.Add(time.Minute)
 		obs := json.RawMessage(`{"cpu":4}`)
-		if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+		if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 			ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 			Labels:      map[string]string{"zone": "us-east-1"},
 			Observation: &obs,
@@ -839,7 +840,15 @@ func runInventoryTests(t *testing.T, factory Factory) {
 	})
 
 	t.Run("Replace", func(t *testing.T) {
-		t.Run("CreatesLatestStateObservationHistoryAndTransitions", func(t *testing.T) {
+		// CreatesLatestState also pins the new empty-history contract
+		// described in the "History" subtest below: even a report
+		// that carries both an observation and a condition -- the
+		// exact shape that used to seed observation history and an
+		// initial condition transition -- must leave both history
+		// lists empty now that history bookkeeping is deferred to a
+		// future async writer (see docs/design/architecture/resource_indexing.md
+		// and this package's "History" subtest).
+		t.Run("CreatesLatestState", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -854,7 +863,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:      map[string]string{"zone": "us-east-1"},
 				Observation: &obs,
@@ -884,19 +893,17 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("ListObservations: %v", err)
 			}
-			if len(obsHistory) != 1 {
-				t.Fatalf("observation history len = %d, want 1", len(obsHistory))
+			if len(obsHistory) != 0 {
+				t.Fatalf("observation history len = %d, want 0 (hot path no longer writes history)", len(obsHistory))
 			}
-			assertEqual(t, "history Observation", string(obsHistory[0].Observation()), `{"cpu":4}`)
 
 			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
 			if err != nil {
 				t.Fatalf("ListConditionTransitions: %v", err)
 			}
-			if len(transitions) != 1 {
-				t.Fatalf("transitions len = %d, want 1 (initial condition)", len(transitions))
+			if len(transitions) != 0 {
+				t.Fatalf("transitions len = %d, want 0 (hot path no longer writes history)", len(transitions))
 			}
-			assertEqual(t, "transition Status", transitions[0].Status(), domain.ConditionTrue)
 		})
 
 		t.Run("UpdatesExisting", func(t *testing.T) {
@@ -914,7 +921,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"cpu":2}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs1,
 				ObservedAt:  now,
@@ -925,7 +932,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			later := now.Add(time.Minute)
 			obs2 := json.RawMessage(`{"cpu":8}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs2,
 				ObservedAt:  later,
@@ -963,7 +970,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"n":1}`)
 			obs2 := json.RawMessage(`{"n":2}`)
-			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
 				{ResourceType: r1.ResourceType(), Name: r1.Name(), CandidateUID: domain.NewExtensionResourceUID(), Observation: &obs1, ObservedAt: now, ReceivedAt: now},
 				{ResourceType: r2.ResourceType(), Name: r2.Name(), CandidateUID: domain.NewExtensionResourceUID(), Observation: &obs2, ObservedAt: now, ReceivedAt: now},
 			})
@@ -989,145 +996,17 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
-		t.Run("SameConditionDoesNotDuplicateTransition", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-dedup")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
-				ObservedAt: t1,
-				ReceivedAt: t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t2)},
-				ObservedAt: t2,
-				ReceivedAt: t2,
-			}}); err != nil {
-				t.Fatalf("second ReplaceInventory: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 1 {
-				t.Fatalf("len = %d, want 1 (repeated condition should not duplicate)", len(got))
-			}
-		})
-
-		t.Run("ChangedConditionRecordsTransition", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-genuine")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
-				ObservedAt: t1,
-				ReceivedAt: t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
-				ObservedAt: t2,
-				ReceivedAt: t2,
-			}}); err != nil {
-				t.Fatalf("second ReplaceInventory: %v", err)
-			}
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 2 {
-				t.Fatalf("len = %d, want 2 (changed condition is a genuine transition)", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionTrue)
-
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/replace-genuine")
-			if err != nil {
-				t.Fatalf("GetView: %v", err)
-			}
-			if len(view.Resource.Inventory().Conditions()) != 1 {
-				t.Fatalf("Conditions len = %d, want 1", len(view.Resource.Inventory().Conditions()))
-			}
-			assertEqual(t, "latest Status", view.Resource.Inventory().Conditions()[0].Status(), domain.ConditionFalse)
-		})
-
-		t.Run("ReturnToPastStateRecordsGenuineTransition", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-bounce")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
-			t3 := fixedTime.Add(3 * time.Minute)
-
-			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
-				t.Helper()
-				if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-					Conditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt: ts,
-					ReceivedAt: ts,
-				}}); err != nil {
-					t.Fatalf("%s ReplaceInventory: %v", step, err)
-				}
-			}
-
-			replaceWith("c1", domain.ConditionTrue, "AllGood", "ok", t1)
-			replaceWith("c2", domain.ConditionFalse, "Degraded", "broke", t2)
-			// c1 again: looks like c1 but the latest is c2, so this is a
-			// genuine third transition and must not be dropped.
-			replaceWith("c3", domain.ConditionTrue, "AllGood", "ok", t3)
-
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(got) != 3 {
-				t.Fatalf("len = %d, want 3 (return to past state is a genuine transition)", len(got))
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
-		})
+		// SameConditionDoesNotDuplicateTransition, ChangedConditionRecordsTransition,
+		// and ReturnToPastStateRecordsGenuineTransition used to live
+		// here, pinning synchronous condition-transition history
+		// (dedup on repeat, a new row on genuine change, a new row on
+		// return to a past state). That bookkeeping moved out of the
+		// hot path -- see the "History" subtest's empty-history
+		// assertions -- and the latest-state half of what they
+		// checked (each successive replace's Conditions() reflecting
+		// only the most recent report) is already covered by
+		// RemovesConditionsAbsentFromReplacement below and by
+		// UpdatesExisting above for observations.
 
 		t.Run("RemovesConditionsAbsentFromReplacement", func(t *testing.T) {
 			tx := factory(t)
@@ -1143,7 +1022,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{
 					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
@@ -1156,7 +1035,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
 				ObservedAt: t2,
@@ -1189,7 +1068,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:     map[string]string{"zone": "us-east-1", "team": "platform"},
 				ObservedAt: t1,
@@ -1199,7 +1078,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:     map[string]string{"zone": "us-east-1"},
 				ObservedAt: t2,
@@ -1237,7 +1116,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  t1,
@@ -1247,7 +1126,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: nil,
 				ObservedAt:  t2,
@@ -1261,15 +1140,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView: %v", err)
 			}
 			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
-
-			// A nil observation must not append history.
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (only the first non-nil observation)", len(hist))
-			}
 		})
 
 		t.Run("NullLiteralObservationLeavesLatestUnchanged", func(t *testing.T) {
@@ -1287,7 +1157,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  t1,
@@ -1297,10 +1167,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			// A non-nil pointer to the JSON literal null must behave
-			// identically to a nil pointer: untouched, no history.
+			// identically to a nil pointer: untouched.
 			nullLiteral := json.RawMessage(`null`)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &nullLiteral,
 				ObservedAt:  t2,
@@ -1314,81 +1184,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView: %v", err)
 			}
 			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (null literal appends no history)", len(hist))
-			}
-		})
-
-		t.Run("DeduplicatesIdenticalObservationHistory", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/replace-obs-dedup")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Observation: &obs,
-				ObservedAt:  t1,
-				ReceivedAt:  t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-
-			// Byte-identical observation on a resync must not append a
-			// second history row.
-			t2 := fixedTime.Add(2 * time.Minute)
-			sameObs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Observation: &sameObs,
-				ObservedAt:  t2,
-				ReceivedAt:  t2,
-			}}); err != nil {
-				t.Fatalf("second ReplaceInventory (same observation): %v", err)
-			}
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (identical observation must dedup)", len(hist))
-			}
-
-			// A genuinely different value appends a second row.
-			t3 := fixedTime.Add(3 * time.Minute)
-			diffObs := json.RawMessage(`{"cpu":8}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Observation: &diffObs,
-				ObservedAt:  t3,
-				ReceivedAt:  t3,
-			}}); err != nil {
-				t.Fatalf("third ReplaceInventory (different observation): %v", err)
-			}
-
-			hist, err = repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 2 {
-				t.Fatalf("history len = %d, want 2 (different observation appends a row)", len(hist))
-			}
-			assertEqual(t, "hist[0].Observation", string(hist[0].Observation()), `{"cpu":8}`)
 		})
 
 		t.Run("RejectsUnregisteredResourceType", func(t *testing.T) {
@@ -1402,7 +1197,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// insert's FK to extension_resource_types still rejects a
 			// resource type that was never registered.
 			now := fixedTime.Add(time.Minute)
-			_, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Unregistered",
 				Name:         "nodes/unregistered",
 				CandidateUID: domain.NewExtensionResourceUID(),
@@ -1430,7 +1225,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			observedAt := fixedTime.Add(time.Minute)
 			receivedAt := wallClockDistantPast
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
@@ -1446,28 +1241,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			if !view.Resource.Inventory().UpdatedAt().Equal(receivedAt) {
 				t.Errorf("Inventory.UpdatedAt = %v, want %v (ReceivedAt, not wall clock)", view.Resource.Inventory().UpdatedAt(), receivedAt)
-			}
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1", len(hist))
-			}
-			if !hist[0].CreatedAt().Equal(receivedAt) {
-				t.Errorf("observation CreatedAt = %v, want %v (ReceivedAt, not wall clock)", hist[0].CreatedAt(), receivedAt)
-			}
-
-			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(transitions) != 1 {
-				t.Fatalf("transitions len = %d, want 1", len(transitions))
-			}
-			if !transitions[0].CreatedAt().Equal(receivedAt) {
-				t.Errorf("transition CreatedAt = %v, want %v (ReceivedAt, not wall clock)", transitions[0].CreatedAt(), receivedAt)
 			}
 		})
 	})
@@ -1487,7 +1260,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:     map[string]string{"zone": "us-east-1", "tier": "1"},
 				ObservedAt: t1,
@@ -1497,7 +1270,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				SetLabels:    map[string]string{"zone": "us-west-2"},
 				DeleteLabels: []string{"tier"},
@@ -1533,7 +1306,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  t1,
@@ -1543,7 +1316,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				SetLabels:   map[string]string{"zone": "us-east-1"},
 				Observation: nil,
@@ -1558,14 +1331,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView: %v", err)
 			}
 			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (unchanged appends no history)", len(hist))
-			}
 		})
 
 		t.Run("ObservationReplace", func(t *testing.T) {
@@ -1583,7 +1348,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs1 := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs1,
 				ObservedAt:  t1,
@@ -1594,7 +1359,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t2 := fixedTime.Add(2 * time.Minute)
 			obs2 := json.RawMessage(`{"cpu":8}`)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs2,
 				ObservedAt:  t2,
@@ -1608,15 +1373,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView: %v", err)
 			}
 			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":8}`)
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 2 {
-				t.Fatalf("history len = %d, want 2 (replace appends history)", len(hist))
-			}
-			assertEqual(t, "hist[0].Observation", string(hist[0].Observation()), `{"cpu":8}`)
 		})
 
 		t.Run("NullLiteralObservationLeavesLatestUnchanged", func(t *testing.T) {
@@ -1634,7 +1390,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			t1 := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  t1,
@@ -1644,10 +1400,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			// A non-nil pointer to the JSON literal null must behave
-			// identically to a nil pointer: untouched, no history.
+			// identically to a nil pointer: untouched.
 			nullLiteral := json.RawMessage(`null`)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &nullLiteral,
 				ObservedAt:  t2,
@@ -1661,60 +1417,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("GetView: %v", err)
 			}
 			assertObservation(t, "Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (null literal appends no history)", len(hist))
-			}
-		})
-
-		t.Run("DeduplicatesIdenticalObservationHistory", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-obs-dedup")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Observation: &obs,
-				ObservedAt:  t1,
-				ReceivedAt:  t1,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			// Byte-identical observation via a delta must not append a
-			// second history row.
-			t2 := fixedTime.Add(2 * time.Minute)
-			sameObs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Observation: &sameObs,
-				ObservedAt:  t2,
-				ReceivedAt:  t2,
-			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas (same observation): %v", err)
-			}
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1 (identical observation must dedup)", len(hist))
-			}
 		})
 
 		t.Run("UpsertsAndDeletesConditionsLeavingOmittedUntouched", func(t *testing.T) {
@@ -1731,7 +1433,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Conditions: []domain.Condition{
 					mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1),
@@ -1745,7 +1447,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
 				DeleteConditions: []domain.ConditionType{"Provisioned"},
@@ -1795,7 +1497,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:     map[string]string{"zone": "us-east-1"},
 				ObservedAt: t1,
@@ -1805,7 +1507,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				ObservedAt: t2,
 				ReceivedAt: t2,
@@ -1834,7 +1536,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// See the Replace-side RejectsUnregisteredResourceType for
 			// why this is the delta-side equivalent of "unknown UID".
 			now := fixedTime.Add(time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: "inv.fleetshift.io/Unregistered",
 				Name:         "nodes/delta-unregistered",
 				CandidateUID: domain.NewExtensionResourceUID(),
@@ -1874,7 +1576,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create: %v", err)
 			}
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				SetLabels:  map[string]string{"zone": "us-east-1"},
 				ObservedAt: t1, ReceivedAt: t1,
@@ -1883,7 +1585,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				SetLabels:    map[string]string{"zone": "us-west-2"},
 				DeleteLabels: []string{"zone"},
@@ -1915,7 +1617,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create: %v", err)
 			}
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
 				ObservedAt:       t1, ReceivedAt: t1,
@@ -1924,7 +1626,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
 				DeleteConditions: []domain.ConditionType{"Ready"},
@@ -1944,17 +1646,15 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
-		// RejectsAliasKeyInBothUpsertAndDelete/RejectsReplaceAliasesCombinedWithUpsertAliases/
-		// RejectsReplaceAliasesCombinedWithDeleteAliases guard
-		// [domain.InventoryDelta]'s alias-specific additions to
-		// [domain.ValidateInventoryDelta]: the same (namespace, key)
-		// on both sides of UpsertAliases/DeleteAliases is exactly the
-		// SetLabels/DeleteLabels contradiction above, scoped to
-		// aliases; ReplaceAliases combined with either is a distinct
-		// "ambiguous request" rejection, since a same-call "this is
-		// my complete contribution" can't be reconciled against
-		// named adds/removes that don't appear in it either way.
-		t.Run("RejectsAliasKeyInBothUpsertAndDelete", func(t *testing.T) {
+		// RejectsDeleteAliasesAsUnimplemented/RejectsReplaceAliasesAsUnimplemented
+		// guard [domain.InventoryDelta]'s doc: neither op is
+		// implemented against the reported-alias payload yet, so
+		// [domain.ValidateInventoryDelta] rejects any non-empty value
+		// outright (with [domain.ErrUnimplemented], not silently
+		// accepting-and-ignoring it, which would leave stale pending
+		// aliases with no indication anything went wrong) regardless
+		// of what else -- if anything -- the delta combines it with.
+		t.Run("RejectsDeleteAliasesAsUnimplemented", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -1962,13 +1662,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-overlap")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-delete-unimplemented")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			original, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-overlap-original")
+			original, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-delete-unimplemented-original")
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				UpsertAliases: []domain.Alias{original},
 				ObservedAt:    t1, ReceivedAt: t1,
@@ -1976,27 +1676,30 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 			}
 
-			replacement, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-overlap-replacement")
 			removeRef, _ := domain.NewAliasRef("gcp", "instance_id")
 			t2 := fixedTime.Add(2 * time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{replacement},
 				DeleteAliases: []domain.AliasRef{removeRef},
 				ObservedAt:    t2, ReceivedAt: t2,
 			}})
-			if !errors.Is(err, domain.ErrInvalidArgument) {
-				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			if !errors.Is(err, domain.ErrUnimplemented) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrUnimplemented", err)
 			}
 
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, original)
+			// Rejected before any write, so the pending alias payload
+			// from the seed call must be untouched -- still just
+			// [original], not retracted.
+			got, err := repo.Get(ctx, r.ResourceType().FullName(r.Name()))
 			if err != nil {
-				t.Fatalf("ResolveAlias(original): %v (rejected before any write, so original must still resolve)", err)
+				t.Fatalf("Get: %v", err)
 			}
-			assertEqual(t, "resolved original", resolved, r.Name())
+			if reported := got.ReportedAliases(); len(reported) != 1 || reported[0] != original {
+				t.Fatalf("ReportedAliases() = %+v, want unchanged [%+v]", reported, original)
+			}
 		})
 
-		t.Run("RejectsReplaceAliasesCombinedWithUpsertAliases", func(t *testing.T) {
+		t.Run("RejectsReplaceAliasesAsUnimplemented", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2004,47 +1707,19 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-upsert-conflict")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-unimplemented")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
-			replaceAlias, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-upsert-replace")
-			upsertAlias, _ := domain.NewAlias("gcp", "zone", "delta-replace-upsert-upsert")
+			replaceAlias, _ := domain.NewAlias("gcp", "instance_id", "delta-alias-replace-unimplemented-value")
 			now := fixedTime.Add(time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				ReplaceAliases: []domain.Alias{replaceAlias},
-				UpsertAliases:  []domain.Alias{upsertAlias},
 				ObservedAt:     now, ReceivedAt: now,
 			}})
-			if !errors.Is(err, domain.ErrInvalidArgument) {
-				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
-			}
-		})
-
-		t.Run("RejectsReplaceAliasesCombinedWithDeleteAliases", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/delta-alias-replace-delete-conflict")
-			if err := repo.Create(ctx, r); err != nil {
-				t.Fatalf("Create: %v", err)
-			}
-			replaceAlias, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-delete-replace")
-			deleteRef, _ := domain.NewAliasRef("gcp", "zone")
-			now := fixedTime.Add(time.Minute)
-			_, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				ReplaceAliases: []domain.Alias{replaceAlias},
-				DeleteAliases:  []domain.AliasRef{deleteRef},
-				ObservedAt:     now, ReceivedAt: now,
-			}})
-			if !errors.Is(err, domain.ErrInvalidArgument) {
-				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrInvalidArgument", err)
+			if !errors.Is(err, domain.ErrUnimplemented) {
+				t.Fatalf("ApplyInventoryDeltas err = %v, want ErrUnimplemented", err)
 			}
 		})
 
@@ -2064,7 +1739,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			observedAt := fixedTime.Add(time.Minute)
 			receivedAt := wallClockDistantPast
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation:      &obs,
 				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", observedAt)},
@@ -2080,28 +1755,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			if !view.Resource.Inventory().UpdatedAt().Equal(receivedAt) {
 				t.Errorf("Inventory.UpdatedAt = %v, want %v (ReceivedAt, not wall clock)", view.Resource.Inventory().UpdatedAt(), receivedAt)
-			}
-
-			hist, err := repo.ListObservations(ctx, r.UID(), 10)
-			if err != nil {
-				t.Fatalf("ListObservations: %v", err)
-			}
-			if len(hist) != 1 {
-				t.Fatalf("history len = %d, want 1", len(hist))
-			}
-			if !hist[0].CreatedAt().Equal(receivedAt) {
-				t.Errorf("observation CreatedAt = %v, want %v (ReceivedAt, not wall clock)", hist[0].CreatedAt(), receivedAt)
-			}
-
-			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions: %v", err)
-			}
-			if len(transitions) != 1 {
-				t.Fatalf("transitions len = %d, want 1", len(transitions))
-			}
-			if !transitions[0].CreatedAt().Equal(receivedAt) {
-				t.Errorf("transition CreatedAt = %v, want %v (ReceivedAt, not wall clock)", transitions[0].CreatedAt(), receivedAt)
 			}
 		})
 	})
@@ -2122,7 +1775,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"ready":true}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  now,
@@ -2212,7 +1865,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"version":"2.0"}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs,
 				ObservedAt:  now,
@@ -2267,8 +1920,23 @@ func runInventoryTests(t *testing.T, factory Factory) {
 		})
 	})
 
+	// History pins the "hot path no longer writes history" contract:
+	// [domain.Observation]/[domain.ConditionTransition] and their
+	// List methods are kept for a future async writer (see
+	// docs/design/architecture/resource_indexing.md), but
+	// ReplaceInventory/ApplyInventoryDeltas themselves never populate
+	// extension_resource_inventory_observations or
+	// extension_resource_inventory_condition_events any more -- not
+	// even for the first report on a resource, and not even for a
+	// report that changes an observation/condition from one real
+	// value to another (the exact shapes that used to append rows
+	// under the old synchronous dedup/transition-detection logic).
+	// Filter-by-type and ordering coverage for the List methods
+	// themselves is deferred until an async writer exists to
+	// populate the tables in the first place; querying empty tables
+	// can't exercise that logic.
 	t.Run("History", func(t *testing.T) {
-		t.Run("ListObservationsOrdersByObservedAtDescWithDistinctIDs", func(t *testing.T) {
+		t.Run("ReplaceInventoryNeverWritesHistory", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2276,51 +1944,57 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/obs1")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/history-replace")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			t2 := fixedTime.Add(2 * time.Minute)
 			obs1 := json.RawMessage(`{"v":1}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs1,
+				Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
 				ObservedAt:  t1,
 				ReceivedAt:  t1,
 			}}); err != nil {
 				t.Fatalf("first ReplaceInventory: %v", err)
 			}
+
+			// A second report with a genuinely different observation
+			// and condition value -- exactly the shape that used to
+			// append a second history row and a transition under the
+			// old synchronous dedup logic.
+			t2 := fixedTime.Add(2 * time.Minute)
 			obs2 := json.RawMessage(`{"v":2}`)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 				Observation: &obs2,
+				Conditions:  []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
 				ObservedAt:  t2,
 				ReceivedAt:  t2,
 			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas: %v", err)
+				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			got, err := repo.ListObservations(ctx, r.UID(), 10)
+			obsHistory, err := repo.ListObservations(ctx, r.UID(), 10)
 			if err != nil {
 				t.Fatalf("ListObservations: %v", err)
 			}
-			if len(got) != 2 {
-				t.Fatalf("len = %d, want 2", len(got))
+			if len(obsHistory) != 0 {
+				t.Fatalf("observation history len = %d, want 0", len(obsHistory))
 			}
-			// Most recent first (ordered by observed_at DESC)
-			assertEqual(t, "got[0].Observation", string(got[0].Observation()), `{"v":2}`)
-			assertEqual(t, "got[1].Observation", string(got[1].Observation()), `{"v":1}`)
-			if got[0].ID() == "" || got[1].ID() == "" {
-				t.Error("observation IDs should be auto-generated and non-empty")
+
+			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
+			if err != nil {
+				t.Fatalf("ListConditionTransitions: %v", err)
 			}
-			if got[0].ID() == got[1].ID() {
-				t.Errorf("got[0].ID() == got[1].ID() (%s); want distinct", got[0].ID())
+			if len(transitions) != 0 {
+				t.Fatalf("transitions len = %d, want 0", len(transitions))
 			}
 		})
 
-		t.Run("ListConditionTransitionsFilterByType", func(t *testing.T) {
+		t.Run("ApplyInventoryDeltasNeverWritesHistory", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2328,36 +2002,59 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			r := newInventoryER("inv.fleetshift.io/Node", "nodes/ct-filter")
+			r := newInventoryER("inv.fleetshift.io/Node", "nodes/history-delta")
 			if err := repo.Create(ctx, r); err != nil {
 				t.Fatalf("Create: %v", err)
 			}
 
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			obs1 := json.RawMessage(`{"v":1}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				Conditions: []domain.Condition{
-					mustCondition(t, "Ready", domain.ConditionTrue, "ok", "", t1),
-					mustCondition(t, "Provisioned", domain.ConditionTrue, "done", "", t1),
-				},
-				ObservedAt: t1,
-				ReceivedAt: t1,
+				Observation:      &obs1,
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt:       t1,
+				ReceivedAt:       t1,
 			}}); err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
+				t.Fatalf("first ApplyInventoryDeltas: %v", err)
 			}
 
-			readyType := domain.ConditionType("Ready")
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), &readyType, 10)
+			t2 := fixedTime.Add(2 * time.Minute)
+			obs2 := json.RawMessage(`{"v":2}`)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Observation:      &obs2,
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				ObservedAt:       t2,
+				ReceivedAt:       t2,
+			}}); err != nil {
+				t.Fatalf("second ApplyInventoryDeltas: %v", err)
+			}
+
+			obsHistory, err := repo.ListObservations(ctx, r.UID(), 10)
+			if err != nil {
+				t.Fatalf("ListObservations: %v", err)
+			}
+			if len(obsHistory) != 0 {
+				t.Fatalf("observation history len = %d, want 0", len(obsHistory))
+			}
+
+			transitions, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
 			if err != nil {
 				t.Fatalf("ListConditionTransitions: %v", err)
 			}
-			if len(got) != 1 {
-				t.Fatalf("len = %d, want 1", len(got))
+			if len(transitions) != 0 {
+				t.Fatalf("transitions len = %d, want 0", len(transitions))
 			}
-			assertEqual(t, "got[0].ConditionType", got[0].ConditionType(), domain.ConditionType("Ready"))
 		})
 
-		t.Run("MultipleUIDsInOneDeltaBatchGetDistinctConditions", func(t *testing.T) {
+		// MultipleUIDsInOneDeltaBatchGetDistinctLatestState no longer
+		// belongs under "History" now that there's no transition
+		// history to inspect per UID, but it earns its keep as a
+		// batch-correctness check in its own right: a batch bug that
+		// copied the first delta's payload to every row in the batch
+		// would slip past single-report tests entirely.
+		t.Run("MultipleUIDsInOneDeltaBatchGetDistinctLatestState", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2374,11 +2071,9 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Create r2: %v", err)
 			}
 
-			// Distinct payloads per UID so a batch bug that copies the
-			// first delta to every row would be caught.
 			t1 := fixedTime.Add(time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
 				{
 					ResourceType: r1.ResourceType(), Name: r1.Name(), CandidateUID: domain.NewExtensionResourceUID(),
 					UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "node is healthy", t1)},
@@ -2395,7 +2090,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
 
-			// Verify r1 condition via GetView.
 			v1, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-a"))
 			if err != nil {
 				t.Fatalf("GetView r1: %v", err)
@@ -2411,7 +2105,6 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "r1.Condition.Message", v1.Resource.Inventory().Conditions()[0].Message(), "node is healthy")
 			assertEqual(t, "r1.Condition.LastTransitionTime", v1.Resource.Inventory().Conditions()[0].LastTransitionTime(), t1)
 
-			// Verify r2 condition via GetView.
 			v2, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", "nodes/multi-b"))
 			if err != nil {
 				t.Fatalf("GetView r2: %v", err)
@@ -2426,44 +2119,16 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "r2.Condition.Reason", v2.Resource.Inventory().Conditions()[0].Reason(), "Degraded")
 			assertEqual(t, "r2.Condition.Message", v2.Resource.Inventory().Conditions()[0].Message(), "disk pressure")
 			assertEqual(t, "r2.Condition.LastTransitionTime", v2.Resource.Inventory().Conditions()[0].LastTransitionTime(), t2)
-
-			// Verify per-UID transitions were recorded independently.
-			tr1, err := repo.ListConditionTransitions(ctx, r1.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions r1: %v", err)
-			}
-			if len(tr1) != 1 {
-				t.Fatalf("r1 transitions = %d, want 1", len(tr1))
-			}
-			assertEqual(t, "r1.Transition.Status", tr1[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "r1.Transition.Reason", tr1[0].Reason(), "AllGood")
-
-			tr2, err := repo.ListConditionTransitions(ctx, r2.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("ListConditionTransitions r2: %v", err)
-			}
-			if len(tr2) != 1 {
-				t.Fatalf("r2 transitions = %d, want 1", len(tr2))
-			}
-			assertEqual(t, "r2.Transition.Status", tr2[0].Status(), domain.ConditionFalse)
-			assertEqual(t, "r2.Transition.Reason", tr2[0].Reason(), "Degraded")
 		})
 
-		// CrossPathConsistencyAcrossReplaceAndDelta exercises a sequence
-		// that alternates between ReplaceInventory and
-		// ApplyInventoryDeltas, mixing genuine transitions with
-		// duplicates in both directions, to prove both commands feed the
-		// same transition-detection path.
-		//
-		//   Step  Path     Condition         Transition?
-		//   1     replace  Ready=True        yes (first)
-		//   2     delta    Ready=True        no  (dedup: delta sees replace state)
-		//   3     delta    Ready=False       yes (genuine via delta)
-		//   4     replace  Ready=False       no  (dedup: replace sees delta state)
-		//   5     replace  Ready=True        yes (genuine via replace)
-		//
-		// Result: 3 transitions, latest state Ready=True.
-		t.Run("CrossPathConsistencyAcrossReplaceAndDelta", func(t *testing.T) {
+		// AlternatingReplaceAndDeltaCallsConvergeOnLatestState replaces
+		// the old CrossPathConsistencyAcrossReplaceAndDelta, which
+		// mostly pinned synchronous transition-counting behavior that
+		// no longer exists. What's left worth pinning: ReplaceInventory
+		// and ApplyInventoryDeltas write the very same latest-state row,
+		// so alternating between them must still converge on whichever
+		// call happened last, with no path-dependent drift.
+		t.Run("AlternatingReplaceAndDeltaCallsConvergeOnLatestState", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2479,77 +2144,32 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t1 := fixedTime.Add(1 * time.Minute)
 			t2 := fixedTime.Add(2 * time.Minute)
 			t3 := fixedTime.Add(3 * time.Minute)
-			t4 := fixedTime.Add(4 * time.Minute)
-			t5 := fixedTime.Add(5 * time.Minute)
 
-			replaceWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
-				t.Helper()
-				if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-					Conditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt: ts,
-					ReceivedAt: ts,
-				}}); err != nil {
-					t.Fatalf("%s ReplaceInventory: %v", step, err)
-				}
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", t1)},
+				ObservedAt: t1,
+				ReceivedAt: t1,
+			}}); err != nil {
+				t.Fatalf("replace: %v", err)
+			}
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "broke", t2)},
+				ObservedAt:       t2,
+				ReceivedAt:       t2,
+			}}); err != nil {
+				t.Fatalf("delta: %v", err)
+			}
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
+				Conditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionTrue, "Recovered", "back", t3)},
+				ObservedAt: t3,
+				ReceivedAt: t3,
+			}}); err != nil {
+				t.Fatalf("final replace: %v", err)
 			}
 
-			deltaWith := func(step string, status domain.ConditionStatus, reason, msg string, ts time.Time) {
-				t.Helper()
-				if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-					ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-					UpsertConditions: []domain.Condition{mustCondition(t, "Ready", status, reason, msg, ts)},
-					ObservedAt:       ts,
-					ReceivedAt:       ts,
-				}}); err != nil {
-					t.Fatalf("%s ApplyInventoryDeltas: %v", step, err)
-				}
-			}
-
-			assertTransitionCount := func(step string, want int) {
-				t.Helper()
-				got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-				if err != nil {
-					t.Fatalf("%s ListConditionTransitions: %v", step, err)
-				}
-				if len(got) != want {
-					t.Fatalf("%s transitions = %d, want %d", step, len(got), want)
-				}
-			}
-
-			// Step 1: replace Ready=True → genuine (first)
-			replaceWith("step1", domain.ConditionTrue, "AllGood", "ok", t1)
-			assertTransitionCount("step1", 1)
-
-			// Step 2: delta Ready=True → dedup (same state set by replace)
-			deltaWith("step2", domain.ConditionTrue, "AllGood", "ok", t2)
-			assertTransitionCount("step2", 1)
-
-			// Step 3: delta Ready=False → genuine transition via delta
-			deltaWith("step3", domain.ConditionFalse, "Degraded", "broke", t3)
-			assertTransitionCount("step3", 2)
-
-			// Step 4: replace Ready=False → dedup (same state set by delta)
-			replaceWith("step4", domain.ConditionFalse, "Degraded", "broke", t4)
-			assertTransitionCount("step4", 2)
-
-			// Step 5: replace Ready=True → genuine transition via replace
-			replaceWith("step5", domain.ConditionTrue, "Recovered", "back", t5)
-			assertTransitionCount("step5", 3)
-
-			// Verify full transition history (most recent first)
-			got, err := repo.ListConditionTransitions(ctx, r.UID(), nil, 10)
-			if err != nil {
-				t.Fatalf("final ListConditionTransitions: %v", err)
-			}
-			assertEqual(t, "got[0].Status", got[0].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[0].Reason", got[0].Reason(), "Recovered")
-			assertEqual(t, "got[1].Status", got[1].Status(), domain.ConditionFalse)
-			assertEqual(t, "got[1].Reason", got[1].Reason(), "Degraded")
-			assertEqual(t, "got[2].Status", got[2].Status(), domain.ConditionTrue)
-			assertEqual(t, "got[2].Reason", got[2].Reason(), "AllGood")
-
-			// Latest state should reflect the final replace
 			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/cross-path")
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
@@ -2583,7 +2203,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			candidateUID := domain.NewExtensionResourceUID()
 			now := fixedTime.Add(time.Minute)
 			obs := json.RawMessage(`{"cpu":4}`)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         "nodes/lazy-create",
 				CandidateUID: candidateUID,
@@ -2622,7 +2242,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			// discarded in favor of the row that already exists.
 			staleCandidateUID := domain.NewExtensionResourceUID()
 			now := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: r.ResourceType(),
 				Name:         r.Name(),
 				CandidateUID: staleCandidateUID,
@@ -2662,7 +2282,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 
 			newCandidateUID := domain.NewExtensionResourceUID()
 			now := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
 				{
 					ResourceType: existing.ResourceType(),
 					Name:         existing.Name(),
@@ -2695,13 +2315,28 @@ func runInventoryTests(t *testing.T, factory Factory) {
 		})
 	})
 
-	// Aliases exercises the alias fold-in shared by ReplaceInventory
-	// and ApplyInventoryDeltas: aliases supplied alongside a report are
-	// upserted in the same statement as the inventory write, and any
-	// [domain.AliasConflict] is reported back rather than raising a
-	// hard SQL error or silently overwriting the conflicting state.
+	// Aliases exercises the "pending, unreconciled" alias contract
+	// ReplaceInventory/ApplyInventoryDeltas store on
+	// extension_resources.reported_aliases and
+	// extension_resources.alias_fingerprint (see
+	// [domain.InventoryReplacement.Aliases]'s doc): the hot path
+	// canonicalizes and stores whatever an extension resource
+	// asserts, skips the alias payload write entirely when the
+	// fingerprint hasn't changed, and never classifies or rejects
+	// conflicts synchronously -- reconciling conflicting assertions
+	// from different extension resources is deferred to a future
+	// accepted-identity process this branch does not implement.
+	//
+	// This replaces a much larger predecessor that pinned synchronous
+	// cross-resource conflict detection against
+	// resource_alias_claims/resource_alias_contributions (additive,
+	// per-name claims with immediate ResolveAlias visibility). That
+	// mechanism is now unreachable from inventory reporting; see
+	// resourceidentityrepotest's own contract tests for the one path
+	// that still exercises it (a platform-owned claim added directly
+	// via AddAlias, independent of inventory reporting).
 	t.Run("Aliases", func(t *testing.T) {
-		t.Run("ReplaceInventoryFoldsAliasesIntoResourceAliases", func(t *testing.T) {
+		t.Run("ReplaceInventoryStoresCanonicalPayloadAndFingerprint", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2710,31 +2345,36 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-replace-1")
+			name := domain.ResourceName("nodes/alias-canonical")
+			// Reported out of canonical (namespace, key, value)
+			// order -- the stored payload must still come back
+			// sorted.
+			zone, _ := domain.NewAlias("gcp", "zone", "alias-canonical-zone")
+			instanceID, _ := domain.NewAlias("gcp", "instance_id", "alias-canonical-instance")
 			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-replace",
+				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
+				Aliases:      []domain.Alias{zone, instanceID},
 				ObservedAt:   now,
 				ReceivedAt:   now,
-			}})
-			if err != nil {
+			}}); err != nil {
 				t.Fatalf("ReplaceInventory: %v", err)
 			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
 
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
+				t.Fatalf("Get: %v", err)
 			}
-			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-replace"))
+			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), domain.SortAliases([]domain.Alias{zone, instanceID}))
+			wantFingerprint := domain.AliasSetFingerprint([]domain.Alias{zone, instanceID})
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() = %x, want %x", got.AliasFingerprint(), wantFingerprint)
+			}
 		})
 
-		t.Run("ApplyInventoryDeltasFoldsAliasesIntoResourceAliases", func(t *testing.T) {
+		t.Run("NoAliasesStoresEmptyArrayWithDeterministicFingerprint", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2743,31 +2383,112 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-1")
+			name := domain.ResourceName("nodes/alias-none")
 			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
-				Name:          "nodes/alias-delta",
-				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{alias},
-				ObservedAt:    now,
-				ReceivedAt:    now,
-			}})
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if reported := got.ReportedAliases(); len(reported) != 0 {
+				t.Fatalf("ReportedAliases() = %+v, want empty (never nil)", reported)
+			}
+			wantFingerprint := domain.AliasSetFingerprint(nil)
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() = %x, want the deterministic empty-set fingerprint %x", got.AliasFingerprint(), wantFingerprint)
+			}
+		})
+
+		// DeltaCreatedResourceGetsDeterministicEmptyAliasFingerprint
+		// guards a backend-consistency requirement: a resource
+		// resolve-or-created by ApplyInventoryDeltas (which, unlike
+		// ReplaceInventory, never carries a caller-supplied alias set
+		// to seed at creation -- see [domain.InventoryDelta]'s doc)
+		// must still get the same deterministic empty-set fingerprint
+		// a no-alias ReplaceInventory report would, not a NULL/absent
+		// one. Both backends must agree, and a subsequent no-alias
+		// report must find fingerprints already equal and skip the
+		// alias payload rewrite -- an unequal-to-NULL fingerprint
+		// would otherwise force one redundant write the very next
+		// time this resource is reported.
+		t.Run("DeltaCreatedResourceGetsDeterministicEmptyAliasFingerprint", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/delta-created-alias-fingerprint")
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				SetLabels:    map[string]string{"env": "prod"},
+				ObservedAt:   t1, ReceivedAt: t1,
+			}}); err != nil {
 				t.Fatalf("ApplyInventoryDeltas: %v", err)
 			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
+
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			wantFingerprint := domain.AliasSetFingerprint(nil)
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Fatalf("AliasFingerprint() after delta-create = %x, want the deterministic empty-set fingerprint %x", got.AliasFingerprint(), wantFingerprint)
+			}
+			extensionResourcesUpdatedAt := got.UpdatedAt()
+
+			// A later no-alias ReplaceInventory report should find
+			// its fingerprint already matching and skip the alias
+			// payload write entirely -- observable as
+			// extension_resources.updated_at (and therefore
+			// UpdatedAt()) staying put even though the report
+			// succeeds and inventory freshness still moves.
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt:   t2, ReceivedAt: t2,
+			}}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
 			}
 
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			got2, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
+				t.Fatalf("Get: %v", err)
 			}
-			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-delta"))
+			if !got2.UpdatedAt().Equal(extensionResourcesUpdatedAt) {
+				t.Errorf("UpdatedAt() = %v, want unchanged %v (alias payload write should have been skipped)", got2.UpdatedAt(), extensionResourcesUpdatedAt)
+			}
+			if !bytes.Equal(got2.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() after follow-up report = %x, want unchanged %x", got2.AliasFingerprint(), wantFingerprint)
+			}
 		})
 
-		t.Run("ReportsConflictWhenValueClaimedByAnotherResourceAcrossCalls", func(t *testing.T) {
+		// UnchangedAliasFingerprintSkipsPendingAliasPayloadWrite
+		// observes the fingerprint-gated write skip indirectly
+		// through ExtensionResource.UpdatedAt(): ReplaceInventory
+		// only touches extension_resources (and therefore only
+		// moves its updated_at) when the alias payload write
+		// actually happens, which is exactly when the reported
+		// fingerprint differs from the stored one. Inventory
+		// freshness (Inventory().UpdatedAt(), a separate row
+		// entirely) still moves on every report regardless.
+		t.Run("UnchangedAliasFingerprintSkipsPendingAliasPayloadWrite", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2776,635 +2497,60 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-contested")
+			name := domain.ResourceName("nodes/alias-fingerprint-skip")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-fingerprint-skip-1")
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-owner-a",
+				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Aliases:      []domain.Alias{alias},
 				ObservedAt:   t1,
 				ReceivedAt:   t1,
 			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory (A): %v", err)
+				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
+			afterFirst, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			if err != nil {
+				t.Fatalf("Get after first: %v", err)
+			}
+			firstUpdatedAt := afterFirst.UpdatedAt()
+
+			// Steady-state poll: identical alias set, but a changed
+			// inventory field so the report as a whole is not a
+			// total no-op.
 			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-owner-b",
+				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
+				Labels:       map[string]string{"zone": "us-east-1"},
 				Aliases:      []domain.Alias{alias},
 				ObservedAt:   t2,
 				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (B): %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-owner-b"))
-			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-owner-a"))
-
-			// The alias must still resolve to its real owner (A) --
-			// B's conflicting claim must never overwrite it.
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
-			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, domain.ResourceName("nodes/alias-owner-a"))
-		})
-
-		// SameExtensionResourceReplacingOwnAliasValueSucceeds covers
-		// the "per-extension-resource replace" half of the alias
-		// contract: the very same extension resource (same natural
-		// key -- ResourceType+Name, see [domain.InventoryReplacement]'s
-		// doc) reporting a *different* value for a (namespace, key) it
-		// already owns is not a conflict at all -- it's a legitimate
-		// update to its own contribution, exactly like changing a
-		// label value on a later report. This test used to assert the
-		// opposite (a permanent conflict) under the older
-		// "additive and immutable" alias contract; see
-		// AliasConflictResourceHasDifferentValue's doc and
-		// ReplacingOwnAliasWhileSiblingStillHoldsOldValueConflicts
-		// below for when a value change *does* still conflict (a
-		// sibling extension resource for the same name still holding
-		// the old value).
-		t.Run("SameExtensionResourceReplacingOwnAliasValueSucceeds", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("nodes/alias-value-flip")
-			firstValue, _ := domain.NewAlias("gcp", "instance_id", "alias-value-v1")
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{firstValue},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
 			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			secondValue, _ := domain.NewAlias("gcp", "instance_id", "alias-value-v2")
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{secondValue},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (second value): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			// The new value must resolve, and the old one must have
-			// been retracted -- freed up for any other resource to
-			// claim, not left dangling forever.
-			resolvedSecond, err := tx.ResourceIdentities().ResolveAlias(ctx, secondValue)
-			if err != nil {
-				t.Fatalf("ResolveAlias(secondValue): %v", err)
-			}
-			assertEqual(t, "resolved name", resolvedSecond, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, firstValue); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(firstValue): got %v, want ErrNotFound (retracted on replace)", err)
-			}
-
-			// This is claim_self_replace's defining property, not
-			// just claim_creates plus a coincidental cleanup: exactly
-			// one claim survives for this (namespace, key), with the
-			// new value -- not two (an orphaned old-value claim
-			// alongside a fresh new-value one). resource_alias_claims'
-			// own UNIQUE(namespace, key, platform_collection_name,
-			// platform_resource_id) would actually reject a genuine
-			// "leave the old claim behind, insert a second one for
-			// the same key" bug outright (a real SQL error, not a
-			// silent duplicate) -- so this also stands as a
-			// regression check that self-replace is still routing
-			// through the in-place UPDATE path aliasFoldCTEs' doc
-			// comment describes, not some other shape that happens to
-			// leave the same *externally resolvable* end state.
-			got, err := tx.ResourceIdentities().GetByName(ctx, name)
-			if err != nil {
-				t.Fatalf("GetByName: %v", err)
-			}
-			if len(got.Aliases()) != 1 || got.Aliases()[0] != secondValue {
-				t.Fatalf("Aliases() = %+v, want exactly [%+v]", got.Aliases(), secondValue)
-			}
-		})
-
-		// The three tests below round out single-contributor replace
-		// coverage: SameExtensionResourceReplacingOwnAliasValueSucceeds
-		// above only exercises a 1-alias resource changing its one
-		// value, and AliasRetractedWhenSoleContributingExtensionResourceStopsReportingIt
-		// (further down) only exercises going from 1 alias to 0. A
-		// resource that carries *several* aliases at once can replace
-		// them unevenly -- keep some, drop some, add new ones, or
-		// swap the whole set -- in a single report, mirroring
-		// RemovesLabelsAbsentFromReplacement's "keep some, drop some"
-		// shape for Labels.
-
-		t.Run("PartialReplaceKeepsUnchangedAliasesAndRetractsDroppedOnesWithinSameExtensionResource", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("nodes/alias-partial-replace")
-			keep, _ := domain.NewAlias("gcp", "instance_id", "alias-partial-keep")
-			drop, _ := domain.NewAlias("gcp", "zone", "alias-partial-drop")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{keep, drop},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-
-			// Second report carries only "keep" -- "drop" is simply
-			// absent, not reasserted with a different value.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{keep},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
 				t.Fatalf("second ReplaceInventory: %v", err)
 			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
 
-			resolvedKeep, err := tx.ResourceIdentities().ResolveAlias(ctx, keep)
+			afterSecond, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
-				t.Fatalf("ResolveAlias(keep): %v", err)
+				t.Fatalf("Get after second: %v", err)
 			}
-			assertEqual(t, "resolved keep", resolvedKeep, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, drop); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(drop): got %v, want ErrNotFound (retracted, not resubmitted)", err)
-			}
-		})
-
-		t.Run("ReplaceGrowsAliasSetWithNewKeyFromSameExtensionResource", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
+			if !afterSecond.UpdatedAt().Equal(firstUpdatedAt) {
+				t.Errorf("UpdatedAt = %v, want unchanged %v (alias payload write must be skipped when the fingerprint is unchanged)", afterSecond.UpdatedAt(), firstUpdatedAt)
 			}
 
-			name := domain.ResourceName("nodes/alias-grow")
-			original, _ := domain.NewAlias("gcp", "instance_id", "alias-grow-original")
-			grown, _ := domain.NewAlias("gcp", "zone", "alias-grow-new")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{original},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{original, grown},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("second ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, a := range []domain.Alias{original, grown} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
-			}
-		})
-
-		t.Run("ReplaceFullySwapsAliasSetWithNoOverlapWithinSameExtensionResource", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("nodes/alias-full-swap")
-			oldA, _ := domain.NewAlias("gcp", "instance_id", "alias-swap-old-a")
-			oldB, _ := domain.NewAlias("gcp", "zone", "alias-swap-old-b")
-			newC, _ := domain.NewAlias("gcp", "instance_id", "alias-swap-new-c")
-			newD, _ := domain.NewAlias("gcp", "zone", "alias-swap-new-d")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{oldA, oldB},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("first ReplaceInventory: %v", err)
-			}
-
-			// Second report shares no aliases at all with the first --
-			// every key keeps existing, but every value moves.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{newC, newD},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("second ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, a := range []domain.Alias{newC, newD} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
-			}
-			for _, a := range []domain.Alias{oldA, oldB} {
-				if _, err := tx.ResourceIdentities().ResolveAlias(ctx, a); !errors.Is(err, domain.ErrNotFound) {
-					t.Errorf("ResolveAlias(%+v): got %v, want ErrNotFound (retracted on swap)", a, err)
-				}
-			}
-		})
-
-		t.Run("ReportsIntraBatchContradictionWithoutSQLError", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			// Two reports in the *same* call claim the same alias value
-			// for two different resources -- a contradiction that only
-			// exists within this batch, with no pre-existing row on
-			// either side for a unique index to catch.
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-intra-batch")
-			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         "nodes/alias-intra-a",
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{alias},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-				{
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         "nodes/alias-intra-b",
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{alias},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-			})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
-
-			// Exactly one of the two resources won the alias; the other
-			// must not have gotten it either (no silent partial write).
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
-			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
-			}
-			if resolved != conflicts[0].ActualName {
-				t.Errorf("resolved name = %q, want the winning resource %q", resolved, conflicts[0].ActualName)
-			}
-		})
-
-		// ReportsNoConflictWhenSameResourceRepeatsSameAliasAcrossCalls
-		// covers the overwhelmingly common steady-state case: a
-		// resource re-reporting an alias it already owns, unchanged,
-		// on every poll. This must never surface as a conflict --
-		// only a genuine contradiction against a *different* target
-		// or value should.
-		t.Run("ReportsNoConflictWhenSameResourceRepeatsSameAliasAcrossCalls", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-steady-state")
-			name := domain.ResourceName("nodes/alias-steady-state")
-			for i, at := range []time.Time{fixedTime.Add(time.Minute), fixedTime.Add(2 * time.Minute), fixedTime.Add(3 * time.Minute)} {
-				conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{alias},
-					ObservedAt:   at,
-					ReceivedAt:   at,
-				}})
-				if err != nil {
-					t.Fatalf("ReplaceInventory (poll %d): %v", i, err)
-				}
-				if len(conflicts) != 0 {
-					t.Fatalf("ReplaceInventory (poll %d): conflicts = %+v, want none", i, conflicts)
-				}
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
-			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		// ReportsConflictsOnlyForActualConflictsInMixedBatch exercises
-		// a single chunk carrying, at once: an idempotent repeat of an
-		// alias its own resource already owns (must succeed silently),
-		// a brand-new alias for an unrelated resource (must succeed),
-		// and a genuine value-claimed-by-another conflict (must be
-		// reported) -- proving the safe and conflicting candidates
-		// within one round trip don't interfere with each other.
-		t.Run("ReportsConflictsOnlyForActualConflictsInMixedBatch", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			ownedAlias, _ := domain.NewAlias("gcp", "instance_id", "alias-mixed-owned")
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-mixed-owner",
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{ownedAlias},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			newAlias, _ := domain.NewAlias("gcp", "instance_id", "alias-mixed-new")
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					// Idempotent repeat of an alias this exact resource already owns.
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         "nodes/alias-mixed-owner",
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{ownedAlias},
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-				{
-					// Brand-new alias for an unrelated resource.
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         "nodes/alias-mixed-fresh",
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{newAlias},
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-				{
-					// Genuine conflict: claims an alias value already owned by another resource.
-					ResourceType: "inv.fleetshift.io/Node",
-					Name:         "nodes/alias-mixed-challenger",
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{ownedAlias},
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-			})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (mixed batch): %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-mixed-challenger"))
-			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-mixed-owner"))
-
-			resolvedOwned, err := tx.ResourceIdentities().ResolveAlias(ctx, ownedAlias)
-			if err != nil {
-				t.Fatalf("ResolveAlias(ownedAlias): %v", err)
-			}
-			assertEqual(t, "resolved owned alias", resolvedOwned, domain.ResourceName("nodes/alias-mixed-owner"))
-
-			resolvedNew, err := tx.ResourceIdentities().ResolveAlias(ctx, newAlias)
-			if err != nil {
-				t.Fatalf("ResolveAlias(newAlias): %v", err)
-			}
-			assertEqual(t, "resolved new alias", resolvedNew, domain.ResourceName("nodes/alias-mixed-fresh"))
-		})
-
-		// The tests above all report exactly one alias per report.
-		// The ones below exercise a single report carrying *multiple*
-		// aliases at once -- e.g. a cloud resource identified by both
-		// an instance ID and a zone -- since every alias in a report
-		// is flattened into its own independent candidate row before
-		// checkAliasBatchConsistency/SQL ever sees it (see
-		// aliasCandidateInput's doc comment), and that per-alias
-		// independence is exactly what could silently break under
-		// future optimization without being caught by any
-		// single-alias test.
-
-		t.Run("ResolvesMultipleDistinctAliasesFromSingleReport", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			instanceID, _ := domain.NewAlias("gcp", "instance_id", "multi-instance-1")
-			zone, _ := domain.NewAlias("gcp", "zone", "multi-zone-1")
-			name := domain.ResourceName("nodes/alias-multi-distinct")
-			t1 := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{instanceID, zone},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, a := range []domain.Alias{instanceID, zone} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
-			}
-
-			// Steady-state repeat: re-reporting both aliases unchanged
-			// on a later call must not conflict either, the same as
-			// the single-alias case above.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err = repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{instanceID, zone},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("second ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("second ReplaceInventory: conflicts = %+v, want none", conflicts)
-			}
-		})
-
-		// PartialConflictInMultiAliasReportStillAppliesTheRest proves
-		// aliases within one report are resolved independently of
-		// each other *and* of the report's own inventory write: one
-		// bad alias must not sink the good alias or the observation
-		// riding along in the very same report.
-		t.Run("PartialConflictInMultiAliasReportStillAppliesTheRest", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			contested, _ := domain.NewAlias("gcp", "instance_id", "multi-partial-contested")
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-multi-partial-owner",
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{contested},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			safe, _ := domain.NewAlias("gcp", "zone", "multi-partial-zone")
-			obs := json.RawMessage(`{"cpu":4}`)
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         "nodes/alias-multi-partial-challenger",
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{contested, safe},
-				Observation:  &obs,
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Alias", conflicts[0].Alias, contested)
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, domain.ResourceName("nodes/alias-multi-partial-challenger"))
-			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, domain.ResourceName("nodes/alias-multi-partial-owner"))
-
-			// The contested alias must still belong to its original owner.
-			resolvedContested, err := tx.ResourceIdentities().ResolveAlias(ctx, contested)
-			if err != nil {
-				t.Fatalf("ResolveAlias(contested): %v", err)
-			}
-			assertEqual(t, "resolved contested", resolvedContested, domain.ResourceName("nodes/alias-multi-partial-owner"))
-
-			// But the safe alias, from the very same losing report,
-			// must have been written to the challenger.
-			resolvedSafe, err := tx.ResourceIdentities().ResolveAlias(ctx, safe)
-			if err != nil {
-				t.Fatalf("ResolveAlias(safe): %v", err)
-			}
-			assertEqual(t, "resolved safe", resolvedSafe, domain.ResourceName("nodes/alias-multi-partial-challenger"))
-
-			// And the challenger's own inventory write (unrelated to
-			// aliases entirely) must have gone through too.
-			view, err := repo.GetView(ctx, "//inv.fleetshift.io/nodes/alias-multi-partial-challenger")
+			view, err := repo.GetView(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
 				t.Fatalf("GetView: %v", err)
 			}
-			assertObservation(t, "challenger Observation", view.Resource.Inventory().Observation(), `{"cpu":4}`)
+			if !view.Resource.Inventory().UpdatedAt().Equal(t2) {
+				t.Errorf("Inventory.UpdatedAt = %v, want %v (inventory freshness still moves on every report)", view.Resource.Inventory().UpdatedAt(), t2)
+			}
 		})
 
-		// IntraReportSameKeyDifferentValuesConflictsAndKeepsFirst
-		// covers checkAliasBatchConsistency's other invariant reached
-		// *within* a single report instead of across two reports:
-		// one report asserting two different values for the same
-		// (namespace, key) is self-contradictory, exactly like
-		// ReportsConflictWhenResourceHasDifferentValueForSameKeyAcrossCalls
-		// but discovered in one call instead of two.
-		t.Run("IntraReportSameKeyDifferentValuesConflictsAndKeepsFirst", func(t *testing.T) {
+		t.Run("ChangedAliasFingerprintUpdatesPayloadAndFingerprint", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -3413,88 +2559,59 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			zoneA, _ := domain.NewAlias("gcp", "zone", "multi-samekey-a")
-			zoneB, _ := domain.NewAlias("gcp", "zone", "multi-samekey-b")
-			name := domain.ResourceName("nodes/alias-multi-samekey")
-			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			name := domain.ResourceName("nodes/alias-changed")
+			first, _ := domain.NewAlias("gcp", "instance_id", "alias-changed-v1")
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{zoneA, zoneB},
-				ObservedAt:   now,
-				ReceivedAt:   now,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Alias", conflicts[0].Alias, zoneB)
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictResourceHasDifferentValue)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
-			assertEqual(t, "conflict.ActualValue", conflicts[0].ActualValue, zoneA.Value)
-
-			// zoneA (listed first in the report) must have won; zoneB
-			// must never have been written at all.
-			resolvedA, err := tx.ResourceIdentities().ResolveAlias(ctx, zoneA)
-			if err != nil {
-				t.Fatalf("ResolveAlias(zoneA): %v", err)
-			}
-			assertEqual(t, "resolved zoneA", resolvedA, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, zoneB); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(zoneB): got %v, want ErrNotFound (never written)", err)
-			}
-		})
-
-		// DuplicateAliasWithinReportIsNotAConflict covers the one
-		// case checkAliasBatchConsistency deliberately lets through
-		// unflagged: the exact same (namespace, key, value) listed
-		// twice for the same target in one report is redundant, not
-		// contradictory, and must not surface as a conflict or a hard
-		// SQL error from either backend's underlying multi-row insert.
-		t.Run("DuplicateAliasWithinReportIsNotAConflict", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
+				Aliases:      []domain.Alias{first},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
 			}
 
-			alias, _ := domain.NewAlias("gcp", "instance_id", "multi-exact-duplicate")
-			name := domain.ResourceName("nodes/alias-multi-duplicate")
-			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			second, _ := domain.NewAlias("gcp", "instance_id", "alias-changed-v2")
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias, alias},
-				ObservedAt:   now,
-				ReceivedAt:   now,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
+				Aliases:      []domain.Alias{second},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory: %v", err)
 			}
 
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
+				t.Fatalf("Get: %v", err)
 			}
-			assertEqual(t, "resolved name", resolved, name)
+			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), []domain.Alias{second})
+			wantFingerprint := domain.AliasSetFingerprint([]domain.Alias{second})
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() = %x, want %x", got.AliasFingerprint(), wantFingerprint)
+			}
+			if !got.UpdatedAt().Equal(t2) {
+				t.Errorf("UpdatedAt = %v, want %v (a changed fingerprint must update the row)", got.UpdatedAt(), t2)
+			}
 		})
 
-		// ApplyInventoryDeltasResolvesMultipleAliasesFromSingleReport
-		// is ResolvesMultipleDistinctAliasesFromSingleReport's Delta
-		// counterpart: the two entry points assemble aliasCandidates
-		// independently (see ApplyInventoryDeltas/ReplaceInventory in
-		// extension_resource_repo.go), so multi-alias support on one
-		// path is never a guarantee it also works on the other.
-		t.Run("ApplyInventoryDeltasResolvesMultipleAliasesFromSingleReport", func(t *testing.T) {
+		// RepeatedConflictingAliasReportsAreAcceptedNotRejected
+		// replaces the old ReportsConflictWhenValueClaimedByAnotherResourceAcrossCalls/
+		// ReportsIntraBatchContradictionWithoutSQLError/
+		// ReportsConflictsOnlyForActualConflictsInMixedBatch trio:
+		// under the old synchronous claims model, two extension
+		// resources asserting the same alias value was a rejected
+		// (or partially rejected) write. It no longer is -- both
+		// reports simply succeed, and each resource's own reported
+		// payload reflects exactly what it asserted, with the
+		// contradiction itself left for a future reconciliation
+		// process to surface.
+		t.Run("RepeatedConflictingAliasReportsAreAcceptedNotRejected", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -3503,46 +2620,192 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			instanceID, _ := domain.NewAlias("gcp", "instance_id", "multi-delta-instance-1")
-			zone, _ := domain.NewAlias("gcp", "zone", "multi-delta-zone-1")
-			name := domain.ResourceName("nodes/alias-multi-delta")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-conflicting")
+			nameA := domain.ResourceName("nodes/alias-conflict-a")
+			nameB := domain.ResourceName("nodes/alias-conflict-b")
 			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         nameA,
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{alias},
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+				{
+					ResourceType: "inv.fleetshift.io/Node",
+					Name:         nameB,
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{alias},
+					ObservedAt:   now,
+					ReceivedAt:   now,
+				},
+			}); err != nil {
+				t.Fatalf("ReplaceInventory: %v", err)
+			}
+
+			gotA, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nameA))
+			if err != nil {
+				t.Fatalf("Get(A): %v", err)
+			}
+			assertAliasesEqual(t, "A.ReportedAliases()", gotA.ReportedAliases(), []domain.Alias{alias})
+
+			gotB, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nameB))
+			if err != nil {
+				t.Fatalf("Get(B): %v", err)
+			}
+			assertAliasesEqual(t, "B.ReportedAliases()", gotB.ReportedAliases(), []domain.Alias{alias})
+
+			// Repeating the same conflicting report again must also
+			// continue to succeed -- this is not a one-time "first
+			// conflict is tolerated" grace period.
+			later := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         nameB,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   later,
+				ReceivedAt:   later,
+			}}); err != nil {
+				t.Fatalf("repeated conflicting ReplaceInventory: %v", err)
+			}
+		})
+
+		t.Run("RemovingAliasesByFullReplacementStoresEmptyArray", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-removed")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-removed-1")
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("first ReplaceInventory: %v", err)
+			}
+
+			// The second report's Aliases is empty, not omitted -- a
+			// full replacement of the reported payload, mirroring
+			// how an empty Labels/Conditions removes everything
+			// absent from the report.
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
+			}}); err != nil {
+				t.Fatalf("second ReplaceInventory (no aliases): %v", err)
+			}
+
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			if reported := got.ReportedAliases(); len(reported) != 0 {
+				t.Fatalf("ReportedAliases() = %+v, want empty after removal", reported)
+			}
+			wantFingerprint := domain.AliasSetFingerprint(nil)
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() = %x, want the empty-set fingerprint %x", got.AliasFingerprint(), wantFingerprint)
+			}
+		})
+
+		// ApplyInventoryDeltasUpsertAliasesAppliesAsPendingUpdate
+		// covers UpsertAliases, the one alias delta operation this
+		// branch implements (see [domain.InventoryDelta]'s doc for
+		// why ReplaceAliases/DeleteAliases are deferred): each
+		// upserted alias merges into the existing pending payload by
+		// (namespace, key), adding new keys and overwriting the
+		// value of keys that already exist, and the stored
+		// fingerprint always reflects the resulting merged set.
+		t.Run("ApplyInventoryDeltasUpsertAliasesAppliesAsPendingUpdate", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/alias-delta-upsert")
+			instanceIDv1, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-upsert-instance-v1")
+			t1 := fixedTime.Add(time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{instanceID, zone},
-				ObservedAt:    now,
-				ReceivedAt:    now,
-			}})
-			if err != nil {
-				t.Fatalf("ApplyInventoryDeltas: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
+				UpsertAliases: []domain.Alias{instanceIDv1},
+				ObservedAt:    t1,
+				ReceivedAt:    t1,
+			}}); err != nil {
+				t.Fatalf("first ApplyInventoryDeltas: %v", err)
 			}
 
-			for _, a := range []domain.Alias{instanceID, zone} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
+			// A distinct (namespace, key) upserted via a second delta
+			// must add to, not replace, the pending payload.
+			zone, _ := domain.NewAlias("gcp", "zone", "alias-delta-upsert-zone")
+			t2 := fixedTime.Add(2 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType:  "inv.fleetshift.io/Node",
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{zone},
+				ObservedAt:    t2,
+				ReceivedAt:    t2,
+			}}); err != nil {
+				t.Fatalf("second ApplyInventoryDeltas: %v", err)
+			}
+
+			// Upserting the same (namespace, key) again with a new
+			// value must overwrite it in place, not append a
+			// duplicate entry.
+			instanceIDv2, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-upsert-instance-v2")
+			t3 := fixedTime.Add(3 * time.Minute)
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType:  "inv.fleetshift.io/Node",
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{instanceIDv2},
+				ObservedAt:    t3,
+				ReceivedAt:    t3,
+			}}); err != nil {
+				t.Fatalf("third ApplyInventoryDeltas: %v", err)
+			}
+
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			if err != nil {
+				t.Fatalf("Get: %v", err)
+			}
+			want := domain.SortAliases([]domain.Alias{instanceIDv2, zone})
+			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), want)
+			wantFingerprint := domain.AliasSetFingerprint(want)
+			if !bytes.Equal(got.AliasFingerprint(), wantFingerprint) {
+				t.Errorf("AliasFingerprint() = %x, want %x", got.AliasFingerprint(), wantFingerprint)
 			}
 		})
 
-		// ApplyInventoryDeltasDeleteAliasesRetractsOwnContribution and
-		// ApplyInventoryDeltasReplaceAliasesFullySwapsOwnContribution
-		// exercise [domain.InventoryDelta.DeleteAliases]/
-		// [domain.InventoryDelta.ReplaceAliases] for a single
-		// contributor -- the delta-path analogs of ReplaceInventory's
-		// PartialReplaceKeepsUnchangedAliasesAndRetractsDroppedOnesWithinSameExtensionResource/
-		// ReplaceFullySwapsAliasSetWithNoOverlapWithinSameExtensionResource.
-		// Neither backend folds DeleteAliases/ReplaceAliases into
-		// ApplyInventoryDeltas yet (see the ApplyInventoryDeltas loop
-		// building aliasCandidates in extension_resource_repo.go), so
-		// both are expected to fail red until that lands.
-		t.Run("ApplyInventoryDeltasDeleteAliasesRetractsOwnContribution", func(t *testing.T) {
+		// ApplyInventoryDeltasOmittingAliasesDoesNoAliasWork guards
+		// the narrower alias-delta contract described in
+		// [domain.InventoryDelta]'s doc: a delta that sets none of
+		// UpsertAliases/DeleteAliases/ReplaceAliases must do no alias
+		// work at all, not even re-derive/rewrite an unchanged
+		// fingerprint -- a heartbeat-style label/condition-only delta
+		// is the overwhelmingly common case this guards.
+		t.Run("ApplyInventoryDeltasOmittingAliasesDoesNoAliasWork", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -3550,1030 +2813,12 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
 				t.Fatalf("CreateType: %v", err)
 			}
-			name := domain.ResourceName("nodes/alias-delta-delete")
-			keep, _ := domain.NewAlias("gcp", "zone", "delta-delete-keep")
-			drop, _ := domain.NewAlias("gcp", "instance_id", "delta-delete-drop")
+
+			name := domain.ResourceName("nodes/alias-delta-omitted")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-delta-omitted-1")
 			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{keep, drop},
-				ObservedAt:    t1, ReceivedAt: t1,
-			}}); err != nil {
-				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
-			}
-
-			dropRef, _ := domain.NewAliasRef("gcp", "instance_id")
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				DeleteAliases: []domain.AliasRef{dropRef},
-				ObservedAt:    t2, ReceivedAt: t2,
-			}})
-			if err != nil {
-				t.Fatalf("ApplyInventoryDeltas (delete): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			resolvedKeep, err := tx.ResourceIdentities().ResolveAlias(ctx, keep)
-			if err != nil {
-				t.Fatalf("ResolveAlias(keep): %v", err)
-			}
-			assertEqual(t, "resolved keep", resolvedKeep, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, drop); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(drop) err = %v, want ErrNotFound (DeleteAliases should have retracted it)", err)
-			}
-		})
-
-		t.Run("ApplyInventoryDeltasReplaceAliasesFullySwapsOwnContribution", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-			name := domain.ResourceName("nodes/alias-delta-replace")
-			oldA, _ := domain.NewAlias("gcp", "instance_id", "delta-replace-old-a")
-			oldB, _ := domain.NewAlias("gcp", "zone", "delta-replace-old-b")
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{oldA, oldB},
-				ObservedAt:    t1, ReceivedAt: t1,
-			}}); err != nil {
-				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
-			}
-
-			newC, _ := domain.NewAlias("gcp", "project_id", "delta-replace-new-c")
-			newD, _ := domain.NewAlias("gcp", "region", "delta-replace-new-d")
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				ReplaceAliases: []domain.Alias{newC, newD},
-				ObservedAt:     t2, ReceivedAt: t2,
-			}})
-			if err != nil {
-				t.Fatalf("ApplyInventoryDeltas (replace): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, old := range []domain.Alias{oldA, oldB} {
-				if _, err := tx.ResourceIdentities().ResolveAlias(ctx, old); !errors.Is(err, domain.ErrNotFound) {
-					t.Errorf("ResolveAlias(%+v) err = %v, want ErrNotFound (ReplaceAliases should have retracted every prior alias)", old, err)
-				}
-			}
-			for _, new := range []domain.Alias{newC, newD} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, new)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", new, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", new), resolved, name)
-			}
-		})
-
-		// ---------------------------------------------------------------
-		// Multi-contributor aliases: many different extension resources
-		// (distinguished by ResourceType, i.e. different addons/services
-		// -- see [domain.ResourceType]'s doc) can represent the very same
-		// platform Name at once, e.g. a cluster represented by both a
-		// cloud-provider addon and a Kubernetes addon. Every test above
-		// this point uses a single ResourceType per Name, so it only ever
-		// exercises one contributor (repeated calls with the same
-		// ResourceType+Name resolve to the same extension_resources row
-		// by natural key -- see [domain.InventoryReplacement]'s doc --
-		// which is "the same contributor reporting again", not "a
-		// different contributor"). The tests below use two distinct
-		// ResourceTypes targeting one Name to exercise genuine
-		// multi-contributor scenarios: aliases are additive across
-		// contributors, replaced independently per contributor
-		// (whether that contributor stops asserting an alias via a
-		// later report or via outright deletion of its extension
-		// resource), and still guarded by the same two conflict
-		// kinds, now scoped across contributors rather than within
-		// one.
-		//
-		// As of this writing, neither backend implements per-contributor
-		// alias tracking yet -- aliases are still immutable-once-set at
-		// the storage layer with no notion of which extension resource
-		// contributed which row -- so every test in this group is
-		// expected to fail red until that lands. They exist to pin the
-		// target contract down before its implementation; see
-		// docs/design/architecture/resource_identity_and_api.md's
-		// "Aliases" section for the same contract in prose.
-
-		t.Run("DifferentExtensionResourcesForSameNameContributeDistinctAliases", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-distinct")
-			instanceID, _ := domain.NewAlias("gcp", "instance_id", "mc-distinct-instance")
-			nodeName, _ := domain.NewAlias("k8s", "node_name", "mc-distinct-node")
-
-			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{instanceID},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{nodeName},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-			})
-			if err != nil {
-				t.Fatalf("ReplaceInventory: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, a := range []domain.Alias{instanceID, nodeName} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
-			}
-		})
-
-		t.Run("DifferentExtensionResourcesForSameNameCanShareTheSameAliasValue", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-shared-value")
-			shared, _ := domain.NewAlias("gcp", "zone", "mc-shared-value")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtCloud,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{shared},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed cloud ReplaceInventory: %v", err)
-			}
-
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtK8s,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{shared},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (k8s): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		t.Run("DifferentExtensionResourcesForSameNameWithDifferentValuesConflicts", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-value-conflict")
-			cloudZone, _ := domain.NewAlias("gcp", "zone", "mc-value-conflict-cloud")
-			k8sZone, _ := domain.NewAlias("gcp", "zone", "mc-value-conflict-k8s")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtCloud,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{cloudZone},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed cloud ReplaceInventory: %v", err)
-			}
-
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtK8s,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{k8sZone},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (k8s): %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictResourceHasDifferentValue)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
-			assertEqual(t, "conflict.ActualValue", conflicts[0].ActualValue, cloudZone.Value)
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, cloudZone)
-			if err != nil {
-				t.Fatalf("ResolveAlias(cloudZone): %v", err)
-			}
-			assertEqual(t, "resolved cloudZone", resolved, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, k8sZone); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(k8sZone): got %v, want ErrNotFound (never written)", err)
-			}
-		})
-
-		t.Run("AliasRetractedWhenSoleContributingExtensionResourceStopsReportingIt", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
-			if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-retract-sole")
-			alias, _ := domain.NewAlias("gcp", "instance_id", "mc-retract-sole")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, alias); err != nil {
-				t.Fatalf("ResolveAlias before retraction: %v", err)
-			}
-
-			// Same extension resource (same natural key) reports
-			// again, this time contributing no aliases at all -- its
-			// prior contribution must be retracted since nothing else
-			// asserts it.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      nil,
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (no aliases): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, alias); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias after retraction: got %v, want ErrNotFound", err)
-			}
-		})
-
-		// AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesStopsReportingIt
-		// is the crux of the whole multi-contributor design: retraction
-		// must be reference-counted per alias, not per report. If it
-		// were tracked per-Name instead, this test would incorrectly
-		// retract the alias entirely as soon as its first contributor
-		// stopped reporting it.
-		t.Run("AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesStopsReportingIt", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-survives")
-			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-survives-shared")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-			}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			// The cloud contributor stops reporting the alias; the
-			// Kubernetes contributor's identical contribution still
-			// stands, so the alias must remain resolvable.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtCloud,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      nil,
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (cloud drops alias): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias after cloud drops alias: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		t.Run("AliasFullyRetractedOnceAllContributingExtensionResourcesStopReportingIt", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-fully-retracted")
-			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-fully-retracted-shared")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-			}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      nil,
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      nil,
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-			}); err != nil {
-				t.Fatalf("ReplaceInventory (both drop alias): %v", err)
-			}
-
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, shared); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias after both drop alias: got %v, want ErrNotFound", err)
-			}
-		})
-
-		// CrossingPathsRetractAndArriveAtSameClaimInSingleBatchSurvives
-		// exercises aliasRetractAbsentCTE's net-refcount algebra
-		// directly: within one ReplaceInventory call (one statement),
-		// the claim's *only* existing contributor drops it in the
-		// same batch that a brand-new contributor corroborates the
-		// exact same (namespace, key, value, target) for the first
-		// time. A cruder implementation that only netted the
-		// departure against the claim's baseline count (ignoring
-		// upserted_contributions' own arrivals landing on that same
-		// claim id) would compute a refcount of zero and delete the
-		// claim -- while a live contribution from this very statement
-		// still points at it, tripping the restrictive claim_id FK on
-		// resource_alias_contributions at best, or silently
-		// orphaning/misresolving the alias at worst. See
-		// aliasRetractAbsentCTE's doc comment for the algebra this
-		// guards.
-		t.Run("CrossingPathsRetractAndArriveAtSameClaimInSingleBatchSurvives", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-crossing-paths")
-			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-crossing-paths-shared")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtCloud,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{shared},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed cloud ReplaceInventory: %v", err)
-			}
-
-			// Single batch: the cloud contributor -- the claim's only
-			// holder so far -- stops reporting it in the very same
-			// call that a brand-new Kubernetes contributor for the
-			// same target first corroborates it.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      nil,
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   t2,
-					ReceivedAt:   t2,
-				},
-			})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (crossing paths): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias after crossing paths: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		// The three tests below are Delete's counterpart to the three
-		// ReplaceInventory-based retraction tests above: an extension
-		// resource can stop contributing an alias either by reporting
-		// again without it, or by ceasing to exist entirely. Deletion
-		// is not just "the same trigger, different API" -- Delete is
-		// a completely separate code path from ReplaceInventory's
-		// alias fold-in. resource_alias_contributions.source_extension_resource_uid
-		// does cascade on extension_resources' deletion, which alone
-		// removes a deleted resource's own contribution rows, but
-		// that's only half of retraction: the resource_alias_claims
-		// row a contribution pointed at needs its own explicit
-		// cleanup once no contributor (and no platform_owned flag)
-		// keeps it alive, since claim_id is a restrictive, non-cascading
-		// FK by design (see the migration's doc comment on
-		// resource_alias_contributions). ExtensionResourceRepo.Delete
-		// performs that cleanup explicitly rather than relying on any
-		// FK to do it -- so retraction working for the omission case
-		// is never a guarantee it also works for the deletion case.
-
-		t.Run("AliasRetractedWhenSoleContributingExtensionResourceIsDeleted", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
-			if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delete-sole")
-			alias, _ := domain.NewAlias("gcp", "instance_id", "mc-delete-sole")
-
-			now := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
-				ObservedAt:   now,
-				ReceivedAt:   now,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, alias); err != nil {
-				t.Fatalf("ResolveAlias before delete: %v", err)
-			}
-
-			if err := repo.Delete(ctx, rt.FullName(name)); err != nil {
-				t.Fatalf("Delete: %v", err)
-			}
-
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, alias); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias after delete: got %v, want ErrNotFound", err)
-			}
-		})
-
-		// AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesIsDeleted
-		// is this group's version of the crux scenario: deleting one
-		// of two contributors must not take down an alias the other
-		// contributor is still asserting.
-		t.Run("AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesIsDeleted", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delete-survives")
-			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-delete-survives-shared")
-
-			now := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-			}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			// Delete the cloud representation entirely; the
-			// Kubernetes representation (and its identical alias
-			// contribution) is untouched.
-			if err := repo.Delete(ctx, rtCloud.FullName(name)); err != nil {
-				t.Fatalf("Delete: %v", err)
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias after cloud deleted: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		t.Run("AliasFullyRetractedOnceAllContributingExtensionResourcesAreDeleted", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delete-both")
-			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-delete-both-shared")
-
-			now := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{shared},
-					ObservedAt:   now,
-					ReceivedAt:   now,
-				},
-			}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			if err := repo.Delete(ctx, rtCloud.FullName(name)); err != nil {
-				t.Fatalf("Delete(cloud): %v", err)
-			}
-			if err := repo.Delete(ctx, rtK8s.FullName(name)); err != nil {
-				t.Fatalf("Delete(k8s): %v", err)
-			}
-
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, shared); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias after both deleted: got %v, want ErrNotFound", err)
-			}
-		})
-
-		// AliasSurvivesExtensionResourceDeleteWhenPlatformOwned closes
-		// the last gap in Delete's orphan cleanup: platform_owned is
-		// the *other* way (besides a surviving sibling contributor) a
-		// claim can outlive the contributor that originally reported
-		// it. A platform resource explicitly corroborating an alias
-		// its own extension resource contributed (resource_identity_repo.go's
-		// reconcileAliases flips the existing claim's platform_owned
-		// flag to true rather than rejecting it as already-claimed)
-		// must keep that alias resolvable even after the sole
-		// contributing extension resource is deleted and its
-		// resource_alias_contributions row cascades away -- Delete's
-		// explicit cleanup must check platform_owned, not just
-		// "zero contributors remain", before deleting a claim.
-		t.Run("AliasSurvivesExtensionResourceDeleteWhenPlatformOwned", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			erRepo := tx.ExtensionResources()
-			riRepo := tx.ResourceIdentities()
-
-			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
-			if err := erRepo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("clusters/platform-owned-survives-delete")
-			alias, _ := domain.NewAlias("gcp", "instance_id", "platform-owned-survives")
-
-			now := fixedTime.Add(time.Minute)
-			if _, err := erRepo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
-				ObservedAt:   now,
-				ReceivedAt:   now,
-			}}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			pr := domain.NewPlatformResource(name, nil, now)
-			if err := pr.AddAlias(alias); err != nil {
-				t.Fatalf("AddAlias: %v", err)
-			}
-			if err := riRepo.Create(ctx, pr); err != nil {
-				t.Fatalf("Create platform resource: %v", err)
-			}
-
-			if err := erRepo.Delete(ctx, rt.FullName(name)); err != nil {
-				t.Fatalf("Delete: %v", err)
-			}
-
-			resolved, err := riRepo.ResolveAlias(ctx, alias)
-			if err != nil {
-				t.Fatalf("ResolveAlias after sole contributor deleted (platform_owned): %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		// ReplacingOwnAliasWhileSiblingStillHoldsOldValueConflicts
-		// covers the subtle interaction between "replace" and
-		// "additive across contributors": a contributor is allowed to
-		// change its own value (see
-		// SameExtensionResourceReplacingOwnAliasValueSucceeds above),
-		// but not when doing so would leave the target Name with two
-		// contributors disagreeing on the same key -- that's still
-		// AliasConflictResourceHasDifferentValue, just discovered via
-		// a replace instead of a brand-new report.
-		t.Run("ReplacingOwnAliasWhileSiblingStillHoldsOldValueConflicts", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-replace-vs-sibling")
-			oldValue, _ := domain.NewAlias("gcp", "zone", "mc-replace-vs-sibling-old")
-			newValue, _ := domain.NewAlias("gcp", "zone", "mc-replace-vs-sibling-new")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
-				{
-					ResourceType: rtCloud,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{oldValue},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-				{
-					ResourceType: rtK8s,
-					Name:         name,
-					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{oldValue},
-					ObservedAt:   t1,
-					ReceivedAt:   t1,
-				},
-			}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			// The cloud contributor tries to change its own value, but
-			// the Kubernetes contributor is still asserting the old
-			// one for the very same (name, namespace, key) -- letting
-			// this through would leave the name with two live values
-			// for one key at once.
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rtCloud,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{newValue},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (cloud replace): %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictResourceHasDifferentValue)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
-			assertEqual(t, "conflict.ActualValue", conflicts[0].ActualValue, oldValue.Value)
-
-			resolvedOld, err := tx.ResourceIdentities().ResolveAlias(ctx, oldValue)
-			if err != nil {
-				t.Fatalf("ResolveAlias(oldValue): %v", err)
-			}
-			assertEqual(t, "resolved oldValue", resolvedOld, name)
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, newValue); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(newValue): got %v, want ErrNotFound (rejected replace)", err)
-			}
-
-			// A rejected candidate gets zero writes, not a partial or
-			// undone one (see alias_resource_conflicts/safe in
-			// aliasFoldCTEs' doc comment: a conflicting row simply
-			// never reaches any of the claim_creates/claim_self_replace/
-			// claim_reuse write paths) -- so the cloud contributor's
-			// own pre-existing contribution to oldValue's claim must
-			// still be exactly what it was before the rejected
-			// replace attempt: one claim for this (namespace, key),
-			// still the old value.
-			got, err := tx.ResourceIdentities().GetByName(ctx, name)
-			if err != nil {
-				t.Fatalf("GetByName: %v", err)
-			}
-			if len(got.Aliases()) != 1 || got.Aliases()[0] != oldValue {
-				t.Fatalf("Aliases() = %+v, want exactly [%+v] (unchanged by rejected replace)", got.Aliases(), oldValue)
-			}
-		})
-
-		t.Run("ReplacingOwnAliasToValueAlreadyOwnedByDifferentNameConflicts", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
-			if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			otherName := domain.ResourceName("clusters/multi-contributor-replace-other-owner")
-			claimedValue, _ := domain.NewAlias("gcp", "zone", "mc-replace-other-owner-claimed")
-			t0 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         otherName,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{claimedValue},
-				ObservedAt:   t0,
-				ReceivedAt:   t0,
-			}}); err != nil {
-				t.Fatalf("seed other-owner ReplaceInventory: %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-replace-self")
-			ownValue, _ := domain.NewAlias("gcp", "zone", "mc-replace-self-own")
-			t1 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{ownValue},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}}); err != nil {
-				t.Fatalf("seed self ReplaceInventory: %v", err)
-			}
-
-			// This extension resource tries to replace its own alias
-			// value with one that already belongs to a totally
-			// different name -- still a conflict, replace or not.
-			t2 := fixedTime.Add(3 * time.Minute)
-			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: rt,
-				Name:         name,
-				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{claimedValue},
-				ObservedAt:   t2,
-				ReceivedAt:   t2,
-			}})
-			if err != nil {
-				t.Fatalf("ReplaceInventory (self replace): %v", err)
-			}
-			if len(conflicts) != 1 {
-				t.Fatalf("conflicts len = %d, want 1: %+v", len(conflicts), conflicts)
-			}
-			assertEqual(t, "conflict.Kind", conflicts[0].Kind, domain.AliasConflictValueClaimedByOther)
-			assertEqual(t, "conflict.TargetName", conflicts[0].TargetName, name)
-			assertEqual(t, "conflict.ActualName", conflicts[0].ActualName, otherName)
-
-			// Its own original alias must still stand, untouched by
-			// the rejected replace attempt.
-			resolvedOwn, err := tx.ResourceIdentities().ResolveAlias(ctx, ownValue)
-			if err != nil {
-				t.Fatalf("ResolveAlias(ownValue): %v", err)
-			}
-			assertEqual(t, "resolved ownValue", resolvedOwn, name)
-		})
-
-		t.Run("ApplyInventoryDeltasAdditiveAcrossDifferentExtensionResourcesForSameName", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delta")
-			instanceID, _ := domain.NewAlias("gcp", "instance_id", "mc-delta-instance")
-			nodeName, _ := domain.NewAlias("k8s", "node_name", "mc-delta-node")
-
-			now := fixedTime.Add(time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
-				{
-					ResourceType:  rtCloud,
-					Name:          name,
-					CandidateUID:  domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{instanceID},
-					ObservedAt:    now,
-					ReceivedAt:    now,
-				},
-				{
-					ResourceType:  rtK8s,
-					Name:          name,
-					CandidateUID:  domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{nodeName},
-					ObservedAt:    now,
-					ReceivedAt:    now,
-				},
-			})
-			if err != nil {
-				t.Fatalf("ApplyInventoryDeltas: %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			for _, a := range []domain.Alias{instanceID, nodeName} {
-				resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, a)
-				if err != nil {
-					t.Fatalf("ResolveAlias(%+v): %v", a, err)
-				}
-				assertEqual(t, fmt.Sprintf("resolved(%+v)", a), resolved, name)
-			}
-		})
-
-		// ApplyInventoryDeltasNeverRetractsAliasesOnOmission locks in
-		// an intentional asymmetry with ReplaceInventory: a delta's
-		// UpsertAliases is additive/upsert-only (like every other
-		// Delta field), so omitting a previously-contributed alias
-		// from a later delta's UpsertAliases must NOT retract it --
-		// only ReplaceAliases (this delta's "this is my complete
-		// alias contribution" op) or a ReplaceInventory call (the
-		// whole-resource equivalent) can do that. See
-		// [domain.InventoryDelta]'s doc. Unlike the rest of this
-		// group, this describes *current*, already-correct behavior
-		// -- it's here to lock the asymmetry in as intentional so it
-		// isn't "fixed" away by accident once per-contributor replace
-		// lands for ReplaceInventory.
-		t.Run("ApplyInventoryDeltasNeverRetractsAliasesOnOmission", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
-			if err := repo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delta-no-retract")
-			alias, _ := domain.NewAlias("gcp", "instance_id", "mc-delta-no-retract")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  rt,
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
 				UpsertAliases: []domain.Alias{alias},
@@ -4582,345 +2827,35 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}}); err != nil {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 			}
+			seeded, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
+			if err != nil {
+				t.Fatalf("Get after seed: %v", err)
+			}
+			seededUpdatedAt := seeded.UpdatedAt()
 
 			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  rt,
-				Name:          name,
-				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: nil,
-				ObservedAt:    t2,
-				ReceivedAt:    t2,
-			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas (heartbeat, no aliases): %v", err)
-			}
-
-			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, alias)
-			if err != nil {
-				t.Fatalf("ResolveAlias: %v", err)
-			}
-			assertEqual(t, "resolved name", resolved, name)
-		})
-
-		// ApplyInventoryDeltasDeleteAliasesRetractsOnlyOwnContributionAcrossContributors
-		// and ApplyInventoryDeltasReplaceAliasesRetractsOnlyOwnContributionAcrossContributors
-		// are DeleteAliases/ReplaceAliases's multi-contributor
-		// counterparts to the group above: retracting or replacing
-		// one contributor's share of a shared alias must never affect
-		// a sibling contributor still asserting it -- exactly the
-		// same per-contributor scoping ReplaceInventory's
-		// AliasSurvivesWhenOneOfMultipleContributingExtensionResourcesStopsReportingIt/
-		// AliasFullyRetractedOnceAllContributingExtensionResourcesStopReportingIt
-		// already lock in for omission-based retraction.
-		t.Run("ApplyInventoryDeltasDeleteAliasesRetractsOnlyOwnContributionAcrossContributors", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delta-delete")
-			shared, _ := domain.NewAlias("gcp", "cluster_id", "mc-delta-delete-shared")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
-				{
-					ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{shared},
-					ObservedAt:    t1, ReceivedAt: t1,
-				},
-				{
-					ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{shared},
-					ObservedAt:    t1, ReceivedAt: t1,
-				},
-			}); err != nil {
-				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
-			}
-
-			sharedRef, _ := domain.NewAliasRef("gcp", "cluster_id")
-			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				DeleteAliases: []domain.AliasRef{sharedRef},
-				ObservedAt:    t2, ReceivedAt: t2,
-			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas (cloud deletes its share): %v", err)
-			}
-
-			resolvedAfterOne, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias after one contributor's delete: %v (should still resolve via k8s)", err)
-			}
-			assertEqual(t, "resolved after one contributor's delete", resolvedAfterOne, name)
-
-			t3 := fixedTime.Add(3 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				DeleteAliases: []domain.AliasRef{sharedRef},
-				ObservedAt:    t3, ReceivedAt: t3,
-			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas (k8s deletes its share): %v", err)
-			}
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, shared); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias after both contributors' delete err = %v, want ErrNotFound", err)
-			}
-		})
-
-		t.Run("ApplyInventoryDeltasReplaceAliasesRetractsOnlyOwnContributionAcrossContributors", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
-			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
-			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
-				t.Fatalf("CreateType(cloud): %v", err)
-			}
-			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
-				t.Fatalf("CreateType(k8s): %v", err)
-			}
-
-			name := domain.ResourceName("clusters/multi-contributor-delta-replace")
-			shared, _ := domain.NewAlias("gcp", "cluster_id", "mc-delta-replace-shared")
-
-			t1 := fixedTime.Add(time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{
-				{
-					ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{shared},
-					ObservedAt:    t1, ReceivedAt: t1,
-				},
-				{
-					ResourceType: rtK8s, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-					UpsertAliases: []domain.Alias{shared},
-					ObservedAt:    t1, ReceivedAt: t1,
-				},
-			}); err != nil {
-				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
-			}
-
-			replacement, _ := domain.NewAlias("gcp", "region", "mc-delta-replace-replacement")
-			t2 := fixedTime.Add(2 * time.Minute)
-			conflicts, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType: rtCloud, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-				ReplaceAliases: []domain.Alias{replacement},
-				ObservedAt:     t2, ReceivedAt: t2,
-			}})
-			if err != nil {
-				t.Fatalf("ApplyInventoryDeltas (cloud replaces its share): %v", err)
-			}
-			if len(conflicts) != 0 {
-				t.Fatalf("conflicts = %+v, want none", conflicts)
-			}
-
-			// K8s never mentioned `shared` in a ReplaceAliases of its
-			// own, so its share must survive cloud's replace.
-			resolvedShared, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
-			if err != nil {
-				t.Fatalf("ResolveAlias(shared): %v (should still resolve via k8s)", err)
-			}
-			assertEqual(t, "resolved shared", resolvedShared, name)
-
-			resolvedReplacement, err := tx.ResourceIdentities().ResolveAlias(ctx, replacement)
-			if err != nil {
-				t.Fatalf("ResolveAlias(replacement): %v", err)
-			}
-			assertEqual(t, "resolved replacement", resolvedReplacement, name)
-		})
-
-		// The next two tests pin down alias_fingerprint's two
-		// correctness subtleties (see the migration's doc comment on
-		// that column, and the fold-in's own doc comment on how the
-		// skip is wired in): the fast path must never let a
-		// still-true conflict go unreported, and a delta that
-		// mutates a resource's aliases outside of ReplaceInventory's
-		// "complete set" bookkeeping must invalidate that resource's
-		// stored fingerprint, not leave it comparable to a later,
-		// delta-unaware replace.
-
-		t.Run("RepeatedReportWithPersistentAliasConflictKeepsReturningConflict", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			otherName := domain.ResourceName("nodes/fingerprint-conflict-victim")
-			contested, _ := domain.NewAlias("gcp", "instance_id", "fingerprint-conflict-contested")
-			t0 := fixedTime.Add(time.Minute)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: "inv.fleetshift.io/Node",
-				Name:         otherName,
+				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{contested},
-				ObservedAt:   t0,
-				ReceivedAt:   t0,
+				SetLabels:    map[string]string{"zone": "us-east-1"},
+				ObservedAt:   t2,
+				ReceivedAt:   t2,
 			}}); err != nil {
-				t.Fatalf("seed contested owner: %v", err)
+				t.Fatalf("label-only ApplyInventoryDeltas: %v", err)
 			}
 
-			name := domain.ResourceName("nodes/fingerprint-conflict-reporter")
-			candidateUID := domain.NewExtensionResourceUID()
-			// Create "reporter" via an alias-free replace first, in a
-			// *separate* statement from the one that reports aliases
-			// below -- extension_resources.alias_fingerprint only
-			// ever gets written for a resource whose row already
-			// existed before that particular statement began (see
-			// aliasFingerprintWriteCTE's doc comment on why a
-			// same-statement INSERT's row is invisible to that
-			// statement's own UPDATE), so a resource created and
-			// alias-reported in the very same call can never
-			// demonstrate a caching bug in the first place: it simply
-			// never gets a chance to cache anything, correct or not.
-			t0b := fixedTime.Add(90 * time.Second)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: candidateUID,
-				ObservedAt:   t0b,
-				ReceivedAt:   t0b,
-			}}); err != nil {
-				t.Fatalf("seed reporter (no aliases): %v", err)
-			}
-
-			ownAlias, _ := domain.NewAlias("gcp", "zone", "fingerprint-conflict-own-zone")
-			// A two-alias report, one alias that succeeds and one
-			// that persistently conflicts -- a resource with *any*
-			// conflict must never get its fingerprint written (see
-			// the fold-in's own doc comment), so repeating this exact
-			// report keeps forcing full reprocessing rather than
-			// treating "byte-for-byte identical to last reported" as
-			// "byte-for-byte identical to last *successful*".
-			report := []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: candidateUID,
-				Aliases:      []domain.Alias{ownAlias, contested},
-				ObservedAt:   fixedTime.Add(2 * time.Minute),
-				ReceivedAt:   fixedTime.Add(2 * time.Minute),
-			}}
-
-			conflicts1, err := repo.ReplaceInventory(ctx, report)
+			got, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name))
 			if err != nil {
-				t.Fatalf("ReplaceInventory (first attempt): %v", err)
+				t.Fatalf("Get: %v", err)
 			}
-			if len(conflicts1) != 1 {
-				t.Fatalf("conflicts1 = %+v, want 1", conflicts1)
+			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), []domain.Alias{alias})
+			if !bytes.Equal(got.AliasFingerprint(), seeded.AliasFingerprint()) {
+				t.Errorf("AliasFingerprint() changed, want unchanged")
 			}
-			assertEqual(t, "conflicts1[0].Kind", conflicts1[0].Kind, domain.AliasConflictValueClaimedByOther)
-
-			resolvedOwn, err := tx.ResourceIdentities().ResolveAlias(ctx, ownAlias)
-			if err != nil {
-				t.Fatalf("ResolveAlias(ownAlias): %v", err)
+			if !got.UpdatedAt().Equal(seededUpdatedAt) {
+				t.Errorf("UpdatedAt = %v, want unchanged %v (no alias fields set, so no alias work)", got.UpdatedAt(), seededUpdatedAt)
 			}
-			assertEqual(t, "resolved ownAlias", resolvedOwn, name)
-
-			conflicts2, err := repo.ReplaceInventory(ctx, report)
-			if err != nil {
-				t.Fatalf("ReplaceInventory (repeated, identical attempt): %v", err)
-			}
-			if len(conflicts2) != 1 {
-				t.Fatalf("conflicts2 = %+v, want 1 (persistent conflict must keep surfacing, not be skipped by a stale fingerprint match)", conflicts2)
-			}
-			assertEqual(t, "conflicts2[0].Kind", conflicts2[0].Kind, domain.AliasConflictValueClaimedByOther)
-		})
-
-		t.Run("DeltaAddedAliasIsRetractedByLaterReplaceWithOriginalFingerprintedSet", func(t *testing.T) {
-			tx := factory(t)
-			defer tx.Rollback()
-			repo := tx.ExtensionResources()
-
-			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
-				t.Fatalf("CreateType: %v", err)
-			}
-
-			name := domain.ResourceName("nodes/fingerprint-delta-invalidation")
-			candidateUID := domain.NewExtensionResourceUID()
-			original, _ := domain.NewAlias("gcp", "instance_id", "fingerprint-delta-original")
-			deltaAdded, _ := domain.NewAlias("gcp", "zone", "fingerprint-delta-added")
-
-			// Create the resource in its own statement first -- see
-			// RepeatedReportWithPersistentAliasConflictKeepsReturningConflict's
-			// identical seeding comment for why a resource's very
-			// first aliased ReplaceInventory call can never itself
-			// demonstrate a caching bug.
-			t0 := fixedTime.Add(30 * time.Second)
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: candidateUID,
-				ObservedAt:   t0,
-				ReceivedAt:   t0,
-			}}); err != nil {
-				t.Fatalf("seed resource (no aliases): %v", err)
-			}
-
-			t1 := fixedTime.Add(time.Minute)
-			replacement := domain.InventoryReplacement{
-				ResourceType: "inv.fleetshift.io/Node",
-				Name:         name,
-				CandidateUID: candidateUID,
-				Aliases:      []domain.Alias{original},
-				ObservedAt:   t1,
-				ReceivedAt:   t1,
-			}
-			// A single, unconflicted alias against an already-existing
-			// resource: this ReplaceInventory call is exactly the
-			// case that gets a stored fingerprint written.
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{replacement}); err != nil {
-				t.Fatalf("seed ReplaceInventory: %v", err)
-			}
-
-			t2 := fixedTime.Add(2 * time.Minute)
-			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
-				ResourceType:  "inv.fleetshift.io/Node",
-				Name:          name,
-				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{deltaAdded},
-				ObservedAt:    t2,
-				ReceivedAt:    t2,
-			}}); err != nil {
-				t.Fatalf("ApplyInventoryDeltas (upsert delta alias): %v", err)
-			}
-
-			resolvedDelta, err := tx.ResourceIdentities().ResolveAlias(ctx, deltaAdded)
-			if err != nil {
-				t.Fatalf("ResolveAlias(deltaAdded): %v", err)
-			}
-			assertEqual(t, "resolved deltaAdded", resolvedDelta, name)
-
-			// Re-report the *original* replacement -- unaware
-			// deltaAdded was ever added, byte-for-byte identical to
-			// the set that produced the stored fingerprint before
-			// the delta ran. If the delta hadn't invalidated that
-			// fingerprint, this would look unchanged and skip alias
-			// processing entirely, leaving deltaAdded (absent from
-			// this report) un-retracted.
-			t3 := fixedTime.Add(3 * time.Minute)
-			replacement.ObservedAt = t3
-			replacement.ReceivedAt = t3
-			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{replacement}); err != nil {
-				t.Fatalf("ReplaceInventory (original set, unaware of delta): %v", err)
-			}
-
-			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, deltaAdded); !errors.Is(err, domain.ErrNotFound) {
-				t.Errorf("ResolveAlias(deltaAdded) after replace with original set: got %v, want ErrNotFound (retracted)", err)
-			}
-			resolvedOriginal, err := tx.ResourceIdentities().ResolveAlias(ctx, original)
-			if err != nil {
-				t.Fatalf("ResolveAlias(original): %v", err)
-			}
-			assertEqual(t, "resolved original", resolvedOriginal, name)
 		})
 	})
 }
@@ -4929,6 +2864,22 @@ func assertEqual[T comparable](t *testing.T, field string, got, want T) {
 	t.Helper()
 	if got != want {
 		t.Errorf("%s = %v, want %v", field, got, want)
+	}
+}
+
+// assertAliasesEqual asserts that got and want contain the same
+// [domain.Alias] values in the same order -- used to check a
+// repository's [domain.ExtensionResource.ReportedAliases] against an
+// expected, already-canonically-sorted slice.
+func assertAliasesEqual(t *testing.T, field string, got, want []domain.Alias) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("%s = %+v, want %+v", field, got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("%s = %+v, want %+v", field, got, want)
+		}
 	}
 }
 

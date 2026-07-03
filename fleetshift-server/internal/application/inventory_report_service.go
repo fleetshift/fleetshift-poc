@@ -99,10 +99,9 @@ type InventoryReplacementBatchInput struct {
 // current condition set -- conditions absent from the report are
 // deleted from latest state. Observation is the exception to that
 // rule: nil, or non-nil pointing to the JSON literal null, leaves the
-// latest observation untouched and appends no history row; any other
-// non-nil value replaces the latest observation and appends a history
-// row (subject to repository-level deduplication against the current
-// latest).
+// latest observation untouched; any other non-nil value replaces the
+// latest observation. Neither case appends a history row today -- see
+// [domain.ExtensionResourceRepository.ListObservations]'s doc.
 type InventoryReplacementInput struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
@@ -138,9 +137,9 @@ type InventoryDeltaBatchInput struct {
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacementInput.Observation]: nil, or non-nil pointing to
-// the JSON literal null, leaves the latest observation untouched and
-// appends no history row; any other non-nil value replaces latest and
-// appends a history row (subject to the same dedup rule).
+// the JSON literal null, leaves the latest observation untouched; any
+// other non-nil value replaces latest. Neither case appends a history
+// row today.
 type InventoryDeltaInput struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
@@ -164,12 +163,16 @@ type InventoryDeltaInput struct {
 // by-Name report, or via one batched alias lookup for an alias-only
 // report -- then replaces each resolved resource's latest inventory
 // state, folding any supplied aliases into the same statement. The
-// batch is all-or-nothing: a duplicate resolved
-// [domain.ResourceName] within the batch, a contradictory alias, a
-// type without inventory metadata, or an [domain.AliasConflict]
-// returned by the write fails the whole call before any inventory
-// write commits, regardless of how many chunks (see
-// [defaultReportChunkSize]) the batch is split across internally.
+// batch is all-or-nothing: a duplicate resolved [domain.ResourceName]
+// within the batch, a type without inventory metadata, or an
+// unresolvable/ambiguous alias-only report fails the whole call
+// before any inventory write commits, regardless of how many chunks
+// (see [defaultReportChunkSize]) the batch is split across
+// internally. Aliases themselves never fail the write: per
+// [domain.InventoryReplacement.Aliases]'s doc, reported aliases are
+// stored as a pending payload with no synchronous cross-resource
+// conflict detection, so two reports (even in the same batch) may
+// freely assert the same alias for different resources.
 func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryReplacementBatchInput) error {
 	if len(in.Reports) == 0 {
 		return nil
@@ -213,12 +216,8 @@ func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryR
 				ReceivedAt:   now,
 			}
 		}
-		conflicts, err := tx.ExtensionResources().ReplaceInventory(ctx, replacements)
-		if err != nil {
+		if err := tx.ExtensionResources().ReplaceInventory(ctx, replacements); err != nil {
 			return fmt.Errorf("replace inventory: %w", err)
-		}
-		if err := rejectAliasConflicts(conflicts); err != nil {
-			return err
 		}
 		return nil
 	})
@@ -234,11 +233,13 @@ func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryR
 // resolved resource's incremental inventory changes, folding any
 // supplied aliases into the same statement. The batch is
 // all-or-nothing: a duplicate resolved [domain.ResourceName] within
-// the batch, a contradictory alias, an internally conflicting report,
-// a type without inventory metadata, or an [domain.AliasConflict]
-// returned by the write fails the whole call before any inventory
-// write commits, regardless of how many chunks (see
-// [defaultReportChunkSize]) the batch is split across internally.
+// the batch, an internally conflicting report, a type without
+// inventory metadata, or an unresolvable/ambiguous alias-only report
+// fails the whole call before any inventory write commits, regardless
+// of how many chunks (see [defaultReportChunkSize]) the batch is
+// split across internally. Like [InventoryReportService.ReplaceBatch],
+// alias-bearing fields never fail the write on their own -- see
+// [domain.InventoryDelta.UpsertAliases]'s doc.
 func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in InventoryDeltaBatchInput) error {
 	if len(in.Reports) == 0 {
 		return nil
@@ -292,12 +293,8 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 				ReceivedAt:       now,
 			}
 		}
-		conflicts, err := tx.ExtensionResources().ApplyInventoryDeltas(ctx, deltas)
-		if err != nil {
+		if err := tx.ExtensionResources().ApplyInventoryDeltas(ctx, deltas); err != nil {
 			return fmt.Errorf("apply inventory deltas: %w", err)
-		}
-		if err := rejectAliasConflicts(conflicts); err != nil {
-			return err
 		}
 		return nil
 	})
@@ -306,19 +303,6 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 	}
 
 	return tx.Commit()
-}
-
-// rejectAliasConflicts turns a non-empty []domain.AliasConflict from
-// ReplaceInventory/ApplyInventoryDeltas into an error, which the
-// caller's deferred tx.Rollback() then applies to the whole batch --
-// an alias conflict is rejected exactly like an inventory-level error
-// would be, not partially applied.
-func rejectAliasConflicts(conflicts []domain.AliasConflict) error {
-	if len(conflicts) == 0 {
-		return nil
-	}
-	return fmt.Errorf("%w: %d alias(es) conflict with existing or concurrently reported identity: %+v",
-		domain.ErrInvalidArgument, len(conflicts), conflicts)
 }
 
 // validateDeltaReport catches internally conflicting delta fields
@@ -396,12 +380,20 @@ type reportIdentity struct {
 // skipped entirely when the chunk has none. A by-Name report's target
 // is its own [domain.ResourceName]: no lookup, no mutation, no SQL at
 // all, since a platform resource has no UID to mint or claim (see
-// [domain.NewPlatformResource]'s doc) and its representations/aliases
-// are derived/additive rather than reconciled. Aliases themselves are
-// never upserted here -- every report's Aliases travel with it into
-// [domain.InventoryReplacement]/[domain.InventoryDelta], and the
-// repository folds their upsert into the same statement that writes
-// inventory (see extension_resource_repo.go's alias fold-in).
+// [domain.NewPlatformResource]'s doc) and its representations are
+// derived rather than reconciled.
+//
+// ResolveAliasesBatch only ever sees *accepted* platform identity
+// (populated by [domain.PlatformResource.AddAlias] via
+// [domain.ResourceIdentityRepository], independent of inventory
+// reporting) -- never this same call's own reported Aliases, which
+// travel with each report into [domain.InventoryReplacement]/
+// [domain.InventoryDelta] purely as a pending payload the repository
+// stores verbatim (see [domain.InventoryReplacement.Aliases]'s doc).
+// So an alias-only report only resolves when some other process has
+// already accepted that alias; a brand-new alias this same batch is
+// the first to report can never resolve a Name-less report to a
+// target, by design.
 //
 // A single resolver instance is reused across every chunk (see
 // [defaultReportChunkSize]) of one [InventoryReportService.ReplaceBatch]/

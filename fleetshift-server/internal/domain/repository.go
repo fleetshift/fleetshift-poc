@@ -84,13 +84,11 @@ type ExtensionResourceRepository interface {
 	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
 
-	// Delete removes the extension resource, along with its
-	// derived representation (see [ResourceRepresentation]'s doc).
-	// Like a later report that omits a previously-contributed alias
-	// (see [InventoryReplacement.Aliases]), deleting the extension
-	// resource retracts every alias it contributed, unless another
-	// extension resource representing the same [ResourceName] is
-	// still asserting it.
+	// Delete removes the extension resource, along with its derived
+	// representation (see [ResourceRepresentation]'s doc) and its own
+	// reported-alias payload (see [InventoryReplacement.Aliases]) --
+	// there is nothing else to reconcile, since that payload was
+	// never folded into any cross-resource state.
 	Delete(ctx context.Context, name FullResourceName) error
 
 	// Read views (join extension resource + managed state + intent + fulfillment + inventory)
@@ -111,22 +109,33 @@ type ExtensionResourceRepository interface {
 	// ReplaceInventory treats each [InventoryReplacement] as the
 	// complete latest inventory state for its resource: fields absent
 	// from the replacement are cleared/deleted from latest state, with
-	// the exception of Observation -- see its field doc. Returns any
-	// [AliasConflict]s encountered folding replacements' Aliases into
-	// resource_alias_claims/resource_alias_contributions.
-	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) ([]AliasConflict, error)
+	// the exception of Observation -- see its field doc. Aliases are
+	// stored as a pending, unreconciled payload -- see
+	// [InventoryReplacement.Aliases]'s doc -- so this never fails or
+	// reports a conflict on account of Aliases; the only errors are
+	// the usual infrastructure/argument-validation ones.
+	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) error
 
 	// ApplyInventoryDeltas applies incremental, field-level changes:
-	// fields absent from an [InventoryDelta] are left unchanged.
-	ApplyInventoryDeltas(ctx context.Context, deltas []InventoryDelta) ([]AliasConflict, error)
+	// fields absent from an [InventoryDelta] are left unchanged. Like
+	// ReplaceInventory, alias-bearing fields never cause a conflict
+	// error -- see [InventoryDelta.UpsertAliases]'s doc.
+	ApplyInventoryDeltas(ctx context.Context, deltas []InventoryDelta) error
 
-	// Observation history (append-only; populated as a side effect of
-	// ReplaceInventory/ApplyInventoryDeltas, never written directly).
+	// Observation history (append-only). Neither ReplaceInventory nor
+	// ApplyInventoryDeltas populates this synchronously today -- see
+	// their doc above -- so this always returns an empty result until
+	// a future asynchronous writer exists. The method and its backing
+	// tables are kept for that writer; see
+	// poc/inventory-identity-reconciliation for the archived
+	// synchronous-history design this replaced.
 	ListObservations(ctx context.Context, uid ExtensionResourceUID, limit int) ([]Observation, error)
 
-	// Condition transition history (append-only; populated as a side
-	// effect of ReplaceInventory/ApplyInventoryDeltas when a supplied
-	// [Condition] represents a genuine state change).
+	// Condition transition history (append-only). Like
+	// ListObservations above, neither ReplaceInventory nor
+	// ApplyInventoryDeltas populates this synchronously today, so this
+	// always returns an empty result until a future asynchronous
+	// writer exists.
 	ListConditionTransitions(ctx context.Context, uid ExtensionResourceUID, conditionType *ConditionType, limit int) ([]ConditionTransition, error)
 }
 
@@ -145,21 +154,31 @@ type ExtensionResourceRepository interface {
 // used instead.
 //
 // Aliases is the complete set of aliases *this extension resource*
-// currently contributes for Name -- the same "absence = removal" rule
-// as Labels below, but scoped to this one contributor rather than to
-// Name as a whole. Many different extension resources (identified by
-// their own natural key above) can represent the same Name at once
-// -- e.g. a cluster represented by both a cloud-provider addon and a
-// Kubernetes addon -- and each one's alias contribution is replaced
-// independently: an alias this extension resource stops reporting is
-// retracted, unless another extension resource currently representing
-// the same Name is still contributing it, in which case it remains in
-// effect. Across different contributing extension resources, aliases
-// are additive: agreeing on the same (namespace, key, value) is fine,
-// but two contributors for the same Name asserting different values
-// for the same (namespace, key), or two contributors resolving to
-// different Names asserting the very same (namespace, key, value),
-// are both rejected -- see [AliasConflict].
+// currently reports for Name. Unlike Labels/Conditions below, Aliases
+// is not reconciled against any other extension resource's
+// contributions or against existing platform identity at write time:
+// the repository stores it verbatim, as canonical JSON, on this
+// extension resource's own row (see [ExtensionResource.ReportedAliases]),
+// replacing whatever this same extension resource previously reported
+// -- a full replace, not a merge, but scoped to this one contributor's
+// own payload rather than a cross-contributor union. An empty or nil
+// Aliases stores an empty payload, which is itself meaningful ("this
+// extension resource asserts no aliases now"), not a no-op.
+//
+// This is a deliberate simplification from an earlier design that
+// classified aliases against cross-resource claims/contributions
+// state synchronously, at write time, and could fail the write with
+// an alias conflict. That work is valuable context (see
+// poc/inventory-identity-reconciliation for the executable reference
+// and its README for the reasoning) but adds too much cost to the hot
+// report path for the common case. Aliases reported here are pending
+// input for a future, asynchronous reconciliation process that
+// decides which extension resource's assertions -- if any conflict --
+// become the platform's accepted identity; see
+// [ResourceIdentityRepository]'s doc. Until that process exists,
+// reported aliases are not trusted by alias resolution
+// ([ResourceIdentityRepository.ResolveAliasesBatch]) or platform
+// representation reads.
 //
 // Labels is the complete observed label set; nil and empty both
 // normalize to an empty latest label set. Conditions is the complete
@@ -169,12 +188,10 @@ type ExtensionResourceRepository interface {
 // Observation is the one field that does not follow the
 // "absence = deletion" rule that governs Labels/Conditions above: a
 // nil Observation, or a non-nil Observation pointing to the JSON
-// literal null, leaves the latest observation untouched and appends
-// no history row -- there is no "clear the observation" operation.
-// Any other non-nil value replaces the latest observation and appends
-// a history row, unless it's identical to the current latest
-// observation (repositories dedup to avoid noisy history on repeat
-// resyncs).
+// literal null, leaves the latest observation untouched -- there is
+// no "clear the observation" operation. Any other non-nil value
+// replaces the latest observation. Neither case appends a history
+// row today; see [ExtensionResourceRepository.ListObservations]'s doc.
 type InventoryReplacement struct {
 	ResourceType ResourceType
 	Name         ResourceName
@@ -196,28 +213,23 @@ type InventoryReplacement struct {
 //
 // Aliases are identity-bearing, unlike Labels/Conditions below, so
 // unlike those two fields' Set/Upsert-plus-Delete shape, they get a
-// third op: UpsertAliases and DeleteAliases mirror SetLabels/
-// DeleteLabels -- add or update named (namespace, key) contributions,
-// or retract named ones this extension resource previously made --
-// but ReplaceAliases additionally offers the same "this is my
-// complete state" convenience [InventoryReplacement.Aliases] gets,
-// scoped to just this delta's alias contribution rather than the
-// whole resource: every alias this extension resource previously
-// contributed that's absent from ReplaceAliases is retracted, exactly
-// like a ReplaceInventory call's Aliases field (see its doc for the
-// full per-contributor, additive-across-contributors contract, shared
-// verbatim here, including conflict detection -- see [AliasConflict]).
-// ReplaceAliases is mutually exclusive with UpsertAliases/DeleteAliases
-// in the same delta: combining them is rejected by
-// [ValidateInventoryDelta] as an ambiguous request, not merged. A
-// delta using UpsertAliases/DeleteAliases only (no ReplaceAliases)
-// behaves exactly like every other Delta field below: an alias
-// contribution absent from both is simply left unchanged, never
-// retracted -- retracting *every* alias in one call (replacing with
-// none) needs an explicit, non-empty-vs-omitted signal that a plain
-// slice can't carry (see the nil-vs-empty note on
-// [InventoryReplacement.Aliases]'s sibling fields), so that one narrow
-// case still requires a full [InventoryReplacement] call.
+// third op mirroring [InventoryReplacement.Aliases]'s "this is my
+// complete state" shape: UpsertAliases, DeleteAliases, and
+// ReplaceAliases. Per [InventoryReplacement.Aliases]'s doc, reported
+// aliases are a pending payload, not reconciled or conflict-checked
+// synchronously at write time.
+//
+// UpsertAliases is currently the only one of the three actually
+// implemented against the reported-alias payload: it merges the given
+// aliases into this extension resource's existing ReportedAliases (by
+// (namespace, key), replacing that key's prior value if already
+// present) and writes a fresh fingerprint over the merged result.
+// DeleteAliases and ReplaceAliases are not yet implemented against the
+// payload -- see extensionresourcerepotest's delta alias tests for the
+// target contract ahead of that landing -- so [ValidateInventoryDelta]
+// rejects any delta setting either one with [ErrUnimplemented] rather
+// than accepting it and silently leaving stale pending aliases in
+// place.
 //
 // Fields left at their zero value are unchanged: SetLabels/DeleteLabels
 // only touch the named keys, and UpsertConditions/DeleteConditions only
@@ -226,9 +238,9 @@ type InventoryReplacement struct {
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacement.Observation]: nil, or non-nil pointing to the
-// JSON literal null, leaves the latest observation untouched and
-// appends no history row; any other non-nil value replaces latest and
-// appends a history row (subject to the same dedup rule).
+// JSON literal null, leaves the latest observation untouched; any
+// other non-nil value replaces latest. Neither case appends a history
+// row today; see [ExtensionResourceRepository.ListObservations]'s doc.
 type InventoryDelta struct {
 	ResourceType ResourceType
 	Name         ResourceName
@@ -238,16 +250,17 @@ type InventoryDelta struct {
 	// contributions from this extension resource -- see this type's
 	// doc above.
 	UpsertAliases []Alias
-	// DeleteAliases retracts specific (namespace, key) contributions
-	// this extension resource previously made, regardless of their
-	// current value (see [AliasRef]'s doc for why no value is
-	// needed). A no-op for any key this extension resource never
-	// contributed.
+	// DeleteAliases would retract specific (namespace, key)
+	// contributions this extension resource previously made,
+	// regardless of their current value (see [AliasRef]'s doc for why
+	// no value is needed). Not yet implemented -- see this type's doc
+	// above -- so any non-empty value here is rejected outright by
+	// [ValidateInventoryDelta].
 	DeleteAliases []AliasRef
-	// ReplaceAliases, if non-empty, replaces this extension
+	// ReplaceAliases would, if non-empty, replace this extension
 	// resource's entire alias contribution in one shot -- see this
-	// type's doc above. Mutually exclusive with UpsertAliases/
-	// DeleteAliases in the same delta.
+	// type's doc above. Not yet implemented, so any non-empty value
+	// here is rejected outright by [ValidateInventoryDelta].
 	ReplaceAliases []Alias
 
 	SetLabels    map[string]string
@@ -262,27 +275,29 @@ type InventoryDelta struct {
 	ReceivedAt time.Time
 }
 
-// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels,
-// UpsertConditions/DeleteConditions, or UpsertAliases/DeleteAliases
-// contradict each other -- the same key present on both sides of a
-// pair -- or whose ReplaceAliases is combined with UpsertAliases/
-// DeleteAliases in the same delta. The label/condition/alias-pair
-// checks can't be left for either backend's ApplyInventoryDeltas to
-// resolve on its own: Postgres's applyInventoryDeltasCoreCTEs runs a
-// pair's set/upsert and delete sides as sibling writable CTEs with no
-// defined execution order between them when they touch the same
-// table, while SQLite's Go orchestration happens to run them as
-// ordered sequential statements -- so the very same contradictory
-// delta would silently resolve differently per backend if it ever
-// reached either one. The ReplaceAliases check has no such
-// per-backend divergence to guard against -- it's simply an
-// underspecified request, since UpsertAliases/DeleteAliases can't be
-// reconciled against a same-call "this is my complete state" that
-// doesn't mention them either way. Both
+// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels
+// or UpsertConditions/DeleteConditions contradict each other -- the
+// same key present on both sides of a pair -- and rejects any delta
+// that sets DeleteAliases or ReplaceAliases at all, since neither is
+// implemented against the reported-alias payload yet (see
+// [InventoryDelta]'s doc). Rejecting outright, rather than silently
+// accepting and ignoring them, means a caller that expects a delete or
+// replace to take effect finds out immediately instead of leaving
+// stale pending aliases in place with no indication anything went
+// wrong.
+//
+// The label/condition checks can't be left for either backend's
+// ApplyInventoryDeltas to resolve on its own: Postgres's
+// applyInventoryDeltasCoreCTEs runs a pair's set/upsert and delete
+// sides as sibling writable CTEs with no defined execution order
+// between them when they touch the same table, while SQLite's Go
+// orchestration happens to run them as ordered sequential statements
+// -- so the very same contradictory delta would silently resolve
+// differently per backend if it ever reached either one. Both
 // [ExtensionResourceRepository.ApplyInventoryDeltas] implementations
 // call this for every delta before building any batch argument, so
-// every contradiction here is always caught in Go before any SQL
-// runs, regardless of caller.
+// every rejection here is always caught in Go before any SQL runs,
+// regardless of caller.
 func ValidateInventoryDelta(d InventoryDelta) error {
 	for _, k := range d.DeleteLabels {
 		if _, ok := d.SetLabels[k]; ok {
@@ -298,17 +313,11 @@ func ValidateInventoryDelta(d InventoryDelta) error {
 			return fmt.Errorf("%w: condition type %q is present in both UpsertConditions and DeleteConditions", ErrInvalidArgument, c.Type())
 		}
 	}
-	if len(d.ReplaceAliases) > 0 && (len(d.UpsertAliases) > 0 || len(d.DeleteAliases) > 0) {
-		return fmt.Errorf("%w: ReplaceAliases cannot be combined with UpsertAliases or DeleteAliases in the same delta", ErrInvalidArgument)
+	if len(d.DeleteAliases) > 0 {
+		return fmt.Errorf("%w: DeleteAliases is not yet implemented against the reported-alias payload", ErrUnimplemented)
 	}
-	deletedAliases := make(map[AliasRef]struct{}, len(d.DeleteAliases))
-	for _, ref := range d.DeleteAliases {
-		deletedAliases[ref] = struct{}{}
-	}
-	for _, a := range d.UpsertAliases {
-		if _, ok := deletedAliases[AliasRef{Namespace: a.Namespace, Key: a.Key}]; ok {
-			return fmt.Errorf("%w: alias %s/%s is present in both UpsertAliases and DeleteAliases", ErrInvalidArgument, a.Namespace, a.Key)
-		}
+	if len(d.ReplaceAliases) > 0 {
+		return fmt.Errorf("%w: ReplaceAliases is not yet implemented against the reported-alias payload", ErrUnimplemented)
 	}
 	return nil
 }
@@ -325,6 +334,16 @@ func ValidateInventoryDelta(d InventoryDelta) error {
 // platform_resources row -- when a name has representations, aliases,
 // or relationships but has never needed its own labels: see
 // resource_identity_and_api.md's "virtual platform resources" section.
+//
+// The aliases this aggregate exposes ([PlatformResource.Aliases]) are
+// accepted platform identity, populated by [PlatformResource.AddAlias]
+// and Create/Update -- a separate, deliberately-not-yet-connected
+// concept from [InventoryReplacement.Aliases]'s pending, per-extension-
+// resource reported payload. Inventory reporting's ReplaceInventory/
+// ApplyInventoryDeltas do not call into this repository's aliases at
+// all in this iteration; a future asynchronous reconciliation process
+// is what will eventually decide which reported aliases become
+// accepted here.
 type ResourceIdentityRepository interface {
 	Create(ctx context.Context, r *PlatformResource) error
 	GetByName(ctx context.Context, name ResourceName) (*PlatformResource, error)
@@ -341,57 +360,4 @@ type ResourceIdentityRepository interface {
 	// absent from the result map -- callers distinguish "unresolved"
 	// from "resolved" by map membership.
 	ResolveAliasesBatch(ctx context.Context, aliases []Alias) (map[Alias]ResourceName, error)
-}
-
-// AliasConflictKind classifies why an alias submitted alongside an
-// inventory report ([InventoryReplacement.Aliases] /
-// [InventoryDelta.UpsertAliases] / [InventoryDelta.ReplaceAliases])
-// did not take effect.
-//
-// Aliases are contributed per extension resource (see
-// [InventoryReplacement.Aliases]'s doc for the full contract): many
-// different extension resources can legitimately represent the same
-// platform [ResourceName] at once -- e.g. one per addon -- and each
-// contributes its own aliases, additively. The two kinds below are
-// what keeps that additive union consistent:
-//
-//   - AliasConflictResourceHasDifferentValue catches two contributing
-//     extension resources for the *same* Name disagreeing about the
-//     value of the *same* (namespace, key).
-//   - AliasConflictValueClaimedByOther catches the same
-//     (namespace, key, value) being claimed by extension resources
-//     that resolve to two *different* Names.
-//
-// Neither fires when a single extension resource replaces its own
-// prior contribution (a value change, or dropping a key it no longer
-// asserts) with no other contributor left disagreeing.
-type AliasConflictKind int
-
-const (
-	// AliasConflictValueClaimedByOther means (Alias.Namespace,
-	// Alias.Key, Alias.Value) already exists, owned by a platform
-	// resource other than the one the report targeted. ActualName
-	// identifies the actual owner. This holds regardless of which
-	// extension resource(s) contributed the existing claim.
-	AliasConflictValueClaimedByOther AliasConflictKind = iota + 1
-
-	// AliasConflictResourceHasDifferentValue means another extension
-	// resource currently representing the report's target Name has
-	// already contributed a different value for (Alias.Namespace,
-	// Alias.Key). ActualValue holds that value. This does not fire
-	// when the report's own extension resource previously contributed
-	// the old value itself -- that's a replace, not a conflict; see
-	// [InventoryReplacement.Aliases].
-	AliasConflictResourceHasDifferentValue
-)
-
-// AliasConflict reports that an alias submitted alongside an inventory
-// report already existed in a way that contradicts the report. See
-// [AliasConflictKind].
-type AliasConflict struct {
-	Alias       Alias
-	Kind        AliasConflictKind
-	TargetName  ResourceName // the resource name the report targeted.
-	ActualName  ResourceName // set when Kind == AliasConflictValueClaimedByOther.
-	ActualValue AliasValue   // set when Kind == AliasConflictResourceHasDifferentValue.
 }

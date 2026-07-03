@@ -53,6 +53,7 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 		}
 		binary.Write(h, binary.BigEndian, v.Resource.inventory.observedAt.UnixNano())
 	}
+	hashBytes(h, v.Resource.aliasFingerprint)
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {

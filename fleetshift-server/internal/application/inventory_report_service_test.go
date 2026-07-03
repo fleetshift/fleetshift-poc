@@ -147,7 +147,11 @@ func TestInventoryReportService_ReplaceBatch_ByName_CreatesIdentityAndInventory(
 		t.Fatalf("Conditions = %+v, want one Ready condition", inv.Conditions())
 	}
 
-	// Observation history and condition transition were recorded.
+	// The synchronous write path no longer populates observation/
+	// condition-transition history at all (see
+	// [domain.ExtensionResourceRepository.ReplaceInventory]'s doc):
+	// ListObservations/ListConditionTransitions stay empty until some
+	// future asynchronous writer populates them.
 	tx2, err := store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -157,19 +161,25 @@ func TestInventoryReportService_ReplaceBatch_ByName_CreatesIdentityAndInventory(
 	if err != nil {
 		t.Fatalf("ListObservations: %v", err)
 	}
-	if len(obs) != 1 {
-		t.Fatalf("ListObservations len = %d, want 1", len(obs))
+	if len(obs) != 0 {
+		t.Fatalf("ListObservations len = %d, want 0 (history is no longer written synchronously)", len(obs))
 	}
 	transitions, err := tx2.ExtensionResources().ListConditionTransitions(ctx, er.UID(), nil, 10)
 	if err != nil {
 		t.Fatalf("ListConditionTransitions: %v", err)
 	}
-	if len(transitions) != 1 {
-		t.Fatalf("ListConditionTransitions len = %d, want 1", len(transitions))
+	if len(transitions) != 0 {
+		t.Fatalf("ListConditionTransitions len = %d, want 0 (history is no longer written synchronously)", len(transitions))
 	}
 }
 
-func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_AttachesAliasAtomically(t *testing.T) {
+// TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPending
+// covers [domain.InventoryReplacement.Aliases]'s pending-payload
+// contract at the service layer: a reported alias is stored verbatim
+// on the extension resource for future asynchronous reconciliation,
+// never synchronously promoted to the platform resource's own
+// accepted [domain.PlatformResource.Aliases].
+func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPending(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -193,6 +203,18 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_AttachesAliasAtomic
 		t.Fatalf("ReplaceBatch: %v", err)
 	}
 
+	er := getExtensionResource(t, store, name)
+	if reported := er.ReportedAliases(); len(reported) != 1 || reported[0] != alias {
+		t.Fatalf("ReportedAliases() = %+v, want [%+v]", reported, alias)
+	}
+	if fp := er.AliasFingerprint(); string(fp) != string(domain.AliasSetFingerprint([]domain.Alias{alias})) {
+		t.Errorf("AliasFingerprint() = %x, want %x", fp, domain.AliasSetFingerprint([]domain.Alias{alias}))
+	}
+
+	// The platform resource's own *accepted* aliases are untouched:
+	// nothing about inventory reporting resolves or promotes a
+	// pending alias into resource_alias_claims (see
+	// [domain.ResourceIdentityRepository.ResolveAlias]'s doc).
 	tx, err := store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -202,8 +224,37 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_AttachesAliasAtomic
 	if err != nil {
 		t.Fatalf("GetByName: %v", err)
 	}
-	if len(pr.Aliases()) != 1 || pr.Aliases()[0] != alias {
-		t.Fatalf("Aliases = %+v, want [%+v]", pr.Aliases(), alias)
+	if len(pr.Aliases()) != 0 {
+		t.Fatalf("Aliases = %+v, want empty (reported alias is pending, not accepted)", pr.Aliases())
+	}
+}
+
+// seedAcceptedAlias establishes an *accepted* platform identity and
+// alias directly through [domain.ResourceIdentityRepository], the
+// only path -- independent of inventory reporting entirely -- that
+// still populates resource_alias_claims (see
+// [domain.ResourceIdentityRepository.ResolveAlias]'s doc). Inventory
+// reports' own reported aliases are pending-only and never resolve
+// on their own; tests that need an alias-only report to actually
+// resolve must seed it this way rather than through a prior
+// ReplaceBatch/ApplyDeltaBatch call.
+func seedAcceptedAlias(t *testing.T, store domain.Store, name domain.ResourceName, alias domain.Alias) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := store.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	pr := domain.NewPlatformResource(name, nil, time.Now())
+	if err := pr.AddAlias(alias); err != nil {
+		t.Fatalf("AddAlias: %v", err)
+	}
+	if err := tx.ResourceIdentities().Create(ctx, pr); err != nil {
+		t.Fatalf("ResourceIdentities().Create: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -218,12 +269,17 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ResolvesExistingIdentit
 	if err != nil {
 		t.Fatalf("NewAlias: %v", err)
 	}
+	// The alias must already be *accepted* platform identity for an
+	// alias-only report to resolve at all -- a prior inventory report
+	// asserting the same alias would only make it pending, never
+	// accepted (see seedAcceptedAlias's doc).
+	seedAcceptedAlias(t, store, name, alias)
 
-	// First report establishes the identity (by name) and the alias.
+	// First report resolves purely by alias, creating the extension
+	// resource under the accepted identity's name.
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
-			Name:         &name,
 			Aliases:      []domain.Alias{alias},
 			Observation:  rawMsg(`{"v":1}`),
 			ObservedAt:   time.Now(),
@@ -294,17 +350,23 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ContradictoryAliasesFai
 	if err != nil {
 		t.Fatalf("NewAlias: %v", err)
 	}
+	// Both aliases must be *accepted* (see seedAcceptedAlias's doc)
+	// for resolveByAliases to find them at all -- a merely pending
+	// alias from an inventory report wouldn't resolve to anything,
+	// which would fail this test for the wrong reason.
+	seedAcceptedAlias(t, store, name1, aliasA)
+	seedAcceptedAlias(t, store, name2, aliasB)
 
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
-			ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{aliasA}, ObservedAt: time.Now(),
+			ResourceType: inventoryReportTestType, Name: &name1, ObservedAt: time.Now(),
 		}},
 	}); err != nil {
 		t.Fatalf("seed report 1: %v", err)
 	}
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
-			ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{aliasB}, ObservedAt: time.Now(),
+			ResourceType: inventoryReportTestType, Name: &name2, ObservedAt: time.Now(),
 		}},
 	}); err != nil {
 		t.Fatalf("seed report 2: %v", err)
@@ -333,7 +395,17 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ContradictoryAliasesFai
 	}
 }
 
-func TestInventoryReportService_ReplaceBatch_CrossReportNewAliasContradictionRejected(t *testing.T) {
+// TestInventoryReportService_ReplaceBatch_CrossReportSameAliasDifferentResourcesAccepted
+// covers the service layer's side of
+// [domain.InventoryReplacement.Aliases]'s pending-payload contract:
+// two different, brand-new reports in the same batch asserting the
+// very same never-before-seen alias for two different resources is
+// no longer a synchronous conflict. Each resource simply stores the
+// alias as its own pending assertion; reconciling the contradiction
+// is deferred to a future asynchronous process (see the repository
+// contract's equivalent
+// "RepeatedConflictingAliasReportsAreAcceptedNotRejected").
+func TestInventoryReportService_ReplaceBatch_CrossReportSameAliasDifferentResourcesAccepted(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -346,49 +418,35 @@ func TestInventoryReportService_ReplaceBatch_CrossReportNewAliasContradictionRej
 		t.Fatalf("NewAlias: %v", err)
 	}
 
-	// Two different, brand-new reports in the same batch both claim
-	// the very same never-before-seen alias for different resources.
-	// A single multi-row INSERT ON CONFLICT DO NOTHING can't detect
-	// this on its own (neither row conflicts with anything that
-	// existed before the statement started), so this must be caught
-	// in Go before any SQL is issued.
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{
 			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
 			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
 		},
 	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	if err != nil {
+		t.Fatalf("ReplaceBatch: %v", err)
 	}
 
-	// No partial writes: the whole transaction must have rolled back,
-	// including the platform identities that would otherwise have
-	// been claimed before the alias contradiction was discovered.
-	tx, err := store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
+	er1 := getExtensionResource(t, store, name1)
+	if reported := er1.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+		t.Errorf("c1 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
-	defer tx.Rollback()
-	if _, err := tx.ResourceIdentities().GetByName(ctx, name1); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name1, err)
-	}
-	if _, err := tx.ResourceIdentities().GetByName(ctx, name2); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name2, err)
+	er2 := getExtensionResource(t, store, name2)
+	if reported := er2.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+		t.Errorf("c2 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 }
 
-// TestInventoryReportService_ReplaceBatch_CrossChunkAliasContradictionRejected
-// is CrossReportNewAliasContradictionRejected's harder sibling: the
-// two contradicting reports land in *different* chunks of the same
-// batch/transaction (forced via a chunk size of 1), so
-// reportResolver's per-chunk checkAliasBatchConsistency-equivalent
-// (scoped to whatever aliasCandidates its own chunk assembled) never
-// sees both claims at once and cannot catch the contradiction in Go.
-// It must still be caught -- this time by the second chunk's SQL
-// seeing the first chunk's alias row, already written earlier in the
-// very same transaction -- and still roll back the whole batch.
-func TestInventoryReportService_ReplaceBatch_CrossChunkAliasContradictionRejected(t *testing.T) {
+// TestInventoryReportService_ReplaceBatch_CrossChunkSameAliasDifferentResourcesAccepted
+// is CrossReportSameAliasDifferentResourcesAccepted's harder sibling:
+// the two reports asserting the same alias land in *different* chunks
+// of the same batch/transaction (forced via a chunk size of 1), so
+// they're written by two separate repository calls rather than one.
+// The outcome is identical either way -- each resource's own pending
+// payload is independent, with no cross-resource state for chunk
+// boundaries to interact with.
+func TestInventoryReportService_ReplaceBatch_CrossChunkSameAliasDifferentResourcesAccepted(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store, application.WithInventoryReportChunkSize(1))
@@ -407,27 +465,29 @@ func TestInventoryReportService_ReplaceBatch_CrossChunkAliasContradictionRejecte
 			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
 		},
 	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	if err != nil {
+		t.Fatalf("ReplaceBatch: %v", err)
 	}
 
-	// No partial writes: chunk 1 committing nothing until the whole
-	// transaction commits is what makes this catchable at all, so
-	// this is also a check that the guarantee actually holds.
-	tx, err := store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
+	er1 := getExtensionResource(t, store, name1)
+	if reported := er1.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+		t.Errorf("cc1 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
-	defer tx.Rollback()
-	if _, err := tx.ResourceIdentities().GetByName(ctx, name1); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name1, err)
-	}
-	if _, err := tx.ResourceIdentities().GetByName(ctx, name2); !errors.Is(err, domain.ErrNotFound) {
-		t.Errorf("GetByName(%s) err = %v, want ErrNotFound (no partial write)", name2, err)
+	er2 := getExtensionResource(t, store, name2)
+	if reported := er2.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+		t.Errorf("cc2 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 }
 
-func TestInventoryReportService_ReplaceBatch_CrossReportSameKeyDifferentValueRejected(t *testing.T) {
+// TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAccepted
+// covers the single-report counterpart: one report asserting two
+// different values for the same (namespace, key) is stored verbatim
+// as a pending payload too -- internal consistency of a report's own
+// Aliases is exactly the kind of check the reconciliation process
+// this plan defers is meant to eventually catch, not something the
+// hot path validates synchronously (see
+// [domain.InventoryReplacement.Aliases]'s doc).
+func TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAccepted(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -443,15 +503,18 @@ func TestInventoryReportService_ReplaceBatch_CrossReportSameKeyDifferentValueRej
 		t.Fatalf("NewAlias: %v", err)
 	}
 
-	// A single report asserting two different values for the same
-	// (namespace, key) is internally contradictory.
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType, Name: &name, Aliases: []domain.Alias{zoneA, zoneB}, ObservedAt: time.Now(),
 		}},
 	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("ReplaceBatch err = %v, want ErrInvalidArgument", err)
+	if err != nil {
+		t.Fatalf("ReplaceBatch: %v", err)
+	}
+
+	er := getExtensionResource(t, store, name)
+	if reported := er.ReportedAliases(); len(reported) != 2 {
+		t.Fatalf("ReportedAliases() = %+v, want both [%+v %+v]", reported, zoneA, zoneB)
 	}
 }
 
@@ -475,23 +538,26 @@ func TestInventoryReportService_ReplaceBatch_LargeMixedBatchResolvesEveryReport(
 		names[i] = domain.ResourceName(fmt.Sprintf("clusters/mixed-%03d", i))
 	}
 
-	// Pre-seed every preexistingEvery'th resource (and, for a subset
-	// of those, an alias) via its own prior ReplaceBatch call, before
-	// the single large batch under test runs.
+	// Pre-seed every preexistingEvery'th resource via its own prior
+	// ReplaceBatch call, before the single large batch under test
+	// runs. A subset of those additionally get an *accepted* alias
+	// via seedAcceptedAlias (see its doc) -- a prior inventory report
+	// asserting the alias would only make it pending, which could
+	// never resolve the batch's later alias-only report.
 	for i := 0; i < total; i += preexistingEvery {
-		report := application.InventoryReplacementInput{
-			ResourceType: inventoryReportTestType,
-			Name:         &names[i],
-			Observation:  rawMsg(`{"seed":true}`),
-			ObservedAt:   time.Now(),
-		}
 		if i%aliasEvery == 0 {
 			alias, err := domain.NewAlias("gcp", "project_id", domain.AliasValue(fmt.Sprintf("proj-%03d", i)))
 			if err != nil {
 				t.Fatalf("NewAlias: %v", err)
 			}
-			report.Aliases = []domain.Alias{alias}
+			seedAcceptedAlias(t, store, names[i], alias)
 			aliasFor[i] = alias
+		}
+		report := application.InventoryReplacementInput{
+			ResourceType: inventoryReportTestType,
+			Name:         &names[i],
+			Observation:  rawMsg(`{"seed":true}`),
+			ObservedAt:   time.Now(),
 		}
 		if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{Reports: []application.InventoryReplacementInput{report}}); err != nil {
 			t.Fatalf("seed report %d: %v", i, err)
@@ -639,10 +705,12 @@ func TestInventoryReportService_ReplaceBatch_MixedNameAndAliasDuplicateRejected(
 	if err != nil {
 		t.Fatalf("NewAlias: %v", err)
 	}
-	// Seed the resource and its alias via one prior report.
+	// The alias must be *accepted* (see seedAcceptedAlias's doc) for
+	// the second report below to resolve to name at all.
+	seedAcceptedAlias(t, store, name, alias)
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
-			ResourceType: inventoryReportTestType, Name: &name, Aliases: []domain.Alias{alias}, ObservedAt: time.Now(),
+			ResourceType: inventoryReportTestType, Name: &name, ObservedAt: time.Now(),
 		}},
 	}); err != nil {
 		t.Fatalf("seed ReplaceBatch: %v", err)
@@ -722,8 +790,8 @@ func TestInventoryReportService_ReplaceBatch_ObservationNilLeavesLatestUnchanged
 	if err != nil {
 		t.Fatalf("ListObservations: %v", err)
 	}
-	if len(obs) != 1 {
-		t.Fatalf("ListObservations len = %d, want 1 (nil observation must not append history)", len(obs))
+	if len(obs) != 0 {
+		t.Fatalf("ListObservations len = %d, want 0 (history is no longer written synchronously)", len(obs))
 	}
 }
 
@@ -810,10 +878,15 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndD
 	}
 }
 
-// TestInventoryReportService_ApplyDeltaBatch_RejectsAliasKeyInBothUpsertAndDelete
-// is RejectsLabelInBothSetAndDelete's alias counterpart, covering
-// validateDeltaReport's UpsertAliases/DeleteAliases overlap guard.
-func TestInventoryReportService_ApplyDeltaBatch_RejectsAliasKeyInBothUpsertAndDelete(t *testing.T) {
+// TestInventoryReportService_ApplyDeltaBatch_RejectsDeleteAliasesAsUnimplemented
+// covers validateDeltaReport's pass-through to
+// [domain.ValidateInventoryDelta]: unlike the label/condition
+// overlap guards above, DeleteAliases is rejected with
+// [domain.ErrUnimplemented] outright -- not [domain.ErrInvalidArgument]
+// -- because it isn't implemented against the reported-alias payload
+// yet, regardless of what it's combined with (see
+// [domain.InventoryDelta]'s doc).
+func TestInventoryReportService_ApplyDeltaBatch_RejectsDeleteAliasesAsUnimplemented(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -849,26 +922,33 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsAliasKeyInBothUpsertAndDe
 			ObservedAt:    time.Now(),
 		}},
 	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, domain.ErrUnimplemented) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrUnimplemented", err)
 	}
 
 	// Rejected before any write, and before identity resolution even
-	// begins: re-reporting by the original alias alone must still
-	// resolve to the same resource.
+	// begins: the seed delta's own UpsertAliases only ever stored
+	// original as a *pending* payload (see
+	// [domain.InventoryDelta.UpsertAliases]'s doc) -- it was never
+	// promoted to accepted platform identity, so a later report
+	// identifying its target purely by that alias still can't
+	// resolve, same as if it had never been reported.
 	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, UpsertAliases: []domain.Alias{original}, ObservedAt: time.Now(),
 		}},
 	})
-	if err != nil {
-		t.Fatalf("ApplyDeltaBatch (re-resolve by original alias): %v", err)
+	if !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("ApplyDeltaBatch (re-resolve by pending-only original alias) err = %v, want ErrNotFound", err)
 	}
 }
 
-// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesCombinedWithUpsertAliases
-// covers validateDeltaReport's ReplaceAliases mutual-exclusivity guard.
-func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesCombinedWithUpsertAliases(t *testing.T) {
+// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesAsUnimplemented
+// is RejectsDeleteAliasesAsUnimplemented's ReplaceAliases counterpart:
+// combining it with UpsertAliases doesn't change the outcome, since
+// ReplaceAliases alone is already rejected with
+// [domain.ErrUnimplemented] (see [domain.InventoryDelta]'s doc).
+func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesAsUnimplemented(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -891,8 +971,8 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesCombinedWit
 			ObservedAt:     time.Now(),
 		}},
 	})
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	if !errors.Is(err, domain.ErrUnimplemented) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrUnimplemented", err)
 	}
 }
 
@@ -927,7 +1007,7 @@ func TestInventoryReportService_ApplyDeltaBatch_ObservationNilVsReplace(t *testi
 		t.Errorf("after nil observation, Observation = %s, want {\"v\":0}", *after.Inventory().Observation())
 	}
 
-	// Observation != nil: write + history.
+	// Observation != nil: latest state is replaced (still no history).
 	if err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, Name: &name,
@@ -951,8 +1031,8 @@ func TestInventoryReportService_ApplyDeltaBatch_ObservationNilVsReplace(t *testi
 	if err != nil {
 		t.Fatalf("ListObservations: %v", err)
 	}
-	if len(obs) != 2 {
-		t.Fatalf("ListObservations len = %d, want 2 (seed + non-nil; nil appended none)", len(obs))
+	if len(obs) != 0 {
+		t.Fatalf("ListObservations len = %d, want 0 (history is no longer written synchronously)", len(obs))
 	}
 }
 

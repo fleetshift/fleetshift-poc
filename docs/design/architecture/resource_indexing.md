@@ -91,7 +91,7 @@ The inventory shape is designed to balance well-structured data the platform and
 
 - **Identity**: resource type and name, following AIP resource names. The full resource name includes the extension's service name (e.g. `//kubernetes.fleetshift.io/clusters/foo/namespaces/bar/objects/apps.v1.Deployment.nginx`). The relative resource name links to the platform resource identity.
   - This necessarily includes the **Parent** resource, if any.
-- **Aliases**: namespaced key:value pairs for alternate identifiers. These solve the problem of relating to a resource where you do not know the canonical platform-defined resource name. Inventory reporting may contribute aliases, but the linked platform resource remains the canonical owner of the aggregated alias set used for cross-extension identity correlation (see [resource_identity_and_api.md](resource_identity_and_api.md#aliases)).
+- **Aliases**: namespaced key:value pairs for alternate identifiers. These solve the problem of relating to a resource where you do not know the canonical platform-defined resource name. Inventory reporting may contribute aliases, but the linked platform resource remains the canonical owner of the aggregated, *accepted* alias set used for cross-extension identity correlation (see [resource_identity_and_api.md](resource_identity_and_api.md#aliases)). A reported alias set is stored verbatim on the extension resource as a pending assertion the moment it's reported, with no synchronous conflict detection against other extension resources' reports; accepting it into the platform resource's own aggregated set (or flagging a genuine conflict) is future asynchronous reconciliation work, not part of the inventory hot path today.
 - **Relationships**: semantic links between different platform resource identities (e.g. Pod → Service, Node → Cluster). These are modeled on the platform resource and follow the relationship model described in [resource_identity_and_api.md](resource_identity_and_api.md#semantic-relationships). Inventory reporting may contribute relationship facts, but the platform resource remains the canonical owner of the aggregated relationship graph.
   - In the future these may drive relationship-based access control, as well as general-purpose relational queries.
   - Relationships should be able to be defined using aliases.
@@ -104,8 +104,8 @@ The inventory shape is designed to balance well-structured data the platform and
     - Option 1: Remove it entirely and collapse with Observations / Aliases
     - Option 2: Keep it as a distinct stable-value bucket, but tighten its intended use and signing model
     - Regardless we can project various fields onto SIG objects
-- **Observations**: opaque, addon-defined. Potentially volatile runtime state as seen by the observer. Historical observations are kept over time.
-- **Conditions**: structured, platform-queryable health and progress signals. A history of condition transition events is kept over time.
+- **Observations**: opaque, addon-defined. Potentially volatile runtime state as seen by the observer. Only the latest observation is stored today; historical observations are a planned future asynchronous writer, not something the synchronous inventory write path maintains (see [../managed_resources.md](../managed_resources.md)).
+- **Conditions**: structured, platform-queryable health and progress signals. Only the latest condition set is stored today, as a single JSON object keyed by condition type; a history of condition transition events is the same planned future asynchronous work as observation history.
 
 This gives the platform a uniform query surface without requiring the platform to understand every domain-specific observation payload. The platform identity layer owns aliases and semantic relationships; the per-extension projection owns labels, properties, observations, and conditions. There are several different structured types here over the more basic Kubernetes shape, mainly for supporting secondary indexes (which etcd cannot support). Specifically we have:
 
@@ -116,7 +116,7 @@ This gives the platform a uniform query surface without requiring the platform t
 
 Observations are for everything else (observed spec, status), sans what is transformed to the other field types.
 
-Condition transitions are retained historically as condition events. This document focuses on the current queryable projection and search surface; the fuller managed-resource discussion of observations and condition-event history lives in [../managed_resources.md](../managed_resources.md).
+Condition transitions are modeled as historical condition events, but that history is not populated by the current synchronous write path -- see [../managed_resources.md](../managed_resources.md) for the deferred-to-async-work status. This document focuses on the current queryable projection and search surface (latest labels and conditions, stored as JSONB with GIN indexes on Postgres); the fuller managed-resource discussion of observations and condition-event history lives there too.
 
 ## Resource identity and child resources
 
@@ -126,15 +126,12 @@ Inventoried resources are extension resources in their addon's own package, with
 
 Identity correlation across extensions works through:
 
-1. **Shared relative name**: if an extension registers into the same platform identity domain and uses the same relative name (e.g. `clusters/foo`), it links to the existing identity automatically.
-2. **Alias correlation**: if an extension doesn't know the canonical name, it reports by aliases it knows about (e.g. a GCP project ID, a kube-system namespace UID). The platform correlates these to existing identities without violating alias uniqueness constraints.
+1. **Shared relative name**: if an extension registers into the same platform identity domain and uses the same relative name (e.g. `clusters/foo`), it links to the existing identity automatically. A representation is derived purely from that name match -- there's no separate write to establish it, and no dependency on aliases either way: this holds equally for a resource reporting no aliases at all and one with a non-empty, still-pending alias set (see below). Name-match representation and alias identity state are orthogonal today; a pending or eventually-conflicting alias set doesn't withhold or retract the representation itself. Distinguishing an accepted representation from a pending or conflicting one is a real gap (see [resource_identity_and_api.md](resource_identity_and_api.md#reported-aliases-inventory-write-path)) -- exposing that state explicitly, rather than only the binary representation-exists check, is future work.
+2. **Alias correlation**: if an extension doesn't know the canonical name, it can only resolve a report to an *existing* identity today by asserting an alias that identity has already accepted (see [resource_identity_and_api.md](resource_identity_and_api.md#aliases)). Newly reported aliases are stored as pending assertions on the reporting extension resource, not synchronously checked against or folded into the platform resource's accepted alias set -- accepting or conflict-flagging a pending alias is deferred to a future asynchronous reconciliation process.
 
 ### What if there is no matching resource?
 
-If an addon reports about a resource and no matching platform identity exists (by name or alias), the platform either:
-
-- Creates the platform resource implicitly (if the addon is authorized to establish identity in that domain), or
-- Holds the report in an inbox, awaiting a matching alias or manual assignment by an operator.
+If an addon reports about a resource and no matching platform identity exists by name, the platform creates the platform resource implicitly (if the addon is authorized to establish identity in that domain). If an addon reports only aliases and none of them match an already-accepted identity, the report is rejected outright today -- there is no inbox holding pattern yet. Building that inbox (or an equivalent asynchronous acceptance/conflict process for pending aliases) is future work; see [../managed_resources.md](../managed_resources.md).
 
 Whether the assigning operator is the provider or a tenant depends on who is importing the resource. Trusted addons can offer a tenant association; otherwise it defaults to the provider tenant.
 

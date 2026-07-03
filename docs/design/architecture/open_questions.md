@@ -209,7 +209,22 @@ How should addons declare their permission schema to the platform: SpiceDB ZED, 
 
 ## Resource identity and aliases
 
+### Explicit identity state for representations with pending or conflicting aliases
+
+**Question:** Should a representation read (`ResourceIdentityRepository.GetRepresentation`) expose an explicit identity state -- accepted, pending, or (once conflict detection exists for reported aliases) conflicting -- instead of the current present-or-absent check alone?
+
+**Context:** Representation is derived purely by name match today, regardless of an extension resource's `reported_aliases` state (see [resource_identity_and_api.md](resource_identity_and_api.md#extension-representations) and [resource_indexing.md](resource_indexing.md#resource-identity-and-child-resources)). An extension resource with a non-empty, still-pending alias set is included as a representation exactly like one reporting no aliases at all. This was a deliberate scope decision made in review of the "Simplify Inventory Write Path" plan (see the `inventory-identity-reconciliation` POC's README for the fuller reconciliation-queue model that was considered and not built) to avoid growing this iteration's scope, not a judgment that pending and accepted identity are equivalent.
+
+**Candidate directions, none decided:**
+
+- Add a state field to `domain.ResourceRepresentation` (or a parallel query) computed from whether `reported_aliases` is empty, matches an already-accepted alias set, or conflicts with one -- requires the accepted-alias-set concept to exist for reported (not just directly-asserted) aliases first, which it doesn't yet.
+- Leave representation reads as a pure existence check and expose identity state only through a separate, opt-in read (e.g. alongside the eventual asynchronous reconciler's output) so the common-case read stays cheap.
+- Do nothing until asynchronous reconciliation is actually built, since a "pending" state with no reconciler to ever resolve it out of pending is not obviously more useful than the current binary check.
+
 ### Alias write path's shared prepared statement and Postgres's generic-plan switch
+
+> [!NOTE]
+> The specific `aliasFoldCTEs`/`aliasRetractAbsentCTE` write path this question was raised against no longer exists: the "Simplify Inventory Write Path" plan removed synchronous cross-resource alias conflict detection from `ReplaceInventory`/`ApplyInventoryDeltas` entirely, replacing it with an unconditional pending-payload write to `extension_resources.reported_aliases`/`alias_fingerprint` (see [resource_identity_and_api.md](resource_identity_and_api.md#reported-aliases-inventory-write-path)). The claims/contributions write path this question describes survives only for aliases asserted directly on a `PlatformResource` (`reconcileAliases`), which is a much simpler per-alias loop, not a batched CTE with the kind of wide cost-estimate swing described below. The underlying Postgres generic-plan-switch risk is still worth keeping in mind if a future asynchronous reconciler reintroduces a similarly-shaped batched CTE over `resource_alias_claims`/`resource_alias_contributions`, so the history is kept here rather than deleted.
 
 **Question:** Should the Postgres alias write path (`ReplaceInventory`/`ApplyInventoryDeltas`'s `aliasFoldCTEs`-based statements) force a specific `plan_cache_mode` for itself, or otherwise reduce its plan-shape variance, to avoid a bad generic plan settling in?
 

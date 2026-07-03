@@ -39,6 +39,12 @@ var (
 	// generation. This means the fulfillment was concurrently
 	// modified and the client should re-fetch and retry.
 	ErrStaleGeneration = errors.New("stale generation")
+
+	// ErrUnimplemented indicates that the request is structurally
+	// valid but names an operation the server doesn't perform yet.
+	// Unlike ErrInvalidArgument, the request itself isn't malformed --
+	// resubmitting it unchanged after the feature lands would succeed.
+	ErrUnimplemented = errors.New("unimplemented")
 )
 
 // terminalPrefix is the marker prepended to terminal errors.

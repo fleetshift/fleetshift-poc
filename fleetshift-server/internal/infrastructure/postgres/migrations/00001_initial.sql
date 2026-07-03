@@ -175,21 +175,40 @@ CREATE TABLE extension_resource_types (
 -- collection_name/resource_id mirror platform_resources so a
 -- representation can be derived on read by joining the two tables on
 -- that pair, rather than maintained as its own reconciled table (see
--- resource_representations' removal below).
--- alias_fingerprint is a sha256 hash (Go-computed, see
--- extension_resource_repo.go's alias fold-in) of the last
--- successfully, fully-applied ReplaceInventory alias set for this
--- resource -- NULL means "no fingerprint on record," which always
--- forces full alias classification. A ReplaceInventory report whose
--- freshly-computed fingerprint matches this column can skip alias
--- classification entirely: nothing about this resource's contributed
--- aliases has changed since the last full replace. Any
--- ApplyInventoryDeltas call that mutates this resource's aliases
--- nulls this column back out, since a delta has no "complete set" to
--- compute a comparable fingerprint from -- see
--- applyInventoryDeltasSQLWithAliases's doc comment for why a stale
--- fingerprint would otherwise let a later ReplaceInventory skip
--- retracting a delta-added alias it never knew about.
+-- resource_representations' removal below). This name-based
+-- derivation is also what makes a no-alias extension resource
+-- implicitly accepted as a representation of its platform resource by
+-- read semantics alone (see docs/design/architecture/resource_identity_and_api.md's
+-- "Aliases" section) -- there is no accepted/pending status column to
+-- maintain here for that common case.
+--
+-- reported_aliases is this extension resource's own complete,
+-- canonically sorted (see extension_resource_repo.go's
+-- domain.SortAliases usage), pending alias payload -- the reporter's
+-- assertions, not accepted platform identity. It is stored verbatim
+-- by ReplaceInventory/ApplyInventoryDeltas with no synchronous
+-- cross-resource conflict detection; a future asynchronous
+-- reconciliation process is what will eventually decide which
+-- reported aliases -- if any conflict -- become accepted. Defaults to
+-- '[]', never NULL, so "this resource asserts no aliases" is always
+-- representable without a NULL special case.
+--
+-- alias_fingerprint is [domain.AliasSetFingerprint] (a sha256 hash)
+-- over reported_aliases, persisted alongside it purely so a repeated
+-- report whose complete alias set is byte-for-byte identical to what's
+-- already stored can skip the reported_aliases/alias_fingerprint write
+-- entirely (see replaceInventorySQL's needs_alias_payload_write CTE) --
+-- not to gate any conflict classification, since none happens
+-- synchronously anymore. NULL means "no fingerprint on record yet",
+-- which always forces the write on this resource's first report.
+--
+-- This deliberately replaces an earlier design that additionally
+-- classified aliases against cross-resource resource_alias_claims/
+-- resource_alias_contributions state at write time (see those tables'
+-- own doc comments below) -- that mechanism is no longer reachable
+-- from inventory reporting; see [domain.InventoryReplacement.Aliases]'s
+-- doc for the full contract and poc/inventory-identity-reconciliation
+-- for the executable reference this schema follows.
 CREATE TABLE extension_resources (
     uid               UUID PRIMARY KEY,
     service_name      TEXT NOT NULL,
@@ -197,6 +216,7 @@ CREATE TABLE extension_resources (
     collection_name   TEXT NOT NULL,
     resource_id       TEXT NOT NULL,
     labels            JSONB NOT NULL DEFAULT '{}',
+    reported_aliases  JSONB NOT NULL DEFAULT '[]'::jsonb,
     alias_fingerprint BYTEA,
     created_at        TIMESTAMPTZ NOT NULL,
     updated_at        TIMESTAMPTZ NOT NULL,
@@ -213,8 +233,20 @@ CREATE INDEX idx_extension_resources_collection_resource
 -- Aliases split into two tables, per the validated
 -- poc/alias-claims/ prototype -- see
 -- docs/design/architecture/resource_identity_and_api.md's "Aliases"
--- section for the full contract, and extension_resource_repo.go's
--- alias fold-in for how a report is turned into writes against them.
+-- section for the full contract.
+--
+-- Inventory reporting (ReplaceInventory/ApplyInventoryDeltas) no
+-- longer writes to either of these tables at all: reported aliases
+-- are stored unnormalized on extension_resources.reported_aliases
+-- (see that column's own doc comment above) rather than classified
+-- into claims/contributions synchronously at write time. These two
+-- tables remain reachable only through [ResourceIdentityRepository]'s
+-- own platform-owned alias path (resource_identity_repo.go's
+-- reconcileAliases, driven by [PlatformResource.AddAlias]), which is
+-- independent of inventory reporting. They are kept, rather than
+-- dropped, so that path keeps working and so a future asynchronous
+-- reconciliation process has a proven schema to promote accepted
+-- reported aliases into.
 --
 -- resource_alias_claims is the canonical (namespace, key, value) ->
 -- platform resource mapping, one row per claim regardless of how
@@ -341,37 +373,57 @@ CREATE TABLE resource_intents (
 
 -- ── Extension resource inventory ────────────────────────────────
 
+-- extension_resource_inventory holds only the *latest* observation,
+-- labels, and conditions for an extension resource -- one row per
+-- resource, replaced or patched in place on every report. labels and
+-- conditions are JSONB rather than normalized out into their own
+-- tables (see the now-removed extension_resource_inventory_labels/
+-- extension_resource_inventory_conditions tables this replaces):
+-- ReplaceInventory's complete-latest-state contract makes a whole-row
+-- JSONB replace cheaper than a delete-absent/upsert pair against a
+-- normalized table, and ApplyInventoryDeltas's field-level
+-- set/upsert-plus-delete semantics map directly onto the `-`
+-- (key-removal) and `||` (merge) jsonb operators (see
+-- extension_resource_repo.go's applyInventoryDeltasCoreCTEs). The GIN
+-- indexes below support future containment/key-existence label and
+-- condition search over that latest state; jsonb_ops is the default
+-- opclass, chosen because it's the more general one and real query
+-- shapes aren't known yet -- jsonb_path_ops could be revisited if a
+-- containment-only workload emerges. SQLite's mirror of this table
+-- (see that migration) has no equivalent index today; see that
+-- file's own doc comment.
+--
+-- conditions is a JSON object keyed by condition type (not an array)
+-- so a delta's per-type upsert/delete can use the same key-removal/
+-- merge operators as labels; see ConditionJSON's doc comment in
+-- extension_resource_repo.go for the exact per-condition shape.
+--
+-- Per-condition observed_at/updated_at are deliberately not part of
+-- this JSON shape: latest freshness is tracked once, at the inventory
+-- row level, by this table's own observed_at/updated_at columns.
+--
+-- Condition/observation *history* (the extension_resource_inventory_
+-- observations/extension_resource_inventory_condition_events tables
+-- below) is intentionally not written by ReplaceInventory/
+-- ApplyInventoryDeltas in this pass -- seeing this fact requires
+-- reading the repository code, not this schema, since the history
+-- tables' shape hasn't changed; they're kept, unpopulated by the hot
+-- path, for a future asynchronous history writer.
 CREATE TABLE extension_resource_inventory (
     extension_resource_uid UUID PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,
     observation JSONB,
+    labels      JSONB NOT NULL DEFAULT '{}',
+    conditions  JSONB NOT NULL DEFAULT '{}',
     observed_at TIMESTAMPTZ NOT NULL,
     updated_at  TIMESTAMPTZ NOT NULL
 );
 
--- Normalized out of extension_resource_inventory.labels (previously
--- JSONB) so batch label writes can be blind multi-row upserts/deletes
--- against a real table instead of a read-modify-write on a JSON blob.
-CREATE TABLE extension_resource_inventory_labels (
-    extension_resource_uid UUID NOT NULL
-        REFERENCES extension_resource_inventory(extension_resource_uid) ON DELETE CASCADE,
-    key                    TEXT NOT NULL,
-    value                  TEXT NOT NULL,
-    PRIMARY KEY (extension_resource_uid, key)
-);
+CREATE INDEX extension_resource_inventory_labels_gin
+    ON extension_resource_inventory USING GIN (labels);
 
-CREATE TABLE extension_resource_inventory_conditions (
-    extension_resource_uid UUID NOT NULL
-        REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    type                   TEXT NOT NULL,
-    status                 TEXT NOT NULL,
-    reason                 TEXT NOT NULL DEFAULT '',
-    message                TEXT NOT NULL DEFAULT '',
-    last_transition_time   TIMESTAMPTZ NOT NULL,
-    observed_at            TIMESTAMPTZ NOT NULL,
-    updated_at             TIMESTAMPTZ NOT NULL,
-    PRIMARY KEY (extension_resource_uid, type)
-);
+CREATE INDEX extension_resource_inventory_conditions_gin
+    ON extension_resource_inventory USING GIN (conditions);
 
 CREATE TABLE extension_resource_inventory_condition_events (
     id                     TEXT PRIMARY KEY,
@@ -404,8 +456,6 @@ CREATE INDEX idx_er_inv_observations_resource
 -- +goose Down
 DROP TABLE IF EXISTS extension_resource_inventory_observations;
 DROP TABLE IF EXISTS extension_resource_inventory_condition_events;
-DROP TABLE IF EXISTS extension_resource_inventory_conditions;
-DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;

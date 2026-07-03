@@ -106,6 +106,7 @@ func TestToStatusError_DomainErrors(t *testing.T) {
 		{domain.ErrAlreadyExists, codes.AlreadyExists},
 		{domain.ErrStaleGeneration, codes.Aborted},
 		{domain.ErrInvalidArgument, codes.InvalidArgument},
+		{domain.ErrUnimplemented, codes.Unimplemented},
 		{errors.New("unknown"), codes.Internal},
 	}
 

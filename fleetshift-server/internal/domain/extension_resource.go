@@ -228,11 +228,13 @@ func (ir *InventoryResource) UpdatedAt() time.Time          { return ir.updatedA
 // ObservationID uniquely identifies an observation history record.
 type ObservationID string
 
-// NewObservationID generates a new random [ObservationID]. Repositories
-// call this internally when appending observation history rows as a
-// side effect of [ExtensionResourceRepository.ReplaceInventory] or
-// [ExtensionResourceRepository.ApplyInventoryDeltas]; reporters never
-// supply observation IDs directly.
+// NewObservationID generates a new random [ObservationID]. Neither
+// [ExtensionResourceRepository.ReplaceInventory] nor
+// [ExtensionResourceRepository.ApplyInventoryDeltas] calls this today
+// -- see [ExtensionResourceRepository.ListObservations]'s doc -- since
+// neither appends observation history synchronously any more. It
+// remains for a future asynchronous history writer to use; reporters
+// never supply observation IDs directly.
 func NewObservationID() ObservationID {
 	return ObservationID(uuid.New().String())
 }
@@ -513,6 +515,15 @@ type ExtensionResource struct {
 	managed   *ManagedState
 	inventory *InventoryResource
 
+	// reportedAliases and aliasFingerprint hold this extension
+	// resource's own pending, unreconciled alias assertions -- see
+	// [InventoryReplacement.Aliases]'s doc for the full contract.
+	// aliasFingerprint is [AliasSetFingerprint] over reportedAliases,
+	// persisted alongside it so a repository can detect an unchanged
+	// report without recomputing the digest from the stored payload.
+	reportedAliases  []Alias
+	aliasFingerprint []byte
+
 	createdAt time.Time
 	updatedAt time.Time
 
@@ -622,6 +633,18 @@ func (r *ExtensionResource) Managed() *ManagedState { return r.managed }
 // Inventory returns the latest inventory state, or nil if no inventory
 // has been reported.
 func (r *ExtensionResource) Inventory() *InventoryResource { return r.inventory }
+
+// ReportedAliases returns this extension resource's own pending,
+// unreconciled alias assertions -- see [InventoryReplacement.Aliases]'s
+// doc for the contract these are stored under. Empty (never nil) when
+// this resource has never reported any.
+func (r *ExtensionResource) ReportedAliases() []Alias { return r.reportedAliases }
+
+// AliasFingerprint returns [AliasSetFingerprint] over ReportedAliases,
+// as persisted. Repositories compare a freshly computed fingerprint
+// against this stored value to skip re-writing an unchanged alias
+// payload.
+func (r *ExtensionResource) AliasFingerprint() []byte { return r.aliasFingerprint }
 
 // CreatedAt returns the creation timestamp.
 func (r *ExtensionResource) CreatedAt() time.Time { return r.createdAt }
