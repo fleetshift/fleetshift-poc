@@ -2,12 +2,18 @@ package inventorywritepath
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/binary"
+	"encoding/hex"
 	"fmt"
+	"hash"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/testcontainers/testcontainers-go"
@@ -90,37 +96,38 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		})
 	}
 
-	assertCount(ctx, t, db, "delta patched labels",
-		`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00003001' AND 'r-00004000' AND inv.labels @> '{"patched":"true"}'::jsonb`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "replace changed observations",
-		`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00004001' AND 'r-00005000' AND inv.observation @> '{"generation":2}'::jsonb`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "new secondary alias claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'secondary-id' AND value LIKE 'new-secondary-apply-%'`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "new secondary alias contributions",
-		`SELECT count(*) FROM resource_alias_contributions c JOIN resource_alias_claims cl ON cl.id = c.claim_id WHERE cl.namespace = 'ext-id' AND cl.key = 'secondary-id' AND cl.value LIKE 'new-secondary-apply-%'`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "self-replaced alias old claims",
-		`SELECT count(*)
+	t.Run("scenario_correctness_assertions", func(t *testing.T) {
+		assertCount(ctx, t, db, "delta patched labels",
+			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00003001' AND 'r-00004000' AND inv.labels @> '{"patched":"true"}'::jsonb`,
+			1_000,
+		)
+		assertCount(ctx, t, db, "replace changed observations",
+			`SELECT count(*) FROM extension_resource_inventory inv JOIN extension_resources er ON er.uid = inv.extension_resource_uid WHERE er.service_name = 'bench.fleetshift.io' AND er.resource_id BETWEEN 'r-00004001' AND 'r-00005000' AND inv.observation @> '{"generation":2}'::jsonb`,
+			1_000,
+		)
+		assertCount(ctx, t, db, "new secondary alias claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'secondary-id' AND value LIKE 'new-secondary-apply-%'`,
+			1_000,
+		)
+		assertCount(ctx, t, db, "new secondary alias contributions",
+			`SELECT count(*) FROM resource_alias_contributions c JOIN resource_alias_claims cl ON cl.id = c.claim_id WHERE cl.namespace = 'ext-id' AND cl.key = 'secondary-id' AND cl.value LIKE 'new-secondary-apply-%'`,
+			1_000,
+		)
+		assertCount(ctx, t, db, "self-replaced alias old claims",
+			`SELECT count(*)
 		 FROM generate_series(67001, 68000) AS g
 		 JOIN resource_alias_claims cl
 		   ON cl.namespace = 'ext-id'
 		  AND cl.key = 'source-id'
 		  AND cl.value = 'ext-' || lpad(g::text, 8, '0')`,
-		0,
-	)
-	assertCount(ctx, t, db, "self-replaced alias new claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'ext-changed-apply-%'`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "self-replaced alias contributions",
-		`SELECT count(*)
+			0,
+		)
+		assertCount(ctx, t, db, "self-replaced alias new claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'ext-changed-apply-%'`,
+			1_000,
+		)
+		assertCount(ctx, t, db, "self-replaced alias contributions",
+			`SELECT count(*)
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
@@ -129,23 +136,23 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
 		   AND cl.value LIKE 'ext-changed-apply-%'`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "sibling-conflict old claims remain",
-		`SELECT count(*)
+			1_000,
+		)
+		assertCount(ctx, t, db, "sibling-conflict old claims remain",
+			`SELECT count(*)
 		 FROM generate_series(82001, 83000) AS g
 		 JOIN resource_alias_claims cl
 		   ON cl.namespace = 'ext-id'
 		  AND cl.key = 'source-id'
 		  AND cl.value = 'ext-' || lpad(g::text, 8, '0')`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "sibling-conflict new claims absent",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'ext-conflict-%'`,
-		0,
-	)
-	assertCount(ctx, t, db, "sibling-conflict primary contributor unchanged",
-		`SELECT count(*)
+			1_000,
+		)
+		assertCount(ctx, t, db, "sibling-conflict new claims absent",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'ext-conflict-%'`,
+			0,
+		)
+		assertCount(ctx, t, db, "sibling-conflict primary contributor unchanged",
+			`SELECT count(*)
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
@@ -154,10 +161,10 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
 		   AND cl.value = 'ext-' || substring(er.resource_id from 3)`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "sibling-conflict secondary contributor unchanged",
-		`SELECT count(*)
+			1_000,
+		)
+		assertCount(ctx, t, db, "sibling-conflict secondary contributor unchanged",
+			`SELECT count(*)
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
@@ -166,40 +173,40 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'source-id'
 		   AND cl.value = 'ext-' || substring(er.resource_id from 3)`,
-		1_000,
-	)
-	assertCount(ctx, t, db, "full replace mixed latest observations",
-		`SELECT count(*)
+			1_000,
+		)
+		assertCount(ctx, t, db, "full replace mixed latest observations",
+			`SELECT count(*)
 		 FROM extension_resource_inventory inv
 		 JOIN extension_resources er ON er.uid = inv.extension_resource_uid
 		 WHERE er.service_name = 'bench.fleetshift.io'
 		   AND er.resource_id BETWEEN 'r-00084001' AND 'r-00084600'
 		   AND inv.observation @> '{"generation":3}'::jsonb`,
-		600,
-	)
-	assertCount(ctx, t, db, "full replace mixed secondary claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'secondary-id' AND value LIKE 'full-secondary-%'`,
-		100,
-	)
-	assertCount(ctx, t, db, "full replace mixed old self-replaced claims",
-		`SELECT count(*)
+			600,
+		)
+		assertCount(ctx, t, db, "full replace mixed secondary claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'secondary-id' AND value LIKE 'full-secondary-%'`,
+			100,
+		)
+		assertCount(ctx, t, db, "full replace mixed old self-replaced claims",
+			`SELECT count(*)
 		 FROM generate_series(84301, 84400) AS g
 		 JOIN resource_alias_claims cl
 		   ON cl.namespace = 'ext-id'
 		  AND cl.key = 'source-id'
 		  AND cl.value = 'ext-' || lpad(g::text, 8, '0')`,
-		0,
-	)
-	assertCount(ctx, t, db, "full replace mixed new self-replaced claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'full-replaced-%'`,
-		100,
-	)
-	assertCount(ctx, t, db, "full replace mixed retracted claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND platform_resource_id BETWEEN 'r-00084401' AND 'r-00084500'`,
-		0,
-	)
-	assertCount(ctx, t, db, "full replace mixed reuse primary contributions",
-		`SELECT count(*)
+			0,
+		)
+		assertCount(ctx, t, db, "full replace mixed new self-replaced claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'full-replaced-%'`,
+			100,
+		)
+		assertCount(ctx, t, db, "full replace mixed retracted claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND platform_resource_id BETWEEN 'r-00084401' AND 'r-00084500'`,
+			0,
+		)
+		assertCount(ctx, t, db, "full replace mixed reuse primary contributions",
+			`SELECT count(*)
 		 FROM resource_alias_contributions c
 		 JOIN resource_alias_claims cl ON cl.id = c.claim_id
 		 JOIN extension_resources er ON er.uid = c.source_extension_resource_uid
@@ -208,34 +215,43 @@ func TestInventoryWritePathPlans(t *testing.T) {
 		   AND cl.namespace = 'ext-id'
 		   AND cl.key = 'reuse-id'
 		   AND cl.value = 'reuse-' || substring(er.resource_id from 3)`,
-		100,
-	)
-	assertCount(ctx, t, db, "full replace conflict new claims absent",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'full-conflict-%'`,
-		0,
-	)
-	assertCount(ctx, t, db, "full replace conflict old claims remain",
-		`SELECT count(*)
+			100,
+		)
+		assertCount(ctx, t, db, "full replace conflict new claims absent",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND value LIKE 'full-conflict-%'`,
+			0,
+		)
+		assertCount(ctx, t, db, "full replace conflict old claims remain",
+			`SELECT count(*)
 		 FROM generate_series(83001, 83100) AS g
 		 JOIN resource_alias_claims cl
 		   ON cl.namespace = 'ext-id'
 		  AND cl.key = 'source-id'
 		  AND cl.value = 'ext-' || lpad(g::text, 8, '0')`,
-		100,
-	)
-	assertCount(ctx, t, db, "full replace conflict latest observations unchanged",
-		`SELECT count(*)
+			100,
+		)
+		assertCount(ctx, t, db, "full replace conflict latest observations still update",
+			`SELECT count(*)
 		 FROM extension_resource_inventory inv
 		 JOIN extension_resources er ON er.uid = inv.extension_resource_uid
 		 WHERE er.service_name = 'bench.fleetshift.io'
-		   AND er.resource_id BETWEEN 'r-00083001' AND 'r-00083100'
-		   AND inv.observation @> '{"generation":1}'::jsonb`,
-		100,
-	)
-	assertCount(ctx, t, db, "retracted alias claims",
-		`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND platform_resource_id BETWEEN 'r-00059001' AND 'r-00060000'`,
-		0,
-	)
+		   AND er.resource_id BETWEEN 'r-00083001' AND 'r-00083200'
+		   AND inv.observation @> '{"generation":4}'::jsonb`,
+			200,
+		)
+		assertCount(ctx, t, db, "full replace conflict safe secondary claims still apply",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'secondary-id' AND value LIKE 'full-conflict-safe-%'`,
+			100,
+		)
+		assertCount(ctx, t, db, "retracted alias claims",
+			`SELECT count(*) FROM resource_alias_claims WHERE namespace = 'ext-id' AND key = 'source-id' AND platform_resource_id BETWEEN 'r-00059001' AND 'r-00060000'`,
+			0,
+		)
+	})
+
+	t.Run("production_replace_inventory_prepared_plan_stability", func(t *testing.T) {
+		runProductionReplacePlanStability(ctx, t, db)
+	})
 }
 
 func detectProvider() testcontainers.ContainerCustomizer {
@@ -254,7 +270,15 @@ func execSQL(ctx context.Context, db *sql.DB, query string) error {
 }
 
 func explain(ctx context.Context, db *sql.DB, query string) (string, error) {
-	rows, err := db.QueryContext(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) "+query)
+	return explainWithArgs(ctx, db, query)
+}
+
+type queryContext interface {
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+}
+
+func explainWithArgs(ctx context.Context, q queryContext, query string, args ...any) (string, error) {
+	rows, err := q.QueryContext(ctx, "EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) "+query, args...)
 	if err != nil {
 		return "", err
 	}
@@ -327,12 +351,568 @@ func summarizePlan(plan string) string {
 	if len(out) == 0 {
 		return plan
 	}
+	if len(out) > 80 {
+		omitted := len(out) - 80
+		out = append(out[:80], fmt.Sprintf("... %d additional summary lines omitted", omitted))
+	}
 	return strings.Join(out, "\n")
 }
 
 type scenario struct {
 	name string
 	sql  string
+}
+
+type productionAlias struct {
+	namespace string
+	key       string
+	value     string
+}
+
+type productionBatch struct {
+	idx                  []int32
+	serviceNames         []string
+	typeNames            []string
+	collectionNames      []string
+	resourceIDs          []string
+	candidateUIDs        []string
+	observations         []string
+	labels               []string
+	conditions           []string
+	observedAts          []time.Time
+	receivedAts          []time.Time
+	aliasFingerprints    [][]byte
+	aliasIdx             []int32
+	aliasNamespaces      []string
+	aliasKeys            []string
+	aliasValues          []string
+	aliasCollectionNames []string
+	aliasResourceIDs     []string
+	aliasReceivedAts     []time.Time
+}
+
+func (b productionBatch) args() []any {
+	return []any{
+		b.idx,
+		b.serviceNames,
+		b.typeNames,
+		b.collectionNames,
+		b.resourceIDs,
+		b.candidateUIDs,
+		b.observations,
+		b.labels,
+		b.conditions,
+		b.observedAts,
+		b.receivedAts,
+		b.aliasFingerprints,
+		b.aliasIdx,
+		b.aliasNamespaces,
+		b.aliasKeys,
+		b.aliasValues,
+		b.aliasCollectionNames,
+		b.aliasResourceIDs,
+		b.aliasReceivedAts,
+	}
+}
+
+type productionResult struct {
+	valueConflicts        int
+	resourceConflicts     int
+	updatedInventory      int
+	insertedClaims        int
+	updatedClaims         int
+	upsertedContributions int
+	deletedContributions  int
+	deletedClaims         int
+	updatedFingerprints   int
+}
+
+func (r productionResult) String() string {
+	return fmt.Sprintf("inventory=%d value_conflicts=%d resource_conflicts=%d inserted_claims=%d updated_claims=%d upserted_contributions=%d deleted_contributions=%d deleted_claims=%d updated_fingerprints=%d",
+		r.updatedInventory,
+		r.valueConflicts,
+		r.resourceConflicts,
+		r.insertedClaims,
+		r.updatedClaims,
+		r.upsertedContributions,
+		r.deletedContributions,
+		r.deletedClaims,
+		r.updatedFingerprints,
+	)
+}
+
+func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	for _, mode := range []string{"auto", "force_custom_plan", "force_generic_plan"} {
+		t.Run(mode, func(t *testing.T) {
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatalf("conn: %v", err)
+			}
+			defer conn.Close()
+
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin tx: %v", err)
+			}
+			defer tx.Rollback()
+
+			if _, err := tx.ExecContext(ctx, "SET LOCAL plan_cache_mode = "+mode); err != nil {
+				t.Fatalf("set plan_cache_mode: %v", err)
+			}
+
+			if mode != "auto" {
+				batch := buildProductionReplaceBatch(8)
+				plan, err := explainPreparedProductionReplace(ctx, tx, "production_replace_explain_"+mode, batch)
+				if err != nil {
+					t.Fatalf("explain production replace %s: %v", mode, err)
+				}
+				t.Logf("production replace %s prepared-plan summary:\n%s", mode, summarizePlan(plan))
+			}
+
+			stmt, err := tx.PrepareContext(ctx, productionReplaceInventorySQL())
+			if err != nil {
+				t.Fatalf("prepare production replace: %v", err)
+			}
+			defer stmt.Close()
+
+			var elapsed []time.Duration
+			var last productionResult
+			for i := 0; i < 8; i++ {
+				batch := buildProductionReplaceBatch(i)
+				start := time.Now()
+				got, err := execProductionReplace(ctx, stmt, batch)
+				if err != nil {
+					t.Fatalf("production replace iteration %d: %v", i+1, err)
+				}
+				elapsed = append(elapsed, time.Since(start))
+				last = got
+				want := productionResult{
+					resourceConflicts:     100,
+					updatedInventory:      1000,
+					insertedClaims:        200,
+					updatedClaims:         200,
+					upsertedContributions: 200,
+					deletedContributions:  100,
+					deletedClaims:         100,
+					updatedFingerprints:   500,
+				}
+				if got != want {
+					t.Fatalf("production replace iteration %d result = %s, want %s", i+1, got, want)
+				}
+			}
+
+			t.Logf("production replace %s repeated prepared executions: %s; last %s", mode, formatDurations(elapsed), last)
+			t.Logf("production replace %s prepared counters:\n%s", mode, preparedStatementCounters(ctx, t, tx))
+		})
+	}
+}
+
+func execProductionReplace(ctx context.Context, stmt *sql.Stmt, batch productionBatch) (productionResult, error) {
+	rows, err := stmt.QueryContext(ctx, batch.args()...)
+	if err != nil {
+		return productionResult{}, err
+	}
+	defer rows.Close()
+
+	var out productionResult
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return productionResult{}, err
+		}
+		return productionResult{}, fmt.Errorf("no result row")
+	}
+	if err := rows.Scan(
+		&out.valueConflicts,
+		&out.resourceConflicts,
+		&out.updatedInventory,
+		&out.insertedClaims,
+		&out.updatedClaims,
+		&out.upsertedContributions,
+		&out.deletedContributions,
+		&out.deletedClaims,
+		&out.updatedFingerprints,
+	); err != nil {
+		return productionResult{}, err
+	}
+	return out, rows.Err()
+}
+
+func preparedStatementCounters(ctx context.Context, t *testing.T, tx *sql.Tx) string {
+	t.Helper()
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT name, generic_plans, custom_plans
+		FROM pg_prepared_statements
+		WHERE statement LIKE '%raw_reports%'
+		ORDER BY name
+	`)
+	if err != nil {
+		return fmt.Sprintf("pg_prepared_statements query failed: %v", err)
+	}
+	defer rows.Close()
+
+	var out strings.Builder
+	for rows.Next() {
+		var name string
+		var genericPlans, customPlans int
+		if err := rows.Scan(&name, &genericPlans, &customPlans); err != nil {
+			return fmt.Sprintf("pg_prepared_statements scan failed: %v", err)
+		}
+		out.WriteString(fmt.Sprintf("%s generic=%d custom=%d\n", name, genericPlans, customPlans))
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Sprintf("pg_prepared_statements rows failed: %v", err)
+	}
+	if out.Len() == 0 {
+		return "(no server-side prepared statement visible)"
+	}
+	return strings.TrimRight(out.String(), "\n")
+}
+
+func explainPreparedProductionReplace(ctx context.Context, tx *sql.Tx, name string, batch productionBatch) (string, error) {
+	_, err := tx.ExecContext(ctx, fmt.Sprintf("PREPARE %s (%s) AS %s",
+		name,
+		productionReplaceParamTypes(),
+		productionReplaceInventorySQL(),
+	))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _, _ = tx.ExecContext(ctx, "DEALLOCATE "+name) }()
+
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf(
+		"EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) EXECUTE %s(%s)",
+		name,
+		strings.Join(productionBatchLiteralArgs(batch), ", "),
+	))
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	var out strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			return "", err
+		}
+		out.WriteString(line)
+		out.WriteByte('\n')
+	}
+	return out.String(), rows.Err()
+}
+
+func productionReplaceParamTypes() string {
+	return strings.Join([]string{
+		"int[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"timestamptz[]",
+		"timestamptz[]",
+		"bytea[]",
+		"int[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"text[]",
+		"timestamptz[]",
+	}, ", ")
+}
+
+func productionBatchLiteralArgs(b productionBatch) []string {
+	return []string{
+		intArrayLiteral(b.idx),
+		textArrayLiteral(b.serviceNames),
+		textArrayLiteral(b.typeNames),
+		textArrayLiteral(b.collectionNames),
+		textArrayLiteral(b.resourceIDs),
+		textArrayLiteral(b.candidateUIDs),
+		textArrayLiteral(b.observations),
+		textArrayLiteral(b.labels),
+		textArrayLiteral(b.conditions),
+		timeArrayLiteral(b.observedAts),
+		timeArrayLiteral(b.receivedAts),
+		byteaArrayLiteral(b.aliasFingerprints),
+		intArrayLiteral(b.aliasIdx),
+		textArrayLiteral(b.aliasNamespaces),
+		textArrayLiteral(b.aliasKeys),
+		textArrayLiteral(b.aliasValues),
+		textArrayLiteral(b.aliasCollectionNames),
+		textArrayLiteral(b.aliasResourceIDs),
+		timeArrayLiteral(b.aliasReceivedAts),
+	}
+}
+
+func intArrayLiteral(values []int32) string {
+	if len(values) == 0 {
+		return "ARRAY[]::int[]"
+	}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = fmt.Sprintf("%d", v)
+	}
+	return "ARRAY[" + strings.Join(parts, ",") + "]::int[]"
+}
+
+func textArrayLiteral(values []string) string {
+	if len(values) == 0 {
+		return "ARRAY[]::text[]"
+	}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = sqlQuote(v)
+	}
+	return "ARRAY[" + strings.Join(parts, ",") + "]::text[]"
+}
+
+func timeArrayLiteral(values []time.Time) string {
+	if len(values) == 0 {
+		return "ARRAY[]::timestamptz[]"
+	}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = sqlQuote(v.UTC().Format(time.RFC3339Nano)) + "::timestamptz"
+	}
+	return "ARRAY[" + strings.Join(parts, ",") + "]::timestamptz[]"
+}
+
+func byteaArrayLiteral(values [][]byte) string {
+	if len(values) == 0 {
+		return "ARRAY[]::bytea[]"
+	}
+	parts := make([]string, len(values))
+	for i, v := range values {
+		parts[i] = sqlQuote("\\x"+hex.EncodeToString(v)) + "::bytea"
+	}
+	return "ARRAY[" + strings.Join(parts, ",") + "]::bytea[]"
+}
+
+func formatDurations(durations []time.Duration) string {
+	parts := make([]string, len(durations))
+	for i, d := range durations {
+		parts[i] = fmt.Sprintf("#%d=%s %.3fms/item", i+1, d.Round(time.Microsecond), float64(d.Microseconds())/1000.0/1000.0)
+	}
+	return strings.Join(parts, ", ")
+}
+
+func buildProductionReplaceBatch(iteration int) productionBatch {
+	var b productionBatch
+	baseTime := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
+
+	addRange := func(start, count, generation int, aliasesFor func(g int) []productionAlias) {
+		for g := start; g < start+count; g++ {
+			aliases := aliasesFor(g)
+			receivedAt := baseTime.Add(time.Duration(iteration)*time.Minute + time.Duration(g)*time.Millisecond)
+			idx := int32(len(b.idx) + 1)
+			resourceID := resourceID(g)
+
+			b.idx = append(b.idx, idx)
+			b.serviceNames = append(b.serviceNames, "bench.fleetshift.io")
+			b.typeNames = append(b.typeNames, "Widget")
+			b.collectionNames = append(b.collectionNames, "widgets")
+			b.resourceIDs = append(b.resourceIDs, resourceID)
+			b.candidateUIDs = append(b.candidateUIDs, candidateUID(g))
+			b.observations = append(b.observations, observationJSON(g, generation))
+			b.labels = append(b.labels, labelsJSON(g, generation))
+			b.conditions = append(b.conditions, conditionsJSON(g, generation))
+			b.observedAts = append(b.observedAts, baseTime.Add(time.Duration(g)*time.Second))
+			b.receivedAts = append(b.receivedAts, receivedAt)
+			b.aliasFingerprints = append(b.aliasFingerprints, aliasSetFingerprint(aliases))
+
+			for _, a := range aliases {
+				b.aliasIdx = append(b.aliasIdx, idx)
+				b.aliasNamespaces = append(b.aliasNamespaces, a.namespace)
+				b.aliasKeys = append(b.aliasKeys, a.key)
+				b.aliasValues = append(b.aliasValues, a.value)
+				b.aliasCollectionNames = append(b.aliasCollectionNames, "widgets")
+				b.aliasResourceIDs = append(b.aliasResourceIDs, resourceID)
+				b.aliasReceivedAts = append(b.aliasReceivedAts, receivedAt)
+			}
+		}
+	}
+
+	addRange(1001+iteration*200, 200, 2, func(int) []productionAlias {
+		return nil
+	})
+	addRange(18001+iteration*200, 200, 2, func(g int) []productionAlias {
+		return []productionAlias{sourceAlias(g)}
+	})
+	addRange(48001+iteration*200, 200, 2, func(g int) []productionAlias {
+		return []productionAlias{
+			sourceAlias(g),
+			{namespace: "ext-id", key: "secondary-id", value: fmt.Sprintf("prod-secondary-%02d-%08d", iteration, g)},
+		}
+	})
+	addRange(70001+iteration*200, 200, 2, func(g int) []productionAlias {
+		return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-replaced-%02d-%08d", iteration, g)}}
+	})
+	addRange(62001+iteration*100, 100, 2, func(int) []productionAlias {
+		return nil
+	})
+	addRange(82101+iteration*100, 100, 2, func(g int) []productionAlias {
+		return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-conflict-%02d-%08d", iteration, g)}}
+	})
+
+	return b
+}
+
+func sourceAlias(g int) productionAlias {
+	return productionAlias{namespace: "ext-id", key: "source-id", value: "ext-" + padded(g)}
+}
+
+func aliasSetFingerprint(aliases []productionAlias) []byte {
+	sorted := make([]productionAlias, len(aliases))
+	copy(sorted, aliases)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].namespace != sorted[j].namespace {
+			return sorted[i].namespace < sorted[j].namespace
+		}
+		if sorted[i].key != sorted[j].key {
+			return sorted[i].key < sorted[j].key
+		}
+		return sorted[i].value < sorted[j].value
+	})
+
+	h := sha256.New()
+	for _, a := range sorted {
+		hashString(h, a.namespace)
+		hashString(h, a.key)
+		hashString(h, a.value)
+	}
+	return h.Sum(nil)
+}
+
+func hashString(h hash.Hash, s string) {
+	_ = binary.Write(h, binary.BigEndian, int64(len(s)))
+	_, _ = h.Write([]byte(s))
+}
+
+func productionReplaceInventorySQL() string {
+	return fullReplaceCoreSQL(`WITH raw_reports AS MATERIALIZED (
+	SELECT
+		idx,
+		service_name,
+		type_name,
+		collection_name,
+		resource_id,
+		candidate_uid::uuid AS candidate_uid,
+		observation::jsonb AS observation,
+		labels::jsonb AS labels,
+		conditions::jsonb AS conditions,
+		observed_at,
+		received_at,
+		reported_alias_fingerprint
+	FROM UNNEST(
+		$1::int[],
+		$2::text[],
+		$3::text[],
+		$4::text[],
+		$5::text[],
+		$6::text[],
+		$7::text[],
+		$8::text[],
+		$9::text[],
+		$10::timestamptz[],
+		$11::timestamptz[],
+		$12::bytea[]
+	) AS x(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, labels, conditions, observed_at, received_at, reported_alias_fingerprint)
+),
+resolved_er AS (
+	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, created_at, updated_at)
+	SELECT candidate_uid, service_name, type_name, collection_name, resource_id, '{}'::jsonb, received_at, received_at
+	FROM raw_reports
+	ON CONFLICT (service_name, collection_name, resource_id) DO NOTHING
+	RETURNING uid, service_name, collection_name, resource_id
+),
+input_reports AS MATERIALIZED (
+	SELECT
+		rr.idx,
+		COALESCE(res.uid, ext.uid) AS source_uid,
+		ext.alias_fingerprint AS stored_alias_fingerprint,
+		rr.reported_alias_fingerprint,
+		rr.collection_name,
+		rr.resource_id,
+		rr.observation,
+		rr.labels,
+		rr.conditions,
+		rr.observed_at,
+		rr.received_at
+	FROM raw_reports rr
+	LEFT JOIN resolved_er res
+	  ON res.service_name = rr.service_name
+	 AND res.collection_name = rr.collection_name
+	 AND res.resource_id = rr.resource_id
+	LEFT JOIN extension_resources ext
+	  ON ext.service_name = rr.service_name
+	 AND ext.collection_name = rr.collection_name
+	 AND ext.resource_id = rr.resource_id
+),
+reported_aliases AS MATERIALIZED (
+	SELECT
+		x.idx,
+		ir.source_uid,
+		x.namespace,
+		x.key,
+		x.value,
+		x.collection_name,
+		x.resource_id,
+		x.received_at
+	FROM UNNEST(
+		$13::int[],
+		$14::text[],
+		$15::text[],
+		$16::text[],
+		$17::text[],
+		$18::text[],
+		$19::timestamptz[]
+	) AS x(idx, namespace, key, value, collection_name, resource_id, received_at)
+	JOIN input_reports ir ON ir.idx = x.idx
+)`)
+}
+
+func candidateUID(g int) string {
+	return fmt.Sprintf("00000000-0000-0000-0000-%012d", g)
+}
+
+func resourceID(g int) string {
+	return "r-" + padded(g)
+}
+
+func padded(g int) string {
+	return fmt.Sprintf("%08d", g)
+}
+
+func observationJSON(g, generation int) string {
+	return fmt.Sprintf(`{"generation":%d,"payload":{"cpu":%d,"memoryGiB":%d,"zone":"zone-%d"}}`, generation, g%16, 16+(g%128), g%16)
+}
+
+func labelsJSON(g, generation int) string {
+	env := "dev"
+	if g%2 == 0 {
+		env = "prod"
+	}
+	return fmt.Sprintf(`{"env":%q,"region":"region-%d","owner":"team-%d","shard":%q,"generation":%q}`, env, g%10, g%20, fmt.Sprintf("%d", g%64), fmt.Sprintf("%d", generation))
+}
+
+func conditionsJSON(g, generation int) string {
+	status := "True"
+	reason := "Ready"
+	message := "ready"
+	if g%17 == 0 {
+		status = "False"
+		reason = "Reconciling"
+		message = "waiting for dependency"
+	}
+	return fmt.Sprintf(`{"Ready":{"status":%q,"reason":%q,"message":%q,"lastTransitionTime":"2026-01-01T00:00:00Z"},"Synced":{"status":"True","reason":"Reported","message":"report generation %d","lastTransitionTime":"2026-01-01T00:00:00Z"}}`, status, reason, message, generation)
 }
 
 var scenarios = []scenario{
@@ -389,8 +969,8 @@ var scenarios = []scenario{
 		sql:  fullReplaceMixedSuccessSQL(),
 	},
 	{
-		name: "full_replace_sibling_conflict_write_gated",
-		sql:  fullReplaceSiblingConflictSQL(),
+		name: "full_replace_partial_conflict",
+		sql:  fullReplacePartialConflictSQL(),
 	},
 	{
 		name: "replace_changed_state_and_retract_alias_direct_cleanup",
@@ -709,8 +1289,6 @@ inserted_claims AS (
 	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id)
 	SELECT namespace, key, value, collection_name, resource_id
 	FROM input_aliases
-	ON CONFLICT (namespace, key, value) DO UPDATE SET
-		platform_collection_name = resource_alias_claims.platform_collection_name
 	RETURNING id, namespace, key, value
 ),
 upserted_contributions AS (
@@ -719,8 +1297,6 @@ upserted_contributions AS (
 	FROM input_aliases ia
 	JOIN inserted_claims ic
 	  ON ic.namespace = ia.namespace AND ic.key = ia.key AND ic.value = ia.value
-	ON CONFLICT (source_extension_resource_uid, namespace, key)
-	DO UPDATE SET claim_id = EXCLUDED.claim_id
 	RETURNING 1
 )
 SELECT
@@ -907,11 +1483,11 @@ func fullReplaceMixedSuccessSQL() string {
 		er.uid AS source_uid,
 		er.alias_fingerprint AS stored_alias_fingerprint,
 		CASE
-			WHEN g BETWEEN 84201 AND 84300 THEN digest(('source-id=ext-' || lpad(g::text, 8, '0') || ';secondary-id=full-secondary-' || lpad((g - 84200)::text, 8, '0'))::bytea, 'sha256')
-			WHEN g BETWEEN 84301 AND 84400 THEN digest(('source-id=full-replaced-' || lpad((g - 84300)::text, 8, '0'))::bytea, 'sha256')
-			WHEN g BETWEEN 84401 AND 84500 THEN digest(''::bytea, 'sha256')
-			WHEN g BETWEEN 84501 AND 84600 THEN digest(('source-id=ext-' || lpad(g::text, 8, '0') || ';reuse-id=reuse-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
-			ELSE digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
+			WHEN g BETWEEN 84201 AND 84300 THEN alias_fingerprint(ARRAY['ext-id', 'secondary-id', 'full-secondary-' || lpad((g - 84200)::text, 8, '0'), 'ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')])
+			WHEN g BETWEEN 84301 AND 84400 THEN alias_fingerprint(ARRAY['ext-id', 'source-id', 'full-replaced-' || lpad((g - 84300)::text, 8, '0')])
+			WHEN g BETWEEN 84401 AND 84500 THEN alias_fingerprint(ARRAY[]::text[])
+			WHEN g BETWEEN 84501 AND 84600 THEN alias_fingerprint(ARRAY['ext-id', 'reuse-id', 'reuse-' || lpad(g::text, 8, '0'), 'ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')])
+			ELSE alias_fingerprint(ARRAY['ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')])
 		END AS reported_alias_fingerprint,
 		'widgets'::text AS collection_name,
 		('r-' || lpad(g::text, 8, '0'))::text AS resource_id,
@@ -988,14 +1564,17 @@ reported_aliases AS MATERIALIZED (
 )`)
 }
 
-func fullReplaceSiblingConflictSQL() string {
+func fullReplacePartialConflictSQL() string {
 	return fullReplaceCoreSQL(`WITH input_reports AS MATERIALIZED (
 	SELECT
 		row_number() OVER (ORDER BY g)::int AS idx,
 		g,
 		er.uid AS source_uid,
 		er.alias_fingerprint AS stored_alias_fingerprint,
-		digest(('source-id=full-conflict-' || lpad((g - 83000)::text, 8, '0'))::bytea, 'sha256') AS reported_alias_fingerprint,
+		CASE
+			WHEN g BETWEEN 83001 AND 83100 THEN alias_fingerprint(ARRAY['ext-id', 'source-id', 'full-conflict-' || lpad((g - 83000)::text, 8, '0')])
+			ELSE alias_fingerprint(ARRAY['ext-id', 'secondary-id', 'full-conflict-safe-' || lpad((g - 83100)::text, 8, '0'), 'ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')])
+		END AS reported_alias_fingerprint,
 		'widgets'::text AS collection_name,
 		('r-' || lpad(g::text, 8, '0'))::text AS resource_id,
 		jsonb_build_object('generation', 4, 'payload', jsonb_build_object('conflict', true)) AS observation,
@@ -1010,7 +1589,7 @@ func fullReplaceSiblingConflictSQL() string {
 		) AS conditions,
 		('2026-01-04T00:00:00Z'::timestamptz + make_interval(secs => g)) AS observed_at,
 		clock_timestamp() AS received_at
-	FROM generate_series(83001, 83100) AS g
+	FROM generate_series(83001, 83200) AS g
 	JOIN extension_resources er
 	  ON er.service_name = 'bench.fleetshift.io'
 	 AND er.collection_name = 'widgets'
@@ -1022,11 +1601,26 @@ reported_aliases AS MATERIALIZED (
 		source_uid,
 		'ext-id'::text AS namespace,
 		'source-id'::text AS key,
-		'full-conflict-' || lpad((g - 83000)::text, 8, '0') AS value,
+		CASE
+			WHEN g BETWEEN 83001 AND 83100 THEN 'full-conflict-' || lpad((g - 83000)::text, 8, '0')
+			ELSE 'ext-' || lpad(g::text, 8, '0')
+		END AS value,
 		collection_name,
 		resource_id,
 		received_at
 	FROM input_reports
+	UNION ALL
+	SELECT
+		idx,
+		source_uid,
+		'ext-id',
+		'secondary-id',
+		'full-conflict-safe-' || lpad((g - 83100)::text, 8, '0'),
+		collection_name,
+		resource_id,
+		received_at
+	FROM input_reports
+	WHERE g BETWEEN 83101 AND 83200
 )`)
 }
 
@@ -1038,12 +1632,12 @@ func fullReplaceCoreSQL(inputCTEs string) string {
 	WHERE reported_alias_fingerprint IS DISTINCT FROM stored_alias_fingerprint
 ),
 input_aliases AS MATERIALIZED (
-	SELECT ra.*
+	SELECT row_number() OVER () AS cand_id, ra.*
 	FROM reported_aliases ra
 	JOIN needs_alias_processing nr ON nr.idx = ra.idx
 ),
 self_claim AS (
-	SELECT ia.idx, ia.namespace, ia.key, ia.value, ia.collection_name, ia.resource_id, ia.received_at, ia.source_uid,
+	SELECT ia.cand_id, ia.idx, ia.namespace, ia.key, ia.value, ia.collection_name, ia.resource_id, ia.received_at, ia.source_uid,
 	       c.claim_id AS self_claim_id, cl.value AS self_value,
 	       cl.platform_collection_name AS self_collection_name, cl.platform_resource_id AS self_resource_id
 	FROM input_aliases ia
@@ -1063,7 +1657,7 @@ self_claim AS (
 	) cl ON true
 ),
 changed AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid, self_claim_id
+	SELECT cand_id, idx, namespace, key, value, collection_name, resource_id, received_at, source_uid, self_claim_id
 	FROM self_claim
 	WHERE self_claim_id IS NULL
 	   OR self_value IS DISTINCT FROM value
@@ -1071,7 +1665,7 @@ changed AS (
 	   OR self_resource_id IS DISTINCT FROM resource_id
 ),
 by_value AS (
-	SELECT ch.idx, vc.id AS value_claim_id, vc.platform_collection_name AS value_collection_name, vc.platform_resource_id AS value_resource_id
+	SELECT ch.cand_id, vc.id AS value_claim_id, vc.platform_collection_name AS value_collection_name, vc.platform_resource_id AS value_resource_id
 	FROM changed ch
 	LEFT JOIN LATERAL (
 		SELECT id, platform_collection_name, platform_resource_id
@@ -1081,7 +1675,7 @@ by_value AS (
 	) vc ON true
 ),
 by_resource AS (
-	SELECT ch.idx, rc.id AS resource_claim_id, rc.value AS resource_value, rc.platform_owned AS resource_platform_owned
+	SELECT ch.cand_id, rc.id AS resource_claim_id, rc.value AS resource_value, rc.platform_owned AS resource_platform_owned
 	FROM changed ch
 	LEFT JOIN LATERAL (
 		SELECT id, value, platform_owned
@@ -1093,14 +1687,14 @@ by_resource AS (
 	) rc ON true
 ),
 sibling AS (
-	SELECT br.idx,
+	SELECT br.cand_id,
 	       br.resource_claim_id IS NOT NULL
 	       AND (
 		 br.resource_platform_owned
 		 OR EXISTS (
 			SELECT 1
 			FROM resource_alias_contributions other
-			JOIN changed ch ON ch.idx = br.idx
+			JOIN changed ch ON ch.cand_id = br.cand_id
 			WHERE other.claim_id = br.resource_claim_id
 			  AND other.source_extension_resource_uid <> ch.source_uid
 		 )
@@ -1111,34 +1705,27 @@ alias_value_conflicts AS (
 	SELECT ch.idx, ch.namespace, ch.key, ch.value,
 	       bv.value_collection_name AS actual_collection_name, bv.value_resource_id AS actual_resource_id
 	FROM changed ch
-	JOIN by_value bv ON bv.idx = ch.idx
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
 	WHERE bv.value_claim_id IS NOT NULL
 	  AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id)
 ),
 alias_resource_conflicts AS (
 	SELECT ch.idx, ch.namespace, ch.key, ch.value, br.resource_value AS existing_value
 	FROM changed ch
-	JOIN by_value bv ON bv.idx = ch.idx
-	JOIN by_resource br ON br.idx = ch.idx
-	JOIN sibling s ON s.idx = ch.idx
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
+	JOIN by_resource br ON br.cand_id = ch.cand_id
+	JOIN sibling s ON s.cand_id = ch.cand_id
 	WHERE bv.value_claim_id IS NULL
 	  AND br.resource_claim_id IS NOT NULL
 	  AND s.sibling_holds
 ),
-conflict_state AS MATERIALIZED (
-	SELECT EXISTS (
-		SELECT 1 FROM alias_value_conflicts
-		UNION ALL
-		SELECT 1 FROM alias_resource_conflicts
-	) AS has_conflicts
-),
 safe AS (
-	SELECT ch.idx, ch.namespace, ch.key, ch.value, ch.collection_name, ch.resource_id, ch.received_at, ch.source_uid, ch.self_claim_id,
+	SELECT ch.cand_id, ch.idx, ch.namespace, ch.key, ch.value, ch.collection_name, ch.resource_id, ch.received_at, ch.source_uid, ch.self_claim_id,
 	       bv.value_claim_id, br.resource_claim_id
 	FROM changed ch
-	JOIN by_value bv ON bv.idx = ch.idx
-	JOIN by_resource br ON br.idx = ch.idx
-	JOIN sibling s ON s.idx = ch.idx
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
+	JOIN by_resource br ON br.cand_id = ch.cand_id
+	JOIN sibling s ON s.cand_id = ch.cand_id
 	WHERE NOT (bv.value_claim_id IS NOT NULL AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id))
 	  AND NOT (bv.value_claim_id IS NULL AND br.resource_claim_id IS NOT NULL AND s.sibling_holds)
 ),
@@ -1172,7 +1759,6 @@ upsert_inventory AS (
 	)
 	SELECT source_uid, observation, labels, conditions, observed_at, received_at
 	FROM input_reports
-	WHERE NOT (SELECT has_conflicts FROM conflict_state)
 	ON CONFLICT (extension_resource_uid)
 	DO UPDATE SET
 		observation = COALESCE(EXCLUDED.observation, extension_resource_inventory.observation),
@@ -1186,7 +1772,6 @@ inserted_claims AS (
 	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
 	SELECT DISTINCT namespace, key, value, collection_name, resource_id, received_at
 	FROM claim_creates
-	WHERE NOT (SELECT has_conflicts FROM conflict_state)
 	RETURNING id, namespace, key, value
 ),
 updated_claims AS (
@@ -1194,7 +1779,6 @@ updated_claims AS (
 	SET value = sr.value
 	FROM claim_self_replace sr
 	WHERE cl.id = sr.resource_claim_id
-	  AND NOT (SELECT has_conflicts FROM conflict_state)
 	RETURNING 1
 ),
 claim_targets AS (
@@ -1209,17 +1793,13 @@ upserted_contributions AS (
 	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id, created_at)
 	SELECT DISTINCT ON (source_uid, namespace, key) source_uid, namespace, key, claim_id, received_at
 	FROM claim_targets
-	WHERE NOT (SELECT has_conflicts FROM conflict_state)
 	ORDER BY source_uid, namespace, key
-	ON CONFLICT (source_extension_resource_uid, namespace, key)
-	DO UPDATE SET claim_id = EXCLUDED.claim_id
 	RETURNING claim_id
 ),
 del_aliases_absent AS (
 	DELETE FROM resource_alias_contributions c
 	USING needs_alias_processing nr
 	WHERE c.source_extension_resource_uid = nr.source_uid
-	  AND NOT (SELECT has_conflicts FROM conflict_state)
 	  AND NOT EXISTS (
 		SELECT 1
 		FROM reported_aliases ra
@@ -1268,16 +1848,20 @@ deleted_orphan_claims AS (
 	WHERE cl.id = rr.claim_id
 	  AND rr.net_refs = 0
 	  AND NOT cl.platform_owned
-	  AND NOT (SELECT has_conflicts FROM conflict_state)
 	RETURNING 1
+),
+fingerprint_updates AS (
+	SELECT nr.idx, nr.source_uid, nr.reported_alias_fingerprint, nr.received_at
+	FROM needs_alias_processing nr
+	WHERE NOT EXISTS (SELECT 1 FROM alias_value_conflicts avc WHERE avc.idx = nr.idx)
+	  AND NOT EXISTS (SELECT 1 FROM alias_resource_conflicts arc WHERE arc.idx = nr.idx)
 ),
 updated_fingerprints AS (
 	UPDATE extension_resources er
-	SET alias_fingerprint = nr.reported_alias_fingerprint,
-	    updated_at = nr.received_at
-	FROM needs_alias_processing nr
-	WHERE er.uid = nr.source_uid
-	  AND NOT (SELECT has_conflicts FROM conflict_state)
+	SET alias_fingerprint = fu.reported_alias_fingerprint,
+	    updated_at = fu.received_at
+	FROM fingerprint_updates fu
+	WHERE er.uid = fu.source_uid
 	RETURNING 1
 )
 SELECT
@@ -1298,7 +1882,7 @@ func inputReportsSQL(start, end int, serviceName string, generation int) string 
 		row_number() OVER ()::int AS idx,
 		er.uid AS source_uid,
 		er.alias_fingerprint AS stored_alias_fingerprint,
-		digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256') AS reported_alias_fingerprint,
+		alias_fingerprint(ARRAY['ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')]) AS reported_alias_fingerprint,
 		'widgets'::text AS collection_name,
 		('r-' || lpad(g::text, 8, '0'))::text AS resource_id,
 		%[5]s AS observation,
@@ -1324,7 +1908,7 @@ func inputReportsWithAliasValuePrefixSQL(start, end int, serviceName string, gen
 		row_number() OVER ()::int AS idx,
 		er.uid AS source_uid,
 		er.alias_fingerprint AS stored_alias_fingerprint,
-		digest((%[8]s)::bytea, 'sha256') AS reported_alias_fingerprint,
+		alias_fingerprint(ARRAY['ext-id', 'source-id', %[8]s::text]) AS reported_alias_fingerprint,
 		'widgets'::text AS collection_name,
 		('r-' || lpad(g::text, 8, '0'))::text AS resource_id,
 		%[5]s AS observation,
@@ -1349,7 +1933,7 @@ func inputReportsWithoutAliasesSQL(start, end int, serviceName string, generatio
 		row_number() OVER ()::int AS idx,
 		er.uid AS source_uid,
 		er.alias_fingerprint AS stored_alias_fingerprint,
-		digest(''::bytea, 'sha256') AS reported_alias_fingerprint,
+		alias_fingerprint(ARRAY[]::text[]) AS reported_alias_fingerprint,
 		'widgets'::text AS collection_name,
 		('r-' || lpad(g::text, 8, '0'))::text AS resource_id,
 		%[5]s AS observation,
@@ -1412,6 +1996,21 @@ func sqlQuote(s string) string {
 
 const schemaSQL = `
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+CREATE FUNCTION alias_fingerprint(parts text[]) RETURNS bytea
+LANGUAGE plpgsql
+IMMUTABLE
+AS $$
+DECLARE
+	out bytea := ''::bytea;
+	part text;
+BEGIN
+	FOREACH part IN ARRAY parts LOOP
+		out := out || int8send(octet_length(part)::bigint) || convert_to(part, 'UTF8');
+	END LOOP;
+	RETURN digest(out, 'sha256');
+END;
+$$;
 
 CREATE TABLE extension_resources (
 	uid uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -1526,8 +2125,8 @@ SELECT
 	jsonb_build_object('fleet', 'primary', 'seed', g::text),
 	CASE
 		WHEN g BETWEEN 84101 AND 84200 THEN NULL
-		WHEN g >= 15001 THEN digest(('source-id=ext-' || lpad(g::text, 8, '0'))::bytea, 'sha256')
-		ELSE digest(''::bytea, 'sha256')
+		WHEN g >= 15001 THEN alias_fingerprint(ARRAY['ext-id', 'source-id', 'ext-' || lpad(g::text, 8, '0')])
+		ELSE alias_fingerprint(ARRAY[]::text[])
 	END,
 	'2026-01-01T00:00:00Z'::timestamptz,
 	'2026-01-01T00:00:00Z'::timestamptz
