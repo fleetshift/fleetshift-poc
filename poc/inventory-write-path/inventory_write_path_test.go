@@ -252,6 +252,10 @@ func TestInventoryWritePathPlans(t *testing.T) {
 	t.Run("production_replace_inventory_prepared_plan_stability", func(t *testing.T) {
 		runProductionReplacePlanStability(ctx, t, db)
 	})
+
+	t.Run("optimistic_replace_inventory_shapes", func(t *testing.T) {
+		runOptimisticReplaceShapeComparison(ctx, t, db)
+	})
 }
 
 func detectProvider() testcontainers.ContainerCustomizer {
@@ -441,6 +445,28 @@ func (r productionResult) String() string {
 	)
 }
 
+type optimisticResult struct {
+	failedReports         int
+	updatedInventory      int
+	insertedClaims        int
+	insertedContributions int
+	deletedContributions  int
+	deletedClaims         int
+	updatedFingerprints   int
+}
+
+func (r optimisticResult) String() string {
+	return fmt.Sprintf("failed_reports=%d inventory=%d inserted_claims=%d inserted_contributions=%d deleted_contributions=%d deleted_claims=%d updated_fingerprints=%d",
+		r.failedReports,
+		r.updatedInventory,
+		r.insertedClaims,
+		r.insertedContributions,
+		r.deletedContributions,
+		r.deletedClaims,
+		r.updatedFingerprints,
+	)
+}
+
 func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 
@@ -509,6 +535,263 @@ func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sq
 	}
 }
 
+func runOptimisticReplaceShapeComparison(ctx context.Context, t *testing.T, db *sql.DB) {
+	t.Helper()
+
+	type optimisticShape struct {
+		name       string
+		wantFailed int
+		build      func(iteration int) productionBatch
+	}
+
+	shapes := []optimisticShape{
+		{
+			name: "never_aliases",
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 1001 + iteration*1000, count: 1000, generation: 2,
+					aliasesFor: func(int, int) []productionAlias { return nil },
+				})
+			},
+		},
+		{
+			name: "same_aliases_fingerprint_skip",
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 18001 + iteration*1000, count: 1000, generation: 2,
+					aliasesFor: func(_ int, g int) []productionAlias { return []productionAlias{sourceAlias(g)} },
+				})
+			},
+		},
+		{
+			name: "new_secondary_alias",
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 48001 + iteration*1000, count: 1000, generation: 2,
+					aliasesFor: func(iteration, g int) []productionAlias {
+						return []productionAlias{
+							sourceAlias(g),
+							{namespace: "ext-id", key: "secondary-id", value: fmt.Sprintf("opt-secondary-%02d-%08d", iteration, g)},
+						}
+					},
+				})
+			},
+		},
+		{
+			name: "alias_retraction",
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 62001 + iteration*1000, count: 1000, generation: 2,
+					aliasesFor: func(int, int) []productionAlias { return nil },
+				})
+			},
+		},
+		{
+			name:       "self_replace_needs_fallback",
+			wantFailed: 1000,
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 70001 + iteration*1000, count: 1000, generation: 2,
+					aliasesFor: func(iteration, g int) []productionAlias {
+						return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("opt-replaced-%02d-%08d", iteration, g)}}
+					},
+				})
+			},
+		},
+		{
+			name:       "sibling_conflict_needs_fallback",
+			wantFailed: 1000,
+			build: func(iteration int) productionBatch {
+				return buildProductionShapeBatch(iteration, productionRangeSpec{
+					start: 82001, count: 1000, generation: 2,
+					aliasesFor: func(iteration, g int) []productionAlias {
+						return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("opt-conflict-%02d-%08d", iteration, g)}}
+					},
+				})
+			},
+		},
+	}
+
+	for _, shape := range shapes {
+		t.Run(shape.name, func(t *testing.T) {
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatalf("conn: %v", err)
+			}
+			defer conn.Close()
+
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin tx: %v", err)
+			}
+			defer tx.Rollback()
+
+			if _, err := tx.ExecContext(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
+				t.Fatalf("set plan_cache_mode: %v", err)
+			}
+
+			stmt, err := tx.PrepareContext(ctx, optimisticReplaceInventorySQL())
+			if err != nil {
+				t.Fatalf("prepare optimistic replace: %v", err)
+			}
+			defer stmt.Close()
+
+			var elapsed []time.Duration
+			var last optimisticResult
+			for i := 0; i < 4; i++ {
+				batch := shape.build(i)
+				start := time.Now()
+				got, err := execOptimisticReplace(ctx, stmt, batch)
+				if err != nil {
+					t.Fatalf("optimistic replace iteration %d: %v", i+1, err)
+				}
+				elapsed = append(elapsed, time.Since(start))
+				last = got
+				if got.failedReports != shape.wantFailed {
+					t.Fatalf("optimistic replace iteration %d failed_reports = %d, want %d; result %s", i+1, got.failedReports, shape.wantFailed, got)
+				}
+				if got.updatedInventory != 1000 {
+					t.Fatalf("optimistic replace iteration %d inventory = %d, want 1000; result %s", i+1, got.updatedInventory, got)
+				}
+			}
+
+			t.Logf("optimistic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed), last)
+		})
+	}
+
+	for _, shape := range shapes {
+		t.Run("diagnostic_"+shape.name, func(t *testing.T) {
+			conn, err := db.Conn(ctx)
+			if err != nil {
+				t.Fatalf("conn: %v", err)
+			}
+			defer conn.Close()
+
+			tx, err := conn.BeginTx(ctx, nil)
+			if err != nil {
+				t.Fatalf("begin tx: %v", err)
+			}
+			defer tx.Rollback()
+
+			if _, err := tx.ExecContext(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
+				t.Fatalf("set plan_cache_mode: %v", err)
+			}
+
+			stmt, err := tx.PrepareContext(ctx, productionReplaceInventorySQL())
+			if err != nil {
+				t.Fatalf("prepare diagnostic replace: %v", err)
+			}
+			defer stmt.Close()
+
+			var elapsed []time.Duration
+			var last productionResult
+			for i := 0; i < 4; i++ {
+				batch := shape.build(i)
+				start := time.Now()
+				got, err := execProductionReplace(ctx, stmt, batch)
+				if err != nil {
+					t.Fatalf("diagnostic replace iteration %d: %v", i+1, err)
+				}
+				elapsed = append(elapsed, time.Since(start))
+				last = got
+				if got.updatedInventory != 1000 {
+					t.Fatalf("diagnostic replace iteration %d inventory = %d, want 1000; result %s", i+1, got.updatedInventory, got)
+				}
+			}
+
+			t.Logf("diagnostic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed), last)
+		})
+	}
+
+	t.Run("mixed_batch_savepoint_then_diagnostic_fallback", func(t *testing.T) {
+		conn, err := db.Conn(ctx)
+		if err != nil {
+			t.Fatalf("conn: %v", err)
+		}
+		defer conn.Close()
+
+		tx, err := conn.BeginTx(ctx, nil)
+		if err != nil {
+			t.Fatalf("begin tx: %v", err)
+		}
+		defer tx.Rollback()
+
+		if _, err := tx.ExecContext(ctx, "SET LOCAL plan_cache_mode = force_generic_plan"); err != nil {
+			t.Fatalf("set plan_cache_mode: %v", err)
+		}
+
+		optimisticStmt, err := tx.PrepareContext(ctx, optimisticReplaceInventorySQL())
+		if err != nil {
+			t.Fatalf("prepare optimistic replace: %v", err)
+		}
+		defer optimisticStmt.Close()
+
+		diagnosticStmt, err := tx.PrepareContext(ctx, productionReplaceInventorySQL())
+		if err != nil {
+			t.Fatalf("prepare diagnostic replace: %v", err)
+		}
+		defer diagnosticStmt.Close()
+
+		var optimisticElapsed []time.Duration
+		var diagnosticElapsed []time.Duration
+		var totalElapsed []time.Duration
+		var lastOptimistic optimisticResult
+		var lastDiagnostic productionResult
+		for i := 0; i < 4; i++ {
+			batch := buildProductionReplaceBatch(i)
+			totalStart := time.Now()
+			if _, err := tx.ExecContext(ctx, "SAVEPOINT optimistic_attempt"); err != nil {
+				t.Fatalf("savepoint iteration %d: %v", i+1, err)
+			}
+
+			optimisticStart := time.Now()
+			gotOptimistic, err := execOptimisticReplace(ctx, optimisticStmt, batch)
+			if err != nil {
+				t.Fatalf("optimistic replace iteration %d: %v", i+1, err)
+			}
+			optimisticElapsed = append(optimisticElapsed, time.Since(optimisticStart))
+			lastOptimistic = gotOptimistic
+			if gotOptimistic.failedReports != 300 {
+				t.Fatalf("optimistic replace mixed iteration %d failed_reports = %d, want 300; result %s", i+1, gotOptimistic.failedReports, gotOptimistic)
+			}
+
+			if _, err := tx.ExecContext(ctx, "ROLLBACK TO SAVEPOINT optimistic_attempt"); err != nil {
+				t.Fatalf("rollback savepoint iteration %d: %v", i+1, err)
+			}
+
+			diagnosticStart := time.Now()
+			gotDiagnostic, err := execProductionReplace(ctx, diagnosticStmt, batch)
+			if err != nil {
+				t.Fatalf("diagnostic replace iteration %d: %v", i+1, err)
+			}
+			diagnosticElapsed = append(diagnosticElapsed, time.Since(diagnosticStart))
+			lastDiagnostic = gotDiagnostic
+			wantDiagnostic := productionResult{
+				resourceConflicts:     100,
+				updatedInventory:      1000,
+				insertedClaims:        200,
+				updatedClaims:         200,
+				upsertedContributions: 200,
+				deletedContributions:  100,
+				deletedClaims:         100,
+				updatedFingerprints:   500,
+			}
+			if gotDiagnostic != wantDiagnostic {
+				t.Fatalf("diagnostic replace iteration %d result = %s, want %s", i+1, gotDiagnostic, wantDiagnostic)
+			}
+
+			if _, err := tx.ExecContext(ctx, "RELEASE SAVEPOINT optimistic_attempt"); err != nil {
+				t.Fatalf("release savepoint iteration %d: %v", i+1, err)
+			}
+			totalElapsed = append(totalElapsed, time.Since(totalStart))
+		}
+
+		t.Logf("optimistic mixed first attempts before fallback: %s; last %s", formatDurations(optimisticElapsed), lastOptimistic)
+		t.Logf("diagnostic mixed fallback executions: %s; last %s", formatDurations(diagnosticElapsed), lastDiagnostic)
+		t.Logf("combined optimistic+fallback mixed executions: %s", formatDurations(totalElapsed))
+	})
+}
+
 func execProductionReplace(ctx context.Context, stmt *sql.Stmt, batch productionBatch) (productionResult, error) {
 	rows, err := stmt.QueryContext(ctx, batch.args()...)
 	if err != nil {
@@ -535,6 +818,34 @@ func execProductionReplace(ctx context.Context, stmt *sql.Stmt, batch production
 		&out.updatedFingerprints,
 	); err != nil {
 		return productionResult{}, err
+	}
+	return out, rows.Err()
+}
+
+func execOptimisticReplace(ctx context.Context, stmt *sql.Stmt, batch productionBatch) (optimisticResult, error) {
+	rows, err := stmt.QueryContext(ctx, batch.args()...)
+	if err != nil {
+		return optimisticResult{}, err
+	}
+	defer rows.Close()
+
+	var out optimisticResult
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return optimisticResult{}, err
+		}
+		return optimisticResult{}, fmt.Errorf("no result row")
+	}
+	if err := rows.Scan(
+		&out.failedReports,
+		&out.updatedInventory,
+		&out.insertedClaims,
+		&out.insertedContributions,
+		&out.deletedContributions,
+		&out.deletedClaims,
+		&out.updatedFingerprints,
+	); err != nil {
+		return optimisticResult{}, err
 	}
 	return out, rows.Err()
 }
@@ -704,13 +1015,58 @@ func formatDurations(durations []time.Duration) string {
 	return strings.Join(parts, ", ")
 }
 
+type productionRangeSpec struct {
+	start      int
+	count      int
+	generation int
+	aliasesFor func(iteration, g int) []productionAlias
+}
+
 func buildProductionReplaceBatch(iteration int) productionBatch {
+	return buildProductionShapeBatch(iteration,
+		productionRangeSpec{
+			start: 1001 + iteration*200, count: 200, generation: 2,
+			aliasesFor: func(int, int) []productionAlias { return nil },
+		},
+		productionRangeSpec{
+			start: 18001 + iteration*200, count: 200, generation: 2,
+			aliasesFor: func(_ int, g int) []productionAlias { return []productionAlias{sourceAlias(g)} },
+		},
+		productionRangeSpec{
+			start: 48001 + iteration*200, count: 200, generation: 2,
+			aliasesFor: func(iteration, g int) []productionAlias {
+				return []productionAlias{
+					sourceAlias(g),
+					{namespace: "ext-id", key: "secondary-id", value: fmt.Sprintf("prod-secondary-%02d-%08d", iteration, g)},
+				}
+			},
+		},
+		productionRangeSpec{
+			start: 70001 + iteration*200, count: 200, generation: 2,
+			aliasesFor: func(iteration, g int) []productionAlias {
+				return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-replaced-%02d-%08d", iteration, g)}}
+			},
+		},
+		productionRangeSpec{
+			start: 62001 + iteration*100, count: 100, generation: 2,
+			aliasesFor: func(int, int) []productionAlias { return nil },
+		},
+		productionRangeSpec{
+			start: 82101 + iteration*100, count: 100, generation: 2,
+			aliasesFor: func(iteration, g int) []productionAlias {
+				return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-conflict-%02d-%08d", iteration, g)}}
+			},
+		},
+	)
+}
+
+func buildProductionShapeBatch(iteration int, specs ...productionRangeSpec) productionBatch {
 	var b productionBatch
 	baseTime := time.Date(2026, 1, 10, 0, 0, 0, 0, time.UTC)
 
-	addRange := func(start, count, generation int, aliasesFor func(g int) []productionAlias) {
-		for g := start; g < start+count; g++ {
-			aliases := aliasesFor(g)
+	for _, spec := range specs {
+		for g := spec.start; g < spec.start+spec.count; g++ {
+			aliases := spec.aliasesFor(iteration, g)
 			receivedAt := baseTime.Add(time.Duration(iteration)*time.Minute + time.Duration(g)*time.Millisecond)
 			idx := int32(len(b.idx) + 1)
 			resourceID := resourceID(g)
@@ -721,9 +1077,9 @@ func buildProductionReplaceBatch(iteration int) productionBatch {
 			b.collectionNames = append(b.collectionNames, "widgets")
 			b.resourceIDs = append(b.resourceIDs, resourceID)
 			b.candidateUIDs = append(b.candidateUIDs, candidateUID(g))
-			b.observations = append(b.observations, observationJSON(g, generation))
-			b.labels = append(b.labels, labelsJSON(g, generation))
-			b.conditions = append(b.conditions, conditionsJSON(g, generation))
+			b.observations = append(b.observations, observationJSON(g, spec.generation))
+			b.labels = append(b.labels, labelsJSON(g, spec.generation))
+			b.conditions = append(b.conditions, conditionsJSON(g, spec.generation))
 			b.observedAts = append(b.observedAts, baseTime.Add(time.Duration(g)*time.Second))
 			b.receivedAts = append(b.receivedAts, receivedAt)
 			b.aliasFingerprints = append(b.aliasFingerprints, aliasSetFingerprint(aliases))
@@ -739,28 +1095,6 @@ func buildProductionReplaceBatch(iteration int) productionBatch {
 			}
 		}
 	}
-
-	addRange(1001+iteration*200, 200, 2, func(int) []productionAlias {
-		return nil
-	})
-	addRange(18001+iteration*200, 200, 2, func(g int) []productionAlias {
-		return []productionAlias{sourceAlias(g)}
-	})
-	addRange(48001+iteration*200, 200, 2, func(g int) []productionAlias {
-		return []productionAlias{
-			sourceAlias(g),
-			{namespace: "ext-id", key: "secondary-id", value: fmt.Sprintf("prod-secondary-%02d-%08d", iteration, g)},
-		}
-	})
-	addRange(70001+iteration*200, 200, 2, func(g int) []productionAlias {
-		return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-replaced-%02d-%08d", iteration, g)}}
-	})
-	addRange(62001+iteration*100, 100, 2, func(int) []productionAlias {
-		return nil
-	})
-	addRange(82101+iteration*100, 100, 2, func(g int) []productionAlias {
-		return []productionAlias{{namespace: "ext-id", key: "source-id", value: fmt.Sprintf("prod-conflict-%02d-%08d", iteration, g)}}
-	})
 
 	return b
 }
@@ -797,7 +1131,15 @@ func hashString(h hash.Hash, s string) {
 }
 
 func productionReplaceInventorySQL() string {
-	return fullReplaceCoreSQL(`WITH raw_reports AS MATERIALIZED (
+	return fullReplaceCoreSQL(productionInputCTEs())
+}
+
+func optimisticReplaceInventorySQL() string {
+	return optimisticReplaceCoreSQL(productionInputCTEs())
+}
+
+func productionInputCTEs() string {
+	return `WITH raw_reports AS MATERIALIZED (
 	SELECT
 		idx,
 		service_name,
@@ -876,7 +1218,183 @@ reported_aliases AS MATERIALIZED (
 		$19::timestamptz[]
 	) AS x(idx, namespace, key, value, collection_name, resource_id, received_at)
 	JOIN input_reports ir ON ir.idx = x.idx
-)`)
+)`
+}
+
+func optimisticReplaceCoreSQL(inputCTEs string) string {
+	return inputCTEs + `
+, needs_alias_processing AS MATERIALIZED (
+	SELECT *
+	FROM input_reports
+	WHERE reported_alias_fingerprint IS DISTINCT FROM stored_alias_fingerprint
+),
+input_aliases AS MATERIALIZED (
+	SELECT row_number() OVER () AS cand_id, ra.*
+	FROM reported_aliases ra
+	JOIN needs_alias_processing nr ON nr.idx = ra.idx
+),
+current_contributions AS MATERIALIZED (
+	SELECT ia.cand_id, ia.idx, ia.source_uid, ia.namespace, ia.key, ia.value, ia.collection_name, ia.resource_id, ia.received_at,
+	       c.claim_id AS current_claim_id,
+	       cl.value AS current_value,
+	       cl.platform_collection_name AS current_collection_name,
+	       cl.platform_resource_id AS current_resource_id
+	FROM input_aliases ia
+	LEFT JOIN resource_alias_contributions c
+	  ON c.source_extension_resource_uid = ia.source_uid
+	 AND c.namespace = ia.namespace
+	 AND c.key = ia.key
+	LEFT JOIN resource_alias_claims cl ON cl.id = c.claim_id
+),
+changed_aliases AS MATERIALIZED (
+	SELECT cand_id, idx, source_uid, namespace, key, value, collection_name, resource_id, received_at
+	FROM current_contributions
+	WHERE current_claim_id IS NULL
+	   OR current_value IS DISTINCT FROM value
+	   OR current_collection_name IS DISTINCT FROM collection_name
+	   OR current_resource_id IS DISTINCT FROM resource_id
+),
+upsert_inventory AS (
+	INSERT INTO extension_resource_inventory (
+		extension_resource_uid,
+		observation,
+		labels,
+		conditions,
+		observed_at,
+		updated_at
+	)
+	SELECT source_uid, observation, labels, conditions, observed_at, received_at
+	FROM input_reports
+	ON CONFLICT (extension_resource_uid)
+	DO UPDATE SET
+		observation = COALESCE(EXCLUDED.observation, extension_resource_inventory.observation),
+		labels = EXCLUDED.labels,
+		conditions = EXCLUDED.conditions,
+		observed_at = EXCLUDED.observed_at,
+		updated_at = EXCLUDED.updated_at
+	RETURNING 1
+),
+inserted_claims AS (
+	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
+	SELECT DISTINCT namespace, key, value, collection_name, resource_id, received_at
+	FROM changed_aliases
+	ON CONFLICT DO NOTHING
+	RETURNING id, namespace, key, value, platform_collection_name, platform_resource_id
+),
+existing_exact_claims AS MATERIALIZED (
+	SELECT ia.cand_id, ia.idx, ia.source_uid, ia.namespace, ia.key, ia.received_at, cl.id AS claim_id
+	FROM input_aliases ia
+	JOIN resource_alias_claims cl
+	  ON cl.namespace = ia.namespace
+	 AND cl.key = ia.key
+	 AND cl.value = ia.value
+	 AND cl.platform_collection_name = ia.collection_name
+	 AND cl.platform_resource_id = ia.resource_id
+),
+exact_claims AS MATERIALIZED (
+	SELECT * FROM existing_exact_claims
+	UNION ALL
+	SELECT ia.cand_id, ia.idx, ia.source_uid, ia.namespace, ia.key, ia.received_at, ic.id AS claim_id
+	FROM changed_aliases ia
+	JOIN inserted_claims ic
+	  ON ic.namespace = ia.namespace
+	 AND ic.key = ia.key
+	 AND ic.value = ia.value
+	 AND ic.platform_collection_name = ia.collection_name
+	 AND ic.platform_resource_id = ia.resource_id
+),
+inserted_contributions AS (
+	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id, created_at)
+	SELECT DISTINCT ON (source_uid, namespace, key) source_uid, namespace, key, claim_id, received_at
+	FROM exact_claims ec
+	WHERE EXISTS (SELECT 1 FROM changed_aliases ca WHERE ca.cand_id = ec.cand_id)
+	ORDER BY source_uid, namespace, key
+	ON CONFLICT DO NOTHING
+	RETURNING source_extension_resource_uid, namespace, key, claim_id
+),
+del_aliases_absent AS (
+	DELETE FROM resource_alias_contributions c
+	USING needs_alias_processing nr
+	WHERE c.source_extension_resource_uid = nr.source_uid
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM reported_aliases ra
+		WHERE ra.source_uid = c.source_extension_resource_uid
+		  AND ra.namespace = c.namespace
+		  AND ra.key = c.key
+	  )
+	RETURNING c.source_extension_resource_uid, c.namespace, c.key, c.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING (SELECT DISTINCT claim_id FROM del_aliases_absent) d
+	WHERE cl.id = d.claim_id
+	  AND NOT cl.platform_owned
+	  AND NOT EXISTS (
+		SELECT 1
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = cl.id
+		  AND NOT EXISTS (
+			SELECT 1
+			FROM del_aliases_absent da
+			WHERE da.source_extension_resource_uid = c.source_extension_resource_uid
+			  AND da.namespace = c.namespace
+			  AND da.key = c.key
+			  AND da.claim_id = c.claim_id
+		  )
+	  )
+	RETURNING 1
+),
+reported_alias_counts AS (
+	SELECT idx, count(*) AS alias_count
+	FROM input_aliases
+	GROUP BY idx
+),
+applied_aliases AS (
+	SELECT ec.idx, ec.cand_id
+	FROM exact_claims ec
+	LEFT JOIN resource_alias_contributions existing
+	  ON existing.source_extension_resource_uid = ec.source_uid
+	 AND existing.namespace = ec.namespace
+	 AND existing.key = ec.key
+	 AND existing.claim_id = ec.claim_id
+	LEFT JOIN inserted_contributions inserted
+	  ON inserted.source_extension_resource_uid = ec.source_uid
+	 AND inserted.namespace = ec.namespace
+	 AND inserted.key = ec.key
+	 AND inserted.claim_id = ec.claim_id
+	WHERE existing.source_extension_resource_uid IS NOT NULL
+	   OR inserted.source_extension_resource_uid IS NOT NULL
+),
+applied_alias_counts AS (
+	SELECT idx, count(*) AS alias_count
+	FROM applied_aliases
+	GROUP BY idx
+),
+failed_reports AS (
+	SELECT nr.idx
+	FROM needs_alias_processing nr
+	LEFT JOIN reported_alias_counts reported ON reported.idx = nr.idx
+	LEFT JOIN applied_alias_counts applied ON applied.idx = nr.idx
+	WHERE COALESCE(reported.alias_count, 0) <> COALESCE(applied.alias_count, 0)
+),
+updated_fingerprints AS (
+	UPDATE extension_resources er
+	SET alias_fingerprint = nr.reported_alias_fingerprint,
+	    updated_at = nr.received_at
+	FROM needs_alias_processing nr
+	WHERE er.uid = nr.source_uid
+	  AND NOT EXISTS (SELECT 1 FROM failed_reports failed WHERE failed.idx = nr.idx)
+	RETURNING 1
+)
+SELECT
+	(SELECT count(*) FROM failed_reports) AS failed_reports,
+	(SELECT count(*) FROM upsert_inventory) AS updated_inventory,
+	(SELECT count(*) FROM inserted_claims) AS inserted_claims,
+	(SELECT count(*) FROM inserted_contributions) AS inserted_contributions,
+	(SELECT count(*) FROM del_aliases_absent) AS deleted_contributions,
+	(SELECT count(*) FROM deleted_orphan_claims) AS deleted_claims,
+	(SELECT count(*) FROM updated_fingerprints) AS updated_fingerprints`
 }
 
 func candidateUID(g int) string {
@@ -1626,16 +2144,24 @@ reported_aliases AS MATERIALIZED (
 
 func fullReplaceCoreSQL(inputCTEs string) string {
 	return inputCTEs + `
+-- Alias work is gated by the caller-computed fingerprint. The common no-alias
+-- and unchanged-alias cases stop here and still get the latest inventory write.
 , needs_alias_processing AS MATERIALIZED (
 	SELECT *
 	FROM input_reports
 	WHERE reported_alias_fingerprint IS DISTINCT FROM stored_alias_fingerprint
 ),
+-- Normalize reported aliases into per-alias candidates. cand_id is local to
+-- this statement and prevents multiple aliases from the same report from being
+-- accidentally collapsed during conflict classification.
 input_aliases AS MATERIALIZED (
 	SELECT row_number() OVER () AS cand_id, ra.*
 	FROM reported_aliases ra
 	JOIN needs_alias_processing nr ON nr.idx = ra.idx
 ),
+-- Look up what this extension resource currently contributes for the same
+-- namespace/key. If it already points at the same claim value and target, this
+-- alias is a true no-op and should not read or write the claim indexes further.
 self_claim AS (
 	SELECT ia.cand_id, ia.idx, ia.namespace, ia.key, ia.value, ia.collection_name, ia.resource_id, ia.received_at, ia.source_uid,
 	       c.claim_id AS self_claim_id, cl.value AS self_value,
@@ -1656,6 +2182,8 @@ self_claim AS (
 		LIMIT 1 OFFSET 0
 	) cl ON true
 ),
+-- Keep only aliases whose contributor row is new, points at a different claim,
+-- or points at a claim whose target metadata no longer matches the report.
 changed AS (
 	SELECT cand_id, idx, namespace, key, value, collection_name, resource_id, received_at, source_uid, self_claim_id
 	FROM self_claim
@@ -1664,6 +2192,9 @@ changed AS (
 	   OR self_collection_name IS DISTINCT FROM collection_name
 	   OR self_resource_id IS DISTINCT FROM resource_id
 ),
+-- Global invariant 1: one alias value maps to at most one platform resource.
+-- This lookup asks whether the reported namespace/key/value is already claimed,
+-- and if so which target owns it.
 by_value AS (
 	SELECT ch.cand_id, vc.id AS value_claim_id, vc.platform_collection_name AS value_collection_name, vc.platform_resource_id AS value_resource_id
 	FROM changed ch
@@ -1674,6 +2205,9 @@ by_value AS (
 		LIMIT 1 OFFSET 0
 	) vc ON true
 ),
+-- Global invariant 2: one platform resource has at most one value for a given
+-- namespace/key. This lookup asks whether the target resource already has a
+-- claim for the same namespace/key, possibly with a different value.
 by_resource AS (
 	SELECT ch.cand_id, rc.id AS resource_claim_id, rc.value AS resource_value, rc.platform_owned AS resource_platform_owned
 	FROM changed ch
@@ -1686,6 +2220,9 @@ by_resource AS (
 		LIMIT 1 OFFSET 0
 	) rc ON true
 ),
+-- A same-resource different-value claim is only movable when this same
+-- extension resource is the sole contributor. Platform-owned claims and claims
+-- still held by another extension resource are treated as conflicts.
 sibling AS (
 	SELECT br.cand_id,
 	       br.resource_claim_id IS NOT NULL
@@ -1701,6 +2238,9 @@ sibling AS (
 	       ) AS sibling_holds
 	FROM by_resource br
 ),
+-- Conflict: the requested alias value already points at a different platform
+-- resource. The candidate is rejected, but other candidates in the batch remain
+-- eligible and latest-state inventory writes are not gated by this conflict.
 alias_value_conflicts AS (
 	SELECT ch.idx, ch.namespace, ch.key, ch.value,
 	       bv.value_collection_name AS actual_collection_name, bv.value_resource_id AS actual_resource_id
@@ -1709,6 +2249,8 @@ alias_value_conflicts AS (
 	WHERE bv.value_claim_id IS NOT NULL
 	  AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id)
 ),
+-- Conflict: the target resource already has a different value for this
+-- namespace/key, and that claim is not movable by this contributor alone.
 alias_resource_conflicts AS (
 	SELECT ch.idx, ch.namespace, ch.key, ch.value, br.resource_value AS existing_value
 	FROM changed ch
@@ -1719,6 +2261,9 @@ alias_resource_conflicts AS (
 	  AND br.resource_claim_id IS NOT NULL
 	  AND s.sibling_holds
 ),
+-- The writeable alias set is per-candidate partial success: conflicts remove
+-- only the offending aliases from alias writes. They do not abort the whole
+-- batch and do not suppress the latest inventory upsert below.
 safe AS (
 	SELECT ch.cand_id, ch.idx, ch.namespace, ch.key, ch.value, ch.collection_name, ch.resource_id, ch.received_at, ch.source_uid, ch.self_claim_id,
 	       bv.value_claim_id, br.resource_claim_id
@@ -1729,12 +2274,15 @@ safe AS (
 	WHERE NOT (bv.value_claim_id IS NOT NULL AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id))
 	  AND NOT (bv.value_claim_id IS NULL AND br.resource_claim_id IS NOT NULL AND s.sibling_holds)
 ),
+-- Brand-new claim: no existing claim by value and no existing claim by target.
 claim_creates AS (
 	SELECT namespace, key, value, collection_name, resource_id, received_at, source_uid
 	FROM safe
 	WHERE value_claim_id IS NULL
 	  AND resource_claim_id IS NULL
 ),
+-- Same resource, same contributor, different value: mutate the existing claim
+-- row in place. This preserves the contribution row and avoids an orphan sweep.
 claim_self_replace AS (
 	SELECT value, received_at, resource_claim_id
 	FROM safe
@@ -1742,12 +2290,17 @@ claim_self_replace AS (
 	  AND resource_claim_id IS NOT NULL
 	  AND self_claim_id = resource_claim_id
 ),
+-- Existing value already points at this target: attach this contributor to the
+-- existing claim instead of creating a duplicate claim.
 claim_reuse AS (
 	SELECT namespace, key, received_at, source_uid, value_claim_id
 	FROM safe
 	WHERE value_claim_id IS NOT NULL
 	  AND self_claim_id IS NULL
 ),
+-- Latest inventory state is independent from alias conflict success. A report
+-- with a rejected alias still updates observation, labels, conditions, and
+-- freshness timestamps.
 upsert_inventory AS (
 	INSERT INTO extension_resource_inventory (
 		extension_resource_uid,
@@ -1768,12 +2321,17 @@ upsert_inventory AS (
 		updated_at = EXCLUDED.updated_at
 	RETURNING 1
 ),
+-- Create only claims proven safe by classification. This intentionally relies
+-- on the previous CTEs rather than broad ON CONFLICT handling, so unexpected
+-- uniqueness violations remain visible during POC iteration.
 inserted_claims AS (
 	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
 	SELECT DISTINCT namespace, key, value, collection_name, resource_id, received_at
 	FROM claim_creates
 	RETURNING id, namespace, key, value
 ),
+-- Move a same-resource claim to the newly reported value when this contributor
+-- is allowed to own that move.
 updated_claims AS (
 	UPDATE resource_alias_claims cl
 	SET value = sr.value
@@ -1781,6 +2339,9 @@ updated_claims AS (
 	WHERE cl.id = sr.resource_claim_id
 	RETURNING 1
 ),
+-- All claim ids that need a contribution row after this report: reused existing
+-- claims plus newly inserted claims. Self-replaces are absent because their
+-- contribution row already points at the updated claim.
 claim_targets AS (
 	SELECT namespace, key, received_at, source_uid, value_claim_id AS claim_id
 	FROM claim_reuse
@@ -1789,6 +2350,9 @@ claim_targets AS (
 	FROM claim_creates cc
 	JOIN inserted_claims ic ON ic.namespace = cc.namespace AND ic.key = cc.key AND ic.value = cc.value
 ),
+-- Add new contribution rows. For this full-replace shape, changed same-key
+-- aliases either self-replace in place or reuse a claim when no self row exists;
+-- an unexpected duplicate contribution should fail loudly in the POC.
 upserted_contributions AS (
 	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id, created_at)
 	SELECT DISTINCT ON (source_uid, namespace, key) source_uid, namespace, key, claim_id, received_at
@@ -1796,6 +2360,8 @@ upserted_contributions AS (
 	ORDER BY source_uid, namespace, key
 	RETURNING claim_id
 ),
+-- Full replacement semantics: for any report whose alias fingerprint changed,
+-- a previously contributed namespace/key absent from the new report is retracted.
 del_aliases_absent AS (
 	DELETE FROM resource_alias_contributions c
 	USING needs_alias_processing nr
@@ -1806,12 +2372,18 @@ del_aliases_absent AS (
 		WHERE ra.source_uid = c.source_extension_resource_uid
 		  AND ra.namespace = c.namespace
 		  AND ra.key = c.key
-	  )
+	)
 	RETURNING c.claim_id
 ),
+-- Orphan cleanup only needs to consider claims touched by retraction. Claim
+-- self-replace updates a claim in place, and this full-replace POC does not
+-- otherwise move an existing contribution away from one claim id to another.
 touched_claims AS (
 	SELECT DISTINCT claim_id FROM del_aliases_absent
 ),
+-- Count references that remain visible after the delete CTE in this same
+-- statement. This baseline is adjusted by statement-local contribution writes
+-- below so cleanup can stay in one SQL statement.
 baseline_contrib_counts AS (
 	SELECT tc.claim_id, cc.baseline_ct
 	FROM touched_claims tc
@@ -1821,6 +2393,8 @@ baseline_contrib_counts AS (
 		WHERE c.claim_id = tc.claim_id
 	) cc ON true
 ),
+-- Account for statement-local contribution changes that may not be reflected
+-- by a plain table read in the way we need for orphan decisions.
 refcount_deltas AS (
 	SELECT claim_id, -count(*)::bigint AS delta_refs
 	FROM del_aliases_absent
@@ -1830,11 +2404,14 @@ refcount_deltas AS (
 	FROM upserted_contributions
 	GROUP BY claim_id
 ),
+-- Collapse contribution changes per claim id.
 net_refcount_deltas AS (
 	SELECT claim_id, sum(delta_refs)::bigint AS delta_refs
 	FROM refcount_deltas
 	GROUP BY claim_id
 ),
+-- A claim can be deleted only if the visible baseline plus statement-local
+-- deltas leaves it with zero contributors.
 remaining_refs AS (
 	SELECT tc.claim_id,
 	       COALESCE(bcc.baseline_ct, 0) + COALESCE(nrd.delta_refs, 0) AS net_refs
@@ -1842,6 +2419,8 @@ remaining_refs AS (
 	LEFT JOIN baseline_contrib_counts bcc ON bcc.claim_id = tc.claim_id
 	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
 ),
+-- Delete unowned claims that no longer have contributors. Platform-owned claims
+-- are retained even with zero extension contributions.
 deleted_orphan_claims AS (
 	DELETE FROM resource_alias_claims cl
 	USING remaining_refs rr
@@ -1850,12 +2429,16 @@ deleted_orphan_claims AS (
 	  AND NOT cl.platform_owned
 	RETURNING 1
 ),
+-- The stored fingerprint is advanced only for reports with no alias conflicts.
+-- A conflicting report keeps its old fingerprint so the next report retries
+-- alias reconciliation instead of being skipped as already-applied.
 fingerprint_updates AS (
 	SELECT nr.idx, nr.source_uid, nr.reported_alias_fingerprint, nr.received_at
 	FROM needs_alias_processing nr
 	WHERE NOT EXISTS (SELECT 1 FROM alias_value_conflicts avc WHERE avc.idx = nr.idx)
 	  AND NOT EXISTS (SELECT 1 FROM alias_resource_conflicts arc WHERE arc.idx = nr.idx)
 ),
+-- Persist successful alias reconciliation at the extension-resource level.
 updated_fingerprints AS (
 	UPDATE extension_resources er
 	SET alias_fingerprint = fu.reported_alias_fingerprint,
@@ -1864,6 +2447,8 @@ updated_fingerprints AS (
 	WHERE er.uid = fu.source_uid
 	RETURNING 1
 )
+-- The POC returns counters rather than production response rows so benchmarks
+-- can assert behavior while keeping result materialization small.
 SELECT
 	(SELECT count(*) FROM alias_value_conflicts) AS value_conflicts,
 	(SELECT count(*) FROM alias_resource_conflicts) AS resource_conflicts,

@@ -74,3 +74,41 @@ summaries. The practical implication is that the production implementation
 should avoid paying the first five custom-plan executions per connection for
 this statement, either by forcing a generic plan for this write or by otherwise
 choosing an execution mode that does not hit the slow custom-plan path.
+
+## Optimistic first-attempt experiment
+
+`optimistic_replace_inventory_shapes` tests a smaller first-attempt statement
+beside the diagnostic mega-CTE. The optimistic statement does not classify alias
+conflicts deeply. It writes latest inventory state, gates alias work by the alias
+fingerprint, skips aliases whose current contribution already points at the
+exact reported claim, inserts missing exact claims and contributions with
+`ON CONFLICT DO NOTHING`, deletes absent contributions for full replacement,
+performs minimal orphan cleanup, and returns `failed_reports` when the exact
+postcondition is not satisfied.
+
+The intended production shape would be: run the optimistic statement inside a
+savepoint, roll back to the savepoint if `failed_reports > 0`, then run the
+diagnostic statement only when richer conflict handling is needed.
+
+On the current Postgres 18 POC corpus, with both statements forced to generic
+plans and run against the same production-array batches, the results are not a
+clear win:
+
+- never-alias and same-alias fingerprint-skip batches are essentially tied at
+  roughly 20-25ms per 1,000 resources
+- new secondary alias insertion is also roughly tied, around 110-125ms per
+  1,000 resources
+- alias retraction is much worse in the optimistic statement, roughly
+  125-140ms per 1,000 resources versus roughly 37-40ms for the diagnostic CTE
+- self-replace and sibling-conflict batches are cheaper to detect
+  optimistically, but if the diagnostic fallback runs immediately, the combined
+  path is slower than running the diagnostic CTE first
+- the mixed batch with 300 failed reports costs roughly 40-55ms for the
+  optimistic attempt plus roughly 50-55ms for diagnostic fallback, versus
+  roughly 50-60ms for the diagnostic statement alone
+
+The takeaway is that this optimistic statement is useful as a reference and
+possibly as a cheap "can I apply this without diagnostics?" probe, but it does
+not currently justify replacing the diagnostic CTE when synchronous diagnostic
+fallback is required. Retraction cleanup is the biggest weakness in the simple
+statement.
