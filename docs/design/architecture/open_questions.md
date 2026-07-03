@@ -207,6 +207,23 @@ How should addons declare their permission schema to the platform: SpiceDB ZED, 
 
 **Context:** During bootstrap, infrastructure state may need to move from the local bootstrap environment into the real cluster. The open questions are whether `clusterctl move` should run as a subprocess or be reimplemented with client libraries, what state beyond CAPI objects needs to transfer, whether ordinary `DeploymentGroup` sequencing is enough, and how recovery should work if the move fails mid-pivot.
 
+## Resource identity and aliases
+
+### Alias write path's shared prepared statement and Postgres's generic-plan switch
+
+**Question:** Should the Postgres alias write path (`ReplaceInventory`/`ApplyInventoryDeltas`'s `aliasFoldCTEs`-based statements) force a specific `plan_cache_mode` for itself, or otherwise reduce its plan-shape variance, to avoid a bad generic plan settling in?
+
+**Context:** Benchmarking the `resource_alias_claims`/`resource_alias_contributions` write path (see `fleetshift-server/internal/infrastructure/postgres/inventory_bench_test.go`'s `BenchmarkCTE_ReplaceInventory_RetractAlias`) surfaced a real Postgres query-planning cliff: explicit alias retraction at batch=1,000 cost 1,080.7µs/item under default conditions, versus 225.2µs/item with `plan_cache_mode` explicitly forced to `force_custom_plan` on the same connection -- a confirmed, repeatable &#126;4.3x gap, not benchmark noise. Root cause: `database/sql`'s pgx driver defaults to `QueryExecModeCacheStatement`, which prepares `replaceInventorySQL` once per connection and reuses it for every alias-shaped call (no-op, self-replace, retraction, conflict...). Postgres tries a generic (parameter-value-agnostic) plan starting with that prepared statement's 6th execution on a connection, and keeps it if the estimated cost looks close enough to the custom-plan average of the first five. Retraction's own cost estimate in `EXPLAIN` for `deleted_orphan_claims` ranges from 2,006 to 210,489 -- an unusually wide spread that is exactly the shape a generic plan handles worst, since it must pick one plan that's tolerable across that whole range rather than the cheap end most calls actually need. Full numbers and the isolated custom-vs-generic-plan confirmation are in the `inventory-write-path-benchmark` canvas.
+
+**Why this matters beyond the benchmark:** production connections also default to `cache_statement` mode and also call `ReplaceInventory`/`ApplyInventoryDeltas` repeatedly across widely varying alias-report shapes on the same long-lived connection, so any production connection could eventually settle into the same bad generic plan.
+
+**Candidate mitigations, none evaluated in depth or applied yet:**
+
+- Force `plan_cache_mode = force_custom_plan` for just this statement (a targeted, low-risk session/statement-level setting) -- always pays custom-planning cost per call, but avoids ever picking a bad generic plan.
+- Reduce the fold-in's plan-shape variance directly, e.g. restructuring `aliasRetractAbsentCTE`'s refcount cleanup pipeline (`touched_claims` through `deleted_orphan_claims`) so its cost estimate doesn't swing as widely between "nothing to retract" and "large batch retraction."
+- Periodic connection recycling (bounding how long any one connection can ride out a bad generic plan) -- treats the symptom, not the cause, and doesn't help a connection that goes bad early in its life.
+- Accept it as a known, monitored risk (e.g. via `pg_prepared_statements`'s `generic_plans`/`custom_plans` columns) rather than changing the write path.
+
 ## Addon integration and UI
 
 ### UI plugin mechanism
