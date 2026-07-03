@@ -358,7 +358,17 @@ func NewAliasRef(ns AliasNamespace, key AliasKey) (AliasRef, error) {
 }
 
 // NewResourceName constructs a [ResourceName] from a collection and
-// resource ID.
+// resource ID. Like [NewCollectionName]/[NewResourceID] and every
+// other typed-parts constructor in this file, it trusts that its
+// arguments are already valid instances of their type rather than
+// re-checking invariants [ParseResourceName] already enforces on a
+// raw string (e.g. collection non-empty): once a caller holds a
+// genuine [CollectionName], it was already validated non-empty by
+// whatever produced it ([NewCollectionName] or [ParseCollectionName]),
+// so re-validating here would just be the same check performed twice.
+// A [ResourceName] built by casting a raw string directly, bypassing
+// every constructor, is a caller bug -- see [ParseResourceName]'s doc
+// -- not a case this function defends against.
 func NewResourceName(collection CollectionName, id ResourceID) (ResourceName, error) {
 	return ResourceName(string(collection) + "/" + string(id)), nil
 }
@@ -367,7 +377,18 @@ func NewResourceName(collection CollectionName, id ResourceID) (ResourceName, er
 // It validates that the string contains no leading/trailing/double
 // slashes and has an even number of segments (resource names alternate
 // collection / resource-id, e.g. "clusters/prod" or
-// "publishers/123/books/les-mis").
+// "publishers/123/books/les-mis") -- which also rules out a bare,
+// collection-less name like "prod" (one segment, no "/" at all).
+// AIP-122 itself only says name segments "should usually alternate"
+// between collection and resource-id, but this codebase reads that as
+// a hard requirement: every [ResourceName] has at least one collection
+// segment. This is the only place that requirement is checked --
+// per this codebase's "parse, don't validate" convention, nothing
+// downstream re-validates a [ResourceName] it already holds; a value
+// produced any other way than through this function (or through
+// domain code that itself upholds the invariant, e.g.
+// [NewResourceName]) is a caller bug, most likely a raw string cast
+// in a test, not a state well-typed code needs to defend against.
 func ParseResourceName(s string) (ResourceName, error) {
 	parts, err := validateCanonicalPath("resource name", s)
 	if err != nil {
@@ -386,7 +407,10 @@ func (n ResourceName) FullName(service ServiceName) FullResourceName {
 }
 
 // Collection returns the full collection path (everything before the
-// final ID segment).
+// final ID segment). It returns "" if n has no "/" at all, but that
+// is not a well-formed [ResourceName] -- see [ParseResourceName]'s
+// doc -- so this is a defensive fallback for malformed input, not an
+// endorsement of collection-less names as valid.
 func (n ResourceName) Collection() CollectionName {
 	s := string(n)
 	idx := strings.LastIndex(s, "/")

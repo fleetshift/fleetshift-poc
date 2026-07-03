@@ -228,7 +228,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 
 	view, err := resourceSvc.Create(ctx, application.CreateExtensionResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
-		Name:         "mr-cluster",
+		Name:         "clusters/mr-cluster",
 		Spec:         spec,
 	})
 	if err != nil {
@@ -239,8 +239,8 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
-	if !provider.hasCluster("mr-cluster") {
-		t.Error("expected kind cluster 'mr-cluster' to be created by the provider")
+	if !provider.hasCluster("clusters/mr-cluster") {
+		t.Error("expected kind cluster 'clusters/mr-cluster' to be created by the provider")
 	}
 }
 

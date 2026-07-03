@@ -13,7 +13,7 @@ import (
 func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	store, _ := setupStore(t)
 	spec := json.RawMessage(`{"provider":"rosa","version":"4.16.2"}`)
-	erUID := seedIntent(t, store, "test.fleetshift.io/Cluster", "prod-us-east-1", spec)
+	erUID := seedIntent(t, store, "test.fleetshift.io/Cluster", "resources/prod-us-east-1", spec)
 
 	s := &domain.ManagedResourceManifestStrategy{
 		Ref:   domain.IntentRef{ExtensionResourceUID: erUID, Version: 1, ManifestType: "clusters"},
@@ -36,8 +36,8 @@ func TestManagedResourceManifestStrategy_ResolvesIntentFromStore(t *testing.T) {
 	if err != nil {
 		t.Fatalf("UnwrapManagedResourceSpec() error = %v", err)
 	}
-	if m.Name != "prod-us-east-1" {
-		t.Errorf("Name = %q, want %q", m.Name, "prod-us-east-1")
+	if m.Name != "resources/prod-us-east-1" {
+		t.Errorf("Name = %q, want %q", m.Name, "resources/prod-us-east-1")
 	}
 	if string(m.Spec) != string(spec) {
 		t.Errorf("Spec = %s, want %s", m.Spec, spec)
