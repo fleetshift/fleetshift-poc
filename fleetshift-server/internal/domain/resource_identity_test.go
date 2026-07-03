@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"crypto/sha256"
 	"errors"
 	"testing"
 	"time"
@@ -528,4 +529,76 @@ func TestPlatformResource_EffectiveLabels_ReturnsCopy(t *testing.T) {
 	got := r.EffectiveLabels()
 	got["env"] = "mutated"
 	assertEq(t, "original unchanged", r.EffectiveLabels()["env"], "prod")
+}
+
+// ---------------------------------------------------------------------------
+// AliasSetFingerprint
+// ---------------------------------------------------------------------------
+
+func TestAliasSetFingerprint_OrderIndependent(t *testing.T) {
+	a1, _ := NewAlias("gcp", "project_id", "proj-1")
+	a2, _ := NewAlias("gcp", "zone", "us-central1-a")
+
+	forward := AliasSetFingerprint([]Alias{a1, a2})
+	reversed := AliasSetFingerprint([]Alias{a2, a1})
+
+	if string(forward) != string(reversed) {
+		t.Errorf("fingerprint depends on input order: forward=%x reversed=%x", forward, reversed)
+	}
+}
+
+func TestAliasSetFingerprint_DoesNotMutateInput(t *testing.T) {
+	a1, _ := NewAlias("gcp", "zone", "us-central1-a")
+	a2, _ := NewAlias("gcp", "project_id", "proj-1")
+	aliases := []Alias{a1, a2}
+
+	AliasSetFingerprint(aliases)
+
+	if aliases[0] != a1 || aliases[1] != a2 {
+		t.Errorf("AliasSetFingerprint mutated its input slice: got %+v", aliases)
+	}
+}
+
+func TestAliasSetFingerprint_DifferentSetsDiffer(t *testing.T) {
+	a1, _ := NewAlias("gcp", "project_id", "proj-1")
+	a2, _ := NewAlias("gcp", "project_id", "proj-2")
+
+	fp1 := AliasSetFingerprint([]Alias{a1})
+	fp2 := AliasSetFingerprint([]Alias{a2})
+
+	if string(fp1) == string(fp2) {
+		t.Error("different alias sets produced the same fingerprint")
+	}
+}
+
+// TestAliasSetFingerprint_FieldBoundariesUnambiguous guards against a
+// naive delimiter-joined ("namespace|key|value") implementation,
+// where two structurally different alias sets can collide onto the
+// same joined string. AliasSetFingerprint instead length-prefixes
+// each field (see hashString), so "ab"/"c" and "a"/"bc" -- which a
+// bare '|'-join would conflate the same way "ab|c|v" == "a|bc"... does
+// not, once a separator is involved -- must still be told apart even
+// though the two aliases' concatenated field bytes overlap.
+func TestAliasSetFingerprint_FieldBoundariesUnambiguous(t *testing.T) {
+	a1, _ := NewAlias("ab", "c", "v")
+	a2, _ := NewAlias("a", "bc", "v")
+
+	fp1 := AliasSetFingerprint([]Alias{a1})
+	fp2 := AliasSetFingerprint([]Alias{a2})
+
+	if string(fp1) == string(fp2) {
+		t.Error("field-boundary-ambiguous aliases produced the same fingerprint")
+	}
+}
+
+func TestAliasSetFingerprint_EmptySetIsStable(t *testing.T) {
+	fp1 := AliasSetFingerprint(nil)
+	fp2 := AliasSetFingerprint([]Alias{})
+
+	if string(fp1) != string(fp2) {
+		t.Error("nil and empty alias sets produced different fingerprints")
+	}
+	if len(fp1) != sha256.Size {
+		t.Errorf("len(fingerprint) = %d, want %d", len(fp1), sha256.Size)
+	}
 }

@@ -1,11 +1,5 @@
 -- +goose Up
 
--- btree_gist supplies GiST-compatible operator classes for plain
--- scalar types (text, uuid, ...), which resource_aliases' EXCLUDE
--- constraints need below -- EXCLUDE requires a GiST (or SP-GiST)
--- index, which the builtin B-tree operator classes alone can't back.
-CREATE EXTENSION IF NOT EXISTS btree_gist;
-
 -- ── Standalone tables (no foreign keys) ─────────────────────────
 
 CREATE TABLE targets (
@@ -132,10 +126,13 @@ CREATE TABLE rollout_strategies (
 --
 -- Platform resources are also virtual by default: a name with
 -- representations (derived from extension_resources, see below) but
--- no labels/aliases/relationships of its own never needs a physical
--- row here at all. A row only exists once something -- labels, an
--- alias, a relationship -- actually needs to be stored against the
--- name.
+-- no labels/relationships of its own never needs a physical row here
+-- at all. A row only exists once something -- labels, a relationship
+-- -- actually needs to be stored against the name. Aliases no longer
+-- force a row into existence either: resource_alias_claims below has
+-- no foreign key back to this table, so a claim can reference a name
+-- with no physical platform_resources row at all, the same way
+-- representations already do.
 
 CREATE TABLE platform_resources (
     collection_name TEXT NOT NULL,
@@ -179,15 +176,30 @@ CREATE TABLE extension_resource_types (
 -- representation can be derived on read by joining the two tables on
 -- that pair, rather than maintained as its own reconciled table (see
 -- resource_representations' removal below).
+-- alias_fingerprint is a sha256 hash (Go-computed, see
+-- extension_resource_repo.go's alias fold-in) of the last
+-- successfully, fully-applied ReplaceInventory alias set for this
+-- resource -- NULL means "no fingerprint on record," which always
+-- forces full alias classification. A ReplaceInventory report whose
+-- freshly-computed fingerprint matches this column can skip alias
+-- classification entirely: nothing about this resource's contributed
+-- aliases has changed since the last full replace. Any
+-- ApplyInventoryDeltas call that mutates this resource's aliases
+-- nulls this column back out, since a delta has no "complete set" to
+-- compute a comparable fingerprint from -- see
+-- applyInventoryDeltasSQLWithAliases's doc comment for why a stale
+-- fingerprint would otherwise let a later ReplaceInventory skip
+-- retracting a delta-added alias it never knew about.
 CREATE TABLE extension_resources (
-    uid             UUID PRIMARY KEY,
-    service_name    TEXT NOT NULL,
-    type_name       TEXT NOT NULL,
-    collection_name TEXT NOT NULL,
-    resource_id     TEXT NOT NULL,
-    labels          JSONB NOT NULL DEFAULT '{}',
-    created_at      TIMESTAMPTZ NOT NULL,
-    updated_at      TIMESTAMPTZ NOT NULL,
+    uid               UUID PRIMARY KEY,
+    service_name      TEXT NOT NULL,
+    type_name         TEXT NOT NULL,
+    collection_name   TEXT NOT NULL,
+    resource_id       TEXT NOT NULL,
+    labels            JSONB NOT NULL DEFAULT '{}',
+    alias_fingerprint BYTEA,
+    created_at        TIMESTAMPTZ NOT NULL,
+    updated_at        TIMESTAMPTZ NOT NULL,
     UNIQUE (service_name, collection_name, resource_id),
     FOREIGN KEY (service_name, type_name)
         REFERENCES extension_resource_types(service_name, type_name)
@@ -198,90 +210,109 @@ CREATE TABLE extension_resources (
 CREATE INDEX idx_extension_resources_collection_resource
     ON extension_resources(collection_name, resource_id);
 
--- Aliases are contributed per extension resource, additive across
--- the (possibly many) extension resources that represent the same
--- platform resource, and replaced independently per contributor --
--- see docs/design/architecture/resource_identity_and_api.md's
--- "Aliases" section for the full contract this table enforces, and
--- extension_resource_repo.go's alias fold-in for how a report is
--- turned into inserts/deletes against it.
+-- Aliases split into two tables, per the validated
+-- poc/alias-claims/ prototype -- see
+-- docs/design/architecture/resource_identity_and_api.md's "Aliases"
+-- section for the full contract, and extension_resource_repo.go's
+-- alias fold-in for how a report is turned into writes against them.
 --
--- source_extension_resource_uid makes a contributor's claim its own
--- row rather than collapsing every contributor's identical claim
--- into one: many rows can legitimately share (namespace, key, value)
--- -- e.g. two addons agreeing a cluster's instance_id is "i-123" --
--- and the alias only disappears once every contributing row does
--- (whether via an inventory report that stops asserting it, or via
--- that extension resource's own deletion -- ON DELETE CASCADE here
--- covers the latter for free). It's nullable to also accommodate
--- resource_identity_repo.go's reconcileAliases, which attaches an
--- alias directly to a platform resource with no extension resource
--- of its own behind it at all.
+-- resource_alias_claims is the canonical (namespace, key, value) ->
+-- platform resource mapping, one row per claim regardless of how
+-- many extension resources contribute it. resource_alias_contributions
+-- tracks which extension resource(s) assert a claim -- many
+-- contributors can point at the same claim (e.g. two addons agreeing
+-- a cluster's instance_id is "i-123"), and a claim only disappears
+-- once every contributing row does.
 --
--- Two EXCLUDE constraints (needing btree_gist -- see this file's
--- CREATE EXTENSION above) replace what used to be a pair of plain
--- UNIQUE indexes, back when (namespace, key, value) alone was the
--- primary key and a row could have only one contributor by
--- construction: unique indexes can't express "these two rows may
--- coexist if source_extension_resource_uid matches, but not
--- otherwise," which is exactly what letting multiple contributors
--- corroborate the same claim, while still rejecting genuine
--- disagreement, requires.
+-- Splitting the two concerns this way turns both cross-resource
+-- alias invariants into ordinary B-tree uniqueness instead of the
+-- GiST EXCLUDE constraints an earlier, single-table design needed:
 --
---   - The first EXCLUDE keeps (namespace, key, value) a function of
---     resource: rows sharing all three may never disagree on which
---     resource they belong to, regardless of contributor. Needs the
---     collection_name/resource_id pair concatenated into one
---     expression, since EXCLUDE's WITH operators are per-column.
---   - The second EXCLUDE keeps (namespace, key, resource) a function
---     of value: rows sharing all three may never disagree on value,
---     regardless of contributor.
+--   - UNIQUE (namespace, key, value) keeps the same (namespace, key,
+--     value) from ever mapping to two platform resources.
+--   - UNIQUE (namespace, key, platform_collection_name,
+--     platform_resource_id) keeps the same platform resource from
+--     ever having two different values for the same (namespace,
+--     key).
 --
--- Both are DEFERRABLE INITIALLY DEFERRED, checked at end of
--- transaction/statement rather than per-row: a contributor legitimately
--- replacing its own value for a key runs as a delete-old-row +
--- insert-new-row pair within the very same statement (see
--- extension_resource_repo.go's del_aliases_replaced), and Postgres
--- doesn't guarantee the delete is visible to the insert's constraint
--- check within one statement unless that check is deferred to the
--- end. (The plain UNIQUE constraint below stays non-deferrable --
--- ON CONFLICT can't target a deferrable constraint as its arbiter --
--- but it never needs to be deferred anyway: re-asserting the exact
--- same (namespace, key, value, source) tuple was never a real
--- conflict in the first place, just a redundant write.)
-CREATE TABLE resource_aliases (
-    namespace                     TEXT NOT NULL,
-    key                           TEXT NOT NULL,
-    value                         TEXT NOT NULL,
-    platform_collection_name      TEXT NOT NULL,
-    platform_resource_id          TEXT NOT NULL,
-    source_extension_resource_uid UUID
-        REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    created_at                    TIMESTAMPTZ NOT NULL,
-    UNIQUE NULLS NOT DISTINCT (namespace, key, value, source_extension_resource_uid),
-    EXCLUDE USING gist (
-        namespace WITH =,
-        key WITH =,
-        value WITH =,
-        (platform_collection_name || '/' || platform_resource_id) WITH <>
-    ) DEFERRABLE INITIALLY DEFERRED,
-    EXCLUDE USING gist (
-        namespace WITH =,
-        key WITH =,
-        platform_collection_name WITH =,
-        platform_resource_id WITH =,
-        value WITH <>
-    ) DEFERRABLE INITIALLY DEFERRED,
-    FOREIGN KEY (platform_collection_name, platform_resource_id)
-        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
+-- A contributor legitimately replacing its own value for a key is
+-- just an UPDATE of its existing claim row's value (when it's the
+-- claim's sole contributor) or a move of its contribution to a
+-- different, already-existing claim -- never a same-statement
+-- delete-then-insert pair racing a constraint the way the old EXCLUDE
+-- design needed, so nothing here is DEFERRABLE.
+--
+-- platform_owned marks a claim asserted directly by the platform
+-- resource itself (resource_identity_repo.go's reconcileAliases),
+-- independent of whether it also has contributions: a claim can be
+-- platform_owned with zero contributors, contributor-only with
+-- platform_owned = false, or both at once if a platform resource
+-- corroborates a claim an extension resource already contributed.
+-- This is what makes source_extension_resource_uid on
+-- resource_alias_contributions NOT NULL and a real primary-key
+-- column -- a platform-direct alias needs no contribution row at
+-- all, so there's no nullable-contributor case to accommodate.
+--
+-- No FK to platform_resources, deliberately: platform_resources is
+-- virtual by default (see its own doc comment above), and requiring
+-- a physical row here would force one into existence on every
+-- accepted alias, working against that design. A claim can reference
+-- a name with no physical platform_resources row at all, the same
+-- way representations already do.
+CREATE TABLE resource_alias_claims (
+    id                        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    namespace                 TEXT NOT NULL,
+    key                       TEXT NOT NULL,
+    value                     TEXT NOT NULL,
+    platform_collection_name TEXT NOT NULL,
+    platform_resource_id      TEXT NOT NULL,
+    platform_owned            BOOLEAN NOT NULL DEFAULT false,
+    created_at                TIMESTAMPTZ NOT NULL,
+    UNIQUE (namespace, key, value),
+    UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
+    -- Exists purely so resource_alias_contributions' FK below can
+    -- also enforce that a contribution's own (namespace, key)
+    -- columns agree with its claim's -- a belt-and-suspenders
+    -- integrity check, not a performance thing.
+    UNIQUE (id, namespace, key)
 );
 
-CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
+-- source_extension_resource_uid cascades on its extension resource's
+-- deletion -- that alone is enough to remove *this* contribution row,
+-- but not necessarily the claim it points at (a sibling contributor,
+-- or platform_owned, may still need it alive); see
+-- ExtensionResourceRepo.Delete's own explicit orphan cleanup for that
+-- half.
+--
+-- The claim_id FK is intentionally restrictive (default NO ACTION),
+-- not ON DELETE CASCADE: claim deletion is only ever attempted by
+-- the vetted orphan-cleanup logic in extension_resource_repo.go/
+-- resource_identity_repo.go, which proves zero contributors remain
+-- (and, for resource_identity_repo.go, that the claim also isn't
+-- platform_owned) before deleting a claim. If that logic is correct,
+-- this FK never fires -- the contributions are already gone by the
+-- time the claim delete runs. If it's wrong, a cascading FK would
+-- silently delete still-valid contributions along with the claim,
+-- corrupting another extension resource's alias state with no error
+-- at all; a restrictive FK instead fails the whole statement loudly
+-- with a constraint violation. With claim_id indexed below, this
+-- costs nothing in the steady state where it never fires.
+CREATE TABLE resource_alias_contributions (
+    source_extension_resource_uid UUID NOT NULL
+        REFERENCES extension_resources(uid) ON DELETE CASCADE,
+    namespace  TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    claim_id   BIGINT NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL,
+    PRIMARY KEY (source_extension_resource_uid, namespace, key),
+    FOREIGN KEY (claim_id, namespace, key)
+        REFERENCES resource_alias_claims(id, namespace, key)
+);
 
--- Supports del_aliases_absent/del_aliases_replaced's per-contributor
--- lookups (extension_resource_repo.go), and ON DELETE CASCADE's own
--- lookup when an extension resource is deleted.
-CREATE INDEX idx_resource_aliases_source ON resource_aliases(source_extension_resource_uid);
+-- Supports the alias fold-in's per-claim contributor lookups
+-- (sibling checks, refcount baselines) and the orphan-cleanup FK
+-- check above.
+CREATE INDEX idx_resource_alias_contributions_claim ON resource_alias_contributions(claim_id);
 
 CREATE TABLE extension_resource_managed (
     extension_resource_uid UUID PRIMARY KEY
@@ -378,7 +409,8 @@ DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;
-DROP TABLE IF EXISTS resource_aliases;
+DROP TABLE IF EXISTS resource_alias_contributions;
+DROP TABLE IF EXISTS resource_alias_claims;
 DROP TABLE IF EXISTS extension_resources;
 DROP TABLE IF EXISTS extension_resource_types;
 DROP TABLE IF EXISTS resource_relationships;

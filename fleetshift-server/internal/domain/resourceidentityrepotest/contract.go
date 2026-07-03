@@ -48,6 +48,34 @@ func seedExtensionResourceInstance(t *testing.T, tx domain.Tx, rt domain.Resourc
 	return uid
 }
 
+// seedExtensionContributedAlias registers a fresh inventory-capable
+// extension resource type and reports alias for name via
+// ReplaceInventory, giving name an extension-contributed
+// resource_alias_claims row (platform_owned = false, one contributor)
+// before any [domain.ResourceIdentityRepository] call touches it --
+// reconcileAliases's corroborate/un-corroborate cases need one of
+// these to already exist to be meaningfully distinct from the
+// plain-insert case CreateWithAliases already covers.
+func seedExtensionContributedAlias(t *testing.T, tx domain.Tx, name domain.ResourceName, alias domain.Alias, now time.Time) {
+	t.Helper()
+	suffix := domain.NewExtensionResourceUID().String()[:8]
+	rt := domain.ResourceType(fmt.Sprintf("inv.fleetshift.io/Seed%s", suffix))
+	typeDef := domain.NewExtensionResourceType(rt, "v1", "seeds", now, domain.WithInventory())
+	if err := tx.ExtensionResources().CreateType(context.Background(), typeDef); err != nil {
+		t.Fatalf("seed inventory-capable type: %v", err)
+	}
+	if _, err := tx.ExtensionResources().ReplaceInventory(context.Background(), []domain.InventoryReplacement{{
+		ResourceType: rt,
+		Name:         name,
+		CandidateUID: domain.NewExtensionResourceUID(),
+		Aliases:      []domain.Alias{alias},
+		ObservedAt:   now,
+		ReceivedAt:   now,
+	}}); err != nil {
+		t.Fatalf("seed extension-contributed alias: %v", err)
+	}
+}
+
 // Run exercises the [domain.ResourceIdentityRepository] contract.
 func Run(t *testing.T, factory Factory) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -415,6 +443,155 @@ func Run(t *testing.T, factory Factory) {
 		err := repo.Create(ctx, r2)
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			t.Fatalf("got %v, want ErrAlreadyExists", err)
+		}
+	})
+
+	// The next three tests pin down reconcileAliases's three-case
+	// lifecycle for platform_owned (see its own doc comment in
+	// resource_identity_repo.go): corroborating an
+	// extension-contributed claim without duplicating it,
+	// un-corroborating one whose platform declaration is withdrawn
+	// but whose contributor(s) remain (the claim survives, merely
+	// un-owned), and deleting one that's both un-corroborated and
+	// left with zero contributors. Case 1 is also covered end-to-end
+	// through an extension resource Delete by
+	// AliasSurvivesExtensionResourceDeleteWhenPlatformOwned in
+	// extensionresourcerepotest/contract.go; these three instead
+	// isolate ResourceIdentityRepository's own Create/Update
+	// contract, independent of ExtensionResourceRepo.Delete.
+
+	t.Run("ReconcileAliasesCorroboratesExistingExtensionContributedClaim", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
+		ctx := context.Background()
+
+		name := domain.ResourceName("clusters/corroborate")
+		alias, _ := domain.NewAlias("gcp", "project_id", "corroborate-proj")
+		seedExtensionContributedAlias(t, tx, name, alias, now)
+
+		r := domain.NewPlatformResource(name, nil, now)
+		if err := r.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias: %v", err)
+		}
+		// Must not be rejected as ErrAlreadyExists: the claim already
+		// targets this exact resource (just from the extension
+		// resource's own contribution), and corroborating it in
+		// place is exactly what reconcileAliases's first branch is
+		// for -- ErrAlreadyExists is reserved for a claim that
+		// targets a genuinely different resource.
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create (corroborate): %v", err)
+		}
+
+		resolved, err := repo.ResolveAlias(ctx, alias)
+		if err != nil {
+			t.Fatalf("ResolveAlias: %v", err)
+		}
+		if resolved != name {
+			t.Errorf("resolved name = %q, want %q", resolved, name)
+		}
+
+		got, err := repo.GetByName(ctx, name)
+		if err != nil {
+			t.Fatalf("GetByName: %v", err)
+		}
+		if len(got.Aliases()) != 1 || got.Aliases()[0] != alias {
+			t.Fatalf("Aliases() = %+v, want exactly [%+v] (corroborated in place, not duplicated)", got.Aliases(), alias)
+		}
+
+		// Re-asserting the same alias on a later Update must stay a
+		// no-op (platform_owned already true), not attempt a second
+		// corroborate.
+		if err := got.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias (idempotent re-assert): %v", err)
+		}
+		if err := repo.Update(ctx, got); err != nil {
+			t.Fatalf("Update (idempotent corroborate): %v", err)
+		}
+	})
+
+	t.Run("ReconcileAliasesUnCorroboratesButKeepsClaimAliveWhileContributorRemains", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
+		ctx := context.Background()
+
+		name := domain.ResourceName("clusters/un-corroborate-survives")
+		alias, _ := domain.NewAlias("gcp", "project_id", "un-corroborate-survives-proj")
+		seedExtensionContributedAlias(t, tx, name, alias, now)
+
+		r := domain.NewPlatformResource(name, nil, now)
+		if err := r.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias: %v", err)
+		}
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		// Withdraw the platform's own declaration of the alias.
+		// PlatformResource.AddAlias is monotonic/additive (see
+		// resource_identity.go), so there's no domain method to
+		// shrink the aggregate's alias set directly -- build the
+		// withdrawn snapshot by hand instead, the same way a
+		// repository read would reconstitute one, per
+		// reconcileAliases's own doc comment on why this matters
+		// even without a public API exercising it yet.
+		withdrawn := domain.PlatformResourceFromSnapshot(domain.PlatformResourceSnapshot{
+			Name:      name,
+			Labels:    map[string]string{},
+			CreatedAt: now,
+			UpdatedAt: now.Add(time.Minute),
+		})
+		if err := repo.Update(ctx, withdrawn); err != nil {
+			t.Fatalf("Update (withdraw): %v", err)
+		}
+
+		// The extension resource's own contribution is untouched by
+		// the platform's withdrawal -- the claim is un-owned, not
+		// deleted, and must remain fully resolvable.
+		resolved, err := repo.ResolveAlias(ctx, alias)
+		if err != nil {
+			t.Fatalf("ResolveAlias after un-corroborate: %v", err)
+		}
+		if resolved != name {
+			t.Errorf("resolved name = %q, want %q", resolved, name)
+		}
+	})
+
+	t.Run("ReconcileAliasesDeletesClaimOnceUnCorroboratedAndOrphaned", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
+		ctx := context.Background()
+
+		name := domain.ResourceName("clusters/un-corroborate-orphaned")
+		alias, _ := domain.NewAlias("gcp", "project_id", "un-corroborate-orphaned-proj")
+
+		// No extension resource ever contributes this one -- it's
+		// platform_owned from the start, with zero contributions, so
+		// withdrawing it must delete the claim outright rather than
+		// merely un-owning it.
+		r := domain.NewPlatformResource(name, nil, now)
+		if err := r.AddAlias(alias); err != nil {
+			t.Fatalf("AddAlias: %v", err)
+		}
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		withdrawn := domain.PlatformResourceFromSnapshot(domain.PlatformResourceSnapshot{
+			Name:      name,
+			Labels:    map[string]string{},
+			CreatedAt: now,
+			UpdatedAt: now.Add(time.Minute),
+		})
+		if err := repo.Update(ctx, withdrawn); err != nil {
+			t.Fatalf("Update (withdraw): %v", err)
+		}
+
+		if _, err := repo.ResolveAlias(ctx, alias); !errors.Is(err, domain.ErrNotFound) {
+			t.Errorf("ResolveAlias after orphaning: got %v, want ErrNotFound", err)
 		}
 	})
 

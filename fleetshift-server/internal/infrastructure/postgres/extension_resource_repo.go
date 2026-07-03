@@ -197,15 +197,97 @@ func (r *ExtensionResourceRepo) ListByResourceType(ctx context.Context, rt domai
 	return result, nil
 }
 
+// extensionResourceDeleteWithAliasCleanupSQL deletes an extension
+// resource and cleans up any resource_alias_claims rows its deletion
+// orphans. There is no foreign key from resource_alias_claims to
+// extension_resources (a claim can be shared by many contributors, or
+// held by the platform itself via platform_owned -- see the
+// migration's doc comment), so unlike resource_intents/
+// extension_resource_managed/extension_resource_inventory*/
+// resource_alias_contributions -- all of which cascade for free off
+// extension_resources.uid -- claim cleanup needs this explicit
+// follow-up, or a deleted extension resource's aliases would keep
+// resolving forever.
+//
+// This transcribes poc/alias-claims/'s validated
+// extensionResourceDeleteWithRefcountCleanupSQL pattern, which beat
+// an alternative that explicitly deletes resource_alias_contributions
+// first (a planner accident: that shape forces a seq scan on the
+// contributor's own rows where relying on ON DELETE CASCADE picks an
+// index nested loop instead -- see that function's sibling
+// extensionResourceDeleteWithDirectContributionCleanupSQL for the
+// discarded comparison). old_contributions is therefore a plain read,
+// *not* a delete: it captures exactly the resource_alias_contributions
+// rows that ON DELETE CASCADE is about to remove as a side effect of
+// deleted_extension_resource's own DELETE, so their claim ids and a
+// pre-delete baseline count can still be computed after the cascade
+// has run. The `(SELECT count(*) FROM deleted_extension_resource) >=
+// 0` clause in deleted_orphan_claims is not a real filter (it's
+// always true) -- it exists purely to give the planner an explicit
+// data dependency forcing deleted_extension_resource's cascade to
+// happen before deleted_orphan_claims runs. Without it, nothing else
+// in this statement's CTE graph forces that ordering, and the
+// restrictive claim_id FK (see the migration's doc comment) would
+// reject deleted_orphan_claims's delete outright if it ran first,
+// while the contributions it's trying to clean up after still exist.
+const extensionResourceDeleteWithAliasCleanupSQL = `
+WITH target_er AS (
+	SELECT uid FROM extension_resources
+	WHERE service_name = $1 AND collection_name = $2 AND resource_id = $3
+),
+old_contributions AS (
+	SELECT c.claim_id
+	FROM target_er t
+	JOIN resource_alias_contributions c ON c.source_extension_resource_uid = t.uid
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM old_contributions
+),
+baseline_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+deleted_extension_resource AS (
+	DELETE FROM extension_resources
+	WHERE service_name = $1 AND collection_name = $2 AND resource_id = $3
+	RETURNING uid
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM old_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(bcc.baseline_ct, 0) + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN baseline_contrib_counts bcc ON bcc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	  AND (SELECT count(*) FROM deleted_extension_resource) >= 0
+	RETURNING 1
+)
+SELECT (SELECT count(*) FROM deleted_extension_resource)`
+
 func (r *ExtensionResourceRepo) Delete(ctx context.Context, name domain.FullResourceName) error {
 	rn := name.ResourceName()
-	res, err := r.DB.ExecContext(ctx,
-		`DELETE FROM extension_resources WHERE service_name = $1 AND collection_name = $2 AND resource_id = $3`,
-		string(name.ServiceName()), string(rn.Collection()), string(rn.ID()))
+	var n int64
+	err := r.DB.QueryRowContext(ctx, extensionResourceDeleteWithAliasCleanupSQL,
+		string(name.ServiceName()), string(rn.Collection()), string(rn.ID())).Scan(&n)
 	if err != nil {
 		return err
 	}
-	n, _ := res.RowsAffected()
 	if n == 0 {
 		return fmt.Errorf("%w: extension resource %s", domain.ErrNotFound, name)
 	}
@@ -792,28 +874,30 @@ type aliasCandidateInput struct {
 
 // checkAliasBatchConsistency rejects, in pure Go and with zero SQL,
 // aliases that contradict each other purely within this one batch --
-// the same two invariants resource_aliases' pair of unique indexes
-// enforce against *pre-existing* rows (see the migration's doc
-// comment): the same (namespace, key, value) claimed by two different
-// targets, or the same target given two different values for the same
-// (namespace, key). Neither shape can be left for alias_upsert's own
-// ON CONFLICT to sort out: the first shape, reached twice within one
-// INSERT's row source, hits Postgres's "ON CONFLICT DO UPDATE command
-// cannot affect row a second time" restriction (a hard error, not a
-// graceful skip) instead of Postgres's conflict resolution just
-// picking a winner the way it would across two separate statements;
-// the second shape would abort the *entire* statement with a generic
-// constraint-violation error on the second unique index, since
-// alias_upsert's ON CONFLICT only names the first one. Catching both
-// shapes here, before any array is built, keeps the failure mode
-// graceful. See the nameless-platform-identity plan's "Why aliases
-// split into two paths, not two write statements" section --
-// validateAliasUpsertsConsistent's old role, now scoped to exactly the
-// case a unique index can't cover. (alias_upsert's SELECT DISTINCT
-// additionally guards against a literal duplicate -- same target,
-// same alias, reported twice in one batch -- which isn't a
-// contradiction and so isn't rejected here, but would otherwise hit
-// that same "affect row twice" restriction.)
+// the same two invariants resource_alias_claims' pair of unique
+// constraints enforce against *pre-existing* rows (see the
+// migration's doc comment): the same (namespace, key, value) claimed
+// by two different targets, or the same target given two different
+// values for the same (namespace, key). Neither shape can be left for
+// inserted_claims's own INSERT to sort out: the first shape, reached
+// twice within one INSERT's row source, would abort the *entire*
+// statement with a straight unique-violation error on
+// UNIQUE(namespace, key, value); the second would do the same against
+// UNIQUE(namespace, key, platform_collection_name,
+// platform_resource_id). Catching both shapes here, before any array
+// is built, keeps the failure mode graceful -- a [domain.AliasConflict]
+// rather than a hard SQL error. See the nameless-platform-identity
+// plan's "Why aliases split into two paths, not two write statements"
+// section -- validateAliasUpsertsConsistent's old role, now scoped to
+// exactly the case a unique index can't cover. (inserted_claims's and
+// upserted_contributions's own SELECT DISTINCT/DISTINCT ON
+// additionally guard against a literal duplicate -- same target, same
+// alias, reported twice in one batch -- which isn't a contradiction
+// and so isn't rejected here, but would otherwise hit either the same
+// unique-violation error (a plain INSERT can't tolerate two identical
+// rows in one statement, ON CONFLICT or not) or, for
+// upserted_contributions specifically, Postgres's "ON CONFLICT DO
+// UPDATE command cannot affect row a second time" restriction.)
 func checkAliasBatchConsistency(candidates []aliasCandidateInput) (safe []aliasCandidateInput, conflicts []domain.AliasConflict) {
 	type valueKey struct {
 		ns    domain.AliasNamespace
@@ -901,9 +985,9 @@ func flattenAliasCandidates(candidates []aliasCandidateInput) (idx []int32, name
 
 // scanAliasConflicts converts the merged inventory statement's final
 // result set -- alias candidates that lost against *pre-existing*
-// resource_aliases state -- into [domain.AliasConflict]s. targetOf
-// maps a flattened input row's idx back to its report's resolved
-// target name.
+// resource_alias_claims state -- into [domain.AliasConflict]s.
+// targetOf maps a flattened input row's idx back to its report's
+// resolved target name.
 func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceName) ([]domain.AliasConflict, error) {
 	var conflicts []domain.AliasConflict
 	for rows.Next() {
@@ -937,205 +1021,318 @@ func scanAliasConflicts(rows *sql.Rows, targetOf func(idx int) domain.ResourceNa
 // comment for why that join, once deliberately avoided, is now
 // required.
 //
-// resource_aliases enforces two invariants regardless of contributor
-// (see the migration's doc comment): (namespace, key, value) can't be
-// claimed by two different resources, and a resource can't be given
-// two different values for the same (namespace, key). A contributor
-// can, however, freely replace *its own* prior contribution -- see
-// [domain.InventoryReplacement.Aliases]'s doc for the full contract.
+// This classifies and writes against the split
+// resource_alias_claims/resource_alias_contributions schema (see the
+// migration's doc comment, and poc/alias-claims/ for the validated
+// prototype this transcribes almost verbatim). The two cross-resource
+// invariants -- (namespace, key, value) can only ever map to one
+// platform resource, and a platform resource can only ever have one
+// value for a given (namespace, key) -- are now plain B-tree UNIQUE
+// constraints on resource_alias_claims itself, not per-contributor
+// EXCLUDE constraints, because a claim is represented exactly once
+// regardless of how many extension resources contribute it.
 // checkAliasBatchConsistency has already ruled out an intra-batch
 // collision against either invariant, so every remaining conflict
-// source is a pre-existing resource_aliases row from a *different*
-// contributor. This fold-in classifies every candidate by reading,
-// before writing anything -- in an order chosen around which outcome
-// is common: most reports re-send the same alias they sent last time,
-// and classify-before-write turns that into a single read with no
-// write at all, rather than a write whose own conflict machinery
-// discovers afterward that it was a no-op.
+// source is a pre-existing resource_alias_claims row held by a
+// *different* contributor (or the platform itself -- see
+// resource_identity_repo.go's reconcileAliases).
 //
-// Phase 1 (alias_prev_by_value) reads by (namespace, key, value) --
-// the *reported* value -- for every candidate, answering "does this
-// exact alias already exist, for whom, and is one of its rows mine"
-// in one pass. That splits candidates three ways: alias_value_conflicts
-// (the value exists, for a *different* target --
-// AliasConflictValueClaimedByOther, resolved without ever touching
-// phase 2, ensure_platform, or alias_upsert); alias_matches_target
-// (the value already exists for *this* target, whether from me
-// already -- a true no-op -- or from a sibling contributor I'm now
-// corroborating -- both go straight to alias_accepted, since neither
-// can possibly violate either invariant); and alias_value_missing
-// (the value doesn't exist anywhere yet), the only group phase 2
-// needs to look at.
+// self_claim/changed implement the fast no-op skip this design's
+// whole point was to make cheap: for each candidate, look up *this*
+// contributor's own current contribution for (namespace, key) --
+// resource_alias_contributions is keyed by exactly that, a single
+// indexed point lookup -- and compare its claim's (value, target)
+// against what's being reported now. A steady-state report (the
+// overwhelming common case) matches exactly and drops out of
+// `changed` entirely, touching neither resource_alias_claims nor
+// resource_alias_contributions again this call.
 //
-// Phase 2 (alias_resource_check) reads by (namespace, key,
-// platform_collection_name, platform_resource_id) -- this target's
-// own row(s) for the key, from any contributor -- but only for
-// alias_value_missing candidates. Since phase 1 already proved this
-// exact value doesn't exist anywhere, a match here can only be a
-// *different* value already registered for this target/key. Whether
-// that's a conflict now turns on who holds it: sibling_holds (true if
-// any matching row belongs to a contributor other than the candidate's
-// own) distinguishes a genuine cross-contributor disagreement
-// (alias_resource_conflicts, AliasConflictResourceHasDifferentValue)
-// from a contributor legitimately replacing a value only it ever
-// held (alias_safe, alongside the case where no row exists at all).
-// GROUP BY value collapses what could otherwise be multiple rows --
-// one per contributor -- sharing this (namespace, key, resource) back
-// down to at most one, since the invariant above guarantees they all
-// agree on value regardless of contributor count.
+// For everything that *did* change, by_value/by_resource/sibling
+// classify by reading, before writing anything, in the same two
+// phases the old single-table design used (see this file's git
+// history for that version's own doc comment): by_value asks "does
+// this exact (namespace, key, value) already exist, and for whom" --
+// a match for a *different* target is alias_value_conflicts
+// (AliasConflictValueClaimedByOther), resolved without ever touching
+// by_resource. by_resource asks "does this target already have *some*
+// claim for this key" -- since by_value already proved the reported
+// value doesn't exist anywhere, a match here is necessarily a
+// *different* value, and sibling asks whether anyone besides this
+// candidate's own contributor (or the platform, via platform_owned)
+// still holds it: if so, alias_resource_conflicts
+// (AliasConflictResourceHasDifferentValue); otherwise this
+// contributor is free to move off it.
 //
-// Both phases fold their existence check directly into a LEFT JOIN
-// LATERAL against the candidate relation (alias_prev_by_value against
-// input_aliases, alias_resource_check against alias_value_missing)
-// rather than computing the check as its own CTE and re-joining it
-// back afterward by idx. That's deliberate, not stylistic: idx
-// identifies a *report*, not a single alias -- flattenAliasCandidates
-// emits one input_aliases row per (report, alias) pair, so a report
-// with two aliases produces two rows sharing one idx. Re-joining two
-// already-derived relations "ON x.idx = y.idx" would fan those two
-// rows out against each other's results whenever both happen to
-// match, silently mixing up which lookup belongs to which alias.
-// Folding the check into the same row via LATERAL keeps every derived
-// CTE 1:1 with its input, so no re-join -- and no idx collision -- is
-// ever needed.
+// A closed-form argument -- not just an empirical claim -- shows
+// `safe` always splits cleanly into exactly three disjoint write
+// shapes, with no case left needing a delete-then-insert dance:
+// resource_alias_claims' own UNIQUE(namespace, key,
+// platform_collection_name, platform_resource_id) guarantees at most
+// one claim exists for (this candidate's fixed target, namespace,
+// key) at any instant, and every claim a candidate's own prior
+// contribution could possibly point to necessarily *is* that one
+// claim (aliases are always self-referential -- a report only ever
+// asserts aliases about its own reported Name, which is immutable
+// once an extension resource's natural key exists). So:
 //
-// alias_accepted unions everything phases 1 and 2 cleared --
-// alias_matches_target and alias_safe -- into the one relation
-// ensure_platform, alias_upsert, and del_aliases_replaced all read
-// from: lazily upserting the (uid-less) platform_resources row for
-// every name in alias_accepted -- see resource_identity_repo.go's
-// virtual-resource doc -- then the alias itself, then cleaning up any
-// stale row this exact contributor held under the same key with a
-// different value (a genuine replace, not a fresh claim). Unlike the
-// design this replaced, alias_upsert no longer needs a guarded DO
-// UPDATE or post-write conflict diagnosis: (namespace, key, value,
-// source_extension_resource_uid) is now the row's actual identity, so
-// a same-statement race against a *different* contributor's row can
-// only violate one of the two EXCLUDE constraints below -- a hard
-// error rather than a graceful [domain.AliasConflict], accepted here
-// as a rare-in-practice trade-off given how narrow the race window is
-// (this fold-in's own reads already rule out every conflict phases 1
-// and 2 can see). del_aliases_replaced's own DELETE ... USING
-// alias_accepted, by contrast, is exactly the same-statement,
-// same-contributor case the migration's EXCLUDE constraints document
-// being DEFERRABLE INITIALLY DEFERRED for: the delete and the insert
-// both land in this one statement, so the constraint check has to
-// wait until both have happened before it can tell whether a
-// genuine violation remains.
+//   - claim_creates: by_value found nothing, by_resource found
+//     nothing -- a genuinely new (namespace, key) for this target.
+//     Insert a fresh claim.
+//   - claim_self_replace: by_value found nothing, by_resource found
+//     this target's *own* claim for the key with sibling_holds false
+//     -- this candidate is that claim's only holder (or the only
+//     extension-resource holder, with the platform not asserting it
+//     either), so it's free to change its value in place. This can
+//     never be the fold-in's own prior claim moving to a *different*
+//     existing claim row -- that would require by_value to find a
+//     claim whose target matches this candidate's, but the UNIQUE
+//     constraint above already guarantees that claim (if any) *is*
+//     by_resource's claim, and by_resource's claim holds this
+//     candidate's *old* value, not the new one just proven absent by
+//     by_value. So this case is always a plain UPDATE of the existing
+//     claim row's value: no new row, no contribution change, and
+//     critically no old claim left vacated to clean up.
+//   - claim_reuse: by_value found an existing claim whose target
+//     matches this candidate's own -- another contributor (or the
+//     platform) already asserted this exact value for this same
+//     target, and this candidate is newly corroborating it. By the
+//     same argument, this can only happen when this candidate had *no*
+//     prior claim for the key at all (self_claim_id IS NULL): if it
+//     had one, by_resource's lookup would already occupy this
+//     target's UNIQUE(namespace, key, target) slot with the
+//     candidate's *own*, different-valued claim, making it impossible
+//     for by_value's freshly-proven-different-valued claim to *also*
+//     have this same target. So joining an existing claim is always a
+//     brand-new contribution, never a move that vacates anything.
 //
-// Every LATERAL here uses OFFSET 0, which is load-bearing, not
-// decorative: without it, Postgres "de-correlates" a LATERAL whose
-// body is just an equality filter back into an ordinary join it's
-// once again free to hash-and-scan, defeating the point -- OFFSET 0
-// is the standard trick for telling the planner a subquery must
-// actually be evaluated as written, one outer row at a time, which is
-// what pushes it to a per-candidate indexed nested loop instead of a
-// seq-scan-and-hash-join (its row-count guess for a CTE is a flat,
-// disconnected-from-real-stats default that otherwise steers it the
-// other way at this corpus size). alias_prev_by_value's LATERAL
-// additionally needs ORDER BY is_mine DESC LIMIT 1 ahead of that
-// OFFSET 0, to prefer a row belonging to the candidate's own
-// contributor over some other contributor's row when both exist for
-// the very same (namespace, key, value) -- see alias_matches_target's
-// doc above for why that distinction doesn't actually matter to this
-// fold-in's own branching (both are safe), but it does matter to
-// del_aliases_replaced downstream, which needs is_mine implicitly via
-// source_uid rather than actual_collection_name/actual_resource_id.
+// The upshot: this fold-in alone never orphans a claim. The *only*
+// way a claim can lose its last reference is aliasRetractAbsentCTE's
+// del_aliases_absent (ReplaceInventory's "absence retracts" rule) or
+// a contributing extension resource's own deletion (see
+// extensionResourceDeleteWithAliasCleanupSQL) -- both are the sole
+// places claim cleanup needs to run, which is why it isn't part of
+// this shared fold-in at all.
 //
-// This is a genuine cost regression from the single-contributor design
-// it replaced (see this file's git history for that version's own
-// EXPLAIN-driven notes): that design could skip input_aliases's join
-// to er entirely, since resource_aliases had no notion of contributor
-// to correlate against. Supporting per-contributor replace requires
-// knowing each candidate's *persistent* extension_resources.uid --
-// not the ephemeral, freshly-generated CandidateUID a caller supplies
-// on every call (see [domain.InventoryReplacement.CandidateUID]'s
-// doc) -- which only er's own natural-key resolution produces. A
-// follow-up benchmark should re-measure this fold-in's cost now that
-// the join is back, and revisit whether the earlier
-// resource-type-declares-no-aliases optimization (deferred during
-// this design's own review) is worth reconsidering to recover it for
-// the common case.
+// That argument is also why upserted_contributions is a plain INSERT,
+// not an upsert: claim_targets (claim_reuse plus claim_creates) is,
+// by the same closed-form argument, only ever populated by
+// self_claim_id IS NULL candidates -- a candidate with an existing
+// contribution row always routes through claim_self_replace instead,
+// which never touches resource_alias_contributions at all. So every
+// row this INSERT attempts is, by construction, for a
+// (source_extension_resource_uid, namespace, key) with no pre-existing
+// row -- ON CONFLICT ... DO UPDATE SET claim_id = EXCLUDED.claim_id
+// would only ever fire if that invariant were violated by a future
+// bug, and silently moving a contribution's claim_id that way is
+// exactly the kind of change that needs compensating cleanup on the
+// claim it moved *from* (see this comment's own argument for why the
+// fold-in doesn't carry that cleanup). Letting the insert fail loudly
+// on a real primary-key collision instead surfaces that bug
+// immediately, the same way the restrictive claim_id FK on
+// resource_alias_contributions does (see the migration's doc comment)
+// -- rather than an upsert quietly orphaning a claim with no error at
+// all. SELECT DISTINCT ON above still collapses the one legitimate
+// source of an intra-statement duplicate key here -- the same alias
+// reported twice within one report (see
+// DuplicateAliasWithinReportIsNotAConflict) -- before the INSERT ever
+// sees it.
+//
+// Every LATERAL here uses LIMIT 1 OFFSET 0, which is load-bearing,
+// not decorative: without it, Postgres can "de-correlate" a LATERAL
+// whose body is just an equality filter back into an ordinary join
+// it's free to hash-and-scan, defeating the point of a per-candidate
+// indexed lookup -- OFFSET 0 is the standard trick for telling the
+// planner a subquery must actually be evaluated as written, one outer
+// row at a time.
+//
+// cand_id (a row_number() surrogate minted once in input_aliases) is
+// the correlation key every downstream CTE joins back on -- not idx.
+// idx is a *report*'s index, shared by every alias candidate within
+// that one report, so two aliases on the same report (a common case:
+// a cluster reporting both a provider ID and a vendor GUID) collide
+// on idx. Joining by_value/by_resource/sibling back to changed with
+// `ON x.idx = ch.idx` fans each of those same-report candidates out
+// against every other same-report candidate's own lookup result --
+// changed's create path happened to survive that (claim_creates only
+// projects columns that come from ch, so inserted_claims's SELECT
+// DISTINCT silently absorbs the duplicate fan-out rows), but
+// claim_self_replace's resource_claim_id came from the fanned-out br
+// side, so a report with two self-replacing aliases could pick up the
+// *other* candidate's resource_claim_id and overwrite the wrong claim
+// row's value. cand_id being unique per candidate row (not per
+// report) closes that: every join below matches exactly one row on
+// each side, so no fan-out is possible regardless of how many aliases
+// one report carries.
+// aliasFingerprintGateCTEs is replaceInventorySQL's own addition,
+// spliced in right after replaceInventoryCoreCTEs and before
+// input_aliases/aliasFoldCTEs, implementing extension_resources.
+// alias_fingerprint's fast path (see the migration's doc comment on
+// that column): a repeated report whose complete alias set hasn't
+// changed since the last time this resource's aliases were fully,
+// successfully applied should skip alias classification entirely
+// rather than re-running every lookup in aliasFoldCTEs for no
+// behavioral change.
+//
+// input_report_fingerprints carries $31, a per-report bytea computed
+// in Go by [domain.AliasSetFingerprint] over that report's complete
+// Aliases -- reusing $1 (idx) rather than minting a fresh placeholder
+// array, since it's already the exact same per-report index UNNEST
+// elsewhere in this statement needs to join back to. needs_alias_processing
+// then compares that against er.stored_alias_fingerprint with IS
+// DISTINCT FROM, which treats NULL (a resource with no prior
+// successful fingerprint write -- see er's own doc comment) as always
+// distinct from any concrete reported hash, so a resource that has
+// never yet gotten this far always gets processed.
+//
+// input_aliases and aliasRetractAbsentCTE's del_aliases_absent both
+// join needs_alias_processing to scope themselves to only the reports
+// that need it -- critically, del_aliases_absent must be scoped this
+// way and not just rely on a fingerprint-matched report supplying zero
+// input_aliases rows for it: with no scoping at all, "zero candidates
+// this round" is indistinguishable from "this resource now has zero
+// aliases", and del_aliases_absent would retract every alias a
+// fingerprint-matched (i.e. unchanged) resource still legitimately
+// holds.
+const aliasFingerprintGateCTEs = `
+input_report_fingerprints(idx, reported_alias_fingerprint) AS (
+	SELECT * FROM UNNEST($1::int[], $31::bytea[])
+),
+needs_alias_processing AS (
+	SELECT e.idx
+	FROM er e
+	JOIN input_report_fingerprints irf ON irf.idx = e.idx
+	WHERE irf.reported_alias_fingerprint IS DISTINCT FROM e.stored_alias_fingerprint
+),
+`
+
 const aliasFoldCTEs = `
-alias_prev_by_value AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ac.source_uid,
-	       ra.actual_collection_name, ra.actual_resource_id
-	FROM input_aliases ac
+self_claim AS (
+	SELECT ia.cand_id, ia.idx, ia.namespace, ia.key, ia.value, ia.collection_name, ia.resource_id, ia.received_at, ia.source_uid,
+	       c.claim_id AS self_claim_id, cl.value AS self_value,
+	       cl.platform_collection_name AS self_collection_name, cl.platform_resource_id AS self_resource_id
+	FROM input_aliases ia
 	LEFT JOIN LATERAL (
-		SELECT platform_collection_name AS actual_collection_name, platform_resource_id AS actual_resource_id,
-		       (source_extension_resource_uid = ac.source_uid) AS is_mine
-		FROM resource_aliases
-		WHERE namespace = ac.namespace AND key = ac.key AND value = ac.value
-		ORDER BY is_mine DESC
+		SELECT claim_id
+		FROM resource_alias_contributions
+		WHERE source_extension_resource_uid = ia.source_uid
+		  AND namespace = ia.namespace AND key = ia.key
 		LIMIT 1 OFFSET 0
-	) ra ON true
+	) c ON true
+	LEFT JOIN LATERAL (
+		SELECT value, platform_collection_name, platform_resource_id
+		FROM resource_alias_claims
+		WHERE id = c.claim_id
+		LIMIT 1 OFFSET 0
+	) cl ON true
+),
+changed AS (
+	SELECT cand_id, idx, namespace, key, value, collection_name, resource_id, received_at, source_uid, self_claim_id
+	FROM self_claim
+	WHERE self_claim_id IS NULL
+	   OR self_value IS DISTINCT FROM value
+	   OR self_collection_name IS DISTINCT FROM collection_name
+	   OR self_resource_id IS DISTINCT FROM resource_id
+),
+by_value AS (
+	SELECT ch.cand_id, vc.id AS value_claim_id, vc.platform_collection_name AS value_collection_name, vc.platform_resource_id AS value_resource_id
+	FROM changed ch
+	LEFT JOIN LATERAL (
+		SELECT id, platform_collection_name, platform_resource_id
+		FROM resource_alias_claims
+		WHERE namespace = ch.namespace AND key = ch.key AND value = ch.value
+		LIMIT 1 OFFSET 0
+	) vc ON true
+),
+by_resource AS (
+	SELECT ch.cand_id, rc.id AS resource_claim_id, rc.value AS resource_value, rc.platform_owned AS resource_platform_owned
+	FROM changed ch
+	LEFT JOIN LATERAL (
+		SELECT id, value, platform_owned
+		FROM resource_alias_claims
+		WHERE namespace = ch.namespace AND key = ch.key
+		  AND platform_collection_name = ch.collection_name AND platform_resource_id = ch.resource_id
+		LIMIT 1 OFFSET 0
+	) rc ON true
+),
+sibling AS (
+	SELECT br.cand_id,
+	       br.resource_claim_id IS NOT NULL
+	       AND (
+		 br.resource_platform_owned
+		 OR EXISTS (
+			SELECT 1
+			FROM resource_alias_contributions other
+			JOIN changed ch ON ch.cand_id = br.cand_id
+			WHERE other.claim_id = br.resource_claim_id
+			  AND other.source_extension_resource_uid <> ch.source_uid
+		 )
+	       ) AS sibling_holds
+	FROM by_resource br
 ),
 alias_value_conflicts AS (
-	SELECT idx, namespace, key, value, actual_collection_name, actual_resource_id
-	FROM alias_prev_by_value
-	WHERE actual_collection_name IS NOT NULL
-	  AND (actual_collection_name <> collection_name OR actual_resource_id <> resource_id)
-),
-alias_matches_target AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
-	FROM alias_prev_by_value
-	WHERE actual_collection_name IS NOT NULL
-	  AND actual_collection_name = collection_name AND actual_resource_id = resource_id
-),
-alias_value_missing AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
-	FROM alias_prev_by_value
-	WHERE actual_collection_name IS NULL
-),
-alias_resource_check AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, ac.source_uid,
-	       ra.existing_value, ra.sibling_holds
-	FROM alias_value_missing ac
-	LEFT JOIN LATERAL (
-		SELECT value AS existing_value, bool_or(source_extension_resource_uid <> ac.source_uid) AS sibling_holds
-		FROM resource_aliases
-		WHERE namespace = ac.namespace AND key = ac.key
-		  AND platform_collection_name = ac.collection_name AND platform_resource_id = ac.resource_id
-		GROUP BY value
-		OFFSET 0
-	) ra ON true
-),
-alias_safe AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid
-	FROM alias_resource_check
-	WHERE existing_value IS NULL OR NOT sibling_holds
+	SELECT ch.idx, ch.namespace, ch.key, ch.value,
+	       bv.value_collection_name AS actual_collection_name, bv.value_resource_id AS actual_resource_id
+	FROM changed ch
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
+	WHERE bv.value_claim_id IS NOT NULL
+	  AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id)
 ),
 alias_resource_conflicts AS (
-	SELECT idx, namespace, key, value, existing_value
-	FROM alias_resource_check
-	WHERE existing_value IS NOT NULL AND sibling_holds
+	SELECT ch.idx, ch.namespace, ch.key, ch.value, br.resource_value AS existing_value
+	FROM changed ch
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
+	JOIN by_resource br ON br.cand_id = ch.cand_id
+	JOIN sibling s ON s.cand_id = ch.cand_id
+	WHERE bv.value_claim_id IS NULL AND br.resource_claim_id IS NOT NULL AND s.sibling_holds
 ),
-alias_accepted AS (
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid FROM alias_matches_target
+safe AS (
+	SELECT ch.cand_id, ch.namespace, ch.key, ch.value, ch.collection_name, ch.resource_id, ch.received_at, ch.source_uid,
+	       bv.value_claim_id, br.resource_claim_id
+	FROM changed ch
+	JOIN by_value bv ON bv.cand_id = ch.cand_id
+	JOIN by_resource br ON br.cand_id = ch.cand_id
+	JOIN sibling s ON s.cand_id = ch.cand_id
+	WHERE NOT (bv.value_claim_id IS NOT NULL AND (bv.value_collection_name <> ch.collection_name OR bv.value_resource_id <> ch.resource_id))
+	  AND NOT (bv.value_claim_id IS NULL AND br.resource_claim_id IS NOT NULL AND s.sibling_holds)
+),
+claim_creates AS (
+	SELECT namespace, key, value, collection_name, resource_id, received_at, source_uid
+	FROM safe WHERE value_claim_id IS NULL AND resource_claim_id IS NULL
+),
+claim_self_replace AS (
+	SELECT value, received_at, resource_claim_id
+	FROM safe WHERE value_claim_id IS NULL AND resource_claim_id IS NOT NULL
+),
+claim_reuse AS (
+	SELECT namespace, key, received_at, source_uid, value_claim_id
+	FROM safe WHERE value_claim_id IS NOT NULL
+),
+inserted_claims AS (
+	INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
+	SELECT DISTINCT namespace, key, value, collection_name, resource_id, received_at
+	FROM claim_creates
+	RETURNING id, namespace, key, value
+),
+updated_claims AS (
+	UPDATE resource_alias_claims cl
+	SET value = sr.value
+	FROM claim_self_replace sr
+	WHERE cl.id = sr.resource_claim_id
+	RETURNING 1
+),
+claim_targets AS (
+	SELECT namespace, key, received_at, source_uid, value_claim_id AS claim_id FROM claim_reuse
 	UNION ALL
-	SELECT idx, namespace, key, value, collection_name, resource_id, received_at, source_uid FROM alias_safe
+	SELECT cc.namespace, cc.key, cc.received_at, cc.source_uid, ic.id AS claim_id
+	FROM claim_creates cc
+	JOIN inserted_claims ic ON ic.namespace = cc.namespace AND ic.key = cc.key AND ic.value = cc.value
 ),
-ensure_platform AS (
-	INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
-	SELECT DISTINCT collection_name, resource_id, '{}'::jsonb, received_at, received_at
-	FROM alias_accepted
-	ON CONFLICT (collection_name, resource_id) DO NOTHING
-	RETURNING 1
-),
-alias_upsert AS (
-	INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid, created_at)
-	SELECT DISTINCT namespace, key, value, collection_name, resource_id, source_uid, received_at
-	FROM alias_accepted
-	ON CONFLICT (namespace, key, value, source_extension_resource_uid) DO NOTHING
-	RETURNING 1
-),
-del_aliases_replaced AS (
-	DELETE FROM resource_aliases ra
-	USING alias_accepted aa
-	WHERE ra.source_extension_resource_uid = aa.source_uid
-	  AND ra.namespace = aa.namespace AND ra.key = aa.key
-	  AND ra.value <> aa.value
-	RETURNING 1
+upserted_contributions AS (
+	INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id, created_at)
+	SELECT DISTINCT ON (source_uid, namespace, key) source_uid, namespace, key, claim_id, received_at
+	FROM claim_targets
+	ORDER BY source_uid, namespace, key
+	RETURNING claim_id
 )`
 
 // aliasConflictSelect is the final SELECT shared verbatim by
@@ -1162,6 +1359,7 @@ FROM alias_resource_conflicts`
 // for its own UpsertAliases (see [domain.InventoryDelta]'s doc --
 // UpsertAliases never retracts; ReplaceAliases would need this same
 // treatment, but doesn't have it yet either).
+//
 // input_reported_alias_keys carries every (idx, namespace,
 // key) pair originally in this chunk's reports, *before*
 // checkAliasBatchConsistency's Go-side filtering -- not
@@ -1177,18 +1375,144 @@ FROM alias_resource_conflicts`
 // (source_extension_resource_uid) instead of directly by uid -- same
 // thing, since a contributor's rows are always its own
 // extension_resources.uid, but named for what it means here.
+//
+// del_aliases_absent is also the *only* place this statement can
+// orphan a resource_alias_claims row -- aliasFoldCTEs's own fold-in
+// never does (see its doc comment's closed-form argument) -- so the
+// refcount-based cleanup pipeline below (touched_claims through
+// deleted_orphan_claims) lives entirely in this ReplaceInventory-only
+// fragment rather than in the shared aliasFoldCTEs. It transcribes
+// poc/alias-claims/'s validated retractWithDirectDeleteRefcountCleanupSQL
+// pattern: touched_claims are exactly the claims del_aliases_absent
+// just removed a contribution from; baseline_contrib_counts reads
+// each one's contribution count as of the start of this statement
+// (Postgres CTEs all share that one pre-statement snapshot regardless
+// of execution order, so this read is unaffected by del_aliases_absent's
+// own delete); net_refcount_deltas nets that baseline against both
+// del_aliases_absent's departures (-1 each) *and* upserted_contributions's
+// arrivals (+1 each) landing on the same claim id -- the latter is
+// what correctly keeps a claim alive when one contributor's retraction
+// and a different contributor's fresh corroboration of the very same
+// value cross paths within this one batch, rather than the first
+// write "winning" and orphaning a claim a sibling write is
+// simultaneously still asserting. A claim only gets deleted once its
+// net reference count reaches zero and it isn't platform_owned (see
+// resource_identity_repo.go's reconcileAliases for that flag's own
+// lifecycle) -- the restrictive (non-cascading) claim_id FK on
+// resource_alias_contributions (see the migration's doc comment) is
+// the backstop if this logic is ever wrong: a claim deletion attempted
+// while a live contribution still points at it fails loudly instead
+// of silently corrupting that contribution's state.
+//
+// del_aliases_absent's USING joins needs_alias_processing (see
+// aliasFingerprintGateCTEs) on top of er, not just er alone -- a
+// fingerprint-matched report supplies zero input_aliases rows for its
+// resource the same way a resource with a genuinely empty Aliases
+// field would, and without this join the two are indistinguishable:
+// del_aliases_absent would retract every alias a fingerprint-matched
+// (unchanged) resource still legitimately holds.
 const aliasRetractAbsentCTE = `,
 input_reported_alias_keys(idx, namespace, key) AS (
 	SELECT * FROM UNNEST($28::int[], $29::text[], $30::text[])
 ),
 del_aliases_absent AS (
-	DELETE FROM resource_aliases ra
+	DELETE FROM resource_alias_contributions c
 	USING er e
-	WHERE ra.source_extension_resource_uid = e.uid
+	JOIN needs_alias_processing nap ON nap.idx = e.idx
+	WHERE c.source_extension_resource_uid = e.uid
 	  AND NOT EXISTS (
 	    SELECT 1 FROM input_reported_alias_keys irk
-	    WHERE irk.idx = e.idx AND irk.namespace = ra.namespace AND irk.key = ra.key
+	    WHERE irk.idx = e.idx AND irk.namespace = c.namespace AND irk.key = c.key
 	  )
+	RETURNING c.claim_id
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM del_aliases_absent
+),
+baseline_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+net_refcount_deltas AS (
+	SELECT claim_id, sum(delta_refs)::bigint AS delta_refs
+	FROM (
+		SELECT claim_id, -count(*)::bigint AS delta_refs FROM del_aliases_absent GROUP BY claim_id
+		UNION ALL
+		SELECT claim_id, count(*)::bigint AS delta_refs FROM upserted_contributions GROUP BY claim_id
+	) deltas
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(bcc.baseline_ct, 0) + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN baseline_contrib_counts bcc ON bcc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	RETURNING 1
+)`
+
+// aliasFingerprintWriteCTE is replaceInventorySQL's final addition,
+// spliced in after aliasRetractAbsentCTE and before aliasConflictSelect,
+// completing the fast path aliasFingerprintGateCTEs started: once a
+// report's aliases have been fully classified and retracted-if-absent
+// with zero conflicts, remember its reported fingerprint so a later,
+// byte-for-byte identical report can skip all of this.
+//
+// fingerprint_updates is deliberately gated on *zero* conflicts for
+// that report's idx, checked against both alias_value_conflicts and
+// alias_resource_conflicts -- a report with even one conflicting
+// alias must never get its fingerprint written, or a later repeat of
+// that exact same still-conflicting report would compare equal to the
+// (wrongly) stored fingerprint and skip reprocessing entirely,
+// silently swallowing a conflict that's still true. Because a report
+// with an unresolved conflict therefore keeps stored_alias_fingerprint
+// NULL (or whatever it was before), and NULL is always IS DISTINCT
+// FROM any concrete hash, needs_alias_processing naturally keeps
+// reprocessing it on every subsequent call for free -- no separate
+// "retry" bookkeeping needed. See
+// RepeatedReportWithPersistentAliasConflictKeepsReturningConflict.
+//
+// updated_fingerprints's UPDATE targets extension_resources by uid,
+// which per Postgres's WITH semantics reads that table's own
+// pre-statement snapshot -- so a brand-new resource resolved_er just
+// inserted earlier in this very statement is invisible to this scan,
+// and the UPDATE simply matches zero rows for it. That's fine, not a
+// bug: the row is already NULL by column default, so "the write
+// didn't happen" and "the write set it to NULL-equivalent" are
+// indistinguishable in effect, and this resource's *next* report
+// (now reading a row that pre-exists the statement) will see it and
+// write successfully then.
+//
+// ApplyInventoryDeltas has no analogous write-back: it has no
+// fingerprint fast path of its own to complete (see
+// applyInventoryDeltasSQLWithAliases's aliasFingerprintInvalidateCTE
+// instead, which only ever clears a fingerprint, never sets one).
+const aliasFingerprintWriteCTE = `,
+fingerprint_updates AS (
+	SELECT nap.idx, e.uid, irf.reported_alias_fingerprint
+	FROM needs_alias_processing nap
+	JOIN er e ON e.idx = nap.idx
+	JOIN input_report_fingerprints irf ON irf.idx = nap.idx
+	WHERE NOT EXISTS (SELECT 1 FROM alias_value_conflicts avc WHERE avc.idx = nap.idx)
+	  AND NOT EXISTS (SELECT 1 FROM alias_resource_conflicts arc WHERE arc.idx = nap.idx)
+),
+updated_fingerprints AS (
+	UPDATE extension_resources ext
+	SET alias_fingerprint = fu.reported_alias_fingerprint
+	FROM fingerprint_updates fu
+	WHERE ext.uid = fu.uid
 	RETURNING 1
 )`
 
@@ -1204,11 +1528,18 @@ del_aliases_absent AS (
 // del_labels_absent/upsert_labels implement "Labels is the complete
 // latest label set"; del_conditions_absent/upsert_conditions/
 // hist_conditions implement the same for conditions plus
-// change-guarded transition history. Deliberately has no trailing
+// change-guarded transition history. er also exposes
+// stored_alias_fingerprint (extension_resources.alias_fingerprint as
+// of the start of this statement -- NULL both for a resource that
+// pre-exists but has never had a successful, fully-applied alias
+// write, and for one resolved_er just inserted, since ext's LEFT JOIN
+// reads the pre-statement snapshot and never sees resolved_er's own
+// insert) for aliasFingerprintGateCTEs to compare against each
+// report's freshly computed fingerprint. Deliberately has no trailing
 // comma after hist_conditions's closing paren -- replaceInventorySQL
-// supplies its own continuation straight into input_aliases/
-// aliasFoldCTEs. Placeholder count is fixed (20) regardless of chunk
-// size -- only the array arguments grow.
+// supplies its own continuation straight into aliasFingerprintGateCTEs/
+// input_aliases/aliasFoldCTEs. Placeholder count is fixed (20)
+// regardless of chunk size -- only the array arguments grow.
 const replaceInventoryCoreCTEs = `
 WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, observed_at, received_at, obs_hist_id) AS (
 	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::timestamptz[], $9::timestamptz[], $10::text[])
@@ -1228,7 +1559,8 @@ resolved_er AS (
 ),
 er AS (
 	SELECT i.idx, i.collection_name, i.resource_id, i.observation, i.observed_at, i.received_at, i.obs_hist_id,
-	       COALESCE(res.uid, ext.uid) AS uid
+	       COALESCE(res.uid, ext.uid) AS uid,
+	       ext.alias_fingerprint AS stored_alias_fingerprint
 	FROM input_er i
 	LEFT JOIN resolved_er res
 		ON res.service_name = i.service_name AND res.collection_name = i.collection_name AND res.resource_id = i.resource_id
@@ -1311,29 +1643,40 @@ hist_conditions AS (
 
 // replaceInventorySQL is ReplaceInventory's single statement,
 // covering every chunk regardless of whether its reports carry any
-// aliases: replaceInventoryCoreCTEs, an input_aliases CTE
-// (placeholders $21-$27) joining er by idx for source_uid (see
-// flattenAliasCandidates's doc comment for why), feeding
-// aliasFoldCTEs, then aliasRetractAbsentCTE (placeholders $28-$30)
-// for the "absence retracts" half of the replace contract, then
-// aliasConflictSelect. Unlike applyInventoryDeltasSQLWithAliases/
-// applyInventoryDeltasSQLNoAliases, there is deliberately no
-// alias-free fast-path variant here: aliasRetractAbsentCTE's
-// del_aliases_absent has to run even for a chunk whose reports supply
-// zero aliases, since under replace semantics an empty Aliases field
-// is itself meaningful -- it means "this resource has no aliases now"
-// -- and must still retract whatever that resource held before. See
-// aliasRetractAbsentCTE's own doc comment for the rest of that
-// reasoning, and its note on a possible future fast path for resource
-// types declared to never carry aliases at all.
+// aliases: replaceInventoryCoreCTEs, then aliasFingerprintGateCTEs
+// (placeholder $31) deciding per-report which reports actually need
+// alias processing, then an input_aliases CTE (placeholders $21-$27)
+// joining er by idx for source_uid (see flattenAliasCandidates's doc
+// comment for why) and needs_alias_processing to skip reports whose
+// fingerprint matched, feeding aliasFoldCTEs, then aliasRetractAbsentCTE
+// (placeholders $28-$30) for the "absence retracts" half of the
+// replace contract (also scoped to needs_alias_processing -- see its
+// own doc comment), then aliasFingerprintWriteCTE to remember each
+// successfully-processed report's fingerprint, then aliasConflictSelect.
+// Unlike applyInventoryDeltasSQLWithAliases/applyInventoryDeltasSQLNoAliases,
+// there is deliberately no alias-free fast-path *statement* variant
+// here: aliasRetractAbsentCTE's del_aliases_absent has to run even for
+// a chunk whose reports supply zero aliases, since under replace
+// semantics an empty Aliases field is itself meaningful -- it means
+// "this resource has no aliases now" -- and must still retract
+// whatever that resource held before. aliasFingerprintGateCTEs is
+// this statement's actual fast path instead: cheap enough to always
+// include, since a resource whose reported alias set (empty or not)
+// matches what's already stored skips both input_aliases and
+// del_aliases_absent's per-report work via needs_alias_processing.
+// See aliasRetractAbsentCTE's own doc comment for the rest of that
+// reasoning.
 const replaceInventorySQL = replaceInventoryCoreCTEs + `,
+` + aliasFingerprintGateCTEs + `
 input_aliases AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
+	SELECT row_number() OVER () AS cand_id,
+	       ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
 	FROM UNNEST($21::int[], $22::text[], $23::text[], $24::text[], $25::text[], $26::text[], $27::timestamptz[])
 	     AS ac(idx, namespace, key, value, collection_name, resource_id, received_at)
 	JOIN er e ON e.idx = ac.idx
+	JOIN needs_alias_processing nap ON nap.idx = e.idx
 ),
-` + aliasFoldCTEs + aliasRetractAbsentCTE + aliasConflictSelect
+` + aliasFoldCTEs + aliasRetractAbsentCTE + aliasFingerprintWriteCTE + aliasConflictSelect
 
 // ReplaceInventory implements [domain.ExtensionResourceRepository.ReplaceInventory]
 // as one round trip for the whole chunk via replaceInventorySQL. See
@@ -1355,6 +1698,13 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	observedAts := make([]time.Time, n)
 	receivedAts := make([]time.Time, n)
 	obsHistIDs := make([]string, n)
+	// reportedAliasFingerprints feeds aliasFingerprintGateCTEs'
+	// input_report_fingerprints -- one hash per report, computed over
+	// its complete, as-reported Aliases regardless of what
+	// checkAliasBatchConsistency does with them afterward, since the
+	// fast path's whole point is comparing "what got reported" against
+	// "what's stored", not "what got applied".
+	reportedAliasFingerprints := make([][]byte, n)
 
 	var labelIdx []int32
 	var labelKeys, labelValues []string
@@ -1386,6 +1736,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		observedAts[i] = rep.ObservedAt.UTC()
 		receivedAts[i] = rep.ReceivedAt.UTC()
 		obsHistIDs[i] = string(domain.NewObservationID())
+		reportedAliasFingerprints[i] = domain.AliasSetFingerprint(rep.Aliases)
 
 		for k, v := range rep.Labels {
 			labelIdx = append(labelIdx, int32(i))
@@ -1418,6 +1769,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		condIdx, condTypes, condStatuses, condReasons, condMessages, condLastTransitions, condHistIDs,
 		aliasIdx, aliasNamespaces, aliasKeys, aliasValues, aliasCollectionNames, aliasResourceIDs, aliasReceivedAts,
 		reportedAliasIdx, reportedAliasNamespaces, reportedAliasKeys,
+		reportedAliasFingerprints,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("replace inventory: %w", err)
@@ -1548,6 +1900,37 @@ del_conditions AS (
 	RETURNING 1
 )`
 
+// aliasFingerprintInvalidateCTE is applyInventoryDeltasSQLWithAliases's
+// own addition after aliasFoldCTEs, the delta-side half of
+// extension_resources.alias_fingerprint's bookkeeping:
+// replaceInventorySQL's aliasFingerprintWriteCTE is the only place
+// that *sets* a fingerprint, so this is the only place that needs to
+// *clear* one -- a delta that upserts an alias changes what "this
+// resource's complete alias set" truthfully is out from under
+// whatever ReplaceInventory last fingerprinted, and a later replace
+// reporting that same old set again must not mistake it for
+// unchanged (see DeltaAddedAliasIsRetractedByLaterReplaceWithOriginalFingerprintedSet).
+//
+// Scoped to every distinct source_uid in input_aliases -- i.e. every
+// resource with at least one UpsertAliases candidate that survived
+// checkAliasBatchConsistency -- regardless of whether that candidate
+// goes on to conflict in aliasFoldCTEs. A conflicting upsert is
+// rejected and never actually changes the resource's true alias set,
+// so invalidating it too is unnecessary, but harmless: it costs that
+// resource one extra full reprocess on its next ReplaceInventory call
+// rather than a skip, never a correctness gap. Deliberately unconditional
+// for the same reason aliasFingerprintWriteCTE is conditioned the
+// other way (on zero conflicts) -- an over-eager invalidation is
+// always safe, an under-eager one is not.
+const aliasFingerprintInvalidateCTE = `,
+invalidated_fingerprints AS (
+	UPDATE extension_resources ext
+	SET alias_fingerprint = NULL
+	FROM (SELECT DISTINCT source_uid FROM input_aliases) touched
+	WHERE ext.uid = touched.source_uid
+	RETURNING 1
+)`
+
 // applyInventoryDeltasSQLWithAliases is ApplyInventoryDeltas's single
 // statement for a chunk containing at least one alias to fold in --
 // see replaceInventorySQL's doc comment for the shape (including why
@@ -1560,15 +1943,17 @@ del_conditions AS (
 // alias-wise -- see applyInventoryDeltasSQLNoAliases just below.
 // (DeleteAliases/ReplaceAliases aren't folded into this statement
 // yet -- see the loop building aliasCandidates in ApplyInventoryDeltas
-// below.)
+// below. When they are, they'll need the same aliasFingerprintInvalidateCTE
+// treatment.)
 const applyInventoryDeltasSQLWithAliases = applyInventoryDeltasCoreCTEs + `,
 input_aliases AS (
-	SELECT ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
+	SELECT row_number() OVER () AS cand_id,
+	       ac.idx, ac.namespace, ac.key, ac.value, ac.collection_name, ac.resource_id, ac.received_at, e.uid AS source_uid
 	FROM UNNEST($25::int[], $26::text[], $27::text[], $28::text[], $29::text[], $30::text[], $31::timestamptz[])
 	     AS ac(idx, namespace, key, value, collection_name, resource_id, received_at)
 	JOIN er e ON e.idx = ac.idx
 ),
-` + aliasFoldCTEs + aliasConflictSelect
+` + aliasFoldCTEs + aliasFingerprintInvalidateCTE + aliasConflictSelect
 
 // applyInventoryDeltasSQLNoAliases is ApplyInventoryDeltas's single
 // statement for a chunk with no aliases left to fold in (either

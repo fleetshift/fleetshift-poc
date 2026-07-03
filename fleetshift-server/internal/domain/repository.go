@@ -113,7 +113,7 @@ type ExtensionResourceRepository interface {
 	// from the replacement are cleared/deleted from latest state, with
 	// the exception of Observation -- see its field doc. Returns any
 	// [AliasConflict]s encountered folding replacements' Aliases into
-	// resource_aliases.
+	// resource_alias_claims/resource_alias_contributions.
 	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) ([]AliasConflict, error)
 
 	// ApplyInventoryDeltas applies incremental, field-level changes:
