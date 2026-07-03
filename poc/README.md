@@ -5,4 +5,7 @@ This folder represents standalone proofs of concepts for concepts explored as pa
 Current POCs include:
 
 - `attestation/`: attestation chain and hybrid verification experiments
+- `inventory-identity-reconciliation/`: inventory write-path experiment where
+  reported identity assertions are accepted asynchronously into a platform
+  identity read model
 - `ocm-work-agent-adapter/`: a standalone Go prototype showing how FleetShift-style delivery could be materialized as OCM `ManifestWork` and consumed through a simplified spoke-side reconcile loop
