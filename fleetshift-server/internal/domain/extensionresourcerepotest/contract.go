@@ -2883,6 +2883,28 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, firstValue); !errors.Is(err, domain.ErrNotFound) {
 				t.Errorf("ResolveAlias(firstValue): got %v, want ErrNotFound (retracted on replace)", err)
 			}
+
+			// This is claim_self_replace's defining property, not
+			// just claim_creates plus a coincidental cleanup: exactly
+			// one claim survives for this (namespace, key), with the
+			// new value -- not two (an orphaned old-value claim
+			// alongside a fresh new-value one). resource_alias_claims'
+			// own UNIQUE(namespace, key, platform_collection_name,
+			// platform_resource_id) would actually reject a genuine
+			// "leave the old claim behind, insert a second one for
+			// the same key" bug outright (a real SQL error, not a
+			// silent duplicate) -- so this also stands as a
+			// regression check that self-replace is still routing
+			// through the in-place UPDATE path aliasFoldCTEs' doc
+			// comment describes, not some other shape that happens to
+			// leave the same *externally resolvable* end state.
+			got, err := tx.ResourceIdentities().GetByName(ctx, name)
+			if err != nil {
+				t.Fatalf("GetByName: %v", err)
+			}
+			if len(got.Aliases()) != 1 || got.Aliases()[0] != secondValue {
+				t.Fatalf("Aliases() = %+v, want exactly [%+v]", got.Aliases(), secondValue)
+			}
 		})
 
 		// The three tests below round out single-contributor replace
@@ -3997,19 +4019,106 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
+		// CrossingPathsRetractAndArriveAtSameClaimInSingleBatchSurvives
+		// exercises aliasRetractAbsentCTE's net-refcount algebra
+		// directly: within one ReplaceInventory call (one statement),
+		// the claim's *only* existing contributor drops it in the
+		// same batch that a brand-new contributor corroborates the
+		// exact same (namespace, key, value, target) for the first
+		// time. A cruder implementation that only netted the
+		// departure against the claim's baseline count (ignoring
+		// upserted_contributions' own arrivals landing on that same
+		// claim id) would compute a refcount of zero and delete the
+		// claim -- while a live contribution from this very statement
+		// still points at it, tripping the restrictive claim_id FK on
+		// resource_alias_contributions at best, or silently
+		// orphaning/misresolving the alias at worst. See
+		// aliasRetractAbsentCTE's doc comment for the algebra this
+		// guards.
+		t.Run("CrossingPathsRetractAndArriveAtSameClaimInSingleBatchSurvives", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			rtCloud := domain.ResourceType("gcp.fleetshift.io/Instance")
+			rtK8s := domain.ResourceType("kind.fleetshift.io/Node")
+			if err := repo.CreateType(ctx, sampleInventoryType(rtCloud)); err != nil {
+				t.Fatalf("CreateType(cloud): %v", err)
+			}
+			if err := repo.CreateType(ctx, sampleInventoryType(rtK8s)); err != nil {
+				t.Fatalf("CreateType(k8s): %v", err)
+			}
+
+			name := domain.ResourceName("clusters/multi-contributor-crossing-paths")
+			shared, _ := domain.NewAlias("gcp", "instance_id", "mc-crossing-paths-shared")
+
+			t1 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: rtCloud,
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{shared},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}}); err != nil {
+				t.Fatalf("seed cloud ReplaceInventory: %v", err)
+			}
+
+			// Single batch: the cloud contributor -- the claim's only
+			// holder so far -- stops reporting it in the very same
+			// call that a brand-new Kubernetes contributor for the
+			// same target first corroborates it.
+			t2 := fixedTime.Add(2 * time.Minute)
+			conflicts, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{
+				{
+					ResourceType: rtCloud,
+					Name:         name,
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      nil,
+					ObservedAt:   t2,
+					ReceivedAt:   t2,
+				},
+				{
+					ResourceType: rtK8s,
+					Name:         name,
+					CandidateUID: domain.NewExtensionResourceUID(),
+					Aliases:      []domain.Alias{shared},
+					ObservedAt:   t2,
+					ReceivedAt:   t2,
+				},
+			})
+			if err != nil {
+				t.Fatalf("ReplaceInventory (crossing paths): %v", err)
+			}
+			if len(conflicts) != 0 {
+				t.Fatalf("conflicts = %+v, want none", conflicts)
+			}
+
+			resolved, err := tx.ResourceIdentities().ResolveAlias(ctx, shared)
+			if err != nil {
+				t.Fatalf("ResolveAlias after crossing paths: %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, name)
+		})
+
 		// The three tests below are Delete's counterpart to the three
 		// ReplaceInventory-based retraction tests above: an extension
 		// resource can stop contributing an alias either by reporting
 		// again without it, or by ceasing to exist entirely. Deletion
 		// is not just "the same trigger, different API" -- Delete is
 		// a completely separate code path from ReplaceInventory's
-		// alias fold-in, and today it doesn't touch resource_aliases
-		// at all (there's no foreign key from extension_resources to
-		// resource_aliases, unlike representations, which do vanish
-		// on delete because they're derived by joining on the
-		// extension_resources row directly). So retraction working
-		// for the omission case is never a guarantee it also works
-		// for the deletion case.
+		// alias fold-in. resource_alias_contributions.source_extension_resource_uid
+		// does cascade on extension_resources' deletion, which alone
+		// removes a deleted resource's own contribution rows, but
+		// that's only half of retraction: the resource_alias_claims
+		// row a contribution pointed at needs its own explicit
+		// cleanup once no contributor (and no platform_owned flag)
+		// keeps it alive, since claim_id is a restrictive, non-cascading
+		// FK by design (see the migration's doc comment on
+		// resource_alias_contributions). ExtensionResourceRepo.Delete
+		// performs that cleanup explicitly rather than relying on any
+		// FK to do it -- so retraction working for the omission case
+		// is never a guarantee it also works for the deletion case.
 
 		t.Run("AliasRetractedWhenSoleContributingExtensionResourceIsDeleted", func(t *testing.T) {
 			tx := factory(t)
@@ -4156,6 +4265,64 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
+		// AliasSurvivesExtensionResourceDeleteWhenPlatformOwned closes
+		// the last gap in Delete's orphan cleanup: platform_owned is
+		// the *other* way (besides a surviving sibling contributor) a
+		// claim can outlive the contributor that originally reported
+		// it. A platform resource explicitly corroborating an alias
+		// its own extension resource contributed (resource_identity_repo.go's
+		// reconcileAliases flips the existing claim's platform_owned
+		// flag to true rather than rejecting it as already-claimed)
+		// must keep that alias resolvable even after the sole
+		// contributing extension resource is deleted and its
+		// resource_alias_contributions row cascades away -- Delete's
+		// explicit cleanup must check platform_owned, not just
+		// "zero contributors remain", before deleting a claim.
+		t.Run("AliasSurvivesExtensionResourceDeleteWhenPlatformOwned", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			erRepo := tx.ExtensionResources()
+			riRepo := tx.ResourceIdentities()
+
+			rt := domain.ResourceType("gcp.fleetshift.io/Instance")
+			if err := erRepo.CreateType(ctx, sampleInventoryType(rt)); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("clusters/platform-owned-survives-delete")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "platform-owned-survives")
+
+			now := fixedTime.Add(time.Minute)
+			if _, err := erRepo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: rt,
+				Name:         name,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{alias},
+				ObservedAt:   now,
+				ReceivedAt:   now,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			pr := domain.NewPlatformResource(name, nil, now)
+			if err := pr.AddAlias(alias); err != nil {
+				t.Fatalf("AddAlias: %v", err)
+			}
+			if err := riRepo.Create(ctx, pr); err != nil {
+				t.Fatalf("Create platform resource: %v", err)
+			}
+
+			if err := erRepo.Delete(ctx, rt.FullName(name)); err != nil {
+				t.Fatalf("Delete: %v", err)
+			}
+
+			resolved, err := riRepo.ResolveAlias(ctx, alias)
+			if err != nil {
+				t.Fatalf("ResolveAlias after sole contributor deleted (platform_owned): %v", err)
+			}
+			assertEqual(t, "resolved name", resolved, name)
+		})
+
 		// ReplacingOwnAliasWhileSiblingStillHoldsOldValueConflicts
 		// covers the subtle interaction between "replace" and
 		// "additive across contributors": a contributor is allowed to
@@ -4236,6 +4403,23 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			assertEqual(t, "resolved oldValue", resolvedOld, name)
 			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, newValue); !errors.Is(err, domain.ErrNotFound) {
 				t.Errorf("ResolveAlias(newValue): got %v, want ErrNotFound (rejected replace)", err)
+			}
+
+			// A rejected candidate gets zero writes, not a partial or
+			// undone one (see alias_resource_conflicts/safe in
+			// aliasFoldCTEs' doc comment: a conflicting row simply
+			// never reaches any of the claim_creates/claim_self_replace/
+			// claim_reuse write paths) -- so the cloud contributor's
+			// own pre-existing contribution to oldValue's claim must
+			// still be exactly what it was before the rejected
+			// replace attempt: one claim for this (namespace, key),
+			// still the old value.
+			got, err := tx.ResourceIdentities().GetByName(ctx, name)
+			if err != nil {
+				t.Fatalf("GetByName: %v", err)
+			}
+			if len(got.Aliases()) != 1 || got.Aliases()[0] != oldValue {
+				t.Fatalf("Aliases() = %+v, want exactly [%+v] (unchanged by rejected replace)", got.Aliases(), oldValue)
 			}
 		})
 
@@ -4550,6 +4734,193 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("ResolveAlias(replacement): %v", err)
 			}
 			assertEqual(t, "resolved replacement", resolvedReplacement, name)
+		})
+
+		// The next two tests pin down alias_fingerprint's two
+		// correctness subtleties (see the migration's doc comment on
+		// that column, and the fold-in's own doc comment on how the
+		// skip is wired in): the fast path must never let a
+		// still-true conflict go unreported, and a delta that
+		// mutates a resource's aliases outside of ReplaceInventory's
+		// "complete set" bookkeeping must invalidate that resource's
+		// stored fingerprint, not leave it comparable to a later,
+		// delta-unaware replace.
+
+		t.Run("RepeatedReportWithPersistentAliasConflictKeepsReturningConflict", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			otherName := domain.ResourceName("nodes/fingerprint-conflict-victim")
+			contested, _ := domain.NewAlias("gcp", "instance_id", "fingerprint-conflict-contested")
+			t0 := fixedTime.Add(time.Minute)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         otherName,
+				CandidateUID: domain.NewExtensionResourceUID(),
+				Aliases:      []domain.Alias{contested},
+				ObservedAt:   t0,
+				ReceivedAt:   t0,
+			}}); err != nil {
+				t.Fatalf("seed contested owner: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/fingerprint-conflict-reporter")
+			candidateUID := domain.NewExtensionResourceUID()
+			// Create "reporter" via an alias-free replace first, in a
+			// *separate* statement from the one that reports aliases
+			// below -- extension_resources.alias_fingerprint only
+			// ever gets written for a resource whose row already
+			// existed before that particular statement began (see
+			// aliasFingerprintWriteCTE's doc comment on why a
+			// same-statement INSERT's row is invisible to that
+			// statement's own UPDATE), so a resource created and
+			// alias-reported in the very same call can never
+			// demonstrate a caching bug in the first place: it simply
+			// never gets a chance to cache anything, correct or not.
+			t0b := fixedTime.Add(90 * time.Second)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: candidateUID,
+				ObservedAt:   t0b,
+				ReceivedAt:   t0b,
+			}}); err != nil {
+				t.Fatalf("seed reporter (no aliases): %v", err)
+			}
+
+			ownAlias, _ := domain.NewAlias("gcp", "zone", "fingerprint-conflict-own-zone")
+			// A two-alias report, one alias that succeeds and one
+			// that persistently conflicts -- a resource with *any*
+			// conflict must never get its fingerprint written (see
+			// the fold-in's own doc comment), so repeating this exact
+			// report keeps forcing full reprocessing rather than
+			// treating "byte-for-byte identical to last reported" as
+			// "byte-for-byte identical to last *successful*".
+			report := []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: candidateUID,
+				Aliases:      []domain.Alias{ownAlias, contested},
+				ObservedAt:   fixedTime.Add(2 * time.Minute),
+				ReceivedAt:   fixedTime.Add(2 * time.Minute),
+			}}
+
+			conflicts1, err := repo.ReplaceInventory(ctx, report)
+			if err != nil {
+				t.Fatalf("ReplaceInventory (first attempt): %v", err)
+			}
+			if len(conflicts1) != 1 {
+				t.Fatalf("conflicts1 = %+v, want 1", conflicts1)
+			}
+			assertEqual(t, "conflicts1[0].Kind", conflicts1[0].Kind, domain.AliasConflictValueClaimedByOther)
+
+			resolvedOwn, err := tx.ResourceIdentities().ResolveAlias(ctx, ownAlias)
+			if err != nil {
+				t.Fatalf("ResolveAlias(ownAlias): %v", err)
+			}
+			assertEqual(t, "resolved ownAlias", resolvedOwn, name)
+
+			conflicts2, err := repo.ReplaceInventory(ctx, report)
+			if err != nil {
+				t.Fatalf("ReplaceInventory (repeated, identical attempt): %v", err)
+			}
+			if len(conflicts2) != 1 {
+				t.Fatalf("conflicts2 = %+v, want 1 (persistent conflict must keep surfacing, not be skipped by a stale fingerprint match)", conflicts2)
+			}
+			assertEqual(t, "conflicts2[0].Kind", conflicts2[0].Kind, domain.AliasConflictValueClaimedByOther)
+		})
+
+		t.Run("DeltaAddedAliasIsRetractedByLaterReplaceWithOriginalFingerprintedSet", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+
+			name := domain.ResourceName("nodes/fingerprint-delta-invalidation")
+			candidateUID := domain.NewExtensionResourceUID()
+			original, _ := domain.NewAlias("gcp", "instance_id", "fingerprint-delta-original")
+			deltaAdded, _ := domain.NewAlias("gcp", "zone", "fingerprint-delta-added")
+
+			// Create the resource in its own statement first -- see
+			// RepeatedReportWithPersistentAliasConflictKeepsReturningConflict's
+			// identical seeding comment for why a resource's very
+			// first aliased ReplaceInventory call can never itself
+			// demonstrate a caching bug.
+			t0 := fixedTime.Add(30 * time.Second)
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: candidateUID,
+				ObservedAt:   t0,
+				ReceivedAt:   t0,
+			}}); err != nil {
+				t.Fatalf("seed resource (no aliases): %v", err)
+			}
+
+			t1 := fixedTime.Add(time.Minute)
+			replacement := domain.InventoryReplacement{
+				ResourceType: "inv.fleetshift.io/Node",
+				Name:         name,
+				CandidateUID: candidateUID,
+				Aliases:      []domain.Alias{original},
+				ObservedAt:   t1,
+				ReceivedAt:   t1,
+			}
+			// A single, unconflicted alias against an already-existing
+			// resource: this ReplaceInventory call is exactly the
+			// case that gets a stored fingerprint written.
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{replacement}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			t2 := fixedTime.Add(2 * time.Minute)
+			if _, err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
+				ResourceType:  "inv.fleetshift.io/Node",
+				Name:          name,
+				CandidateUID:  domain.NewExtensionResourceUID(),
+				UpsertAliases: []domain.Alias{deltaAdded},
+				ObservedAt:    t2,
+				ReceivedAt:    t2,
+			}}); err != nil {
+				t.Fatalf("ApplyInventoryDeltas (upsert delta alias): %v", err)
+			}
+
+			resolvedDelta, err := tx.ResourceIdentities().ResolveAlias(ctx, deltaAdded)
+			if err != nil {
+				t.Fatalf("ResolveAlias(deltaAdded): %v", err)
+			}
+			assertEqual(t, "resolved deltaAdded", resolvedDelta, name)
+
+			// Re-report the *original* replacement -- unaware
+			// deltaAdded was ever added, byte-for-byte identical to
+			// the set that produced the stored fingerprint before
+			// the delta ran. If the delta hadn't invalidated that
+			// fingerprint, this would look unchanged and skip alias
+			// processing entirely, leaving deltaAdded (absent from
+			// this report) un-retracted.
+			t3 := fixedTime.Add(3 * time.Minute)
+			replacement.ObservedAt = t3
+			replacement.ReceivedAt = t3
+			if _, err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{replacement}); err != nil {
+				t.Fatalf("ReplaceInventory (original set, unaware of delta): %v", err)
+			}
+
+			if _, err := tx.ResourceIdentities().ResolveAlias(ctx, deltaAdded); !errors.Is(err, domain.ErrNotFound) {
+				t.Errorf("ResolveAlias(deltaAdded) after replace with original set: got %v, want ErrNotFound (retracted)", err)
+			}
+			resolvedOriginal, err := tx.ResourceIdentities().ResolveAlias(ctx, original)
+			if err != nil {
+				t.Fatalf("ResolveAlias(original): %v", err)
+			}
+			assertEqual(t, "resolved original", resolvedOriginal, name)
 		})
 	})
 }

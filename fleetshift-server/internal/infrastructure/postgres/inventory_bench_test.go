@@ -388,8 +388,9 @@ func drawFromPoolNoWrap(pool []int, pos *atomic.Int64, n int, scenario string) [
 // nextNeverAliasIndices draws from neverAliasPool -- resources
 // seedAliasCorpus deliberately never gives an alias to (see its skip
 // parameter) -- for benchmarks measuring the genuine "no alias, never
-// had one, while resource_aliases is still large from everyone else's
-// aliases" baseline: buildUpdateReplacements's withAlias=false,
+// had one, while resource_alias_claims/resource_alias_contributions
+// are still large from everyone else's aliases" baseline:
+// buildUpdateReplacements's withAlias=false,
 // buildAppUpdateReplacements's withAlias=false, buildHeartbeatDeltas,
 // and the ACM baseline builders (which don't care about aliases at
 // all, but drawing from here rather than a pool something else
@@ -682,7 +683,7 @@ func buildBenchState() (*benchState, error) {
 	fmt.Println("\n[bench] seeding corpus (this happens once for the whole run)...")
 	seedStart := time.Now()
 
-	corpusUIDs, err := seedExtensionResourceCorpus(ctx, db, benchCorpusSize)
+	corpusUIDs, err := seedExtensionResourceCorpus(ctx, db, benchCorpusSize, hasAlias)
 	if err != nil {
 		return nil, err
 	}
@@ -740,8 +741,15 @@ func buildBenchState() (*benchState, error) {
 // seedAliasCorpus can attribute its seeded aliases to the same
 // contributor a later steady-state report for that idx resolves to
 // (see seedAliasCorpus's doc comment for why that attribution
-// matters under the per-contributor alias model).
-func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int) ([]string, error) {
+// matters under the per-contributor alias model). It also seeds
+// extension_resources.alias_fingerprint to match the alias state
+// seedAliasCorpus is about to write: aliased resources get the hash
+// of their one seeded alias, and never-alias resources get the hash
+// of the empty set. Because benchmark setup intentionally bypasses
+// ReplaceInventory, this is what makes the steady-state no-op alias
+// benchmarks exercise the fingerprint skip instead of paying one
+// artificial cold-cache classification pass.
+func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int, hasAlias []bool) ([]string, error) {
 	allUIDs := make([]string, n)
 	for start := 0; start < n; start += benchSeedChunkRows {
 		end := min(start+benchSeedChunkRows, n)
@@ -753,6 +761,7 @@ func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int) ([]stri
 		collectionNames := make([]string, size)
 		resourceIDs := make([]string, size)
 		labelsJSON := make([]string, size)
+		aliasFingerprints := make([][]byte, size)
 		createdAts := make([]time.Time, size)
 		observations := make([]*string, size)
 
@@ -765,17 +774,26 @@ func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int) ([]stri
 			collectionNames[i] = benchCollectionName
 			resourceIDs[i] = benchResourceID(idx)
 			labelsJSON[i] = "{}"
+			if hasAlias[idx] {
+				aliasFingerprints[i] = domain.AliasSetFingerprint([]domain.Alias{{
+					Namespace: benchAliasNamespace,
+					Key:       benchAliasKey,
+					Value:     domain.AliasValue(benchAliasValue(idx)),
+				}})
+			} else {
+				aliasFingerprints[i] = domain.AliasSetFingerprint(nil)
+			}
 			createdAts[i] = time.Now().UTC()
 			obs := string(benchObservationJSON(0))
 			observations[i] = &obs
 		}
 
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, created_at, updated_at)
-			SELECT u, s, t, c, r, l::jsonb, ts, ts
-			FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::timestamptz[])
-				AS x(u, s, t, c, r, l, ts)
-		`, uids, serviceNames, typeNames, collectionNames, resourceIDs, labelsJSON, createdAts); err != nil {
+			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, alias_fingerprint, created_at, updated_at)
+			SELECT u, s, t, c, r, l::jsonb, fp, ts, ts
+			FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::text[], $7::bytea[], $8::timestamptz[])
+				AS x(u, s, t, c, r, l, fp, ts)
+		`, uids, serviceNames, typeNames, collectionNames, resourceIDs, labelsJSON, aliasFingerprints, createdAts); err != nil {
 			return nil, fmt.Errorf("seed extension_resources[%d:%d]: %w", start, end, err)
 		}
 
@@ -842,26 +860,33 @@ func seedExtensionResourceCorpus(ctx context.Context, db *sql.DB, n int) ([]stri
 // hasAlias[idx] == false exactly one already-resolved alias, so the
 // "UpdateWithAlias" benchmark measures the realistic steady-state
 // case: an addon that always reports the same alias on every poll,
-// hitting resource_aliases' "already resolved, no-op" path rather than
-// a first-time claim. uids (from seedExtensionResourceCorpus)
-// attributes each seeded alias to the very same extension_resources.uid
-// a later steady-state report for that idx resolves to via natural-key
-// resolution -- required under the per-contributor alias model (see
-// the migration's resource_aliases doc comment): without it, a
-// "repeat" report's real contributor uid would never match this
-// seed's contributor, so what's meant to exercise a no-op would
-// instead exercise alias_accepted's corroboration branch followed by
-// a genuine (if one-time per idx) extra INSERT.
+// hitting ReplaceInventory's alias_fingerprint skip rather than
+// reclassifying a no-op alias or writing a first-time claim. uids (from
+// seedExtensionResourceCorpus) attributes each seeded contribution to
+// the very same extension_resources.uid a later steady-state report
+// for that idx resolves to via natural-key resolution -- required
+// under the per-contributor alias model (see the migration's
+// resource_alias_claims doc comment): without it, a "repeat" report's
+// real contributor uid would never match this seed's contributor, so
+// what's meant to exercise a no-op would instead exercise a genuine
+// (if one-time per idx) new claim/contribution.
 //
 // hasAlias[idx] == false is exactly benchState.neverAliasPool's
-// membership: those resources get neither a resource_aliases row nor
-// a platform_resources row (ensure_platform only ever creates one
-// lazily, on a resource's first accepted alias -- see
-// resource_identity_repo.go's virtual-resource doc -- and a resource
-// that never contributes an alias has no other reason here to get
-// one either), so a benchmark drawing from neverAliasPool measures a
-// resource type that has genuinely never touched either table, not
-// one whose alias was seeded and is merely never read back.
+// membership: those resources get neither a resource_alias_claims/
+// resource_alias_contributions row nor a platform_resources row:
+// claims no longer require a physical platform_resources row, and a
+// resource that never contributes an alias has no other reason here
+// to get one either. A benchmark drawing from neverAliasPool
+// therefore measures a resource type that has genuinely never
+// touched either table, not one whose alias was seeded and is merely
+// never read back.
+//
+// Each qualifying idx needs its own brand-new claim row (this
+// function never corroborates a pre-existing one), so the claim
+// insert always returns exactly one row per input row; claimIDByValue
+// correlates the two INSERTs by value rather than assuming the
+// RETURNING order matches the UNNEST input order, which Postgres
+// doesn't guarantee for a set-returning INSERT ... SELECT.
 func seedAliasCorpus(ctx context.Context, db *sql.DB, n int, uids []string, hasAlias []bool) error {
 	for start := 0; start < n; start += benchSeedChunkRows {
 		end := min(start+benchSeedChunkRows, n)
@@ -886,13 +911,6 @@ func seedAliasCorpus(ctx context.Context, db *sql.DB, n int, uids []string, hasA
 			resourceIDs[i] = benchResourceID(idx)
 			createdAts[i] = now
 		}
-		if _, err := db.ExecContext(ctx, `
-			INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
-			SELECT c, r, '{}'::jsonb, t, t
-			FROM UNNEST($1::text[], $2::text[], $3::timestamptz[]) AS x(c, r, t)
-		`, collectionNames, resourceIDs, createdAts); err != nil {
-			return fmt.Errorf("seed platform_resources[%d:%d]: %w", start, end, err)
-		}
 
 		namespaces := make([]string, size)
 		keys := make([]string, size)
@@ -904,11 +922,44 @@ func seedAliasCorpus(ctx context.Context, db *sql.DB, n int, uids []string, hasA
 			values[i] = benchAliasValue(idx)
 			sourceUIDs[i] = uids[idx]
 		}
+
+		claimRows, err := db.QueryContext(ctx, `
+			INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
+			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::timestamptz[])
+			RETURNING value, id
+		`, namespaces, keys, values, collectionNames, resourceIDs, createdAts)
+		if err != nil {
+			return fmt.Errorf("seed resource_alias_claims[%d:%d]: %w", start, end, err)
+		}
+		claimIDByValue := make(map[string]int64, size)
+		for claimRows.Next() {
+			var value string
+			var id int64
+			if err := claimRows.Scan(&value, &id); err != nil {
+				claimRows.Close()
+				return fmt.Errorf("scan seeded resource_alias_claims[%d:%d]: %w", start, end, err)
+			}
+			claimIDByValue[value] = id
+		}
+		if err := claimRows.Err(); err != nil {
+			claimRows.Close()
+			return fmt.Errorf("seed resource_alias_claims[%d:%d]: %w", start, end, err)
+		}
+		claimRows.Close()
+
+		claimIDs := make([]int64, size)
+		for i, v := range values {
+			id, ok := claimIDByValue[v]
+			if !ok {
+				return fmt.Errorf("seed resource_alias_contributions[%d:%d]: no claim id for value %q", start, end, v)
+			}
+			claimIDs[i] = id
+		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid, created_at)
-			SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::timestamptz[])
-		`, namespaces, keys, values, collectionNames, resourceIDs, sourceUIDs, createdAts); err != nil {
-			return fmt.Errorf("seed resource_aliases[%d:%d]: %w", start, end, err)
+			INSERT INTO resource_alias_contributions (source_extension_resource_uid, namespace, key, claim_id, created_at)
+			SELECT * FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::bigint[], $5::timestamptz[])
+		`, sourceUIDs, namespaces, keys, claimIDs, createdAts); err != nil {
+			return fmt.Errorf("seed resource_alias_contributions[%d:%d]: %w", start, end, err)
 		}
 	}
 	return nil
@@ -939,6 +990,7 @@ func seedCrossContributorCorpus(ctx context.Context, db *sql.DB, indices []int) 
 		typeNames := make([]string, size)
 		collectionNames := make([]string, size)
 		resourceIDs := make([]string, size)
+		aliasFingerprints := make([][]byte, size)
 		createdAts := make([]time.Time, size)
 		observations := make([]*string, size)
 		now := time.Now().UTC()
@@ -948,16 +1000,17 @@ func seedCrossContributorCorpus(ctx context.Context, db *sql.DB, indices []int) 
 			typeNames[i] = benchTypeName
 			collectionNames[i] = benchCollectionName
 			resourceIDs[i] = benchResourceID(idx)
+			aliasFingerprints[i] = domain.AliasSetFingerprint(nil)
 			createdAts[i] = now
 			obs := string(benchObservationJSON(0))
 			observations[i] = &obs
 		}
 		if _, err := db.ExecContext(ctx, `
-			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, created_at, updated_at)
-			SELECT u, s, t, c, r, '{}'::jsonb, ts, ts
-			FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::timestamptz[])
-				AS x(u, s, t, c, r, ts)
-		`, uids, serviceNames, typeNames, collectionNames, resourceIDs, createdAts); err != nil {
+			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, alias_fingerprint, created_at, updated_at)
+			SELECT u, s, t, c, r, '{}'::jsonb, fp, ts, ts
+			FROM UNNEST($1::uuid[], $2::text[], $3::text[], $4::text[], $5::text[], $6::bytea[], $7::timestamptz[])
+				AS x(u, s, t, c, r, fp, ts)
+		`, uids, serviceNames, typeNames, collectionNames, resourceIDs, aliasFingerprints, createdAts); err != nil {
 			return fmt.Errorf("seed cross-contributor extension_resources[%d:%d]: %w", start, end, err)
 		}
 		if _, err := db.ExecContext(ctx, `
@@ -976,15 +1029,16 @@ func seedCrossContributorCorpus(ctx context.Context, db *sql.DB, indices []int) 
 // buildValueClaimedByOtherReplacements (and buildMixedAliasReplacements's
 // matching bucket) has pre-existing "other owners" to generate genuine
 // AliasConflictValueClaimedByOther rows against. These are
-// platform_resources/resource_aliases rows only -- no
-// extension_resources/inventory rows at all -- since alias resolution
-// depends on the platform natural key alone (see aliasFoldCTEs's doc
-// comment), not on an extension resource existing; their
-// source_extension_resource_uid is left NULL accordingly (the same
+// platform_resources/resource_alias_claims rows only -- no
+// extension_resources/inventory rows and no resource_alias_contributions
+// rows at all -- since alias resolution depends on the platform
+// natural key alone (see aliasFoldCTEs's doc comment), not on an
+// extension resource existing; each claim is written with
+// platform_owned = true and zero contributions accordingly (the same
 // "platform-direct" shape resource_identity_repo.go's reconcileAliases
-// writes -- see the migration's resource_aliases doc comment), which
-// is fine here since none of the conflict shapes this seeds depend on
-// contributor identity at all.
+// writes -- see the migration's resource_alias_claims doc comment),
+// which is fine here since none of the conflict shapes this seeds
+// depend on contributor identity at all.
 //
 // This deliberately uses benchSecondaryAliasKey, not benchAliasKey:
 // every corpus resource already owns a benchAliasKey alias (see
@@ -1024,10 +1078,11 @@ func seedConflictVictims(ctx context.Context, db *sql.DB, n int) error {
 		return fmt.Errorf("seed conflict victim platform_resources: %w", err)
 	}
 	if _, err := db.ExecContext(ctx, `
-		INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, created_at)
-		SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::timestamptz[])
+		INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, platform_owned, created_at)
+		SELECT n, k, v, c, r, true, t
+		FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[], $5::text[], $6::timestamptz[]) AS x(n, k, v, c, r, t)
 	`, namespaces, keys, values, collectionNames, resourceIDs, createdAts); err != nil {
-		return fmt.Errorf("seed conflict victim resource_aliases: %w", err)
+		return fmt.Errorf("seed conflict victim resource_alias_claims: %w", err)
 	}
 	return nil
 }
@@ -1065,7 +1120,8 @@ func analyzeBenchTables(ctx context.Context, db *sql.DB) error {
 		"extension_resource_inventory_observations",
 		"extension_resource_inventory_condition_events",
 		"platform_resources",
-		"resource_aliases",
+		"resource_alias_claims",
+		"resource_alias_contributions",
 		"bench_acm_resources",
 	}
 	for _, t := range tables {
@@ -1273,8 +1329,8 @@ func buildCrossContributorConflictReplacements(st *benchState, n int) []domain.I
 }
 
 // buildValueClaimedByOtherReplacements isolates alias_value_conflicts'
-// AliasConflictValueClaimedByOther outcome (phase 1,
-// alias_prev_by_value): every row reports its own unchanged
+// AliasConflictValueClaimedByOther outcome (phase 1, by_value): every
+// row reports its own unchanged
 // benchAliasKey alias (preserving it -- otherwise this report's
 // silence on benchAliasKey would retract it under replace semantics,
 // confounding a "new key rejected" measurement with an unrelated
@@ -1698,12 +1754,12 @@ func BenchmarkCTE_ReplaceInventory_InsertNew(b *testing.B) {
 // alias case this session's optimization targeted: every report
 // re-sends the same alias it sent last time, from the very same
 // contributor (see seedAliasCorpus's doc comment for why that
-// attribution matters), so it exercises aliasFoldCTEs/aliasRetractAbsentCTE's
-// extra joins/anti-joins purely for a result that turns out to be a
-// no-op -- the cost this benchmark quantifies is exactly what a
-// resource type declaring "I never have aliases" could in principle
-// avoid, a possible future optimization this benchmark doesn't
-// exercise (see aliasFoldCTEs's doc comment's closing paragraph).
+// attribution matters), with extension_resources.alias_fingerprint
+// already warmed to match that seeded alias state. That means this
+// benchmark should exercise the fingerprint skip: needs_alias_processing
+// filters the batch before aliasFoldCTEs/aliasRetractAbsentCTE do real
+// work. The cost this benchmark quantifies is the residual overhead of
+// carrying alias-capable SQL for warmed steady-state same-alias traffic.
 func BenchmarkCTE_ReplaceInventory_UpdateWithAlias(b *testing.B) {
 	st := setupBenchOnce(b)
 	repo := &ExtensionResourceRepo{DB: st.db}
@@ -1930,16 +1986,17 @@ func BenchmarkCTE_ReplaceInventory_ValueClaimedByOtherConflict(b *testing.B) {
 // outcomes the isolated benchmarks above measure separately, blended
 // into one batch at illustrative-not-measured ratios). It exists to
 // answer a specific question about aliasFoldCTEs' two-phase,
-// read-by-value-then-by-resource design (phase 1 = alias_prev_by_value,
-// phase 2 = alias_resource_check, gated on alias_value_missing): phase
-// 1 alone resolves the no-op and AliasConflictValueClaimedByOther
-// cases (the (namespace, key, value) tuple it looks up already exists
-// either way, so ownership is unambiguous without ever checking what
-// else this resource holds) -- but a genuinely new alias, a
-// self-replacement's new value, or a retraction's absence has never
-// been seen (or is deliberately not looked for) under that tuple
-// before, so those fall through to alias_value_missing/never look at
-// phase 1 at all. Whether the value-first design's two-reads-for-some-rows
+// read-by-value-then-by-resource design (phase 1 = by_value, phase 2
+// = by_resource/sibling, gated on by_value's value_claim_id being
+// NULL): the no-op case never reaches either phase at all (self_claim/
+// changed filters it out first), but AliasConflictValueClaimedByOther
+// is resolved by phase 1 alone (the (namespace, key, value) tuple it
+// looks up already exists either way, so ownership is unambiguous
+// without ever checking what else this resource holds) -- while a
+// genuinely new alias, a self-replacement's new value, or
+// AliasConflictResourceHasDifferentValue has never been seen (or is
+// deliberately not looked for) under that tuple before, so those fall
+// through to phase 2. Whether the value-first design's two-reads-for-some-rows
 // trade nets out favorably against the simpler by-resource-only design
 // (this session's "small version" -- see git history, which paid for
 // exactly one read per row) depends on the real mix of these outcomes

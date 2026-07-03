@@ -1,7 +1,9 @@
 package domain
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 )
@@ -209,6 +211,53 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 		return Alias{}, fmt.Errorf("alias value: %w: must not be empty", ErrInvalidArgument)
 	}
 	return Alias{Namespace: ns, Key: key, Value: value}, nil
+}
+
+// AliasSetFingerprint returns a stable, order-independent digest of
+// aliases's complete (namespace, key, value) content. Repository
+// implementations use this to detect a resource whose reported alias
+// set is byte-for-byte identical to the last one it successfully,
+// fully applied (see extension_resource_repo.go's alias fold-in in
+// both infrastructure/postgres and infrastructure/sqlite), letting a
+// repeated report skip alias classification entirely rather than
+// reclassifying every (namespace, key, value) against the database
+// again for no behavioral change.
+//
+// aliases is sorted by (namespace, key, value) into a local copy
+// first (the input slice is never mutated) so that the same set
+// reported in a different order still produces the same fingerprint
+// -- callers can't generally guarantee stable ordering across
+// reports. Each field is length-prefixed via hashString, the same
+// technique [DeploymentView.Etag] and [ExtensionResourceView.Etag]
+// use, so that e.g. an alias with namespace "ab", key "c" can never
+// hash the same as one with namespace "a", key "bc": a bare
+// delimiter-joined string wouldn't have that guarantee.
+//
+// An empty or nil aliases returns sha256's fixed digest of zero
+// bytes, not a special-cased sentinel -- "this resource has no
+// aliases" is just the fingerprint of the empty set, forming a stable
+// basis for skipping alias processing entirely once a resource that
+// never reports aliases has done so once.
+func AliasSetFingerprint(aliases []Alias) []byte {
+	sorted := make([]Alias, len(aliases))
+	copy(sorted, aliases)
+	sort.Slice(sorted, func(i, j int) bool {
+		if sorted[i].Namespace != sorted[j].Namespace {
+			return sorted[i].Namespace < sorted[j].Namespace
+		}
+		if sorted[i].Key != sorted[j].Key {
+			return sorted[i].Key < sorted[j].Key
+		}
+		return sorted[i].Value < sorted[j].Value
+	})
+
+	h := sha256.New()
+	for _, a := range sorted {
+		hashString(h, string(a.Namespace))
+		hashString(h, string(a.Key))
+		hashString(h, string(a.Value))
+	}
+	return h.Sum(nil)
 }
 
 // AliasRef identifies one of an extension resource's own alias

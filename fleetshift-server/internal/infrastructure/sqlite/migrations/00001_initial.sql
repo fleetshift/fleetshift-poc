@@ -126,10 +126,13 @@ CREATE TABLE rollout_strategies (
 --
 -- Platform resources are also virtual by default: a name with
 -- representations (derived from extension_resources, see below) but
--- no labels/aliases/relationships of its own never needs a physical
--- row here at all. A row only exists once something -- labels, an
--- alias, a relationship -- actually needs to be stored against the
--- name.
+-- no labels/relationships of its own never needs a physical row here
+-- at all. A row only exists once something -- labels, a relationship
+-- -- actually needs to be stored against the name. Aliases no longer
+-- force a row into existence either: resource_alias_claims below has
+-- no foreign key back to this table, so a claim can reference a name
+-- with no physical platform_resources row at all, the same way
+-- representations already do.
 
 CREATE TABLE platform_resources (
     collection_name TEXT NOT NULL,
@@ -173,15 +176,18 @@ CREATE TABLE extension_resource_types (
 -- representation can be derived on read by joining the two tables on
 -- that pair, rather than maintained as its own reconciled table (see
 -- resource_representations' removal below).
+-- alias_fingerprint mirrors the Postgres migration's column of the
+-- same name -- see that file's doc comment for the full contract.
 CREATE TABLE extension_resources (
-    uid             TEXT PRIMARY KEY,
-    service_name    TEXT NOT NULL,
-    type_name       TEXT NOT NULL,
-    collection_name TEXT NOT NULL,
-    resource_id     TEXT NOT NULL,
-    labels          TEXT NOT NULL DEFAULT '{}',
-    created_at      TEXT NOT NULL,
-    updated_at      TEXT NOT NULL,
+    uid               TEXT PRIMARY KEY,
+    service_name      TEXT NOT NULL,
+    type_name         TEXT NOT NULL,
+    collection_name   TEXT NOT NULL,
+    resource_id       TEXT NOT NULL,
+    labels            TEXT NOT NULL DEFAULT '{}',
+    alias_fingerprint BLOB,
+    created_at        TEXT NOT NULL,
+    updated_at        TEXT NOT NULL,
     UNIQUE (service_name, collection_name, resource_id),
     FOREIGN KEY (service_name, type_name)
         REFERENCES extension_resource_types(service_name, type_name)
@@ -192,53 +198,57 @@ CREATE TABLE extension_resources (
 CREATE INDEX idx_extension_resources_collection_resource
     ON extension_resources(collection_name, resource_id);
 
--- Aliases are contributed per extension resource, additive across
--- the (possibly many) extension resources that represent the same
--- platform resource, and replaced independently per contributor --
--- see docs/design/architecture/resource_identity_and_api.md's
--- "Aliases" section for the full contract this table enforces, and
--- extension_resource_repo.go's alias fold-in for how a report is
--- turned into inserts/deletes against it. source_extension_resource_uid
--- makes a contributor's claim its own row rather than collapsing
--- every contributor's identical claim into one -- see the Postgres
--- migration's resource_aliases doc comment (fleetshift-server/internal/infrastructure/postgres/migrations/00001_initial.sql)
--- for the full reasoning, which applies here unchanged. It's nullable
--- to also accommodate resource_identity_repo.go's reconcileAliases,
--- which attaches an alias directly to a platform resource with no
--- extension resource of its own behind it at all.
---
--- Unlike Postgres, SQLite has no EXCLUDE constraint (it would need a
--- GiST-equivalent index type SQLite doesn't have), so the two global
--- invariants an EXCLUDE constraint would enforce there --
--- (namespace, key, value) can't disagree on resource, and
--- (namespace, key, resource) can't disagree on value, both regardless
--- of contributor -- are enforced procedurally in Go instead (see
--- extension_resource_repo.go's resolveAliasesForWrite). The plain
--- UNIQUE constraint below only catches the narrower case a real index
--- still can: the exact same (namespace, key, value, contributor)
--- tuple reported twice, which is what makes a repeat report of an
--- unchanged alias idempotent via INSERT OR IGNORE rather than a
--- SQLite constraint-violation error.
-CREATE TABLE resource_aliases (
-    namespace                     TEXT NOT NULL,
-    key                           TEXT NOT NULL,
-    value                         TEXT NOT NULL,
-    platform_collection_name      TEXT NOT NULL,
-    platform_resource_id          TEXT NOT NULL,
-    source_extension_resource_uid TEXT
-        REFERENCES extension_resources(uid) ON DELETE CASCADE,
-    created_at                    TEXT NOT NULL,
-    UNIQUE (namespace, key, value, source_extension_resource_uid),
-    FOREIGN KEY (platform_collection_name, platform_resource_id)
-        REFERENCES platform_resources(collection_name, resource_id) ON DELETE CASCADE
+-- Aliases split into two tables -- mirrors the Postgres migration's
+-- resource_alias_claims/resource_alias_contributions doc comment
+-- (fleetshift-server/internal/infrastructure/postgres/migrations/00001_initial.sql)
+-- exactly; that reasoning applies here unchanged. The two invariants
+-- an EXCLUDE constraint used to enforce in the old single-table
+-- Postgres design -- (namespace, key, value) can't disagree on
+-- resource, and (namespace, key, resource) can't disagree on value,
+-- both regardless of contributor -- are now real, enforced B-tree
+-- UNIQUE constraints on resource_alias_claims below in both backends:
+-- SQLite never needed a GiST-equivalent for this, only Postgres's
+-- EXCLUDE-based predecessor did, so there's no procedural
+-- (Go-side) enforcement to document here either.
+CREATE TABLE resource_alias_claims (
+    id                        INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace                 TEXT NOT NULL,
+    key                       TEXT NOT NULL,
+    value                     TEXT NOT NULL,
+    platform_collection_name TEXT NOT NULL,
+    platform_resource_id      TEXT NOT NULL,
+    platform_owned            BOOLEAN NOT NULL DEFAULT 0,
+    created_at                TEXT NOT NULL,
+    UNIQUE (namespace, key, value),
+    UNIQUE (namespace, key, platform_collection_name, platform_resource_id),
+    -- Belt-and-suspenders integrity check only -- see the Postgres
+    -- migration's identical column for the full reasoning.
+    UNIQUE (id, namespace, key)
 );
 
-CREATE INDEX idx_resource_aliases_platform ON resource_aliases(platform_collection_name, platform_resource_id);
+-- source_extension_resource_uid is NOT NULL and a real primary-key
+-- column: platform_owned on resource_alias_claims above is what
+-- represents a platform-direct alias now, so there's no
+-- nullable-contributor case left to accommodate here. The claim_id
+-- FK is intentionally restrictive (no ON DELETE CASCADE) -- see the
+-- Postgres migration's identical table for the full reasoning, which
+-- applies here unchanged since SQLite enables the foreign_keys
+-- pragma on every connection (see db.go).
+CREATE TABLE resource_alias_contributions (
+    source_extension_resource_uid TEXT NOT NULL
+        REFERENCES extension_resources(uid) ON DELETE CASCADE,
+    namespace  TEXT NOT NULL,
+    key        TEXT NOT NULL,
+    claim_id   INTEGER NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (source_extension_resource_uid, namespace, key),
+    FOREIGN KEY (claim_id, namespace, key)
+        REFERENCES resource_alias_claims(id, namespace, key)
+);
 
--- Supports resolveAliasesForWrite's/retraction's per-contributor
--- lookups (extension_resource_repo.go), and ON DELETE CASCADE's own
--- lookup when an extension resource is deleted.
-CREATE INDEX idx_resource_aliases_source ON resource_aliases(source_extension_resource_uid);
+-- Supports the alias fold-in's per-claim contributor lookups
+-- (sibling checks, orphan-cleanup checks) and the FK check above.
+CREATE INDEX idx_resource_alias_contributions_claim ON resource_alias_contributions(claim_id);
 
 CREATE TABLE extension_resource_managed (
     extension_resource_uid TEXT PRIMARY KEY
@@ -336,7 +346,8 @@ DROP TABLE IF EXISTS extension_resource_inventory_labels;
 DROP TABLE IF EXISTS extension_resource_inventory;
 DROP TABLE IF EXISTS resource_intents;
 DROP TABLE IF EXISTS extension_resource_managed;
-DROP TABLE IF EXISTS resource_aliases;
+DROP TABLE IF EXISTS resource_alias_contributions;
+DROP TABLE IF EXISTS resource_alias_claims;
 DROP TABLE IF EXISTS extension_resources;
 DROP TABLE IF EXISTS extension_resource_types;
 DROP TABLE IF EXISTS resource_relationships;

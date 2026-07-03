@@ -81,12 +81,16 @@ func (r *ResourceIdentityRepo) GetByName(ctx context.Context, name domain.Resour
 
 // virtualByName synthesizes a [domain.PlatformResource] with no
 // physical platform_resources row, for a name that has extension
-// resource representations but has never needed its own labels,
-// aliases, or relationships (see repository.go's virtual-resource
-// doc). Aliases/relationships can never exist without a physical row
-// (they're FK'd to platform_resources), so representations are the
-// only signal checked here. Returns [domain.ErrNotFound] if the name
-// has no representations either -- i.e. it truly doesn't exist.
+// resource representations but has never needed its own labels or
+// relationships (see repository.go's virtual-resource doc).
+// Relationships can never exist without a physical row (they're FK'd
+// to platform_resources), so representations are the only signal
+// checked here. Returns [domain.ErrNotFound] if the name has no
+// representations either -- i.e. it truly doesn't exist.
+//
+// See the Postgres sibling's identical doc comment for why aliases
+// are the one exception -- resource_alias_claims has no FK to
+// platform_resources -- and why that's still not a gap here.
 func (r *ResourceIdentityRepo) virtualByName(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
 	collectionName := string(name.Collection())
 	resourceID := string(name.ID())
@@ -255,19 +259,17 @@ func (r *ResourceIdentityRepo) listVirtualByCollection(ctx context.Context, coll
 // Cross-resource lookups
 // ---------------------------------------------------------------------------
 
-// ResolveAlias reads by (namespace, key, value) alone, with no regard
-// for source_extension_resource_uid: multiple contributors can hold a
-// row for the very same claim (see the migration's resource_aliases
-// doc comment), but resolveAliasesForWrite's own enforcement (the
-// SQLite counterpart to Postgres's EXCLUDE constraints) guarantees
-// they all agree on which resource it belongs to, so LIMIT 1 -- and
-// therefore which contributor's row SQLite happens to pick -- is safe
-// here regardless.
+// ResolveAlias reads resource_alias_claims by (namespace, key, value)
+// alone -- its own UNIQUE(namespace, key, value) constraint (see the
+// migration's doc comment) guarantees at most one row can ever match,
+// regardless of how many contributors' resource_alias_contributions
+// rows point at it, so there's no contributor-side ambiguity to
+// resolve here at all.
 func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Alias) (domain.ResourceName, error) {
 	var collectionName, resourceID string
 	err := r.DB.QueryRowContext(ctx,
-		`SELECT platform_collection_name, platform_resource_id FROM resource_aliases
-		 WHERE namespace = ? AND key = ? AND value = ? LIMIT 1`,
+		`SELECT platform_collection_name, platform_resource_id FROM resource_alias_claims
+		 WHERE namespace = ? AND key = ? AND value = ?`,
 		string(alias.Namespace), string(alias.Key), string(alias.Value),
 	).Scan(&collectionName, &resourceID)
 	if err != nil {
@@ -313,41 +315,54 @@ const representationDerivationQuery = `
 // Reconciliation helpers -- upsert child entities from aggregate state
 // ---------------------------------------------------------------------------
 
-// reconcileAliases inserts s.Aliases as platform-direct claims --
-// source_extension_resource_uid explicitly NULL, since these come
-// straight from the PlatformResource aggregate itself rather than
-// from any extension resource's inventory report (see the migration's
-// resource_aliases doc comment for why that column is nullable at
-// all). It does not retract a previously-set alias that's absent from
-// s.Aliases on Update -- see the Postgres sibling's identical doc
-// comment for why that's specific to the inventory report path. LIMIT
-// 1 on the existence check is safe for the same reason it is in
-// ResolveAlias -- see that method's doc comment.
+// reconcileAliases reconciles resource_alias_claims against s.Aliases
+// -- see the Postgres sibling's identical doc comment for the full
+// reasoning, which applies unchanged: s.Aliases is treated as the
+// complete current set of aliases the platform resource asserts
+// directly, so an entry present marks (or creates) its claim
+// platform_owned, and a platform_owned claim absent from it gets
+// unmarked, deleted outright if that leaves it with no contributors
+// either.
 func (r *ResourceIdentityRepo) reconcileAliases(ctx context.Context, s domain.PlatformResourceSnapshot) error {
 	collectionName := string(s.Name.Collection())
 	resourceID := string(s.Name.ID())
+
+	asserted := make(map[domain.Alias]bool, len(s.Aliases))
 	for _, alias := range s.Aliases {
+		a := domain.Alias{Namespace: alias.Namespace, Key: alias.Key, Value: alias.Value}
+		asserted[a] = true
+
+		var claimID int64
 		var existingCollection, existingResourceID string
+		var platformOwned bool
 		err := r.DB.QueryRowContext(ctx,
-			`SELECT platform_collection_name, platform_resource_id FROM resource_aliases
-			 WHERE namespace = ? AND key = ? AND value = ? LIMIT 1`,
+			`SELECT id, platform_collection_name, platform_resource_id, platform_owned FROM resource_alias_claims
+			 WHERE namespace = ? AND key = ? AND value = ?`,
 			string(alias.Namespace), string(alias.Key), string(alias.Value),
-		).Scan(&existingCollection, &existingResourceID)
+		).Scan(&claimID, &existingCollection, &existingResourceID, &platformOwned)
 		if err == nil {
-			if existingCollection == collectionName && existingResourceID == resourceID {
+			if existingCollection != collectionName || existingResourceID != resourceID {
+				return fmt.Errorf("alias %s/%s/%s owned by %s/%s, not %s: %w",
+					alias.Namespace, alias.Key, alias.Value,
+					existingCollection, existingResourceID, s.Name, domain.ErrAlreadyExists)
+			}
+			if platformOwned {
 				continue
 			}
-			return fmt.Errorf("alias %s/%s/%s owned by %s/%s, not %s: %w",
-				alias.Namespace, alias.Key, alias.Value,
-				existingCollection, existingResourceID, s.Name, domain.ErrAlreadyExists)
+			if _, err := r.DB.ExecContext(ctx,
+				`UPDATE resource_alias_claims SET platform_owned = 1 WHERE id = ?`, claimID,
+			); err != nil {
+				return fmt.Errorf("corroborate alias: %w", err)
+			}
+			continue
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return fmt.Errorf("check existing alias: %w", err)
 		}
 
 		_, err = r.DB.ExecContext(ctx,
-			`INSERT INTO resource_aliases (namespace, key, value, platform_collection_name, platform_resource_id, source_extension_resource_uid, created_at)
-			 VALUES (?, ?, ?, ?, ?, NULL, ?)`,
+			`INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, platform_owned, created_at)
+			 VALUES (?, ?, ?, ?, ?, 1, ?)`,
 			string(alias.Namespace), string(alias.Key), string(alias.Value),
 			collectionName, resourceID, time.Now().UTC().Format(time.RFC3339),
 		)
@@ -356,6 +371,64 @@ func (r *ResourceIdentityRepo) reconcileAliases(ctx context.Context, s domain.Pl
 				return fmt.Errorf("alias %s/%s/%s: %w", alias.Namespace, alias.Key, alias.Value, domain.ErrAlreadyExists)
 			}
 			return fmt.Errorf("insert alias: %w", err)
+		}
+	}
+
+	return r.retractAbsentPlatformOwnedAliases(ctx, collectionName, resourceID, asserted)
+}
+
+// retractAbsentPlatformOwnedAliases is reconcileAliases's other half
+// -- see the Postgres sibling's identical method for the full
+// reasoning, which applies unchanged.
+func (r *ResourceIdentityRepo) retractAbsentPlatformOwnedAliases(ctx context.Context, collectionName, resourceID string, asserted map[domain.Alias]bool) error {
+	rows, err := r.DB.QueryContext(ctx,
+		`SELECT id, namespace, key, value FROM resource_alias_claims
+		 WHERE platform_collection_name = ? AND platform_resource_id = ? AND platform_owned`,
+		collectionName, resourceID,
+	)
+	if err != nil {
+		return fmt.Errorf("list platform-owned aliases: %w", err)
+	}
+	type ownedClaim struct {
+		id                    int64
+		namespace, key, value string
+	}
+	var owned []ownedClaim
+	for rows.Next() {
+		var oc ownedClaim
+		if err := rows.Scan(&oc.id, &oc.namespace, &oc.key, &oc.value); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan platform-owned alias: %w", err)
+		}
+		owned = append(owned, oc)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("list platform-owned aliases: %w", err)
+	}
+	rows.Close()
+
+	for _, oc := range owned {
+		a := domain.Alias{Namespace: domain.AliasNamespace(oc.namespace), Key: domain.AliasKey(oc.key), Value: domain.AliasValue(oc.value)}
+		if asserted[a] {
+			continue
+		}
+		var contributorCount int
+		if err := r.DB.QueryRowContext(ctx,
+			`SELECT count(*) FROM resource_alias_contributions WHERE claim_id = ?`, oc.id,
+		).Scan(&contributorCount); err != nil {
+			return fmt.Errorf("count alias contributions: %w", err)
+		}
+		if contributorCount == 0 {
+			if _, err := r.DB.ExecContext(ctx, `DELETE FROM resource_alias_claims WHERE id = ?`, oc.id); err != nil {
+				return fmt.Errorf("delete orphaned alias claim: %w", err)
+			}
+			continue
+		}
+		if _, err := r.DB.ExecContext(ctx,
+			`UPDATE resource_alias_claims SET platform_owned = 0 WHERE id = ?`, oc.id,
+		); err != nil {
+			return fmt.Errorf("un-own alias claim: %w", err)
 		}
 	}
 	return nil
@@ -389,15 +462,11 @@ func (r *ResourceIdentityRepo) reconcileRelationships(ctx context.Context, s dom
 
 // ResolveAliasesBatch implements
 // [domain.ResourceIdentityRepository.ResolveAliasesBatch] as a single
-// round trip against resource_aliases, whose rows already carry the
-// owning resource's name directly -- no join needed. DISTINCT
-// collapses the possibly-many contributor rows behind a single
-// (namespace, key, value) -- see the migration's resource_aliases doc
-// comment -- back down to the one result map entry each represents;
-// they're guaranteed to agree on platform_collection_name/
-// platform_resource_id by the same enforcement ResolveAlias's doc
-// comment relies on, so which contributor's row survives the collapse
-// doesn't matter.
+// round trip against resource_alias_claims, whose rows already carry
+// the owning resource's name directly -- no join needed, and no
+// DISTINCT needed either: UNIQUE(namespace, key, value) (see the
+// migration's doc comment) guarantees at most one row per requested
+// alias regardless of how many contributors back it.
 func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases []domain.Alias) (map[domain.Alias]domain.ResourceName, error) {
 	if len(aliases) == 0 {
 		return map[domain.Alias]domain.ResourceName{}, nil
@@ -411,8 +480,8 @@ func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases 
 	}
 
 	rows, err := r.DB.QueryContext(ctx,
-		fmt.Sprintf(`SELECT DISTINCT namespace, key, value, platform_collection_name, platform_resource_id
-			FROM resource_aliases
+		fmt.Sprintf(`SELECT namespace, key, value, platform_collection_name, platform_resource_id
+			FROM resource_alias_claims
 			WHERE (namespace, key, value) IN (%s)`, strings.Join(placeholders, ", ")),
 		args...,
 	)
@@ -484,16 +553,16 @@ func (r *ResourceIdentityRepo) loadRepresentations(ctx context.Context, name dom
 	return result, rows.Err()
 }
 
-// loadAliases returns one snapshot per distinct (namespace, key,
-// value) claimed for name, regardless of how many contributors' rows
-// back it -- see the migration's resource_aliases doc comment for why
-// there can be more than one row per claim, and ResolveAliasesBatch's
-// doc comment for why DISTINCT is enough to collapse them (they're
-// never allowed to disagree on anything DISTINCT would need to
-// preserve).
+// loadAliases returns one snapshot per resource_alias_claims row
+// claimed for name, regardless of how many resource_alias_contributions
+// rows back it -- UNIQUE(namespace, key, platform_collection_name,
+// platform_resource_id) (see the migration's doc comment) guarantees
+// there's exactly one claim row per (namespace, key) for a given
+// name, so no collapsing is needed here the way ResolveAliasesBatch's
+// old DISTINCT once did.
 func (r *ResourceIdentityRepo) loadAliases(ctx context.Context, name domain.ResourceName) ([]domain.ResourceAliasSnapshot, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT DISTINCT namespace, key, value FROM resource_aliases
+		`SELECT namespace, key, value FROM resource_alias_claims
 		 WHERE platform_collection_name = ? AND platform_resource_id = ? ORDER BY namespace, key`,
 		string(name.Collection()), string(name.ID()),
 	)
