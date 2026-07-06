@@ -175,11 +175,11 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 // extension_resource_inventory's own JSON columns (see that table's
 // migration doc comment for why they're JSON text rather than
 // normalized out into their own tables, mirroring the Postgres
-// sibling's JSONB choice one-for-one). er.reported_aliases/
-// er.alias_fingerprint are this extension resource's own pending,
-// unreconciled alias payload -- see
-// [domain.InventoryReplacement.Aliases]'s doc.
-var erInstanceQuerySQLite = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.alias_fingerprint, er.created_at, er.updated_at,
+// sibling's JSONB choice one-for-one). er.reported_aliases is this
+// extension resource's own pending, unreconciled alias payload -- see
+// [domain.InventoryReplacement.Aliases]'s doc. alias_fingerprint
+// remains repository-private.
+var erInstanceQuerySQLite = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	m.current_version, m.fulfillment_id,
 	inv.labels, inv.observation, inv.observed_at, inv.updated_at, inv.conditions
 FROM extension_resources er
@@ -311,7 +311,7 @@ func (r *ExtensionResourceRepo) ListViewsByType(ctx context.Context, rt domain.R
 }
 
 var erViewQuerySQLite = `SELECT
-	er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.alias_fingerprint, er.created_at, er.updated_at,
+	er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	m.current_version, m.fulfillment_id,
 	ri.spec, ri.created_at,
 	` + fulfillmentColumnsJoined("f") + `,
@@ -516,14 +516,13 @@ func (r *ExtensionResourceRepo) scanType(s interface{ Scan(...any) error }) (dom
 
 func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) (*domain.ExtensionResource, error) {
 	var uidStr, serviceName, typeName, collectionName, resourceID, labelsJSON, reportedAliasesJSON, createdAt, updatedAt string
-	var aliasFingerprint []byte
 	var mVersion sql.NullInt64
 	var mFulfillmentID sql.NullString
 	var invLabels, invObservation sql.NullString
 	var invObservedAt, invUpdatedAt sql.NullString
 	var invConditionsJSON sql.NullString
 
-	if err := s.Scan(&uidStr, &serviceName, &typeName, &collectionName, &resourceID, &labelsJSON, &reportedAliasesJSON, &aliasFingerprint, &createdAt, &updatedAt,
+	if err := s.Scan(&uidStr, &serviceName, &typeName, &collectionName, &resourceID, &labelsJSON, &reportedAliasesJSON, &createdAt, &updatedAt,
 		&mVersion, &mFulfillmentID,
 		&invLabels, &invObservation, &invObservedAt, &invUpdatedAt,
 		&invConditionsJSON); err != nil {
@@ -548,12 +547,11 @@ func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) 
 	}
 
 	snap := domain.ExtensionResourceSnapshot{
-		UID:              uid,
-		ResourceType:     domain.ResourceType(serviceName + "/" + typeName),
-		Name:             domain.ResourceName(collectionName + "/" + resourceID),
-		Labels:           labels,
-		ReportedAliases:  reportedAliases,
-		AliasFingerprint: aliasFingerprint,
+		UID:             uid,
+		ResourceType:    domain.ResourceType(serviceName + "/" + typeName),
+		Name:            domain.ResourceName(collectionName + "/" + resourceID),
+		Labels:          labels,
+		ReportedAliases: reportedAliases,
 	}
 	if t, err := time.Parse(time.RFC3339Nano, createdAt); err == nil {
 		snap.CreatedAt = t
@@ -595,7 +593,6 @@ func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) 
 
 func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (domain.ExtensionResourceView, error) {
 	var uidStr, serviceName, typeName, collectionName, resourceID, labelsJSON, reportedAliasesJSON, erCreatedAt, erUpdatedAt string
-	var aliasFingerprint []byte
 	var mVersion sql.NullInt64
 	var mFulfillmentID sql.NullString
 	var riSpec, riCreatedAt sql.NullString
@@ -607,7 +604,7 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 	var invConditionsJSON sql.NullString
 
 	if err := s.Scan(append(append([]any{
-		&uidStr, &serviceName, &typeName, &collectionName, &resourceID, &labelsJSON, &reportedAliasesJSON, &aliasFingerprint, &erCreatedAt, &erUpdatedAt,
+		&uidStr, &serviceName, &typeName, &collectionName, &resourceID, &labelsJSON, &reportedAliasesJSON, &erCreatedAt, &erUpdatedAt,
 		&mVersion, &mFulfillmentID,
 		&riSpec, &riCreatedAt,
 	}, fCols.dests()...),
@@ -635,12 +632,11 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 	}
 
 	snap := domain.ExtensionResourceSnapshot{
-		UID:              uid,
-		ResourceType:     domain.ResourceType(serviceName + "/" + typeName),
-		Name:             domain.ResourceName(collectionName + "/" + resourceID),
-		Labels:           labels,
-		ReportedAliases:  reportedAliases,
-		AliasFingerprint: aliasFingerprint,
+		UID:             uid,
+		ResourceType:    domain.ResourceType(serviceName + "/" + typeName),
+		Name:            domain.ResourceName(collectionName + "/" + resourceID),
+		Labels:          labels,
+		ReportedAliases: reportedAliases,
 	}
 	if t, err := time.Parse(time.RFC3339Nano, erCreatedAt); err == nil {
 		snap.CreatedAt = t

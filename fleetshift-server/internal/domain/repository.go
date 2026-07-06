@@ -350,10 +350,6 @@ type ResourceIdentityRepository interface {
 	Update(ctx context.Context, r *PlatformResource) error
 	ListByCollection(ctx context.Context, collection CollectionName) ([]*PlatformResource, error)
 
-	// Cross-resource lookups (can't live on the aggregate).
-	ResolveAlias(ctx context.Context, alias Alias) (ResourceName, error)
-	GetRepresentation(ctx context.Context, name FullResourceName) (ResourceRepresentation, error)
-
 	// ResolveAliasesBatch resolves a batch of aliases to their owning
 	// platform resource's [ResourceName] in a single round trip.
 	// Aliases that don't resolve to any platform resource are simply

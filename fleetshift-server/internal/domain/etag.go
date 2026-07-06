@@ -53,7 +53,7 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 		}
 		binary.Write(h, binary.BigEndian, v.Resource.inventory.observedAt.UnixNano())
 	}
-	hashBytes(h, v.Resource.aliasFingerprint)
+	hashAliases(h, v.Resource.reportedAliases)
 }
 
 func hashDeploymentFields(h hash.Hash, v DeploymentView) {
@@ -83,6 +83,16 @@ func hashString(h hash.Hash, s string) {
 func hashBytes(h hash.Hash, b []byte) {
 	binary.Write(h, binary.BigEndian, int64(len(b)))
 	h.Write(b)
+}
+
+func hashAliases(h hash.Hash, aliases []Alias) {
+	sorted := SortAliases(aliases)
+	binary.Write(h, binary.BigEndian, int64(len(sorted)))
+	for _, a := range sorted {
+		hashString(h, string(a.Namespace))
+		hashString(h, string(a.Key))
+		hashString(h, string(a.Value))
+	}
 }
 
 func weakEtag(h hash.Hash) Etag {

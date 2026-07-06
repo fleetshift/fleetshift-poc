@@ -359,19 +359,18 @@ func (r *ExtensionResourceRepo) GetIntent(ctx context.Context, uid domain.Extens
 // row at all produces SQL NULL for every inv.* column via the LEFT
 // JOIN below, which the scan helpers already treat as "no inventory".
 //
-// er.reported_aliases/er.alias_fingerprint are this extension
-// resource's own pending, unreconciled alias payload -- see
-// [domain.InventoryReplacement.Aliases]'s doc -- included here so
-// every read path (not just ReplaceInventory/ApplyInventoryDeltas)
-// exposes them via [domain.ExtensionResource.ReportedAliases]/
-// [domain.ExtensionResource.AliasFingerprint].
-const erSelectColumns = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.alias_fingerprint, er.created_at, er.updated_at,
+// er.reported_aliases is this extension resource's own pending,
+// unreconciled alias payload -- see
+// [domain.InventoryReplacement.Aliases]'s doc. Read paths expose the
+// payload itself via [domain.ExtensionResource.ReportedAliases];
+// alias_fingerprint remains repository-private.
+const erSelectColumns = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	erm.current_version, erm.fulfillment_id,
 	inv.labels, inv.observation, inv.observed_at, inv.updated_at, inv.conditions
 `
 
 var erViewQueryPG = `SELECT
-	er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.alias_fingerprint, er.created_at, er.updated_at,
+	er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	erm.current_version, erm.fulfillment_id,
 	ri.spec, ri.created_at,
 	` + fulfillmentColumnsJoined("f") + `,
@@ -424,7 +423,6 @@ func scanExtensionResourceType(s scanner) (domain.ExtensionResourceType, error) 
 func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot, error) {
 	var snap domain.ExtensionResourceSnapshot
 	var serviceName, typeName, collectionName, resourceID, labelsStr, reportedAliasesStr string
-	var aliasFingerprint []byte
 	var currentVersion sql.NullInt64
 	var fulfillmentID sql.NullString
 	var invLabels, invObservation sql.NullString
@@ -432,7 +430,7 @@ func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot,
 	var invConditionsJSON sql.NullString
 
 	if err := s.Scan(
-		&snap.UID, &serviceName, &typeName, &collectionName, &resourceID, &labelsStr, &reportedAliasesStr, &aliasFingerprint,
+		&snap.UID, &serviceName, &typeName, &collectionName, &resourceID, &labelsStr, &reportedAliasesStr,
 		&snap.CreatedAt, &snap.UpdatedAt,
 		&currentVersion, &fulfillmentID,
 		&invLabels, &invObservation, &invObservedAt, &invUpdatedAt,
@@ -453,7 +451,6 @@ func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot,
 	if err := json.Unmarshal([]byte(reportedAliasesStr), &snap.ReportedAliases); err != nil {
 		return snap, fmt.Errorf("unmarshal reported aliases: %w", err)
 	}
-	snap.AliasFingerprint = aliasFingerprint
 
 	if fulfillmentID.Valid {
 		snap.Managed = &domain.ManagedStateSnapshot{
@@ -491,7 +488,6 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	var uid domain.ExtensionResourceUID
 	var serviceName, typeName, collectionName, resourceID string
 	var labelsStr, reportedAliasesStr string
-	var aliasFingerprint []byte
 	var erCreatedAt, erUpdatedAt time.Time
 
 	var currentVersion sql.NullInt64
@@ -510,7 +506,7 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	var invConditionsJSON sql.NullString
 
 	if err := s.Scan(
-		&uid, &serviceName, &typeName, &collectionName, &resourceID, &labelsStr, &reportedAliasesStr, &aliasFingerprint,
+		&uid, &serviceName, &typeName, &collectionName, &resourceID, &labelsStr, &reportedAliasesStr,
 		&erCreatedAt, &erUpdatedAt,
 		&currentVersion, &managedFID,
 		&riSpec, &riCreatedAt,
@@ -540,14 +536,13 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	name := domain.ResourceName(collectionName + "/" + resourceID)
 
 	erSnap := domain.ExtensionResourceSnapshot{
-		UID:              uid,
-		ResourceType:     resourceType,
-		Name:             name,
-		Labels:           labels,
-		CreatedAt:        erCreatedAt,
-		UpdatedAt:        erUpdatedAt,
-		ReportedAliases:  reportedAliases,
-		AliasFingerprint: aliasFingerprint,
+		UID:             uid,
+		ResourceType:    resourceType,
+		Name:            name,
+		Labels:          labels,
+		CreatedAt:       erCreatedAt,
+		UpdatedAt:       erUpdatedAt,
+		ReportedAliases: reportedAliases,
 	}
 	if managedFID.Valid {
 		erSnap.Managed = &domain.ManagedStateSnapshot{

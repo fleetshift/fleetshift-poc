@@ -515,14 +515,10 @@ type ExtensionResource struct {
 	managed   *ManagedState
 	inventory *InventoryResource
 
-	// reportedAliases and aliasFingerprint hold this extension
-	// resource's own pending, unreconciled alias assertions -- see
+	// reportedAliases holds this extension resource's own pending,
+	// unreconciled alias assertions -- see
 	// [InventoryReplacement.Aliases]'s doc for the full contract.
-	// aliasFingerprint is [AliasSetFingerprint] over reportedAliases,
-	// persisted alongside it so a repository can detect an unchanged
-	// report without recomputing the digest from the stored payload.
-	reportedAliases  []Alias
-	aliasFingerprint []byte
+	reportedAliases []Alias
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -639,12 +635,6 @@ func (r *ExtensionResource) Inventory() *InventoryResource { return r.inventory 
 // doc for the contract these are stored under. Empty (never nil) when
 // this resource has never reported any.
 func (r *ExtensionResource) ReportedAliases() []Alias { return r.reportedAliases }
-
-// AliasFingerprint returns [AliasSetFingerprint] over ReportedAliases,
-// as persisted. Repositories compare a freshly computed fingerprint
-// against this stored value to skip re-writing an unchanged alias
-// payload.
-func (r *ExtensionResource) AliasFingerprint() []byte { return r.aliasFingerprint }
 
 // CreatedAt returns the creation timestamp.
 func (r *ExtensionResource) CreatedAt() time.Time { return r.createdAt }

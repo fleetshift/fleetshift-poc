@@ -207,14 +207,11 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPendin
 	if reported := er.ReportedAliases(); len(reported) != 1 || reported[0] != alias {
 		t.Fatalf("ReportedAliases() = %+v, want [%+v]", reported, alias)
 	}
-	if fp := er.AliasFingerprint(); string(fp) != string(domain.AliasSetFingerprint([]domain.Alias{alias})) {
-		t.Errorf("AliasFingerprint() = %x, want %x", fp, domain.AliasSetFingerprint([]domain.Alias{alias}))
-	}
 
 	// The platform resource's own *accepted* aliases are untouched:
 	// nothing about inventory reporting resolves or promotes a
 	// pending alias into resource_alias_claims (see
-	// [domain.ResourceIdentityRepository.ResolveAlias]'s doc).
+	// [domain.ResourceIdentityRepository.ResolveAliasesBatch]'s doc).
 	tx, err := store.BeginReadOnly(ctx)
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
@@ -233,7 +230,7 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPendin
 // alias directly through [domain.ResourceIdentityRepository], the
 // only path -- independent of inventory reporting entirely -- that
 // still populates resource_alias_claims (see
-// [domain.ResourceIdentityRepository.ResolveAlias]'s doc). Inventory
+// [domain.ResourceIdentityRepository.ResolveAliasesBatch]'s doc). Inventory
 // reports' own reported aliases are pending-only and never resolve
 // on their own; tests that need an alias-only report to actually
 // resolve must seed it this way rather than through a prior

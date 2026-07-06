@@ -249,14 +249,11 @@ type ExtensionResourceSnapshot struct {
 	CreatedAt    time.Time
 	UpdatedAt    time.Time
 
-	// ReportedAliases and AliasFingerprint mirror
-	// [ExtensionResource.ReportedAliases]/[ExtensionResource.AliasFingerprint]
-	// -- this extension resource's own pending, unreconciled alias
-	// assertions. ReportedAliases is empty (never nil) and
-	// AliasFingerprint is [AliasSetFingerprint] of nil when this
-	// resource has never reported any aliases.
-	ReportedAliases  []Alias
-	AliasFingerprint []byte
+	// ReportedAliases mirrors [ExtensionResource.ReportedAliases] --
+	// this extension resource's own pending, unreconciled alias
+	// assertions. It is empty (never nil) when this resource has never
+	// reported any aliases.
+	ReportedAliases []Alias
 
 	// Pending intents collected by RecordIntent.
 	// Populated on Snapshot() for write-path serialization;
@@ -487,17 +484,16 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 	copy(aliases, r.reportedAliases)
 
 	return ExtensionResourceSnapshot{
-		UID:              r.uid,
-		ResourceType:     r.resourceType,
-		Name:             r.name,
-		Labels:           labels,
-		Managed:          managed,
-		Inventory:        inv,
-		CreatedAt:        r.createdAt,
-		UpdatedAt:        r.updatedAt,
-		ReportedAliases:  aliases,
-		AliasFingerprint: r.aliasFingerprint,
-		PendingIntents:   r.pendingIntents,
+		UID:             r.uid,
+		ResourceType:    r.resourceType,
+		Name:            r.name,
+		Labels:          labels,
+		Managed:         managed,
+		Inventory:       inv,
+		CreatedAt:       r.createdAt,
+		UpdatedAt:       r.updatedAt,
+		ReportedAliases: aliases,
+		PendingIntents:  r.pendingIntents,
 	}
 }
 
@@ -720,16 +716,15 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 	copy(aliases, s.ReportedAliases)
 
 	return &ExtensionResource{
-		uid:              s.UID,
-		resourceType:     s.ResourceType,
-		name:             s.Name,
-		labels:           labels,
-		managed:          managed,
-		inventory:        inv,
-		reportedAliases:  aliases,
-		aliasFingerprint: s.AliasFingerprint,
-		createdAt:        s.CreatedAt,
-		updatedAt:        s.UpdatedAt,
+		uid:             s.UID,
+		resourceType:    s.ResourceType,
+		name:            s.Name,
+		labels:          labels,
+		managed:         managed,
+		inventory:       inv,
+		reportedAliases: aliases,
+		createdAt:       s.CreatedAt,
+		updatedAt:       s.UpdatedAt,
 	}
 }
 

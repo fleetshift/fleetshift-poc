@@ -409,3 +409,49 @@ func TestExtensionResourceView_Etag_NilInventoryDiffers(t *testing.T) {
 		t.Error("etag should differ between nil and non-nil inventory")
 	}
 }
+
+func TestExtensionResourceView_Etag_ChangesOnReportedAliases(t *testing.T) {
+	now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	uid := NewExtensionResourceUID()
+	instanceID, err := NewAlias("gcp", "instance_id", "cluster-1")
+	if err != nil {
+		t.Fatalf("NewAlias(instance_id): %v", err)
+	}
+	zone, err := NewAlias("gcp", "zone", "us-east1-b")
+	if err != nil {
+		t.Fatalf("NewAlias(zone): %v", err)
+	}
+
+	baseSnap := ExtensionResourceSnapshot{
+		UID:             uid,
+		ResourceType:    "kind.fleetshift.io/Cluster",
+		Name:            "clusters/dev",
+		ReportedAliases: []Alias{instanceID, zone},
+		CreatedAt:       now,
+		UpdatedAt:       now.Add(time.Minute),
+	}
+	base := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(baseSnap)}
+	baseEtag := base.Etag()
+
+	t.Run("value change", func(t *testing.T) {
+		updatedInstanceID, err := NewAlias("gcp", "instance_id", "cluster-2")
+		if err != nil {
+			t.Fatalf("NewAlias(updatedInstanceID): %v", err)
+		}
+		changedSnap := baseSnap
+		changedSnap.ReportedAliases = []Alias{updatedInstanceID, zone}
+		changed := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(changedSnap)}
+		if changed.Etag() == baseEtag {
+			t.Error("etag should change when reported aliases change")
+		}
+	})
+
+	t.Run("order only", func(t *testing.T) {
+		reorderedSnap := baseSnap
+		reorderedSnap.ReportedAliases = []Alias{zone, instanceID}
+		reordered := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(reorderedSnap)}
+		if reordered.Etag() != baseEtag {
+			t.Error("etag should be order-independent for the same reported alias set")
+		}
+	})
+}

@@ -255,71 +255,6 @@ func (r *ResourceIdentityRepo) listVirtualByCollection(ctx context.Context, coll
 	return result, rows.Err()
 }
 
-// ---------------------------------------------------------------------------
-// Cross-resource lookups
-// ---------------------------------------------------------------------------
-
-// ResolveAlias reads resource_alias_claims by (namespace, key, value)
-// alone -- its own UNIQUE(namespace, key, value) constraint (see the
-// migration's doc comment) guarantees at most one row can ever match,
-// regardless of how many contributors' resource_alias_contributions
-// rows point at it, so there's no contributor-side ambiguity to
-// resolve here at all.
-//
-// This never reads extension_resources.reported_aliases: those are
-// reporter assertions pending future asynchronous reconciliation, not
-// accepted platform identity (see [domain.InventoryReplacement.Aliases]'s
-// doc), so a newly reported alias that hasn't yet gone through that
-// reconciliation resolves as [domain.ErrNotFound] here, same as if it
-// had never been reported at all.
-func (r *ResourceIdentityRepo) ResolveAlias(ctx context.Context, alias domain.Alias) (domain.ResourceName, error) {
-	var collectionName, resourceID string
-	err := r.DB.QueryRowContext(ctx,
-		`SELECT platform_collection_name, platform_resource_id FROM resource_alias_claims
-		 WHERE namespace = ? AND key = ? AND value = ?`,
-		string(alias.Namespace), string(alias.Key), string(alias.Value),
-	).Scan(&collectionName, &resourceID)
-	if err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", fmt.Errorf("alias %s/%s/%s: %w", alias.Namespace, alias.Key, alias.Value, domain.ErrNotFound)
-		}
-		return "", fmt.Errorf("resolve alias: %w", err)
-	}
-	return domain.ResourceName(collectionName + "/" + resourceID), nil
-}
-
-// GetRepresentation derives a representation on read from
-// extension_resources alone: it exists iff an extension_resources row
-// matching (service, relative name) exists. There is no dependency on
-// a platform_resources row -- representations for a virtual platform
-// resource are derived exactly the same way. There is nothing to
-// reconcile on Create/Update/Delete -- the representation appears and
-// disappears exactly when the extension_resources row is
-// created/deleted.
-//
-// This is unconditional on extension_resources.reported_aliases: an
-// extension resource with a non-empty pending alias set still
-// represents the platform resource of its own declarative name, the
-// same as one reporting none. Nothing in this branch's read model
-// gates representation on reported_aliases being empty -- there is no
-// explicit accepted-identity projection yet to trust instead (see
-// [domain.InventoryReplacement.Aliases]'s doc), so "derive from
-// extension_resources by name alone" already *is* this branch's
-// no-alias-implicit-acceptance rule in its simplest form: with zero
-// explicit-identity rows to ever contradict it, every representation
-// falls through to the implicit-accepted case.
-func (r *ResourceIdentityRepo) GetRepresentation(ctx context.Context, name domain.FullResourceName) (domain.ResourceRepresentation, error) {
-	service := name.ServiceName()
-	relative := name.ResourceName()
-	collectionName := string(relative.Collection())
-	resourceID := string(relative.ID())
-	row := r.DB.QueryRowContext(ctx, representationDerivationQuery+`
-		WHERE er.service_name = ? AND er.collection_name = ? AND er.resource_id = ?`,
-		string(service), collectionName, resourceID,
-	)
-	return scanRepresentation(row)
-}
-
 // representationDerivationQuery joins extension_resources to
 // extension_resource_types for the representation's declared API
 // version. Callers append a WHERE clause to scope by (service, name)
@@ -487,10 +422,9 @@ func (r *ResourceIdentityRepo) reconcileRelationships(ctx context.Context, s dom
 // migration's doc comment) guarantees at most one row per requested
 // alias regardless of how many contributors back it.
 //
-// Like [ResourceIdentityRepo.ResolveAlias], this never consults
-// extension_resources.reported_aliases -- an alias absent here simply
-// isn't in the map ResolveAliasesBatch returns, whether it was never
-// reported or is still pending reconciliation.
+// This never consults extension_resources.reported_aliases -- an alias
+// absent here simply isn't in the map ResolveAliasesBatch returns,
+// whether it was never reported or is still pending reconciliation.
 func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases []domain.Alias) (map[domain.Alias]domain.ResourceName, error) {
 	if len(aliases) == 0 {
 		return map[domain.Alias]domain.ResourceName{}, nil

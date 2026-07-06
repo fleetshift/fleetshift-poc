@@ -50,6 +50,8 @@ type CreatePlatformResourceInput struct {
 // on resource_name surfaces [domain.ErrAlreadyExists] if the name is
 // already taken (per AIP-133: Create must not silently update an
 // existing resource).
+//
+// TODO: Probably remove this – we'll have user managed platform resource state in its own API
 func (s *PlatformResourceService) Create(ctx context.Context, in CreatePlatformResourceInput) (*domain.PlatformResource, error) {
 	tx, err := s.store.Begin(ctx)
 	if err != nil {

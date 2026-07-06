@@ -473,6 +473,8 @@ func (r *reportResolver) resolveBatch(ctx context.Context, items []reportIdentit
 
 // lookupInventoryType resolves and caches an [domain.ExtensionResourceType],
 // rejecting types that lack inventory metadata.
+//
+// TODO: this could be maintained as global cache, potentially always kept up to date as addons are activated/deactivated.
 func (r *reportResolver) lookupInventoryType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	if typeDef, ok := r.typeCache[rt]; ok {
 		return typeDef, nil

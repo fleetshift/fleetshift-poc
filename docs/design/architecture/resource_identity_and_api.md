@@ -113,20 +113,16 @@ Extension resources (the representations underneath a platform resource) keep th
 
 ### Materialization
 
-Platform resources are **virtual by default**: a resource name is visible through the platform API as soon as *anything* backs it — a live extension resource representation, a registered alias, or an explicit `Create`/label attachment — with no independent physical row required for the common case. Reads derive the platform resource from whatever backing data exists for that name; there is nothing to eagerly create or keep in sync, and thus nothing that can go stale.
+Platform resources are **virtual**: a resource name is visible through the platform API as soon as *anything* backs it — a live extension resource representation, a registered alias, or an explicit `Create`/label attachment — with no independent physical row required (unless an optimization–the API is decoupled from this). Reads derive the platform resource from whatever backing data exists for that name.
 
-A physical `platform_resources` row is created lazily, only when something needs to persist independently of any single representation — an explicit `Create` (for label or IAM attachment before any extension resource exists), or the first alias registered for that name. The common case (an extension resource reported or managed with no alias) never needs one.
+Thus, there is no explicit _delete_ or _create_ operation for a platform resource. It exists so long as there is a reference across all service names. It is gone when there is none.
 
-### Deletion semantics
+TODO: Consider history / retention – that may keep it around in a different state?
 
-Because materialization is virtual, "deletion" means different things depending on what's backing the name:
+### Platform-wide, user-managed state
 
-- A **purely virtual** platform resource (no explicit `Create`, no alias, no `platform_resources` row) has no independent existence — once its last representation is gone (the underlying extension resource is deleted), the platform resource disappears too. There's nothing left to read a virtual resource from, and nothing to explicitly delete.
-- A platform resource with a **physical row** (explicitly created, or with at least one alias) is declarative-friendly — it can be explicitly created and deleted independently of any single representation coming and going. Additionally, authorized extensions can signal that the resource no longer exists (e.g., a GCP addon confirms a cluster was destroyed), which can trigger deletion of the platform identity.
+Users may desire to add labels, IAM policies, or other state, about a cluster that was just imported, or yet to be managed (somewhat equivalent to eagerly creating a ManagedCluster resource). This should be its own service, separate from the "platform resource" service, so that it can have its own AIP-compatible, "declarative-friendly" state.
 
-Open nuance: if the platform identity was pre-created (before any extension resource existed), deletion authority may differ. Whether pre-established identity has stronger persistence guarantees is an open design question.
-
-We probably want deletion to primarly come from user input. If a user is managing the cluster, it's clear when it should be deleted. If the delete signal comes from somewhere else, we should not remove the user's intent. Even when a cluster is imported, the platform identity assignment is described by a user at some point.
 
 ### Dynamic service registration
 
@@ -202,12 +198,6 @@ The implementation's naming types mirror AIP-122 terminology:
 
 `ResourceName` is the standard currency for domain APIs. `ResourceID` is used only at boundaries (e.g. parsing a resource name from an HTTP path segment). The current implementation is flat (`clusters/foo`), but `CollectionName` and `ResourceName` do not structurally prevent future hierarchy.
 
-### Persistence of resource identity
-
-The repository layer persists resource identity as two separate columns: `collection_name` (the full parent `CollectionName`, e.g. `clusters` or `publishers/123/books`) and `resource_id` (the leaf `ResourceID`, e.g. `prod` or `les-mis`). The composed `ResourceName` is reconstructed on read with a plain `collection_name + "/" + resource_id` join, which assumes `collection_name` is non-empty rather than re-checking it. That assumption follows this codebase's "parse, don't validate" convention for its value types (see `ParseCollectionName`/`ParseResourceName`'s doc comments): a collection-less `ResourceName` (e.g. `mr-cluster`, with no `/` at all) is not a valid resource name at all -- `ParseResourceName` rejects one outright (an odd segment count), this codebase's stricter reading of AIP-122's "should usually alternate" collection/resource-id guidance -- and the *only* place that rule is checked is `ParseResourceName` itself, the boundary where a raw string becomes a `ResourceName`. Once a caller holds a `ResourceName` produced that way (or built from already-valid parts via `NewResourceName`), every consumer -- this repository join included -- trusts it rather than re-validating; a `ResourceName` manufactured by casting a raw string directly, bypassing every constructor (most likely in a test), is a caller bug, not a state the repository layer needs to defend against.
-
-This split enables exact-match listing by collection (`WHERE collection_name = ?`) rather than prefix matching, which would over-include descendants in nested collection hierarchies. The uniqueness constraint is `(collection_name, resource_id)` per table. `ResourceName` remains the only identity type exposed by the domain; the split is an infrastructure concern.
-
 ### Identity uniqueness
 
 A resource name is unique within a **platform identity domain**. Extension collections participate in that domain only when their resource type registration maps them to the corresponding platform resource type.
@@ -218,10 +208,7 @@ At the extension level, the unique key for an extension resource is `(service_na
 
 ### Claiming protocol
 
-The first extension to create a resource with a given name establishes the identity — its representation is immediately visible through the platform API via virtual materialization (see above), with no separate claiming step or physical row required. Subsequent extensions link to the same identity when they either:
-
-1. Use the same registered identity domain and relative name, or
-2. Have aliases that correlate to an existing identity without violating alias uniqueness constraints -- today this means aliases *accepted* onto the platform resource directly (see Aliases, below); a merely reported/pending alias from inventory doesn't correlate anything on its own.
+TODO: We'll want to make sure there is only one _managed_ resource per name, to avoid having to define "multiple things manage this" semantics.
 
 ### Aliases
 
@@ -233,29 +220,11 @@ Examples:
 - `sig-multicluster/cluster-id:550e8400-e29b-41d4-a716-446655440000`
 - `acs/cluster-id:acs-12345`
 
-> [!NOTE]
-> This section originally described a synchronous, per-report conflict-detecting alias model wired directly into the inventory write path. That model has since been simplified: inventory reporting's aliases are now a **pending** payload only (see "Reported aliases (inventory write path)" below), and the richer claims/contributions/conflict-detection model described afterward now applies solely to aliases asserted directly on a [`domain.PlatformResource`](../../../fleetshift-server/internal/domain/resource_identity.go) (via `AddAlias`, through `ResourceIdentityRepository.Create`/`Update`) -- a path independent of inventory reporting entirely. The two used to be the same mechanism; they are not anymore.
+See pocs/ for various alias approaches.
 
-#### Reported aliases (inventory write path)
+Aliases are to be resolved asynchronously. Conflicts should be surfaced to users and in the API.
 
-Extension resources reporting inventory contribute aliases too, but today that's just a pending assertion, not synchronous identity correlation. `ReplaceInventory`'s `Aliases` field is a report's complete current alias set; it's canonicalized (sorted, JSON-serialized) and stored verbatim on `extension_resources.reported_aliases` (JSONB on Postgres, JSON text on SQLite), alongside a deterministic `alias_fingerprint` hash of that same payload. There is no cross-resource conflict detection at write time: two reports -- even in the same batch -- may freely assert the very same `(namespace, key, value)` for two different resources, or one report may assert two different values for the same `(namespace, key)`; both are simply stored as-is. Reconciling those assertions into (or flagging them against) the platform resource's own accepted alias set is deferred to a future asynchronous process that hasn't been built yet -- see [resource_indexing.md](resource_indexing.md#what-if-there-is-no-matching-resource).
-
-`alias_fingerprint` is still a fast-path optimization, just over a narrower job than before: a `ReplaceInventory` write compares the incoming report's fingerprint against the stored one and skips the `reported_aliases`/`alias_fingerprint` write entirely when they match (the common case for a poller re-reporting the same aliases every cycle), rather than skipping a conflict-classification pass that no longer exists. `ApplyInventoryDeltas`'s `UpsertAliases` merges into the existing `reported_aliases` by `(namespace, key)` (last write for a key wins, matching `SetLabels`) and always recomputes the fingerprint, since a delta doesn't carry a complete set to compare against.
-
-`DeleteAliases` and `ReplaceAliases` are validated (including the mutual-exclusivity and same-key-in-both-Upsert-and-Delete checks) but **not yet implemented** by either backend -- `UpsertAliases` and `ReplaceInventory`'s full-payload replace are the only two paths wired up today. `extensionresourcerepotest`'s `ApplyInventoryDeltas*Aliases*` tests pin the target contract down ahead of that landing.
-
-Because reported aliases are never synchronously trusted, `ResourceIdentityRepository.ResolveAlias`/`ResolveAliasesBatch` never read `reported_aliases` at all -- an alias only resolves to a platform resource once something has gone through the direct/accepted path below (or, eventually, the asynchronous reconciler). A resource that reports no aliases at all needs neither: it's implicitly a valid representation of the platform resource sharing its declarative name purely by that name match (see [resource_indexing.md](resource_indexing.md#resource-identity-and-child-resources)), with no accepted-identity row required to make that true.
-
-#### Accepted aliases (direct platform-resource assertion)
-
-Aliases asserted directly against a `PlatformResource` aggregate (`AddAlias`, persisted through `ResourceIdentityRepository.Create`/`Update`) are a separate, independent mechanism, and the one `ResolveAlias`/`ResolveAliasesBatch` actually reads. This is the multi-contributor model this section originally described in full:
-
-Many different extension resources can represent the same platform resource at once — one per addon is the common case (see Representations, below). At this layer, aliases are contributed **per extension resource, on a replace basis, but additive across the extension resources that represent the same name**: each contributor's alias set for a report is its complete current contribution — an alias it stops reporting, or that it stops existing to report at all (its extension resource is deleted, exactly like a representation disappearing), is retracted, unless another contributor representing the same name is still asserting it — while different contributors are free to add different aliases, or even agree on the very same one, without conflict. What remains a conflict is contributors *disagreeing*: two contributors for the same name asserting different values for the same `(namespace, key)`, or two contributors resolving to different names asserting the very same `(namespace, key, value)`. See Conflict detection, below.
-
-Storage-wise, two tables split "what value does this key resolve to" from "who's asserting it": `resource_alias_claims` holds one canonical row per `(namespace, key, target)` (its `value`, plus a `platform_owned` flag — see below), and `resource_alias_contributions` holds one row per `(source_extension_resource_uid, namespace, key)` pointing at the claim it corroborates. This is what lets corroborating contributors coexist — they all point at the same claim row rather than each holding their own copy of the value — and lets the claim survive until its *last* contribution is gone, whether that's an explicit retraction, the contributing extension resource's own deletion, or (for a `platform_owned` claim asserted directly against the platform identity rather than through any single contributor — see `resource_identity_repo.go`'s `reconcileAliases`) the platform-level assertion itself being withdrawn. Both backends enforce the two cross-contributor invariants above — value-claimed-by-a-different-resource and resource-has-a-different-value — with plain `UNIQUE` B-tree indexes on `resource_alias_claims` (one on `(namespace, key, value)`, one on `(namespace, key, platform_collection_name, platform_resource_id)`), since splitting the value out of the per-contributor row is what makes a `UNIQUE` index expressive enough here — no `EXCLUDE`/GiST constraint needed on either backend. A restrictive (non-cascading) foreign key from `resource_alias_contributions.claim_id` to `resource_alias_claims` means orphan cleanup (deleting a claim once its last contribution and any `platform_owned` assertion are both gone) has to run explicitly as part of the same write, rather than being implicit via cascade.
-
-> [!NOTE]
-> `resource_alias_contributions` and per-extension-resource contributions to `resource_alias_claims` are effectively unreachable today: nothing in the current inventory write path populates them anymore (see above), and `reconcileAliases` only ever writes the `platform_owned` side. The tables and schema remain -- both as the shape a future asynchronous reconciler could plausibly promote accepted `reported_aliases` payloads into, and so `ResolveAlias`/`ResolveAliasesBatch` keep working for the direct-assertion path -- but nothing exercises the contribution side end-to-end right now.
+As alises resolve, they should appear in platform resource representations list, categorized by whether they are "accepted" (no conflict), "pending" (not yet processed), "conflicting".
 
 ### Conflict detection
 
@@ -300,9 +269,6 @@ Example: platform resource `clusters/foo` has representations:
 - `//gcphcp.fleetshift.io/clusters/foo` — roles: `managed`
 - `//kubernetes.fleetshift.io/clusters/foo` — roles: `target`, `inventory`
 - `//acs.fleetshift.io/clusters/foo` — roles: `inventory`
-
-> [!NOTE]
-> Whether an extension resource counts as a representation is decided purely by name match (see [resource_indexing.md](resource_indexing.md#resource-identity-and-child-resources)), independent of its reported-aliases state (see "Reported aliases", above). An extension resource with a non-empty, still-pending (or, once conflict detection exists, conflicting) alias set is included as a representation today exactly like one reporting no aliases at all -- there's no third "held back pending reconciliation" state for representations yet, only present-or-absent. That's a deliberate scope decision to avoid a bigger design (an explicit accepted/pending/conflicting identity state surfaced per representation) for this iteration, not a claim that pending and accepted are indistinguishable in general -- see "Reported aliases" above for how the two are tracked separately at the storage layer even though representation reads don't yet expose the distinction.
 
 ### Semantic relationships
 

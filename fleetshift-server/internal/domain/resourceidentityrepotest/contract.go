@@ -228,14 +228,9 @@ func Run(t *testing.T, factory Factory) {
 		if len(got.Representations()) != 0 {
 			t.Errorf("representations len = %d, want 0", len(got.Representations()))
 		}
-
-		_, err = repo.GetRepresentation(ctx, rt.FullName(name))
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Fatalf("GetRepresentation after delete: got %v, want ErrNotFound", err)
-		}
 	})
 
-	t.Run("RepresentationExtensionResourceUID_RoundTrips", func(t *testing.T) {
+	t.Run("RepresentationExtensionResourceUID_RoundTripsViaGetByName", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
 		repo := tx.ResourceIdentities()
@@ -260,15 +255,6 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if reps[0].ExtensionResourceUID() != erUID {
 			t.Errorf("ExtensionResourceUID = %s, want %s", reps[0].ExtensionResourceUID(), erUID)
-		}
-
-		// GetRepresentation should also return the UID.
-		rep, err := repo.GetRepresentation(ctx, rt.FullName(name))
-		if err != nil {
-			t.Fatalf("GetRepresentation: %v", err)
-		}
-		if rep.ExtensionResourceUID() != erUID {
-			t.Errorf("GetRepresentation ExtensionResourceUID = %s, want %s", rep.ExtensionResourceUID(), erUID)
 		}
 	})
 
@@ -344,14 +330,6 @@ func Run(t *testing.T, factory Factory) {
 
 		if err := repo.Create(ctx, r); err != nil {
 			t.Fatalf("Create: %v", err)
-		}
-
-		resolvedName, err := repo.ResolveAlias(ctx, alias)
-		if err != nil {
-			t.Fatalf("ResolveAlias: %v", err)
-		}
-		if resolvedName != name {
-			t.Errorf("resolved name = %q, want %q", resolvedName, name)
 		}
 
 		got, err := repo.GetByName(ctx, name)
@@ -465,8 +443,12 @@ func Run(t *testing.T, factory Factory) {
 			t.Fatalf("Update (withdraw): %v", err)
 		}
 
-		if _, err := repo.ResolveAlias(ctx, alias); !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("ResolveAlias after orphaning: got %v, want ErrNotFound", err)
+		resolved, err := repo.ResolveAliasesBatch(ctx, []domain.Alias{alias})
+		if err != nil {
+			t.Fatalf("ResolveAliasesBatch after orphaning: %v", err)
+		}
+		if _, ok := resolved[alias]; ok {
+			t.Errorf("ResolveAliasesBatch after orphaning returned alias %v, want absent", alias)
 		}
 	})
 
@@ -622,7 +604,7 @@ func Run(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("GetNotFoundCases", func(t *testing.T) {
+	t.Run("GetByNameNotFound", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
 		repo := tx.ResourceIdentities()
@@ -631,16 +613,6 @@ func Run(t *testing.T, factory Factory) {
 		_, err := repo.GetByName(ctx, domain.ResourceName("clusters/missing"))
 		if !errors.Is(err, domain.ErrNotFound) {
 			t.Errorf("GetByName: got %v, want ErrNotFound", err)
-		}
-
-		_, err = repo.GetRepresentation(ctx, "//missing.svc/clusters/missing")
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("GetRepresentation: got %v, want ErrNotFound", err)
-		}
-
-		_, err = repo.ResolveAlias(ctx, domain.Alias{Namespace: "x", Key: "k", Value: "v"})
-		if !errors.Is(err, domain.ErrNotFound) {
-			t.Errorf("ResolveAlias: got %v, want ErrNotFound", err)
 		}
 	})
 

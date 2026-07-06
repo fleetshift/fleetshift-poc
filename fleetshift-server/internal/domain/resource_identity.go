@@ -541,8 +541,9 @@ func (r *PlatformResource) SetLabels(labels map[string]string, now time.Time) {
 // ---------------------------------------------------------------------------
 
 // Representations returns this platform resource's derived
-// representations, as populated by the repository at load time (see
-// [ResourceIdentityRepository.GetRepresentation]). Empty unless the
+// representations, as populated by repository read paths such as
+// [ResourceIdentityRepository.GetByName] and
+// [ResourceIdentityRepository.ListByCollection]. Empty unless the
 // aggregate was hydrated by a repository read that populates them.
 func (r *PlatformResource) Representations() []ResourceRepresentation {
 	return r.representations
