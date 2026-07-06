@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"reflect"
-	"sort"
 	"testing"
 	"time"
 
@@ -133,17 +132,15 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 // lost-update fix: two concurrent UpsertAliases deltas for the same
 // resource, each contributing a different alias, must both survive.
 //
-// Unlike the labels/conditions case (fixed by merging inline in a
-// single UPDATE), the alias merge is fixed by a dedicated
-// SELECT ... FOR UPDATE (applyInventoryDeltasCurrentAliasesSQL) that
-// holds its lock across ApplyInventoryDeltas's Go-side merge and its
-// final write. This test drives the same real-transactions-plus-
-// pg_locks-polling approach to force that interleaving deterministically:
-// txA's ApplyInventoryDeltas call runs to completion (including its
-// own FOR UPDATE read and merge-write) but stays uncommitted, so its
-// row lock on extension_resources is held; txB's concurrent call for
-// the same resource must block waiting for that lock before it can
-// even read current aliases, let alone merge against them.
+// Like labels/conditions, the Postgres alias path now merges inline in
+// a single UPDATE against extension_resources.reported_aliases. This
+// test drives the same real-transactions-plus-pg_locks-polling
+// approach to force the interleaving deterministically: txA's
+// ApplyInventoryDeltas call runs to completion but stays uncommitted,
+// so its row lock on extension_resources is held; txB's concurrent
+// call for the same resource must block waiting for that lock before
+// Postgres can re-evaluate its JSONB merge against txA's committed
+// value.
 func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -165,7 +162,7 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 	t0 := time.Unix(1_700_000_000, 0).UTC()
 	if err := seedRepo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 		ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-		UpsertAliases: []domain.Alias{seedAlias},
+		UpsertAliases: domain.NewAliasSet([]domain.Alias{seedAlias}),
 		ObservedAt:    t0, ReceivedAt: t0,
 	}}); err != nil {
 		t.Fatalf("seed ApplyInventoryDeltas: %v", err)
@@ -189,7 +186,7 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 	tA := t0.Add(time.Minute)
 	if err := repoA.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 		ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-		UpsertAliases: []domain.Alias{aliasA},
+		UpsertAliases: domain.NewAliasSet([]domain.Alias{aliasA}),
 		ObservedAt:    tA, ReceivedAt: tA,
 	}}); err != nil {
 		t.Fatalf("repoA.ApplyInventoryDeltas: %v", err)
@@ -210,7 +207,7 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 	go func() {
 		done <- repoB.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 			ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-			UpsertAliases: []domain.Alias{aliasB},
+			UpsertAliases: domain.NewAliasSet([]domain.Alias{aliasB}),
 			ObservedAt:    tB, ReceivedAt: tB,
 		}})
 	}()
@@ -239,25 +236,15 @@ func TestApplyInventoryDeltas_ConcurrentAliasUpsertsDoNotLoseUpdates(t *testing.
 		t.Fatalf("Get: %v", err)
 	}
 	want := []domain.Alias{seedAlias, aliasA, aliasB}
-	gotAliases := append([]domain.Alias(nil), got.ReportedAliases()...)
-	sortAliases(gotAliases)
-	wantSorted := append([]domain.Alias(nil), want...)
-	sortAliases(wantSorted)
-	if !reflect.DeepEqual(gotAliases, wantSorted) {
-		t.Fatalf("ReportedAliases() = %+v, want %+v (a concurrent delta's alias was lost)", gotAliases, wantSorted)
+	gotAliases := collectAliases(got.ReportedAliases())
+	wantAliases := collectAliases(domain.NewAliasSet(want))
+	if !reflect.DeepEqual(gotAliases, wantAliases) {
+		t.Fatalf("ReportedAliases() = %+v, want %+v (a concurrent delta's alias was lost)", gotAliases, wantAliases)
 	}
 }
 
-func sortAliases(aliases []domain.Alias) {
-	sort.Slice(aliases, func(i, j int) bool {
-		if aliases[i].Namespace != aliases[j].Namespace {
-			return aliases[i].Namespace < aliases[j].Namespace
-		}
-		if aliases[i].Key != aliases[j].Key {
-			return aliases[i].Key < aliases[j].Key
-		}
-		return aliases[i].Value < aliases[j].Value
-	})
+func collectAliases(set domain.AliasSet) []domain.Alias {
+	return set.Slice()
 }
 
 // waitForBlockedBackend polls pg_locks until pid has at least one

@@ -361,9 +361,9 @@ func (r *ExtensionResourceRepo) GetIntent(ctx context.Context, uid domain.Extens
 //
 // er.reported_aliases is this extension resource's own pending,
 // unreconciled alias payload -- see
-// [domain.InventoryReplacement.Aliases]'s doc. Read paths expose the
-// payload itself via [domain.ExtensionResource.ReportedAliases];
-// alias_fingerprint remains repository-private.
+// [domain.InventoryReplacement.Aliases]'s doc. Postgres stores that
+// payload as a JSONB object for SQL-native delta merging, but read
+// paths decode it back into [domain.ExtensionResource.ReportedAliases].
 const erSelectColumns = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	erm.current_version, erm.fulfillment_id,
 	inv.labels, inv.observation, inv.observed_at, inv.updated_at, inv.conditions
@@ -448,9 +448,11 @@ func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot,
 	if err := json.Unmarshal([]byte(labelsStr), &snap.Labels); err != nil {
 		return snap, fmt.Errorf("unmarshal labels: %w", err)
 	}
-	if err := json.Unmarshal([]byte(reportedAliasesStr), &snap.ReportedAliases); err != nil {
+	reportedAliases, err := unmarshalReportedAliasesPayload([]byte(reportedAliasesStr))
+	if err != nil {
 		return snap, fmt.Errorf("unmarshal reported aliases: %w", err)
 	}
+	snap.ReportedAliases = reportedAliases
 
 	if fulfillmentID.Valid {
 		snap.Managed = &domain.ManagedStateSnapshot{
@@ -527,8 +529,8 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 	if err := json.Unmarshal([]byte(labelsStr), &labels); err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal labels: %w", err)
 	}
-	var reportedAliases []domain.Alias
-	if err := json.Unmarshal([]byte(reportedAliasesStr), &reportedAliases); err != nil {
+	reportedAliases, err := unmarshalReportedAliasesPayload([]byte(reportedAliasesStr))
+	if err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal reported aliases: %w", err)
 	}
 
@@ -701,11 +703,8 @@ func nonNilStrings(s []string) []string {
 // ---------------------------------------------------------------------------
 //
 // ReplaceInventory and ApplyInventoryDeltas are each exactly one round
-// trip for their *entire* input slice, regardless of batch size (plus,
-// for ApplyInventoryDeltas, a second round trip only when at least one
-// delta in the batch actually upserts aliases -- see
-// applyInventoryDeltasAliasPayloadUpdateSQL's doc comment): a single
-// CTE-chained statement (replaceInventorySQL/applyInventoryDeltasSQL
+// trip for their *entire* input slice, regardless of batch size: a
+// single CTE-chained statement (replaceInventorySQL/applyInventoryDeltasSQL
 // below) that resolves-or-creates every replacement/delta's
 // extension_resources row by natural key (service_name,
 // collection_name, resource_id) -- the input_er/resolved_er/er CTEs --
@@ -729,16 +728,11 @@ func nonNilStrings(s []string) []string {
 // Aliases are handled with no synchronous cross-resource conflict
 // detection at all -- see [domain.InventoryReplacement.Aliases]'s doc
 // -- so there is nothing for either method to report beyond error.
-// ReplaceInventory stores the reported set verbatim, skipping the
-// write entirely when [domain.AliasSetFingerprint] matches what's
-// already stored (needs_alias_payload_write below). ApplyInventoryDeltas's
-// UpsertAliases instead merges into the existing payload by
-// (namespace, key) -- a genuine read-modify-write that can't be
-// pushed into the main statement without knowing the *result* of the
-// merge ahead of time, so it becomes a second, smaller round trip
-// scoped to only the resources with alias work (see
-// applyInventoryDeltasSQL's trailing SELECT and
-// applyInventoryDeltasAliasPayloadUpdateSQL).
+// ReplaceInventory stores the reported set as this backend's JSONB
+// object payload, skipping the write entirely when that payload is
+// unchanged. ApplyInventoryDeltas's UpsertAliases uses the same object
+// shape so it can merge in SQL with JSONB `||`, avoiding a separate
+// current-alias read and Go-side merge.
 
 // normalizeObservation collapses the two "no real observation" input
 // shapes -- a nil pointer and a non-nil pointer to the JSON literal
@@ -754,6 +748,62 @@ func normalizeObservation(obs *json.RawMessage) *json.RawMessage {
 		return nil
 	}
 	return obs
+}
+
+// reportedAliasObjectPayload encodes an extension resource's pending
+// aliases in the Postgres storage shape: a JSON object keyed by the
+// JSON-encoded [namespace, key] pair, with the alias value as the JSON
+// string value. The repository derives this from the domain's
+// canonical [domain.AliasSet] snapshot rather than storing any
+// repository-local JSON metadata on the domain object itself.
+// repository-local shape exists so ApplyInventoryDeltas can merge
+// UpsertAliases with a single JSONB `||` in SQL instead of doing a
+// read/merge/write round trip in Go.
+func reportedAliasObjectPayload(aliases domain.AliasSet) ([]byte, error) {
+	payload := make(map[string]string, aliases.Len())
+	for alias := range aliases.All() {
+		key, err := reportedAliasObjectKey(alias.Namespace(), alias.Key())
+		if err != nil {
+			return nil, err
+		}
+		payload[key] = string(alias.Value())
+	}
+	return json.Marshal(payload)
+}
+
+func reportedAliasObjectKey(namespace domain.AliasNamespace, key domain.AliasKey) (string, error) {
+	encoded, err := json.Marshal([2]string{string(namespace), string(key)})
+	if err != nil {
+		return "", fmt.Errorf("marshal alias object key: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func unmarshalReportedAliasesPayload(payload []byte) (domain.AliasSetSnapshot, error) {
+	payload = bytes.TrimSpace(payload)
+	if len(payload) == 0 || bytes.Equal(payload, []byte("null")) {
+		return domain.AliasSetSnapshot{}, nil
+	}
+	if payload[0] != '{' {
+		return domain.AliasSetSnapshot{}, fmt.Errorf("reported aliases payload must be JSON object")
+	}
+	var encoded map[string]string
+	if err := json.Unmarshal(payload, &encoded); err != nil {
+		return nil, err
+	}
+	aliases := make(domain.AliasSetSnapshot, 0, len(encoded))
+	for encodedKey, value := range encoded {
+		var parts [2]string
+		if err := json.Unmarshal([]byte(encodedKey), &parts); err != nil {
+			return nil, fmt.Errorf("unmarshal alias object key %q: %w", encodedKey, err)
+		}
+		aliases = append(aliases, domain.AliasSnapshot{
+			Namespace: domain.AliasNamespace(parts[0]),
+			Key:       domain.AliasKey(parts[1]),
+			Value:     domain.AliasValue(value),
+		})
+	}
+	return aliases, nil
 }
 
 // insertInventory writes a resource's initial inventory state as part
@@ -799,28 +849,22 @@ func (r *ExtensionResourceRepo) insertInventory(ctx context.Context, uid domain.
 // https://www.postgresql.org/docs/current/queries-with.html's
 // "Data-Modifying Statements in WITH".
 //
-// needs_alias_payload_write's IS DISTINCT FROM treats a NULL stored
-// fingerprint (a resource that has never had a successful alias
-// payload write) as always distinct from any concrete reported hash,
-// so a resource's first report always writes its alias payload
-// regardless of whether it reports any aliases at all.
-//
 // updated_alias_payloads excludes rows already handled by resolved_er
 // (a genuinely new resource): resolved_er's own INSERT already wrote
-// the correct alias_fingerprint/reported_aliases at creation time, and
-// ext's LEFT JOIN inside er reads extension_resources as of the
-// statement's start -- a snapshot that, per the same CTE semantics
-// cited above, cannot see rows resolved_er itself just inserted --
-// so without this exclusion a brand-new resource's own fingerprint
-// would look NULL (not yet stored) and needs_alias_payload_write
-// would try to write it a second, redundant time.
+// the correct reported_aliases at creation time, and ext's LEFT JOIN
+// inside er reads extension_resources as of the statement's start --
+// a snapshot that, per the same CTE semantics cited above, cannot see
+// rows resolved_er itself just inserted -- so without this exclusion a
+// brand-new resource would look like its current payload is missing
+// and needs_alias_payload_write would try to write it a second,
+// redundant time.
 const replaceInventorySQL = `
-WITH raw_reports(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, labels, conditions, observed_at, received_at, reported_alias_fingerprint, reported_aliases) AS MATERIALIZED (
-	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::timestamptz[], $11::timestamptz[], $12::bytea[], $13::jsonb[])
+WITH raw_reports(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, labels, conditions, observed_at, received_at, reported_aliases) AS MATERIALIZED (
+	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::timestamptz[], $11::timestamptz[], $12::jsonb[])
 ),
 resolved_er AS (
-	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, alias_fingerprint, reported_aliases, created_at, updated_at)
-	SELECT candidate_uid, service_name, type_name, collection_name, resource_id, '{}'::jsonb, reported_alias_fingerprint, reported_aliases, received_at, received_at
+	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
+	SELECT candidate_uid, service_name, type_name, collection_name, resource_id, '{}'::jsonb, reported_aliases, received_at, received_at
 	FROM raw_reports
 	ON CONFLICT (service_name, collection_name, resource_id) DO NOTHING
 	RETURNING uid, service_name, collection_name, resource_id
@@ -828,8 +872,7 @@ resolved_er AS (
 er AS MATERIALIZED (
 	SELECT rr.idx, COALESCE(res.uid, ext.uid) AS uid,
 	       rr.observation, rr.labels, rr.conditions, rr.observed_at, rr.received_at,
-	       rr.reported_alias_fingerprint, rr.reported_aliases,
-	       ext.alias_fingerprint AS stored_alias_fingerprint
+	       rr.reported_aliases, ext.reported_aliases AS stored_reported_aliases
 	FROM raw_reports rr
 	LEFT JOIN resolved_er res
 	  ON res.service_name = rr.service_name AND res.collection_name = rr.collection_name AND res.resource_id = rr.resource_id
@@ -848,12 +891,11 @@ upsert_inv AS (
 	RETURNING 1
 ),
 needs_alias_payload_write AS (
-	SELECT * FROM er WHERE reported_alias_fingerprint IS DISTINCT FROM stored_alias_fingerprint
+	SELECT * FROM er WHERE reported_aliases IS DISTINCT FROM stored_reported_aliases
 ),
 updated_alias_payloads AS (
 	UPDATE extension_resources ext
-	SET alias_fingerprint = nw.reported_alias_fingerprint,
-	    reported_aliases = nw.reported_aliases,
+	SET reported_aliases = nw.reported_aliases,
 	    updated_at = nw.received_at
 	FROM needs_alias_payload_write nw
 	WHERE ext.uid = nw.uid
@@ -879,7 +921,6 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	conditions := make([]string, n)
 	observedAts := make([]time.Time, n)
 	receivedAts := make([]time.Time, n)
-	aliasFingerprints := make([][]byte, n)
 	reportedAliases := make([]string, n)
 
 	for i, rep := range replacements {
@@ -905,8 +946,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		conditions[i] = string(conditionsJSON)
 		observedAts[i] = rep.ObservedAt.UTC()
 		receivedAts[i] = rep.ReceivedAt.UTC()
-		aliasFingerprints[i] = domain.AliasSetFingerprint(rep.Aliases)
-		aliasesJSON, err := domain.CanonicalAliasPayload(rep.Aliases)
+		aliasesJSON, err := reportedAliasObjectPayload(rep.Aliases)
 		if err != nil {
 			return fmt.Errorf("marshal reported aliases: %w", err)
 		}
@@ -916,7 +956,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	_, err := r.DB.ExecContext(ctx, replaceInventorySQL,
 		idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs,
 		observations, labels, conditions, observedAts, receivedAts,
-		aliasFingerprints, reportedAliases,
+		reportedAliases,
 	)
 	if err != nil {
 		return fmt.Errorf("replace inventory: %w", err)
@@ -932,15 +972,9 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // per-delta shape in memory and building it once there is simpler
 // than an extra per-key UNNEST input CTE.
 //
-// resolved_er seeds a brand-new row's alias_fingerprint with $14, the
-// empty-set fingerprint ([domain.AliasSetFingerprint] of nil) computed
-// once in Go, rather than leaving the column NULL -- see
-// [ExtensionResourceRepo.ApplyInventoryDeltas]'s doc for why: it keeps
-// this backend consistent with sqlite's resolveOrCreateExtensionResources,
-// which seeds the same concrete value, and avoids a spurious
-// IS DISTINCT FROM NULL mismatch that would otherwise force a
-// redundant alias payload rewrite the very next time this resource is
-// reported with (still) no aliases.
+// resolved_er seeds a brand-new row with this backend's JSONB object
+// alias payload: either the delta's UpsertAliases patch when the
+// delta has alias work, or `{}` when it does not.
 //
 // updated_inv/new_inv replace what used to be a single upsert_inv CTE
 // that merged each delta against a *pre-read* prev_inv snapshot (taken
@@ -974,27 +1008,23 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // (see [domain.InventoryDelta]'s doc) its "still bumps freshness"
 // behavior.
 //
-// The trailing SELECT is not a result the caller cares about in the
-// same sense replaceInventorySQL's is (that one returns nothing at
-// all) -- it returns exactly the (idx, uid) pairs ApplyInventoryDeltas
-// needs to drive its second-phase alias merge (see
-// [ExtensionResourceRepo.ApplyInventoryDeltas]'s doc): one row per
-// delta that actually set UpsertAliases (the $15 join). It
-// deliberately does *not* also return current reported_aliases the
-// way an earlier version of this query did -- see that method's doc
-// for why the current-aliases read now happens in its own locked
-// statement instead. A delta with no alias work contributes no row
-// here at all, and the whole second phase is skipped when the result
-// set is empty -- see [domain.InventoryDelta]'s doc for why omitting
-// all three alias fields must do no alias work whatsoever, not even a
-// no-op rewrite.
+// updated_alias_payloads folds UpsertAliases into the same statement
+// as the rest of the delta. The JSONB object shape makes the merge a
+// plain `reported_aliases || upsert_aliases`; Postgres re-evaluates
+// that expression against the current row after waiting on any
+// concurrent updater, so sibling alias deltas compose instead of
+// losing one writer's value. The WHERE clause also skips unchanged
+// alias upserts, keeping extension_resources.updated_at stable when
+// the reported alias object is already identical.
 const applyInventoryDeltasSQL = `
-WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, set_labels, delete_labels, upsert_conditions, delete_conditions, observed_at, received_at) AS MATERIALIZED (
-	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::jsonb[], $11::jsonb[], $12::timestamptz[], $13::timestamptz[])
+WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, set_labels, delete_labels, upsert_conditions, delete_conditions, observed_at, received_at, upsert_aliases, has_alias_work) AS MATERIALIZED (
+	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::jsonb[], $11::jsonb[], $12::timestamptz[], $13::timestamptz[], $14::jsonb[], $15::boolean[])
 ),
 resolved_er AS (
-	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, alias_fingerprint, created_at, updated_at)
-	SELECT candidate_uid, service_name, type_name, collection_name, resource_id, '{}'::jsonb, '[]'::jsonb, $14::bytea, received_at, received_at
+	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
+	SELECT candidate_uid, service_name, type_name, collection_name, resource_id, '{}'::jsonb,
+	       CASE WHEN has_alias_work THEN upsert_aliases ELSE '{}'::jsonb END,
+	       received_at, received_at
 	FROM input_er
 	ON CONFLICT (service_name, collection_name, resource_id) DO NOTHING
 	RETURNING uid, service_name, collection_name, resource_id
@@ -1002,7 +1032,7 @@ resolved_er AS (
 er AS MATERIALIZED (
 	SELECT i.idx, COALESCE(res.uid, ext.uid) AS uid,
 	       i.observation, i.set_labels, i.delete_labels, i.upsert_conditions, i.delete_conditions,
-	       i.observed_at, i.received_at
+	       i.observed_at, i.received_at, i.upsert_aliases, i.has_alias_work
 	FROM input_er i
 	LEFT JOIN resolved_er res
 	  ON res.service_name = i.service_name AND res.collection_name = i.collection_name AND res.resource_id = i.resource_id
@@ -1037,75 +1067,26 @@ new_inv AS (
 		observed_at = EXCLUDED.observed_at,
 		updated_at = EXCLUDED.updated_at
 	RETURNING 1
+),
+updated_alias_payloads AS (
+	UPDATE extension_resources ext
+	SET reported_aliases = ext.reported_aliases || e.upsert_aliases,
+	    updated_at = e.received_at
+	FROM er e
+	WHERE ext.uid = e.uid
+	  AND e.has_alias_work
+	  AND NOT EXISTS (SELECT 1 FROM resolved_er res WHERE res.uid = e.uid)
+	  AND ext.reported_aliases IS DISTINCT FROM (ext.reported_aliases || e.upsert_aliases)
+	RETURNING 1
 )
-SELECT e.idx, e.uid
-FROM er e
-JOIN UNNEST($15::int[]) aw(idx) ON aw.idx = e.idx`
-
-// applyInventoryDeltasCurrentAliasesSQL is ApplyInventoryDeltas's
-// dedicated second-phase read: for exactly the uids applyInventoryDeltasSQL
-// flagged as having alias work, it reads and, via FOR UPDATE, locks
-// each extension_resources row's current reported_aliases until this
-// call's transaction commits. Every uid passed in is guaranteed to
-// already exist in extension_resources by now -- either it predates
-// this batch, or applyInventoryDeltasSQL's own resolved_er just
-// created it earlier in this same transaction -- so this can be a
-// plain equality lookup with no outer join, unlike
-// applyInventoryDeltasSQL's own trailing SELECT (which does need a
-// LEFT JOIN, and so could not add FOR UPDATE to it directly: Postgres
-// rejects locking clauses on the nullable side of an outer join).
-// Holding the lock across the gap until applyInventoryDeltasAliasPayloadUpdateSQL
-// writes is what closes the lost-update race described in
-// [ExtensionResourceRepo.ApplyInventoryDeltas]'s doc: any other
-// transaction trying to read or write these same rows' aliases blocks
-// until this one commits, instead of interleaving with it.
-const applyInventoryDeltasCurrentAliasesSQL = `
-SELECT uid, reported_aliases FROM extension_resources WHERE uid = ANY($1::uuid[]) FOR UPDATE`
-
-// applyInventoryDeltasAliasPayloadUpdateSQL is ApplyInventoryDeltas's
-// third-phase batched write: one row per resource whose merged
-// reported_aliases/alias_fingerprint (computed in Go by
-// domain.MergeAliases against applyInventoryDeltasCurrentAliasesSQL's
-// locked read) needs to be persisted. Only ever executed when that
-// read returned at least one row. Relies on the caller running within
-// a single transaction spanning all three phases -- true for every
-// production caller (see [domain.Store.Begin]) -- so
-// applyInventoryDeltasCurrentAliasesSQL's row locks are still held
-// here.
-const applyInventoryDeltasAliasPayloadUpdateSQL = `
-UPDATE extension_resources ext
-SET reported_aliases = u.reported_aliases,
-    alias_fingerprint = u.alias_fingerprint,
-    updated_at = u.updated_at
-FROM UNNEST($1::uuid[], $2::jsonb[], $3::bytea[], $4::timestamptz[]) AS u(uid, reported_aliases, alias_fingerprint, updated_at)
-WHERE ext.uid = u.uid`
+SELECT 1`
 
 // ApplyInventoryDeltas implements [domain.ExtensionResourceRepository.ApplyInventoryDeltas]
-// as three phases against Postgres, run within the caller's
-// transaction (see [domain.Store.Begin] -- every production caller
-// wraps the whole call in one, which the phases below depend on):
-//
-//  1. applyInventoryDeltasSQL resolves/creates each resource and
-//     merges labels/conditions directly against each row's current
-//     state (not a pre-read snapshot -- see that SQL's doc comment for
-//     why that distinction is what makes this safe under concurrent
-//     ApplyInventoryDeltas calls touching the same resource), returning
-//     which deltas have UpsertAliases work left to do.
-//  2. applyInventoryDeltasCurrentAliasesSQL reads and locks (FOR
-//     UPDATE) exactly those resources' current reported_aliases.
-//  3. Go merges each locked row's current aliases with its delta's
-//     UpsertAliases and applyInventoryDeltasAliasPayloadUpdateSQL
-//     writes the result back, still holding phase 2's locks.
-//
-// Phases 2-3 exist as their own read-then-write pair (rather than
-// folding the merge into phase 1's single statement the way labels/
-// conditions do) because a plain UPDATE's EvalPlanQual re-evaluation
-// -- phase 1's fix for labels/conditions -- only protects a single
-// statement computing its own merge inline. The alias merge
-// (domain.MergeAliases) runs in Go, not SQL, so nothing re-evaluates
-// it against a fresher row if the read and write were two unlocked
-// statements; explicit FOR UPDATE locking is what makes a Go-side
-// read-modify-write safe across that gap instead.
+// in one statement against Postgres. Labels, conditions, and alias
+// upserts all merge inside SQL against each row's current state, so
+// concurrent writers compose through Postgres row locking and
+// EvalPlanQual re-evaluation instead of through a Go-side
+// read-modify-write.
 func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas []domain.InventoryDelta) error {
 	if len(deltas) == 0 {
 		return nil
@@ -1130,7 +1111,8 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	deleteConditions := make([]string, n)
 	observedAts := make([]time.Time, n)
 	receivedAts := make([]time.Time, n)
-	var aliasWorkIdx []int32
+	upsertAliases := make([]string, n)
+	hasAliasWork := make([]bool, n)
 
 	for i, d := range deltas {
 		idx[i] = int32(i)
@@ -1175,102 +1157,24 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 		observedAts[i] = d.ObservedAt.UTC()
 		receivedAts[i] = d.ReceivedAt.UTC()
 
-		if len(d.UpsertAliases) > 0 {
-			aliasWorkIdx = append(aliasWorkIdx, int32(i))
+		aliasesJSON, err := reportedAliasObjectPayload(d.UpsertAliases)
+		if err != nil {
+			return fmt.Errorf("marshal upsert aliases: %w", err)
+		}
+		upsertAliases[i] = string(aliasesJSON)
+		if d.UpsertAliases.Len() > 0 {
+			hasAliasWork[i] = true
 		}
 	}
 
-	emptyAliasFingerprint := domain.AliasSetFingerprint(nil)
-
-	rows, err := r.DB.QueryContext(ctx, applyInventoryDeltasSQL,
+	_, err := r.DB.ExecContext(ctx, applyInventoryDeltasSQL,
 		idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs,
 		observations, setLabels, deleteLabels, upsertConditions, deleteConditions,
 		observedAts, receivedAts,
-		emptyAliasFingerprint,
-		aliasWorkIdx,
+		upsertAliases, hasAliasWork,
 	)
 	if err != nil {
 		return fmt.Errorf("apply inventory deltas: %w", err)
-	}
-
-	var workIdx []int32
-	var workUIDs []domain.ExtensionResourceUID
-	for rows.Next() {
-		var rowIdx int32
-		var uid domain.ExtensionResourceUID
-		if err := rows.Scan(&rowIdx, &uid); err != nil {
-			rows.Close()
-			return fmt.Errorf("apply inventory deltas: scan alias work row: %w", err)
-		}
-		workIdx = append(workIdx, rowIdx)
-		workUIDs = append(workUIDs, uid)
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return fmt.Errorf("apply inventory deltas: %w", err)
-	}
-	rows.Close()
-
-	if len(workUIDs) == 0 {
-		return nil
-	}
-
-	// Second phase: read this resource's current reported_aliases
-	// under FOR UPDATE, holding the lock until the third phase's write
-	// below commits -- see applyInventoryDeltasCurrentAliasesSQL's doc
-	// for why this closes the lost-update race a single combined
-	// read-then-write would otherwise leave open.
-	workUIDStrs := make([]string, len(workUIDs))
-	for i, u := range workUIDs {
-		workUIDStrs[i] = u.String()
-	}
-	currentRows, err := r.DB.QueryContext(ctx, applyInventoryDeltasCurrentAliasesSQL, workUIDStrs)
-	if err != nil {
-		return fmt.Errorf("apply inventory deltas: lock current aliases: %w", err)
-	}
-	current := make(map[domain.ExtensionResourceUID][]domain.Alias, len(workUIDs))
-	for currentRows.Next() {
-		var uid domain.ExtensionResourceUID
-		var currentAliasesJSON string
-		if err := currentRows.Scan(&uid, &currentAliasesJSON); err != nil {
-			currentRows.Close()
-			return fmt.Errorf("apply inventory deltas: scan current aliases: %w", err)
-		}
-		var aliases []domain.Alias
-		if err := json.Unmarshal([]byte(currentAliasesJSON), &aliases); err != nil {
-			currentRows.Close()
-			return fmt.Errorf("apply inventory deltas: unmarshal current aliases: %w", err)
-		}
-		current[uid] = aliases
-	}
-	if err := currentRows.Err(); err != nil {
-		currentRows.Close()
-		return fmt.Errorf("apply inventory deltas: %w", err)
-	}
-	currentRows.Close()
-
-	// Third phase: merge in Go and write back while still holding the
-	// locks the second phase took.
-	updateUIDs := make([]string, len(workUIDs))
-	updatePayloads := make([]string, len(workUIDs))
-	updateFingerprints := make([][]byte, len(workUIDs))
-	updateTimes := make([]time.Time, len(workUIDs))
-	for i, rowIdx := range workIdx {
-		uid := workUIDs[i]
-		merged := domain.MergeAliases(current[uid], deltas[rowIdx].UpsertAliases)
-		payload, err := domain.CanonicalAliasPayload(merged)
-		if err != nil {
-			return fmt.Errorf("apply inventory deltas: marshal merged aliases: %w", err)
-		}
-		updateUIDs[i] = uid.String()
-		updatePayloads[i] = string(payload)
-		updateFingerprints[i] = domain.AliasSetFingerprint(merged)
-		updateTimes[i] = deltas[rowIdx].ReceivedAt.UTC()
-	}
-	if _, err := r.DB.ExecContext(ctx, applyInventoryDeltasAliasPayloadUpdateSQL,
-		updateUIDs, updatePayloads, updateFingerprints, updateTimes,
-	); err != nil {
-		return fmt.Errorf("apply inventory deltas: write merged alias payloads: %w", err)
 	}
 	return nil
 }

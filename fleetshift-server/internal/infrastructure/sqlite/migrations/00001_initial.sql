@@ -176,9 +176,11 @@ CREATE TABLE extension_resource_types (
 -- representation can be derived on read by joining the two tables on
 -- that pair, rather than maintained as its own reconciled table (see
 -- resource_representations' removal below).
--- reported_aliases and alias_fingerprint mirror the Postgres
--- migration's columns of the same names -- see that file's doc
--- comment for the full contract.
+-- reported_aliases is this extension resource's pending alias
+-- payload, stored in the same object shape Postgres uses: a JSON
+-- object keyed by the JSON-encoded [namespace, key] pair, with the
+-- alias value as the object value. Both backends still hydrate the
+-- same Alias/AliasSet domain snapshots on read.
 CREATE TABLE extension_resources (
     uid               TEXT PRIMARY KEY,
     service_name      TEXT NOT NULL,
@@ -186,8 +188,7 @@ CREATE TABLE extension_resources (
     collection_name   TEXT NOT NULL,
     resource_id       TEXT NOT NULL,
     labels            TEXT NOT NULL DEFAULT '{}',
-    reported_aliases  TEXT NOT NULL DEFAULT '[]',
-    alias_fingerprint BLOB,
+    reported_aliases  TEXT NOT NULL DEFAULT '{}',
     created_at        TEXT NOT NULL,
     updated_at        TEXT NOT NULL,
     UNIQUE (service_name, collection_name, resource_id),

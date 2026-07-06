@@ -115,10 +115,6 @@ type SignerEnrollmentSnapshot struct {
 
 // PlatformResourceSnapshot is the persistence DTO for [PlatformResource].
 // It captures the aggregate's full state including child entities.
-//
-// There is no UID field: [ResourceName] is the sole, permanent
-// identifier for a platform resource (see resource_identity.go's
-// [NewPlatformResource] doc for why).
 type PlatformResourceSnapshot struct {
 	Name      ResourceName
 	Labels    map[string]string
@@ -131,9 +127,7 @@ type PlatformResourceSnapshot struct {
 }
 
 // ResourceRepresentationSnapshot is the persistence DTO for
-// [ResourceRepresentation]. It is never itself persisted -- the
-// repository builds these on read by deriving representations from
-// extension resources (see resource_identity_and_api.md).
+// [ResourceRepresentation].
 type ResourceRepresentationSnapshot struct {
 	ServiceName          ServiceName
 	Version              APIVersion
@@ -142,6 +136,16 @@ type ResourceRepresentationSnapshot struct {
 	CreatedAt            time.Time
 	UpdatedAt            time.Time
 }
+
+// AliasSnapshot is the persistence/JSON DTO for an [Alias].
+type AliasSnapshot struct {
+	Namespace AliasNamespace `json:"namespace"`
+	Key       AliasKey       `json:"key"`
+	Value     AliasValue     `json:"value"`
+}
+
+// AliasSetSnapshot is the persistence/JSON DTO for an [AliasSet].
+type AliasSetSnapshot []AliasSnapshot
 
 // ResourceAliasSnapshot is the persistence DTO for an [Alias] bound
 // to a platform resource.
@@ -251,14 +255,60 @@ type ExtensionResourceSnapshot struct {
 
 	// ReportedAliases mirrors [ExtensionResource.ReportedAliases] --
 	// this extension resource's own pending, unreconciled alias
-	// assertions. It is empty (never nil) when this resource has never
-	// reported any aliases.
-	ReportedAliases []Alias
+	// assertions.
+	ReportedAliases AliasSetSnapshot
 
 	// Pending intents collected by RecordIntent.
 	// Populated on Snapshot() for write-path serialization;
 	// empty when constructed by ExtensionResourceFromSnapshot (read path).
 	PendingIntents []ResourceIntent
+}
+
+// Alias snapshot helpers.
+
+// Snapshot returns an [AliasSnapshot] capturing alias state.
+func (a Alias) Snapshot() AliasSnapshot {
+	return AliasSnapshot{
+		Namespace: a.Namespace(),
+		Key:       a.Key(),
+		Value:     a.Value(),
+	}
+}
+
+// AliasFromSnapshot reconstitutes an [Alias] from a trusted snapshot.
+func AliasFromSnapshot(s AliasSnapshot) Alias {
+	return Alias{
+		namespace: s.Namespace,
+		key:       s.Key,
+		value:     s.Value,
+	}
+}
+
+// Snapshot returns an [AliasSetSnapshot] in canonical order. Empty
+// sets always snapshot as a non-nil empty slice so JSON encoding yields
+// `[]`, never `null`.
+func (s AliasSet) Snapshot() AliasSetSnapshot {
+	if s.Len() == 0 {
+		return AliasSetSnapshot{}
+	}
+	snapshot := make(AliasSetSnapshot, 0, s.Len())
+	for alias := range s.All() {
+		snapshot = append(snapshot, alias.Snapshot())
+	}
+	return snapshot
+}
+
+// AliasSetFromSnapshot reconstitutes an [AliasSet] from a trusted
+// snapshot.
+func AliasSetFromSnapshot(s AliasSetSnapshot) AliasSet {
+	if len(s) == 0 {
+		return AliasSet{}
+	}
+	aliases := make([]Alias, len(s))
+	for i, alias := range s {
+		aliases[i] = AliasFromSnapshot(alias)
+	}
+	return NewAliasSet(aliases)
 }
 
 // ---------------------------------------------------------------------------
@@ -480,9 +530,6 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 			UpdatedAt:   r.inventory.updatedAt,
 		}
 	}
-	aliases := make([]Alias, len(r.reportedAliases))
-	copy(aliases, r.reportedAliases)
-
 	return ExtensionResourceSnapshot{
 		UID:             r.uid,
 		ResourceType:    r.resourceType,
@@ -492,7 +539,7 @@ func (r *ExtensionResource) Snapshot() ExtensionResourceSnapshot {
 		Inventory:       inv,
 		CreatedAt:       r.createdAt,
 		UpdatedAt:       r.updatedAt,
-		ReportedAliases: aliases,
+		ReportedAliases: r.reportedAliases.Snapshot(),
 		PendingIntents:  r.pendingIntents,
 	}
 }
@@ -627,7 +674,11 @@ func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource 
 
 	aliases := make([]Alias, len(s.Aliases))
 	for i, as := range s.Aliases {
-		aliases[i] = Alias{Namespace: as.Namespace, Key: as.Key, Value: as.Value}
+		aliases[i] = AliasFromSnapshot(AliasSnapshot{
+			Namespace: as.Namespace,
+			Key:       as.Key,
+			Value:     as.Value,
+		})
 	}
 
 	rels := make([]ResourceRelationship, len(s.Relationships))
@@ -641,7 +692,7 @@ func PlatformResourceFromSnapshot(s PlatformResourceSnapshot) *PlatformResource 
 		createdAt:       s.CreatedAt,
 		updatedAt:       s.UpdatedAt,
 		representations: reps,
-		aliases:         aliases,
+		aliases:         NewAliasSet(aliases),
 		relationships:   rels,
 	}
 }
@@ -712,9 +763,6 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 			updatedAt:   s.Inventory.UpdatedAt,
 		}
 	}
-	aliases := make([]Alias, len(s.ReportedAliases))
-	copy(aliases, s.ReportedAliases)
-
 	return &ExtensionResource{
 		uid:             s.UID,
 		resourceType:    s.ResourceType,
@@ -722,7 +770,7 @@ func ExtensionResourceFromSnapshot(s ExtensionResourceSnapshot) *ExtensionResour
 		labels:          labels,
 		managed:         managed,
 		inventory:       inv,
-		reportedAliases: aliases,
+		reportedAliases: AliasSetFromSnapshot(s.ReportedAliases),
 		createdAt:       s.CreatedAt,
 		updatedAt:       s.UpdatedAt,
 	}
@@ -909,6 +957,44 @@ func (e *SignerEnrollment) UnmarshalJSON(data []byte) error {
 		return err
 	}
 	*e = SignerEnrollmentFromSnapshot(s)
+	return nil
+}
+
+func (a Alias) MarshalJSON() ([]byte, error) {
+	return json.Marshal(a.Snapshot())
+}
+
+func (a *Alias) UnmarshalJSON(data []byte) error {
+	var s AliasSnapshot
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	parsed, err := NewAlias(s.Namespace, s.Key, s.Value)
+	if err != nil {
+		return err
+	}
+	*a = parsed
+	return nil
+}
+
+func (s AliasSet) MarshalJSON() ([]byte, error) {
+	return json.Marshal(s.Snapshot())
+}
+
+func (s *AliasSet) UnmarshalJSON(data []byte) error {
+	var snap AliasSetSnapshot
+	if err := json.Unmarshal(data, &snap); err != nil {
+		return err
+	}
+	aliases := make([]Alias, 0, len(snap))
+	for _, aliasSnap := range snap {
+		alias, err := NewAlias(aliasSnap.Namespace, aliasSnap.Key, aliasSnap.Value)
+		if err != nil {
+			return err
+		}
+		aliases = append(aliases, alias)
+	}
+	*s = NewAliasSet(aliases)
 	return nil
 }
 

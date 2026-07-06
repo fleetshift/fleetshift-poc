@@ -518,7 +518,7 @@ type ExtensionResource struct {
 	// reportedAliases holds this extension resource's own pending,
 	// unreconciled alias assertions -- see
 	// [InventoryReplacement.Aliases]'s doc for the full contract.
-	reportedAliases []Alias
+	reportedAliases AliasSet
 
 	createdAt time.Time
 	updatedAt time.Time
@@ -632,9 +632,8 @@ func (r *ExtensionResource) Inventory() *InventoryResource { return r.inventory 
 
 // ReportedAliases returns this extension resource's own pending,
 // unreconciled alias assertions -- see [InventoryReplacement.Aliases]'s
-// doc for the contract these are stored under. Empty (never nil) when
-// this resource has never reported any.
-func (r *ExtensionResource) ReportedAliases() []Alias { return r.reportedAliases }
+// doc for the contract these are stored under.
+func (r *ExtensionResource) ReportedAliases() AliasSet { return r.reportedAliases }
 
 // CreatedAt returns the creation timestamp.
 func (r *ExtensionResource) CreatedAt() time.Time { return r.createdAt }

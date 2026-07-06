@@ -12,6 +12,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+func collectAliases(set domain.AliasSet) []domain.Alias {
+	return set.Slice()
+}
+
 // Factory creates a fresh [domain.Tx] for each test. The Tx is needed
 // because representations are derived by joining extension resources
 // (via [domain.Tx.ExtensionResources]) to platform resources on name.
@@ -280,8 +284,8 @@ func Run(t *testing.T, factory Factory) {
 		if len(got.Labels()) != 0 {
 			t.Errorf("virtual resource Labels = %+v, want empty", got.Labels())
 		}
-		if len(got.Aliases()) != 0 {
-			t.Errorf("virtual resource Aliases = %+v, want empty", got.Aliases())
+		if got.Aliases().Len() != 0 {
+			t.Errorf("virtual resource Aliases = %+v, want empty", collectAliases(got.Aliases()))
 		}
 		reps := got.Representations()
 		if len(reps) != 1 {
@@ -336,8 +340,8 @@ func Run(t *testing.T, factory Factory) {
 		if err != nil {
 			t.Fatalf("GetByName: %v", err)
 		}
-		if len(got.Aliases()) != 1 {
-			t.Fatalf("aliases len = %d, want 1", len(got.Aliases()))
+		if got.Aliases().Len() != 1 {
+			t.Fatalf("aliases len = %d, want 1", got.Aliases().Len())
 		}
 	})
 
@@ -487,6 +491,57 @@ func Run(t *testing.T, factory Factory) {
 		}
 		if rels[0].TargetName() != name2 {
 			t.Errorf("TargetName = %q, want %q", rels[0].TargetName(), name2)
+		}
+	})
+
+	t.Run("GetByNameHydratesIndependentChildCollections", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ResourceIdentities()
+		ctx := context.Background()
+
+		name := domain.ResourceName("clusters/full-identity")
+		rt1 := seedExtensionResourceType(t, tx, "kind.fleetshift.io", "v1", now)
+		rt2 := seedExtensionResourceType(t, tx, "gcp.fleetshift.io", "v1alpha1", now)
+		seedExtensionResourceInstance(t, tx, rt1, name, now)
+		seedExtensionResourceInstance(t, tx, rt2, name, now)
+
+		target1 := domain.ResourceName("projects/identity-target-1")
+		target2 := domain.ResourceName("projects/identity-target-2")
+		if err := repo.Create(ctx, domain.NewPlatformResource(target1, nil, now)); err != nil {
+			t.Fatalf("Create target1: %v", err)
+		}
+		if err := repo.Create(ctx, domain.NewPlatformResource(target2, nil, now)); err != nil {
+			t.Fatalf("Create target2: %v", err)
+		}
+
+		r := domain.NewPlatformResource(name, map[string]string{"env": "prod"}, now)
+		projectID, _ := domain.NewAlias("gcp", "project_id", "full-identity-project")
+		clusterID, _ := domain.NewAlias("fleetshift", "cluster_id", "full-identity-cluster")
+		if err := r.AddAlias(projectID); err != nil {
+			t.Fatalf("AddAlias project_id: %v", err)
+		}
+		if err := r.AddAlias(clusterID); err != nil {
+			t.Fatalf("AddAlias cluster_id: %v", err)
+		}
+		_ = r.AddRelationship(domain.NewResourceRelationship(name, "runs-on", target1, "kind.fleetshift.io", now))
+		_ = r.AddRelationship(domain.NewResourceRelationship(name, "member-of", target2, "gcp.fleetshift.io", now))
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create source: %v", err)
+		}
+
+		got, err := repo.GetByName(ctx, name)
+		if err != nil {
+			t.Fatalf("GetByName: %v", err)
+		}
+		if len(got.Representations()) != 2 {
+			t.Fatalf("representations len = %d, want 2", len(got.Representations()))
+		}
+		if got.Aliases().Len() != 2 {
+			t.Fatalf("aliases len = %d, want 2", got.Aliases().Len())
+		}
+		if len(got.Relationships()) != 2 {
+			t.Fatalf("relationships len = %d, want 2", len(got.Relationships()))
 		}
 	})
 

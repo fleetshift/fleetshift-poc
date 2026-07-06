@@ -157,13 +157,16 @@ type ExtensionResourceRepository interface {
 // currently reports for Name. Unlike Labels/Conditions below, Aliases
 // is not reconciled against any other extension resource's
 // contributions or against existing platform identity at write time:
-// the repository stores it verbatim, as canonical JSON, on this
-// extension resource's own row (see [ExtensionResource.ReportedAliases]),
-// replacing whatever this same extension resource previously reported
-// -- a full replace, not a merge, but scoped to this one contributor's
-// own payload rather than a cross-contributor union. An empty or nil
-// Aliases stores an empty payload, which is itself meaningful ("this
-// extension resource asserts no aliases now"), not a no-op.
+// callers supply it as an already-canonical [AliasSet], and the
+// repository stores that pending payload on this extension resource's
+// own row (see
+// [ExtensionResource.ReportedAliases]), replacing whatever this same
+// extension resource previously reported -- a full replace, not a
+// cross-contributor merge. If the input repeats the same
+// (namespace, key), [AliasSet]'s construction semantics apply and the
+// later value wins. The zero value of Aliases stores an empty payload,
+// which is itself meaningful ("this extension resource asserts no
+// aliases now"), not a no-op.
 //
 // This is a deliberate simplification from an earlier design that
 // classified aliases against cross-resource claims/contributions
@@ -196,7 +199,7 @@ type InventoryReplacement struct {
 	ResourceType ResourceType
 	Name         ResourceName
 	CandidateUID ExtensionResourceUID
-	Aliases      []Alias
+	Aliases      AliasSet
 
 	Labels      map[string]string
 	Observation *json.RawMessage
@@ -220,10 +223,12 @@ type InventoryReplacement struct {
 // synchronously at write time.
 //
 // UpsertAliases is currently the only one of the three actually
-// implemented against the reported-alias payload: it merges the given
-// aliases into this extension resource's existing ReportedAliases (by
-// (namespace, key), replacing that key's prior value if already
-// present) and writes a fresh fingerprint over the merged result.
+// implemented against the reported-alias payload: it merges the given,
+// already-canonical alias set into this extension resource's existing
+// ReportedAliases (by (namespace, key), replacing that key's prior
+// value if already present). If the merged payload is unchanged,
+// repositories may skip the alias payload write and leave the
+// extension resource's own UpdatedAt unchanged.
 // DeleteAliases and ReplaceAliases are not yet implemented against the
 // payload -- see extensionresourcerepotest's delta alias tests for the
 // target contract ahead of that landing -- so [ValidateInventoryDelta]
@@ -249,7 +254,7 @@ type InventoryDelta struct {
 	// UpsertAliases adds or updates specific (namespace, key)
 	// contributions from this extension resource -- see this type's
 	// doc above.
-	UpsertAliases []Alias
+	UpsertAliases AliasSet
 	// DeleteAliases would retract specific (namespace, key)
 	// contributions this extension resource previously made,
 	// regardless of their current value (see [AliasRef]'s doc for why
@@ -261,7 +266,7 @@ type InventoryDelta struct {
 	// resource's entire alias contribution in one shot -- see this
 	// type's doc above. Not yet implemented, so any non-empty value
 	// here is rejected outright by [ValidateInventoryDelta].
-	ReplaceAliases []Alias
+	ReplaceAliases AliasSet
 
 	SetLabels    map[string]string
 	DeleteLabels []string
@@ -316,7 +321,7 @@ func ValidateInventoryDelta(d InventoryDelta) error {
 	if len(d.DeleteAliases) > 0 {
 		return fmt.Errorf("%w: DeleteAliases is not yet implemented against the reported-alias payload", ErrUnimplemented)
 	}
-	if len(d.ReplaceAliases) > 0 {
+	if d.ReplaceAliases.Len() > 0 {
 		return fmt.Errorf("%w: ReplaceAliases is not yet implemented against the reported-alias payload", ErrUnimplemented)
 	}
 	return nil

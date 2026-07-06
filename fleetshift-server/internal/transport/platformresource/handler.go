@@ -283,11 +283,11 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	aliasesField := h.descs.Resource.Fields().ByName("aliases")
 	aliasList := msg.Mutable(aliasesField).List()
 	aliasDesc := aliasesField.Message()
-	for _, alias := range pr.Aliases() {
+	for alias := range pr.Aliases().All() {
 		aliasMsg := dynamicpb.NewMessage(aliasDesc)
-		aliasMsg.Set(aliasDesc.Fields().ByName("namespace"), protoreflect.ValueOfString(string(alias.Namespace)))
-		aliasMsg.Set(aliasDesc.Fields().ByName("key"), protoreflect.ValueOfString(string(alias.Key)))
-		aliasMsg.Set(aliasDesc.Fields().ByName("value"), protoreflect.ValueOfString(string(alias.Value)))
+		aliasMsg.Set(aliasDesc.Fields().ByName("namespace"), protoreflect.ValueOfString(string(alias.Namespace())))
+		aliasMsg.Set(aliasDesc.Fields().ByName("key"), protoreflect.ValueOfString(string(alias.Key())))
+		aliasMsg.Set(aliasDesc.Fields().ByName("value"), protoreflect.ValueOfString(string(alias.Value())))
 		aliasList.Append(protoreflect.ValueOfMessage(aliasMsg))
 	}
 

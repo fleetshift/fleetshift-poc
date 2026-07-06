@@ -25,8 +25,9 @@ package postgres
 // measure -- there is no synchronous alias classification left to
 // exercise. This version measures what the current write path
 // actually does: a single CTE-chained upsert per ReplaceInventory
-// call, with reported aliases stored verbatim and skipped entirely
-// when unchanged. The ACM baseline comparison, and the corpus/data
+// call, with reported aliases canonicalized through [domain.AliasSet]
+// and skipped entirely when unchanged. The ACM baseline comparison,
+// and the corpus/data
 // shape it needs (kind/namespace spread, hub-cluster pseudo-nodes,
 // etc.), carries over from that earlier benchmark largely unchanged --
 // it never depended on the alias/history model that changed.
@@ -61,6 +62,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/stdlib"
 )
+
+func aliasSet(aliases ...domain.Alias) domain.AliasSet {
+	return domain.NewAliasSet(aliases)
+}
 
 // ---------------------------------------------------------------------------
 // Corpus shape
@@ -137,7 +142,7 @@ func ipbAliasValue(idx int, gen int64) domain.AliasValue {
 
 // ipbSteadyAliasValue is ipbSameAliasStart's fixed, gen-independent
 // value: reporting the exact same value every round is what exercises
-// replaceInventorySQL's needs_alias_payload_write fingerprint skip.
+// replaceInventorySQL's needs_alias_payload_write payload-equality skip.
 func ipbSteadyAliasValue(idx int) domain.AliasValue {
 	return domain.AliasValue(fmt.Sprintf("steady-%08d", idx))
 }
@@ -269,7 +274,7 @@ func seedIPBCorpus(t *testing.T, db *sql.DB) {
 					if err != nil {
 						t.Fatalf("seed alias: %v", err)
 					}
-					rep.Aliases = []domain.Alias{alias}
+					rep.Aliases = aliasSet(alias)
 				}
 				reps[i] = rep
 			}
@@ -491,7 +496,7 @@ func explainACMUpsert(t *testing.T, db *sql.DB, uid, cluster, data string) {
 // ---------------------------------------------------------------------------
 // Scenario builders -- one per named scenario in
 // TestInventoryWritePathBenchmark, each returning a fresh batch for a
-// given round so IS DISTINCT FROM/fingerprint short-circuits are
+// given round so IS DISTINCT FROM/payload-equality short-circuits are
 // exercised the same way a real repeated call would, not accidentally
 // bypassed by reusing identical Go values across rounds.
 // ---------------------------------------------------------------------------
@@ -567,7 +572,7 @@ func (s *ipbScenarioState) buildNewWithAlias(round, n int) []domain.InventoryRep
 	for i, idx := range indices {
 		rep := ipbBaseReplacement(idx, int64(round))
 		alias, _ := domain.NewAlias(ipbAliasNamespace, ipbAliasKey, ipbAliasValue(idx, int64(round)))
-		rep.Aliases = []domain.Alias{alias}
+		rep.Aliases = aliasSet(alias)
 		reps[i] = rep
 	}
 	return reps
@@ -577,8 +582,8 @@ func (s *ipbScenarioState) buildNewWithAlias(round, n int) []domain.InventoryRep
 // resources with changed observation/labels/conditions each round --
 // the common "heartbeat with real data drift" case. Every call hits
 // replaceInventorySQL's UPDATE branch for extension_resource_inventory,
-// and skips the alias payload write entirely (empty fingerprint always
-// matches empty fingerprint).
+// and skips the alias payload write entirely (empty payload always
+// matches empty payload).
 func (s *ipbScenarioState) buildSteadyNoAlias(round, n int) []domain.InventoryReplacement {
 	indices := ipbCycle(ipbNoAliasStart, ipbPoolSize, &s.noAliasPos, n)
 	reps := make([]domain.InventoryReplacement, n)
@@ -590,17 +595,16 @@ func (s *ipbScenarioState) buildSteadyNoAlias(round, n int) []domain.InventoryRe
 
 // buildSteadySameAlias re-reports the exact same alias value every
 // round for already-existing resources -- the case
-// needs_alias_payload_write's fingerprint comparison exists to make
-// cheap: the alias UPDATE is skipped entirely once the fingerprint
-// matches (i.e. from round 2 onward; round 1's seeding already wrote
-// it once).
+// needs_alias_payload_write's payload comparison exists to make cheap:
+// the alias UPDATE is skipped entirely once the payload matches (i.e.
+// from round 2 onward; round 1's seeding already wrote it once).
 func (s *ipbScenarioState) buildSteadySameAlias(round, n int) []domain.InventoryReplacement {
 	indices := ipbCycle(ipbSameAliasStart, ipbPoolSize, &s.sameAliasPos, n)
 	reps := make([]domain.InventoryReplacement, n)
 	for i, idx := range indices {
 		rep := ipbBaseReplacement(idx, int64(round+1))
 		alias, _ := domain.NewAlias(ipbAliasNamespace, ipbAliasKey, ipbSteadyAliasValue(idx))
-		rep.Aliases = []domain.Alias{alias}
+		rep.Aliases = aliasSet(alias)
 		reps[i] = rep
 	}
 	return reps
@@ -609,14 +613,14 @@ func (s *ipbScenarioState) buildSteadySameAlias(round, n int) []domain.Inventory
 // buildSteadyChangedAlias reports a *different* alias value every
 // round for already-existing resources -- the worst case for
 // needs_alias_payload_write, which must perform the UPDATE on every
-// single call since the fingerprint never matches.
+// single call since the payload never matches.
 func (s *ipbScenarioState) buildSteadyChangedAlias(round, n int) []domain.InventoryReplacement {
 	indices := ipbCycle(ipbChangedAliasStart, ipbPoolSize, &s.changedAliasPos, n)
 	reps := make([]domain.InventoryReplacement, n)
 	for i, idx := range indices {
 		rep := ipbBaseReplacement(idx, int64(round+1))
 		alias, _ := domain.NewAlias(ipbAliasNamespace, ipbAliasKey, ipbAliasValue(idx, int64(round+1)))
-		rep.Aliases = []domain.Alias{alias}
+		rep.Aliases = aliasSet(alias)
 		reps[i] = rep
 	}
 	return reps
@@ -638,6 +642,52 @@ func (s *ipbScenarioState) buildSteadyHeartbeatDelta(round, n int) []domain.Inve
 			Observation:  &obs,
 			ObservedAt:   fixedIPBTime,
 			ReceivedAt:   fixedIPBTime,
+		}
+	}
+	return deltas
+}
+
+// buildSteadySameAliasDelta measures ApplyInventoryDeltas's alias
+// payload skip: every delta upserts the same alias value already
+// stored for that resource, so the JSONB merge is unchanged and
+// extension_resources should not be rewritten.
+func (s *ipbScenarioState) buildSteadySameAliasDelta(round, n int) []domain.InventoryDelta {
+	indices := ipbCycle(ipbSameAliasStart, ipbPoolSize, &s.sameAliasPos, n)
+	deltas := make([]domain.InventoryDelta, n)
+	for i, idx := range indices {
+		alias, _ := domain.NewAlias(ipbAliasNamespace, ipbAliasKey, ipbSteadyAliasValue(idx))
+		obs := ipbObservationJSON(int64(round + 1))
+		deltas[i] = domain.InventoryDelta{
+			ResourceType:  ipbResourceType,
+			Name:          ipbResourceName(idx),
+			CandidateUID:  domain.NewExtensionResourceUID(),
+			UpsertAliases: aliasSet(alias),
+			Observation:   &obs,
+			ObservedAt:    fixedIPBTime,
+			ReceivedAt:    fixedIPBTime,
+		}
+	}
+	return deltas
+}
+
+// buildSteadyChangedAliasDelta measures ApplyInventoryDeltas's
+// alias-bearing update case: every delta changes the value for the
+// same (namespace, key), forcing the JSONB merge to rewrite
+// extension_resources.
+func (s *ipbScenarioState) buildSteadyChangedAliasDelta(round, n int) []domain.InventoryDelta {
+	indices := ipbCycle(ipbChangedAliasStart, ipbPoolSize, &s.changedAliasPos, n)
+	deltas := make([]domain.InventoryDelta, n)
+	for i, idx := range indices {
+		alias, _ := domain.NewAlias(ipbAliasNamespace, ipbAliasKey, ipbAliasValue(idx, int64(round+1_000)))
+		obs := ipbObservationJSON(int64(round + 1))
+		deltas[i] = domain.InventoryDelta{
+			ResourceType:  ipbResourceType,
+			Name:          ipbResourceName(idx),
+			CandidateUID:  domain.NewExtensionResourceUID(),
+			UpsertAliases: aliasSet(alias),
+			Observation:   &obs,
+			ObservedAt:    fixedIPBTime,
+			ReceivedAt:    fixedIPBTime,
 		}
 	}
 	return deltas
@@ -842,7 +892,7 @@ func TestInventoryWritePathBenchmark(t *testing.T) {
 		{"new/no-alias (onboarding)", state.buildNewNoAlias},
 		{"new/with-alias (onboarding)", state.buildNewWithAlias},
 		{"steady/no-alias (heartbeat, data drift)", state.buildSteadyNoAlias},
-		{"steady/same-alias (fingerprint skip)", state.buildSteadySameAlias},
+		{"steady/same-alias (payload skip)", state.buildSteadySameAlias},
 		{"steady/changed-alias (payload rewrite every call)", state.buildSteadyChangedAlias},
 	}
 
@@ -863,8 +913,8 @@ func TestInventoryWritePathBenchmark(t *testing.T) {
 
 	t.Log("")
 	t.Log("=== Alias cost breakdown (marginal cost within our own design; ACM has no alias concept to compare against) ===")
-	printAliasCostBreakdown(t, "steady/same-alias (fingerprint skip)  vs  steady/no-alias",
-		results["steady/no-alias (heartbeat, data drift)"], results["steady/same-alias (fingerprint skip)"])
+	printAliasCostBreakdown(t, "steady/same-alias (payload skip)  vs  steady/no-alias",
+		results["steady/no-alias (heartbeat, data drift)"], results["steady/same-alias (payload skip)"])
 	printAliasCostBreakdown(t, "steady/changed-alias (payload rewrite every call)  vs  steady/no-alias",
 		results["steady/no-alias (heartbeat, data drift)"], results["steady/changed-alias (payload rewrite every call)"])
 	printAliasCostBreakdown(t, "new/with-alias (onboarding)  vs  new/no-alias (onboarding)",
@@ -872,11 +922,31 @@ func TestInventoryWritePathBenchmark(t *testing.T) {
 
 	t.Log("")
 	t.Log("=== ApplyInventoryDeltas ===")
-	t.Run("steady/heartbeat-delta (observation only)", func(t *testing.T) {
-		for _, bs := range ipbBatchSizes {
-			timing := timeApplyDeltas(t, db, "steady/heartbeat-delta", bs, state.buildSteadyHeartbeatDelta)
-			t.Log(timing.String())
-		}
+	deltaScenarios := []struct {
+		name  string
+		build func(round, n int) []domain.InventoryDelta
+	}{
+		{"steady/heartbeat-delta (observation only)", state.buildSteadyHeartbeatDelta},
+		{"steady/same-alias-delta (payload skip)", state.buildSteadySameAliasDelta},
+		{"steady/changed-alias-delta (payload rewrite)", state.buildSteadyChangedAliasDelta},
+	}
+	deltaResults := make(map[string]map[int]ipbTimings, len(deltaScenarios))
+	for _, sc := range deltaScenarios {
+		perBatch := make(map[int]ipbTimings, len(ipbBatchSizes))
+		t.Run(sc.name, func(t *testing.T) {
+			for _, bs := range ipbBatchSizes {
+				timing := timeApplyDeltas(t, db, sc.name, bs, sc.build)
+				t.Log(timing.String())
+				perBatch[bs] = timing
+			}
+		})
+		deltaResults[sc.name] = perBatch
+	}
+	t.Run("delta alias cost breakdown", func(t *testing.T) {
+		printAliasCostBreakdown(t, "delta steady/same-alias (payload skip)  vs  delta heartbeat",
+			deltaResults["steady/heartbeat-delta (observation only)"], deltaResults["steady/same-alias-delta (payload skip)"])
+		printAliasCostBreakdown(t, "delta steady/changed-alias (payload rewrite)  vs  delta heartbeat",
+			deltaResults["steady/heartbeat-delta (observation only)"], deltaResults["steady/changed-alias-delta (payload rewrite)"])
 	})
 
 	// ACM baseline: buildACMUpdateExisting/buildACMInsertNew are the
@@ -945,7 +1015,6 @@ func explainReplaceInventory(t *testing.T, db *sql.DB, reps []domain.InventoryRe
 	conditions := make([]string, n)
 	observedAts := make([]time.Time, n)
 	receivedAts := make([]time.Time, n)
-	aliasFingerprints := make([][]byte, n)
 	reportedAliases := make([]string, n)
 
 	for i, rep := range reps {
@@ -965,15 +1034,14 @@ func explainReplaceInventory(t *testing.T, db *sql.DB, reps []domain.InventoryRe
 		conditions[i] = string(conditionsJSON)
 		observedAts[i] = rep.ObservedAt.UTC()
 		receivedAts[i] = rep.ReceivedAt.UTC()
-		aliasFingerprints[i] = domain.AliasSetFingerprint(rep.Aliases)
-		aliasesJSON, _ := domain.CanonicalAliasPayload(rep.Aliases)
+		aliasesJSON, _ := reportedAliasObjectPayload(rep.Aliases)
 		reportedAliases[i] = string(aliasesJSON)
 	}
 
 	rows, err := db.QueryContext(context.Background(), "EXPLAIN (ANALYZE, BUFFERS) "+replaceInventorySQL,
 		idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs,
 		observations, labels, conditions, observedAts, receivedAts,
-		aliasFingerprints, reportedAliases,
+		reportedAliases,
 	)
 	if err != nil {
 		t.Fatalf("explain: %v", err)

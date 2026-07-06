@@ -62,68 +62,11 @@ func (r *ResourceIdentityRepo) Create(ctx context.Context, pr *domain.PlatformRe
 // ---------------------------------------------------------------------------
 
 func (r *ResourceIdentityRepo) GetByName(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
-	collectionName := string(name.Collection())
-	resourceID := string(name.ID())
 	row := r.DB.QueryRowContext(ctx,
-		`SELECT collection_name, resource_id, labels, created_at, updated_at
-		 FROM platform_resources WHERE collection_name = ? AND resource_id = ?`,
-		collectionName, resourceID,
+		platformResourceByNameQuery,
+		string(name.Collection()), string(name.ID()),
 	)
-	snap, err := scanPlatformResourceSnapshot(row)
-	if err != nil {
-		if errors.Is(err, domain.ErrNotFound) {
-			return r.virtualByName(ctx, name)
-		}
-		return nil, err
-	}
-	return r.loadChildren(ctx, snap)
-}
-
-// virtualByName synthesizes a [domain.PlatformResource] with no
-// physical platform_resources row, for a name that has extension
-// resource representations but has never needed its own labels or
-// relationships (see repository.go's virtual-resource doc).
-// Relationships can never exist without a physical row (they're FK'd
-// to platform_resources), so representations are the only signal
-// checked here. Returns [domain.ErrNotFound] if the name has no
-// representations either -- i.e. it truly doesn't exist.
-//
-// See the Postgres sibling's identical doc comment for why aliases
-// are the one exception -- resource_alias_claims has no FK to
-// platform_resources -- and why that's still not a gap here.
-func (r *ResourceIdentityRepo) virtualByName(ctx context.Context, name domain.ResourceName) (*domain.PlatformResource, error) {
-	collectionName := string(name.Collection())
-	resourceID := string(name.ID())
-
-	var minCreated, maxUpdated sql.NullString
-	err := r.DB.QueryRowContext(ctx,
-		`SELECT MIN(created_at), MAX(updated_at) FROM extension_resources
-		 WHERE collection_name = ? AND resource_id = ?`,
-		collectionName, resourceID,
-	).Scan(&minCreated, &maxUpdated)
-	if err != nil {
-		return nil, fmt.Errorf("check virtual platform resource: %w", err)
-	}
-	if !minCreated.Valid {
-		return nil, fmt.Errorf("platform resource %q: %w", name, domain.ErrNotFound)
-	}
-
-	createdAt, err := time.Parse(time.RFC3339, minCreated.String)
-	if err != nil {
-		return nil, fmt.Errorf("parse created_at: %w", err)
-	}
-	updatedAt, err := time.Parse(time.RFC3339, maxUpdated.String)
-	if err != nil {
-		return nil, fmt.Errorf("parse updated_at: %w", err)
-	}
-
-	snap := domain.PlatformResourceSnapshot{
-		Name:      name,
-		Labels:    map[string]string{},
-		CreatedAt: createdAt,
-		UpdatedAt: updatedAt,
-	}
-	return r.loadChildren(ctx, snap)
+	return scanPlatformResourceAggregate(row)
 }
 
 // ---------------------------------------------------------------------------
@@ -169,101 +112,119 @@ func (r *ResourceIdentityRepo) Update(ctx context.Context, pr *domain.PlatformRe
 
 func (r *ResourceIdentityRepo) ListByCollection(ctx context.Context, collection domain.CollectionName) ([]*domain.PlatformResource, error) {
 	rows, err := r.DB.QueryContext(ctx,
-		`SELECT collection_name, resource_id, labels, created_at, updated_at
-		 FROM platform_resources WHERE collection_name = ? ORDER BY resource_id`,
-		string(collection),
+		platformResourcesByCollectionQuery,
+		string(collection), string(collection),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("list platform resources: %w", err)
 	}
+	defer rows.Close()
 
-	var snaps []domain.PlatformResourceSnapshot
-	physical := make(map[domain.ResourceName]bool)
+	var result []*domain.PlatformResource
 	for rows.Next() {
-		snap, err := scanPlatformResourceSnapshot(rows)
-		if err != nil {
-			rows.Close()
-			return nil, err
-		}
-		snaps = append(snaps, snap)
-		physical[snap.Name] = true
-	}
-	if err := rows.Err(); err != nil {
-		rows.Close()
-		return nil, err
-	}
-	rows.Close()
-
-	virtual, err := r.listVirtualByCollection(ctx, collection, physical)
-	if err != nil {
-		return nil, err
-	}
-	snaps = append(snaps, virtual...)
-
-	result := make([]*domain.PlatformResource, 0, len(snaps))
-	for _, snap := range snaps {
-		pr, err := r.loadChildren(ctx, snap)
+		pr, err := scanPlatformResourceAggregate(rows)
 		if err != nil {
 			return nil, err
 		}
 		result = append(result, pr)
 	}
-	return result, nil
-}
-
-// listVirtualByCollection finds names under collection that have
-// extension resource representations but no physical platform_resources
-// row (see virtualByName's doc for why representations are the only
-// signal that matters).
-func (r *ResourceIdentityRepo) listVirtualByCollection(ctx context.Context, collection domain.CollectionName, physical map[domain.ResourceName]bool) ([]domain.PlatformResourceSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx,
-		`SELECT resource_id, MIN(created_at), MAX(updated_at)
-		 FROM extension_resources WHERE collection_name = ?
-		 GROUP BY resource_id`,
-		string(collection),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("list virtual platform resources: %w", err)
-	}
-	defer rows.Close()
-
-	var result []domain.PlatformResourceSnapshot
-	for rows.Next() {
-		var resourceID, createdAtStr, updatedAtStr string
-		if err := rows.Scan(&resourceID, &createdAtStr, &updatedAtStr); err != nil {
-			return nil, fmt.Errorf("scan virtual platform resource: %w", err)
-		}
-		name := domain.ResourceName(string(collection) + "/" + resourceID)
-		if physical[name] {
-			continue
-		}
-		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse created_at: %w", err)
-		}
-		updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse updated_at: %w", err)
-		}
-		result = append(result, domain.PlatformResourceSnapshot{
-			Name:      name,
-			Labels:    map[string]string{},
-			CreatedAt: createdAt,
-			UpdatedAt: updatedAt,
-		})
-	}
 	return result, rows.Err()
 }
 
-// representationDerivationQuery joins extension_resources to
-// extension_resource_types for the representation's declared API
-// version. Callers append a WHERE clause to scope by (service, name)
-// or by (collection_name, resource_id) alone.
-const representationDerivationQuery = `
-	SELECT er.service_name, ert.api_version, er.collection_name, er.resource_id, er.uid, er.created_at, er.updated_at
-	FROM extension_resources er
-	JOIN extension_resource_types ert ON ert.service_name = er.service_name AND ert.type_name = er.type_name
+const platformResourceAggregateSelectSQLite = `
+SELECT b.collection_name, b.resource_id, b.labels, b.created_at, b.updated_at,
+       COALESCE((
+         SELECT json_group_array(json_object(
+           'ServiceName', service_name,
+           'Version', api_version,
+           'Name', collection_name || '/' || resource_id,
+           'ExtensionResourceUID', uid,
+           'CreatedAt', created_at,
+           'UpdatedAt', updated_at
+         ))
+         FROM (
+           SELECT er.service_name, ert.api_version, er.collection_name, er.resource_id, er.uid, er.created_at, er.updated_at
+           FROM extension_resources er
+           JOIN extension_resource_types ert ON ert.service_name = er.service_name AND ert.type_name = er.type_name
+           WHERE er.collection_name = b.collection_name AND er.resource_id = b.resource_id
+           ORDER BY er.service_name
+         )
+       ), '[]') AS representations,
+       COALESCE((
+         SELECT json_group_array(json_object(
+           'Namespace', namespace,
+           'Key', key,
+           'Value', value,
+           'CreatedAt', created_at
+         ))
+         FROM (
+           SELECT namespace, key, value, created_at
+           FROM resource_alias_claims
+           WHERE platform_collection_name = b.collection_name AND platform_resource_id = b.resource_id
+           ORDER BY namespace, key
+         )
+       ), '[]') AS aliases,
+       COALESCE((
+         SELECT json_group_array(json_object(
+           'SourceName', source_collection_name || '/' || source_resource_id,
+           'Type', type,
+           'TargetName', target_collection_name || '/' || target_resource_id,
+           'SourceService', source_service,
+           'CreatedAt', created_at
+         ))
+         FROM (
+           SELECT source_collection_name, source_resource_id, type, target_collection_name, target_resource_id, source_service, created_at
+           FROM resource_relationships
+           WHERE source_collection_name = b.collection_name AND source_resource_id = b.resource_id
+           ORDER BY type, target_collection_name, target_resource_id
+         )
+       ), '[]') AS relationships
+FROM base b
 `
+
+const platformResourceByNameQuery = `
+WITH input(collection_name, resource_id) AS (VALUES (?, ?)),
+physical AS (
+	SELECT pr.collection_name, pr.resource_id, pr.labels, pr.created_at, pr.updated_at
+	FROM platform_resources pr
+	JOIN input i ON i.collection_name = pr.collection_name AND i.resource_id = pr.resource_id
+),
+virtual AS (
+	SELECT i.collection_name, i.resource_id, '{}' AS labels, MIN(er.created_at) AS created_at, MAX(er.updated_at) AS updated_at
+	FROM input i
+	JOIN extension_resources er ON er.collection_name = i.collection_name AND er.resource_id = i.resource_id
+	GROUP BY i.collection_name, i.resource_id
+),
+base AS (
+	SELECT * FROM physical
+	UNION ALL
+	SELECT * FROM virtual WHERE NOT EXISTS (SELECT 1 FROM physical)
+)
+` + platformResourceAggregateSelectSQLite
+
+const platformResourcesByCollectionQuery = `
+WITH physical AS (
+	SELECT collection_name, resource_id, labels, created_at, updated_at
+	FROM platform_resources
+	WHERE collection_name = ?
+),
+virtual AS (
+	SELECT collection_name, resource_id, '{}' AS labels, MIN(created_at) AS created_at, MAX(updated_at) AS updated_at
+	FROM extension_resources
+	WHERE collection_name = ?
+	GROUP BY collection_name, resource_id
+),
+base AS (
+	SELECT * FROM physical
+	UNION ALL
+	SELECT v.* FROM virtual v
+	WHERE NOT EXISTS (
+		SELECT 1 FROM physical p
+		WHERE p.collection_name = v.collection_name AND p.resource_id = v.resource_id
+	)
+)
+` + platformResourceAggregateSelectSQLite + `
+ORDER BY b.resource_id`
 
 // ---------------------------------------------------------------------------
 // Reconciliation helpers -- upsert child entities from aggregate state
@@ -283,7 +244,11 @@ func (r *ResourceIdentityRepo) reconcileAliases(ctx context.Context, s domain.Pl
 
 	asserted := make(map[domain.Alias]bool, len(s.Aliases))
 	for _, alias := range s.Aliases {
-		a := domain.Alias{Namespace: alias.Namespace, Key: alias.Key, Value: alias.Value}
+		a := domain.AliasFromSnapshot(domain.AliasSnapshot{
+			Namespace: alias.Namespace,
+			Key:       alias.Key,
+			Value:     alias.Value,
+		})
 		asserted[a] = true
 
 		var claimID int64
@@ -363,7 +328,11 @@ func (r *ResourceIdentityRepo) retractAbsentPlatformOwnedAliases(ctx context.Con
 	rows.Close()
 
 	for _, oc := range owned {
-		a := domain.Alias{Namespace: domain.AliasNamespace(oc.namespace), Key: domain.AliasKey(oc.key), Value: domain.AliasValue(oc.value)}
+		a := domain.AliasFromSnapshot(domain.AliasSnapshot{
+			Namespace: domain.AliasNamespace(oc.namespace),
+			Key:       domain.AliasKey(oc.key),
+			Value:     domain.AliasValue(oc.value),
+		})
 		if asserted[a] {
 			continue
 		}
@@ -434,7 +403,7 @@ func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases 
 	args := make([]any, 0, len(aliases)*3)
 	for i, a := range aliases {
 		placeholders[i] = "(?, ?, ?)"
-		args = append(args, string(a.Namespace), string(a.Key), string(a.Value))
+		args = append(args, string(a.Namespace()), string(a.Key()), string(a.Value()))
 	}
 
 	rows, err := r.DB.QueryContext(ctx,
@@ -454,7 +423,11 @@ func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases 
 		if err := rows.Scan(&ns, &key, &value, &collectionName, &resourceID); err != nil {
 			return nil, fmt.Errorf("scan resolve aliases result: %w", err)
 		}
-		result[domain.Alias{Namespace: domain.AliasNamespace(ns), Key: domain.AliasKey(key), Value: domain.AliasValue(value)}] =
+		result[domain.AliasFromSnapshot(domain.AliasSnapshot{
+			Namespace: domain.AliasNamespace(ns),
+			Key:       domain.AliasKey(key),
+			Value:     domain.AliasValue(value),
+		})] =
 			domain.ResourceName(collectionName + "/" + resourceID)
 	}
 	if err := rows.Err(); err != nil {
@@ -464,188 +437,51 @@ func (r *ResourceIdentityRepo) ResolveAliasesBatch(ctx context.Context, aliases 
 }
 
 // ---------------------------------------------------------------------------
-// Load helpers -- join child entities into snapshot and hydrate aggregate
-// ---------------------------------------------------------------------------
-
-func (r *ResourceIdentityRepo) loadChildren(ctx context.Context, snap domain.PlatformResourceSnapshot) (*domain.PlatformResource, error) {
-	reps, err := r.loadRepresentations(ctx, snap.Name)
-	if err != nil {
-		return nil, err
-	}
-	snap.Representations = reps
-
-	aliases, err := r.loadAliases(ctx, snap.Name)
-	if err != nil {
-		return nil, err
-	}
-	snap.Aliases = aliases
-
-	rels, err := r.loadRelationships(ctx, snap.Name)
-	if err != nil {
-		return nil, err
-	}
-	snap.Relationships = rels
-
-	return domain.PlatformResourceFromSnapshot(snap), nil
-}
-
-func (r *ResourceIdentityRepo) loadRepresentations(ctx context.Context, name domain.ResourceName) ([]domain.ResourceRepresentationSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx, representationDerivationQuery+`
-		WHERE er.collection_name = ? AND er.resource_id = ?
-		ORDER BY er.service_name`,
-		string(name.Collection()), string(name.ID()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("load representations: %w", err)
-	}
-	defer rows.Close()
-
-	var result []domain.ResourceRepresentationSnapshot
-	for rows.Next() {
-		rep, err := scanRepresentation(rows)
-		if err != nil {
-			return nil, err
-		}
-		result = append(result, rep.Snapshot())
-	}
-	return result, rows.Err()
-}
-
-// loadAliases returns one snapshot per resource_alias_claims row
-// claimed for name, regardless of how many resource_alias_contributions
-// rows back it -- UNIQUE(namespace, key, platform_collection_name,
-// platform_resource_id) (see the migration's doc comment) guarantees
-// there's exactly one claim row per (namespace, key) for a given
-// name, so no collapsing is needed here the way ResolveAliasesBatch's
-// old DISTINCT once did.
-func (r *ResourceIdentityRepo) loadAliases(ctx context.Context, name domain.ResourceName) ([]domain.ResourceAliasSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx,
-		`SELECT namespace, key, value FROM resource_alias_claims
-		 WHERE platform_collection_name = ? AND platform_resource_id = ? ORDER BY namespace, key`,
-		string(name.Collection()), string(name.ID()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("load aliases: %w", err)
-	}
-	defer rows.Close()
-
-	var result []domain.ResourceAliasSnapshot
-	for rows.Next() {
-		var ns, k, v string
-		if err := rows.Scan(&ns, &k, &v); err != nil {
-			return nil, fmt.Errorf("scan alias: %w", err)
-		}
-		result = append(result, domain.ResourceAliasSnapshot{
-			Namespace: domain.AliasNamespace(ns),
-			Key:       domain.AliasKey(k),
-			Value:     domain.AliasValue(v),
-		})
-	}
-	return result, rows.Err()
-}
-
-func (r *ResourceIdentityRepo) loadRelationships(ctx context.Context, name domain.ResourceName) ([]domain.ResourceRelationshipSnapshot, error) {
-	rows, err := r.DB.QueryContext(ctx,
-		`SELECT target_collection_name, target_resource_id, type, source_service, created_at
-		 FROM resource_relationships
-		 WHERE source_collection_name = ? AND source_resource_id = ? ORDER BY type, target_collection_name, target_resource_id`,
-		string(name.Collection()), string(name.ID()),
-	)
-	if err != nil {
-		return nil, fmt.Errorf("load relationships: %w", err)
-	}
-	defer rows.Close()
-
-	var result []domain.ResourceRelationshipSnapshot
-	for rows.Next() {
-		var targetCollection, targetResourceID, relType, svc, createdAtStr string
-		if err := rows.Scan(&targetCollection, &targetResourceID, &relType, &svc, &createdAtStr); err != nil {
-			return nil, fmt.Errorf("scan relationship: %w", err)
-		}
-		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
-		if err != nil {
-			return nil, fmt.Errorf("parse created_at: %w", err)
-		}
-		result = append(result, domain.ResourceRelationshipSnapshot{
-			SourceName:    name,
-			Type:          domain.RelationshipType(relType),
-			TargetName:    domain.ResourceName(targetCollection + "/" + targetResourceID),
-			SourceService: domain.ServiceName(svc),
-			CreatedAt:     createdAt,
-		})
-	}
-	return result, rows.Err()
-}
-
-// ---------------------------------------------------------------------------
 // Scan helpers
 // ---------------------------------------------------------------------------
 
-func scanPlatformResourceSnapshot(s scanner) (domain.PlatformResourceSnapshot, error) {
+func scanPlatformResourceAggregate(s scanner) (*domain.PlatformResource, error) {
 	var collectionName, resourceID, labelsJSON, createdAtStr, updatedAtStr string
+	var representationsJSON, aliasesJSON, relationshipsJSON string
 
-	if err := s.Scan(&collectionName, &resourceID, &labelsJSON, &createdAtStr, &updatedAtStr); err != nil {
+	if err := s.Scan(
+		&collectionName, &resourceID, &labelsJSON, &createdAtStr, &updatedAtStr,
+		&representationsJSON, &aliasesJSON, &relationshipsJSON,
+	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return domain.PlatformResourceSnapshot{}, fmt.Errorf("%w", domain.ErrNotFound)
+			return nil, fmt.Errorf("%w", domain.ErrNotFound)
 		}
-		return domain.PlatformResourceSnapshot{}, fmt.Errorf("scan platform resource: %w", err)
+		return nil, fmt.Errorf("scan platform resource: %w", err)
 	}
 
 	var labels map[string]string
 	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
-		return domain.PlatformResourceSnapshot{}, fmt.Errorf("unmarshal labels: %w", err)
+		return nil, fmt.Errorf("unmarshal labels: %w", err)
 	}
 
-	createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+	createdAt, err := time.Parse(time.RFC3339Nano, createdAtStr)
 	if err != nil {
-		return domain.PlatformResourceSnapshot{}, fmt.Errorf("parse created_at: %w", err)
+		return nil, fmt.Errorf("parse created_at: %w", err)
 	}
-	updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
+	updatedAt, err := time.Parse(time.RFC3339Nano, updatedAtStr)
 	if err != nil {
-		return domain.PlatformResourceSnapshot{}, fmt.Errorf("parse updated_at: %w", err)
+		return nil, fmt.Errorf("parse updated_at: %w", err)
 	}
 
-	return domain.PlatformResourceSnapshot{
+	snap := domain.PlatformResourceSnapshot{
 		Name:      domain.ResourceName(collectionName + "/" + resourceID),
 		Labels:    labels,
 		CreatedAt: createdAt,
 		UpdatedAt: updatedAt,
-	}, nil
-}
-
-func scanRepresentation(s scanner) (domain.ResourceRepresentation, error) {
-	var serviceName, version, collectionName, resourceID string
-	var extensionResourceUIDStr string
-	var createdAtStr, updatedAtStr string
-
-	if err := s.Scan(&serviceName, &version, &collectionName, &resourceID, &extensionResourceUIDStr, &createdAtStr, &updatedAtStr); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return domain.ResourceRepresentation{}, fmt.Errorf("%w", domain.ErrNotFound)
-		}
-		return domain.ResourceRepresentation{}, fmt.Errorf("scan representation: %w", err)
 	}
-
-	erUID, err := domain.ParseExtensionResourceUID(extensionResourceUIDStr)
-	if err != nil {
-		return domain.ResourceRepresentation{}, fmt.Errorf("parse extension_resource_uid: %w", err)
+	if err := json.Unmarshal([]byte(representationsJSON), &snap.Representations); err != nil {
+		return nil, fmt.Errorf("unmarshal representations: %w", err)
 	}
-
-	createdAt, err := time.Parse(time.RFC3339, createdAtStr)
-	if err != nil {
-		return domain.ResourceRepresentation{}, fmt.Errorf("parse created_at: %w", err)
+	if err := json.Unmarshal([]byte(aliasesJSON), &snap.Aliases); err != nil {
+		return nil, fmt.Errorf("unmarshal aliases: %w", err)
 	}
-	updatedAt, err := time.Parse(time.RFC3339, updatedAtStr)
-	if err != nil {
-		return domain.ResourceRepresentation{}, fmt.Errorf("parse updated_at: %w", err)
+	if err := json.Unmarshal([]byte(relationshipsJSON), &snap.Relationships); err != nil {
+		return nil, fmt.Errorf("unmarshal relationships: %w", err)
 	}
-
-	snap := domain.ResourceRepresentationSnapshot{
-		ServiceName:          domain.ServiceName(serviceName),
-		Version:              domain.APIVersion(version),
-		Name:                 domain.ResourceName(collectionName + "/" + resourceID),
-		ExtensionResourceUID: erUID,
-		CreatedAt:            createdAt,
-		UpdatedAt:            updatedAt,
-	}
-	return domain.ResourceRepresentationFromSnapshot(snap), nil
+	return domain.PlatformResourceFromSnapshot(snap), nil
 }

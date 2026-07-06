@@ -1,11 +1,16 @@
 package domain
 
 import (
-	"crypto/sha256"
+	"encoding/json"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
+
+func collectAliasSet(set AliasSet) []Alias {
+	return set.Slice()
+}
 
 // ---------------------------------------------------------------------------
 // Value object constructors
@@ -154,10 +159,115 @@ func TestNewAlias(t *testing.T) {
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			if got.Namespace != tt.ns || got.Key != tt.key || got.Value != tt.value {
+			if got.Namespace() != tt.ns || got.Key() != tt.key || got.Value() != tt.value {
 				t.Errorf("got %+v, want ns=%q key=%q value=%q", got, tt.ns, tt.key, tt.value)
 			}
 		})
+	}
+}
+
+func TestAliasSet_CanonicalizesSortsAndMergesByRef(t *testing.T) {
+	projectV1, err := NewAlias("gcp", "project_id", "proj-v1")
+	if err != nil {
+		t.Fatalf("NewAlias(projectV1): %v", err)
+	}
+	projectV2, err := NewAlias("gcp", "project_id", "proj-v2")
+	if err != nil {
+		t.Fatalf("NewAlias(projectV2): %v", err)
+	}
+	zone, err := NewAlias("gcp", "zone", "us-central1-a")
+	if err != nil {
+		t.Fatalf("NewAlias(zone): %v", err)
+	}
+	account, err := NewAlias("aws", "account_id", "123456789012")
+	if err != nil {
+		t.Fatalf("NewAlias(account): %v", err)
+	}
+
+	set := NewAliasSet([]Alias{zone, projectV1, account, projectV2})
+
+	if got := set.Len(); got != 3 {
+		t.Fatalf("Len() = %d, want 3", got)
+	}
+
+	var got []Alias
+	for alias := range set.All() {
+		got = append(got, alias)
+	}
+	want := []Alias{account, projectV2, zone}
+	if len(got) != len(want) {
+		t.Fatalf("All() len = %d, want %d", len(got), len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("All()[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestAliasSet_Slice_ReturnsCanonicalCopy(t *testing.T) {
+	project, err := NewAlias("gcp", "project_id", "proj-1")
+	if err != nil {
+		t.Fatalf("NewAlias(project): %v", err)
+	}
+	zone, err := NewAlias("gcp", "zone", "us-central1-a")
+	if err != nil {
+		t.Fatalf("NewAlias(zone): %v", err)
+	}
+
+	set := NewAliasSet([]Alias{zone, project})
+	got := set.Slice()
+	want := []Alias{project, zone}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Slice() = %+v, want %+v", got, want)
+	}
+
+	got[0] = zone
+	if again := set.Slice(); !slices.Equal(again, want) {
+		t.Fatalf("Slice() after mutating returned slice = %+v, want %+v", again, want)
+	}
+}
+
+func TestAlias_JSONRoundTrip_UsesSnapshotShape(t *testing.T) {
+	alias, err := NewAlias("gcp", "project_id", "my-proj")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+
+	data, err := json.Marshal(alias)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if got, want := string(data), `{"namespace":"gcp","key":"project_id","value":"my-proj"}`; got != want {
+		t.Fatalf("MarshalJSON() = %s, want %s", got, want)
+	}
+
+	var roundTripped Alias
+	if err := json.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if roundTripped != alias {
+		t.Fatalf("roundTripped = %+v, want %+v", roundTripped, alias)
+	}
+}
+
+func TestAliasSet_JSONRoundTrip_EmptyUsesArrayLiteral(t *testing.T) {
+	var set AliasSet
+
+	data, err := json.Marshal(set)
+	if err != nil {
+		t.Fatalf("MarshalJSON: %v", err)
+	}
+	if got, want := string(data), `[]`; got != want {
+		t.Fatalf("MarshalJSON() = %s, want %s", got, want)
+	}
+
+	var roundTripped AliasSet
+	if err := json.Unmarshal(data, &roundTripped); err != nil {
+		t.Fatalf("UnmarshalJSON: %v", err)
+	}
+	if got := roundTripped.Len(); got != 0 {
+		t.Fatalf("roundTripped.Len() = %d, want 0", got)
 	}
 }
 
@@ -400,12 +510,12 @@ func TestPlatformResource_AddAlias(t *testing.T) {
 		t.Fatalf("AddAlias: %v", err)
 	}
 
-	aliases := r.Aliases()
+	aliases := collectAliasSet(r.Aliases())
 	if len(aliases) != 1 {
 		t.Fatalf("len(Aliases) = %d, want 1", len(aliases))
 	}
-	if aliases[0].Namespace != "gcp" {
-		t.Errorf("Namespace = %q, want gcp", aliases[0].Namespace)
+	if aliases[0].Namespace() != "gcp" {
+		t.Errorf("Namespace = %q, want gcp", aliases[0].Namespace())
 	}
 }
 
@@ -421,8 +531,8 @@ func TestPlatformResource_AddAlias_Idempotent(t *testing.T) {
 		t.Fatalf("second AddAlias (idempotent): %v", err)
 	}
 
-	if len(r.Aliases()) != 1 {
-		t.Errorf("len(Aliases) = %d, want 1 (idempotent)", len(r.Aliases()))
+	if r.Aliases().Len() != 1 {
+		t.Errorf("len(Aliases) = %d, want 1 (idempotent)", r.Aliases().Len())
 	}
 }
 
@@ -441,12 +551,12 @@ func TestPlatformResource_AddAlias_RejectsConflictingValue(t *testing.T) {
 		t.Errorf("conflicting alias: got %v, want ErrInvalidArgument", err)
 	}
 
-	aliases := r.Aliases()
+	aliases := collectAliasSet(r.Aliases())
 	if len(aliases) != 1 {
 		t.Fatalf("len(Aliases) = %d, want 1", len(aliases))
 	}
-	if aliases[0].Value != "proj-a" {
-		t.Errorf("Value = %q, want proj-a (unchanged)", aliases[0].Value)
+	if aliases[0].Value() != "proj-a" {
+		t.Errorf("Value = %q, want proj-a (unchanged)", aliases[0].Value())
 	}
 }
 
@@ -463,8 +573,8 @@ func TestPlatformResource_AddAlias_AllowsDifferentKeysInSameNamespace(t *testing
 		t.Fatalf("second AddAlias: %v", err)
 	}
 
-	if len(r.Aliases()) != 2 {
-		t.Errorf("len(Aliases) = %d, want 2", len(r.Aliases()))
+	if r.Aliases().Len() != 2 {
+		t.Errorf("len(Aliases) = %d, want 2", r.Aliases().Len())
 	}
 }
 
@@ -529,76 +639,4 @@ func TestPlatformResource_EffectiveLabels_ReturnsCopy(t *testing.T) {
 	got := r.EffectiveLabels()
 	got["env"] = "mutated"
 	assertEq(t, "original unchanged", r.EffectiveLabels()["env"], "prod")
-}
-
-// ---------------------------------------------------------------------------
-// AliasSetFingerprint
-// ---------------------------------------------------------------------------
-
-func TestAliasSetFingerprint_OrderIndependent(t *testing.T) {
-	a1, _ := NewAlias("gcp", "project_id", "proj-1")
-	a2, _ := NewAlias("gcp", "zone", "us-central1-a")
-
-	forward := AliasSetFingerprint([]Alias{a1, a2})
-	reversed := AliasSetFingerprint([]Alias{a2, a1})
-
-	if string(forward) != string(reversed) {
-		t.Errorf("fingerprint depends on input order: forward=%x reversed=%x", forward, reversed)
-	}
-}
-
-func TestAliasSetFingerprint_DoesNotMutateInput(t *testing.T) {
-	a1, _ := NewAlias("gcp", "zone", "us-central1-a")
-	a2, _ := NewAlias("gcp", "project_id", "proj-1")
-	aliases := []Alias{a1, a2}
-
-	AliasSetFingerprint(aliases)
-
-	if aliases[0] != a1 || aliases[1] != a2 {
-		t.Errorf("AliasSetFingerprint mutated its input slice: got %+v", aliases)
-	}
-}
-
-func TestAliasSetFingerprint_DifferentSetsDiffer(t *testing.T) {
-	a1, _ := NewAlias("gcp", "project_id", "proj-1")
-	a2, _ := NewAlias("gcp", "project_id", "proj-2")
-
-	fp1 := AliasSetFingerprint([]Alias{a1})
-	fp2 := AliasSetFingerprint([]Alias{a2})
-
-	if string(fp1) == string(fp2) {
-		t.Error("different alias sets produced the same fingerprint")
-	}
-}
-
-// TestAliasSetFingerprint_FieldBoundariesUnambiguous guards against a
-// naive delimiter-joined ("namespace|key|value") implementation,
-// where two structurally different alias sets can collide onto the
-// same joined string. AliasSetFingerprint instead length-prefixes
-// each field (see hashString), so "ab"/"c" and "a"/"bc" -- which a
-// bare '|'-join would conflate the same way "ab|c|v" == "a|bc"... does
-// not, once a separator is involved -- must still be told apart even
-// though the two aliases' concatenated field bytes overlap.
-func TestAliasSetFingerprint_FieldBoundariesUnambiguous(t *testing.T) {
-	a1, _ := NewAlias("ab", "c", "v")
-	a2, _ := NewAlias("a", "bc", "v")
-
-	fp1 := AliasSetFingerprint([]Alias{a1})
-	fp2 := AliasSetFingerprint([]Alias{a2})
-
-	if string(fp1) == string(fp2) {
-		t.Error("field-boundary-ambiguous aliases produced the same fingerprint")
-	}
-}
-
-func TestAliasSetFingerprint_EmptySetIsStable(t *testing.T) {
-	fp1 := AliasSetFingerprint(nil)
-	fp2 := AliasSetFingerprint([]Alias{})
-
-	if string(fp1) != string(fp2) {
-		t.Error("nil and empty alias sets produced different fingerprints")
-	}
-	if len(fp1) != sha256.Size {
-		t.Errorf("len(fingerprint) = %d, want %d", len(fp1), sha256.Size)
-	}
 }

@@ -41,6 +41,10 @@ var fixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 // read.
 var wallClockDistantPast = time.Date(1999, 1, 1, 0, 0, 0, 0, time.UTC)
 
+func aliasSet(aliases ...domain.Alias) domain.AliasSet {
+	return domain.NewAliasSet(aliases)
+}
+
 func seedFulfillment(t *testing.T, tx domain.Tx, fID domain.FulfillmentID, at time.Time) {
 	t.Helper()
 	ctx := context.Background()
@@ -1669,7 +1673,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{original},
+				UpsertAliases: aliasSet(original),
 				ObservedAt:    t1, ReceivedAt: t1,
 			}}); err != nil {
 				t.Fatalf("seed ApplyInventoryDeltas: %v", err)
@@ -1693,7 +1697,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			if reported := got.ReportedAliases(); len(reported) != 1 || reported[0] != original {
+			if reported := collectAliases(got.ReportedAliases()); len(reported) != 1 || reported[0] != original {
 				t.Fatalf("ReportedAliases() = %+v, want unchanged [%+v]", reported, original)
 			}
 		})
@@ -1714,7 +1718,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			now := fixedTime.Add(time.Minute)
 			err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: r.ResourceType(), Name: r.Name(), CandidateUID: domain.NewExtensionResourceUID(),
-				ReplaceAliases: []domain.Alias{replaceAlias},
+				ReplaceAliases: aliasSet(replaceAlias),
 				ObservedAt:     now, ReceivedAt: now,
 			}})
 			if !errors.Is(err, domain.ErrUnimplemented) {
@@ -2355,7 +2359,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{zone, instanceID},
+				Aliases:      aliasSet(zone, instanceID),
 				ObservedAt:   now,
 				ReceivedAt:   now,
 			}}); err != nil {
@@ -2366,10 +2370,10 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), domain.SortAliases([]domain.Alias{zone, instanceID}))
+			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), []domain.Alias{zone, instanceID})
 		})
 
-		t.Run("NoAliasesStoresEmptyArray", func(t *testing.T) {
+		t.Run("NoAliasesStoresEmptyPayload", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2394,7 +2398,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			if reported := got.ReportedAliases(); len(reported) != 0 {
+			if reported := collectAliases(got.ReportedAliases()); len(reported) != 0 {
 				t.Fatalf("ReportedAliases() = %+v, want empty (never nil)", reported)
 			}
 		})
@@ -2417,7 +2421,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			name := domain.ResourceName("nodes/delta-created-alias-fingerprint")
+			name := domain.ResourceName("nodes/delta-created-alias-payload")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType: "inv.fleetshift.io/Node",
@@ -2433,13 +2437,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			if reported := got.ReportedAliases(); len(reported) != 0 {
+			if reported := collectAliases(got.ReportedAliases()); len(reported) != 0 {
 				t.Fatalf("ReportedAliases() after delta-create = %+v, want empty", reported)
 			}
 			extensionResourcesUpdatedAt := got.UpdatedAt()
 
 			// A later no-alias ReplaceInventory report should find
-			// its fingerprint already matching and skip the alias
+			// its alias payload already matching and skip the alias
 			// payload write entirely -- observable as
 			// extension_resources.updated_at (and therefore
 			// UpdatedAt()) staying put even though the report
@@ -2461,18 +2465,18 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if !got2.UpdatedAt().Equal(extensionResourcesUpdatedAt) {
 				t.Errorf("UpdatedAt() = %v, want unchanged %v (alias payload write should have been skipped)", got2.UpdatedAt(), extensionResourcesUpdatedAt)
 			}
-			if reported := got2.ReportedAliases(); len(reported) != 0 {
+			if reported := collectAliases(got2.ReportedAliases()); len(reported) != 0 {
 				t.Errorf("ReportedAliases() after follow-up report = %+v, want still empty", reported)
 			}
 		})
 
 		// UnchangedReportedAliasesSkipPendingAliasPayloadWrite
-		// observes the fingerprint-gated write skip indirectly
+		// observes the unchanged-payload write skip indirectly
 		// through ExtensionResource.UpdatedAt(): ReplaceInventory
 		// only touches extension_resources (and therefore only
 		// moves its updated_at) when the alias payload write
 		// actually happens, which is exactly when the reported
-		// fingerprint differs from the stored one. Inventory
+		// payload differs from the stored one. Inventory
 		// freshness (Inventory().UpdatedAt(), a separate row
 		// entirely) still moves on every report regardless.
 		t.Run("UnchangedReportedAliasesSkipPendingAliasPayloadWrite", func(t *testing.T) {
@@ -2484,14 +2488,14 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("CreateType: %v", err)
 			}
 
-			name := domain.ResourceName("nodes/alias-fingerprint-skip")
-			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-fingerprint-skip-1")
+			name := domain.ResourceName("nodes/alias-payload-skip")
+			alias, _ := domain.NewAlias("gcp", "instance_id", "alias-payload-skip-1")
 			t1 := fixedTime.Add(time.Minute)
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
+				Aliases:      aliasSet(alias),
 				ObservedAt:   t1,
 				ReceivedAt:   t1,
 			}}); err != nil {
@@ -2513,7 +2517,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
 				Labels:       map[string]string{"zone": "us-east-1"},
-				Aliases:      []domain.Alias{alias},
+				Aliases:      aliasSet(alias),
 				ObservedAt:   t2,
 				ReceivedAt:   t2,
 			}}); err != nil {
@@ -2525,7 +2529,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("Get after second: %v", err)
 			}
 			if !afterSecond.UpdatedAt().Equal(firstUpdatedAt) {
-				t.Errorf("UpdatedAt = %v, want unchanged %v (alias payload write must be skipped when the fingerprint is unchanged)", afterSecond.UpdatedAt(), firstUpdatedAt)
+				t.Errorf("UpdatedAt = %v, want unchanged %v (alias payload write must be skipped when the payload is unchanged)", afterSecond.UpdatedAt(), firstUpdatedAt)
 			}
 			assertAliasesEqual(t, "ReportedAliases()", afterSecond.ReportedAliases(), []domain.Alias{alias})
 
@@ -2554,7 +2558,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{first},
+				Aliases:      aliasSet(first),
 				ObservedAt:   t1,
 				ReceivedAt:   t1,
 			}}); err != nil {
@@ -2567,7 +2571,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{second},
+				Aliases:      aliasSet(second),
 				ObservedAt:   t2,
 				ReceivedAt:   t2,
 			}}); err != nil {
@@ -2580,7 +2584,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), []domain.Alias{second})
 			if !got.UpdatedAt().Equal(t2) {
-				t.Errorf("UpdatedAt = %v, want %v (a changed fingerprint must update the row)", got.UpdatedAt(), t2)
+				t.Errorf("UpdatedAt = %v, want %v (a changed alias payload must update the row)", got.UpdatedAt(), t2)
 			}
 		})
 
@@ -2613,7 +2617,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 					ResourceType: "inv.fleetshift.io/Node",
 					Name:         nameA,
 					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{alias},
+					Aliases:      aliasSet(alias),
 					ObservedAt:   now,
 					ReceivedAt:   now,
 				},
@@ -2621,7 +2625,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 					ResourceType: "inv.fleetshift.io/Node",
 					Name:         nameB,
 					CandidateUID: domain.NewExtensionResourceUID(),
-					Aliases:      []domain.Alias{alias},
+					Aliases:      aliasSet(alias),
 					ObservedAt:   now,
 					ReceivedAt:   now,
 				},
@@ -2649,7 +2653,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         nameB,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
+				Aliases:      aliasSet(alias),
 				ObservedAt:   later,
 				ReceivedAt:   later,
 			}}); err != nil {
@@ -2657,7 +2661,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
-		t.Run("RemovingAliasesByFullReplacementStoresEmptyArray", func(t *testing.T) {
+		t.Run("RemovingAliasesByFullReplacementStoresEmptyPayload", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2673,7 +2677,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType: "inv.fleetshift.io/Node",
 				Name:         name,
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      []domain.Alias{alias},
+				Aliases:      aliasSet(alias),
 				ObservedAt:   t1,
 				ReceivedAt:   t1,
 			}}); err != nil {
@@ -2699,7 +2703,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			if reported := got.ReportedAliases(); len(reported) != 0 {
+			if reported := collectAliases(got.ReportedAliases()); len(reported) != 0 {
 				t.Fatalf("ReportedAliases() = %+v, want empty after removal", reported)
 			}
 		})
@@ -2727,7 +2731,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{instanceIDv1},
+				UpsertAliases: aliasSet(instanceIDv1),
 				ObservedAt:    t1,
 				ReceivedAt:    t1,
 			}}); err != nil {
@@ -2742,7 +2746,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{zone},
+				UpsertAliases: aliasSet(zone),
 				ObservedAt:    t2,
 				ReceivedAt:    t2,
 			}}); err != nil {
@@ -2758,7 +2762,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{instanceIDv2},
+				UpsertAliases: aliasSet(instanceIDv2),
 				ObservedAt:    t3,
 				ReceivedAt:    t3,
 			}}); err != nil {
@@ -2769,23 +2773,17 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			if err != nil {
 				t.Fatalf("Get: %v", err)
 			}
-			want := domain.SortAliases([]domain.Alias{instanceIDv2, zone})
+			want := []domain.Alias{instanceIDv2, zone}
 			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), want)
 		})
 
-		// UnchangedAliasDeltaStillWritesPayload documents that
-		// the delta path does NOT share the replace path's
-		// fingerprint-gated write-skip optimization: upserting an
-		// alias whose value already matches the stored payload still
-		// causes a payload write (and therefore moves UpdatedAt).
-		// This is an intentional trade-off -- the delta path already
-		// holds a lock and has read the current aliases in order to
-		// merge, so the fingerprint comparison that would elide the
-		// subsequent UPDATE saves at most one small write, not worth
-		// the added complexity given the overwhelmingly-common
-		// heartbeat case (no UpsertAliases at all) is already gated
-		// out before the read+merge phase begins.
-		t.Run("UnchangedAliasDeltaStillWritesPayload", func(t *testing.T) {
+		// UnchangedAliasDeltaSkipsPayloadWrite documents that an
+		// UpsertAliases delta whose merged result is identical to the
+		// stored payload is a no-op for extension_resources itself:
+		// the alias set stays correct, and UpdatedAt does not move.
+		// Inventory freshness still moves independently through
+		// extension_resource_inventory.
+		t.Run("UnchangedAliasDeltaSkipsPayloadWrite", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -2801,7 +2799,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{alias},
+				UpsertAliases: aliasSet(alias),
 				ObservedAt:    t1,
 				ReceivedAt:    t1,
 			}}); err != nil {
@@ -2815,14 +2813,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			seedUpdatedAt := afterSeed.UpdatedAt()
 
 			// Upsert the exact same alias again -- the merged set is
-			// identical, but both backends unconditionally write back
-			// the payload after merging, so UpdatedAt moves.
+			// identical, so the alias payload write should be skipped.
 			t2 := fixedTime.Add(2 * time.Minute)
 			if err := repo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{alias},
+				UpsertAliases: aliasSet(alias),
 				ObservedAt:    t2,
 				ReceivedAt:    t2,
 			}}); err != nil {
@@ -2835,11 +2832,8 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 			// The alias set itself must still be correct.
 			assertAliasesEqual(t, "ReportedAliases()", got.ReportedAliases(), []domain.Alias{alias})
-			// Unlike the replace path, the delta path does NOT skip
-			// the write -- UpdatedAt moves even though the alias set
-			// is unchanged.
-			if got.UpdatedAt().Equal(seedUpdatedAt) {
-				t.Errorf("UpdatedAt = %v, want moved (delta path does not fingerprint-gate its write)", got.UpdatedAt())
+			if !got.UpdatedAt().Equal(seedUpdatedAt) {
+				t.Errorf("UpdatedAt = %v, want unchanged %v (unchanged alias delta should skip the payload write)", got.UpdatedAt(), seedUpdatedAt)
 			}
 		})
 
@@ -2848,7 +2842,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 		// [domain.InventoryDelta]'s doc: a delta that sets none of
 		// UpsertAliases/DeleteAliases/ReplaceAliases must do no alias
 		// work at all, not even re-derive/rewrite an unchanged
-		// fingerprint -- a heartbeat-style label/condition-only delta
+		// payload -- a heartbeat-style label/condition-only delta
 		// is the overwhelmingly common case this guards.
 		t.Run("ApplyInventoryDeltasOmittingAliasesDoesNoAliasWork", func(t *testing.T) {
 			tx := factory(t)
@@ -2866,7 +2860,7 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				ResourceType:  "inv.fleetshift.io/Node",
 				Name:          name,
 				CandidateUID:  domain.NewExtensionResourceUID(),
-				UpsertAliases: []domain.Alias{alias},
+				UpsertAliases: aliasSet(alias),
 				ObservedAt:    t1,
 				ReceivedAt:    t1,
 			}}); err != nil {
@@ -2909,18 +2903,22 @@ func assertEqual[T comparable](t *testing.T, field string, got, want T) {
 	}
 }
 
+func collectAliases(set domain.AliasSet) []domain.Alias {
+	return set.Slice()
+}
+
 // assertAliasesEqual asserts that got and want contain the same
-// [domain.Alias] values in the same order -- used to check a
-// repository's [domain.ExtensionResource.ReportedAliases] against an
-// expected, already-canonically-sorted slice.
-func assertAliasesEqual(t *testing.T, field string, got, want []domain.Alias) {
+// [domain.Alias] values once canonicalized by [domain.AliasSet].
+func assertAliasesEqual(t *testing.T, field string, got domain.AliasSet, want []domain.Alias) {
 	t.Helper()
-	if len(got) != len(want) {
-		t.Fatalf("%s = %+v, want %+v", field, got, want)
+	gotAliases := collectAliases(got)
+	wantAliases := collectAliases(domain.NewAliasSet(want))
+	if len(gotAliases) != len(wantAliases) {
+		t.Fatalf("%s = %+v, want %+v", field, gotAliases, wantAliases)
 	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("%s = %+v, want %+v", field, got, want)
+	for i := range wantAliases {
+		if gotAliases[i] != wantAliases[i] {
+			t.Fatalf("%s = %+v, want %+v", field, gotAliases, wantAliases)
 		}
 	}
 }

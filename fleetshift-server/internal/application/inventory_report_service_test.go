@@ -15,6 +15,14 @@ import (
 
 const inventoryReportTestType domain.ResourceType = "kind.fleetshift.io/Cluster"
 
+func collectAliases(set domain.AliasSet) []domain.Alias {
+	return set.Slice()
+}
+
+func aliasSet(aliases ...domain.Alias) domain.AliasSet {
+	return domain.NewAliasSet(aliases)
+}
+
 // seedInventoryType registers an extension resource type that
 // supports inventory reporting (and nothing else).
 func seedInventoryType(t *testing.T, store domain.Store) {
@@ -175,9 +183,10 @@ func TestInventoryReportService_ReplaceBatch_ByName_CreatesIdentityAndInventory(
 
 // TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPending
 // covers [domain.InventoryReplacement.Aliases]'s pending-payload
-// contract at the service layer: a reported alias is stored verbatim
-// on the extension resource for future asynchronous reconciliation,
-// never synchronously promoted to the platform resource's own
+// contract at the service layer: a reported alias is stored on the
+// extension resource for future asynchronous reconciliation, after
+// [domain.AliasSet] canonicalization, never synchronously promoted to
+// the platform resource's own
 // accepted [domain.PlatformResource.Aliases].
 func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPending(t *testing.T) {
 	store := newStore(t)
@@ -195,7 +204,7 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPendin
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
 			Name:         &name,
-			Aliases:      []domain.Alias{alias},
+			Aliases:      aliasSet(alias),
 			ObservedAt:   time.Now(),
 		}},
 	})
@@ -204,7 +213,7 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPendin
 	}
 
 	er := getExtensionResource(t, store, name)
-	if reported := er.ReportedAliases(); len(reported) != 1 || reported[0] != alias {
+	if reported := collectAliases(er.ReportedAliases()); len(reported) != 1 || reported[0] != alias {
 		t.Fatalf("ReportedAliases() = %+v, want [%+v]", reported, alias)
 	}
 
@@ -221,8 +230,8 @@ func TestInventoryReportService_ReplaceBatch_ByNamePlusAlias_StoresAliasAsPendin
 	if err != nil {
 		t.Fatalf("GetByName: %v", err)
 	}
-	if len(pr.Aliases()) != 0 {
-		t.Fatalf("Aliases = %+v, want empty (reported alias is pending, not accepted)", pr.Aliases())
+	if pr.Aliases().Len() != 0 {
+		t.Fatalf("Aliases = %+v, want empty (reported alias is pending, not accepted)", collectAliases(pr.Aliases()))
 	}
 }
 
@@ -277,7 +286,7 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ResolvesExistingIdentit
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
-			Aliases:      []domain.Alias{alias},
+			Aliases:      aliasSet(alias),
 			Observation:  rawMsg(`{"v":1}`),
 			ObservedAt:   time.Now(),
 		}},
@@ -291,7 +300,7 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ResolvesExistingIdentit
 	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
-			Aliases:      []domain.Alias{alias},
+			Aliases:      aliasSet(alias),
 			Observation:  rawMsg(`{"v":2}`),
 			ObservedAt:   time.Now(),
 		}},
@@ -322,7 +331,7 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_NoMatchRejected(t *test
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
-			Aliases:      []domain.Alias{alias},
+			Aliases:      aliasSet(alias),
 			ObservedAt:   time.Now(),
 		}},
 	})
@@ -372,7 +381,7 @@ func TestInventoryReportService_ReplaceBatch_AliasesOnly_ContradictoryAliasesFai
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
 			ResourceType: inventoryReportTestType,
-			Aliases:      []domain.Alias{aliasA, aliasB},
+			Aliases:      aliasSet(aliasA, aliasB),
 			Observation:  rawMsg(`{"should":"not persist"}`),
 			ObservedAt:   time.Now(),
 		}},
@@ -417,8 +426,8 @@ func TestInventoryReportService_ReplaceBatch_CrossReportSameAliasDifferentResour
 
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{
-			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
-			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: aliasSet(contested), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: aliasSet(contested), ObservedAt: time.Now()},
 		},
 	})
 	if err != nil {
@@ -426,11 +435,11 @@ func TestInventoryReportService_ReplaceBatch_CrossReportSameAliasDifferentResour
 	}
 
 	er1 := getExtensionResource(t, store, name1)
-	if reported := er1.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+	if reported := collectAliases(er1.ReportedAliases()); len(reported) != 1 || reported[0] != contested {
 		t.Errorf("c1 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 	er2 := getExtensionResource(t, store, name2)
-	if reported := er2.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+	if reported := collectAliases(er2.ReportedAliases()); len(reported) != 1 || reported[0] != contested {
 		t.Errorf("c2 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 }
@@ -458,8 +467,8 @@ func TestInventoryReportService_ReplaceBatch_CrossChunkSameAliasDifferentResourc
 
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{
-			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
-			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: []domain.Alias{contested}, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name1, Aliases: aliasSet(contested), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &name2, Aliases: aliasSet(contested), ObservedAt: time.Now()},
 		},
 	})
 	if err != nil {
@@ -467,24 +476,21 @@ func TestInventoryReportService_ReplaceBatch_CrossChunkSameAliasDifferentResourc
 	}
 
 	er1 := getExtensionResource(t, store, name1)
-	if reported := er1.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+	if reported := collectAliases(er1.ReportedAliases()); len(reported) != 1 || reported[0] != contested {
 		t.Errorf("cc1 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 	er2 := getExtensionResource(t, store, name2)
-	if reported := er2.ReportedAliases(); len(reported) != 1 || reported[0] != contested {
+	if reported := collectAliases(er2.ReportedAliases()); len(reported) != 1 || reported[0] != contested {
 		t.Errorf("cc2 ReportedAliases() = %+v, want [%+v]", reported, contested)
 	}
 }
 
-// TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAccepted
+// TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueMerges
 // covers the single-report counterpart: one report asserting two
-// different values for the same (namespace, key) is stored verbatim
-// as a pending payload too -- internal consistency of a report's own
-// Aliases is exactly the kind of check the reconciliation process
-// this plan defers is meant to eventually catch, not something the
-// hot path validates synchronously (see
-// [domain.InventoryReplacement.Aliases]'s doc).
-func TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAccepted(t *testing.T) {
+// different values for the same (namespace, key) is canonicalized by
+// [domain.AliasSet] on construction, so only the later value remains
+// in the pending payload.
+func TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueMerges(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -502,7 +508,7 @@ func TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAcce
 
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{{
-			ResourceType: inventoryReportTestType, Name: &name, Aliases: []domain.Alias{zoneA, zoneB}, ObservedAt: time.Now(),
+			ResourceType: inventoryReportTestType, Name: &name, Aliases: aliasSet(zoneA, zoneB), ObservedAt: time.Now(),
 		}},
 	})
 	if err != nil {
@@ -510,8 +516,8 @@ func TestInventoryReportService_ReplaceBatch_SameReportSameKeyDifferentValueAcce
 	}
 
 	er := getExtensionResource(t, store, name)
-	if reported := er.ReportedAliases(); len(reported) != 2 {
-		t.Fatalf("ReportedAliases() = %+v, want both [%+v %+v]", reported, zoneA, zoneB)
+	if reported := collectAliases(er.ReportedAliases()); len(reported) != 1 || reported[0] != zoneB {
+		t.Fatalf("ReportedAliases() = %+v, want [%+v] (later duplicate ref wins)", reported, zoneB)
 	}
 }
 
@@ -570,7 +576,7 @@ func TestInventoryReportService_ReplaceBatch_LargeMixedBatchResolvesEveryReport(
 		if alias, ok := aliasFor[i]; ok {
 			reports[i] = application.InventoryReplacementInput{
 				ResourceType: inventoryReportTestType,
-				Aliases:      []domain.Alias{alias},
+				Aliases:      aliasSet(alias),
 				Observation:  observation,
 				ObservedAt:   time.Now(),
 			}
@@ -716,7 +722,7 @@ func TestInventoryReportService_ReplaceBatch_MixedNameAndAliasDuplicateRejected(
 	err = svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
 		Reports: []application.InventoryReplacementInput{
 			{ResourceType: inventoryReportTestType, Name: &name, Observation: rawMsg(`{"v":1}`), ObservedAt: time.Now()},
-			{ResourceType: inventoryReportTestType, Aliases: []domain.Alias{alias}, Observation: rawMsg(`{"v":2}`), ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Aliases: aliasSet(alias), Observation: rawMsg(`{"v":2}`), ObservedAt: time.Now()},
 		},
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -897,7 +903,7 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsDeleteAliasesAsUnimplemen
 	if err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, Name: &name,
-			UpsertAliases: []domain.Alias{original}, ObservedAt: time.Now(),
+			UpsertAliases: aliasSet(original), ObservedAt: time.Now(),
 		}},
 	}); err != nil {
 		t.Fatalf("seed ApplyDeltaBatch: %v", err)
@@ -914,7 +920,7 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsDeleteAliasesAsUnimplemen
 	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, Name: &name,
-			UpsertAliases: []domain.Alias{replacement},
+			UpsertAliases: aliasSet(replacement),
 			DeleteAliases: []domain.AliasRef{removeRef},
 			ObservedAt:    time.Now(),
 		}},
@@ -932,7 +938,7 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsDeleteAliasesAsUnimplemen
 	// resolve, same as if it had never been reported.
 	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
-			ResourceType: inventoryReportTestType, UpsertAliases: []domain.Alias{original}, ObservedAt: time.Now(),
+			ResourceType: inventoryReportTestType, UpsertAliases: aliasSet(original), ObservedAt: time.Now(),
 		}},
 	})
 	if !errors.Is(err, domain.ErrNotFound) {
@@ -963,8 +969,8 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceAliasesAsUnimpleme
 	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, Name: &name,
-			ReplaceAliases: []domain.Alias{replaceAlias},
-			UpsertAliases:  []domain.Alias{upsertAlias},
+			ReplaceAliases: aliasSet(replaceAlias),
+			UpsertAliases:  aliasSet(upsertAlias),
 			ObservedAt:     time.Now(),
 		}},
 	})

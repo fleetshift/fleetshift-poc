@@ -177,8 +177,7 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 // normalized out into their own tables, mirroring the Postgres
 // sibling's JSONB choice one-for-one). er.reported_aliases is this
 // extension resource's own pending, unreconciled alias payload -- see
-// [domain.InventoryReplacement.Aliases]'s doc. alias_fingerprint
-// remains repository-private.
+// [domain.InventoryReplacement.Aliases]'s doc.
 var erInstanceQuerySQLite = `SELECT er.uid, er.service_name, er.type_name, er.collection_name, er.resource_id, er.labels, er.reported_aliases, er.created_at, er.updated_at,
 	m.current_version, m.fulfillment_id,
 	inv.labels, inv.observation, inv.observed_at, inv.updated_at, inv.conditions
@@ -332,40 +331,36 @@ LEFT JOIN extension_resource_inventory inv ON inv.extension_resource_uid = er.ui
 // resolveOrCreateExtensionResources resolves every candidate's
 // extension_resources row by natural key (service_name,
 // collection_name, resource_id), creating it with candidateUIDs[i] --
-// and reportedAliasFingerprints[i]/reportedAliasPayloads[i], the
-// pending alias payload to store on a brand-new row (see
-// [domain.InventoryReplacement.Aliases]'s doc) -- if it doesn't exist
-// yet. SQLite has no writable CTEs, so this is two statements rather
-// than the Postgres sibling's one CTE-chained lookup: a blind
-// multi-row INSERT ... ON CONFLICT DO NOTHING, then a single
-// tuple-IN SELECT that resolves every input row's UID and current
-// alias_fingerprint, whether just inserted or already there.
+// and reportedAliasPayloads[i], the pending alias payload to store on
+// a brand-new row (see [domain.InventoryReplacement.Aliases]'s doc) --
+// if it doesn't exist yet. SQLite has no writable CTEs, so this is
+// two statements rather than the Postgres sibling's one CTE-chained
+// lookup: a blind multi-row INSERT ... ON CONFLICT DO NOTHING, then a
+// single tuple-IN SELECT that resolves every input row's UID and
+// current reported_aliases, whether just inserted or already there.
 //
 // Because the SELECT runs *after* the INSERT as its own statement
 // (unlike Postgres, where both live in one statement and a CTE can
-// never see another CTE's own writes), storedAliasFingerprints[i] for
-// a row this same call just created already reflects the value that
-// row's own INSERT wrote -- not NULL. Callers that compare it against
-// their own freshly reported fingerprint therefore see "unchanged"
-// for a brand-new resource whose creating report's aliases were
-// written directly in the INSERT, with no separate write-back step
-// needed (mirrors the Postgres sibling's updated_alias_payloads
-// EXISTS-exclusion, achieved here for free by statement ordering
-// instead).
+// never see another CTE's own writes), storedAliasPayloads[i] for a
+// row this same call just created already reflects the value that
+// row's own INSERT wrote. Callers that compare it against their own
+// freshly reported payload therefore see "unchanged" for a brand-new
+// resource whose creating report's aliases were written directly in
+// the INSERT, with no separate write-back step needed.
 //
 // ApplyInventoryDeltas has no aliases to seed a new row with (see
 // [domain.InventoryDelta]'s doc: it never resolves a brand-new alias
 // payload of its own), so it passes the deterministic empty-set
-// fingerprint/payload for every row -- exactly what the column
-// defaults would produce anyway, made explicit here for a single
-// shared insert statement.
+// payload for every row -- exactly what the column default would
+// produce anyway, made explicit here for a single shared insert
+// statement.
 //
 // Both returned slices are in the same order as the input slices.
 func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 	ctx context.Context,
 	resourceTypes []domain.ResourceType, names []domain.ResourceName, candidateUIDs []domain.ExtensionResourceUID, receivedAts []time.Time,
-	reportedAliasFingerprints [][]byte, reportedAliasPayloads []string,
-) ([]domain.ExtensionResourceUID, [][]byte, error) {
+	reportedAliasPayloads []string,
+) ([]domain.ExtensionResourceUID, []string, error) {
 	n := len(resourceTypes)
 	if n == 0 {
 		return nil, nil, nil
@@ -376,13 +371,12 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 	selectPlaceholders := make([]string, n)
 	selectArgs := make([]any, 0, n*3)
 	for i := range resourceTypes {
-		insertPlaceholders[i] = "(?, ?, ?, ?, ?, '{}', ?, ?, ?, ?)"
+		insertPlaceholders[i] = "(?, ?, ?, ?, ?, '{}', ?, ?, ?)"
 		receivedAt := receivedAts[i].UTC().Format(time.RFC3339Nano)
 		insertArgs = append(insertArgs,
 			candidateUIDs[i].String(), string(resourceTypes[i].ServiceName()), resourceTypes[i].TypeName(),
 			string(names[i].Collection()), string(names[i].ID()),
-			reportedAliasFingerprints[i], reportedAliasPayloads[i],
-			receivedAt, receivedAt)
+			reportedAliasPayloads[i], receivedAt, receivedAt)
 
 		selectPlaceholders[i] = "(?, ?, ?)"
 		selectArgs = append(selectArgs,
@@ -390,7 +384,7 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 	}
 
 	if _, err := r.DB.ExecContext(ctx,
-		fmt.Sprintf(`INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, alias_fingerprint, reported_aliases, created_at, updated_at)
+		fmt.Sprintf(`INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
 			VALUES %s
 			ON CONFLICT (service_name, collection_name, resource_id) DO NOTHING`, strings.Join(insertPlaceholders, ", ")),
 		insertArgs...,
@@ -399,7 +393,7 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 	}
 
 	rows, err := r.DB.QueryContext(ctx,
-		fmt.Sprintf(`SELECT service_name, collection_name, resource_id, uid, alias_fingerprint FROM extension_resources
+		fmt.Sprintf(`SELECT service_name, collection_name, resource_id, uid, reported_aliases FROM extension_resources
 			WHERE (service_name, collection_name, resource_id) IN (%s)`, strings.Join(selectPlaceholders, ", ")),
 		selectArgs...,
 	)
@@ -409,14 +403,14 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 	defer rows.Close()
 
 	type resolvedRow struct {
-		uid              domain.ExtensionResourceUID
-		aliasFingerprint []byte
+		uid          domain.ExtensionResourceUID
+		aliasPayload string
 	}
 	resolved := make(map[domain.FullResourceName]resolvedRow, n)
 	for rows.Next() {
 		var serviceName, collectionName, resourceID, uidStr string
-		var aliasFingerprint []byte
-		if err := rows.Scan(&serviceName, &collectionName, &resourceID, &uidStr, &aliasFingerprint); err != nil {
+		var aliasPayload string
+		if err := rows.Scan(&serviceName, &collectionName, &resourceID, &uidStr, &aliasPayload); err != nil {
 			return nil, nil, fmt.Errorf("scan resolved extension resource: %w", err)
 		}
 		uid, err := domain.ParseExtensionResourceUID(uidStr)
@@ -424,14 +418,14 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 			return nil, nil, fmt.Errorf("parse resolved uid: %w", err)
 		}
 		fullName := domain.NewFullResourceName(domain.ServiceName(serviceName), domain.ResourceName(collectionName+"/"+resourceID))
-		resolved[fullName] = resolvedRow{uid: uid, aliasFingerprint: aliasFingerprint}
+		resolved[fullName] = resolvedRow{uid: uid, aliasPayload: aliasPayload}
 	}
 	if err := rows.Err(); err != nil {
 		return nil, nil, fmt.Errorf("resolve-or-create extension resources (resolve): %w", err)
 	}
 
 	uids := make([]domain.ExtensionResourceUID, n)
-	storedAliasFingerprints := make([][]byte, n)
+	storedAliasPayloads := make([]string, n)
 	for i := range resourceTypes {
 		fullName := domain.NewFullResourceName(resourceTypes[i].ServiceName(), names[i])
 		row, ok := resolved[fullName]
@@ -439,9 +433,9 @@ func (r *ExtensionResourceRepo) resolveOrCreateExtensionResources(
 			return nil, nil, fmt.Errorf("resolve-or-create extension resources: no result for %s", fullName)
 		}
 		uids[i] = row.uid
-		storedAliasFingerprints[i] = row.aliasFingerprint
+		storedAliasPayloads[i] = row.aliasPayload
 	}
-	return uids, storedAliasFingerprints, nil
+	return uids, storedAliasPayloads, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -541,8 +535,8 @@ func (r *ExtensionResourceRepo) scanInstance(s interface{ Scan(...any) error }) 
 	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
 		return nil, fmt.Errorf("unmarshal labels: %w", err)
 	}
-	var reportedAliases []domain.Alias
-	if err := json.Unmarshal([]byte(reportedAliasesJSON), &reportedAliases); err != nil {
+	reportedAliases, err := unmarshalReportedAliasesPayload([]byte(reportedAliasesJSON))
+	if err != nil {
 		return nil, fmt.Errorf("unmarshal reported aliases: %w", err)
 	}
 
@@ -626,8 +620,8 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal labels: %w", err)
 	}
-	var reportedAliases []domain.Alias
-	if err := json.Unmarshal([]byte(reportedAliasesJSON), &reportedAliases); err != nil {
+	reportedAliases, err := unmarshalReportedAliasesPayload([]byte(reportedAliasesJSON))
+	if err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal reported aliases: %w", err)
 	}
 
@@ -821,14 +815,15 @@ func nonNilLabels(m map[string]string) map[string]string {
 // Aliases are handled with no synchronous cross-resource conflict
 // detection at all -- see [domain.InventoryReplacement.Aliases]'s doc
 // -- so there is nothing for either method to report beyond error.
-// ReplaceInventory stores the reported set verbatim, skipping the
-// write entirely when [domain.AliasSetFingerprint] matches what's
+// ReplaceInventory stores the reported set after [domain.AliasSet]
+// canonicalization, skipping the write entirely when the canonical
+// alias payload matches what's
 // already stored. ApplyInventoryDeltas's UpsertAliases instead merges
-// into the existing payload by (namespace, key) via
-// [domain.MergeAliases] -- a genuine read-modify-write that can't be
-// avoided without knowing the *result* of the merge ahead of time, so
-// it becomes its own small pass scoped to only the resources with
-// alias work.
+// into the existing payload in Go using the domain's canonical
+// [domain.AliasSet] representation -- a genuine read-modify-write that
+// can't be avoided without knowing the *result* of the merge ahead of
+// time, so it becomes its own small pass scoped to only the resources
+// with alias work.
 
 // normalizeObservation collapses the two "no real observation" input
 // shapes -- a nil pointer and a non-nil pointer to the JSON literal
@@ -844,6 +839,59 @@ func normalizeObservation(obs *json.RawMessage) *json.RawMessage {
 		return nil
 	}
 	return obs
+}
+
+// reportedAliasObjectPayload encodes an extension resource's pending
+// aliases in the same object payload shape Postgres uses: a JSON
+// object keyed by the JSON-encoded [namespace, key] pair, with the
+// alias value as the object value. Keeping both backends on the same
+// storage shape lets the domain stay on snapshot/value-object
+// boundaries rather than carrying backend-specific JSON concerns.
+func reportedAliasObjectPayload(aliases domain.AliasSet) ([]byte, error) {
+	payload := make(map[string]string, aliases.Len())
+	for alias := range aliases.All() {
+		key, err := reportedAliasObjectKey(alias.Namespace(), alias.Key())
+		if err != nil {
+			return nil, err
+		}
+		payload[key] = string(alias.Value())
+	}
+	return json.Marshal(payload)
+}
+
+func reportedAliasObjectKey(namespace domain.AliasNamespace, key domain.AliasKey) (string, error) {
+	encoded, err := json.Marshal([2]string{string(namespace), string(key)})
+	if err != nil {
+		return "", fmt.Errorf("marshal alias object key: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func unmarshalReportedAliasesPayload(payload []byte) (domain.AliasSetSnapshot, error) {
+	payload = bytes.TrimSpace(payload)
+	if len(payload) == 0 || bytes.Equal(payload, []byte("null")) {
+		return domain.AliasSetSnapshot{}, nil
+	}
+	if payload[0] != '{' {
+		return domain.AliasSetSnapshot{}, fmt.Errorf("reported aliases payload must be JSON object")
+	}
+	var encoded map[string]string
+	if err := json.Unmarshal(payload, &encoded); err != nil {
+		return nil, err
+	}
+	aliases := make(domain.AliasSetSnapshot, 0, len(encoded))
+	for encodedKey, value := range encoded {
+		var parts [2]string
+		if err := json.Unmarshal([]byte(encodedKey), &parts); err != nil {
+			return nil, fmt.Errorf("unmarshal alias object key %q: %w", encodedKey, err)
+		}
+		aliases = append(aliases, domain.AliasSnapshot{
+			Namespace: domain.AliasNamespace(parts[0]),
+			Key:       domain.AliasKey(parts[1]),
+			Value:     domain.AliasValue(value),
+		})
+	}
+	return aliases, nil
 }
 
 // inventoryRowInput is the flattened per-resource input row
@@ -969,11 +1017,11 @@ func (r *ExtensionResourceRepo) deleteOrphanedClaims(ctx context.Context, claimI
 // as a fixed number of round trips for the whole batch: it resolves-
 // or-creates every replacement's extension_resources row by natural
 // key (resolveOrCreateExtensionResources, seeding a brand-new row's
-// reported_aliases/alias_fingerprint directly from that same
-// replacement), writes every resource's complete latest labels/
-// conditions/observation in one upsert, then writes only the pending
-// alias payload for resources whose [domain.AliasSetFingerprint] has
-// actually changed since the last successful write.
+// reported_aliases directly from that same replacement), writes every
+// resource's complete latest labels/conditions/observation in one
+// upsert, then writes only the pending alias payload for resources
+// whose canonical payload has actually changed since the last
+// successful write.
 func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacements []domain.InventoryReplacement) error {
 	if len(replacements) == 0 {
 		return nil
@@ -984,22 +1032,20 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	names := make([]domain.ResourceName, n)
 	candidateUIDs := make([]domain.ExtensionResourceUID, n)
 	receivedAts := make([]time.Time, n)
-	reportedAliasFingerprints := make([][]byte, n)
 	reportedAliasPayloads := make([]string, n)
 	for i, rep := range replacements {
 		resourceTypes[i] = rep.ResourceType
 		names[i] = rep.Name
 		candidateUIDs[i] = rep.CandidateUID
 		receivedAts[i] = rep.ReceivedAt
-		reportedAliasFingerprints[i] = domain.AliasSetFingerprint(rep.Aliases)
-		aliasesJSON, err := domain.CanonicalAliasPayload(rep.Aliases)
+		aliasesJSON, err := reportedAliasObjectPayload(rep.Aliases)
 		if err != nil {
 			return fmt.Errorf("marshal reported aliases: %w", err)
 		}
 		reportedAliasPayloads[i] = string(aliasesJSON)
 	}
-	uids, storedAliasFingerprints, err := r.resolveOrCreateExtensionResources(
-		ctx, resourceTypes, names, candidateUIDs, receivedAts, reportedAliasFingerprints, reportedAliasPayloads)
+	uids, storedAliasPayloads, err := r.resolveOrCreateExtensionResources(
+		ctx, resourceTypes, names, candidateUIDs, receivedAts, reportedAliasPayloads)
 	if err != nil {
 		return fmt.Errorf("replace inventory: %w", err)
 	}
@@ -1028,21 +1074,19 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	}
 
 	// needs_alias_payload_write, mirroring the Postgres sibling's CTE
-	// of the same purpose: a resource whose reported fingerprint
-	// differs from what's already stored. A NULL stored fingerprint
-	// (never written before) is always distinct from any concrete
-	// hash, so a resource's first report always writes; a row this
-	// same call just created already has the right value stored by
+	// of the same purpose: a resource whose canonical reported alias
+	// payload differs from what's already stored. A row this same call
+	// just created already has the right value stored by
 	// resolveOrCreateExtensionResources's own INSERT (see that
 	// method's doc comment), so it naturally compares equal here and
 	// is skipped -- no separate exclusion needed.
 	for i := range replacements {
-		if bytes.Equal(reportedAliasFingerprints[i], storedAliasFingerprints[i]) {
+		if reportedAliasPayloads[i] == storedAliasPayloads[i] {
 			continue
 		}
 		if _, err := r.DB.ExecContext(ctx,
-			`UPDATE extension_resources SET alias_fingerprint = ?, reported_aliases = ?, updated_at = ? WHERE uid = ?`,
-			reportedAliasFingerprints[i], reportedAliasPayloads[i], receivedAts[i].UTC().Format(time.RFC3339Nano), uids[i].String(),
+			`UPDATE extension_resources SET reported_aliases = ?, updated_at = ? WHERE uid = ?`,
+			reportedAliasPayloads[i], receivedAts[i].UTC().Format(time.RFC3339Nano), uids[i].String(),
 		); err != nil {
 			return fmt.Errorf("replace inventory: write alias payload: %w", err)
 		}
@@ -1055,7 +1099,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // same natural-key-resolve-then-write shape as ReplaceInventory
 // above. A delta never seeds a brand-new row's alias payload -- see
 // [domain.InventoryDelta]'s doc -- so every row here resolves-or-
-// creates with the deterministic empty-set fingerprint/payload.
+// creates with the deterministic empty-set payload.
 func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas []domain.InventoryDelta) error {
 	if len(deltas) == 0 {
 		return nil
@@ -1071,10 +1115,8 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	names := make([]domain.ResourceName, n)
 	candidateUIDs := make([]domain.ExtensionResourceUID, n)
 	receivedAts := make([]time.Time, n)
-	emptyAliasFingerprints := make([][]byte, n)
 	emptyAliasPayloads := make([]string, n)
-	emptyFingerprint := domain.AliasSetFingerprint(nil)
-	emptyPayload, err := domain.CanonicalAliasPayload(nil)
+	emptyPayload, err := reportedAliasObjectPayload(domain.AliasSet{})
 	if err != nil {
 		return fmt.Errorf("marshal empty alias payload: %w", err)
 	}
@@ -1083,11 +1125,10 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 		names[i] = d.Name
 		candidateUIDs[i] = d.CandidateUID
 		receivedAts[i] = d.ReceivedAt
-		emptyAliasFingerprints[i] = emptyFingerprint
 		emptyAliasPayloads[i] = string(emptyPayload)
 	}
 	uids, _, err := r.resolveOrCreateExtensionResources(
-		ctx, resourceTypes, names, candidateUIDs, receivedAts, emptyAliasFingerprints, emptyAliasPayloads)
+		ctx, resourceTypes, names, candidateUIDs, receivedAts, emptyAliasPayloads)
 	if err != nil {
 		return fmt.Errorf("apply inventory deltas: %w", err)
 	}
@@ -1141,7 +1182,7 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 			updatedAt:      d.ReceivedAt,
 		}
 
-		if len(d.UpsertAliases) > 0 {
+		if d.UpsertAliases.Len() > 0 {
 			aliasWorkIdx = append(aliasWorkIdx, i)
 		}
 	}
@@ -1162,15 +1203,17 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	}
 	for _, idx := range aliasWorkIdx {
 		uid := uids[idx]
-		merged := domain.MergeAliases(currentAliases[uid], deltas[idx].UpsertAliases)
-		payload, err := domain.CanonicalAliasPayload(merged)
+		merged := currentAliases[uid].Merge(deltas[idx].UpsertAliases)
+		if merged.Equal(currentAliases[uid]) {
+			continue
+		}
+		payload, err := reportedAliasObjectPayload(merged)
 		if err != nil {
 			return fmt.Errorf("apply inventory deltas: marshal merged aliases: %w", err)
 		}
-		fingerprint := domain.AliasSetFingerprint(merged)
 		if _, err := r.DB.ExecContext(ctx,
-			`UPDATE extension_resources SET reported_aliases = ?, alias_fingerprint = ?, updated_at = ? WHERE uid = ?`,
-			string(payload), fingerprint, deltas[idx].ReceivedAt.UTC().Format(time.RFC3339Nano), uid.String(),
+			`UPDATE extension_resources SET reported_aliases = ?, updated_at = ? WHERE uid = ?`,
+			string(payload), deltas[idx].ReceivedAt.UTC().Format(time.RFC3339Nano), uid.String(),
 		); err != nil {
 			return fmt.Errorf("apply inventory deltas: write merged alias payload: %w", err)
 		}
@@ -1231,8 +1274,8 @@ func (r *ExtensionResourceRepo) batchReadCurrentLabelsAndConditions(ctx context.
 // batchReadCurrentReportedAliases reads every uid's current
 // reported_aliases in one round trip, for
 // [ExtensionResourceRepo.ApplyInventoryDeltas]'s UpsertAliases merge.
-func (r *ExtensionResourceRepo) batchReadCurrentReportedAliases(ctx context.Context, uids []domain.ExtensionResourceUID) (map[domain.ExtensionResourceUID][]domain.Alias, error) {
-	result := make(map[domain.ExtensionResourceUID][]domain.Alias, len(uids))
+func (r *ExtensionResourceRepo) batchReadCurrentReportedAliases(ctx context.Context, uids []domain.ExtensionResourceUID) (map[domain.ExtensionResourceUID]domain.AliasSet, error) {
+	result := make(map[domain.ExtensionResourceUID]domain.AliasSet, len(uids))
 	if len(uids) == 0 {
 		return result, nil
 	}
@@ -1258,11 +1301,11 @@ func (r *ExtensionResourceRepo) batchReadCurrentReportedAliases(ctx context.Cont
 		if err != nil {
 			return nil, fmt.Errorf("parse uid: %w", err)
 		}
-		var aliases []domain.Alias
-		if err := json.Unmarshal([]byte(aliasesJSON), &aliases); err != nil {
+		aliases, err := unmarshalReportedAliasesPayload([]byte(aliasesJSON))
+		if err != nil {
 			return nil, fmt.Errorf("unmarshal current reported aliases: %w", err)
 		}
-		result[uid] = aliases
+		result[uid] = domain.AliasSetFromSnapshot(aliases)
 	}
 	return result, rows.Err()
 }

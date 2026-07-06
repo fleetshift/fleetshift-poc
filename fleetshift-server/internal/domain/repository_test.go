@@ -32,7 +32,7 @@ func TestValidateInventoryDelta(t *testing.T) {
 		{
 			name: "UpsertAliases alone is valid",
 			delta: InventoryDelta{
-				UpsertAliases: []Alias{instanceID},
+				UpsertAliases: NewAliasSet([]Alias{instanceID}),
 			},
 		},
 		{
@@ -61,7 +61,7 @@ func TestValidateInventoryDelta(t *testing.T) {
 		{
 			name: "DeleteAliases combined with UpsertAliases for the same key is still unimplemented, not the label/condition-style overlap error",
 			delta: InventoryDelta{
-				UpsertAliases: []Alias{instanceID},
+				UpsertAliases: NewAliasSet([]Alias{instanceID}),
 				DeleteAliases: []AliasRef{instanceIDRef},
 			},
 			wantErr: ErrUnimplemented,
@@ -69,15 +69,15 @@ func TestValidateInventoryDelta(t *testing.T) {
 		{
 			name: "ReplaceAliases alone is unimplemented",
 			delta: InventoryDelta{
-				ReplaceAliases: []Alias{instanceID},
+				ReplaceAliases: NewAliasSet([]Alias{instanceID}),
 			},
 			wantErr: ErrUnimplemented,
 		},
 		{
 			name: "ReplaceAliases combined with UpsertAliases is still unimplemented",
 			delta: InventoryDelta{
-				ReplaceAliases: []Alias{instanceID},
-				UpsertAliases:  []Alias{instanceID},
+				ReplaceAliases: NewAliasSet([]Alias{instanceID}),
+				UpsertAliases:  NewAliasSet([]Alias{instanceID}),
 			},
 			wantErr: ErrUnimplemented,
 		},

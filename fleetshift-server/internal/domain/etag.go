@@ -85,13 +85,12 @@ func hashBytes(h hash.Hash, b []byte) {
 	h.Write(b)
 }
 
-func hashAliases(h hash.Hash, aliases []Alias) {
-	sorted := SortAliases(aliases)
-	binary.Write(h, binary.BigEndian, int64(len(sorted)))
-	for _, a := range sorted {
-		hashString(h, string(a.Namespace))
-		hashString(h, string(a.Key))
-		hashString(h, string(a.Value))
+func hashAliases(h hash.Hash, aliases AliasSet) {
+	binary.Write(h, binary.BigEndian, int64(aliases.Len()))
+	for alias := range aliases.All() {
+		hashString(h, string(alias.Namespace()))
+		hashString(h, string(alias.Key()))
+		hashString(h, string(alias.Value()))
 	}
 }
 

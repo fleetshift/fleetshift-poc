@@ -1,9 +1,9 @@
 package domain
 
 import (
-	"crypto/sha256"
-	"encoding/json"
 	"fmt"
+	"iter"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -192,16 +192,11 @@ func NewRelationshipType(s string) (RelationshipType, error) {
 // Alias is a cross-reference from an external naming scheme to a
 // platform resource (e.g. GCP project ID -> platform UID).
 //
-// JSON field tags are lowercase and stable: this is the exact shape
-// persisted as the canonical [ExtensionResource.ReportedAliases]
-// payload (see [CanonicalAliasPayload]), not just an incidental
-// serialization used elsewhere.
-//
 // Construct with [NewAlias] to enforce invariants.
 type Alias struct {
-	Namespace AliasNamespace `json:"namespace"`
-	Key       AliasKey       `json:"key"`
-	Value     AliasValue     `json:"value"`
+	namespace AliasNamespace
+	key       AliasKey
+	value     AliasValue
 }
 
 // NewAlias validates and returns an [Alias]. All three fields must be
@@ -216,118 +211,112 @@ func NewAlias(ns AliasNamespace, key AliasKey, value AliasValue) (Alias, error) 
 	if value == "" {
 		return Alias{}, fmt.Errorf("alias value: %w: must not be empty", ErrInvalidArgument)
 	}
-	return Alias{Namespace: ns, Key: key, Value: value}, nil
+	return Alias{namespace: ns, key: key, value: value}, nil
 }
 
-// SortAliases returns a copy of aliases sorted deterministically by
-// (namespace, key, value). The input slice is never mutated. A nil or
-// empty input returns a non-nil, empty slice (never nil), so callers
-// that json.Marshal the result (see [CanonicalAliasPayload]) always
-// get the JSON array literal `[]` rather than `null`: the alias
-// payload contract calls for an explicit empty array to store "this
-// extension resource asserts no aliases," not a missing/null value.
+// Namespace returns the alias namespace.
+func (a Alias) Namespace() AliasNamespace { return a.namespace }
+
+// Key returns the alias key within its namespace.
+func (a Alias) Key() AliasKey { return a.key }
+
+// Value returns the alias value.
+func (a Alias) Value() AliasValue { return a.value }
+
+func aliasLess(a, b Alias) bool {
+	if a.namespace != b.namespace {
+		return a.namespace < b.namespace
+	}
+	if a.key != b.key {
+		return a.key < b.key
+	}
+	return a.value < b.value
+}
+
+// AliasSet encapsulates a canonical alias collection. Construction
+// merges by (namespace, key), with later entries winning, and sorts the
+// result deterministically by (namespace, key, value).
 //
-// Shared by [AliasSetFingerprint] and [CanonicalAliasPayload] so both
-// always agree on exactly which ordering "the canonical form" means.
-func SortAliases(aliases []Alias) []Alias {
-	sorted := make([]Alias, len(aliases))
-	copy(sorted, aliases)
-	sort.Slice(sorted, func(i, j int) bool {
-		if sorted[i].Namespace != sorted[j].Namespace {
-			return sorted[i].Namespace < sorted[j].Namespace
-		}
-		if sorted[i].Key != sorted[j].Key {
-			return sorted[i].Key < sorted[j].Key
-		}
-		return sorted[i].Value < sorted[j].Value
+// The zero value is the empty set.
+type AliasSet struct {
+	aliases []Alias
+}
+
+// NewAliasSet canonicalizes aliases into an [AliasSet]. Duplicates are
+// merged by (namespace, key), with the last value winning.
+func NewAliasSet(aliases []Alias) AliasSet {
+	if len(aliases) == 0 {
+		return AliasSet{}
+	}
+	byRef := make(map[AliasRef]Alias, len(aliases))
+	for _, alias := range aliases {
+		byRef[AliasRef{Namespace: alias.namespace, Key: alias.key}] = alias
+	}
+	merged := make([]Alias, 0, len(byRef))
+	for _, alias := range byRef {
+		merged = append(merged, alias)
+	}
+	sort.Slice(merged, func(i, j int) bool {
+		return aliasLess(merged[i], merged[j])
 	})
-	return sorted
+	return AliasSet{aliases: merged}
 }
 
-// CanonicalAliasPayload marshals aliases into the canonical JSON
-// array persisted as [ExtensionResourceRepository]'s reported-alias
-// payload (see [InventoryReplacement.Aliases]'s doc for the
-// "pending, not yet reconciled" contract this payload now serves).
-// Aliases are sorted via [SortAliases] first, so the same set reported
-// in a different order always serializes identically -- this is what
-// lets [AliasSetFingerprint], computed over the same sorted order,
-// stand in for a byte-for-byte comparison of this payload without
-// repositories re-deriving or re-sorting anything themselves.
-//
-// A nil or empty aliases marshals to the JSON array literal `[]`, per
-// [SortAliases]'s own doc -- never `null`.
-func CanonicalAliasPayload(aliases []Alias) ([]byte, error) {
-	return json.Marshal(SortAliases(aliases))
-}
+// Len returns the number of aliases in the set.
+func (s AliasSet) Len() int { return len(s.aliases) }
 
-// AliasSetFingerprint returns a stable, order-independent digest of
-// aliases's complete (namespace, key, value) content. Repository
-// implementations use this to detect a resource whose reported alias
-// set is byte-for-byte identical to the last one it successfully
-// stored (see extension_resource_repo.go's reported-alias fast path
-// in both infrastructure/postgres and infrastructure/sqlite), letting
-// a repeated report skip the reported-alias payload write entirely
-// rather than re-writing an identical JSON blob for no behavioral
-// change.
-//
-// aliases is canonicalized via [SortAliases] first, so the same set
-// reported in a different order still produces the same fingerprint
-// -- callers can't generally guarantee stable ordering across
-// reports. Each field is length-prefixed via hashString, the same
-// technique [DeploymentView.Etag] and [ExtensionResourceView.Etag]
-// use, so that e.g. an alias with namespace "ab", key "c" can never
-// hash the same as one with namespace "a", key "bc": a bare
-// delimiter-joined string wouldn't have that guarantee.
-//
-// An empty or nil aliases returns sha256's fixed digest of zero
-// bytes, not a special-cased sentinel -- "this resource has no
-// aliases" is just the fingerprint of the empty set, forming a stable
-// basis for skipping alias processing entirely once a resource that
-// never reports aliases has done so once.
-func AliasSetFingerprint(aliases []Alias) []byte {
-	sorted := SortAliases(aliases)
+// Slice returns a copy of the set's aliases in canonical order.
+func (s AliasSet) Slice() []Alias { return slices.Clone(s.aliases) }
 
-	h := sha256.New()
-	for _, a := range sorted {
-		hashString(h, string(a.Namespace))
-		hashString(h, string(a.Key))
-		hashString(h, string(a.Value))
-	}
-	return h.Sum(nil)
-}
-
-// MergeAliases folds upserts into current by (namespace, key),
-// overwriting any existing entry for the same pair in place and
-// appending any new pair -- the merge [InventoryDelta.UpsertAliases]
-// documents. Shared by both infrastructure/postgres and
-// infrastructure/sqlite's ApplyInventoryDeltas, which each read a
-// resource's current ReportedAliases, call this, then persist the
-// result through [CanonicalAliasPayload]/[AliasSetFingerprint].
-//
-// The result is not yet canonicalized or deduplicated beyond
-// (namespace, key): callers sort/fingerprint it themselves.
-func MergeAliases(current, upserts []Alias) []Alias {
-	byRef := make(map[AliasRef]Alias, len(current)+len(upserts))
-	order := make([]AliasRef, 0, len(current)+len(upserts))
-	for _, a := range current {
-		ref := AliasRef{Namespace: a.Namespace, Key: a.Key}
-		if _, ok := byRef[ref]; !ok {
-			order = append(order, ref)
+// All iterates aliases in canonical order.
+func (s AliasSet) All() iter.Seq[Alias] {
+	return func(yield func(Alias) bool) {
+		for _, alias := range s.aliases {
+			if !yield(alias) {
+				return
+			}
 		}
-		byRef[ref] = a
 	}
-	for _, a := range upserts {
-		ref := AliasRef{Namespace: a.Namespace, Key: a.Key}
-		if _, ok := byRef[ref]; !ok {
-			order = append(order, ref)
+}
+
+// Get returns the alias for ref, if present.
+func (s AliasSet) Get(ref AliasRef) (Alias, bool) {
+	for _, alias := range s.aliases {
+		if alias.namespace == ref.Namespace && alias.key == ref.Key {
+			return alias, true
 		}
-		byRef[ref] = a
 	}
-	merged := make([]Alias, len(order))
-	for i, ref := range order {
-		merged[i] = byRef[ref]
+	return Alias{}, false
+}
+
+// Merge overlays upserts onto s by (namespace, key), returning a new
+// canonical set. This is the merge [InventoryDelta.UpsertAliases]
+// documents.
+func (s AliasSet) Merge(upserts AliasSet) AliasSet {
+	if len(upserts.aliases) == 0 {
+		return s
 	}
-	return merged
+	if len(s.aliases) == 0 {
+		return upserts
+	}
+	merged := make([]Alias, 0, len(s.aliases)+len(upserts.aliases))
+	merged = append(merged, s.aliases...)
+	merged = append(merged, upserts.aliases...)
+	return NewAliasSet(merged)
+}
+
+// Equal reports whether two alias sets contain the same canonical
+// aliases.
+func (s AliasSet) Equal(other AliasSet) bool {
+	if len(s.aliases) != len(other.aliases) {
+		return false
+	}
+	for i := range s.aliases {
+		if s.aliases[i] != other.aliases[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // AliasRef identifies one of an extension resource's own previously
@@ -486,7 +475,7 @@ type PlatformResource struct {
 	updatedAt time.Time
 
 	representations []ResourceRepresentation
-	aliases         []Alias
+	aliases         AliasSet
 	relationships   []ResourceRelationship
 }
 
@@ -550,7 +539,7 @@ func (r *PlatformResource) Representations() []ResourceRepresentation {
 }
 
 // Aliases returns the aliases attached to this platform resource.
-func (r *PlatformResource) Aliases() []Alias {
+func (r *PlatformResource) Aliases() AliasSet {
 	return r.aliases
 }
 
@@ -570,16 +559,15 @@ func (r *PlatformResource) Relationships() []ResourceRelationship {
 // value is rejected as an invariant violation. Cross-resource alias
 // uniqueness is enforced by the repository on save.
 func (r *PlatformResource) AddAlias(alias Alias) error {
-	for _, existing := range r.aliases {
-		if existing.Namespace == alias.Namespace && existing.Key == alias.Key {
-			if existing.Value == alias.Value {
-				return nil // idempotent
-			}
-			return fmt.Errorf("alias %s/%s already has value %q, cannot set %q: %w",
-				existing.Namespace, existing.Key, existing.Value, alias.Value, ErrInvalidArgument)
+	ref := AliasRef{Namespace: alias.Namespace(), Key: alias.Key()}
+	if existing, ok := r.aliases.Get(ref); ok {
+		if existing == alias {
+			return nil // idempotent
 		}
+		return fmt.Errorf("alias %s/%s already has value %q, cannot set %q: %w",
+			existing.Namespace(), existing.Key(), existing.Value(), alias.Value(), ErrInvalidArgument)
 	}
-	r.aliases = append(r.aliases, alias)
+	r.aliases = r.aliases.Merge(NewAliasSet([]Alias{alias}))
 	return nil
 }
 
@@ -625,13 +613,14 @@ func (r *PlatformResource) Snapshot() PlatformResourceSnapshot {
 		repSnaps[i] = rep.Snapshot()
 	}
 
-	aliasSnaps := make([]ResourceAliasSnapshot, len(r.aliases))
-	for i, a := range r.aliases {
-		aliasSnaps[i] = ResourceAliasSnapshot{
-			Namespace: a.Namespace,
-			Key:       a.Key,
-			Value:     a.Value,
-		}
+	aliasSnaps := make([]ResourceAliasSnapshot, 0, r.aliases.Len())
+	for alias := range r.aliases.All() {
+		aliasSnap := alias.Snapshot()
+		aliasSnaps = append(aliasSnaps, ResourceAliasSnapshot{
+			Namespace: aliasSnap.Namespace,
+			Key:       aliasSnap.Key,
+			Value:     aliasSnap.Value,
+		})
 	}
 
 	relSnaps := make([]ResourceRelationshipSnapshot, len(r.relationships))

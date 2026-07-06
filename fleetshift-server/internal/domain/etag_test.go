@@ -426,7 +426,7 @@ func TestExtensionResourceView_Etag_ChangesOnReportedAliases(t *testing.T) {
 		UID:             uid,
 		ResourceType:    "kind.fleetshift.io/Cluster",
 		Name:            "clusters/dev",
-		ReportedAliases: []Alias{instanceID, zone},
+		ReportedAliases: NewAliasSet([]Alias{instanceID, zone}).Snapshot(),
 		CreatedAt:       now,
 		UpdatedAt:       now.Add(time.Minute),
 	}
@@ -439,7 +439,7 @@ func TestExtensionResourceView_Etag_ChangesOnReportedAliases(t *testing.T) {
 			t.Fatalf("NewAlias(updatedInstanceID): %v", err)
 		}
 		changedSnap := baseSnap
-		changedSnap.ReportedAliases = []Alias{updatedInstanceID, zone}
+		changedSnap.ReportedAliases = NewAliasSet([]Alias{updatedInstanceID, zone}).Snapshot()
 		changed := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(changedSnap)}
 		if changed.Etag() == baseEtag {
 			t.Error("etag should change when reported aliases change")
@@ -448,7 +448,7 @@ func TestExtensionResourceView_Etag_ChangesOnReportedAliases(t *testing.T) {
 
 	t.Run("order only", func(t *testing.T) {
 		reorderedSnap := baseSnap
-		reorderedSnap.ReportedAliases = []Alias{zone, instanceID}
+		reorderedSnap.ReportedAliases = NewAliasSet([]Alias{zone, instanceID}).Snapshot()
 		reordered := ExtensionResourceView{Resource: *ExtensionResourceFromSnapshot(reorderedSnap)}
 		if reordered.Etag() != baseEtag {
 			t.Error("etag should be order-independent for the same reported alias set")

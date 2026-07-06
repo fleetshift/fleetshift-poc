@@ -105,7 +105,7 @@ type InventoryReplacementBatchInput struct {
 type InventoryReplacementInput struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
-	Aliases      []domain.Alias
+	Aliases      domain.AliasSet
 
 	Labels      map[string]string
 	Observation *json.RawMessage
@@ -144,9 +144,9 @@ type InventoryDeltaInput struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
 
-	UpsertAliases  []domain.Alias
+	UpsertAliases  domain.AliasSet
 	DeleteAliases  []domain.AliasRef
-	ReplaceAliases []domain.Alias
+	ReplaceAliases domain.AliasSet
 
 	SetLabels    map[string]string
 	DeleteLabels []string
@@ -162,8 +162,9 @@ type InventoryDeltaInput struct {
 // ReplaceBatch resolves identity for every report -- in pure Go for a
 // by-Name report, or via one batched alias lookup for an alias-only
 // report -- then replaces each resolved resource's latest inventory
-// state, folding any supplied aliases into the same statement. The
-// batch is all-or-nothing: a duplicate resolved [domain.ResourceName]
+// state, using each command's already-canonical [domain.AliasSet]
+// directly. The batch is all-or-nothing: a duplicate resolved
+// [domain.ResourceName]
 // within the batch, a type without inventory metadata, or an
 // unresolvable/ambiguous alias-only report fails the whole call
 // before any inventory write commits, regardless of how many chunks
@@ -208,7 +209,7 @@ func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryR
 				ResourceType: report.ResourceType,
 				Name:         targets[i],
 				CandidateUID: domain.NewExtensionResourceUID(),
-				Aliases:      report.Aliases,
+				Aliases:      identities[i].Aliases,
 				Labels:       report.Labels,
 				Observation:  report.Observation,
 				Conditions:   report.Conditions,
@@ -230,9 +231,9 @@ func (s *InventoryReportService) ReplaceBatch(ctx context.Context, in InventoryR
 
 // ApplyDeltaBatch resolves identity for every report the same way
 // [InventoryReportService.ReplaceBatch] does, then applies each
-// resolved resource's incremental inventory changes, folding any
-// supplied aliases into the same statement. The batch is
-// all-or-nothing: a duplicate resolved [domain.ResourceName] within
+// resolved resource's incremental inventory changes, using the
+// already-canonical alias sets supplied on each command directly. The
+// batch is all-or-nothing: a duplicate resolved [domain.ResourceName] within
 // the batch, an internally conflicting report, a type without
 // inventory metadata, or an unresolvable/ambiguous alias-only report
 // fails the whole call before any inventory write commits, regardless
@@ -246,6 +247,7 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 	}
 
 	for _, report := range in.Reports {
+		// TODO: this is awkward
 		if err := validateDeltaReport(report); err != nil {
 			return err
 		}
@@ -267,7 +269,7 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 			identities[i] = reportIdentity{
 				ResourceType: report.ResourceType,
 				Name:         report.Name,
-				Aliases:      deltaIdentityAliases(report),
+				Aliases:      report.UpsertAliases.Merge(report.ReplaceAliases),
 			}
 		}
 		targets, err := res.resolveBatch(ctx, identities, start)
@@ -324,24 +326,6 @@ func validateDeltaReport(report InventoryDeltaInput) error {
 	})
 }
 
-// deltaIdentityAliases returns the aliases eligible to resolve
-// report's target when Name is nil: UpsertAliases and ReplaceAliases,
-// both of which assert a (namespace, key, value) triple a resource can
-// be looked up by, but never DeleteAliases -- an [domain.AliasRef] has
-// no value to resolve by, precisely because retracting a contribution
-// doesn't require knowing it (see [domain.AliasRef]'s doc). A delta
-// that only wants to retract an alias must identify its target by
-// Name.
-func deltaIdentityAliases(report InventoryDeltaInput) []domain.Alias {
-	if len(report.ReplaceAliases) == 0 {
-		return report.UpsertAliases
-	}
-	out := make([]domain.Alias, 0, len(report.UpsertAliases)+len(report.ReplaceAliases))
-	out = append(out, report.UpsertAliases...)
-	out = append(out, report.ReplaceAliases...)
-	return out
-}
-
 // forEachReportChunk calls fn once per contiguous chunk of at most
 // size report indices spanning [0, n), passing each chunk's [start,
 // end) bounds. size <= 0 or size >= n runs fn exactly once, covering
@@ -368,7 +352,7 @@ func forEachReportChunk(n, size int, fn func(start, end int) error) error {
 type reportIdentity struct {
 	ResourceType domain.ResourceType
 	Name         *domain.ResourceName
-	Aliases      []domain.Alias
+	Aliases      domain.AliasSet
 }
 
 // reportResolver implements the shared identity/type resolution path
@@ -389,7 +373,8 @@ type reportIdentity struct {
 // reporting) -- never this same call's own reported Aliases, which
 // travel with each report into [domain.InventoryReplacement]/
 // [domain.InventoryDelta] purely as a pending payload the repository
-// stores verbatim (see [domain.InventoryReplacement.Aliases]'s doc).
+// canonicalizes through [domain.AliasSet] before storing (see
+// [domain.InventoryReplacement.Aliases]'s doc).
 // So an alias-only report only resolves when some other process has
 // already accepted that alias; a brand-new alias this same batch is
 // the first to report can never resolve a Name-less report to a
@@ -435,7 +420,7 @@ func (r *reportResolver) resolveBatch(ctx context.Context, items []reportIdentit
 		if _, err := r.lookupInventoryType(ctx, in.ResourceType); err != nil {
 			return nil, err
 		}
-		if in.Name == nil && len(in.Aliases) == 0 {
+		if in.Name == nil && in.Aliases.Len() == 0 {
 			return nil, fmt.Errorf("%w: report must set Name or Aliases", domain.ErrInvalidArgument)
 		}
 	}
@@ -443,7 +428,7 @@ func (r *reportResolver) resolveBatch(ctx context.Context, items []reportIdentit
 	var aliasQuery []domain.Alias
 	for _, in := range items {
 		if in.Name == nil {
-			aliasQuery = append(aliasQuery, in.Aliases...)
+			aliasQuery = append(aliasQuery, in.Aliases.Slice()...)
 		}
 	}
 	aliasResolved, err := r.tx.ResourceIdentities().ResolveAliasesBatch(ctx, aliasQuery)
@@ -497,10 +482,10 @@ func (r *reportResolver) lookupInventoryType(ctx context.Context, rt domain.Reso
 // look each one up. It never auto-creates an identity -- at least one
 // alias must resolve to an existing platform resource, and any two
 // that do resolve must agree on the same one.
-func resolveByAliases(aliases []domain.Alias, resolved map[domain.Alias]domain.ResourceName) (domain.ResourceName, error) {
+func resolveByAliases(aliases domain.AliasSet, resolved map[domain.Alias]domain.ResourceName) (domain.ResourceName, error) {
 	var target domain.ResourceName
 	var found bool
-	for _, alias := range aliases {
+	for alias := range aliases.All() {
 		name, ok := resolved[alias]
 		if !ok {
 			continue

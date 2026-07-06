@@ -117,22 +117,7 @@ CREATE TABLE rollout_strategies (
 );
 
 -- ── Platform resource identity ──────────────────────────────────
---
--- No uid column: per AIP-148, a UID is only warranted for resources
--- that can be deleted and recreated under the same name yet still
--- need to be told apart across that gap. Platform resources have no
--- such generational concept -- (collection_name, resource_id) is the
--- sole, permanent identifier, so it's the primary key directly.
---
--- Platform resources are also virtual by default: a name with
--- representations (derived from extension_resources, see below) but
--- no labels/relationships of its own never needs a physical row here
--- at all. A row only exists once something -- labels, a relationship
--- -- actually needs to be stored against the name. Aliases no longer
--- force a row into existence either: resource_alias_claims below has
--- no foreign key back to this table, so a claim can reference a name
--- with no physical platform_resources row at all, the same way
--- representations already do.
+-- (See design docs.)
 
 CREATE TABLE platform_resources (
     collection_name TEXT NOT NULL,
@@ -182,25 +167,20 @@ CREATE TABLE extension_resource_types (
 -- "Aliases" section) -- there is no accepted/pending status column to
 -- maintain here for that common case.
 --
--- reported_aliases is this extension resource's own complete,
--- canonically sorted (see extension_resource_repo.go's
--- domain.SortAliases usage), pending alias payload -- the reporter's
--- assertions, not accepted platform identity. It is stored verbatim
--- by ReplaceInventory/ApplyInventoryDeltas with no synchronous
--- cross-resource conflict detection; a future asynchronous
--- reconciliation process is what will eventually decide which
--- reported aliases -- if any conflict -- become accepted. Defaults to
--- '[]', never NULL, so "this resource asserts no aliases" is always
--- representable without a NULL special case.
---
--- alias_fingerprint is [domain.AliasSetFingerprint] (a sha256 hash)
--- over reported_aliases, persisted alongside it purely so a repeated
--- report whose complete alias set is byte-for-byte identical to what's
--- already stored can skip the reported_aliases/alias_fingerprint write
--- entirely (see replaceInventorySQL's needs_alias_payload_write CTE) --
--- not to gate any conflict classification, since none happens
--- synchronously anymore. NULL means "no fingerprint on record yet",
--- which always forces the write on this resource's first report.
+-- reported_aliases is this extension resource's own complete pending
+-- alias payload -- the reporter's assertions, not accepted platform
+-- identity. Postgres stores it as a JSONB object keyed by a
+-- JSON-encoded [namespace, key] pair, with the alias value as the
+-- object value. That repository-local shape lets
+-- ApplyInventoryDeltas merge UpsertAliases with a single JSONB `||`
+-- operation while read paths still hydrate the domain's
+-- Alias/AliasSet snapshots. It is stored with no synchronous
+-- cross-resource conflict
+-- detection; a future asynchronous reconciliation process is what
+-- will eventually decide which reported aliases -- if any conflict --
+-- become accepted. Defaults to '{}', never NULL, so "this resource
+-- asserts no aliases" is always representable without a NULL special
+-- case.
 --
 -- This deliberately replaces an earlier design that additionally
 -- classified aliases against cross-resource resource_alias_claims/
@@ -216,8 +196,7 @@ CREATE TABLE extension_resources (
     collection_name   TEXT NOT NULL,
     resource_id       TEXT NOT NULL,
     labels            JSONB NOT NULL DEFAULT '{}',
-    reported_aliases  JSONB NOT NULL DEFAULT '[]'::jsonb,
-    alias_fingerprint BYTEA,
+    reported_aliases  JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at        TIMESTAMPTZ NOT NULL,
     updated_at        TIMESTAMPTZ NOT NULL,
     UNIQUE (service_name, collection_name, resource_id),
