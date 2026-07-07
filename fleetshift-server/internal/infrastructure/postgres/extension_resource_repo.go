@@ -976,7 +976,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // alias payload: either the delta's UpsertAliases patch when the
 // delta has alias work, or `{}` when it does not.
 //
-// updated_inv/new_inv replace what used to be a single upsert_inv CTE
+// updated_inv_* / new_inv replace what used to be a single upsert_inv CTE
 // that merged each delta against a *pre-read* prev_inv snapshot (taken
 // once, at this statement's start) and wrote the merged result via
 // `ON CONFLICT DO UPDATE SET labels = EXCLUDED.labels`. That was
@@ -987,26 +987,32 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // it ever waited, still computed against the pre-first-commit
 // snapshot -- clobbering the first transaction's change instead of
 // composing with it. The fix is to never precompute the merge from a
-// snapshot at all: updated_inv is a plain `UPDATE ... FROM er`, which
-// (per Postgres's normal EvalPlanQual behavior for UPDATE, the same
-// mechanism that makes `UPDATE t SET n = n + 1` safe under
-// concurrency) always merges against inv's own current row once its
-// lock is acquired -- i.e. against whatever the other transaction
-// just committed, not a stale read. updated_inv only touches resources
-// that already have an inventory row; new_inv's INSERT covers the
-// rest (deleting from an empty `{}` is a no-op, so the initial value
-// is just set_labels/upsert_conditions directly), with its own
+// snapshot at all: the updated_inv_* branches are plain
+// `UPDATE ... FROM er` statements which (per Postgres's normal
+// EvalPlanQual behavior for UPDATE, the same mechanism that makes
+// `UPDATE t SET n = n + 1` safe under concurrency) always merge
+// against inv's own current row once its lock is acquired -- i.e.
+// against whatever the other transaction just committed, not a stale
+// read. The branches are mutually exclusive so each row is updated at
+// most once in this statement, and so observation-only heartbeat
+// deltas do not list the GIN-indexed labels/conditions columns in the
+// UPDATE target list at all. That keeps the cheap heartbeat path from
+// paying avoidable label/condition index-maintenance cost.
+//
+// new_inv's INSERT covers resources with no inventory row yet
+// (deleting from an empty `{}` is a no-op, so the initial value is
+// just set_labels/upsert_conditions directly), with its own
 // ON CONFLICT DO UPDATE as a rare fallback for the narrow window where
-// a concurrent transaction created the row between updated_inv running
-// and this INSERT executing -- that fallback re-applies the same
-// current-row-based merge, using a small correlated subquery against
-// er (scoped to this one row's own uid via EXCLUDED, not a scan of the
-// whole batch) since ON CONFLICT DO UPDATE can only see EXCLUDED and
-// the target row, not other CTEs directly. This still runs for every
-// delta in the batch, including one with no label/condition/
-// observation change at all, which is what gives a heartbeat delta
-// (see [domain.InventoryDelta]'s doc) its "still bumps freshness"
-// behavior.
+// a concurrent transaction created the row between the updated_inv_*
+// branches running and this INSERT executing -- that fallback
+// re-applies the same current-row-based merge, using a small
+// correlated subquery against er (scoped to this one row's own uid via
+// EXCLUDED, not a scan of the whole batch) since ON CONFLICT DO UPDATE
+// can only see EXCLUDED and the target row, not other CTEs directly.
+// This still runs for every delta in the batch, including one with no
+// label/condition/observation change at all, which is what gives a
+// heartbeat delta (see [domain.InventoryDelta]'s doc) its "still bumps
+// freshness" behavior.
 //
 // updated_alias_payloads folds UpsertAliases into the same statement
 // as the rest of the delta. The JSONB object shape makes the merge a
@@ -1032,14 +1038,54 @@ resolved_er AS (
 er AS MATERIALIZED (
 	SELECT i.idx, COALESCE(res.uid, ext.uid) AS uid,
 	       i.observation, i.set_labels, i.delete_labels, i.upsert_conditions, i.delete_conditions,
-	       i.observed_at, i.received_at, i.upsert_aliases, i.has_alias_work
+	       i.observed_at, i.received_at, i.upsert_aliases, i.has_alias_work,
+	       (i.set_labels <> '{}'::jsonb OR i.delete_labels <> '[]'::jsonb) AS has_label_work,
+	       (i.upsert_conditions <> '{}'::jsonb OR i.delete_conditions <> '[]'::jsonb) AS has_condition_work
 	FROM input_er i
 	LEFT JOIN resolved_er res
 	  ON res.service_name = i.service_name AND res.collection_name = i.collection_name AND res.resource_id = i.resource_id
 	LEFT JOIN extension_resources ext
 	  ON ext.service_name = i.service_name AND ext.collection_name = i.collection_name AND ext.resource_id = i.resource_id
 ),
-updated_inv AS (
+updated_inv_base AS (
+	UPDATE extension_resource_inventory inv
+	SET
+		observation = COALESCE(e.observation, inv.observation),
+		observed_at = e.observed_at,
+		updated_at = e.received_at
+	FROM er e
+	WHERE inv.extension_resource_uid = e.uid
+	  AND NOT e.has_label_work
+	  AND NOT e.has_condition_work
+	RETURNING inv.extension_resource_uid
+),
+updated_inv_labels AS (
+	UPDATE extension_resource_inventory inv
+	SET
+		observation = COALESCE(e.observation, inv.observation),
+		labels = (inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))) || e.set_labels,
+		observed_at = e.observed_at,
+		updated_at = e.received_at
+	FROM er e
+	WHERE inv.extension_resource_uid = e.uid
+	  AND e.has_label_work
+	  AND NOT e.has_condition_work
+	RETURNING inv.extension_resource_uid
+),
+updated_inv_conditions AS (
+	UPDATE extension_resource_inventory inv
+	SET
+		observation = COALESCE(e.observation, inv.observation),
+		conditions = (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions,
+		observed_at = e.observed_at,
+		updated_at = e.received_at
+	FROM er e
+	WHERE inv.extension_resource_uid = e.uid
+	  AND NOT e.has_label_work
+	  AND e.has_condition_work
+	RETURNING inv.extension_resource_uid
+),
+updated_inv_labels_conditions AS (
 	UPDATE extension_resource_inventory inv
 	SET
 		observation = COALESCE(e.observation, inv.observation),
@@ -1049,7 +1095,18 @@ updated_inv AS (
 		updated_at = e.received_at
 	FROM er e
 	WHERE inv.extension_resource_uid = e.uid
+	  AND e.has_label_work
+	  AND e.has_condition_work
 	RETURNING inv.extension_resource_uid
+),
+updated_inv AS (
+	SELECT extension_resource_uid FROM updated_inv_base
+	UNION ALL
+	SELECT extension_resource_uid FROM updated_inv_labels
+	UNION ALL
+	SELECT extension_resource_uid FROM updated_inv_conditions
+	UNION ALL
+	SELECT extension_resource_uid FROM updated_inv_labels_conditions
 ),
 new_inv AS (
 	INSERT INTO extension_resource_inventory (extension_resource_uid, observation, labels, conditions, observed_at, updated_at)
