@@ -459,7 +459,9 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 	}
 
 	// Create extension resource with authenticated caller context.
-	spec := json.RawMessage(`{"name":"` + clusterName + `"}`)
+	// No "name" in the spec body: for managed resources the cluster
+	// name comes from the resource's own name below, not the spec.
+	spec := json.RawMessage(`{}`)
 
 	authCtx := application.ContextWithAuth(ctx, &application.AuthorizationContext{
 		Subject: &domain.SubjectClaims{
@@ -474,7 +476,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 
 	view, err := resourceSvc.Create(authCtx, application.CreateExtensionResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
-		Name:         domain.ResourceName(clusterName),
+		Name:         domain.ResourceName("clusters/" + clusterName),
 		Spec:         spec,
 	})
 	if err != nil {

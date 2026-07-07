@@ -3,6 +3,8 @@ package kind
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 func TestParseClusterManifest(t *testing.T) {
@@ -109,6 +111,37 @@ func TestParseClusterManifest(t *testing.T) {
 				t.Errorf("OIDC = %+v, want %+v", *got.OIDC, *tt.want.OIDC)
 			}
 		})
+	}
+}
+
+// TestParseClusterManifest_ManagedResourceWrapper verifies that a
+// manifest wrapped by [domain.WrapManagedResourceSpec] (the shape used
+// by managed-resource deliveries) is unwrapped correctly: the bare
+// resource ID from the envelope's name -- not the inner spec's own
+// "name" field, if any -- becomes the cluster name. Regression test
+// for the resource name's collection prefix (e.g. "clusters/foo")
+// otherwise leaking into the kind cluster/container name, which
+// docker/podman reject.
+func TestParseClusterManifest_ManagedResourceWrapper(t *testing.T) {
+	resourceName, err := domain.NewResourceName("clusters", domain.ResourceID("foo"))
+	if err != nil {
+		t.Fatalf("NewResourceName: %v", err)
+	}
+	innerSpec := json.RawMessage(`{"nodes":[{"role":"control-plane"}]}`)
+	raw, err := domain.WrapManagedResourceSpec(resourceName, domain.NewExtensionResourceUID(), innerSpec)
+	if err != nil {
+		t.Fatalf("WrapManagedResourceSpec: %v", err)
+	}
+
+	got, err := parseClusterManifest(raw)
+	if err != nil {
+		t.Fatalf("parseClusterManifest() error = %v", err)
+	}
+	if got.Name != "foo" {
+		t.Errorf("Name = %q, want %q", got.Name, "foo")
+	}
+	if len(got.Nodes) != 1 || got.Nodes[0].Role != "control-plane" {
+		t.Errorf("Nodes = %+v, want a single control-plane node", got.Nodes)
 	}
 }
 

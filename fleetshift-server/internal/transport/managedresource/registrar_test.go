@@ -365,7 +365,11 @@ func TestDynamic_ValidationRejectsInvalidSpec(t *testing.T) {
 	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
 	specField := env.svc.Descriptors.Resource.Fields().ByName("spec")
 	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
-	// name is required — leave it empty to trigger validation failure
+	// A node's role is required and constrained to "control-plane" or
+	// "worker" — an empty role triggers a validation failure.
+	nodesField := env.svc.Descriptors.Spec.Fields().ByName("nodes")
+	badNode := dynamicpb.NewMessage(nodesField.Message())
+	spec.Mutable(nodesField).List().Append(protoreflect.ValueOfMessage(badNode))
 	resource.Set(specField, protoreflect.ValueOfMessage(spec))
 	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
 
@@ -680,9 +684,13 @@ func TestDynamic_SpecDescriptorIdentity(t *testing.T) {
 	invalidReq := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	invalidReq.Set(idField, protoreflect.ValueOfString("bad-cluster"))
 	invalidResource := dynamicpb.NewMessage(svc.Descriptors.Resource)
-	emptySpec := dynamicpb.NewMessage(svc.Descriptors.Spec)
-	// name is required by buf.validate — leave it empty
-	invalidResource.Set(specField, protoreflect.ValueOfMessage(emptySpec))
+	invalidSpec := dynamicpb.NewMessage(svc.Descriptors.Spec)
+	// A node's role is required and constrained to "control-plane" or
+	// "worker" — an empty role triggers a validation failure.
+	nodesField := svc.Descriptors.Spec.Fields().ByName("nodes")
+	badNode := dynamicpb.NewMessage(nodesField.Message())
+	invalidSpec.Mutable(nodesField).List().Append(protoreflect.ValueOfMessage(badNode))
+	invalidResource.Set(specField, protoreflect.ValueOfMessage(invalidSpec))
 	invalidReq.Set(resourceField, protoreflect.ValueOfMessage(invalidResource))
 
 	wire2, _ := proto.Marshal(invalidReq)

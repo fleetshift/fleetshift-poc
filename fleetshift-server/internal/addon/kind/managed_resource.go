@@ -11,10 +11,33 @@ import (
 // parseClusterManifest unmarshals a kind cluster manifest payload into
 // the canonical [ClusterSpec]. The JSON shape matches the proto
 // KindClusterSpec message (protojson encoding).
+//
+// raw may be either a bare [ClusterSpec] (used by direct, non-managed
+// target deliveries) or a [domain.ManagedResourceSpecManifest] wrapper
+// (used by managed-resource deliveries, see
+// [domain.WrapManagedResourceSpec]). We try to unwrap first; a bare
+// ClusterSpec never has a "spec" field, so unwrapping fails cleanly
+// and we fall back to parsing raw directly. When the manifest is
+// wrapped, the resource's bare ID -- not the inner spec's own "name"
+// field, if any -- becomes the cluster name, mirroring the gcphcp
+// addon's handling of managed-resource manifests. Using the full
+// resource name (which includes its collection prefix, e.g.
+// "clusters/foo") verbatim as the cluster name would produce an
+// invalid docker/podman container name.
 func parseClusterManifest(raw json.RawMessage) (ClusterSpec, error) {
+	innerRaw := raw
+	var name string
+	if mrs, err := domain.UnwrapManagedResourceSpec(raw); err == nil {
+		innerRaw = mrs.Spec
+		name = string(mrs.Name.ID())
+	}
+
 	var spec ClusterSpec
-	if err := json.Unmarshal(raw, &spec); err != nil {
+	if err := json.Unmarshal(innerRaw, &spec); err != nil {
 		return ClusterSpec{}, fmt.Errorf("%w: unmarshal kind cluster spec: %v", domain.ErrInvalidArgument, err)
+	}
+	if name != "" {
+		spec.Name = name
 	}
 	if err := validateClusterSpec(spec); err != nil {
 		return ClusterSpec{}, err

@@ -8,8 +8,13 @@ import "buf/validate/validate.proto";
 // the canonical spec used by both the managed resource API and the
 // delivery agent.
 message KindClusterSpec {
-  // Name of the kind cluster.
-  string name = 1 [(buf.validate.field).required = true];
+  // Name of the kind cluster. Only used for direct, non-managed
+  // deliveries (an inline manifest on a deployment), where there is
+  // no other identity to draw a cluster name from. For managed
+  // resources, the cluster name always comes from the resource's own
+  // name instead, and this field is ignored -- so it must not be
+  // required here.
+  string name = 1;
 
   // Nodes to provision. Defaults to a single control-plane node when
   // empty.
