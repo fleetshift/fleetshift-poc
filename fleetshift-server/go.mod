@@ -27,7 +27,7 @@ require (
 	k8s.io/client-go v0.35.2
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4
 	modernc.org/sqlite v1.46.1
-	sigs.k8s.io/kind v0.31.0
+	sigs.k8s.io/kind v0.33.0-alpha.0.20260625155607-955ea974f216
 )
 
 require (
