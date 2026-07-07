@@ -470,6 +470,8 @@ func (r optimisticResult) String() string {
 func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 
+	const itemsPerBatch = 1_000
+
 	for _, mode := range []string{"auto", "force_custom_plan", "force_generic_plan"} {
 		t.Run(mode, func(t *testing.T) {
 			conn, err := db.Conn(ctx)
@@ -529,7 +531,7 @@ func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sq
 				}
 			}
 
-			t.Logf("production replace %s repeated prepared executions: %s; last %s", mode, formatDurations(elapsed), last)
+			t.Logf("production replace %s repeated prepared executions: %s; last %s", mode, formatDurations(elapsed, itemsPerBatch), last)
 			t.Logf("production replace %s prepared counters:\n%s", mode, preparedStatementCounters(ctx, t, tx))
 		})
 	}
@@ -537,6 +539,8 @@ func runProductionReplacePlanStability(ctx context.Context, t *testing.T, db *sq
 
 func runOptimisticReplaceShapeComparison(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
+
+	const itemsPerBatch = 1_000
 
 	type optimisticShape struct {
 		name       string
@@ -655,7 +659,7 @@ func runOptimisticReplaceShapeComparison(ctx context.Context, t *testing.T, db *
 				}
 			}
 
-			t.Logf("optimistic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed), last)
+			t.Logf("optimistic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed, itemsPerBatch), last)
 		})
 	}
 
@@ -699,7 +703,7 @@ func runOptimisticReplaceShapeComparison(ctx context.Context, t *testing.T, db *
 				}
 			}
 
-			t.Logf("diagnostic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed), last)
+			t.Logf("diagnostic replace %s force_generic executions: %s; last %s", shape.name, formatDurations(elapsed, itemsPerBatch), last)
 		})
 	}
 
@@ -786,9 +790,9 @@ func runOptimisticReplaceShapeComparison(ctx context.Context, t *testing.T, db *
 			totalElapsed = append(totalElapsed, time.Since(totalStart))
 		}
 
-		t.Logf("optimistic mixed first attempts before fallback: %s; last %s", formatDurations(optimisticElapsed), lastOptimistic)
-		t.Logf("diagnostic mixed fallback executions: %s; last %s", formatDurations(diagnosticElapsed), lastDiagnostic)
-		t.Logf("combined optimistic+fallback mixed executions: %s", formatDurations(totalElapsed))
+		t.Logf("optimistic mixed first attempts before fallback: %s; last %s", formatDurations(optimisticElapsed, itemsPerBatch), lastOptimistic)
+		t.Logf("diagnostic mixed fallback executions: %s; last %s", formatDurations(diagnosticElapsed, itemsPerBatch), lastDiagnostic)
+		t.Logf("combined optimistic+fallback mixed executions: %s", formatDurations(totalElapsed, itemsPerBatch))
 	})
 }
 
@@ -1007,12 +1011,32 @@ func byteaArrayLiteral(values [][]byte) string {
 	return "ARRAY[" + strings.Join(parts, ",") + "]::bytea[]"
 }
 
-func formatDurations(durations []time.Duration) string {
+func formatDurations(durations []time.Duration, items int) string {
 	parts := make([]string, len(durations))
 	for i, d := range durations {
-		parts[i] = fmt.Sprintf("#%d=%s %.3fms/item", i+1, d.Round(time.Microsecond), float64(d.Microseconds())/1000.0/1000.0)
+		parts[i] = fmt.Sprintf(
+			"#%d=%s %.3fms/item (%d items)",
+			i+1,
+			d.Round(time.Microsecond),
+			float64(d.Microseconds())/1000.0/float64(items),
+			items,
+		)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func TestFormatDurations(t *testing.T) {
+	t.Parallel()
+
+	got := formatDurations([]time.Duration{
+		2 * time.Second,
+		1500 * time.Millisecond,
+	}, 1_000)
+
+	want := "#1=2s 2.000ms/item (1000 items), #2=1.5s 1.500ms/item (1000 items)"
+	if got != want {
+		t.Fatalf("formatDurations() = %q, want %q", got, want)
+	}
 }
 
 type productionRangeSpec struct {

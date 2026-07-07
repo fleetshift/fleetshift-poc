@@ -580,6 +580,8 @@ func assertResolvedAliasMissing(ctx context.Context, t *testing.T, db *sql.DB, n
 func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 	t.Helper()
 
+	const batchItems = 1_000
+
 	preseedAccepted := func(name string, seed batch) {
 		t.Helper()
 		hot := execHotPath(ctx, t, db, seed)
@@ -718,8 +720,8 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 				lastReconcile = execReconcile(ctx, t, db)
 				reconcileDurations = append(reconcileDurations, time.Since(start))
 			}
-			t.Logf("%s hot path: %s; last %s", shape.name, formatDurations(hotDurations), lastHot)
-			t.Logf("%s reconciliation: %s; last %s", shape.name, formatDurations(reconcileDurations), lastReconcile)
+			t.Logf("%s hot path: %s; last %s", shape.name, formatDurations(hotDurations, batchItems), lastHot)
+			t.Logf("%s reconciliation: %s; last %s", shape.name, formatDurations(reconcileDurations, batchItems), lastReconcile)
 			if shape.assertLast != nil {
 				shape.assertLast(t, lastHot, lastReconcile)
 			}
@@ -727,12 +729,32 @@ func runBatchTimings(ctx context.Context, t *testing.T, db *sql.DB) {
 	}
 }
 
-func formatDurations(durations []time.Duration) string {
+func formatDurations(durations []time.Duration, items int) string {
 	parts := make([]string, len(durations))
 	for i, d := range durations {
-		parts[i] = fmt.Sprintf("#%d=%s %.3fms/item", i+1, d.Round(time.Microsecond), float64(d.Microseconds())/1000.0/1000.0)
+		parts[i] = fmt.Sprintf(
+			"#%d=%s %.3fms/item (%d items)",
+			i+1,
+			d.Round(time.Microsecond),
+			float64(d.Microseconds())/1000.0/float64(items),
+			items,
+		)
 	}
 	return strings.Join(parts, ", ")
+}
+
+func TestFormatDurations(t *testing.T) {
+	t.Parallel()
+
+	got := formatDurations([]time.Duration{
+		2 * time.Second,
+		1500 * time.Millisecond,
+	}, 1_000)
+
+	want := "#1=2s 2.000ms/item (1000 items), #2=1.5s 1.500ms/item (1000 items)"
+	if got != want {
+		t.Fatalf("formatDurations() = %q, want %q", got, want)
+	}
 }
 
 func runLongBenchmark(ctx context.Context, t *testing.T, db *sql.DB) {
