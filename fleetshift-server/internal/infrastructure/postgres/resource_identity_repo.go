@@ -469,6 +469,23 @@ func scanPlatformResourceAggregate(s scanner) (*domain.PlatformResource, error) 
 		return nil, fmt.Errorf("scan platform resource: %w", err)
 	}
 
+	return platformResourceAggregateFromColumns(
+		collectionName, resourceID, labelsJSON, createdAtStr, updatedAtStr,
+		representationsJSON, aliasesJSON, relationshipsJSON,
+	)
+}
+
+// platformResourceAggregateFromColumns builds a [domain.PlatformResource]
+// from platformResourceAggregateSelectPostgres's already-scanned column
+// values. Factored out of scanPlatformResourceAggregate so the query
+// repository's combined platform/extension projection (query_repo.go)
+// can reuse the exact same construction logic against a row it scanned
+// itself, without hydrating each result with a follow-up per-row
+// GetByName call.
+func platformResourceAggregateFromColumns(
+	collectionName, resourceID, labelsJSON, createdAtStr, updatedAtStr string,
+	representationsJSON, aliasesJSON, relationshipsJSON string,
+) (*domain.PlatformResource, error) {
 	var labels map[string]string
 	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
 		return nil, fmt.Errorf("unmarshal labels: %w", err)

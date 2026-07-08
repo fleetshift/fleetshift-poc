@@ -166,6 +166,39 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 	}
 }
 
+// TestDynamicSchemaActivator_ActivateRegistersQuerySchema proves that
+// Activate hands its compiled spec descriptor to QuerySchemas (see
+// the QueryRepository POC plan's "Schema Provider" section) and that
+// Deactivate removes it again.
+func TestDynamicSchemaActivator_ActivateRegistersQuerySchema(t *testing.T) {
+	activator, _ := newActivator(t)
+	catalog := application.NewQuerySchemaCatalog()
+	activator.QuerySchemas = catalog
+
+	schema := kindaddon.Schema()
+	id, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	got, ok, err := catalog.GetResourceQuerySchema(context.Background(), schema.ResourceType)
+	if err != nil || !ok {
+		t.Fatalf("GetResourceQuerySchema after Activate: ok=%v err=%v, want ok=true err=nil", ok, err)
+	}
+	if got.SpecDescriptor == nil {
+		t.Error("SpecDescriptor is nil, want the compiled spec descriptor")
+	}
+	if got.SpecDescriptor.FullName() != protoreflect.FullName(schema.Management.SpecMessage) {
+		t.Errorf("SpecDescriptor.FullName() = %q, want %q", got.SpecDescriptor.FullName(), schema.Management.SpecMessage)
+	}
+
+	activator.Deactivate(id)
+
+	if _, ok, err := catalog.GetResourceQuerySchema(context.Background(), schema.ResourceType); err != nil || ok {
+		t.Fatalf("GetResourceQuerySchema after Deactivate: ok=%v err=%v, want ok=false err=nil", ok, err)
+	}
+}
+
 func TestDynamicSchemaActivator_DuplicateActivateIsIdempotent(t *testing.T) {
 	activator, _ := newActivator(t)
 

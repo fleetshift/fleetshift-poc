@@ -48,6 +48,7 @@ func (t *storeTx) SignerEnrollments() domain.SignerEnrollmentRepository {
 func (t *storeTx) ResourceIdentities() domain.ResourceIdentityRepository {
 	return &ResourceIdentityRepo{DB: t.tx}
 }
+func (t *storeTx) Queries() domain.QueryRepository { return &QueryRepo{} }
 
 func (t *storeTx) Commit() error {
 	if t.done {

@@ -209,6 +209,23 @@ CREATE TABLE extension_resources (
 CREATE INDEX idx_extension_resources_collection_resource
     ON extension_resources(collection_name, resource_id);
 
+-- Supports QueryResources' resource_type == "service/Type" filter
+-- (see ../query_filter.go's envelope column mapping and
+-- ../query_sql.go's extension_rows CTE, both of which compute
+-- resource_type as exactly this expression). Without this, an
+-- EXPLAIN (ANALYZE, BUFFERS) investigation against a ~40k-row
+-- extension_resources corpus (see ../query_repo_bench_test.go) showed
+-- resource_type equality falling back to a full sequential scan
+-- re-concatenating service_name/type_name per row, since resource_type
+-- has no stored column of its own to index directly -- costing the
+-- same regardless of how selective the filter actually is. Postgres
+-- matches a plain WHERE predicate against a matching expression index
+-- without needing the query to spell out the expression specially, so
+-- this speeds up that filter with no querysql/query_filter.go changes
+-- required.
+CREATE INDEX idx_extension_resources_resource_type
+    ON extension_resources ((service_name || '/' || type_name));
+
 -- Aliases split into two tables, per the validated
 -- poc/alias-claims/ prototype -- see
 -- docs/design/architecture/resource_identity_and_api.md's "Aliases"

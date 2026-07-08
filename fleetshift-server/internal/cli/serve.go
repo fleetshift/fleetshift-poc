@@ -117,13 +117,19 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		authMethodRepo domain.AuthMethodRepository
 	)
 
+	// querySchemaCatalog backs QueryRepository's optional type-specific
+	// field validation (see [domain.QuerySchemaProvider]'s doc). It
+	// starts empty and is populated as managed resource schemas are
+	// activated below (see the activator wiring).
+	querySchemaCatalog := application.NewQuerySchemaCatalog()
+
 	if f.databaseURL != "" {
 		var err error
 		db, err = pgstore.Open(f.databaseURL)
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		store = &pgstore.Store{DB: db}
+		store = &pgstore.Store{DB: db, SchemaProvider: querySchemaCatalog}
 		vault = &pgstore.VaultStore{DB: db}
 		authMethodRepo = &pgstore.AuthMethodRepo{DB: db}
 	} else {
@@ -586,6 +592,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		PlatformDeps: platformresource.Deps{
 			Resources: platformResourceSvc,
 		},
+		QuerySchemas: querySchemaCatalog,
 	}
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router:    router,

@@ -485,8 +485,6 @@ func scanExtensionResourceSnapshot(s scanner) (domain.ExtensionResourceSnapshot,
 }
 
 func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) {
-	var v domain.ExtensionResourceView
-
 	var uid domain.ExtensionResourceUID
 	var serviceName, typeName, collectionName, resourceID string
 	var labelsStr, reportedAliasesStr string
@@ -524,6 +522,46 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 		}
 		return domain.ExtensionResourceView{}, fmt.Errorf("scan extension resource view: %w", err)
 	}
+
+	return extensionResourceViewFromColumns(
+		uid, serviceName, typeName, collectionName, resourceID, labelsStr, reportedAliasesStr,
+		erCreatedAt, erUpdatedAt,
+		currentVersion, managedFID,
+		riSpec, riCreatedAt,
+		fID, msVer, msSpec, psVer, psSpec, rsVer, rsSpec,
+		rtJSON, stateStr, pauseReason, statusReason, authJSON, provJSON, attestRefJSON,
+		generation, observedGeneration, activeWorkflowGen,
+		fCreatedAt, fUpdatedAt,
+		invLabels, invObservation, invObservedAt, invUpdatedAt,
+		invConditionsJSON,
+	)
+}
+
+// extensionResourceViewFromColumns builds a [domain.ExtensionResourceView]
+// from erViewQueryPG's already-scanned column values. Factored out of
+// scanExtensionResourceView so the query repository's combined
+// platform/extension projection (query_repo.go) can reuse the exact
+// same construction logic against a row it scanned itself, without
+// hydrating each result with a follow-up per-row GetView call.
+func extensionResourceViewFromColumns(
+	uid domain.ExtensionResourceUID,
+	serviceName, typeName, collectionName, resourceID string,
+	labelsStr, reportedAliasesStr string,
+	erCreatedAt, erUpdatedAt time.Time,
+	currentVersion sql.NullInt64,
+	managedFID sql.NullString,
+	riSpec, riCreatedAt sql.NullString,
+	fID sql.NullString, msVer sql.NullInt64, msSpec sql.NullString,
+	psVer sql.NullInt64, psSpec sql.NullString,
+	rsVer sql.NullInt64, rsSpec sql.NullString,
+	rtJSON, stateStr, pauseReason, statusReason, authJSON, provJSON, attestRefJSON sql.NullString,
+	generation, observedGeneration, activeWorkflowGen sql.NullInt64,
+	fCreatedAt, fUpdatedAt sql.NullString,
+	invLabels, invObservation sql.NullString,
+	invObservedAt, invUpdatedAt *time.Time,
+	invConditionsJSON sql.NullString,
+) (domain.ExtensionResourceView, error) {
+	var v domain.ExtensionResourceView
 
 	var labels map[string]string
 	if err := json.Unmarshal([]byte(labelsStr), &labels); err != nil {

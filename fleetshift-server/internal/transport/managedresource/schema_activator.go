@@ -47,6 +47,15 @@ type DynamicSchemaActivator struct {
 	// [platformresource.APIVersion] is used.
 	PlatformVersion string
 
+	// QuerySchemas, if set, is kept in sync with activation/
+	// deactivation: Activate registers the compiled spec descriptor it
+	// already has on hand (see specDesc below) so QueryRepository's
+	// resource.spec.* field validation can use it (see
+	// [domain.QuerySchemaProvider]'s doc); Deactivate removes it. Nil
+	// is a valid no-op default -- most callers (including today's
+	// tests) don't need query-time schema validation.
+	QuerySchemas QuerySchemaRegistry
+
 	mu     sync.Mutex
 	hashes map[string][32]byte               // service name → content hash
 	regs   map[string]*extensionRegistration // service name → registration state
@@ -56,6 +65,15 @@ type DynamicSchemaActivator struct {
 	extensionKeys   map[string]string                // gRPC service name → platform key
 }
 
+// QuerySchemaRegistry is the subset of application.QuerySchemaCatalog
+// that DynamicSchemaActivator needs. Declared here (rather than
+// depending on the concrete type) so this package states exactly what
+// it uses.
+type QuerySchemaRegistry interface {
+	Register(domain.ResourceQuerySchema)
+	Unregister(domain.ResourceType)
+}
+
 // extensionRegistration tracks the transport details for one activated
 // extension schema. Purely internal — the application layer only sees
 // an opaque [application.SchemaActivationID].
@@ -63,6 +81,7 @@ type extensionRegistration struct {
 	grpcServiceName string
 	httpPrefix      string
 	descriptorPath  string
+	resourceType    domain.ResourceType
 }
 
 // platformRegistration tracks what was registered for a platform
@@ -103,6 +122,7 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 		grpcServiceName: serviceName,
 		httpPrefix:      canonicalPrefix,
 		descriptorPath:  descriptorPath,
+		resourceType:    schema.ResourceType,
 	}
 	hash := schemaContentHash(schema)
 	id := application.SchemaActivationID(serviceName)
@@ -244,6 +264,18 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 
 	a.hashes[serviceName] = hash
 	a.regs[serviceName] = reg
+
+	if a.QuerySchemas != nil {
+		a.QuerySchemas.Register(domain.ResourceQuerySchema{
+			ResourceType:   schema.ResourceType,
+			ServiceName:    schema.ResourceType.ServiceName(),
+			TypeName:       schema.Singular,
+			APIVersion:     domain.APIVersion(schema.Version),
+			CollectionName: domain.CollectionName(schema.CollectionID),
+			SpecDescriptor: specDesc.Message,
+		})
+	}
+
 	return id, nil
 }
 
@@ -390,6 +422,10 @@ func (a *DynamicSchemaActivator) Deactivate(id application.SchemaActivationID) {
 
 	delete(a.hashes, serviceName)
 	delete(a.regs, serviceName)
+
+	if a.QuerySchemas != nil {
+		a.QuerySchemas.Unregister(reg.resourceType)
+	}
 
 	if platformKey, hasPlatform := a.extensionKeys[serviceName]; hasPlatform {
 		delete(a.extensionKeys, serviceName)

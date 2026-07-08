@@ -1,0 +1,411 @@
+package postgres
+
+// This file gets an EXPLAIN (ANALYZE, BUFFERS) plan for
+// buildQueryResourcesSQL (see query_sql.go) against a
+// realistic-scale corpus, so query_sql.go's "Indexing limitations
+// (POC scope)" doc comment is backed by an actual plan rather than a
+// guess -- see the QueryRepository POC plan's "Future Follow-Ups"
+// entries "Add SQL index recommendations per registered query field"
+// and "Add explain/debug output for query planning".
+//
+// It follows inventory_bench_test.go's own EXPLAIN-driven
+// investigation pattern: a dedicated bench container/corpus (see
+// openBenchDB), skipped by default, with bulk raw-SQL seeding rather
+// than routing every row through the full domain/repository API.
+// Unlike inventory_bench_test.go's write-path corpus (which seeds
+// through ReplaceInventory specifically to measure that path's own
+// cost), what matters here is just realistic row counts, key
+// cardinalities, and JSONB payload shapes for the *planner* to reason
+// about -- so raw bulk INSERT ... SELECT * FROM UNNEST(...) (the same
+// technique seedIPBACMTable already uses in this file's package for
+// its ACM baseline table) is both sufficient and far faster at this
+// scale.
+//
+// Run with:
+//
+//	FLEETSHIFT_QUERY_BENCH=1 go test ./internal/infrastructure/postgres/ -run TestQueryResourcesExplainPlan -v -timeout 10m
+//
+// (skipped by default -- it spins up its own Postgres container and
+// seeds a multi-tens-of-thousands-row corpus, so it's too slow for
+// the default `go test ./...` loop.)
+
+import (
+	"context"
+	"database/sql"
+	"fmt"
+	"os"
+	"testing"
+	"time"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
+)
+
+// ---------------------------------------------------------------------------
+// Corpus shape
+// ---------------------------------------------------------------------------
+
+const (
+	qrbClusterService    = "kind.fleetshift.io"
+	qrbClusterType       = "Cluster"
+	qrbClusterCollection = "clusters"
+
+	qrbNodeService    = "kubernetes.fleetshift.io"
+	qrbNodeType       = "Node"
+	qrbNodeCollection = "nodes"
+
+	// qrbPlatformOnlyCollection holds physical-only platform
+	// resources -- no extension resource ever shares this
+	// collection -- so all_rows' platform_physical/platform_virtual
+	// split has real volume on both sides (see query_sql.go).
+	qrbPlatformOnlyCollection = "assets"
+
+	// qrbClusterCount/qrbNodeCount/qrbPlatformOnlyCount pick a scale
+	// an order of magnitude below inventory_bench_test.go's ~100k
+	// (this investigation only needs the planner to see "not
+	// trivially small", not a production-scale corpus) while still
+	// being large enough that a full table scan is visibly costly in
+	// EXPLAIN ANALYZE's actual timings, not just its row-count
+	// estimate.
+	qrbClusterCount      = 20_000
+	qrbNodeCount         = 20_000
+	qrbPlatformOnlyCount = 5_000
+
+	qrbChunk = 5000
+)
+
+var qrbFixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+
+// ---------------------------------------------------------------------------
+// Seeding
+// ---------------------------------------------------------------------------
+
+func seedQRBTypes(t *testing.T, db *sql.DB) {
+	t.Helper()
+	if _, err := db.ExecContext(context.Background(), `
+		INSERT INTO extension_resource_types (service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at)
+		VALUES
+			($1, $2, 'v1', $3, '{}'::jsonb, NULL, $4, $4),
+			($5, $6, 'v1', $7, NULL, '{}'::jsonb, $4, $4)
+	`, qrbClusterService, qrbClusterType, qrbClusterCollection, qrbFixedTime,
+		qrbNodeService, qrbNodeType, qrbNodeCollection); err != nil {
+		t.Fatalf("seed extension resource types: %v", err)
+	}
+}
+
+// seedQRBPlatformOnly bulk-inserts qrbPlatformOnlyCount physical
+// platform_resources rows with no corresponding extension resource,
+// alternating env=prod/dev labels.
+func seedQRBPlatformOnly(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	for start := 0; start < qrbPlatformOnlyCount; start += qrbChunk {
+		n := min(qrbChunk, qrbPlatformOnlyCount-start)
+		resourceIDs := make([]string, n)
+		labels := make([]string, n)
+		createdAts := make([]time.Time, n)
+		for i := 0; i < n; i++ {
+			idx := start + i
+			resourceIDs[i] = fmt.Sprintf("asset-%08d", idx)
+			env := "prod"
+			if idx%2 == 0 {
+				env = "dev"
+			}
+			labels[i] = fmt.Sprintf(`{"env":%q}`, env)
+			createdAts[i] = qrbFixedTime
+		}
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO platform_resources (collection_name, resource_id, labels, created_at, updated_at)
+			SELECT $1, r, l::jsonb, c, c
+			FROM UNNEST($2::text[], $3::jsonb[], $4::timestamptz[]) AS t(r, l, c)
+		`, qrbPlatformOnlyCollection, resourceIDs, labels, createdAts); err != nil {
+			t.Fatalf("seed platform-only [%d:%d]: %v", start, start+n, err)
+		}
+	}
+}
+
+// seedQRBClusters bulk-inserts qrbClusterCount managed extension
+// resources (kind.fleetshift.io/Cluster): extension_resources plus
+// the extension_resource_managed/resource_intents/fulfillments rows
+// query_sql.go's extension_rows CTE joins against, so
+// resource.spec.*/resource.state-shaped filters have real rows to
+// match.
+func seedQRBClusters(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	teams := []string{"platform", "apps", "data"}
+	providers := []string{"aws", "gcp", "azure"}
+	regions := []string{"us-east-1", "us-west-2", "eu-west-1", "ap-south-1"}
+	createdAtText := qrbFixedTime.Format(time.RFC3339)
+
+	for start := 0; start < qrbClusterCount; start += qrbChunk {
+		n := min(qrbChunk, qrbClusterCount-start)
+		uids := make([]string, n)
+		resourceIDs := make([]string, n)
+		labels := make([]string, n)
+		specs := make([]string, n)
+		fulfillmentIDs := make([]string, n)
+		createdAts := make([]time.Time, n)
+		for i := 0; i < n; i++ {
+			idx := start + i
+			uids[i] = domain.NewExtensionResourceUID().String()
+			resourceIDs[i] = fmt.Sprintf("cluster-%08d", idx)
+			labels[i] = fmt.Sprintf(`{"team":%q}`, teams[idx%len(teams)])
+			specs[i] = fmt.Sprintf(`{"provider":%q,"region":%q}`, providers[idx%len(providers)], regions[idx%len(regions)])
+			fulfillmentIDs[i] = fmt.Sprintf("qrb-fulfillment-%08d", idx)
+			createdAts[i] = qrbFixedTime
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
+			SELECT u, $1, $2, $3, r, l::jsonb, '{}'::jsonb, c, c
+			FROM UNNEST($4::uuid[], $5::text[], $6::jsonb[], $7::timestamptz[]) AS t(u, r, l, c)
+		`, qrbClusterService, qrbClusterType, qrbClusterCollection, uids, resourceIDs, labels, createdAts); err != nil {
+			t.Fatalf("seed cluster extension_resources [%d:%d]: %v", start, start+n, err)
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO extension_resource_managed (extension_resource_uid, current_version, fulfillment_id)
+			SELECT u, 1, f FROM UNNEST($1::uuid[], $2::text[]) AS t(u, f)
+		`, uids, fulfillmentIDs); err != nil {
+			t.Fatalf("seed extension_resource_managed [%d:%d]: %v", start, start+n, err)
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO resource_intents (extension_resource_uid, version, spec, created_at)
+			SELECT u, 1, s::jsonb, $1 FROM UNNEST($2::uuid[], $3::jsonb[]) AS t(u, s)
+		`, createdAtText, uids, specs); err != nil {
+			t.Fatalf("seed resource_intents [%d:%d]: %v", start, start+n, err)
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO fulfillments (id, state, created_at, updated_at)
+			SELECT f, 'active', $1, $1 FROM UNNEST($2::text[]) AS t(f)
+		`, createdAtText, fulfillmentIDs); err != nil {
+			t.Fatalf("seed fulfillments [%d:%d]: %v", start, start+n, err)
+		}
+	}
+}
+
+// seedQRBNodes bulk-inserts qrbNodeCount inventory-only extension
+// resources (kubernetes.fleetshift.io/Node): extension_resources plus
+// extension_resource_inventory, with a numeric capacity.cpu
+// observation spread evenly across [1,64] so a `> 32` filter is
+// roughly 50% selective -- a realistic mid-selectivity numeric JSON
+// filter, not a trivially-cheap or trivially-empty one.
+func seedQRBNodes(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	roles := []string{"worker", "control-plane"}
+
+	for start := 0; start < qrbNodeCount; start += qrbChunk {
+		n := min(qrbChunk, qrbNodeCount-start)
+		uids := make([]string, n)
+		resourceIDs := make([]string, n)
+		labels := make([]string, n)
+		invLabels := make([]string, n)
+		observations := make([]string, n)
+		conditions := make([]string, n)
+		observedAts := make([]time.Time, n)
+		for i := 0; i < n; i++ {
+			idx := start + i
+			uids[i] = domain.NewExtensionResourceUID().String()
+			resourceIDs[i] = fmt.Sprintf("node-%08d", idx)
+			labels[i] = "{}"
+			role := roles[idx%len(roles)]
+			invLabels[i] = fmt.Sprintf(`{"node-role":%q}`, role)
+			cpu := idx%64 + 1
+			observations[i] = fmt.Sprintf(`{"capacity":{"cpu":%d},"allocatable":{"cpu":%d}}`, cpu, max(cpu-2, 1))
+			ready := "True"
+			if idx%20 == 0 {
+				ready = "False"
+			}
+			conditions[i] = fmt.Sprintf(
+				`{"Ready":{"status":%q,"reason":"Probe","message":"steady","lastTransitionTime":"2026-06-01T12:00:00Z"}}`, ready)
+			observedAts[i] = qrbFixedTime
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
+			SELECT u, $1, $2, $3, r, l::jsonb, '{}'::jsonb, c, c
+			FROM UNNEST($4::uuid[], $5::text[], $6::jsonb[], $7::timestamptz[]) AS t(u, r, l, c)
+		`, qrbNodeService, qrbNodeType, qrbNodeCollection, uids, resourceIDs, labels, observedAts); err != nil {
+			t.Fatalf("seed node extension_resources [%d:%d]: %v", start, start+n, err)
+		}
+
+		if _, err := db.ExecContext(ctx, `
+			INSERT INTO extension_resource_inventory (extension_resource_uid, observation, labels, conditions, observed_at, updated_at)
+			SELECT u, o::jsonb, l::jsonb, c::jsonb, t, t
+			FROM UNNEST($1::uuid[], $2::jsonb[], $3::jsonb[], $4::jsonb[], $5::timestamptz[]) AS x(u, o, l, c, t)
+		`, uids, observations, invLabels, conditions, observedAts); err != nil {
+			t.Fatalf("seed extension_resource_inventory [%d:%d]: %v", start, start+n, err)
+		}
+	}
+}
+
+// seedQRBAliasesAndRelationships gives every qrbPlatformOnlyCount
+// asset one alias claim and one outgoing relationship, so
+// platformResourceAggregateSelectPostgres's three LATERAL sub-joins
+// (reps/aliases/relationships -- see resource_identity_repo.go) have
+// non-trivial, non-empty tables to join against when a query page
+// hydrates platform rows.
+func seedQRBAliasesAndRelationships(t *testing.T, db *sql.DB) {
+	t.Helper()
+	ctx := context.Background()
+	n := qrbPlatformOnlyCount
+	resourceIDs := make([]string, n)
+	values := make([]string, n)
+	targets := make([]string, n)
+	createdAts := make([]time.Time, n)
+	for i := 0; i < n; i++ {
+		resourceIDs[i] = fmt.Sprintf("asset-%08d", i)
+		values[i] = fmt.Sprintf("ext-%08d", i)
+		targets[i] = fmt.Sprintf("asset-%08d", (i+1)%n)
+		createdAts[i] = qrbFixedTime
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO resource_alias_claims (namespace, key, value, platform_collection_name, platform_resource_id, platform_owned, created_at)
+		SELECT 'ext-id', 'source-id', v, $1, r, true, c
+		FROM UNNEST($2::text[], $3::text[], $4::timestamptz[]) AS t(r, v, c)
+	`, qrbPlatformOnlyCollection, resourceIDs, values, createdAts); err != nil {
+		t.Fatalf("seed resource_alias_claims: %v", err)
+	}
+
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO resource_relationships (source_collection_name, source_resource_id, type, target_collection_name, target_resource_id, source_service, created_at)
+		SELECT $1, r, 'depends-on', $1, tgt, 'bench.fleetshift.io', c
+		FROM UNNEST($2::text[], $3::text[], $4::timestamptz[]) AS t(r, tgt, c)
+	`, qrbPlatformOnlyCollection, resourceIDs, targets, createdAts); err != nil {
+		t.Fatalf("seed resource_relationships: %v", err)
+	}
+}
+
+func qrbTableSizes(t *testing.T, db *sql.DB) {
+	t.Helper()
+	rows, err := db.QueryContext(context.Background(), `
+		SELECT relname, reltuples::bigint, pg_size_pretty(pg_total_relation_size(oid))
+		FROM pg_class
+		WHERE relname IN (
+			'platform_resources', 'extension_resources', 'extension_resource_types',
+			'extension_resource_managed', 'resource_intents', 'fulfillments',
+			'extension_resource_inventory', 'resource_alias_claims', 'resource_relationships'
+		)
+		ORDER BY relname`)
+	if err != nil {
+		t.Logf("table size query failed (non-fatal): %v", err)
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		var estRows int64
+		var size string
+		if err := rows.Scan(&name, &estRows, &size); err != nil {
+			continue
+		}
+		t.Logf("  %-32s ~%-8d %s", name, estRows, size)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// EXPLAIN driver
+// ---------------------------------------------------------------------------
+
+// explainQueryResources compiles filter through the real
+// querysql.Compiler/queryFieldResolver pair -- exactly what
+// QueryRepo.QueryResources runs (see query_repo.go) -- builds the
+// same buildQueryResourcesSQL page query, and logs its EXPLAIN
+// (ANALYZE, BUFFERS) plan. keysetTok, if non-nil, exercises the
+// second-page keyset predicate the same way a real PageToken would;
+// the exact values don't need to correspond to a real first page for
+// planning purposes, only their types matter.
+func explainQueryResources(t *testing.T, db *sql.DB, label, filter string, pageSize int, keysetTok *queryPageToken) {
+	t.Helper()
+	compiler := querysql.Compiler{Fields: queryFieldResolver{}}
+	predicate, err := compiler.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter})
+	if err != nil {
+		t.Fatalf("%s: compile filter %q: %v", label, filter, err)
+	}
+	args := append([]any{}, predicate.Args...)
+
+	keysetSQL := "TRUE"
+	if keysetTok != nil {
+		keysetSQL = fmt.Sprintf(
+			"(kind, service_name, collection_name, resource_id, type_name) > ($%d, $%d, $%d, $%d, $%d)",
+			len(args)+1, len(args)+2, len(args)+3, len(args)+4, len(args)+5,
+		)
+		args = append(args, keysetTok.Kind, keysetTok.ServiceName, keysetTok.CollectionName, keysetTok.ResourceID, keysetTok.TypeName)
+	}
+
+	limitPlaceholder := len(args) + 1
+	args = append(args, pageSize+1)
+
+	query := buildQueryResourcesSQL(predicate.SQL, keysetSQL, limitPlaceholder)
+
+	t.Logf("=== %s ===", label)
+	t.Logf("filter: %q  page_size: %d  keyset: %v", filter, pageSize, keysetTok != nil)
+	rows, err := db.QueryContext(context.Background(), "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
+	if err != nil {
+		t.Fatalf("%s: explain: %v", label, err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("%s: explain scan: %v", label, err)
+		}
+		t.Log(line)
+	}
+	t.Log("")
+}
+
+// ---------------------------------------------------------------------------
+// Main investigation
+// ---------------------------------------------------------------------------
+
+func TestQueryResourcesExplainPlan(t *testing.T) {
+	if os.Getenv("FLEETSHIFT_QUERY_BENCH") == "" {
+		t.Skip("set FLEETSHIFT_QUERY_BENCH=1 to run (spins up a dedicated Postgres container and seeds a realistic-scale corpus)")
+	}
+
+	db := openBenchDB(t)
+
+	t.Log("seeding corpus...")
+	seedStart := time.Now()
+	seedQRBTypes(t, db)
+	seedQRBPlatformOnly(t, db)
+	seedQRBClusters(t, db)
+	seedQRBNodes(t, db)
+	seedQRBAliasesAndRelationships(t, db)
+	if _, err := db.ExecContext(context.Background(), `ANALYZE
+		platform_resources, extension_resources, extension_resource_types,
+		extension_resource_managed, resource_intents, fulfillments,
+		extension_resource_inventory, resource_alias_claims, resource_relationships`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	t.Logf("seeded corpus in %s", time.Since(seedStart))
+	qrbTableSizes(t, db)
+	t.Log("")
+
+	explainQueryResources(t, db, "empty filter (default first page)", "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "kind == extension", `kind == "extension"`, defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "kind == platform", `kind == "platform"`, defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "selective envelope filter (resource_type equality)",
+		fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType), defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "extension label filter (JSONB, no index)",
+		`resource.labels["team"] == "platform"`, defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "guarded spec filter (JSONB, no index)",
+		fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`, qrbClusterService, qrbClusterType),
+		defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "inventory label filter (existing GIN index does not match ->> shape)",
+		`resource.inventory.labels["node-role"] == "worker"`, defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "guarded numeric observation filter (safeJSONCast)",
+		fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
+		defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "max page size (500), empty filter", "", maxQueryPageSize, nil)
+	explainQueryResources(t, db, "keyset continuation (second page, empty filter)", "", defaultQueryPageSize, &queryPageToken{
+		Kind: "extension", ServiceName: qrbClusterService, CollectionName: qrbClusterCollection,
+		ResourceID: "cluster-00000049", TypeName: qrbClusterType,
+	})
+}
