@@ -21,8 +21,8 @@ import (
 	ec2svc "github.com/aws/aws-sdk-go-v2/service/ec2"
 	ec2types "github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	iamsvc "github.com/aws/aws-sdk-go-v2/service/iam"
-	_ "github.com/mattn/go-sqlite3"
 	s3svc "github.com/aws/aws-sdk-go-v2/service/s3"
+	_ "github.com/mattn/go-sqlite3"
 	"github.com/zalando/go-keyring"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -1084,5 +1084,3 @@ func validateCleanup(t *testing.T, cfg *Config) {
 // ---------------------------------------------------------------------------
 
 func strPtr(s string) *string { return &s }
-
-

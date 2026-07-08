@@ -13,12 +13,12 @@ import (
 
 type Config struct {
 	// SSO
-	KeycloakIssuer       string
-	KeycloakClientID     string
-	EnrollmentClientID   string
-	RoleARN              string
-	RHSSOIssuer          string
-	ConsoleClientSecret  string
+	KeycloakIssuer      string
+	KeycloakClientID    string
+	EnrollmentClientID  string
+	RoleARN             string
+	RHSSOIssuer         string
+	ConsoleClientSecret string
 
 	// Cluster
 	BaseDomain         string
@@ -36,18 +36,18 @@ func LoadConfig() (*Config, error) {
 	loadEnvFile(".env")
 
 	cfg := &Config{
-		KeycloakIssuer:     os.Getenv("E2E_KEYCLOAK_ISSUER"),
-		KeycloakClientID:   os.Getenv("E2E_KEYCLOAK_CLIENT_ID"),
-		EnrollmentClientID: envOr("E2E_ENROLLMENT_CLIENT_ID", "fleetshift-signing"),
-		RoleARN:            os.Getenv("E2E_ROLE_ARN"),
+		KeycloakIssuer:      os.Getenv("E2E_KEYCLOAK_ISSUER"),
+		KeycloakClientID:    os.Getenv("E2E_KEYCLOAK_CLIENT_ID"),
+		EnrollmentClientID:  envOr("E2E_ENROLLMENT_CLIENT_ID", "fleetshift-signing"),
+		RoleARN:             os.Getenv("E2E_ROLE_ARN"),
 		RHSSOIssuer:         os.Getenv("E2E_RH_SSO_ISSUER"),
 		ConsoleClientSecret: os.Getenv("E2E_CONSOLE_CLIENT_SECRET"),
-		BaseDomain:         envOr("E2E_BASE_DOMAIN", "aws-acm-cluster-virt.devcluster.openshift.com"),
-		Region:             envOr("E2E_REGION", "us-west-2"),
-		ReleaseImage:       envOr("E2E_RELEASE_IMAGE", "quay.io/openshift-release-dev/ocp-release:4.20.18-x86_64"),
-		WorkerCount:        envOrInt("E2E_WORKER_COUNT", 3),
-		WorkerInstanceType: envOr("E2E_WORKER_INSTANCE_TYPE", "m6i.xlarge"),
-		ClusterName:        generateClusterName(),
+		BaseDomain:          envOr("E2E_BASE_DOMAIN", "aws-acm-cluster-virt.devcluster.openshift.com"),
+		Region:              envOr("E2E_REGION", "us-west-2"),
+		ReleaseImage:        envOr("E2E_RELEASE_IMAGE", "quay.io/openshift-release-dev/ocp-release:4.20.18-x86_64"),
+		WorkerCount:         envOrInt("E2E_WORKER_COUNT", 3),
+		WorkerInstanceType:  envOr("E2E_WORKER_INSTANCE_TYPE", "m6i.xlarge"),
+		ClusterName:         generateClusterName(),
 	}
 
 	required := []struct {

@@ -115,4 +115,3 @@ func TestPollForToken_Expired(t *testing.T) {
 		t.Errorf("error = %q, should mention expiration", got)
 	}
 }
-
