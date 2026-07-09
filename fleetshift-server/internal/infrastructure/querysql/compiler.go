@@ -155,8 +155,10 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 // which Postgres rejects -- but the field is still resolved (see
 // below) rather than short-circuited away entirely. Like
 // compileComparison, the first list element's Go type becomes the
-// field's [TypeHint]; an empty list has no element to derive one
-// from, so it resolves with TypeHintUnknown.
+// field's [TypeHint]; every subsequent element must match that hint
+// (heterogeneous lists are rejected as ErrInvalidArgument). An empty
+// list has no element to derive a hint from, so it resolves with
+// TypeHintUnknown.
 func compileIn(args []ast.Expr, st *state) (string, error) {
 	if len(args) != 2 {
 		return "", unsupportedExprf("in")
@@ -184,8 +186,13 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 			return "", err
 		}
 		values[i] = v
+		elHint := typeHintOf(v)
 		if i == 0 {
-			hint = typeHintOf(v)
+			hint = elHint
+			continue
+		}
+		if elHint != hint {
+			return "", fmt.Errorf("filter: %w: \"in\" list elements must all have the same type", domain.ErrInvalidArgument)
 		}
 	}
 

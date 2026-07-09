@@ -241,6 +241,23 @@ func TestCompileFilter_ComparisonRequiresFieldAndLiteral(t *testing.T) {
 	}
 }
 
+// TestCompileFilter_InListRequiresHomogeneousLiterals proves mixed-type
+// "in" lists are rejected before resolve: the type hint is inferred
+// from the first element, and every subsequent literal must match it.
+func TestCompileFilter_InListRequiresHomogeneousLiterals(t *testing.T) {
+	for _, filter := range []string{
+		`resource_type in ["a", 1]`,
+		`resource.generation in [1, "a"]`,
+		`resource.healthy in [true, "yes"]`,
+		`resource.generation in [1, true]`,
+	} {
+		err := compileErr(t, filter)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+		}
+	}
+}
+
 // TestCompileFilter_NoResolverConfigured proves a Compiler with a nil
 // Fields fails with a descriptive error -- not a nil-pointer panic --
 // as soon as a filter actually references a field.
