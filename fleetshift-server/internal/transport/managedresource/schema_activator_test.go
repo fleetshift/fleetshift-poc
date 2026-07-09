@@ -553,6 +553,59 @@ func TestDynamicSchemaActivator_PackageRenameKeepsOldOnFailure(t *testing.T) {
 	}
 }
 
+// TestDynamicSchemaActivator_PackageRenameSameHTTPPrefix proves that a
+// ProtoPackage rename (new gRPC name, unchanged canonical HTTP prefix)
+// succeeds with HTTPMux wired: the shared prefix is replaced in place
+// rather than re-registered, the old gRPC identity is retired, and the
+// HTTP route stays live.
+func TestDynamicSchemaActivator_PackageRenameSameHTTPPrefix(t *testing.T) {
+	env := newActivatorWithHTTP(t)
+	ctx := context.Background()
+
+	schema := kindaddon.Schema()
+	oldID, err := env.activator.Activate(ctx, schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	oldService := string(oldID)
+	const prefix = "/apis/kind.fleetshift.io/v1/clusters"
+
+	if code := httpStatus(t, env.httpURL+prefix+"/test-id"); code == http.StatusNotFound {
+		t.Fatal("expected canonical route after first Activate, got 404")
+	}
+
+	schema.ProtoPackage = "kind.fleetshift.v2"
+	newID, err := env.activator.Activate(ctx, schema)
+	if err != nil {
+		t.Fatalf("Activate after package rename: %v", err)
+	}
+	newService := string(newID)
+	if newService != "kind.fleetshift.v2.ClusterService" {
+		t.Fatalf("new registration ID = %q, want kind.fleetshift.v2.ClusterService", newService)
+	}
+	if newService == oldService {
+		t.Fatal("expected gRPC service name to change after ProtoPackage rename")
+	}
+
+	info := env.grpcMux.ServiceInfo()
+	if _, ok := info[newService]; !ok {
+		t.Fatalf("expected new service %q in mux after rename", newService)
+	}
+	if _, ok := info[oldService]; ok {
+		t.Fatalf("old service %q still in mux after successful rename", oldService)
+	}
+	if _, _, ok := env.activator.Registry.GetByGRPCServiceName(oldService); ok {
+		t.Fatal("old gRPC name still in registry after successful rename")
+	}
+	if _, _, ok := env.activator.Registry.GetByGRPCServiceName(newService); !ok {
+		t.Fatal("new gRPC name missing from registry after rename")
+	}
+
+	if code := httpStatus(t, env.httpURL+prefix+"/test-id"); code == http.StatusNotFound {
+		t.Fatal("expected canonical route to survive package rename, got 404")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Full-stack activator tests — prove schema swap changes request handling
 // ---------------------------------------------------------------------------
