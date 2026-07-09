@@ -39,6 +39,10 @@ Examples:
   fleetctl resource query \
     --filter 'resource_type == "kind.fleetshift.io/Cluster" && resource.spec.region == "us-east-1" && resource.state == "ACTIVE"'
 
+  # Resources whose envelope name starts with a service prefix
+  fleetctl resource query \
+    --filter 'name.startsWith("//kind.fleetshift.io/")'
+
   # Stable type+name order, first page of 20
   fleetctl resource query --order-by resource_type,name --page-size 20
 

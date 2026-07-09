@@ -99,12 +99,13 @@ type ResolveContext struct {
 
 // FieldResolver maps a CEL field path to a SQL expression. This
 // package's compiler owns CEL AST lowering -- boolean/comparison
-// structure, literals, in, parameter binding, resource_type guard
-// detection -- and knows about field paths only generically; a
-// FieldResolver owns the actual row shape a path reads from (column
-// names, JSON extraction, schema-backed path validation). See the
-// postgres package's query field resolver for this project's current
-// implementation; a future SQLite QueryRepo would supply its own.
+// structure, literals, in, startsWith, parameter binding,
+// resource_type guard detection -- and knows about field paths only
+// generically; a FieldResolver owns the actual row shape a path reads
+// from (column names, JSON extraction, schema-backed path
+// validation). See the postgres package's query field resolver for
+// this project's current implementation; a future SQLite QueryRepo
+// would supply its own.
 type FieldResolver interface {
 	Resolve(path FieldPath, hint TypeHint, ctx ResolveContext) (SQLExpr, error)
 }

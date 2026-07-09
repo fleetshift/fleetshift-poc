@@ -44,6 +44,25 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("NameStartsWithMatchesPrefix", func(t *testing.T) {
+		tx, fx := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
+		results := queryAll(t, tx, fmt.Sprintf(`name.startsWith(%q)`, "//"+string(fx.ManagedType.ServiceName())+"/"))
+		if len(results) != 1 {
+			t.Fatalf("len(results) = %d, want 1", len(results))
+		}
+		if results[0].Name != wantName {
+			t.Errorf("Name = %q, want %q", results[0].Name, wantName)
+		}
+
+		results = queryAll(t, tx, `name.startsWith("//does-not-exist/")`)
+		if len(results) != 0 {
+			t.Fatalf("len(results) = %d, want 0 for a non-matching prefix", len(results))
+		}
+	})
+
 	t.Run("ResourceTypeNotEqualExcludesOnlyThatType", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
@@ -89,6 +108,25 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		}
 		if results[0].Name != extensionEnvelopeName(fx.ManagedType, fx.ManagedName) {
 			t.Errorf("result Name = %q, want the managed cluster", results[0].Name)
+		}
+	})
+
+	t.Run("ExtensionLabelsStartsWith", func(t *testing.T) {
+		tx, fx := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
+		results := queryAll(t, tx, `resource.labels["team"].startsWith("plat")`)
+		if len(results) != 1 {
+			t.Fatalf("len(results) = %d, want 1", len(results))
+		}
+		if results[0].Name != wantName {
+			t.Errorf("result Name = %q, want the managed cluster", results[0].Name)
+		}
+
+		results = queryAll(t, tx, `resource.labels["team"].startsWith("ops")`)
+		if len(results) != 0 {
+			t.Fatalf("len(results) = %d, want 0 for a non-matching prefix", len(results))
 		}
 	})
 

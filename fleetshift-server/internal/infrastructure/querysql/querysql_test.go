@@ -293,6 +293,80 @@ func TestCompileFilter_UnsupportedOperators(t *testing.T) {
 	for _, filter := range []string{
 		`name.matches("ext.*")`,
 		`1 + 1 == 2`,
+		`name.endsWith("x")`,
+		`name.contains("x")`,
+	} {
+		err := compileErr(t, filter)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+		}
+	}
+}
+
+// TestCompileFilter_StartsWith compiles field.startsWith("prefix") to a
+// parameterized LIKE predicate with LIKE metacharacters in the prefix
+// escaped, so a user-supplied "%" or "_" cannot widen the match.
+func TestCompileFilter_StartsWith(t *testing.T) {
+	tests := []struct {
+		name     string
+		filter   string
+		wantSQL  string
+		wantArgs []any
+	}{
+		{
+			name:     "simple prefix",
+			filter:   `name.startsWith("//kind.fleetshift.io/")`,
+			wantSQL:  `name LIKE $1 ESCAPE '\'`,
+			wantArgs: []any{`//kind.fleetshift.io/%`},
+		},
+		{
+			name:     "escapes LIKE metacharacters",
+			filter:   `name.startsWith("a%b_c\\d")`,
+			wantSQL:  `name LIKE $1 ESCAPE '\'`,
+			wantArgs: []any{`a\%b\_c\\d%`},
+		},
+		{
+			name:     "empty prefix matches any non-null string",
+			filter:   `name.startsWith("")`,
+			wantSQL:  `name LIKE $1 ESCAPE '\'`,
+			wantArgs: []any{`%`},
+		},
+		{
+			name:     "nested field path",
+			filter:   `resource.labels["team"].startsWith("plat")`,
+			wantSQL:  `resource.labels.team LIKE $1 ESCAPE '\'`,
+			wantArgs: []any{`plat%`},
+		},
+		{
+			name:     "and with startsWith",
+			filter:   `resource_type == "kind.fleetshift.io/Cluster" && name.startsWith("//kind")`,
+			wantSQL:  `(resource_type = $1) AND (name LIKE $2 ESCAPE '\')`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster", `//kind%`},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pred := compile(t, tt.filter)
+			if pred.SQL != tt.wantSQL {
+				t.Errorf("SQL = %q, want %q", pred.SQL, tt.wantSQL)
+			}
+			if len(pred.Args) != len(tt.wantArgs) {
+				t.Fatalf("Args = %v, want %v", pred.Args, tt.wantArgs)
+			}
+			for i, want := range tt.wantArgs {
+				if pred.Args[i] != want {
+					t.Errorf("Args[%d] = %v, want %v", i, pred.Args[i], want)
+				}
+			}
+		})
+	}
+}
+
+func TestCompileFilter_StartsWithRequiresFieldAndStringLiteral(t *testing.T) {
+	for _, filter := range []string{
+		`"literal".startsWith("lit")`,
+		`name.startsWith(resource_type)`,
+		`name.startsWith(1)`,
 	} {
 		err := compileErr(t, filter)
 		if !errors.Is(err, domain.ErrInvalidArgument) {

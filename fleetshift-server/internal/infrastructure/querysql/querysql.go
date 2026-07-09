@@ -53,29 +53,29 @@
 // # Package split
 //
 // This package owns only CEL AST lowering: boolean/logical structure,
-// comparison and "in" handling, literal binding, and resource_type
-// guard detection (compiler.go). It does not know what field paths
-// actually mean -- column names, JSON extraction, label/condition
-// map keys, or schema-backed path validation are all the concern of
-// whatever [FieldResolver] the caller supplies (see field_resolver.go
-// for that contract and the postgres package's query_filter.go for
-// this project's Postgres/FleetShift implementation). This split
-// exists because querysql's supported CEL subset is a
-// QueryResources-wide contract -- any storage backend would parse
-// and validate filters the same way -- while the row shape a field
-// path resolves to is backend-specific.
+// comparison, "in", and startsWith handling, literal binding, and
+// resource_type guard detection (compiler.go). It does not know what
+// field paths actually mean -- column names, JSON extraction,
+// label/condition map keys, or schema-backed path validation are all
+// the concern of whatever [FieldResolver] the caller supplies (see
+// field_resolver.go for that contract and the postgres package's
+// query_filter.go for this project's Postgres/FleetShift
+// implementation). This split exists because querysql's supported CEL
+// subset is a QueryResources-wide contract -- any storage backend
+// would parse and validate filters the same way -- while the row
+// shape a field path resolves to is backend-specific.
 //
 // Parameter placeholder style is likewise a dialect concern, owned
 // by the caller's [ParamBinder] (see param_binder.go). The compiler
 // defaults to [DollarParams] (Postgres $N) when Params is nil.
 //
 // Supported filter shape: see compiler.go for the supported operators
-// (&&, ||, !, ==, !=, <, <=, >, >=, in) and field-path syntax
-// (identifiers, dotted selects, and string-keyed index expressions).
-// Anything else -- unsupported operators, arithmetic, regex, and
-// exists/all/map/filter/has macros -- fails closed with
-// [domain.ErrInvalidArgument], as does any field path a configured
-// [FieldResolver] doesn't recognize.
+// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith) and field-path
+// syntax (identifiers, dotted selects, and string-keyed index
+// expressions). Anything else -- unsupported operators, arithmetic,
+// regex, endsWith/contains/matches, and exists/all/map/filter/has
+// macros -- fails closed with [domain.ErrInvalidArgument], as does any
+// field path a configured [FieldResolver] doesn't recognize.
 package querysql
 
 import (

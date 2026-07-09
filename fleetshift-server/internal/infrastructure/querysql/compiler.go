@@ -74,6 +74,8 @@ func compileBool(e ast.Expr, st *state) (string, error) {
 			return compileComparison(c.FunctionName(), c.Args(), st)
 		case operators.In:
 			return compileIn(c.Args(), st)
+		case "startsWith":
+			return compileStartsWith(c, st)
 		default:
 			return "", fmt.Errorf("filter: %w: unsupported function %q", domain.ErrInvalidArgument, c.FunctionName())
 		}
@@ -231,6 +233,53 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 		placeholders[i] = st.b.bind(v)
 	}
 	return fmt.Sprintf("%s IN (%s)", expr.SQL, strings.Join(placeholders, ", ")), nil
+}
+
+// compileStartsWith handles field.startsWith("prefix"): a member call
+// whose target is a resolvable field path and whose single argument is
+// a string literal. It lowers to a parameterized LIKE with an ESCAPE
+// clause so %, _, and \ in the prefix cannot widen the match. Literal
+// targets (e.g. "x".startsWith("x")) and non-literal prefixes are
+// rejected -- the former carries no queryable field, the latter isn't
+// pushable as a bound pattern.
+func compileStartsWith(c ast.CallExpr, st *state) (string, error) {
+	if !c.IsMemberFunction() || c.Target() == nil {
+		return "", fmt.Errorf("filter: %w: startsWith must be called as a member function", domain.ErrInvalidArgument)
+	}
+	args := c.Args()
+	if len(args) != 1 {
+		return "", unsupportedExprf("startsWith")
+	}
+	path, ok, err := fieldPathFromExpr(c.Target())
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", fmt.Errorf("filter: %w: startsWith target must be a field", domain.ErrInvalidArgument)
+	}
+	if args[0].Kind() != ast.LiteralKind {
+		return "", fmt.Errorf("filter: %w: startsWith argument must be a string literal", domain.ErrInvalidArgument)
+	}
+	prefix, ok := args[0].AsLiteral().Value().(string)
+	if !ok {
+		return "", fmt.Errorf("filter: %w: startsWith argument must be a string literal", domain.ErrInvalidArgument)
+	}
+
+	expr, err := st.resolve(path, TypeHintString)
+	if err != nil {
+		return "", err
+	}
+	pattern := escapeLikePattern(prefix) + "%"
+	return fmt.Sprintf("%s LIKE %s ESCAPE '\\'", expr.SQL, st.b.bind(pattern)), nil
+}
+
+// escapeLikePattern escapes \, %, and _ so a user-supplied prefix can
+// be used as a LIKE pattern without those characters acting as
+// wildcards. The ESCAPE character is backslash, matching the ESCAPE
+// clause compileStartsWith emits.
+func escapeLikePattern(s string) string {
+	replacer := strings.NewReplacer(`\`, `\\`, `%`, `\%`, `_`, `\_`)
+	return replacer.Replace(s)
 }
 
 // typeHintOf maps a bound Go literal value (see literalValue) to the

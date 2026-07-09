@@ -218,7 +218,7 @@ GET /apis/fleetshift.io/v1/{scope}:queryResources?filter={cel_expression}
 ```
 
 - **Scope**: v0 accepts only `-` (whole-platform wildcard). The URI pattern keeps `{scope=**}` so future collection scopes can land without reshaping the RPC.
-- **Filter**: CEL evaluated by the query repository (not AIP-160 list-filter syntax). Empty matches all extension rows in scope.
+- **Filter**: CEL evaluated by the query repository (not AIP-160 list-filter syntax). Empty matches all extension rows in scope. The supported subset is boolean/logical operators (`&&`, `||`, `!`), comparisons (`==`, `!=`, `<`, `<=`, `>`, `>=`), `in` list membership, and string `startsWith` (e.g. `name.startsWith("//kind.fleetshift.io/")`). Unsupported operators and macros fail closed.
 - **Pagination / ordering**: AIP-158 page tokens; optional `order_by` (`""` default, or `resource_type,name`).
 - **Response**: each hit is `name`, `resource_type`, and a `google.protobuf.Struct` body matching the dynamic managed-resource Get/List envelope (no labels/inventory fields on the Struct in v0). Typed dynamic `oneof` bodies are deferred.
 
