@@ -252,11 +252,12 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	}
 
 	if err := a.Registry.Register(ActiveResourceVersion{
-		APIVersion:      apiVersion,
-		GRPCServiceName: serviceName,
-		HTTPPrefix:      canonicalPrefix,
-		DescriptorPath:  descriptorPath,
-		ContentHash:     hash,
+		APIVersion:         apiVersion,
+		GRPCServiceName:    serviceName,
+		HTTPPrefix:         canonicalPrefix,
+		DescriptorPath:     descriptorPath,
+		ContentHash:        hash,
+		ServiceDescriptors: svc.Descriptors,
 		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   schema.ResourceType,
 			ServiceName:    schema.ResourceType.ServiceName(),

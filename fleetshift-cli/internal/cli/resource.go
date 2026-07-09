@@ -6,7 +6,7 @@ func newResourceCmd(ctx *cmdContext) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "resource",
 		Aliases: []string{"res"},
-		Short:   "Interact with addon-provided managed resources",
+		Short:   "Manage and query addon-provided managed resources",
 	}
 
 	cmd.PersistentFlags().String("service", "", "gRPC service name to disambiguate when multiple services expose the same collection")
@@ -16,6 +16,7 @@ func newResourceCmd(ctx *cmdContext) *cobra.Command {
 	cmd.AddCommand(newResourceCreateCmd(ctx))
 	cmd.AddCommand(newResourceGetCmd(ctx))
 	cmd.AddCommand(newResourceListCmd(ctx))
+	cmd.AddCommand(newResourceQueryCmd(ctx))
 	cmd.AddCommand(newResourceDeleteCmd(ctx))
 
 	return cmd

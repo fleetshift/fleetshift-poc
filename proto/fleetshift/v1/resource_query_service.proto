@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/annotations.proto";
+import "google/api/client.proto";
+import "fleetshift/v1/query_resources_request.proto";
+import "fleetshift/v1/query_resources_response.proto";
+
+// ResourceQueryService provides fleet-wide queries over managed
+// extension resources.
+service ResourceQueryService {
+  // QueryResources returns managed extension resources matching a CEL
+  // filter within the given scope.
+  //
+  // In v0, scope must be `-` (whole platform). The returned resource
+  // bodies match the dynamic managed-resource Get/List shape encoded as
+  // google.protobuf.Struct (no labels/inventory fields).
+  rpc QueryResources(QueryResourcesRequest) returns (QueryResourcesResponse) {
+    option (google.api.http) = {
+      get: "/apis/fleetshift.io/v1/{scope=**}:queryResources"
+    };
+    option (google.api.method_signature) = "scope";
+  }
+}

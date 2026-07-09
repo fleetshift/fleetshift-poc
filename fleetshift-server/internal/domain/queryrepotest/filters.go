@@ -215,6 +215,33 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("StateFilterLowercasesLiterals", func(t *testing.T) {
+		// fulfillments.state is stored lowercase ("creating"); Get/List
+		// expose proto enum names ("CREATING"). Compiling resource.state
+		// comparisons lowercases the literal so both spellings match.
+		tx, fx := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
+		for _, filter := range []string{
+			`resource.state == "creating"`,
+			`resource.state == "CREATING"`,
+		} {
+			results := queryAll(t, tx, filter)
+			if len(results) != 1 {
+				t.Fatalf("filter %q: len(results) = %d, want 1", filter, len(results))
+			}
+			if results[0].Name != wantName {
+				t.Errorf("filter %q: Name = %q, want %q", filter, results[0].Name, wantName)
+			}
+		}
+
+		results := queryAll(t, tx, `resource.state == "ACTIVE"`)
+		if len(results) != 0 {
+			t.Fatalf(`resource.state == "ACTIVE": len(results) = %d, want 0 (fixture is creating)`, len(results))
+		}
+	})
+
 	t.Run("PlatformOnlyBodyFieldsAreInvalid", func(t *testing.T) {
 		tx, _ := newFixtureTx(t, factory)
 		defer tx.Rollback()

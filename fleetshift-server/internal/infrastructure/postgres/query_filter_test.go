@@ -455,6 +455,7 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 	}{
 		{`resource.intent_version == 1`, "erm.current_version"},
 		{`resource.state == "active"`, "f.state"},
+		{`resource.state == "ACTIVE"`, "f.state"},
 		{`resource.pause_reason == "manual"`, "f.pause_reason"},
 		{`resource.generation == 3`, "f.generation"},
 	} {
@@ -462,6 +463,19 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 		if !strings.Contains(pred.SQL, tt.column) {
 			t.Errorf("filter %q: SQL = %q, want it to reference column %q", tt.filter, pred.SQL, tt.column)
 		}
+	}
+
+	// API enum spelling must bind the domain storage value.
+	pred := compile(t, `resource.state == "ACTIVE"`)
+	found := false
+	for _, a := range pred.Args {
+		if a == "active" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %#v, want to include normalized \"active\"", pred.Args)
 	}
 }
 

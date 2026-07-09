@@ -805,7 +805,7 @@ var File_fleetshift_v1_attestation_proto protoreflect.FileDescriptor
 
 const file_fleetshift_v1_attestation_proto_rawDesc = "" +
 	"\n" +
-	"\x1ffleetshift/v1/attestation.proto\x12\rfleetshift.v1\x1a\x1fgoogle/protobuf/timestamp.proto\x1a\x1cfleetshift/v1/manifest.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\"E\n" +
+	"\x1ffleetshift/v1/attestation.proto\x12\rfleetshift.v1\x1a\x1cfleetshift/v1/manifest.proto\x1a%fleetshift/v1/manifest_strategy.proto\x1a&fleetshift/v1/placement_strategy.proto\x1a\x1fgoogle/protobuf/timestamp.proto\"E\n" +
 	"\x11FederatedIdentity\x12\x18\n" +
 	"\asubject\x18\x01 \x01(\tR\asubject\x12\x16\n" +
 	"\x06issuer\x18\x02 \x01(\tR\x06issuer\"\x91\x01\n" +

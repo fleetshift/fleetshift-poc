@@ -1,0 +1,25 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+import "google/protobuf/struct.proto";
+
+// ResourceResult is one row returned by
+// [ResourceQueryService.QueryResources][fleetshift.v1.ResourceQueryService.QueryResources].
+message ResourceResult {
+  // Canonical full resource name.
+  // Format: `//{service}/{collection}/{id}`.
+  string name = 1 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Stable type identity.
+  // Format: `{service}/{type}` (e.g. `kind.fleetshift.io/Cluster`).
+  string resource_type = 2 [(google.api.field_behavior) = OUTPUT_ONLY];
+
+  // Managed-resource Get/List body encoded as Struct. Field names follow
+  // the dynamic managed-resource message (protojson casing). This is not
+  // a typed AIP resource message; typed bodies are deferred.
+  google.protobuf.Struct resource = 3 [(google.api.field_behavior) = OUTPUT_ONLY];
+}

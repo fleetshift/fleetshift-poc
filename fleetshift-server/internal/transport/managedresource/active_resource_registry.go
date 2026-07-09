@@ -37,6 +37,13 @@ type ActiveResourceVersion struct {
 	ContentHash [32]byte
 
 	QuerySchema domain.ResourceQuerySchema
+
+	// ServiceDescriptors are the activated dynamic managed-resource
+	// descriptors for this version. Used by QueryResources to project
+	// ExtensionResourceView into the same body shape as typed Get/List.
+	// Nil only for registry entries constructed in tests that do not
+	// exercise body projection.
+	ServiceDescriptors *ServiceDescriptors
 }
 
 // PlatformRegistrationKey identifies a shared platform-canonical

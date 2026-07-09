@@ -27,6 +27,7 @@ var staticServices = map[string]bool{
 	"fleetshift.v1.DeploymentService":          true,
 	"fleetshift.v1.AuthMethodService":          true,
 	"fleetshift.v1.SignerEnrollmentService":    true,
+	"fleetshift.v1.ResourceQueryService":       true,
 	"grpc.reflection.v1.ServerReflection":      true,
 	"grpc.reflection.v1alpha.ServerReflection": true,
 	"grpc.health.v1.Health":                    true,

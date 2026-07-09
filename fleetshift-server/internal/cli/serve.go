@@ -433,6 +433,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		return fmt.Errorf("register resume-managed-resource: %w", err)
 	}
 
+	resourceQuerySvc := application.NewResourceQueryService(store)
+
 	deploymentSvc := &application.DeploymentService{
 		Store:         store,
 		CreateWF:      createWf,
@@ -485,6 +487,10 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	pb.RegisterSignerEnrollmentServiceServer(grpcServer, &transportgrpc.SignerEnrollmentServer{
 		Enrollments: signerEnrollmentSvc,
 	})
+	pb.RegisterResourceQueryServiceServer(grpcServer, &transportgrpc.ResourceQueryServer{
+		Queries:  resourceQuerySvc,
+		Registry: activeResources,
+	})
 	dynamicapi.RegisterCompositeReflection(grpcServer, dynamicMux, fileRegistry)
 
 	grpcLis, err := net.Listen("tcp", f.grpcAddr)
@@ -505,14 +511,19 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if err := pb.RegisterSignerEnrollmentServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
 		return fmt.Errorf("register signer enrollment gateway: %w", err)
 	}
+	if err := pb.RegisterResourceQueryServiceHandlerFromEndpoint(ctx, gwMux, f.grpcAddr, gwOpts); err != nil {
+		return fmt.Errorf("register resource query gateway: %w", err)
+	}
 
 	// Dynamic managed resource HTTP routes are registered directly on
 	// topMux by the SchemaActivator at canonical
 	// /apis/{service}/{version}/{collection} prefixes. Go 1.22+ ServeMux
 	// uses longest-prefix matching, so these always take precedence over
-	// the gateway's /v1/ catch-all.
+	// the gateway's /v1/ catch-all and the platform-owned
+	// /apis/fleetshift.io/ prefix used by QueryResources.
 	topMux := http.NewServeMux()
 	topMux.Handle("/v1/", gwMux)
+	topMux.Handle("/apis/fleetshift.io/", gwMux)
 
 	// HTTP auth middleware — mirrors the gRPC authn interceptor: if
 	// auth methods are configured require a valid OIDC Bearer token,

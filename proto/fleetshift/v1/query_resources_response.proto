@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "fleetshift/v1/resource_result.proto";
+
+// Response message for
+// [ResourceQueryService.QueryResources][fleetshift.v1.ResourceQueryService.QueryResources].
+message QueryResourcesResponse {
+  // The resources matching the query, in the applied order.
+  repeated ResourceResult resources = 1;
+
+  // A token for the next page. If empty, there are no more results.
+  string next_page_token = 2;
+}

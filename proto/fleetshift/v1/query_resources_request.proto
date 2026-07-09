@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package fleetshift.v1;
+
+option go_package = "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1;fleetshiftv1";
+
+import "google/api/field_behavior.proto";
+
+// Request message for
+// [ResourceQueryService.QueryResources][fleetshift.v1.ResourceQueryService.QueryResources].
+message QueryResourcesRequest {
+  // Required. Query scope. Format is a resource-hierarchy path segment
+  // sequence. The only accepted value in v0 is `-` (whole platform
+  // wildcard per AIP-159). Future increments may accept concrete
+  // collection scopes without reshaping this field.
+  string scope = 1 [(google.api.field_behavior) = REQUIRED];
+
+  // Optional CEL filter evaluated against the query envelope and
+  // resource body fields supported by the query repository. Empty
+  // matches all resources in scope.
+  //
+  // This is CEL (the repository's documented subset), not AIP-160
+  // list-filter syntax. AIP-160 itself points to CEL for that use case;
+  // FleetShift uses CEL as the deterministic filter language for
+  // QueryResources.
+  string filter = 2 [(google.api.field_behavior) = OPTIONAL];
+
+  // The maximum number of resources to return. The service may return
+  // fewer than this value. If unspecified, the server applies its
+  // default page size. Values above the server maximum are clamped.
+  int32 page_size = 3 [(google.api.field_behavior) = OPTIONAL];
+
+  // A page token received from a previous QueryResources call. Provide
+  // this to retrieve the subsequent page. Tokens are opaque and bound
+  // to the filter and order_by used when they were issued; mismatched
+  // arguments return INVALID_ARGUMENT.
+  string page_token = 4 [(google.api.field_behavior) = OPTIONAL];
+
+  // Optional ordering. Empty selects the server default stable order.
+  // The only other supported value in v0 is `resource_type,name`.
+  // Unsupported values return INVALID_ARGUMENT.
+  string order_by = 5 [(google.api.field_behavior) = OPTIONAL];
+}
