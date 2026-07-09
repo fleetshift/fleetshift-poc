@@ -377,8 +377,18 @@ func castByHint(expr string, want querysql.TypeHint) querysql.SQLExpr {
 // CASE is used rather than a boolean AND because SQLite does
 // guarantee CASE only evaluates the selected branch.
 func safeJSONNumberCast(expr string) string {
+	// TEXT values are accepted only when they are themselves a JSON
+	// integer/real literal (json_valid + json_type). That rejects
+	// prefix-cast traps like "1e", "1.2.3", and "1-2" that a GLOB of
+	// numeric characters would still allow through CAST(... AS REAL),
+	// matching Postgres's pg_input_is_valid('numeric') intent more
+	// closely than a character-class check.
+	//
+	// expr may contain numbered bind placeholders (?N). Repeating it
+	// is safe because QuestionParams emits reusable ?N indexes, not
+	// bare positional "?".
 	return fmt.Sprintf(
-		`(CASE WHEN typeof(%s) IN ('integer', 'real') THEN %s WHEN typeof(%s) = 'text' AND NOT ((%s) GLOB '*[^0-9.+-eE]*') AND (%s) GLOB '*[0-9]*' THEN CAST((%s) AS REAL) END)`,
+		`(CASE WHEN typeof(%s) IN ('integer', 'real') THEN %s WHEN typeof(%s) = 'text' AND json_valid(%s) AND json_type(%s) IN ('integer', 'real') THEN CAST((%s) AS REAL) END)`,
 		expr, expr, expr, expr, expr, expr,
 	)
 }

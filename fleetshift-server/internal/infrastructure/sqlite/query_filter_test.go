@@ -1,8 +1,8 @@
 // This file tests queryFieldResolver -- this package's
 // [querysql.FieldResolver] implementation for SQLite (json_extract /
-// ->>, QuestionParams, safe numeric/boolean casts without
-// pg_input_is_valid). End-to-end coverage against a real SQLite
-// database lives in queryrepotest.
+// ->>, numbered QuestionParams ?N, safe numeric/boolean casts via
+// json_valid/json_type without pg_input_is_valid). End-to-end
+// coverage against a real SQLite database lives in queryrepotest.
 package sqlite
 
 import (
@@ -121,7 +121,10 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 				}
 			}
 			if strings.Contains(pred.SQL, "$") {
-				t.Errorf("SQL = %q, want QuestionParams (?) not DollarParams", pred.SQL)
+				t.Errorf("SQL = %q, want QuestionParams (?N) not DollarParams", pred.SQL)
+			}
+			if !strings.Contains(pred.SQL, "?1") {
+				t.Errorf("SQL = %q, want numbered ?N placeholders", pred.SQL)
 			}
 		})
 	}
@@ -215,11 +218,74 @@ func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testi
 			if !strings.Contains(pred.SQL, "typeof(") {
 				t.Errorf("SQL = %q, want a typeof(...) guard before the numeric cast", pred.SQL)
 			}
+			if !strings.Contains(pred.SQL, "json_valid(") || !strings.Contains(pred.SQL, "json_type(") {
+				t.Errorf("SQL = %q, want json_valid/json_type guard for TEXT numerics", pred.SQL)
+			}
 			if !strings.Contains(pred.SQL, "CAST(") || !strings.Contains(pred.SQL, "AS REAL") {
 				t.Errorf("SQL = %q, want CAST(... AS REAL) for numeric comparison", pred.SQL)
 			}
+			if strings.Contains(pred.SQL, "GLOB") {
+				t.Errorf("SQL = %q, GLOB character-class guard is too permissive; use json_valid", pred.SQL)
+			}
 		})
 	}
+
+	t.Run("reuses numbered bind for repeated json_extract in cast", func(t *testing.T) {
+		// safeJSONNumberCast repeats the extract expression many
+		// times. With bare "?", each repeat would consume a new
+		// positional slot and leave later args unbound/wrong.
+		pred := compile(t, `resource.labels["priority"] > 4`)
+		if len(pred.Args) != 2 || pred.Args[0] != "priority" || pred.Args[1] != int64(4) {
+			t.Fatalf("Args = %v, want [priority 4] (key bound once)", pred.Args)
+		}
+		if strings.Count(pred.SQL, "?1") < 2 {
+			t.Errorf("SQL = %q, want ?1 reused across cast occurrences", pred.SQL)
+		}
+		if !strings.Contains(pred.SQL, "?2") {
+			t.Errorf("SQL = %q, want comparison literal as ?2", pred.SQL)
+		}
+		// No bare "?" tokens.
+		for _, tok := range strings.FieldsFunc(pred.SQL, func(r rune) bool {
+			return r == ' ' || r == '(' || r == ')' || r == ',' || r == '|' || r == '\''
+		}) {
+			if tok == "?" {
+				t.Errorf("SQL = %q, bare ? is unsafe when expressions repeat", pred.SQL)
+				break
+			}
+		}
+	})
+
+	t.Run("rejects non-numeric text", func(t *testing.T) {
+		// Exercise the guard at evaluation time: malformed numeric
+		// strings must not enter the CAST branch (SQLite would
+		// otherwise CAST by prefix, e.g. "1e" → 1, "8ABC" → 8).
+		db := OpenTestDB(t)
+		cast := safeJSONNumberCast("v")
+		for _, val := range []string{"8ABC", "1e", "1.2.3", "1-2"} {
+			var matched int
+			if err := db.QueryRow(`SELECT CASE WHEN `+cast+` > 0 THEN 1 ELSE 0 END FROM (SELECT ? AS v)`, val).Scan(&matched); err != nil {
+				t.Fatalf("evaluate cast(%q): %v", val, err)
+			}
+			if matched != 0 {
+				t.Fatalf("safeJSONNumberCast(%q) > 0 matched; want NULL/no-match", val)
+			}
+			var isNull int
+			if err := db.QueryRow(`SELECT CASE WHEN `+cast+` IS NULL THEN 1 ELSE 0 END FROM (SELECT ? AS v)`, val).Scan(&isNull); err != nil {
+				t.Fatalf("evaluate nullness(%q): %v", val, err)
+			}
+			if isNull != 1 {
+				t.Fatalf("safeJSONNumberCast(%q) is not NULL; want json_valid/json_type rejection", val)
+			}
+		}
+		// Valid JSON numeric text still casts.
+		var got float64
+		if err := db.QueryRow(`SELECT ` + cast + ` FROM (SELECT '8' AS v)`).Scan(&got); err != nil {
+			t.Fatalf("evaluate valid numeric text: %v", err)
+		}
+		if got != 8 {
+			t.Fatalf("safeJSONNumberCast(%q) = %v, want 8", "8", got)
+		}
+	})
 }
 
 func TestQueryFieldResolver_BooleanJSONCast(t *testing.T) {

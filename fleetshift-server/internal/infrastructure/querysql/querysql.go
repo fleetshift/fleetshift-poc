@@ -136,7 +136,7 @@ type Compiler struct {
 
 	// Params formats bind-parameter placeholders in the generated
 	// SQL. Nil defaults to [DollarParams] (Postgres $N). SQLite
-	// callers should set [QuestionParams].
+	// callers should set [QuestionParams] (?N).
 	Params ParamBinder
 }
 

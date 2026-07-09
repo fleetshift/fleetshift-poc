@@ -55,8 +55,19 @@ func TestCompileFilter_ParamBinderControlsPlaceholders(t *testing.T) {
 		if strings.Contains(pred.SQL, "$") {
 			t.Errorf("SQL = %q, QuestionParams must not emit $N", pred.SQL)
 		}
-		if strings.Count(pred.SQL, "?") != 2 {
-			t.Errorf("SQL = %q, want exactly two ? placeholders", pred.SQL)
+		if !strings.Contains(pred.SQL, "?1") || !strings.Contains(pred.SQL, "?2") {
+			t.Errorf("SQL = %q, want ?1 and ?2 numbered placeholders", pred.SQL)
+		}
+		// Bare "?" (without a following digit) would break reuse when
+		// an expression containing a Bind is repeated; QuestionParams
+		// must always emit ?N.
+		for _, tok := range strings.FieldsFunc(pred.SQL, func(r rune) bool {
+			return r == ' ' || r == '(' || r == ')' || r == ',' || r == '[' || r == ']'
+		}) {
+			if tok == "?" {
+				t.Errorf("SQL = %q, QuestionParams must not emit bare ?", pred.SQL)
+				break
+			}
 		}
 		if len(pred.Args) != 2 || pred.Args[0] != "team" || pred.Args[1] != "platform" {
 			t.Errorf("Args = %v, want [team platform]", pred.Args)

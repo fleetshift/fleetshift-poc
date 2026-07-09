@@ -353,9 +353,10 @@ func explainQueryResources(t *testing.T, db *sql.DB, label, filter, orderBy stri
 	if keysetTok != nil {
 		keysetSQL, args = keysetPredicateSQL(order, *keysetTok, args)
 	}
+	limitPlaceholder := len(args) + 1
 	args = append(args, pageSize+1)
 
-	query := buildQueryResourcesSQL(predicate.SQL, keysetSQL, order)
+	query := buildQueryResourcesSQL(predicate.SQL, keysetSQL, order, limitPlaceholder)
 
 	t.Logf("=== %s ===", label)
 	t.Logf("filter: %q  order_by: %q  page_size: %d  keyset: %v", filter, orderBy, pageSize, keysetTok != nil)

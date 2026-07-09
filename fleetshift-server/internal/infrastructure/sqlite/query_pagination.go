@@ -100,14 +100,15 @@ func resolveQueryOrder(orderBy string) (querySupportedOrder, error) {
 	}
 }
 
-// keysetPredicateSQL builds the row-wise "(cols...) > (?, ...)"
+// keysetPredicateSQL builds the row-wise "(cols...) > (?N, ...)"
 // predicate for order, appending the cursor values from tok onto args.
 // Returns the SQL fragment and the extended args slice. Placeholders
-// are "?" for SQLite's [querysql.QuestionParams] style.
+// are numbered (?N) to match [querysql.QuestionParams] and stay
+// consistent with filter binds that may reuse a single index.
 func keysetPredicateSQL(order querySupportedOrder, tok queryPageToken, args []any) (string, []any) {
 	placeholders := make([]string, len(order.CursorColumns))
 	for i := range order.CursorColumns {
-		placeholders[i] = "?"
+		placeholders[i] = fmt.Sprintf("?%d", len(args)+1+i)
 	}
 	sql := fmt.Sprintf("(%s) > (%s)",
 		strings.Join(order.CursorColumns, ", "),

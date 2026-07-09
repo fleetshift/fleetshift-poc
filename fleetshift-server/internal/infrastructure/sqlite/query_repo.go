@@ -87,11 +87,13 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 	}
 
 	// Fetch one extra row so we can tell whether a NextPageToken is
-	// warranted without a second round trip. LIMIT uses "?" (bound
-	// last) -- see buildQueryResourcesSQL.
+	// warranted without a second round trip. LIMIT uses ?N (bound
+	// last) so it stays consistent with numbered filter/keyset binds
+	// -- see buildQueryResourcesSQL.
+	limitPlaceholder := len(args) + 1
 	args = append(args, limit+1)
 
-	query := buildQueryResourcesSQL(predicateSQL, keysetSQL, order)
+	query := buildQueryResourcesSQL(predicateSQL, keysetSQL, order, limitPlaceholder)
 	rows, err := r.DB.QueryContext(ctx, query, args...)
 	if err != nil {
 		return domain.QueryResourcesPage{}, fmt.Errorf("query resources: %w", err)

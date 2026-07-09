@@ -23,9 +23,10 @@ import "fmt"
 // Platform aggregate rows are intentionally not part of this query.
 //
 // predicateSQL and keysetSQL are trusted, pre-built SQL fragments
-// (parameterized with "?" placeholders only; QueryRepo wires
+// (parameterized with ?N placeholders only; QueryRepo wires
 // querysql.QuestionParams, and user input never reaches this function
 // as raw text). order is a supported order from resolveQueryOrder.
+// limitPlaceholder is the ?N index bound to the page's row limit.
 //
 // # Indexing notes
 //
@@ -41,7 +42,7 @@ import "fmt"
 // SQLite has no GIN-equivalent; that is acceptable for the single-pod
 // / small-fleet deployment target. Hot-key generated columns can be
 // added later if a workload needs them.
-func buildQueryResourcesSQL(predicateSQL, keysetSQL string, order querySupportedOrder) string {
+func buildQueryResourcesSQL(predicateSQL, keysetSQL string, order querySupportedOrder, limitPlaceholder int) string {
 	return fmt.Sprintf(`
 WITH filtered_page AS MATERIALIZED (
 	SELECT
@@ -63,7 +64,7 @@ WITH filtered_page AS MATERIALIZED (
 	WHERE (%s)
 	  AND (%s)
 	ORDER BY %s
-	LIMIT ?
+	LIMIT ?%d
 )
 SELECT
 	fp.collection_name,
@@ -87,7 +88,7 @@ LEFT JOIN fulfillments f ON f.id = erm.fulfillment_id
 LEFT JOIN extension_resource_inventory inv ON inv.extension_resource_uid = er.uid
 ORDER BY %s
 `,
-		predicateSQL, keysetSQL, order.OrderBySQL,
+		predicateSQL, keysetSQL, order.OrderBySQL, limitPlaceholder,
 		fulfillmentColumnsJoined("f"),
 		strategyJoins("f"),
 		order.OrderBySQLQualified,
