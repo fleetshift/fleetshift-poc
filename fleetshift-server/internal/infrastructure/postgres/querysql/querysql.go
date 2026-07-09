@@ -78,6 +78,7 @@ package querysql
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/google/cel-go/cel"
 
@@ -115,6 +116,9 @@ type SQLPredicate struct {
 
 // Compiler is the only [CELSQLCompiler] implementation. It is safe
 // for concurrent use as long as Fields is (or is nil/immutable).
+// CompileFilter shares a package-level *cel.Env (see filterCELEnv)
+// whose declarations never change, so concurrent Compile calls are
+// safe once that env has been initialized.
 type Compiler struct {
 	// Fields resolves the field paths a filter references (envelope
 	// columns, resource.*, resource.inventory.*, ...) to SQL
@@ -129,13 +133,30 @@ type Compiler struct {
 
 var _ CELSQLCompiler = Compiler{}
 
+// filterCELEnv is the shared CEL environment for every CompileFilter
+// call. Variable declarations are fixed (see newCELEnv), so one Env
+// is reused across Compilers and goroutines. Initialized once via
+// filterCELEnvOnce; creation errors are sticky in filterCELEnvErr.
+var (
+	filterCELEnvOnce sync.Once
+	filterCELEnv     *cel.Env
+	filterCELEnvErr  error
+)
+
+func sharedCELEnv() (*cel.Env, error) {
+	filterCELEnvOnce.Do(func() {
+		filterCELEnv, filterCELEnvErr = newCELEnv()
+	})
+	return filterCELEnv, filterCELEnvErr
+}
+
 // CompileFilter implements [CELSQLCompiler].
 func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQLPredicate, error) {
 	if in.Filter == "" {
 		return SQLPredicate{SQL: "TRUE"}, nil
 	}
 
-	env, err := newCELEnv()
+	env, err := sharedCELEnv()
 	if err != nil {
 		return SQLPredicate{}, fmt.Errorf("filter: create CEL environment: %w", err)
 	}
@@ -168,6 +189,10 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 // [FieldResolver]'s job, not cel-go's, since the supported resource.*
 // shape depends on Postgres JSONB layout the CEL type system knows
 // nothing about.
+//
+// Called once from sharedCELEnv. EagerlyValidateDeclarations(true)
+// forces checker init at construction so concurrent Compile calls on
+// the shared Env do not race on lazy checker setup.
 func newCELEnv() (*cel.Env, error) {
 	// Public CEL envelope fields for this iteration: name and
 	// resource_type only. Old POC aliases (kind, platform_name,
@@ -175,6 +200,7 @@ func newCELEnv() (*cel.Env, error) {
 	// intentionally undeclared so CEL rejects them before the field
 	// resolver runs; resource.* validation remains the resolver's job.
 	return cel.NewEnv(
+		cel.EagerlyValidateDeclarations(true),
 		cel.Variable("name", cel.StringType),
 		cel.Variable("resource_type", cel.StringType),
 		cel.Variable("resource", cel.DynType),

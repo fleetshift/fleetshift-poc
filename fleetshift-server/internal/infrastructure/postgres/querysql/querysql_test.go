@@ -14,6 +14,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -57,6 +58,38 @@ func TestCompileFilter_Empty(t *testing.T) {
 	}
 	if len(pred.Args) != 0 {
 		t.Errorf("Args = %v, want empty", pred.Args)
+	}
+}
+
+// TestCompileFilter_ConcurrentSharedCompiler proves a single Compiler
+// (and its shared CEL env) can CompileFilter from many goroutines at
+// once. Run with -race.
+func TestCompileFilter_ConcurrentSharedCompiler(t *testing.T) {
+	c := querysql.Compiler{Fields: stubResolver{}}
+	filters := []string{
+		`resource_type == "kind.fleetshift.io/Cluster"`,
+		`name == "alpha" && resource_type == "kind.fleetshift.io/Cluster"`,
+		`!(name == "beta")`,
+		`resource_type in ["kind.fleetshift.io/Cluster", "kind.fleetshift.io/Node"]`,
+	}
+
+	const goroutines = 32
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines)
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			filter := filters[i%len(filters)]
+			if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter}); err != nil {
+				errCh <- fmt.Errorf("goroutine %d filter %q: %w", i, filter, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		t.Error(err)
 	}
 }
 
