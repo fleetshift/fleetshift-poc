@@ -18,11 +18,11 @@ import (
 type Factory func(t *testing.T) domain.Tx
 
 // RunUnimplemented exercises the contract for a backend that has not
-// yet implemented QueryResources -- see the QueryRepository POC plan's
-// "SQLite" section. It asserts the method exists and fails closed with
-// [domain.ErrUnimplemented] rather than silently returning an empty
-// page, so callers can distinguish "no results" from "not supported
-// yet". SQLite remains ErrUnimplemented in this iteration.
+// yet implemented QueryResources. It asserts the method exists and
+// fails closed with [domain.ErrUnimplemented] rather than silently
+// returning an empty page, so callers can distinguish "no results"
+// from "not supported yet". Both Postgres and SQLite implement
+// QueryResources; keep this helper for any future stub backend.
 func RunUnimplemented(t *testing.T, factory Factory) {
 	t.Run("QueryResourcesReturnsErrUnimplemented", func(t *testing.T) {
 		tx := factory(t)

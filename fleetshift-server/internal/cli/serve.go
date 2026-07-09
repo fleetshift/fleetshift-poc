@@ -139,7 +139,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		store = &sqlite.Store{DB: db}
+		store = &sqlite.Store{DB: db, SchemaProvider: activeResources}
 		vault = &sqlite.VaultStore{DB: db}
 		authMethodRepo = &sqlite.AuthMethodRepo{DB: db}
 	}

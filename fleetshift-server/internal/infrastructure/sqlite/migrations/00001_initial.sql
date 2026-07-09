@@ -196,10 +196,21 @@ CREATE TABLE extension_resources (
         REFERENCES extension_resource_types(service_name, type_name)
 );
 
--- Supports deriving representations for a platform resource: join on
--- (collection_name, resource_id) rather than service_name-prefixed.
-CREATE INDEX idx_extension_resources_collection_resource
-    ON extension_resources(collection_name, resource_id);
+-- QueryResources default order groups by logical resource identity
+-- first (collection_name, resource_id), then by addon type
+-- (service_name, type_name). This composite also covers the former
+-- (collection_name, resource_id) representation-join lookup as a left
+-- prefix, so the narrower idx_extension_resources_collection_resource
+-- is no longer needed (mirrors the Postgres migration).
+CREATE INDEX idx_extension_resources_query_order
+    ON extension_resources(collection_name, resource_id, service_name, type_name);
+
+-- QueryResources "resource_type,name" order mode, and the
+-- resource_type == "service/Type" equality rewrite that compiles to
+-- service_name/type_name constituent predicates (see
+-- ../query_filter.go).
+CREATE INDEX idx_extension_resources_type_query_order
+    ON extension_resources(service_name, type_name, collection_name, resource_id);
 
 -- Aliases split into two tables -- mirrors the Postgres migration's
 -- resource_alias_claims/resource_alias_contributions doc comment
@@ -285,11 +296,12 @@ CREATE TABLE resource_intents (
 -- Mirrors the Postgres migration's extension_resource_inventory
 -- table and doc comment exactly (labels/conditions latest-state JSON,
 -- conditions keyed by type, history deferred to a future async
--- writer) with one gap: SQLite has no GIN-equivalent index, so latest
--- labels/conditions are not searchable here the way Postgres's GIN
--- indexes make them. If SQLite search over labels/conditions becomes
--- necessary, consider generated columns or expression indexes for
--- known keys at that point -- not added speculatively now.
+-- writer) with one gap: SQLite has no GIN-equivalent index, so
+-- QueryResources label/condition equality filters use json_extract /
+-- ->> residual predicates rather than containment+GIN. That is
+-- acceptable for the single-pod / small-fleet SQLite deployment
+-- target; generated columns or expression indexes for known hot keys
+-- can be added later if a workload needs them.
 CREATE TABLE extension_resource_inventory (
     extension_resource_uid TEXT PRIMARY KEY
         REFERENCES extension_resources(uid) ON DELETE CASCADE,

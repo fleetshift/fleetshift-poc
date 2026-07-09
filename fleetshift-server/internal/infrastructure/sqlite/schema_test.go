@@ -11,6 +11,40 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
+func TestExtensionResourcesQueryOrderIndexes(t *testing.T) {
+	db := sqlite.OpenTestDB(t)
+
+	want := map[string]bool{
+		"idx_extension_resources_query_order":      false,
+		"idx_extension_resources_type_query_order": false,
+	}
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'index' AND tbl_name = 'extension_resources'`)
+	if err != nil {
+		t.Fatalf("list indexes: %v", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			t.Fatalf("scan index name: %v", err)
+		}
+		if _, ok := want[name]; ok {
+			want[name] = true
+		}
+		if name == "idx_extension_resources_collection_resource" {
+			t.Fatal("narrow collection_resource index should have been replaced by query_order composite")
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate indexes: %v", err)
+	}
+	for name, found := range want {
+		if !found {
+			t.Errorf("missing index %s", name)
+		}
+	}
+}
+
 func TestResourceRepresentationsSchema_DoesNotExposeLegacyDeletedAt(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 

@@ -616,6 +616,41 @@ func (r *ExtensionResourceRepo) scanView(s interface{ Scan(...any) error }) (dom
 		return domain.ExtensionResourceView{}, err
 	}
 
+	view, err := extensionResourceViewFromColumns(
+		uid, serviceName, typeName, collectionName, resourceID,
+		labelsJSON, reportedAliasesJSON,
+		erCreatedAt, erUpdatedAt,
+		mVersion, mFulfillmentID,
+		riSpec, riCreatedAt,
+		fCols,
+		invLabels, invObservation, invObservedAt, invUpdatedAt,
+		invConditionsJSON,
+	)
+	if err != nil {
+		return domain.ExtensionResourceView{}, err
+	}
+	return view, nil
+}
+
+// extensionResourceViewFromColumns builds a [domain.ExtensionResourceView]
+// from erViewQuerySQLite's already-scanned column values. Factored out of
+// scanView so the query repository's extension-only projection
+// (query_repo.go) can reuse the exact same construction logic against
+// a row it scanned itself, without hydrating each result with a
+// follow-up per-row GetView call.
+func extensionResourceViewFromColumns(
+	uid domain.ExtensionResourceUID,
+	serviceName, typeName, collectionName, resourceID string,
+	labelsJSON, reportedAliasesJSON string,
+	erCreatedAt, erUpdatedAt string,
+	mVersion sql.NullInt64,
+	mFulfillmentID sql.NullString,
+	riSpec, riCreatedAt sql.NullString,
+	fCols nullableFulfillmentScanColumns,
+	invLabels, invObservation sql.NullString,
+	invObservedAt, invUpdatedAt sql.NullString,
+	invConditionsJSON sql.NullString,
+) (domain.ExtensionResourceView, error) {
 	var labels map[string]string
 	if err := json.Unmarshal([]byte(labelsJSON), &labels); err != nil {
 		return domain.ExtensionResourceView{}, fmt.Errorf("unmarshal labels: %w", err)

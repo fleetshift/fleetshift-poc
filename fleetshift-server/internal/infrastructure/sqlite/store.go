@@ -11,6 +11,14 @@ import (
 // Store implements [domain.Store] backed by SQLite.
 type Store struct {
 	DB *sql.DB
+
+	// SchemaProvider is threaded into every QueryRepo this store
+	// hands out (see storeTx.Queries), so query-time
+	// resource.spec.*/resource.inventory.observation.* field
+	// validation can use real descriptors once schemas are activated
+	// (see [domain.QuerySchemaProvider]'s doc). Nil is a valid,
+	// permissive default.
+	SchemaProvider domain.QuerySchemaProvider
 }
 
 func (s *Store) Begin(ctx context.Context) (domain.Tx, error) {
@@ -18,7 +26,7 @@ func (s *Store) Begin(ctx context.Context) (domain.Tx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("begin tx: %w", err)
 	}
-	return &storeTx{tx: tx}, nil
+	return &storeTx{tx: tx, schemaProvider: s.SchemaProvider}, nil
 }
 
 func (s *Store) BeginReadOnly(ctx context.Context) (domain.Tx, error) {
@@ -26,12 +34,13 @@ func (s *Store) BeginReadOnly(ctx context.Context) (domain.Tx, error) {
 	if err != nil {
 		return nil, fmt.Errorf("begin read-only tx: %w", err)
 	}
-	return &storeTx{tx: tx}, nil
+	return &storeTx{tx: tx, schemaProvider: s.SchemaProvider}, nil
 }
 
 type storeTx struct {
-	tx   *sql.Tx
-	done bool
+	tx             *sql.Tx
+	schemaProvider domain.QuerySchemaProvider
+	done           bool
 }
 
 func (t *storeTx) Targets() domain.TargetRepository           { return &TargetRepo{DB: t.tx} }
@@ -48,7 +57,9 @@ func (t *storeTx) SignerEnrollments() domain.SignerEnrollmentRepository {
 func (t *storeTx) ResourceIdentities() domain.ResourceIdentityRepository {
 	return &ResourceIdentityRepo{DB: t.tx}
 }
-func (t *storeTx) Queries() domain.QueryRepository { return &QueryRepo{} }
+func (t *storeTx) Queries() domain.QueryRepository {
+	return &QueryRepo{DB: t.tx, SchemaProvider: t.schemaProvider}
+}
 
 func (t *storeTx) Commit() error {
 	if t.done {

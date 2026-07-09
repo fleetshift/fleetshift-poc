@@ -9,10 +9,13 @@ import "fmt"
 // (they are typically pure functions of the index).
 //
 // This is the dialect seam for parameter style: Postgres uses
-// [DollarParams] ($1, $2, ...); SQLite's database/sql driver uses
-// [QuestionParams] (?, ?, ...). Field resolvers never see the binder
-// directly -- they call [ResolveContext.Bind], which already applies
-// the compiler's configured ParamBinder.
+// [DollarParams] ($1, $2, ...); SQLite uses [QuestionParams]
+// (?1, ?2, ...). Numbered forms matter when a FieldResolver embeds
+// one bound placeholder into an expression that is later repeated
+// (e.g. SQLite's safe JSON casts): a bare "?" would consume a fresh
+// positional slot on every occurrence. Field resolvers never see the
+// binder directly -- they call [ResolveContext.Bind], which already
+// applies the compiler's configured ParamBinder.
 type ParamBinder interface {
 	// Placeholder returns the SQL text for the 1-based parameter
 	// index n. n is always >= 1.
@@ -27,11 +30,14 @@ func (DollarParams) Placeholder(n int) string {
 	return fmt.Sprintf("$%d", n)
 }
 
-// QuestionParams is the SQLite / database/sql-style ParamBinder: a
-// bare "?" for every parameter (positional, not numbered).
+// QuestionParams is the SQLite-style ParamBinder: ?1, ?2, ...
+// Numbered (not bare "?") so a single Bind can be referenced from
+// multiple occurrences of the same SQL expression -- required when
+// SQLite field resolvers wrap a parameterized json_extract in a
+// CASE that repeats the expression.
 type QuestionParams struct{}
 
 // Placeholder implements [ParamBinder].
-func (QuestionParams) Placeholder(int) string {
-	return "?"
+func (QuestionParams) Placeholder(n int) string {
+	return fmt.Sprintf("?%d", n)
 }
