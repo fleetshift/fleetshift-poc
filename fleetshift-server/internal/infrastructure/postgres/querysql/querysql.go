@@ -41,7 +41,7 @@
 //     read from a JSONB column whose *shape differs by
 //     resource_type*, resolved only once resource_type == "..." is
 //     known (see hasResourceTypeGuard), across a single query
-//     spanning every platform and extension row. A library built
+//     spanning every extension resource type. A library built
 //     around one static schema per Convert call has no hook for that.
 //
 // Given both, this package instead implements the documented
@@ -169,15 +169,14 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 // shape depends on Postgres JSONB layout the CEL type system knows
 // nothing about.
 func newCELEnv() (*cel.Env, error) {
+	// Public CEL envelope fields for this iteration: name and
+	// resource_type only. Old POC aliases (kind, platform_name,
+	// service_name, api_version, collection_name, resource_id) are
+	// intentionally undeclared so CEL rejects them before the field
+	// resolver runs; resource.* validation remains the resolver's job.
 	return cel.NewEnv(
-		cel.Variable("kind", cel.StringType),
 		cel.Variable("name", cel.StringType),
-		cel.Variable("platform_name", cel.StringType),
 		cel.Variable("resource_type", cel.StringType),
-		cel.Variable("service_name", cel.StringType),
-		cel.Variable("api_version", cel.StringType),
-		cel.Variable("collection_name", cel.StringType),
-		cel.Variable("resource_id", cel.StringType),
 		cel.Variable("resource", cel.DynType),
 	)
 }

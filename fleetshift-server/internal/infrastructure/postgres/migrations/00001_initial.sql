@@ -204,27 +204,29 @@ CREATE TABLE extension_resources (
         REFERENCES extension_resource_types(service_name, type_name)
 );
 
--- Supports deriving representations for a platform resource: join on
--- (collection_name, resource_id) rather than service_name-prefixed.
-CREATE INDEX idx_extension_resources_collection_resource
-    ON extension_resources(collection_name, resource_id);
+-- QueryResources default order groups by logical resource identity
+-- first (collection_name, resource_id), then by addon type
+-- (service_name, type_name). This composite also covers the former
+-- (collection_name, resource_id) representation-join lookup as a left
+-- prefix, so the narrower idx_extension_resources_collection_resource
+-- is no longer needed.
+CREATE INDEX idx_extension_resources_query_order
+    ON extension_resources(collection_name, resource_id, service_name, type_name);
 
--- Supports QueryResources' resource_type == "service/Type" filter
--- (see ../query_filter.go's envelope column mapping and
--- ../query_sql.go's extension_rows CTE, both of which compute
--- resource_type as exactly this expression). Without this, an
--- EXPLAIN (ANALYZE, BUFFERS) investigation against a ~40k-row
--- extension_resources corpus (see ../query_repo_bench_test.go) showed
--- resource_type equality falling back to a full sequential scan
--- re-concatenating service_name/type_name per row, since resource_type
--- has no stored column of its own to index directly -- costing the
--- same regardless of how selective the filter actually is. Postgres
--- matches a plain WHERE predicate against a matching expression index
--- without needing the query to spell out the expression specially, so
--- this speeds up that filter with no querysql/query_filter.go changes
--- required.
-CREATE INDEX idx_extension_resources_resource_type
-    ON extension_resources ((service_name || '/' || type_name));
+-- QueryResources "resource_type,name" order mode, and the
+-- resource_type == "service/Type" equality rewrite that compiles to
+-- service_name/type_name constituent predicates (see
+-- ../query_filter.go). Replaces the previous expression index on
+-- (service_name || '/' || type_name).
+CREATE INDEX idx_extension_resources_type_query_order
+    ON extension_resources(service_name, type_name, collection_name, resource_id);
+
+-- GIN on extension resource labels so resource.labels["k"] == "v"
+-- can use JSONB containment (@>) after the field resolver's equality
+-- rewrite (see ../query_filter.go). Inventory labels/conditions keep
+-- their own GIN indexes below.
+CREATE INDEX idx_extension_resources_labels_gin
+    ON extension_resources USING GIN (labels);
 
 -- Aliases split into two tables, per the validated
 -- poc/alias-claims/ prototype -- see

@@ -22,7 +22,7 @@ type Factory func(t *testing.T) domain.Tx
 // "SQLite" section. It asserts the method exists and fails closed with
 // [domain.ErrUnimplemented] rather than silently returning an empty
 // page, so callers can distinguish "no results" from "not supported
-// yet".
+// yet". SQLite remains ErrUnimplemented in this iteration.
 func RunUnimplemented(t *testing.T, factory Factory) {
 	t.Run("QueryResourcesReturnsErrUnimplemented", func(t *testing.T) {
 		tx := factory(t)
@@ -35,11 +35,10 @@ func RunUnimplemented(t *testing.T, factory Factory) {
 	})
 }
 
-// Run exercises the full [domain.QueryRepository] contract: a
-// backend that implements CEL filtering over
-// [SeedCoreFixtures]'s platform/extension/virtual resource fixtures.
-// See the QueryRepository POC plan's "Tests" section for the full
-// required-test-case list this mirrors.
+// Run exercises the full [domain.QueryRepository] contract for a
+// backend that implements CEL filtering over extension resources.
+// Platform aggregate rows are intentionally out of scope for this
+// iteration.
 func Run(t *testing.T, factory Factory) {
 	t.Run("EmptyFilter", func(t *testing.T) { runEmptyFilterTests(t, factory) })
 	t.Run("HydrationEquivalence", func(t *testing.T) { runHydrationEquivalenceTests(t, factory) })
@@ -93,12 +92,6 @@ func findByName(results []domain.QueryResourceResult, name string) (domain.Query
 	return domain.QueryResourceResult{}, false
 }
 
-// platformEnvelopeName builds the "//fleetshift.io/{name}" envelope
-// name a platform row (physical or virtual) is expected to report.
-func platformEnvelopeName(name domain.ResourceName) string {
-	return string(domain.NewFullResourceName("fleetshift.io", name))
-}
-
 // extensionEnvelopeName builds the "//{service}/{name}" envelope name
 // an extension row is expected to report.
 func extensionEnvelopeName(rt domain.ResourceType, name domain.ResourceName) string {
@@ -106,36 +99,27 @@ func extensionEnvelopeName(rt domain.ResourceType, name domain.ResourceName) str
 }
 
 func runEmptyFilterTests(t *testing.T, factory Factory) {
-	t.Run("ReturnsBothKinds", func(t *testing.T) {
+	t.Run("ReturnsOnlyExtensionRows", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
 		results := queryAll(t, tx, "")
-
-		var platformCount, extensionCount int
+		if len(results) != 2 {
+			t.Fatalf("len(results) = %d, want 2 (managed + inventory-only extension rows)", len(results))
+		}
 		for _, r := range results {
-			switch r.Kind {
-			case domain.QueryResourceKindPlatform:
-				platformCount++
-			case domain.QueryResourceKindExtension:
-				extensionCount++
-			default:
-				t.Errorf("result %q has unexpected Kind %q", r.Name, r.Kind)
+			if r.Kind != domain.QueryResourceKindExtension {
+				t.Errorf("result %q has Kind %q, want extension", r.Name, r.Kind)
 			}
-		}
-		// 2 extension rows (managed + inventory-only) and 3 platform
-		// rows (the physical platform-only resource, plus a virtual
-		// platform resource derived from each of the two extension
-		// resources -- neither has a physical platform_resources row).
-		if extensionCount != 2 {
-			t.Errorf("extensionCount = %d, want 2", extensionCount)
-		}
-		if platformCount != 3 {
-			t.Errorf("platformCount = %d, want 3", platformCount)
+			if r.Platform != nil {
+				t.Errorf("result %q: Platform is non-nil, want nil", r.Name)
+			}
+			if r.Extension == nil {
+				t.Errorf("result %q: Extension is nil", r.Name)
+			}
 		}
 
 		for _, name := range []string{
-			platformEnvelopeName(fx.PlatformOnlyName),
 			extensionEnvelopeName(fx.ManagedType, fx.ManagedName),
 			extensionEnvelopeName(fx.InventoryType, fx.InventoryName),
 		} {
@@ -145,23 +129,16 @@ func runEmptyFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("IncludesVirtualPlatformResources", func(t *testing.T) {
+	t.Run("IgnoresPlatformOnlyResources", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, `kind == "platform"`)
-		for _, name := range []string{
-			platformEnvelopeName(fx.ManagedName),
-			platformEnvelopeName(fx.InventoryName),
-		} {
-			r, ok := findByName(results, name)
-			if !ok {
-				t.Errorf("missing virtual platform result %q", name)
-				continue
-			}
-			if r.Platform == nil {
-				t.Errorf("result %q: Platform is nil", name)
-			}
+		// Platform-only fixtures remain seeded for other repositories,
+		// but QueryResources must not surface them in this iteration.
+		results := queryAll(t, tx, "")
+		platformName := string(domain.NewFullResourceName("fleetshift.io", fx.PlatformOnlyName))
+		if _, ok := findByName(results, platformName); ok {
+			t.Errorf("unexpected platform-only result %q", platformName)
 		}
 	})
 }
@@ -209,49 +186,5 @@ func runHydrationEquivalenceTests(t *testing.T, factory Factory) {
 			t.Fatalf("result Extension is nil")
 		}
 		assertExtensionViewEqual(t, *got.Extension, want)
-	})
-
-	t.Run("PlatformProjectionEqualsGetByName", func(t *testing.T) {
-		tx, fx := newFixtureTx(t, factory)
-		defer tx.Rollback()
-		ctx := context.Background()
-
-		want, err := tx.ResourceIdentities().GetByName(ctx, fx.PlatformOnlyName)
-		if err != nil {
-			t.Fatalf("GetByName: %v", err)
-		}
-
-		name := platformEnvelopeName(fx.PlatformOnlyName)
-		results := queryAll(t, tx, fmt.Sprintf("name == %q", name))
-		if len(results) != 1 {
-			t.Fatalf("len(results) = %d, want 1 for filter on %q", len(results), name)
-		}
-		got := results[0]
-		if got.Platform == nil {
-			t.Fatalf("result Platform is nil")
-		}
-		assertPlatformResourceEqual(t, got.Platform, want)
-	})
-
-	t.Run("VirtualPlatformProjectionEqualsGetByName", func(t *testing.T) {
-		tx, fx := newFixtureTx(t, factory)
-		defer tx.Rollback()
-		ctx := context.Background()
-
-		want, err := tx.ResourceIdentities().GetByName(ctx, fx.ManagedName)
-		if err != nil {
-			t.Fatalf("GetByName (virtual): %v", err)
-		}
-
-		name := platformEnvelopeName(fx.ManagedName)
-		results := queryAll(t, tx, fmt.Sprintf(`kind == "platform" && name == %q`, name))
-		if len(results) != 1 {
-			t.Fatalf("len(results) = %d, want 1 for filter on %q", len(results), name)
-		}
-		got := results[0]
-		if got.Platform == nil {
-			t.Fatalf("result Platform is nil")
-		}
-		assertPlatformResourceEqual(t, got.Platform, want)
 	})
 }

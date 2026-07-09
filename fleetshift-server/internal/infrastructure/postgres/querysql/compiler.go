@@ -11,30 +11,34 @@ import (
 )
 
 // comparisonOperators maps cel-go's canonical comparison function
-// names to their SQL symbol. Equals/NotEquals are symmetric;
-// the four ordered comparisons get flipped by flipComparison when the
-// literal appears on the left (e.g. `4 < resource.generation`).
-var comparisonOperators = map[string]string{
-	operators.Equals:        "=",
-	operators.NotEquals:     "!=",
-	operators.Less:          "<",
-	operators.LessEquals:    "<=",
-	operators.Greater:       ">",
-	operators.GreaterEquals: ">=",
+// names to their SQL symbol and named [ComparisonOperator].
+// Equals/NotEquals are symmetric; the four ordered comparisons get
+// flipped by flipComparison when the literal appears on the left
+// (e.g. `4 < resource.generation`).
+var comparisonOperators = map[string]struct {
+	sql string
+	op  ComparisonOperator
+}{
+	operators.Equals:        {"=", OpEqual},
+	operators.NotEquals:     {"!=", OpNotEqual},
+	operators.Less:          {"<", OpLess},
+	operators.LessEquals:    {"<=", OpLessEqual},
+	operators.Greater:       {">", OpGreater},
+	operators.GreaterEquals: {">=", OpGreaterEqual},
 }
 
-func flipComparison(op string) string {
+func flipComparison(sql string, op ComparisonOperator) (string, ComparisonOperator) {
 	switch op {
-	case "<":
-		return ">"
-	case "<=":
-		return ">="
-	case ">":
-		return "<"
-	case ">=":
-		return "<="
+	case OpLess:
+		return ">", OpGreater
+	case OpLessEqual:
+		return ">=", OpGreaterEqual
+	case OpGreater:
+		return "<", OpLess
+	case OpGreaterEqual:
+		return "<=", OpLessEqual
 	default:
-		return op
+		return sql, op
 	}
 }
 
@@ -116,7 +120,7 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 		return "", err
 	}
 
-	op := comparisonOperators[fn]
+	cmp := comparisonOperators[fn]
 
 	var path FieldPath
 	var lit any
@@ -124,7 +128,8 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 	case left.isField && right.isLit:
 		path, lit = left.path, right.lit
 	case right.isField && left.isLit:
-		path, lit, op = right.path, left.lit, flipComparison(op)
+		path, lit = right.path, left.lit
+		cmp.sql, cmp.op = flipComparison(cmp.sql, cmp.op)
 	default:
 		return "", fmt.Errorf("filter: %w: comparisons must be between a field and a literal", domain.ErrInvalidArgument)
 	}
@@ -133,7 +138,16 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s %s %s", expr.SQL, op, st.b.bind(lit)), nil
+	if expr.Compare != nil {
+		sql, handled, err := expr.Compare(cmp.op, lit, st.b.bind)
+		if err != nil {
+			return "", err
+		}
+		if handled {
+			return sql, nil
+		}
+	}
+	return fmt.Sprintf("%s %s %s", expr.SQL, cmp.sql, st.b.bind(lit)), nil
 }
 
 // compileIn handles `field in [literal, ...]`. An empty list compiles
@@ -193,6 +207,16 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 		// produced (e.g. a label key) referenced by the SQL text
 		// instead of left dangling and unused.
 		return fmt.Sprintf("(%s IS NOT NULL AND FALSE)", expr.SQL), nil
+	}
+
+	if expr.In != nil {
+		sql, handled, err := expr.In(values, st.b.bind)
+		if err != nil {
+			return "", err
+		}
+		if handled {
+			return sql, nil
+		}
 	}
 
 	placeholders := make([]string, len(values))

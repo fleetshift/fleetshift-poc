@@ -5,14 +5,13 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // defaultQueryPageSize/maxQueryPageSize implement
-// [domain.QueryResourcesRequest.PageSize]'s documented default/max
-// (see the QueryRepository POC plan's "Default Ordering and
-// Pagination" section).
+// [domain.QueryResourcesRequest.PageSize]'s documented default/max.
 const (
 	defaultQueryPageSize = 50
 	maxQueryPageSize     = 500
@@ -31,36 +30,115 @@ func clampQueryPageSize(requested int32) int {
 	return int(requested)
 }
 
-// queryResultsOrderBy is QueryResources' deterministic default
-// ordering, applied inside filtered_page (unqualified: that CTE's
-// WHERE/ORDER BY only ever sees all_rows' columns, so there is no
-// ambiguity to qualify away). It is also, column-for-column, the
-// keyset [queryPageToken] encodes.
-const queryResultsOrderBy = "kind, service_name, collection_name, resource_id, type_name"
+// queryOrderMode is one of the small explicit orderings QueryResources
+// supports. Arbitrary order_by expressions are rejected.
+type queryOrderMode string
 
-// queryResultsOrderByQualified is the same ordering re-applied,
-// fp-qualified, on buildQueryResourcesSQL's final SELECT. CTE row
-// order is not a guarantee Postgres documents once the plan adds the
-// LEFT JOIN LATERALs, so the outer query re-sorts explicitly rather
-// than relying on filtered_page's internal ordering surviving the
-// join. It must be qualified here because extv/plat's LATERAL output
-// also has columns like service_name that would otherwise collide.
-const queryResultsOrderByQualified = "fp.kind, fp.service_name, fp.collection_name, fp.resource_id, fp.type_name"
+const (
+	// queryOrderDefault groups by logical resource identity first
+	// (collection_name, resource_id), then by addon type. Backed by
+	// idx_extension_resources_query_order.
+	queryOrderDefault queryOrderMode = ""
+	// queryOrderResourceTypeName groups by resource type first, then
+	// by relative resource identity. Requested as "resource_type,name".
+	// Backed by idx_extension_resources_type_query_order.
+	queryOrderResourceTypeName queryOrderMode = "resource_type,name"
+)
 
-const queryPageTokenVersion = 1
+// querySupportedOrder describes one supported ORDER BY / keyset shape.
+type querySupportedOrder struct {
+	Mode queryOrderMode
+
+	// OrderBySQL is the unqualified ORDER BY clause used inside
+	// filtered_page (columns are already scoped to that CTE).
+	OrderBySQL string
+	// OrderBySQLQualified is the same ordering re-applied, fp-qualified,
+	// on the final SELECT after LATERAL hydration.
+	OrderBySQLQualified string
+	// CursorColumns are the er-qualified columns the keyset predicate
+	// compares, in order.
+	CursorColumns []string
+}
+
+var (
+	queryOrderDefaultSpec = querySupportedOrder{
+		Mode:                queryOrderDefault,
+		OrderBySQL:          "collection_name, resource_id, service_name, type_name",
+		OrderBySQLQualified: "fp.collection_name, fp.resource_id, fp.service_name, fp.type_name",
+		CursorColumns: []string{
+			"er.collection_name",
+			"er.resource_id",
+			"er.service_name",
+			"er.type_name",
+		},
+	}
+	queryOrderResourceTypeNameSpec = querySupportedOrder{
+		Mode:                queryOrderResourceTypeName,
+		OrderBySQL:          "service_name, type_name, collection_name, resource_id",
+		OrderBySQLQualified: "fp.service_name, fp.type_name, fp.collection_name, fp.resource_id",
+		CursorColumns: []string{
+			"er.service_name",
+			"er.type_name",
+			"er.collection_name",
+			"er.resource_id",
+		},
+	}
+)
+
+// resolveQueryOrder maps a request OrderBy string to a supported
+// order. Empty selects the default. Unsupported values return
+// [domain.ErrInvalidArgument].
+func resolveQueryOrder(orderBy string) (querySupportedOrder, error) {
+	switch queryOrderMode(strings.TrimSpace(orderBy)) {
+	case queryOrderDefault:
+		return queryOrderDefaultSpec, nil
+	case queryOrderResourceTypeName:
+		return queryOrderResourceTypeNameSpec, nil
+	default:
+		return querySupportedOrder{}, fmt.Errorf("order_by: %w: unsupported ordering %q (supported: \"\", %q)",
+			domain.ErrInvalidArgument, orderBy, queryOrderResourceTypeName)
+	}
+}
+
+// keysetPredicateSQL builds the row-wise "(cols...) > ($N, ...)"
+// predicate for order, appending the cursor values from tok onto args.
+// Returns the SQL fragment and the extended args slice.
+func keysetPredicateSQL(order querySupportedOrder, tok queryPageToken, args []any) (string, []any) {
+	placeholders := make([]string, len(order.CursorColumns))
+	for i := range order.CursorColumns {
+		placeholders[i] = fmt.Sprintf("$%d", len(args)+1+i)
+	}
+	sql := fmt.Sprintf("(%s) > (%s)",
+		strings.Join(order.CursorColumns, ", "),
+		strings.Join(placeholders, ", "))
+
+	// Cursor values follow CursorColumns order for each mode.
+	switch order.Mode {
+	case queryOrderResourceTypeName:
+		args = append(args, tok.ServiceName, tok.TypeName, tok.CollectionName, tok.ResourceID)
+	default:
+		args = append(args, tok.CollectionName, tok.ResourceID, tok.ServiceName, tok.TypeName)
+	}
+	return sql, args
+}
+
+// Bumped from 1: the previous POC token carried kind and used a
+// different default order. Existing tokens are intentionally not
+// compatible.
+const queryPageTokenVersion = 2
 
 // queryPageToken is the opaque page token payload for QueryResources
-// keyset pagination. Each field mirrors one queryResultsOrderBy
-// column, in order, so a token's keyset can drive a row-wise
-// "(cols...) > (vals...)" predicate directly.
+// keyset pagination. Each cursor field mirrors one ordering column so
+// a token's keyset can drive a row-wise "(cols...) > (vals...)"
+// predicate directly. OrderBy records the selected supported order
+// mode (empty for default).
 type queryPageToken struct {
 	Version        int    `json:"version"`
 	FilterHash     string `json:"filter_hash"`
 	OrderBy        string `json:"order_by"`
-	Kind           string `json:"kind"`
-	ServiceName    string `json:"service_name"`
 	CollectionName string `json:"collection_name"`
 	ResourceID     string `json:"resource_id"`
+	ServiceName    string `json:"service_name"`
 	TypeName       string `json:"type_name"`
 }
 

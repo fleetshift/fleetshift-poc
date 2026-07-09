@@ -11,36 +11,6 @@ import (
 )
 
 func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
-	t.Run("KindExtensionReturnsOnlyExtensionRows", func(t *testing.T) {
-		tx, _ := newFixtureTx(t, factory)
-		defer tx.Rollback()
-
-		results := queryAll(t, tx, `kind == "extension"`)
-		if len(results) != 2 {
-			t.Fatalf("len(results) = %d, want 2", len(results))
-		}
-		for _, r := range results {
-			if r.Kind != domain.QueryResourceKindExtension {
-				t.Errorf("result %q has Kind %q, want extension", r.Name, r.Kind)
-			}
-		}
-	})
-
-	t.Run("KindPlatformReturnsOnlyPlatformRows", func(t *testing.T) {
-		tx, _ := newFixtureTx(t, factory)
-		defer tx.Rollback()
-
-		results := queryAll(t, tx, `kind == "platform"`)
-		if len(results) != 3 {
-			t.Fatalf("len(results) = %d, want 3", len(results))
-		}
-		for _, r := range results {
-			if r.Kind != domain.QueryResourceKindPlatform {
-				t.Errorf("result %q has Kind %q, want platform", r.Name, r.Kind)
-			}
-		}
-	})
-
 	t.Run("ResourceTypeReturnsManagedCluster", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
@@ -51,6 +21,9 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		}
 		if results[0].Name != extensionEnvelopeName(fx.ManagedType, fx.ManagedName) {
 			t.Errorf("result Name = %q, want the managed cluster's envelope name", results[0].Name)
+		}
+		if results[0].Kind != domain.QueryResourceKindExtension {
+			t.Errorf("Kind = %q, want extension", results[0].Kind)
 		}
 	})
 
@@ -66,80 +39,41 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		if results[0].Kind != domain.QueryResourceKindExtension {
 			t.Errorf("Kind = %q, want extension", results[0].Kind)
 		}
-	})
-
-	t.Run("PlatformRowsHaveEmptyResourceTypeAndAPIVersion", func(t *testing.T) {
-		tx, _ := newFixtureTx(t, factory)
-		defer tx.Rollback()
-
-		// Platform rows project resource_type/api_version as SQL ''
-		// (not NULL), matching QueryResourceResult's documented
-		// empty-string convention for "not applicable to this kind"
-		// (see ResourceType's doc). If the CTE ever regresses to NULL,
-		// this comparison goes to SQL's three-valued NULL rather than
-		// TRUE and silently drops every platform row.
-		results := queryAll(t, tx, `resource_type == "" && api_version == ""`)
-		if len(results) != 3 {
-			t.Fatalf("len(results) = %d, want 3 (all platform rows)", len(results))
-		}
-		for _, r := range results {
-			if r.Kind != domain.QueryResourceKindPlatform {
-				t.Errorf("result %q has Kind %q, want platform", r.Name, r.Kind)
-			}
+		if results[0].Platform != nil {
+			t.Errorf("Platform is non-nil, want nil")
 		}
 	})
 
-	t.Run("ResourceTypeNotEqualIncludesPlatformRows", func(t *testing.T) {
+	t.Run("ResourceTypeNotEqualExcludesOnlyThatType", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		// A negative resource_type filter should include rows that
-		// have no resource_type at all (platform rows), not just
-		// extension rows of a different type. Under NULL-based
-		// projection, `NULL != 'literal'` is itself NULL (not TRUE),
-		// so this previously dropped every platform row too.
 		filter := fmt.Sprintf("resource_type != %q", string(fx.ManagedType))
 		results := queryAll(t, tx, filter)
-
-		var sawPlatform, sawOtherExtension bool
-		for _, r := range results {
-			switch r.Kind {
-			case domain.QueryResourceKindPlatform:
-				sawPlatform = true
-			case domain.QueryResourceKindExtension:
-				if r.Name == extensionEnvelopeName(fx.ManagedType, fx.ManagedName) {
-					t.Errorf("result %q is the excluded resource_type, should not be present", r.Name)
-				}
-				sawOtherExtension = true
-			}
+		if len(results) != 1 {
+			t.Fatalf("len(results) = %d, want 1 (inventory-only node)", len(results))
 		}
-		if !sawPlatform {
-			t.Error("expected platform rows to be included in a resource_type != ... filter")
-		}
-		if !sawOtherExtension {
-			t.Error("expected the other extension type (inventory-only node) to be included")
+		if results[0].Name != extensionEnvelopeName(fx.InventoryType, fx.InventoryName) {
+			t.Errorf("result Name = %q, want the inventory-only node", results[0].Name)
 		}
 	})
 
-	t.Run("PlatformNameReturnsBothPlatformAndExtensionRow", func(t *testing.T) {
+	t.Run("OldPOCEnvelopeFieldsAreInvalid", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, fmt.Sprintf("platform_name == %q", string(fx.ManagedName)))
-		if len(results) != 2 {
-			t.Fatalf("len(results) = %d, want 2 (virtual platform row + extension row)", len(results))
-		}
-		var sawPlatform, sawExtension bool
-		for _, r := range results {
-			switch r.Kind {
-			case domain.QueryResourceKindPlatform:
-				sawPlatform = true
-			case domain.QueryResourceKindExtension:
-				sawExtension = true
+		for _, filter := range []string{
+			`kind == "extension"`,
+			`platform_name == "clusters/managed"`,
+			`service_name == "kind.fleetshift.io"`,
+			`api_version == "v1"`,
+			`collection_name == "clusters"`,
+			fmt.Sprintf(`resource_id == %q`, string(fx.ManagedName.ID())),
+		} {
+			err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
 			}
-		}
-		if !sawPlatform || !sawExtension {
-			t.Errorf("sawPlatform=%v sawExtension=%v, want both true", sawPlatform, sawExtension)
 		}
 	})
 }
@@ -155,19 +89,6 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		}
 		if results[0].Name != extensionEnvelopeName(fx.ManagedType, fx.ManagedName) {
 			t.Errorf("result Name = %q, want the managed cluster", results[0].Name)
-		}
-	})
-
-	t.Run("PlatformLabelsFilter", func(t *testing.T) {
-		tx, fx := newFixtureTx(t, factory)
-		defer tx.Rollback()
-
-		results := queryAll(t, tx, `resource.labels["env"] == "prod"`)
-		if len(results) != 1 {
-			t.Fatalf("len(results) = %d, want 1", len(results))
-		}
-		if results[0].Name != platformEnvelopeName(fx.PlatformOnlyName) {
-			t.Errorf("result Name = %q, want the platform-only resource", results[0].Name)
 		}
 	})
 
@@ -224,9 +145,6 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Errorf("result Name = %q, want the inventory-only node", results[0].Name)
 		}
 
-		// A threshold the fixture's cpu=8 observation does not clear
-		// should exclude the row, proving the comparison is a real
-		// numeric one and not e.g. a always-true text comparison.
 		filter = fmt.Sprintf(`resource_type == %q && resource.inventory.observation.capacity.cpu > 100`, string(fx.InventoryType))
 		results = queryAll(t, tx, filter)
 		if len(results) != 0 {
@@ -239,14 +157,6 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 		ctx := context.Background()
 
-		// Seed a second resource type sharing the exact same
-		// observation JSON path (capacity.cpu) as fx.InventoryType,
-		// but with a non-numeric value at that path. A plain
-		// WHERE-clause AND gives Postgres no evaluation-order
-		// guarantee, so an unconditional ::numeric cast on this
-		// column can still be attempted against this row even when
-		// the query is guarded by resource_type == fx.InventoryType;
-		// see querysql's safeJSONCast doc.
 		conflictType := domain.ResourceType("kubernetes.fleetshift.io/BrokenNode")
 		seedInventoryType(t, tx, conflictType)
 		conflictUID := domain.NewExtensionResourceUID()
@@ -304,6 +214,23 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Errorf("result Name = %q, want the managed cluster", results[0].Name)
 		}
 	})
+
+	t.Run("PlatformOnlyBodyFieldsAreInvalid", func(t *testing.T) {
+		tx, _ := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		for _, filter := range []string{
+			`resource.effective_labels["env"] == "prod"`,
+			`resource.representations == "x"`,
+			`resource.aliases == "x"`,
+			`resource.relationships == "x"`,
+		} {
+			err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
+		}
+	})
 }
 
 func runInvalidFilterTests(t *testing.T, factory Factory) {
@@ -321,7 +248,7 @@ func runInvalidFilterTests(t *testing.T, factory Factory) {
 		tx, _ := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: `kind ==`})
+		err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: `name ==`})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("err = %v, want ErrInvalidArgument", err)
 		}

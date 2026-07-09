@@ -2,11 +2,11 @@ package postgres
 
 // This file gets an EXPLAIN (ANALYZE, BUFFERS) plan for
 // buildQueryResourcesSQL (see query_sql.go) against a
-// realistic-scale corpus, so query_sql.go's "Indexing limitations
-// (POC scope)" doc comment is backed by an actual plan rather than a
-// guess -- see the QueryRepository POC plan's "Future Follow-Ups"
-// entries "Add SQL index recommendations per registered query field"
-// and "Add explain/debug output for query planning".
+// realistic-scale corpus, so query_sql.go's indexing notes are
+// backed by an actual plan rather than a guess.
+//
+// Platform rows are still seeded for comparison only -- QueryResources
+// itself ignores them in this extension-only iteration.
 //
 // It follows inventory_bench_test.go's own EXPLAIN-driven
 // investigation pattern: a dedicated bench container/corpus (see
@@ -56,8 +56,8 @@ const (
 
 	// qrbPlatformOnlyCollection holds physical-only platform
 	// resources -- no extension resource ever shares this
-	// collection -- so all_rows' platform_physical/platform_virtual
-	// split has real volume on both sides (see query_sql.go).
+	// collection. Seeded only so we can confirm QueryResources
+	// ignores them; the query itself never reads platform_resources.
 	qrbPlatformOnlyCollection = "assets"
 
 	// qrbClusterCount/qrbNodeCount/qrbPlatformOnlyCount pick a scale
@@ -320,8 +320,12 @@ func qrbTableSizes(t *testing.T, db *sql.DB) {
 // second-page keyset predicate the same way a real PageToken would;
 // the exact values don't need to correspond to a real first page for
 // planning purposes, only their types matter.
-func explainQueryResources(t *testing.T, db *sql.DB, label, filter string, pageSize int, keysetTok *queryPageToken) {
+func explainQueryResources(t *testing.T, db *sql.DB, label, filter, orderBy string, pageSize int, keysetTok *queryPageToken) {
 	t.Helper()
+	order, err := resolveQueryOrder(orderBy)
+	if err != nil {
+		t.Fatalf("%s: resolve order %q: %v", label, orderBy, err)
+	}
 	compiler := querysql.Compiler{Fields: queryFieldResolver{}}
 	predicate, err := compiler.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter})
 	if err != nil {
@@ -331,20 +335,16 @@ func explainQueryResources(t *testing.T, db *sql.DB, label, filter string, pageS
 
 	keysetSQL := "TRUE"
 	if keysetTok != nil {
-		keysetSQL = fmt.Sprintf(
-			"(kind, service_name, collection_name, resource_id, type_name) > ($%d, $%d, $%d, $%d, $%d)",
-			len(args)+1, len(args)+2, len(args)+3, len(args)+4, len(args)+5,
-		)
-		args = append(args, keysetTok.Kind, keysetTok.ServiceName, keysetTok.CollectionName, keysetTok.ResourceID, keysetTok.TypeName)
+		keysetSQL, args = keysetPredicateSQL(order, *keysetTok, args)
 	}
 
 	limitPlaceholder := len(args) + 1
 	args = append(args, pageSize+1)
 
-	query := buildQueryResourcesSQL(predicate.SQL, keysetSQL, limitPlaceholder)
+	query := buildQueryResourcesSQL(predicate.SQL, keysetSQL, order, limitPlaceholder)
 
 	t.Logf("=== %s ===", label)
-	t.Logf("filter: %q  page_size: %d  keyset: %v", filter, pageSize, keysetTok != nil)
+	t.Logf("filter: %q  order_by: %q  page_size: %d  keyset: %v", filter, orderBy, pageSize, keysetTok != nil)
 	rows, err := db.QueryContext(context.Background(), "EXPLAIN (ANALYZE, BUFFERS) "+query, args...)
 	if err != nil {
 		t.Fatalf("%s: explain: %v", label, err)
@@ -388,24 +388,29 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 	qrbTableSizes(t, db)
 	t.Log("")
 
-	explainQueryResources(t, db, "empty filter (default first page)", "", defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "kind == extension", `kind == "extension"`, defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "kind == platform", `kind == "platform"`, defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "selective envelope filter (resource_type equality)",
-		fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType), defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "extension label filter (JSONB, no index)",
-		`resource.labels["team"] == "platform"`, defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "guarded spec filter (JSONB, no index)",
+	// Empty-filter first page should seek idx_extension_resources_query_order.
+	explainQueryResources(t, db, "empty filter (default first page)", "", "", defaultQueryPageSize, nil)
+	// Second page should keyset-seek rather than full rescan/sort.
+	explainQueryResources(t, db, "empty filter (default second page keyset)", "", "", defaultQueryPageSize, &queryPageToken{
+		CollectionName: qrbClusterCollection,
+		ResourceID:     "cluster-00000049",
+		ServiceName:    qrbClusterService,
+		TypeName:       qrbClusterType,
+	})
+	explainQueryResources(t, db, "resource_type,name order first page", "", "resource_type,name", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "selective resource_type equality (constituent columns)",
+		fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType), "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "extension label equality (GIN containment)",
+		`resource.labels["team"] == "platform"`, "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "guarded spec filter",
 		fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`, qrbClusterService, qrbClusterType),
-		defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "inventory label filter (existing GIN index does not match ->> shape)",
-		`resource.inventory.labels["node-role"] == "worker"`, defaultQueryPageSize, nil)
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "inventory label equality (GIN containment)",
+		`resource.inventory.labels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "inventory condition equality (GIN containment)",
+		`resource.inventory.conditions["Ready"].status == "True"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "guarded numeric observation filter (safeJSONCast)",
 		fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
-		defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "max page size (500), empty filter", "", maxQueryPageSize, nil)
-	explainQueryResources(t, db, "keyset continuation (second page, empty filter)", "", defaultQueryPageSize, &queryPageToken{
-		Kind: "extension", ServiceName: qrbClusterService, CollectionName: qrbClusterCollection,
-		ResourceID: "cluster-00000049", TypeName: qrbClusterType,
-	})
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "max page size (500), empty filter", "", "", maxQueryPageSize, nil)
 }

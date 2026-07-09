@@ -10,7 +10,7 @@ import (
 // FieldPath is a CEL field-select/index chain flattened to its
 // segment names, outermost-first -- e.g. resource.labels["team"]
 // becomes ["resource", "labels", "team"]; a bare envelope identifier
-// like kind becomes ["kind"]. See fieldPathFromExpr for how a CEL AST
+// like name becomes ["name"]. See fieldPathFromExpr for how a CEL AST
 // expression becomes a FieldPath.
 type FieldPath struct {
 	Segments []string
@@ -37,9 +37,38 @@ const (
 	TypeHintNumber
 )
 
+// ComparisonOperator is the named comparison the compiler asks a
+// [SQLExpr.Compare] hook to handle. Using a named type (rather than
+// raw SQL operator strings) keeps the FleetShift field resolver from
+// depending on the compiler's SQL spelling of each operator.
+type ComparisonOperator int
+
+const (
+	OpEqual ComparisonOperator = iota
+	OpNotEqual
+	OpLess
+	OpLessEqual
+	OpGreater
+	OpGreaterEqual
+)
+
 // SQLExpr is a field path resolved to a SQL expression.
+//
+// Compare, when non-nil, lets a field mapping override the generic
+// "SQL op $literal" compilation for a specific comparison. Returning
+// handled=false falls back to the generic path. This is how
+// resource.labels["k"] == "v" becomes a GIN-friendly JSONB
+// containment predicate, and how name/resource_type equality can
+// special-case to constituent-column predicates.
+//
+// In, when non-nil, likewise overrides the generic "SQL IN (...)"
+// path -- e.g. resource_type in ["a/T", "b/U"] becomes
+// (er.service_name, er.type_name) IN (('a','T'), ('b','U')).
 type SQLExpr struct {
 	SQL string
+
+	Compare func(op ComparisonOperator, lit any, bind func(any) string) (sql string, handled bool, err error)
+	In      func(values []any, bind func(any) string) (sql string, handled bool, err error)
 }
 
 // ResolveContext carries the per-compilation state a [FieldResolver]

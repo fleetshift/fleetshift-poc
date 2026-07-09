@@ -73,42 +73,42 @@ func TestCompileFilter_LogicalAndComparisonMechanics(t *testing.T) {
 	}{
 		{
 			name:     "equals",
-			filter:   `kind == "extension"`,
-			wantArgs: []any{"extension"},
+			filter:   `resource_type == "kind.fleetshift.io/Cluster"`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster"},
 		},
 		{
 			name:     "not equals",
-			filter:   `kind != "extension"`,
-			wantArgs: []any{"extension"},
+			filter:   `resource_type != "kind.fleetshift.io/Cluster"`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster"},
 		},
 		{
 			name:     "and",
-			filter:   `kind == "extension" && resource_type == "kind.fleetshift.io/Cluster"`,
-			wantArgs: []any{"extension", "kind.fleetshift.io/Cluster"},
+			filter:   `resource_type == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster", "//kind.fleetshift.io/clusters/managed"},
 		},
 		{
 			name:     "or",
-			filter:   `kind == "extension" || kind == "platform"`,
-			wantArgs: []any{"extension", "platform"},
+			filter:   `resource_type == "kind.fleetshift.io/Cluster" || resource_type == "kubernetes.fleetshift.io/Node"`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"},
 		},
 		{
 			name:     "not",
-			filter:   `!(kind == "platform")`,
-			wantArgs: []any{"platform"},
+			filter:   `!(resource_type == "kind.fleetshift.io/Cluster")`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster"},
 		},
 		{
 			name:     "literal on left flips operator",
-			filter:   `"clusters/managed" == platform_name`,
-			wantArgs: []any{"clusters/managed"},
+			filter:   `"//kind.fleetshift.io/clusters/managed" == name`,
+			wantArgs: []any{"//kind.fleetshift.io/clusters/managed"},
 		},
 		{
 			name:     "in list",
-			filter:   `kind in ["platform", "extension"]`,
-			wantArgs: []any{"platform", "extension"},
+			filter:   `resource_type in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
+			wantArgs: []any{"kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"},
 		},
 		{
 			name:     "in list is empty",
-			filter:   `kind in []`,
+			filter:   `resource_type in []`,
 			wantArgs: []any{},
 		},
 	}
@@ -137,8 +137,8 @@ func TestCompileFilter_LogicalAndComparisonMechanics(t *testing.T) {
 // label key) stays referenced by the SQL text instead of dangling
 // unused.
 func TestCompileFilter_InEmptyListReferencesResolvedField(t *testing.T) {
-	pred := compile(t, `kind in []`)
-	if !strings.Contains(pred.SQL, "kind") {
+	pred := compile(t, `resource_type in []`)
+	if !strings.Contains(pred.SQL, "resource_type") {
 		t.Errorf("SQL = %q, want it to still reference the resolved field", pred.SQL)
 	}
 	if !strings.Contains(pred.SQL, "FALSE") {
@@ -157,11 +157,11 @@ func TestCompileFilter_TypeHintDerivedFromLiteral(t *testing.T) {
 		filter   string
 		wantHint querysql.TypeHint
 	}{
-		{"string literal", `kind == "extension"`, querysql.TypeHintString},
+		{"string literal", `resource_type == "kind.fleetshift.io/Cluster"`, querysql.TypeHintString},
 		{"int literal", `resource.generation == 3`, querysql.TypeHintNumber},
 		{"bool literal", `resource.healthy == true`, querysql.TypeHintBool},
 		{"literal on left", `3 < resource.generation`, querysql.TypeHintNumber},
-		{"in list uses first element", `kind in ["a", "b"]`, querysql.TypeHintString},
+		{"in list uses first element", `resource_type in ["a", "b"]`, querysql.TypeHintString},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -199,7 +199,7 @@ func (f recordingResolver) Resolve(path querysql.FieldPath, hint querysql.TypeHi
 func TestCompileFilter_ComparisonRequiresFieldAndLiteral(t *testing.T) {
 	for _, filter := range []string{
 		`"a" == "b"`,
-		`kind == resource_type`,
+		`name == resource_type`,
 	} {
 		err := compileErr(t, filter)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -213,14 +213,14 @@ func TestCompileFilter_ComparisonRequiresFieldAndLiteral(t *testing.T) {
 // as soon as a filter actually references a field.
 func TestCompileFilter_NoResolverConfigured(t *testing.T) {
 	c := querysql.Compiler{}
-	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `kind == "extension"`})
+	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resource_type == "kind.fleetshift.io/Cluster"`})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("err = %v, want ErrInvalidArgument", err)
 	}
 }
 
 func TestCompileFilter_InvalidSyntax(t *testing.T) {
-	err := compileErr(t, `kind ==`)
+	err := compileErr(t, `name ==`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("err = %v, want ErrInvalidArgument", err)
 	}
@@ -241,7 +241,7 @@ func TestCompileFilter_UnsupportedMacro(t *testing.T) {
 
 func TestCompileFilter_UnsupportedOperators(t *testing.T) {
 	for _, filter := range []string{
-		`kind.matches("ext.*")`,
+		`name.matches("ext.*")`,
 		`1 + 1 == 2`,
 	} {
 		err := compileErr(t, filter)
@@ -283,7 +283,7 @@ func TestCompileFilter_ResolverErrorPropagates(t *testing.T) {
 	c := querysql.Compiler{Fields: recordingResolver(func(querysql.FieldPath, querysql.TypeHint, querysql.ResolveContext) (querysql.SQLExpr, error) {
 		return querysql.SQLExpr{}, sentinel
 	})}
-	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `kind == "extension"`})
+	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resource_type == "kind.fleetshift.io/Cluster"`})
 	if !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want it to wrap the resolver's error", err)
 	}
@@ -302,7 +302,7 @@ func TestCompileFilter_InEmptyListStillResolvesField(t *testing.T) {
 	c := querysql.Compiler{Fields: recordingResolver(func(querysql.FieldPath, querysql.TypeHint, querysql.ResolveContext) (querysql.SQLExpr, error) {
 		return querysql.SQLExpr{}, sentinel
 	})}
-	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `kind in []`})
+	_, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: `resource_type in []`})
 	if !errors.Is(err, sentinel) {
 		t.Errorf("err = %v, want it to wrap the resolver's error even for an empty \"in\" list", err)
 	}
@@ -322,7 +322,7 @@ func TestCompileFilter_GuardInsideOrDoesNotCount(t *testing.T) {
 	})}
 
 	if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `resource_type == "kind.fleetshift.io/Cluster" && kind == "extension"`,
+		Filter: `resource_type == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
 	}); err != nil {
 		t.Fatalf("CompileFilter: unexpected error: %v", err)
 	}
@@ -332,11 +332,87 @@ func TestCompileFilter_GuardInsideOrDoesNotCount(t *testing.T) {
 
 	gotGuard = nil
 	if _, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-		Filter: `(resource_type == "kind.fleetshift.io/Cluster") || kind == "extension"`,
+		Filter: `(resource_type == "kind.fleetshift.io/Cluster") || name == "//kind.fleetshift.io/clusters/managed"`,
 	}); err != nil {
 		t.Fatalf("CompileFilter: unexpected error: %v", err)
 	}
 	if gotGuard != nil {
 		t.Errorf("GuardedResourceType = %v, want nil (guard inside || does not count)", gotGuard)
+	}
+}
+
+// TestCompileFilter_CompareHookOverridesGenericComparison proves a
+// [querysql.SQLExpr.Compare] hook can replace the generic
+// "SQL op $literal" path when it reports handled=true, and that
+// handled=false falls back to the generic path.
+func TestCompileFilter_CompareHookOverridesGenericComparison(t *testing.T) {
+	c := querysql.Compiler{Fields: recordingResolver(func(path querysql.FieldPath, _ querysql.TypeHint, _ querysql.ResolveContext) (querysql.SQLExpr, error) {
+		return querysql.SQLExpr{
+			SQL: path.String(),
+			Compare: func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
+				if op != querysql.OpEqual {
+					return "", false, nil
+				}
+				return "OVERRIDDEN(" + bind(lit) + ")", true, nil
+			},
+		}, nil
+	})}
+
+	pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `resource_type == "kind.fleetshift.io/Cluster"`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter: %v", err)
+	}
+	if pred.SQL != "OVERRIDDEN($1)" {
+		t.Errorf("SQL = %q, want OVERRIDDEN($1)", pred.SQL)
+	}
+
+	pred, err = c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `resource_type != "kind.fleetshift.io/Cluster"`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter (!=): %v", err)
+	}
+	if !strings.Contains(pred.SQL, "resource_type != $1") {
+		t.Errorf("SQL = %q, want generic fallback for !=", pred.SQL)
+	}
+}
+
+// TestCompileFilter_InHookOverridesGenericIn proves a
+// [querysql.SQLExpr.In] hook can replace the generic "SQL IN (...)"
+// path when it reports handled=true, and that handled=false falls
+// back to the generic path.
+func TestCompileFilter_InHookOverridesGenericIn(t *testing.T) {
+	c := querysql.Compiler{Fields: recordingResolver(func(path querysql.FieldPath, _ querysql.TypeHint, _ querysql.ResolveContext) (querysql.SQLExpr, error) {
+		return querysql.SQLExpr{
+			SQL: path.String(),
+			In: func(values []any, bind func(any) string) (string, bool, error) {
+				if len(values) != 2 {
+					return "", false, nil
+				}
+				return "IN_OVERRIDDEN(" + bind(values[0]) + ", " + bind(values[1]) + ")", true, nil
+			},
+		}, nil
+	})}
+
+	pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `resource_type in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter: %v", err)
+	}
+	if pred.SQL != "IN_OVERRIDDEN($1, $2)" {
+		t.Errorf("SQL = %q, want IN_OVERRIDDEN($1, $2)", pred.SQL)
+	}
+
+	pred, err = c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `resource_type in ["only-one"]`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter (fallback): %v", err)
+	}
+	if !strings.Contains(pred.SQL, "resource_type IN ($1)") {
+		t.Errorf("SQL = %q, want generic fallback for a single-element list", pred.SQL)
 	}
 }

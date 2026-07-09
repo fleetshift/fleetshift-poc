@@ -9,13 +9,17 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
 )
 
-// queryFieldResolver implements [querysql.FieldResolver] for this
-// project's actual row shape: the all_rows/filtered_page envelope
-// columns and the resource.*/resource.inventory.* fields the plan's
-// "CEL Shape" section documents (see ../query_sql.go for the columns
-// this mirrors). querysql's compiler owns CEL AST lowering and knows
-// nothing about any of this -- see querysql's package doc for why the
-// split lands here.
+// queryFieldResolver implements [querysql.FieldResolver] for
+// QueryResources' extension-only row shape: the er/erm/ri/f/inv
+// aliases in buildQueryResourcesSQL's filtered_page CTE. querysql's
+// compiler owns CEL AST lowering and knows nothing about any of this
+// -- see querysql's package doc for why the split lands here.
+//
+// Public CEL fields match the target QueryResources response shape:
+// envelope name, envelope resource_type, and fields under resource.
+// Old POC envelope aliases (platform_name, kind, service_name,
+// api_version, collection_name, resource_id) and platform-only body
+// fields are rejected.
 type queryFieldResolver struct {
 	// SchemaProvider, if set, lets resource.spec.* (and, once
 	// activated, resource.inventory.observation.*) paths be validated
@@ -28,21 +32,6 @@ type queryFieldResolver struct {
 }
 
 var _ querysql.FieldResolver = queryFieldResolver{}
-
-// envelopeColumns are the common QueryResources envelope fields
-// (see the plan's "CEL Shape" section), each a direct column on the
-// all_rows/filtered_page CTEs (see ../query_sql.go). All are plain
-// SQL text, so no JSON cast handling is needed for them.
-var envelopeColumns = map[string]bool{
-	"kind":            true,
-	"name":            true,
-	"platform_name":   true,
-	"resource_type":   true,
-	"service_name":    true,
-	"api_version":     true,
-	"collection_name": true,
-	"resource_id":     true,
-}
 
 // conditionSubfields are the resource.inventory.conditions["Type"].*
 // fields the plan documents; all are text-valued so no cast handling
@@ -68,10 +57,7 @@ func (r queryFieldResolver) Resolve(path querysql.FieldPath, want querysql.TypeH
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: empty field path", domain.ErrInvalidArgument)
 	}
 	if len(segs) == 1 {
-		if envelopeColumns[segs[0]] {
-			return querysql.SQLExpr{SQL: segs[0]}, nil
-		}
-		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field %q", domain.ErrInvalidArgument, segs[0])
+		return r.resolveEnvelopeField(segs[0])
 	}
 	if segs[0] != "resource" {
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field expression", domain.ErrInvalidArgument)
@@ -79,9 +65,34 @@ func (r queryFieldResolver) Resolve(path querysql.FieldPath, want querysql.TypeH
 	return r.resolveResourceField(segs[1:], want, ctx)
 }
 
+func (r queryFieldResolver) resolveEnvelopeField(name string) (querysql.SQLExpr, error) {
+	switch name {
+	case "name":
+		// Canonical full name. Equality / IN against well-formed
+		// "//service/collection/id" literals special-case to
+		// constituent-column predicates so the default-order index
+		// can seek; other comparisons fall back to the expression.
+		return querysql.SQLExpr{
+			SQL:     "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id",
+			Compare: compareFullNameEquality,
+			In:      inFullName,
+		}, nil
+	case "resource_type":
+		// Equality / IN against well-formed "service/Type" literals
+		// special-case to service_name/type_name predicates so
+		// idx_extension_resources_type_query_order can participate.
+		return querysql.SQLExpr{
+			SQL:     "er.service_name || '/' || er.type_name",
+			Compare: compareResourceTypeEquality,
+			In:      inResourceType,
+		}, nil
+	default:
+		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field %q", domain.ErrInvalidArgument, name)
+	}
+}
+
 // resolveResourceField maps the segments following `resource` to a
-// SQL expression. See the package doc and the plan's "CEL Shape"
-// section for the field list this mirrors.
+// SQL expression against the er/erm/ri/f/inv aliases.
 func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.TypeHint, ctx querysql.ResolveContext) (querysql.SQLExpr, error) {
 	if len(segs) == 0 {
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource\"", domain.ErrInvalidArgument)
@@ -91,36 +102,33 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 	switch head {
 	case "name":
 		if len(rest) == 0 {
-			// Both platform and extension rows compute their
-			// envelope platform_name identically as
-			// collection_name || '/' || resource_id (see
-			// ../query_sql.go), so resource.name can reuse that
-			// column directly instead of a separate one.
-			return querysql.SQLExpr{SQL: "platform_name"}, nil
+			// Body-level relative resource name
+			// (collection_name/resource_id), not an envelope alias.
+			return querysql.SQLExpr{SQL: "er.collection_name || '/' || er.resource_id"}, nil
 		}
 	case "uid":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "extension_uid::text"}, nil
+			return querysql.SQLExpr{SQL: "er.uid::text"}, nil
 		}
 	case "labels":
 		if len(rest) == 1 {
-			return labelField("resource_labels", rest[0], ctx.Bind, want), nil
+			return labelField("er.labels", rest[0], ctx.Bind, want), nil
 		}
 	case "intent_version":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "intent_version"}, nil
+			return querysql.SQLExpr{SQL: "erm.current_version"}, nil
 		}
 	case "state":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "fulfillment_state"}, nil
+			return querysql.SQLExpr{SQL: "f.state"}, nil
 		}
 	case "pause_reason":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "pause_reason"}, nil
+			return querysql.SQLExpr{SQL: "f.pause_reason"}, nil
 		}
 	case "generation":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "generation"}, nil
+			return querysql.SQLExpr{SQL: "f.generation"}, nil
 		}
 	case "spec":
 		if len(rest) > 0 {
@@ -133,10 +141,12 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}
-			return jsonTextField("spec", names, want)
+			return jsonTextField("ri.spec", names, want)
 		}
 	case "inventory":
 		return r.resolveInventoryField(rest, want, ctx)
+	case "effective_labels", "representations", "aliases", "relationships":
+		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
 }
@@ -150,12 +160,17 @@ func (r queryFieldResolver) resolveInventoryField(segs []string, want querysql.T
 	switch head {
 	case "labels":
 		if len(rest) == 1 {
-			return labelField("inventory_labels", rest[0], ctx.Bind, want), nil
+			return labelField("inv.labels", rest[0], ctx.Bind, want), nil
 		}
 	case "conditions":
 		if len(rest) == 2 && conditionSubfields[rest[1]] {
-			expr := fmt.Sprintf("inventory_conditions -> %s ->> '%s'", ctx.Bind(rest[0]), rest[1])
-			return castByHint(expr, want), nil
+			key := rest[0]
+			subfield := rest[1]
+			keyPlaceholder := ctx.Bind(key)
+			extract := fmt.Sprintf("inv.conditions -> %s ->> '%s'", keyPlaceholder, subfield)
+			expr := castByHint(extract, want)
+			expr.Compare = conditionContainmentCompare(keyPlaceholder, subfield)
+			return expr, nil
 		}
 	case "observation":
 		if len(rest) > 0 {
@@ -168,7 +183,7 @@ func (r queryFieldResolver) resolveInventoryField(segs []string, want querysql.T
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}
-			return jsonTextField("inventory_observation", names, want)
+			return jsonTextField("inv.observation", names, want)
 		}
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.inventory.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
@@ -177,23 +192,143 @@ func (r queryFieldResolver) resolveInventoryField(segs []string, want querysql.T
 // labelField handles the common `<column> ->> <key>` shape shared by
 // resource.labels[...] and resource.inventory.labels[...]. key comes
 // from the filter text (a CEL map-index string literal), so it is
-// bound as a SQL parameter via ctx.Bind rather than inlined -- see
-// [querysql.ResolveContext.Bind]'s doc -- even though CEL's lexer
-// already restricts *identifiers*, since a map-index literal can
-// contain arbitrary characters (quotes, comment sequences, ...).
+// bound as a SQL parameter via bind rather than inlined. String
+// equality is rewritten to JSONB containment so the GIN indexes can
+// participate; other operators keep the ->> / safe-cast path.
 func labelField(column, key string, bind func(any) string, want querysql.TypeHint) querysql.SQLExpr {
-	return castByHint(fmt.Sprintf("%s ->> %s", column, bind(key)), want)
+	keyPlaceholder := bind(key)
+	expr := castByHint(fmt.Sprintf("%s ->> %s", column, keyPlaceholder), want)
+	expr.Compare = labelContainmentCompare(column, keyPlaceholder)
+	return expr
+}
+
+func labelContainmentCompare(column, keyPlaceholder string) func(querysql.ComparisonOperator, any, func(any) string) (string, bool, error) {
+	return func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
+		if op != querysql.OpEqual {
+			return "", false, nil
+		}
+		value, ok := lit.(string)
+		if !ok {
+			return "", false, nil
+		}
+		// Reuse the key placeholder already bound during Resolve so
+		// equality rewrite does not double-bind the same key. Cast
+		// both args to text: jsonb_build_object is polymorphic and
+		// Postgres cannot infer bind-parameter types otherwise.
+		return fmt.Sprintf("%s @> jsonb_build_object(%s::text, %s::text)", column, keyPlaceholder, bind(value)), true, nil
+	}
+}
+
+func conditionContainmentCompare(typePlaceholder, subfield string) func(querysql.ComparisonOperator, any, func(any) string) (string, bool, error) {
+	return func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
+		if op != querysql.OpEqual {
+			return "", false, nil
+		}
+		value, ok := lit.(string)
+		if !ok {
+			return "", false, nil
+		}
+		// Condition type key was already bound during Resolve; the
+		// subfield name comes from the static whitelist and is bound
+		// here as a JSON object key (not inlined). Cast all three
+		// args to text for jsonb_build_object's polymorphic signature.
+		return fmt.Sprintf(
+			"inv.conditions @> jsonb_build_object(%s::text, jsonb_build_object(%s::text, %s::text))",
+			typePlaceholder, bind(subfield), bind(value),
+		), true, nil
+	}
+}
+
+func compareFullNameEquality(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
+	if op != querysql.OpEqual {
+		return "", false, nil
+	}
+	s, ok := lit.(string)
+	if !ok {
+		return "", false, nil
+	}
+	full := domain.FullResourceName(s)
+	service := full.ServiceName()
+	name := full.ResourceName()
+	if service == "" || name == "" || !strings.HasPrefix(s, "//") {
+		return "", false, nil
+	}
+	if _, err := domain.ParseResourceName(string(name)); err != nil {
+		return "", false, nil
+	}
+	return fmt.Sprintf(
+		"(er.service_name = %s AND er.collection_name = %s AND er.resource_id = %s)",
+		bind(string(service)), bind(string(name.Collection())), bind(string(name.ID())),
+	), true, nil
+}
+
+func compareResourceTypeEquality(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
+	if op != querysql.OpEqual {
+		return "", false, nil
+	}
+	s, ok := lit.(string)
+	if !ok {
+		return "", false, nil
+	}
+	rt, err := domain.ParseResourceType(s)
+	if err != nil {
+		// Fall back to the concatenated expression so a malformed
+		// literal still compares (and simply matches nothing) rather
+		// than failing closed at compile time for a value that CEL
+		// already accepted as a string.
+		return "", false, nil
+	}
+	return fmt.Sprintf(
+		"(er.service_name = %s AND er.type_name = %s)",
+		bind(string(rt.ServiceName())), bind(rt.TypeName()),
+	), true, nil
+}
+
+func inResourceType(values []any, bind func(any) string) (string, bool, error) {
+	tuples := make([]string, 0, len(values))
+	for _, v := range values {
+		s, ok := v.(string)
+		if !ok {
+			return "", false, nil
+		}
+		rt, err := domain.ParseResourceType(s)
+		if err != nil {
+			// Any unparseable element keeps the generic concatenated
+			// IN path so the filter still compiles.
+			return "", false, nil
+		}
+		tuples = append(tuples, fmt.Sprintf("(%s, %s)",
+			bind(string(rt.ServiceName())), bind(rt.TypeName())))
+	}
+	return fmt.Sprintf("(er.service_name, er.type_name) IN (%s)", strings.Join(tuples, ", ")), true, nil
+}
+
+func inFullName(values []any, bind func(any) string) (string, bool, error) {
+	tuples := make([]string, 0, len(values))
+	for _, v := range values {
+		s, ok := v.(string)
+		if !ok {
+			return "", false, nil
+		}
+		full := domain.FullResourceName(s)
+		service := full.ServiceName()
+		name := full.ResourceName()
+		if service == "" || name == "" || !strings.HasPrefix(s, "//") {
+			return "", false, nil
+		}
+		if _, err := domain.ParseResourceName(string(name)); err != nil {
+			return "", false, nil
+		}
+		tuples = append(tuples, fmt.Sprintf("(%s, %s, %s)",
+			bind(string(service)), bind(string(name.Collection())), bind(string(name.ID()))))
+	}
+	return fmt.Sprintf("(er.service_name, er.collection_name, er.resource_id) IN (%s)", strings.Join(tuples, ", ")), true, nil
 }
 
 // jsonTextField builds a chained ->/->> extraction from column
 // through names -- the parsed dotted-path field names from a
 // resource.spec.foo.bar/resource.inventory.observation.foo.bar
-// selector -- and casts the result per want (see castByHint). names
-// come from CEL field-path segments -- already restricted by CEL's
-// own lexer to identifierPattern -- but this re-validates before
-// inlining them into SQL text as defense in depth, per the plan's
-// "SQL identifiers and JSON paths must come only from static field
-// mappings or schema descriptors" rule.
+// selector -- and casts the result per want (see castByHint).
 func jsonTextField(column string, names []string, want querysql.TypeHint) (querysql.SQLExpr, error) {
 	for _, n := range names {
 		if !identifierPattern.MatchString(n) {
@@ -213,10 +348,9 @@ func jsonTextField(column string, names []string, want querysql.TypeHint) (query
 }
 
 // castByHint wraps a JSON-text-extracted SQL expression in a cast
-// matching want, so e.g. `(resource.generation as extracted via ->>)
-// > 4` compares numerically rather than lexically. TypeHintString and
-// TypeHintUnknown need no cast: ->> already yields text, which is
-// exactly what a string comparison needs.
+// matching want, so e.g. a numeric comparison compares numerically
+// rather than lexically. TypeHintString and TypeHintUnknown need no
+// cast: ->> already yields text.
 func castByHint(expr string, want querysql.TypeHint) querysql.SQLExpr {
 	switch want {
 	case querysql.TypeHintBool:
@@ -237,24 +371,12 @@ func castByHint(expr string, want querysql.TypeHint) querysql.SQLExpr {
 // resource_type == "..." conjunct (see hasResourceTypeGuard in
 // querysql): standard SQL gives no evaluation-order guarantee for a
 // plain WHERE-clause AND, so Postgres remains free to evaluate this
-// cast against rows the guard conjunct would otherwise exclude (e.g.
-// a differently-typed row whose value at the same JSON key is a
-// string, not a number). It is equally required for fields with no
-// type guard at all -- e.g. resource.labels[...]/
-// resource.inventory.labels[...], which share their column across
-// every resource type -- where there is no guard conjunct to even
-// attempt to rely on.
+// cast against rows the guard conjunct would otherwise exclude.
 //
 // pg_input_is_valid is a Postgres 17+ builtin (this project targets
-// Postgres 18 uniformly, see e.g. deploy/podman/overrides/postgres.yaml);
-// it reports whether a text value is valid input for a type without
-// raising an error. CASE is used rather than e.g. a boolean AND
+// Postgres 18 uniformly); CASE is used rather than a boolean AND
 // because Postgres does guarantee CASE only evaluates the selected
-// branch for expressions that vary per row -- verified against a live
-// Postgres 18 instance: a bare `(expr)::numeric` conjunct can still
-// fail depending on plan shape, but `CASE WHEN pg_input_is_valid(expr,
-// 'numeric') THEN (expr)::numeric END` reliably returns NULL instead
-// for a non-numeric expr.
+// branch for expressions that vary per row.
 func safeJSONCast(expr, sqlType string) string {
 	return fmt.Sprintf("(CASE WHEN pg_input_is_valid(%s, '%s') THEN (%s)::%s END)", expr, sqlType, expr, sqlType)
 }

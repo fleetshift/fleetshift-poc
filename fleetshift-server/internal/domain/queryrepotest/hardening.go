@@ -44,8 +44,8 @@ func runHardeningTests(t *testing.T, factory Factory) {
 		// as a parameter, the table would now be gone and this would
 		// fail instead of returning the fixture set.
 		everything := queryAll(t, tx, "")
-		if len(everything) != 5 {
-			t.Fatalf("len(everything) = %d, want 5; extension_resources may have been damaged", len(everything))
+		if len(everything) != 2 {
+			t.Fatalf("len(everything) = %d, want 2; extension_resources may have been damaged", len(everything))
 		}
 	})
 

@@ -10,10 +10,11 @@ import (
 var _ domain.QueryRepository = (*QueryRepo)(nil)
 
 // QueryRepo is the SQLite [domain.QueryRepository] stub. Postgres
-// implements the query surface first; SQLite returns
-// [domain.ErrUnimplemented] until a follow-up translates the
-// supported CEL subset to SQLite's JSON functions (see the
-// QueryRepository POC plan's "Later SQLite implementation" section).
+// implements the extension-only query surface first; SQLite returns
+// [domain.ErrUnimplemented] in this iteration. A follow-up can
+// translate the supported CEL subset to SQLite's JSON functions and
+// add any SQLite-side indexes then; until that lands, SQLite does not
+// mirror the Postgres QueryResources indexes.
 type QueryRepo struct{}
 
 func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResourcesRequest) (domain.QueryResourcesPage, error) {
