@@ -946,6 +946,51 @@ func TestReplaceDoesNotDropPlatform(t *testing.T) {
 	}
 }
 
+// TestReplaceInPlaceKeepsExtensionOnPlatformAcquireFailure proves that
+// an in-place content replace must reconcile platform ownership before
+// mutating the live extension mux. If acquirePlatform fails, the
+// previously registered extension transport must remain routable.
+func TestReplaceInPlaceKeepsExtensionOnPlatformAcquireFailure(t *testing.T) {
+	env := newActivatorWithHTTPAndPlatform(t)
+	ctx := context.Background()
+	const extSvc = "kind.fleetshift.v1.ClusterService"
+
+	schema := kindaddon.Schema()
+	if _, err := env.activator.Activate(ctx, schema); err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if _, ok := env.grpcMux.ServiceInfo()[extSvc]; !ok {
+		t.Fatal("expected extension service after initial Activate")
+	}
+
+	// Occupy the destination platform HTTP prefix so acquirePlatform
+	// fails after releasing the old collection's platform ownership.
+	const newPlatformPrefix = "/apis/fleetshift.io/v1/widgets"
+	if err := env.httpMux.RegisterPrefixHandler(newPlatformPrefix, func(http.ResponseWriter, *http.Request) {}); err != nil {
+		t.Fatalf("pre-register conflicting platform prefix: %v", err)
+	}
+
+	// Same gRPC service name (replace-in-place), new CollectionID so
+	// platform ownership must be re-acquired.
+	modified := kindaddon.Schema()
+	modified.CollectionID = "widgets"
+	for k, v := range modified.ProtoFiles {
+		modified.ProtoFiles[k] = "// replaced for test\n" + v
+	}
+
+	_, err := env.activator.Activate(ctx, modified)
+	if err == nil {
+		t.Fatal("Activate with conflicting platform prefix: want error")
+	}
+
+	if _, ok := env.grpcMux.ServiceInfo()[extSvc]; !ok {
+		t.Fatalf("extension service %q missing from mux after failed platform acquire; replace-in-place must not tear it down", extSvc)
+	}
+	if _, _, ok := env.activator.Registry.GetByGRPCServiceName(extSvc); !ok {
+		t.Fatal("extension registry entry missing after failed platform acquire")
+	}
+}
+
 func TestPlatformReflection(t *testing.T) {
 	mux := dynamicapi.NewDynamicServiceMux()
 	fileReg := dynamicapi.NewDynamicFileRegistry()

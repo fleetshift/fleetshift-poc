@@ -162,6 +162,27 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	}
 
 	if replaceInPlace {
+		// Reconcile platform ownership before mutating the live
+		// extension mux. If acquire fails we must not tear down the
+		// still-serving registration (ReplaceDesc / HTTP / file).
+		if platformKey.Collection != "" {
+			prevKey, hadPrev := a.Registry.PlatformKeyForOwner(serviceName)
+			needAcquire := !hadPrev || prevKey != platformKey
+
+			if hadPrev && prevKey != platformKey {
+				a.releasePlatformOwner(prevKey, serviceName)
+			}
+
+			if needAcquire {
+				if err := a.acquirePlatform(schema, platformKey, serviceName); err != nil {
+					// Live extension transport was not mutated; only
+					// new platform transport is rolled back inside
+					// acquirePlatform.
+					return "", fmt.Errorf("register platform service: %w", err)
+				}
+			}
+		}
+
 		a.GRPCMux.ReplaceDesc(svc.Desc)
 		if a.HTTPMux != nil {
 			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), canonicalPrefix)
@@ -196,32 +217,26 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 				return "", fmt.Errorf("register file descriptor: %w", err)
 			}
 		}
-	}
 
-	// Platform ownership — reconcile against the *new* gRPC name.
-	// On rename, the old name's platform ownership is released after
-	// the registry swap below so a failed new registration does not
-	// drop the still-live old service's platform ref.
-	if platformKey.Collection != "" {
-		prevKey, hadPrev := a.Registry.PlatformKeyForOwner(serviceName)
-		needAcquire := !hadPrev || prevKey != platformKey
+		// Platform ownership — reconcile against the *new* gRPC name.
+		// On rename, the old name's platform ownership is released after
+		// the registry swap below so a failed new registration does not
+		// drop the still-live old service's platform ref.
+		if platformKey.Collection != "" {
+			prevKey, hadPrev := a.Registry.PlatformKeyForOwner(serviceName)
+			needAcquire := !hadPrev || prevKey != platformKey
 
-		if hadPrev && prevKey != platformKey {
-			a.releasePlatformOwner(prevKey, serviceName)
-		}
+			if hadPrev && prevKey != platformKey {
+				a.releasePlatformOwner(prevKey, serviceName)
+			}
 
-		if needAcquire {
-			if err := a.acquirePlatform(schema, platformKey, serviceName); err != nil {
-				// Roll back only the *new* transport. On in-place
-				// replace we cannot restore the previous compiled
-				// service, so clear registry state for this name so
-				// the next Activate rebuilds. On rename the old
-				// registration is still intact.
-				a.deregisterExtensionTransport(serviceName, canonicalPrefix, descriptorPath)
-				if replaceInPlace {
-					a.Registry.UnregisterByGRPCServiceName(serviceName)
+			if needAcquire {
+				if err := a.acquirePlatform(schema, platformKey, serviceName); err != nil {
+					// Roll back only the *new* transport. On rename the
+					// old registration is still intact.
+					a.deregisterExtensionTransport(serviceName, canonicalPrefix, descriptorPath)
+					return "", fmt.Errorf("register platform service: %w", err)
 				}
-				return "", fmt.Errorf("register platform service: %w", err)
 			}
 		}
 	}
