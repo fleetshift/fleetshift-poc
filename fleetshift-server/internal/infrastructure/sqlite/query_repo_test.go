@@ -8,9 +8,11 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain/queryrepotest"
 )
 
+// TestQueryRepo exercises the full QueryRepository contract against
+// the real SQLite implementation -- see queryrepotest.Run's doc.
 func TestQueryRepo(t *testing.T) {
 	t.Parallel()
-	queryrepotest.RunUnimplemented(t, func(t *testing.T) domain.Tx {
+	queryrepotest.Run(t, func(t *testing.T) domain.Tx {
 		store := beginTestTx(t)
 		tx, err := store.Begin(context.Background())
 		if err != nil {

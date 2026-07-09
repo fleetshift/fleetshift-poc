@@ -129,10 +129,6 @@ func (r *TargetRepo) Delete(ctx context.Context, id domain.TargetID) error {
 	return nil
 }
 
-type scanner interface {
-	Scan(dest ...any) error
-}
-
 func scanTargetInfoSnapshot(s scanner) (domain.TargetInfoSnapshot, error) {
 	var snap domain.TargetInfoSnapshot
 	var id, targetType, stateStr, labelsJSON, propsJSON, inventoryItemID, artJSON string

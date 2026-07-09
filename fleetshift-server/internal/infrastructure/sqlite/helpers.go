@@ -7,6 +7,23 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+type scanner interface {
+	Scan(dest ...any) error
+}
+
+func collectRows[T any](rows *sql.Rows, scan func(scanner) (T, error)) ([]T, error) {
+	defer rows.Close()
+	var items []T
+	for rows.Next() {
+		item, err := scan(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
 func isUniqueViolation(err error) bool {
 	return strings.Contains(err.Error(), "UNIQUE constraint failed")
 }

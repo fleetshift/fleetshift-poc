@@ -5,10 +5,10 @@ import "context"
 // QueryResourceKind discriminates the two resource surfaces a
 // [QueryRepository] result row can come from.
 //
-// The current Postgres implementation returns only extension rows
-// ([QueryResourceKindExtension]). [QueryResourceKindPlatform] is kept
-// for a future platform-aggregate query implementation and is not
-// emitted today.
+// The current Postgres and SQLite implementations return only
+// extension rows ([QueryResourceKindExtension]).
+// [QueryResourceKindPlatform] is kept for a future platform-aggregate
+// query implementation and is not emitted today.
 type QueryResourceKind string
 
 const (
@@ -28,8 +28,8 @@ const (
 // QueryResourcesRequest is the input to [QueryRepository.QueryResources].
 type QueryResourcesRequest struct {
 	// Filter is a CEL expression evaluated against the query result
-	// envelope (see the Postgres implementation's field resolver for
-	// the supported field set). Empty matches every row.
+	// envelope (see each backend's field resolver for the supported
+	// field set). Empty matches every row.
 	//
 	// Public CEL fields for this iteration are envelope name,
 	// envelope resource_type, and fields under resource (labels,
@@ -91,7 +91,7 @@ type QueryResourceResult struct {
 	// QueryResources envelope CEL fields.
 	ServiceName ServiceName
 	// APIVersion is retained on the DTO for compatibility but is not
-	// populated by the current extension-only Postgres implementation
+	// populated by the current extension-only implementations
 	// (QueryResources no longer joins extension_resource_types for
 	// the page window). Callers that need the type's API version
 	// should read it from the type catalog / schema provider.
