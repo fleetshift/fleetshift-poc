@@ -162,15 +162,9 @@ func (r *ActiveResourceRegistry) Register(ver ActiveResourceVersion) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
-	if idx, ok := r.extensionsByGRPC[ver.GRPCServiceName]; ok {
-		if idx.resourceType != rt || idx.apiVersion != ver.APIVersion {
-			return fmt.Errorf("%w: gRPC service name %q is already registered for resource type %q version %q",
-				domain.ErrInvalidArgument, ver.GRPCServiceName, idx.resourceType, idx.apiVersion)
-		}
-	}
-	if _, ok := r.platformGRPC[ver.GRPCServiceName]; ok {
-		return fmt.Errorf("%w: gRPC service name %q is already registered as a platform service",
-			domain.ErrInvalidArgument, ver.GRPCServiceName)
+	allow := extensionIndex{resourceType: rt, apiVersion: ver.APIVersion}
+	if err := r.checkGRPCNameAvailable(ver.GRPCServiceName, &allow, false); err != nil {
+		return err
 	}
 
 	active, ok := r.extensionsByType[rt]
@@ -269,13 +263,8 @@ func (r *ActiveResourceRegistry) AddPlatformOwner(key PlatformRegistrationKey, o
 	if transport.GRPCServiceName == "" {
 		return false, fmt.Errorf("%w: ActivePlatformRegistration.GRPCServiceName is required on first acquire", domain.ErrInvalidArgument)
 	}
-	if _, ok := r.extensionsByGRPC[transport.GRPCServiceName]; ok {
-		return false, fmt.Errorf("%w: gRPC service name %q is already registered as an extension service",
-			domain.ErrInvalidArgument, transport.GRPCServiceName)
-	}
-	if other, ok := r.platformGRPC[transport.GRPCServiceName]; ok {
-		return false, fmt.Errorf("%w: gRPC service name %q is already registered for platform collection %q",
-			domain.ErrInvalidArgument, transport.GRPCServiceName, other.Collection)
+	if err := r.checkGRPCNameAvailable(transport.GRPCServiceName, nil, true); err != nil {
+		return false, err
 	}
 
 	stored := &ActivePlatformRegistration{
@@ -424,6 +413,39 @@ func (r *ActiveResourceRegistry) ListResourceQuerySchemas(_ context.Context) ([]
 		}
 	}
 	return out, nil
+}
+
+// checkGRPCNameAvailable ensures grpcName is not owned by a conflicting
+// extension or platform registration. Caller must hold r.mu.
+//
+// When allowExtension is non-nil, an existing extensionsByGRPC entry for
+// that exact (resourceType, apiVersion) is allowed (Register
+// replace-in-place). Pass nil when claiming a platform name.
+// asPlatform selects the ErrInvalidArgument context string for each
+// conflict so Register and AddPlatformOwner keep their existing wording.
+func (r *ActiveResourceRegistry) checkGRPCNameAvailable(grpcName string, allowExtension *extensionIndex, asPlatform bool) error {
+	if idx, ok := r.extensionsByGRPC[grpcName]; ok {
+		sameExtension := allowExtension != nil &&
+			idx.resourceType == allowExtension.resourceType &&
+			idx.apiVersion == allowExtension.apiVersion
+		if !sameExtension {
+			if asPlatform {
+				return fmt.Errorf("%w: gRPC service name %q is already registered as an extension service",
+					domain.ErrInvalidArgument, grpcName)
+			}
+			return fmt.Errorf("%w: gRPC service name %q is already registered for resource type %q version %q",
+				domain.ErrInvalidArgument, grpcName, idx.resourceType, idx.apiVersion)
+		}
+	}
+	if other, ok := r.platformGRPC[grpcName]; ok {
+		if asPlatform {
+			return fmt.Errorf("%w: gRPC service name %q is already registered for platform collection %q",
+				domain.ErrInvalidArgument, grpcName, other.Collection)
+		}
+		return fmt.Errorf("%w: gRPC service name %q is already registered as a platform service",
+			domain.ErrInvalidArgument, grpcName)
+	}
+	return nil
 }
 
 func cloneActiveResourceType(src *ActiveResourceType) ActiveResourceType {
