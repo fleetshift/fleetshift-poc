@@ -43,7 +43,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 // ---------------------------------------------------------------------------
@@ -342,7 +342,7 @@ func explainQueryResources(t *testing.T, db *sql.DB, label, filter, orderBy stri
 	if err != nil {
 		t.Fatalf("%s: resolve order %q: %v", label, orderBy, err)
 	}
-	compiler := querysql.Compiler{Fields: queryFieldResolver{}}
+	compiler := querysql.Compiler{Fields: queryFieldResolver{}, Params: querysql.DollarParams{}}
 	predicate, err := compiler.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter})
 	if err != nil {
 		t.Fatalf("%s: compile filter %q: %v", label, filter, err)

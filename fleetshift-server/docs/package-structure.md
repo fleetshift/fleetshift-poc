@@ -40,9 +40,14 @@ Vendor-specific implementations of domain interfaces (e.g., postgres, memory).
 
 - Depends on: Domain
 
+Shared, vendor-neutral infrastructure helpers may also live as siblings under `internal/infrastructure/` when more than one vendor package needs them. Today:
+
+- **`infrastructure/querysql`** — CEL-to-SQL filter compilation for QueryResources (AST lowering, parameter binding). Postgres and (eventually) SQLite each supply a `FieldResolver` and a `ParamBinder` (`DollarParams` / `QuestionParams`); they do not own the CEL subset.
+
 ## Rules
 
 - Domain must not import from transport, application, or infrastructure
 - Application must not import from transport or infrastructure
 - Infrastructure implements domain interfaces; it does not define new shared abstractions (only those it needs internally)
 - New external dependencies (databases, services) get their own infrastructure package
+- Shared SQL/CEL helpers that are not vendor-specific belong in a sibling package under `infrastructure/`, not nested under one vendor

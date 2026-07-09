@@ -12,7 +12,8 @@ import (
 // QuerySchemaProvider gives [QueryRepository] implementations
 // optional protobuf schema knowledge for type-specific CEL field
 // validation -- see the QueryRepository POC plan's "Schema Provider"
-// section and querysql's field resolver (the only current caller).
+// section and the postgres query field resolver (the only current
+// caller; it implements infrastructure/querysql.FieldResolver).
 //
 // It is intentionally narrow and transport-agnostic: it knows nothing
 // about internal/transport's dynamic gRPC/HTTP registration, only the

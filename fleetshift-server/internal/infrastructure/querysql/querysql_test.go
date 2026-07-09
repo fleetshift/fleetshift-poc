@@ -6,7 +6,7 @@
 // extraction, schema-backed path validation, safe numeric/boolean
 // casts, and the injection-safety of label/condition keys) is tested
 // against the real resolver in
-// ../query_filter_test.go, plus end-to-end in queryrepotest.
+// ../postgres/query_filter_test.go, plus end-to-end in queryrepotest.
 package querysql_test
 
 import (
@@ -18,7 +18,7 @@ import (
 	"testing"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 // stubResolver resolves every field path to its dotted string form as
@@ -327,7 +327,7 @@ func TestCompileFilter_ResolverErrorPropagates(t *testing.T) {
 // short-circuiting straight to a FALSE literal before ever consulting
 // the resolver -- otherwise an unsupported/typo'd field name would
 // silently compile instead of failing closed (see
-// ../query_filter_test.go's
+// ../postgres/query_filter_test.go's
 // TestQueryFieldResolver_UnsupportedFieldInEmptyList for the
 // end-to-end proof against the real resolver).
 func TestCompileFilter_InEmptyListStillResolvesField(t *testing.T) {
@@ -376,8 +376,8 @@ func TestCompileFilter_GuardInsideOrDoesNotCount(t *testing.T) {
 
 // TestCompileFilter_CompareHookOverridesGenericComparison proves a
 // [querysql.SQLExpr.Compare] hook can replace the generic
-// "SQL op $literal" path when it reports handled=true, and that
-// handled=false falls back to the generic path.
+// "SQL op <bound literal>" path when it reports handled=true, and
+// that handled=false falls back to the generic path.
 func TestCompileFilter_CompareHookOverridesGenericComparison(t *testing.T) {
 	c := querysql.Compiler{Fields: recordingResolver(func(path querysql.FieldPath, _ querysql.TypeHint, _ querysql.ResolveContext) (querysql.SQLExpr, error) {
 		return querysql.SQLExpr{

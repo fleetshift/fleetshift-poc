@@ -1,7 +1,7 @@
 // Package querysql implements the small local CEL-to-SQL adapter
 // called for in the QueryRepository POC plan's "cel2sql Adapter"
 // section: it compiles a CEL filter, evaluated against
-// QueryResources' result envelope, into a parameterized Postgres
+// QueryResources' result envelope, into a parameterized SQL
 // predicate.
 //
 // # Why not github.com/spandigital/cel2sql/v3
@@ -38,7 +38,7 @@
 //     fixed, closed-world shape per compiled expression -- there is
 //     no per-row discriminator concept. This package's
 //     resource.spec.*/resource.inventory.observation.* fields are
-//     read from a JSONB column whose *shape differs by
+//     read from a JSON column whose *shape differs by
 //     resource_type*, resolved only once resource_type == "..." is
 //     known (see hasResourceTypeGuard), across a single query
 //     spanning every extension resource type. A library built
@@ -47,24 +47,27 @@
 // Given both, this package instead implements the documented
 // supported CEL subset directly over cel-go's parser/checker, behind
 // a [CELSQLCompiler] interface named around the role a cel2sql-style
-// dependency would play, so repository code (see
-// ../query_repo.go) does not need to change if a future library fixes
-// these gaps.
+// dependency would play, so repository code does not need to change
+// if a future library fixes these gaps.
 //
 // # Package split
 //
 // This package owns only CEL AST lowering: boolean/logical structure,
 // comparison and "in" handling, literal binding, and resource_type
 // guard detection (compiler.go). It does not know what field paths
-// actually mean -- column names, JSONB extraction, label/condition
+// actually mean -- column names, JSON extraction, label/condition
 // map keys, or schema-backed path validation are all the concern of
 // whatever [FieldResolver] the caller supplies (see field_resolver.go
-// for that contract and ../query_filter.go for this project's
-// Postgres/FleetShift implementation). This split exists because
-// querysql's supported CEL subset is a QueryResources-wide contract
-// -- any future storage backend would parse and validate filters the
-// same way -- while the row shape a field path resolves to is
-// Postgres-specific.
+// for that contract and the postgres package's query_filter.go for
+// this project's Postgres/FleetShift implementation). This split
+// exists because querysql's supported CEL subset is a
+// QueryResources-wide contract -- any storage backend would parse
+// and validate filters the same way -- while the row shape a field
+// path resolves to is backend-specific.
+//
+// Parameter placeholder style is likewise a dialect concern, owned
+// by the caller's [ParamBinder] (see param_binder.go). The compiler
+// defaults to [DollarParams] (Postgres $N) when Params is nil.
 //
 // Supported filter shape: see compiler.go for the supported operators
 // (&&, ||, !, ==, !=, <, <=, >, >=, in) and field-path syntax
@@ -103,22 +106,23 @@ type CompileFilterInput struct {
 }
 
 // SQLPredicate is a compiled filter: a boolean SQL expression plus
-// the ordered bind parameter values its $N placeholders reference.
+// the ordered bind parameter values its placeholders reference.
 // SQL never contains user-supplied *values* -- every literal in the
 // filter is bound through builder.bind, and every field path is
 // either a static column name or run through the configured
 // [FieldResolver], which must do the same for any value it needs to
-// inline (see [ResolveContext.Bind]'s doc).
+// inline (see [ResolveContext.Bind]'s doc). Placeholder spelling is
+// controlled by the compiler's [ParamBinder].
 type SQLPredicate struct {
 	SQL  string
 	Args []any
 }
 
 // Compiler is the only [CELSQLCompiler] implementation. It is safe
-// for concurrent use as long as Fields is (or is nil/immutable).
-// CompileFilter shares a package-level *cel.Env (see filterCELEnv)
-// whose declarations never change, so concurrent Compile calls are
-// safe once that env has been initialized.
+// for concurrent use as long as Fields and Params are (or are
+// nil/immutable). CompileFilter shares a package-level *cel.Env (see
+// filterCELEnv) whose declarations never change, so concurrent
+// Compile calls are safe once that env has been initialized.
 type Compiler struct {
 	// Fields resolves the field paths a filter references (envelope
 	// columns, resource.*, resource.inventory.*, ...) to SQL
@@ -129,6 +133,11 @@ type Compiler struct {
 	// Fields fails with a descriptive error rather than a nil-pointer
 	// panic.
 	Fields FieldResolver
+
+	// Params formats bind-parameter placeholders in the generated
+	// SQL. Nil defaults to [DollarParams] (Postgres $N). SQLite
+	// callers should set [QuestionParams].
+	Params ParamBinder
 }
 
 var _ CELSQLCompiler = Compiler{}
@@ -166,12 +175,17 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 		return SQLPredicate{}, fmt.Errorf("filter: %w: %v", domain.ErrInvalidArgument, issues.Err())
 	}
 
+	params := c.Params
+	if params == nil {
+		params = DollarParams{}
+	}
+
 	root := checked.NativeRep().Expr()
 	st := &state{
 		ctx:    ctx,
 		fields: c.Fields,
 		guard:  hasResourceTypeGuard(root),
-		b:      &builder{},
+		b:      &builder{params: params},
 	}
 
 	sql, err := compileBool(root, st)
@@ -187,8 +201,8 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 // accept any resource.* selection/index syntax without itself
 // validating field names -- that validation is the configured
 // [FieldResolver]'s job, not cel-go's, since the supported resource.*
-// shape depends on Postgres JSONB layout the CEL type system knows
-// nothing about.
+// shape depends on the storage backend's row/JSON layout the CEL type
+// system knows nothing about.
 //
 // Called once from sharedCELEnv. EagerlyValidateDeclarations(true)
 // forces checker init at construction so concurrent Compile calls on
@@ -207,16 +221,18 @@ func newCELEnv() (*cel.Env, error) {
 	)
 }
 
-// builder accumulates parameterized SQL args and hands back $N
-// placeholders, so every literal value compiled from the filter
-// becomes a bind parameter rather than inlined SQL text.
+// builder accumulates parameterized SQL args and hands back
+// placeholders via the configured [ParamBinder], so every literal
+// value compiled from the filter becomes a bind parameter rather
+// than inlined SQL text.
 type builder struct {
-	args []any
+	params ParamBinder
+	args   []any
 }
 
 func (b *builder) bind(v any) string {
 	b.args = append(b.args, v)
-	return fmt.Sprintf("$%d", len(b.args))
+	return b.params.Placeholder(len(b.args))
 }
 
 // state threads the per-compilation context through compileBool and

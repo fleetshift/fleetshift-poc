@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 var _ domain.QueryRepository = (*QueryRepo)(nil)
@@ -25,9 +25,9 @@ var _ domain.QueryRepository = (*QueryRepo)(nil)
 type QueryRepo struct {
 	DB *sql.Tx
 
-	// Compiler defaults to querysql.Compiler{Fields:
-	// queryFieldResolver{SchemaProvider: SchemaProvider}} when nil
-	// (see compiler()). Overridable for tests that need to exercise
+	// Compiler defaults to querysql.Compiler with this package's
+	// queryFieldResolver and [querysql.DollarParams] when nil (see
+	// compiler()). Overridable for tests that need to exercise
 	// QueryResources against a stub compiler; in that case
 	// SchemaProvider is ignored since the override owns its own field
 	// resolution, if any.
@@ -45,7 +45,10 @@ func (r *QueryRepo) compiler() querysql.CELSQLCompiler {
 	if r.Compiler != nil {
 		return r.Compiler
 	}
-	return querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: r.SchemaProvider}}
+	return querysql.Compiler{
+		Fields: queryFieldResolver{SchemaProvider: r.SchemaProvider},
+		Params: querysql.DollarParams{},
+	}
 }
 
 // queryResourceRow is scanQueryResourceRow's internal result: the
