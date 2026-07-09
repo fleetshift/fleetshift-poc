@@ -240,6 +240,25 @@ func TestDynamicSchemaActivator_DuplicateActivateIsIdempotent(t *testing.T) {
 	if h1 != h2 {
 		t.Errorf("handles differ: %v vs %v", h1, h2)
 	}
+
+	// Unchanged Activate must release its lock; otherwise ContentHash
+	// (and Activate/Deactivate) deadlock on the same activator.
+	type hashResult struct {
+		ok bool
+	}
+	done := make(chan hashResult, 1)
+	go func() {
+		_, ok := activator.ContentHash(string(h2))
+		done <- hashResult{ok: ok}
+	}()
+	select {
+	case r := <-done:
+		if !r.ok {
+			t.Error("expected content hash after unchanged Activate")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("ContentHash blocked after unchanged Activate; likely mu not unlocked on fast path")
+	}
 }
 
 func TestDynamicSchemaActivator_ChangedContentSwapsAtomically(t *testing.T) {

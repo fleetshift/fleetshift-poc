@@ -101,10 +101,11 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	// Full classification (replace / rename / multi-version) happens
 	// after compilation under the second lock.
 	a.mu.Lock()
-	if a.Registry.Contains(schema.ResourceType, apiVersion, serviceName, hash) {
+	unchanged := a.Registry.Contains(schema.ResourceType, apiVersion, serviceName, hash)
+	a.mu.Unlock()
+	if unchanged {
 		return id, nil
 	}
-	a.mu.Unlock()
 
 	entryFile, err := resolveEntryFile(schema)
 	if err != nil {
