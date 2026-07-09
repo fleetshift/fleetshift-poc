@@ -539,10 +539,10 @@ func scanExtensionResourceView(s scanner) (domain.ExtensionResourceView, error) 
 
 // extensionResourceViewFromColumns builds a [domain.ExtensionResourceView]
 // from erViewQueryPG's already-scanned column values. Factored out of
-// scanExtensionResourceView so the query repository's combined
-// platform/extension projection (query_repo.go) can reuse the exact
-// same construction logic against a row it scanned itself, without
-// hydrating each result with a follow-up per-row GetView call.
+// scanExtensionResourceView so the query repository's extension-only
+// projection (query_repo.go) can reuse the exact same construction
+// logic against a row it scanned itself, without hydrating each
+// result with a follow-up per-row GetView call.
 func extensionResourceViewFromColumns(
 	uid domain.ExtensionResourceUID,
 	serviceName, typeName, collectionName, resourceID string,

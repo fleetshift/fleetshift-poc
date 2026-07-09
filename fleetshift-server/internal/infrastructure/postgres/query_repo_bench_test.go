@@ -143,7 +143,7 @@ func seedQRBPlatformOnly(t *testing.T, db *sql.DB) {
 // seedQRBClusters bulk-inserts qrbClusterCount managed extension
 // resources (kind.fleetshift.io/Cluster): extension_resources plus
 // the extension_resource_managed/resource_intents/fulfillments rows
-// query_sql.go's extension_rows CTE joins against, so
+// query_sql.go's filtered_page CTE joins against, so
 // resource.spec.*/resource.state-shaped filters have real rows to
 // match.
 func seedQRBClusters(t *testing.T, db *sql.DB) {

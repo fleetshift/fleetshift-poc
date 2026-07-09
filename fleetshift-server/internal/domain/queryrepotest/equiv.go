@@ -43,18 +43,3 @@ func assertExtensionViewEqual(t *testing.T, got, want domain.ExtensionResourceVi
 		}
 	}
 }
-
-// assertPlatformResourceEqual compares got against want by snapshot;
-// see assertExtensionViewEqual's doc for why this is safe against the
-// two independent read paths being compared.
-func assertPlatformResourceEqual(t *testing.T, got, want *domain.PlatformResource) {
-	t.Helper()
-	if got == nil || want == nil {
-		t.Fatalf("assertPlatformResourceEqual: got=%v want=%v, neither may be nil", got, want)
-	}
-	gotSnap := got.Snapshot()
-	wantSnap := want.Snapshot()
-	if !reflect.DeepEqual(gotSnap, wantSnap) {
-		t.Errorf("Platform.Snapshot() mismatch:\n got:  %+v\n want: %+v", gotSnap, wantSnap)
-	}
-}
