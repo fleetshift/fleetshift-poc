@@ -90,6 +90,7 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 			filter:   `resource_type == "kind.fleetshift.io/Cluster"`,
 			wantArgs: []any{"kind.fleetshift.io", "Cluster"},
 			wantSQL:  []string{"er.service_name =", "er.type_name ="},
+			denySQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
 			name:     "resource_type inequality keeps concatenated expression",
@@ -137,7 +138,7 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 					t.Errorf("SQL = %q, must not contain %q", pred.SQL, frag)
 				}
 			}
-			if strings.Contains(pred.SQL, "service_name || '/' || type_name") &&
+			if strings.Contains(pred.SQL, "er.service_name || '/' || er.type_name") &&
 				strings.Contains(tt.filter, "resource_type ==") {
 				t.Errorf("SQL = %q, resource_type equality must not use the concatenated expression", pred.SQL)
 			}
