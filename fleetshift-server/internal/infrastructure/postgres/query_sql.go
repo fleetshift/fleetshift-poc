@@ -49,16 +49,17 @@ import "fmt"
 // (service_name || '/' || type_name).
 //
 // Label/condition string equality compiles to JSONB containment
-// (@> jsonb_build_object(...)), which is GIN-eligible on
-// extension_resources.labels and extension_resource_inventory
-// labels/conditions. GIN is not guaranteed to be chosen: for
-// ORDER BY + LIMIT page queries the planner often prefers walking
-// the order B-tree and applying @> as a residual filter (especially
-// when the predicate is not selective enough that a GIN bitmap plus
-// sort looks cheaper). That is acceptable -- containment still
-// preserves correct equality semantics and remains available when
-// selectivity favors it. Normalized label/condition side tables are
-// intentionally out of scope this iteration.
+// (@> jsonb_build_object(...)), which is GIN-eligible on the
+// jsonb_path_ops indexes over extension_resources.labels and
+// extension_resource_inventory labels/conditions. GIN is not
+// guaranteed to be chosen: for ORDER BY + LIMIT page queries the
+// planner often prefers walking the order B-tree and applying @>
+// as a residual filter (especially when the predicate is not
+// selective enough that a GIN bitmap plus sort looks cheaper). That
+// is acceptable -- containment still preserves correct equality
+// semantics and remains available when selectivity favors it.
+// Normalized label/condition side tables are intentionally out of
+// scope this iteration.
 //
 // See query_repo_bench_test.go's TestQueryResourcesExplainPlan
 // (FLEETSHIFT_QUERY_BENCH=1) for measured plans.

@@ -223,10 +223,12 @@ CREATE INDEX idx_extension_resources_type_query_order
 
 -- GIN on extension resource labels so resource.labels["k"] == "v"
 -- can use JSONB containment (@>) after the field resolver's equality
--- rewrite (see ../query_filter.go). Inventory labels/conditions keep
--- their own GIN indexes below.
+-- rewrite (see ../query_filter.go). jsonb_path_ops is smaller and more
+-- selective for @> than the default jsonb_ops; we don't need key-
+-- existence operators (?, ?|, ?&). Inventory labels/conditions keep
+-- their own jsonb_path_ops GIN indexes below.
 CREATE INDEX idx_extension_resources_labels_gin
-    ON extension_resources USING GIN (labels);
+    ON extension_resources USING GIN (labels jsonb_path_ops);
 
 -- Aliases split into two tables, per the validated
 -- poc/alias-claims/ prototype -- see
@@ -383,13 +385,13 @@ CREATE TABLE resource_intents (
 -- set/upsert-plus-delete semantics map directly onto the `-`
 -- (key-removal) and `||` (merge) jsonb operators (see
 -- extension_resource_repo.go's applyInventoryDeltasCoreCTEs). The GIN
--- indexes below support future containment/key-existence label and
--- condition search over that latest state; jsonb_ops is the default
--- opclass, chosen because it's the more general one and real query
--- shapes aren't known yet -- jsonb_path_ops could be revisited if a
--- containment-only workload emerges. SQLite's mirror of this table
--- (see that migration) has no equivalent index today; see that
--- file's own doc comment.
+-- indexes below support containment (@>) label and condition search
+-- over that latest state via the field resolver's equality rewrite
+-- (see ../query_filter.go). jsonb_path_ops is preferred over the
+-- default jsonb_ops: QueryResources only emits @> for these maps, and
+-- path_ops is smaller and more selective for that operator. SQLite's
+-- mirror of this table (see that migration) has no equivalent index
+-- today; see that file's own doc comment.
 --
 -- conditions is a JSON object keyed by condition type (not an array)
 -- so a delta's per-type upsert/delete can use the same key-removal/
@@ -418,10 +420,10 @@ CREATE TABLE extension_resource_inventory (
 );
 
 CREATE INDEX extension_resource_inventory_labels_gin
-    ON extension_resource_inventory USING GIN (labels);
+    ON extension_resource_inventory USING GIN (labels jsonb_path_ops);
 
 CREATE INDEX extension_resource_inventory_conditions_gin
-    ON extension_resource_inventory USING GIN (conditions);
+    ON extension_resource_inventory USING GIN (conditions jsonb_path_ops);
 
 CREATE TABLE extension_resource_inventory_condition_events (
     id                     TEXT PRIMARY KEY,
