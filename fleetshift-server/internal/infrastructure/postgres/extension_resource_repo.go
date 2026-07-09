@@ -1375,6 +1375,145 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	return nil
 }
 
+// ---------------------------------------------------------------------------
+// Inventory delete/prune
+// ---------------------------------------------------------------------------
+
+// inventoryDeleteWithAliasCleanupSQLTemplate is the shared CTE tail
+// factored out of [extensionResourceDeleteWithAliasCleanupSQL]: %s
+// supplies the target_er body, which need only select the uids of the
+// extension_resources rows to delete. See that const's doc comment for
+// the full explanation of why claim cleanup needs old_contributions/
+// touched_claims/baseline_contrib_counts/net_refcount_deltas/
+// remaining_refs rather than a simpler DELETE ... RETURNING, and why
+// the ordering-forcing "(SELECT count(*) FROM deleted_extension_resource) >= 0"
+// clause exists. Unlike that const, target_er here selects only uid --
+// [ExtensionResourceRepo.DeleteInventoryResources],
+// [ExtensionResourceRepo.PruneInventoryCollection], and
+// [ExtensionResourceRepo.DeleteInventorySubtree] each supply their own
+// selection predicate instead of sharing one exact-name match, and
+// none of them need the final row count: unlike single-row [Delete],
+// zero matching rows is success, not [domain.ErrNotFound].
+const inventoryDeleteWithAliasCleanupSQLTemplate = `
+WITH target_er AS (
+	%s
+),
+old_contributions AS (
+	SELECT c.claim_id
+	FROM target_er t
+	JOIN resource_alias_contributions c ON c.source_extension_resource_uid = t.uid
+),
+touched_claims AS (
+	SELECT DISTINCT claim_id FROM old_contributions
+),
+baseline_contrib_counts AS (
+	SELECT tc.claim_id, cc.baseline_ct
+	FROM touched_claims tc
+	JOIN LATERAL (
+		SELECT count(*)::bigint AS baseline_ct
+		FROM resource_alias_contributions c
+		WHERE c.claim_id = tc.claim_id
+	) cc ON true
+),
+deleted_extension_resource AS (
+	DELETE FROM extension_resources
+	WHERE uid IN (SELECT uid FROM target_er)
+	RETURNING uid
+),
+net_refcount_deltas AS (
+	SELECT claim_id, -count(*)::bigint AS delta_refs
+	FROM old_contributions
+	GROUP BY claim_id
+),
+remaining_refs AS (
+	SELECT tc.claim_id,
+	       COALESCE(bcc.baseline_ct, 0) + COALESCE(nrd.delta_refs, 0) AS net_refs
+	FROM touched_claims tc
+	LEFT JOIN baseline_contrib_counts bcc ON bcc.claim_id = tc.claim_id
+	LEFT JOIN net_refcount_deltas nrd ON nrd.claim_id = tc.claim_id
+),
+deleted_orphan_claims AS (
+	DELETE FROM resource_alias_claims cl
+	USING remaining_refs rr
+	WHERE cl.id = rr.claim_id
+	  AND rr.net_refs = 0
+	  AND NOT cl.platform_owned
+	  AND (SELECT count(*) FROM deleted_extension_resource) >= 0
+	RETURNING 1
+)
+SELECT (SELECT count(*) FROM deleted_extension_resource)`
+
+// DeleteInventoryResources implements
+// [domain.ExtensionResourceRepository.DeleteInventoryResources] by
+// joining extension_resources against every ref's natural key in one
+// UNNEST, following the same batch-arg shape as [replaceInventorySQL].
+func (r *ExtensionResourceRepo) DeleteInventoryResources(ctx context.Context, refs []domain.InventoryResourceRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	n := len(refs)
+	serviceNames := make([]string, n)
+	collectionNames := make([]string, n)
+	resourceIDs := make([]string, n)
+	for i, ref := range refs {
+		serviceNames[i] = string(ref.ResourceType.ServiceName())
+		collectionNames[i] = string(ref.Name.Collection())
+		resourceIDs[i] = string(ref.Name.ID())
+	}
+	targetEr := `SELECT er.uid
+		FROM extension_resources er
+		JOIN (SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[]) AS t(service_name, collection_name, resource_id)) t
+		  ON er.service_name = t.service_name AND er.collection_name = t.collection_name AND er.resource_id = t.resource_id`
+	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
+	_, err := r.DB.ExecContext(ctx, query, serviceNames, collectionNames, resourceIDs)
+	if err != nil {
+		return fmt.Errorf("delete inventory resources: %w", err)
+	}
+	return nil
+}
+
+// PruneInventoryCollection implements
+// [domain.ExtensionResourceRepository.PruneInventoryCollection]. A nil
+// keepIDs is rejected before any SQL runs; a non-nil empty keepIDs
+// passes an empty array to "<> ALL(...)", which is vacuously true for
+// every row and so deletes every row in the exact collection.
+func (r *ExtensionResourceRepo) PruneInventoryCollection(ctx context.Context, scope domain.InventoryCollectionRef, keepIDs []domain.ResourceID) error {
+	if keepIDs == nil {
+		return fmt.Errorf("%w: keepIDs must not be nil", domain.ErrInvalidArgument)
+	}
+	keep := make([]string, len(keepIDs))
+	for i, id := range keepIDs {
+		keep[i] = string(id)
+	}
+	targetEr := `SELECT uid FROM extension_resources
+		WHERE service_name = $1 AND type_name = $2 AND collection_name = $3 AND resource_id <> ALL($4::text[])`
+	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
+	_, err := r.DB.ExecContext(ctx, query,
+		string(scope.ResourceType.ServiceName()), scope.ResourceType.TypeName(), string(scope.Collection), keep)
+	if err != nil {
+		return fmt.Errorf("prune inventory collection: %w", err)
+	}
+	return nil
+}
+
+// DeleteInventorySubtree implements
+// [domain.ExtensionResourceRepository.DeleteInventorySubtree] using a
+// length-bounded left() comparison rather than LIKE, so a parent
+// segment containing '%' or '_' can never be misinterpreted as a
+// wildcard.
+func (r *ExtensionResourceRepo) DeleteInventorySubtree(ctx context.Context, ref domain.InventorySubtreeRef) error {
+	prefix := string(ref.Parent) + "/"
+	targetEr := `SELECT uid FROM extension_resources
+		WHERE service_name = $1 AND type_name = $2 AND (collection_name = $3 OR left(collection_name, length($4)) = $4)`
+	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
+	_, err := r.DB.ExecContext(ctx, query,
+		string(ref.ResourceType.ServiceName()), ref.ResourceType.TypeName(), string(ref.Parent), prefix)
+	if err != nil {
+		return fmt.Errorf("delete inventory subtree: %w", err)
+	}
+	return nil
+}
+
 func (r *ExtensionResourceRepo) ListObservations(ctx context.Context, uid domain.ExtensionResourceUID, limit int) ([]domain.Observation, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT id, extension_resource_uid, observation, observed_at, created_at

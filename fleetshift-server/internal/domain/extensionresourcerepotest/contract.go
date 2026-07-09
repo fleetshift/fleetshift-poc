@@ -3211,6 +3211,311 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 	})
+
+	// DeleteAndPrune covers the [domain.ExtensionResourceRepository.DeleteInventoryResources]/
+	// [domain.ExtensionResourceRepository.PruneInventoryCollection]/
+	// [domain.ExtensionResourceRepository.DeleteInventorySubtree] contract
+	// added alongside ReplaceInventory/ApplyInventoryDeltas. These share
+	// the same alias-claim cleanup [ExtensionResourceRepository.Delete]
+	// performs, but neither backend's inventory reporting path
+	// populates resource_alias_claims/resource_alias_contributions for
+	// inventory-only resources any more (see the "Aliases" group's own
+	// doc comment above) -- there is no seam in this contract-test
+	// harness to fabricate a contribution row pointing at one of these
+	// resources, so cleanup correctness here reduces to "runs the same
+	// cleanup query path as Delete without erroring when there is
+	// nothing to clean up," which every subtest below already exercises.
+	t.Run("DeleteAndPrune", func(t *testing.T) {
+		t.Run("DeleteInventoryResourcesIdempotent", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			name := domain.ResourceName("nodes/del1")
+			now := fixedTime.Add(time.Minute)
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt: now, ReceivedAt: now,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			ref := domain.InventoryResourceRef{ResourceType: "inv.fleetshift.io/Node", Name: name}
+			if err := repo.DeleteInventoryResources(ctx, []domain.InventoryResourceRef{ref}); err != nil {
+				t.Fatalf("DeleteInventoryResources: %v", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get after delete: got %v, want ErrNotFound", err)
+			}
+
+			// Deleting again, and deleting a name that never existed,
+			// are both no-ops -- required for watch-delete races and
+			// resync-plus-watch overlap.
+			if err := repo.DeleteInventoryResources(ctx, []domain.InventoryResourceRef{ref}); err != nil {
+				t.Fatalf("DeleteInventoryResources (repeat): %v", err)
+			}
+			ghost := domain.InventoryResourceRef{ResourceType: "inv.fleetshift.io/Node", Name: "nodes/ghost"}
+			if err := repo.DeleteInventoryResources(ctx, []domain.InventoryResourceRef{ghost}); err != nil {
+				t.Fatalf("DeleteInventoryResources (never existed): %v", err)
+			}
+			if err := repo.DeleteInventoryResources(ctx, nil); err != nil {
+				t.Fatalf("DeleteInventoryResources (empty): %v", err)
+			}
+		})
+
+		// DeleteInventoryResourcesBatchDeletesOnlyNamedResources proves
+		// a multi-ref call deletes exactly the named resources -- not
+		// every resource of that type -- exercising the row-value IN
+		// (SQLite) / UNNEST join (Postgres) batch match with more than
+		// one row.
+		t.Run("DeleteInventoryResourcesBatchDeletesOnlyNamedResources", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			now := fixedTime.Add(time.Minute)
+			a := domain.ResourceName("nodes/batch-a")
+			b := domain.ResourceName("nodes/batch-b")
+			c := domain.ResourceName("nodes/batch-c")
+			for _, name := range []domain.ResourceName{a, b, c} {
+				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ObservedAt: now, ReceivedAt: now,
+				}}); err != nil {
+					t.Fatalf("seed ReplaceInventory(%s): %v", name, err)
+				}
+			}
+
+			refs := []domain.InventoryResourceRef{
+				{ResourceType: "inv.fleetshift.io/Node", Name: a},
+				{ResourceType: "inv.fleetshift.io/Node", Name: b},
+			}
+			if err := repo.DeleteInventoryResources(ctx, refs); err != nil {
+				t.Fatalf("DeleteInventoryResources: %v", err)
+			}
+
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", a)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(a) after batch delete: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", b)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(b) after batch delete: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", c)); err != nil {
+				t.Fatalf("Get(c) after batch delete: %v (must not be touched)", err)
+			}
+		})
+
+		// PruneInventoryCollectionScopesExactly proves the prune scope
+		// is (ResourceType, Collection) exactly: a row outside keepIDs
+		// but in a different collection, and a row with the same
+		// collection name but a different resource type, must both
+		// survive -- only "gone" (in-scope, not kept) is deleted.
+		t.Run("PruneInventoryCollectionScopesExactly", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType(Node): %v", err)
+			}
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Pod")); err != nil {
+				t.Fatalf("CreateType(Pod): %v", err)
+			}
+			now := fixedTime.Add(time.Minute)
+			collection := domain.CollectionName("clusters/prod/apiResources/core~v1~nodes/objects")
+			keep := domain.ResourceName(string(collection) + "/keep1")
+			gone := domain.ResourceName(string(collection) + "/gone1")
+			otherCollection := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/other1")
+			otherType := domain.ResourceName(string(collection) + "/other-type1")
+
+			seed := []struct {
+				rt   domain.ResourceType
+				name domain.ResourceName
+			}{
+				{"inv.fleetshift.io/Node", keep},
+				{"inv.fleetshift.io/Node", gone},
+				{"inv.fleetshift.io/Pod", otherCollection},
+				{"inv.fleetshift.io/Pod", otherType},
+			}
+			for _, s := range seed {
+				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: s.rt, Name: s.name, CandidateUID: domain.NewExtensionResourceUID(),
+					ObservedAt: now, ReceivedAt: now,
+				}}); err != nil {
+					t.Fatalf("seed ReplaceInventory(%s): %v", s.name, err)
+				}
+			}
+
+			scope := domain.InventoryCollectionRef{ResourceType: "inv.fleetshift.io/Node", Collection: collection}
+			if err := repo.PruneInventoryCollection(ctx, scope, []domain.ResourceID{keep.ID()}); err != nil {
+				t.Fatalf("PruneInventoryCollection: %v", err)
+			}
+
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", keep)); err != nil {
+				t.Fatalf("Get(keep) after prune: %v", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", gone)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(gone) after prune: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", otherCollection)); err != nil {
+				t.Fatalf("Get(otherCollection) after prune: %v (different collection must not be touched)", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", otherType)); err != nil {
+				t.Fatalf("Get(otherType) after prune: %v (different resource type must not be touched)", err)
+			}
+		})
+
+		t.Run("PruneInventoryCollectionEmptyKeepDeletesEverything", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			now := fixedTime.Add(time.Minute)
+			collection := domain.CollectionName("clusters/prod/apiResources/core~v1~nodes/objects")
+			name := domain.ResourceName(string(collection) + "/only1")
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt: now, ReceivedAt: now,
+			}}); err != nil {
+				t.Fatalf("seed ReplaceInventory: %v", err)
+			}
+
+			scope := domain.InventoryCollectionRef{ResourceType: "inv.fleetshift.io/Node", Collection: collection}
+			if err := repo.PruneInventoryCollection(ctx, scope, []domain.ResourceID{}); err != nil {
+				t.Fatalf("PruneInventoryCollection (empty keep): %v", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get after empty-keep prune: got %v, want ErrNotFound", err)
+			}
+		})
+
+		t.Run("PruneInventoryCollectionRejectsNilKeepIDs", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			scope := domain.InventoryCollectionRef{
+				ResourceType: "inv.fleetshift.io/Node",
+				Collection:   "clusters/prod/apiResources/core~v1~nodes/objects",
+			}
+			if err := repo.PruneInventoryCollection(ctx, scope, nil); !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("PruneInventoryCollection(nil keepIDs): got %v, want ErrInvalidArgument", err)
+			}
+		})
+
+		// DeleteInventorySubtreeIsBoundarySafe pins the segment-boundary
+		// requirement from the delete/resync contract doc: a parent of
+		// "clusters/prod" must delete every collection nested under it
+		// but must not match the unrelated sibling "clusters/prod-old".
+		t.Run("DeleteInventorySubtreeIsBoundarySafe", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			now := fixedTime.Add(time.Minute)
+			podName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/pod1")
+			nodeName := domain.ResourceName("clusters/prod/apiResources/core~v1~nodes/objects/node1")
+			siblingName := domain.ResourceName("clusters/prod-old/apiResources/core~v1~pods/objects/pod2")
+
+			for _, name := range []domain.ResourceName{podName, nodeName, siblingName} {
+				if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+					ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: domain.NewExtensionResourceUID(),
+					ObservedAt: now, ReceivedAt: now,
+				}}); err != nil {
+					t.Fatalf("seed ReplaceInventory(%s): %v", name, err)
+				}
+			}
+
+			ref := domain.InventorySubtreeRef{ResourceType: "inv.fleetshift.io/Node", Parent: "clusters/prod"}
+			if err := repo.DeleteInventorySubtree(ctx, ref); err != nil {
+				t.Fatalf("DeleteInventorySubtree: %v", err)
+			}
+
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", podName)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(pod) after subtree delete: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nodeName)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(node) after subtree delete: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", siblingName)); err != nil {
+				t.Fatalf("Get(sibling) after subtree delete: %v (\"clusters/prod-old\" must not match parent \"clusters/prod\")", err)
+			}
+		})
+
+		// DeleteInventorySubtreeScopesByResourceType proves the "one
+		// resource type" half of DeleteInventorySubtree's scope: a
+		// different resource type's collection under the very same
+		// parent subtree must survive a delete scoped to another type.
+		t.Run("DeleteInventorySubtreeScopesByResourceType", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType(Node): %v", err)
+			}
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Pod")); err != nil {
+				t.Fatalf("CreateType(Pod): %v", err)
+			}
+			now := fixedTime.Add(time.Minute)
+			nodeName := domain.ResourceName("clusters/prod/apiResources/core~v1~nodes/objects/node1")
+			podName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/pod1")
+
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Node", Name: nodeName, CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt: now, ReceivedAt: now,
+			}}); err != nil {
+				t.Fatalf("seed Node: %v", err)
+			}
+			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
+				ResourceType: "inv.fleetshift.io/Pod", Name: podName, CandidateUID: domain.NewExtensionResourceUID(),
+				ObservedAt: now, ReceivedAt: now,
+			}}); err != nil {
+				t.Fatalf("seed Pod: %v", err)
+			}
+
+			ref := domain.InventorySubtreeRef{ResourceType: "inv.fleetshift.io/Node", Parent: "clusters/prod"}
+			if err := repo.DeleteInventorySubtree(ctx, ref); err != nil {
+				t.Fatalf("DeleteInventorySubtree: %v", err)
+			}
+
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", nodeName)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get(node) after subtree delete: got %v, want ErrNotFound", err)
+			}
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", podName)); err != nil {
+				t.Fatalf("Get(pod) after Node-scoped subtree delete: %v (different resource type must not be touched)", err)
+			}
+		})
+
+		t.Run("DeleteInventorySubtreeNoMatchIsNoop", func(t *testing.T) {
+			tx := factory(t)
+			defer tx.Rollback()
+			repo := tx.ExtensionResources()
+
+			if err := repo.CreateType(ctx, sampleInventoryType("inv.fleetshift.io/Node")); err != nil {
+				t.Fatalf("CreateType: %v", err)
+			}
+			ref := domain.InventorySubtreeRef{ResourceType: "inv.fleetshift.io/Node", Parent: "clusters/ghost"}
+			if err := repo.DeleteInventorySubtree(ctx, ref); err != nil {
+				t.Fatalf("DeleteInventorySubtree (no match): %v", err)
+			}
+		})
+	})
 }
 
 func assertEqual[T comparable](t *testing.T, field string, got, want T) {

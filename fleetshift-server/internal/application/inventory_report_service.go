@@ -332,6 +332,172 @@ func validateDeltaReport(report InventoryDeltaInput) error {
 	})
 }
 
+// InventoryDeleteBatchInput is the input for
+// [InventoryReportService.DeleteBatch].
+type InventoryDeleteBatchInput struct {
+	Resources []InventoryDeleteInput
+}
+
+// InventoryDeleteInput identifies a single inventory-owned extension
+// resource to delete, by resource type and explicit name. Unlike
+// [InventoryReplacementInput]/[InventoryDeltaInput], there is no
+// alias-only form: deletes are destructive, so identity must be
+// exact rather than resolved through the unreconciled reported-alias
+// payload (see [domain.InventoryReplacement.Aliases]'s doc).
+type InventoryDeleteInput struct {
+	ResourceType domain.ResourceType
+	Name         domain.ResourceName
+}
+
+// DeleteBatch validates that every resource type has inventory
+// metadata, rejects a batch that names the same (ResourceType, Name)
+// more than once, and hard-deletes every named resource in one
+// transaction via
+// [domain.ExtensionResourceRepository.DeleteInventoryResources]. A
+// resource that doesn't exist is treated as already-deleted, not an
+// error -- see that method's doc.
+func (s *InventoryReportService) DeleteBatch(ctx context.Context, in InventoryDeleteBatchInput) error {
+	if len(in.Resources) == 0 {
+		return nil
+	}
+
+	tx, err := s.store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res := newReportResolver(tx)
+	refs := make([]domain.InventoryResourceRef, len(in.Resources))
+	seen := make(map[domain.FullResourceName]int, len(in.Resources))
+	for i, d := range in.Resources {
+		if _, err := res.lookupInventoryType(ctx, d.ResourceType); err != nil {
+			return err
+		}
+		full := d.ResourceType.FullName(d.Name)
+		if first, dup := seen[full]; dup {
+			return fmt.Errorf("%w: resource %s deleted more than once in this batch (entries %d and %d)",
+				domain.ErrInvalidArgument, full, first, i)
+		}
+		seen[full] = i
+		refs[i] = domain.InventoryResourceRef{ResourceType: d.ResourceType, Name: d.Name}
+	}
+
+	if err := tx.ExtensionResources().DeleteInventoryResources(ctx, refs); err != nil {
+		return fmt.Errorf("delete inventory resources: %w", err)
+	}
+	return tx.Commit()
+}
+
+// InventoryCollectionReplacementInput is the input for
+// [InventoryReportService.ReplaceCollection]: the complete latest
+// contents of one exact inventory collection
+type InventoryCollectionReplacementInput struct {
+	ResourceType domain.ResourceType
+	Collection   domain.CollectionName
+	Reports      []InventoryReplacementInput
+}
+
+// ReplaceCollection writes every report's complete latest inventory
+// state, then deletes any resource previously stored in the exact
+// collection that this call's Reports didn't include -- the platform
+// primitive for resync: a caller that just LISTed the complete
+// contents of a source collection reports the whole set here, and
+// anything else stored under that collection is proven absent from
+// the source and pruned. Every report must set Name (no alias-only
+// reports -- this is a scoped source-of-truth operation, not an
+// identity-resolved one) and Name must be inside Collection, i.e.
+// [domain.ResourceName.Collection] must equal Collection exactly.
+// Aliases, if set, are still passed through to
+// [domain.ExtensionResourceRepository.ReplaceInventory] as reported
+// metadata; they play no role in selecting which resource belongs to
+// the collection. An empty Reports is valid and prunes the entire
+// collection, the same as [InventoryReportService.DeleteCollection].
+// All writes and the prune happen in one transaction.
+func (s *InventoryReportService) ReplaceCollection(ctx context.Context, in InventoryCollectionReplacementInput) error {
+	tx, err := s.store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res := newReportResolver(tx)
+	if _, err := res.lookupInventoryType(ctx, in.ResourceType); err != nil {
+		return err
+	}
+
+	now := s.now()
+	replacements := make([]domain.InventoryReplacement, len(in.Reports))
+	keepIDs := make([]domain.ResourceID, len(in.Reports))
+	for i, report := range in.Reports {
+		if report.Name == nil {
+			return fmt.Errorf("%w: report %d must set Name", domain.ErrInvalidArgument, i)
+		}
+		if report.Name.Collection() != in.Collection {
+			return fmt.Errorf("%w: report %d name %q is not inside collection %q",
+				domain.ErrInvalidArgument, i, *report.Name, in.Collection)
+		}
+		replacements[i] = domain.InventoryReplacement{
+			ResourceType: in.ResourceType,
+			Name:         *report.Name,
+			CandidateUID: domain.NewExtensionResourceUID(),
+			Aliases:      report.Aliases,
+			Labels:       report.Labels,
+			Observation:  report.Observation,
+			Conditions:   report.Conditions,
+			ObservedAt:   report.ObservedAt,
+			ReceivedAt:   now,
+		}
+		keepIDs[i] = report.Name.ID()
+	}
+
+	if len(replacements) > 0 {
+		if err := tx.ExtensionResources().ReplaceInventory(ctx, replacements); err != nil {
+			return fmt.Errorf("replace inventory: %w", err)
+		}
+	}
+
+	scope := domain.InventoryCollectionRef{ResourceType: in.ResourceType, Collection: in.Collection}
+	if err := tx.ExtensionResources().PruneInventoryCollection(ctx, scope, keepIDs); err != nil {
+		return fmt.Errorf("prune inventory collection: %w", err)
+	}
+
+	return tx.Commit()
+}
+
+// InventoryCollectionDeleteInput is the input for
+// [InventoryReportService.DeleteCollection]: the address of one exact
+// inventory collection to remove entirely, e.g. because indexing of a
+// Kubernetes target+GVR stopped.
+type InventoryCollectionDeleteInput struct {
+	ResourceType domain.ResourceType
+	Collection   domain.CollectionName
+}
+
+// DeleteCollection deletes every resource in the exact named
+// collection via
+// [domain.ExtensionResourceRepository.PruneInventoryCollection] with
+// an explicit empty keep set -- a named, auditable workflow for what
+// is, underneath, a prune-with-nothing-to-keep.
+func (s *InventoryReportService) DeleteCollection(ctx context.Context, in InventoryCollectionDeleteInput) error {
+	tx, err := s.store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	res := newReportResolver(tx)
+	if _, err := res.lookupInventoryType(ctx, in.ResourceType); err != nil {
+		return err
+	}
+
+	scope := domain.InventoryCollectionRef{ResourceType: in.ResourceType, Collection: in.Collection}
+	if err := tx.ExtensionResources().PruneInventoryCollection(ctx, scope, []domain.ResourceID{}); err != nil {
+		return fmt.Errorf("prune inventory collection: %w", err)
+	}
+	return tx.Commit()
+}
+
 // forEachReportChunk calls fn once per contiguous chunk of at most
 // size report indices spanning [0, n), passing each chunk's [start,
 // end) bounds. size <= 0 or size >= n runs fn exactly once, covering

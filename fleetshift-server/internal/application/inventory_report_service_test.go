@@ -1292,3 +1292,263 @@ func TestInventoryReportService_ApplyDeltaBatch_NewIdentityGetsNoLabelsFromRepor
 		t.Errorf("Inventory.Labels()[env] = %q, want prod", er.Inventory().Labels()["env"])
 	}
 }
+
+func TestInventoryReportService_DeleteBatch_DeletesPreviouslyReplacedResource(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	if err := svc.DeleteBatch(ctx, application.InventoryDeleteBatchInput{
+		Resources: []application.InventoryDeleteInput{{ResourceType: inventoryReportTestType, Name: name}},
+	}); err != nil {
+		t.Fatalf("DeleteBatch: %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExtensionResources().Get(ctx, inventoryReportTestType.FullName(name)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get after DeleteBatch: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestInventoryReportService_DeleteBatch_EmptyInputIsNoop(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	if err := svc.DeleteBatch(ctx, application.InventoryDeleteBatchInput{}); err != nil {
+		t.Fatalf("DeleteBatch (empty): %v", err)
+	}
+}
+
+func TestInventoryReportService_DeleteBatch_MissingResourceIsSuccess(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	if err := svc.DeleteBatch(ctx, application.InventoryDeleteBatchInput{
+		Resources: []application.InventoryDeleteInput{{ResourceType: inventoryReportTestType, Name: "clusters/ghost"}},
+	}); err != nil {
+		t.Fatalf("DeleteBatch (missing resource): %v", err)
+	}
+}
+
+func TestInventoryReportService_DeleteBatch_RejectsDuplicateEntry(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/dup1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	err := svc.DeleteBatch(ctx, application.InventoryDeleteBatchInput{
+		Resources: []application.InventoryDeleteInput{
+			{ResourceType: inventoryReportTestType, Name: name},
+			{ResourceType: inventoryReportTestType, Name: name},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("DeleteBatch (duplicate) err = %v, want ErrInvalidArgument", err)
+	}
+
+	// No partial writes: the resource must still exist.
+	getExtensionResource(t, store, name)
+}
+
+func TestInventoryReportService_DeleteBatch_RejectsTypeWithoutInventoryMetadata(t *testing.T) {
+	store := newStore(t)
+	const managedOnlyType domain.ResourceType = "kind.fleetshift.io/Widget"
+	seedManagedOnlyType(t, store, managedOnlyType)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	err := svc.DeleteBatch(ctx, application.InventoryDeleteBatchInput{
+		Resources: []application.InventoryDeleteInput{{ResourceType: managedOnlyType, Name: "widgets/w1"}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("DeleteBatch err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestInventoryReportService_ReplaceCollection_WritesAndPrunesExactCollection(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	keep := domain.ResourceName("clusters/keep1")
+	gone := domain.ResourceName("clusters/gone1")
+
+	// Seed both resources via a plain ReplaceBatch so gone1 pre-exists
+	// before the exact-collection resync below.
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &keep, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &gone, ObservedAt: time.Now()},
+		},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	if err := svc.ReplaceCollection(ctx, application.InventoryCollectionReplacementInput{
+		ResourceType: inventoryReportTestType,
+		Collection:   "clusters",
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &keep, Observation: rawMsg(`{"v":2}`), ObservedAt: time.Now()},
+		},
+	}); err != nil {
+		t.Fatalf("ReplaceCollection: %v", err)
+	}
+
+	// keep1 was written with the new report's state.
+	er := getExtensionResource(t, store, keep)
+	if er.Inventory().Observation() == nil || string(*er.Inventory().Observation()) != `{"v":2}` {
+		t.Errorf("keep1 Observation = %v, want {\"v\":2}", er.Inventory().Observation())
+	}
+
+	// gone1 was pruned: absent from the new snapshot.
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExtensionResources().Get(ctx, inventoryReportTestType.FullName(gone)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get(gone1) after ReplaceCollection: got %v, want ErrNotFound", err)
+	}
+}
+
+// TestInventoryReportService_ReplaceCollection_EmptyReportsPrunesEverything
+// covers ReplaceCollection's documented degenerate case: an empty
+// Reports is valid and prunes the entire collection, equivalent to
+// DeleteCollection.
+func TestInventoryReportService_ReplaceCollection_EmptyReportsPrunesEverything(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/only1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	if err := svc.ReplaceCollection(ctx, application.InventoryCollectionReplacementInput{
+		ResourceType: inventoryReportTestType,
+		Collection:   "clusters",
+	}); err != nil {
+		t.Fatalf("ReplaceCollection (empty Reports): %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExtensionResources().Get(ctx, inventoryReportTestType.FullName(name)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get after empty-Reports ReplaceCollection: got %v, want ErrNotFound", err)
+	}
+}
+
+func TestInventoryReportService_ReplaceCollection_RejectsNameOutsideCollection(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	outside := domain.ResourceName("other/outside1")
+	err := svc.ReplaceCollection(ctx, application.InventoryCollectionReplacementInput{
+		ResourceType: inventoryReportTestType,
+		Collection:   "clusters",
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &outside, ObservedAt: time.Now()},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceCollection err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestInventoryReportService_ReplaceCollection_RejectsAliasOnlyReport(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	alias, err := domain.NewAlias("gcp", "project_id", "replace-collection-alias-only")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+	err = svc.ReplaceCollection(ctx, application.InventoryCollectionReplacementInput{
+		ResourceType: inventoryReportTestType,
+		Collection:   "clusters",
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Aliases: aliasSet(alias), ObservedAt: time.Now()},
+		},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ReplaceCollection err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestInventoryReportService_DeleteCollection_RemovesEverythingInCollectionOnly(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	inCollection := domain.ResourceName("clusters/c1")
+	otherCollection := domain.ResourceName("other-clusters/c1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{
+			{ResourceType: inventoryReportTestType, Name: &inCollection, ObservedAt: time.Now()},
+			{ResourceType: inventoryReportTestType, Name: &otherCollection, ObservedAt: time.Now()},
+		},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	if err := svc.DeleteCollection(ctx, application.InventoryCollectionDeleteInput{
+		ResourceType: inventoryReportTestType,
+		Collection:   "clusters",
+	}); err != nil {
+		t.Fatalf("DeleteCollection: %v", err)
+	}
+
+	tx, err := store.BeginReadOnly(ctx)
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExtensionResources().Get(ctx, inventoryReportTestType.FullName(inCollection)); !errors.Is(err, domain.ErrNotFound) {
+		t.Fatalf("Get(inCollection) after DeleteCollection: got %v, want ErrNotFound", err)
+	}
+	if _, err := tx.ExtensionResources().Get(ctx, inventoryReportTestType.FullName(otherCollection)); err != nil {
+		t.Fatalf("Get(otherCollection) after DeleteCollection: %v (different collection must not be touched)", err)
+	}
+}

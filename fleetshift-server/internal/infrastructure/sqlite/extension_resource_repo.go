@@ -1400,6 +1400,105 @@ func (r *ExtensionResourceRepo) batchReadCurrentReportedAliases(ctx context.Cont
 	return result, rows.Err()
 }
 
+// ---------------------------------------------------------------------------
+// Inventory delete/prune
+// ---------------------------------------------------------------------------
+
+// deleteInventoryResourcesByPredicate deletes extension_resources rows
+// matching whereSQL/args, running the same orphaned-alias-claim cleanup
+// [ExtensionResourceRepo.Delete] does, but treating zero matching rows
+// as success rather than [domain.ErrNotFound]. This is the shared
+// shape [ExtensionResourceRepo.DeleteInventoryResources],
+// [ExtensionResourceRepo.PruneInventoryCollection], and
+// [ExtensionResourceRepo.DeleteInventorySubtree] all need: source-
+// driven deletes, where a duplicate or already-absent delete must not
+// fail. whereSQL must reference extension_resources columns
+// unqualified, since it is reused verbatim against both the
+// unaliased DELETE and the alias-claim lookup JOIN below.
+func (r *ExtensionResourceRepo) deleteInventoryResourcesByPredicate(ctx context.Context, whereSQL string, args []any) error {
+	rows, err := r.DB.QueryContext(ctx,
+		`SELECT c.claim_id FROM resource_alias_contributions c
+		 JOIN extension_resources ON extension_resources.uid = c.source_extension_resource_uid
+		 WHERE `+whereSQL, args...)
+	if err != nil {
+		return fmt.Errorf("find alias claims for delete: %w", err)
+	}
+	var claimIDs []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return fmt.Errorf("scan alias claim id for delete: %w", err)
+		}
+		claimIDs = append(claimIDs, id)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return fmt.Errorf("find alias claims for delete: %w", err)
+	}
+	rows.Close()
+
+	if _, err := r.DB.ExecContext(ctx, `DELETE FROM extension_resources WHERE `+whereSQL, args...); err != nil {
+		return err
+	}
+
+	if err := r.deleteOrphanedClaims(ctx, claimIDs); err != nil {
+		return fmt.Errorf("clean up orphaned alias claims: %w", err)
+	}
+	return nil
+}
+
+// DeleteInventoryResources implements
+// [domain.ExtensionResourceRepository.DeleteInventoryResources] with a
+// single row-value IN match across every ref's natural key.
+func (r *ExtensionResourceRepo) DeleteInventoryResources(ctx context.Context, refs []domain.InventoryResourceRef) error {
+	if len(refs) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(refs))
+	args := make([]any, 0, len(refs)*3)
+	for i, ref := range refs {
+		placeholders[i] = "(?, ?, ?)"
+		args = append(args, string(ref.ResourceType.ServiceName()), string(ref.Name.Collection()), string(ref.Name.ID()))
+	}
+	whereSQL := fmt.Sprintf("(service_name, collection_name, resource_id) IN (%s)", strings.Join(placeholders, ", "))
+	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
+}
+
+// PruneInventoryCollection implements
+// [domain.ExtensionResourceRepository.PruneInventoryCollection]. A nil
+// keepIDs is rejected before any SQL runs; a non-nil empty keepIDs
+// omits the NOT IN clause entirely, deleting every row in the exact
+// collection.
+func (r *ExtensionResourceRepo) PruneInventoryCollection(ctx context.Context, scope domain.InventoryCollectionRef, keepIDs []domain.ResourceID) error {
+	if keepIDs == nil {
+		return fmt.Errorf("%w: keepIDs must not be nil", domain.ErrInvalidArgument)
+	}
+	whereSQL := "service_name = ? AND type_name = ? AND collection_name = ?"
+	args := []any{string(scope.ResourceType.ServiceName()), scope.ResourceType.TypeName(), string(scope.Collection)}
+	if len(keepIDs) > 0 {
+		placeholders := make([]string, len(keepIDs))
+		for i, id := range keepIDs {
+			placeholders[i] = "?"
+			args = append(args, string(id))
+		}
+		whereSQL += fmt.Sprintf(" AND resource_id NOT IN (%s)", strings.Join(placeholders, ", "))
+	}
+	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
+}
+
+// DeleteInventorySubtree implements
+// [domain.ExtensionResourceRepository.DeleteInventorySubtree] using a
+// length-bounded substr comparison rather than LIKE, so a parent
+// segment containing '%' or '_' can never be misinterpreted as a
+// wildcard.
+func (r *ExtensionResourceRepo) DeleteInventorySubtree(ctx context.Context, ref domain.InventorySubtreeRef) error {
+	prefix := string(ref.Parent) + "/"
+	whereSQL := "service_name = ? AND type_name = ? AND (collection_name = ? OR substr(collection_name, 1, ?) = ?)"
+	args := []any{string(ref.ResourceType.ServiceName()), ref.ResourceType.TypeName(), string(ref.Parent), len(prefix), prefix}
+	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
+}
+
 func (r *ExtensionResourceRepo) ListObservations(ctx context.Context, uid domain.ExtensionResourceUID, limit int) ([]domain.Observation, error) {
 	rows, err := r.DB.QueryContext(ctx,
 		`SELECT id, extension_resource_uid, observation, observed_at, created_at

@@ -132,6 +132,47 @@ type ExtensionResourceRepository interface {
 	// error -- see [InventoryDelta.UpsertAliases]'s doc.
 	ApplyInventoryDeltas(ctx context.Context, deltas []InventoryDelta) error
 
+	// DeleteInventoryResources hard-deletes the extension resources
+	// named by refs. This cascades latest inventory, observation and
+	// condition history, intents, and alias contributions through the
+	// same foreign keys [Delete] relies on, and cleans up any
+	// orphaned resource_alias_claims rows the same way [Delete] does.
+	// Unlike [Delete], a name with no matching row -- and an empty
+	// refs slice -- is a no-op, not [ErrNotFound]: this method exists
+	// for source-driven delete events (e.g. a Kubernetes watch
+	// delete), where a duplicate delete or a delete racing a resync
+	// must not fail. Deletes are exact-name addressed; refs is never
+	// resolved through aliases -- see [InventoryReplacement.Aliases]'s
+	// doc for why reported aliases aren't trusted for resolution.
+	DeleteInventoryResources(ctx context.Context, refs []InventoryResourceRef) error
+
+	// PruneInventoryCollection deletes every extension resource of
+	// scope.ResourceType whose collection is exactly scope.Collection
+	// and whose resource ID is not in keepIDs. This is the resync-prune
+	// primitive: a caller that has just LISTed the complete contents of
+	// one source collection passes every resource ID from that LIST as
+	// keepIDs, and anything else stored under the collection -- proven
+	// absent from the source -- is deleted.
+	//
+	// keepIDs must be non-nil: nil almost always means the caller
+	// failed to construct the keep set, so it is rejected outright with
+	// [ErrInvalidArgument] rather than silently deleting the entire
+	// collection. A non-nil, empty keepIDs is different and meaningful:
+	// it asserts "the source collection is known to be completely
+	// empty," and deletes every row in the exact collection. A
+	// collection with no matching rows to begin with is a no-op.
+	PruneInventoryCollection(ctx context.Context, scope InventoryCollectionRef, keepIDs []ResourceID) error
+
+	// DeleteInventorySubtree deletes every extension resource of
+	// ref.ResourceType whose collection lies under the resource-name
+	// subtree rooted at ref.Parent -- for example, every Kubernetes
+	// object collection under "clusters/{target}" when a target is
+	// torn down. Matching uses resource-name segment boundaries: a
+	// parent of "clusters/prod" must not match a sibling collection
+	// under "clusters/prod-old". A subtree with no matching rows is a
+	// no-op.
+	DeleteInventorySubtree(ctx context.Context, ref InventorySubtreeRef) error
+
 	// Observation history (append-only). Neither ReplaceInventory nor
 	// ApplyInventoryDeltas populates this synchronously today -- see
 	// their doc above -- so this always returns an empty result until
@@ -310,6 +351,36 @@ type InventoryDelta struct {
 
 	ObservedAt time.Time
 	ReceivedAt time.Time
+}
+
+// InventoryResourceRef identifies an inventory-owned extension
+// resource by the same natural key shape [InventoryReplacement] and
+// [InventoryDelta] use, for
+// [ExtensionResourceRepository.DeleteInventoryResources].
+type InventoryResourceRef struct {
+	ResourceType ResourceType
+	Name         ResourceName
+}
+
+// InventoryCollectionRef identifies one exact inventory collection for
+// one resource type, for
+// [ExtensionResourceRepository.PruneInventoryCollection]. Collection is
+// a full collection path (e.g. "clusters/prod/apiResources/core~v1~pods/objects"),
+// not a prefix.
+type InventoryCollectionRef struct {
+	ResourceType ResourceType
+	Collection   CollectionName
+}
+
+// InventorySubtreeRef identifies every inventory resource of one
+// resource type whose collection lies below a parent resource-name
+// subtree, for
+// [ExtensionResourceRepository.DeleteInventorySubtree]. Parent is a
+// parsed [ResourceName] such as "clusters/prod", not a raw string
+// prefix.
+type InventorySubtreeRef struct {
+	ResourceType ResourceType
+	Parent       ResourceName
 }
 
 // ValidateInventoryDelta rejects a delta whose label or condition ops
