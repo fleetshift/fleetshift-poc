@@ -205,6 +205,7 @@ func Start(t *testing.T) string {
 			Resources: extensionResourceSvc,
 			Validator: specValidator,
 		},
+		Registry: managedresource.NewActiveResourceRegistry(),
 	}
 
 	// Use the AddonManager lifecycle (Enable → Connect) to match

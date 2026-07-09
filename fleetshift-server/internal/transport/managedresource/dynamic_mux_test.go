@@ -568,6 +568,34 @@ func TestDynamicHTTPMux_DeregisterReturns404(t *testing.T) {
 	}
 }
 
+// TestDynamicHTTPMux_ReregisterAfterDeregister proves that a prefix can
+// be registered again after DeregisterByPrefix. The underlying ServeMux
+// pattern stays; only the handler map entry is restored.
+func TestDynamicHTTPMux_ReregisterAfterDeregister(t *testing.T) {
+	svc := buildFullClusterService(t)
+	_, conn, _ := serveGRPCOverTCP(t, svc)
+
+	httpMux := dynamicapi.NewDynamicHTTPMux(nil, conn)
+	if err := registerHTTPService(httpMux, svc); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+
+	ts := httptest.NewServer(httpMux.ServeMux())
+	defer ts.Close()
+
+	httpMux.DeregisterByPrefix(kindHTTPPrefix)
+
+	if err := registerHTTPService(httpMux, svc); err != nil {
+		t.Fatalf("re-Register after Deregister: %v", err)
+	}
+
+	resp := httpCreateCluster(t, ts.URL, "reregistered")
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("POST after re-Register: status = %d, want 200", resp.StatusCode)
+	}
+}
+
 func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	kindCfg := clusterConfig(t)
 	gcpCfg := clusterConfig(t)

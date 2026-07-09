@@ -20,11 +20,28 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
 
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/postgres/querysql"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
 )
+
+// staticQuerySchemas is a minimal [domain.QuerySchemaProvider] for
+// field-resolver tests. Kept local so this package does not import
+// transport/managedresource (layering: infrastructure → domain only).
+type staticQuerySchemas map[domain.ResourceType]domain.ResourceQuerySchema
+
+func (s staticQuerySchemas) GetResourceQuerySchema(_ context.Context, rt domain.ResourceType) (domain.ResourceQuerySchema, bool, error) {
+	schema, ok := s[rt]
+	return schema, ok, nil
+}
+
+func (s staticQuerySchemas) ListResourceQuerySchemas(_ context.Context) ([]domain.ResourceQuerySchema, error) {
+	out := make([]domain.ResourceQuerySchema, 0, len(s))
+	for _, schema := range s {
+		out = append(out, schema)
+	}
+	return out, nil
+}
 
 func compileWithResolver(t *testing.T, c querysql.Compiler, filter string) querysql.SQLPredicate {
 	t.Helper()
@@ -276,12 +293,14 @@ func TestQueryFieldResolver_ObservationWithoutGuardIsInvalid(t *testing.T) {
 
 func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T) {
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
-	catalog := application.NewQuerySchemaCatalog()
-	catalog.Register(domain.ResourceQuerySchema{
-		ResourceType:   rt,
-		SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
-	})
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: catalog}}
+	schemas := staticQuerySchemas{
+		rt: {
+			ResourceType:   rt,
+			APIVersion:     "v1",
+			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
+		},
+	}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
 
 	pred := compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.seconds == 5`)
 	if !strings.Contains(pred.SQL, "ri.spec ->> 'seconds'") {
@@ -313,12 +332,14 @@ message TestSpec {
 
 func TestQueryFieldResolver_SpecUsesJSONNameNotProtoNameForExtraction(t *testing.T) {
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
-	catalog := application.NewQuerySchemaCatalog()
-	catalog.Register(domain.ResourceQuerySchema{
-		ResourceType:   rt,
-		SpecDescriptor: specTestDescriptor(t),
-	})
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: catalog}}
+	schemas := staticQuerySchemas{
+		rt: {
+			ResourceType:   rt,
+			APIVersion:     "v1",
+			SpecDescriptor: specTestDescriptor(t),
+		},
+	}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
 
 	for _, tt := range []struct {
 		name   string
@@ -371,12 +392,14 @@ message NestedSpec {
 
 func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.T) {
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
-	catalog := application.NewQuerySchemaCatalog()
-	catalog.Register(domain.ResourceQuerySchema{
-		ResourceType:   rt,
-		SpecDescriptor: nestedSpecTestDescriptor(t),
-	})
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: catalog}}
+	schemas := staticQuerySchemas{
+		rt: {
+			ResourceType:   rt,
+			APIVersion:     "v1",
+			SpecDescriptor: nestedSpecTestDescriptor(t),
+		},
+	}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
 
 	pred := compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !strings.Contains(pred.SQL, "ri.spec -> 'nested' ->> 'value'") {
@@ -401,7 +424,7 @@ func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.
 }
 
 func TestQueryFieldResolver_SpecPermissiveWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: application.NewQuerySchemaCatalog()}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}}
 	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.anything_goes == 5`)
 }
 

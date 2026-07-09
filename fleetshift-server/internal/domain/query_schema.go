@@ -19,8 +19,8 @@ import (
 // descriptors that registration already produces. A concrete
 // implementation that *does* know how to populate it from schema
 // activation lives in a higher layer -- see
-// internal/application's QuerySchemaCatalog, wired beside
-// managedresource.DynamicSchemaActivator -- so this interface itself
+// transport/managedresource's ActiveResourceRegistry, which is also the
+// activator's state store -- so this interface itself
 // stays free of that dependency direction.
 //
 // Absence of a schema is an explicit, first-class outcome (the bool

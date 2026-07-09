@@ -117,11 +117,12 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		authMethodRepo domain.AuthMethodRepository
 	)
 
-	// querySchemaCatalog backs QueryRepository's optional type-specific
-	// field validation (see [domain.QuerySchemaProvider]'s doc). It
-	// starts empty and is populated as managed resource schemas are
-	// activated below (see the activator wiring).
-	querySchemaCatalog := application.NewQuerySchemaCatalog()
+	// activeResources backs QueryRepository's optional type-specific
+	// field validation and DynamicSchemaActivator's activation state
+	// (see [domain.QuerySchemaProvider] and
+	// [managedresource.ActiveResourceRegistry]). It starts empty and is
+	// populated as managed resource schemas are activated below.
+	activeResources := managedresource.NewActiveResourceRegistry()
 
 	if f.databaseURL != "" {
 		var err error
@@ -129,7 +130,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		if err != nil {
 			return fmt.Errorf("open database: %w", err)
 		}
-		store = &pgstore.Store{DB: db, SchemaProvider: querySchemaCatalog}
+		store = &pgstore.Store{DB: db, SchemaProvider: activeResources}
 		vault = &pgstore.VaultStore{DB: db}
 		authMethodRepo = &pgstore.AuthMethodRepo{DB: db}
 	} else {
@@ -592,7 +593,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		PlatformDeps: platformresource.Deps{
 			Resources: platformResourceSvc,
 		},
-		QuerySchemas: querySchemaCatalog,
+		Registry: activeResources,
 	}
 	addonMgr := application.NewAddonManager(application.AddonManagerDeps{
 		Router:    router,

@@ -198,6 +198,13 @@ type DynamicHTTPMux struct {
 	mux      *http.ServeMux
 	conn     *grpc.ClientConn
 	handlers map[string]http.HandlerFunc // prefix → current handler
+	// dispatched tracks prefixes that already have a stable dispatcher
+	// on the underlying ServeMux. Go's ServeMux cannot remove patterns,
+	// so once installed a dispatcher stays forever and returns 404 when
+	// handlers[prefix] is absent. This set is distinct from handlers so
+	// DeregisterByPrefix + RegisterPrefixHandler can re-activate a
+	// previously used prefix without re-calling HandleFunc.
+	dispatched map[string]struct{}
 }
 
 // NewDynamicHTTPMux creates a new dynamic HTTP mux backed by the given
@@ -209,9 +216,10 @@ func NewDynamicHTTPMux(mux *http.ServeMux, conn *grpc.ClientConn) *DynamicHTTPMu
 		mux = http.NewServeMux()
 	}
 	return &DynamicHTTPMux{
-		mux:      mux,
-		conn:     conn,
-		handlers: make(map[string]http.HandlerFunc),
+		mux:        mux,
+		conn:       conn,
+		handlers:   make(map[string]http.HandlerFunc),
+		dispatched: make(map[string]struct{}),
 	}
 }
 
@@ -241,17 +249,18 @@ func (m *DynamicHTTPMux) ReplacePrefixHandler(prefix string, handler http.Handle
 }
 
 // installPrefixHandler installs a handler for a single prefix. If the
-// prefix has never been seen, a stable dispatcher is registered on the
-// underlying mux. Must be called with m.mu held.
+// prefix has never had a dispatcher on the underlying mux, one is
+// registered. Must be called with m.mu held.
 func (m *DynamicHTTPMux) installPrefixHandler(prefix string, handler http.HandlerFunc) {
-	_, dispatched := m.handlers[prefix]
 	m.handlers[prefix] = handler
 
-	if !dispatched {
-		dispatcher := m.dispatcher(prefix)
-		m.mux.HandleFunc(prefix, dispatcher)
-		m.mux.HandleFunc(prefix+"/", dispatcher)
+	if _, ok := m.dispatched[prefix]; ok {
+		return
 	}
+	m.dispatched[prefix] = struct{}{}
+	dispatcher := m.dispatcher(prefix)
+	m.mux.HandleFunc(prefix, dispatcher)
+	m.mux.HandleFunc(prefix+"/", dispatcher)
 }
 
 // Conn returns the shared gRPC loopback client connection. Platform

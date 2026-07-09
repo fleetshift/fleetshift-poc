@@ -22,12 +22,17 @@ import (
 // [dynamicapi.DynamicHTTPMux], and [dynamicapi.DynamicFileRegistry]
 // (for gRPC reflection).
 //
-// It keeps a content hash per service so that repeated Activate calls
-// with unchanged schemas skip recompilation. When the schema content
-// changes, the mux entry is atomically replaced — no deregister/register
-// gap. It also tracks the prior handle per service so that if the
-// transport identity changes (e.g. APIServiceName or Version), the old
-// HTTP prefix and descriptor path are cleaned up.
+// Activation state — extension transport identity, content hash, query
+// schema, and platform ownership/refcount — lives in
+// [ActiveResourceRegistry]. The activator owns mux handles and performs
+// mux mutations when the registry reports 0→1 / last-owner transitions.
+//
+// It keeps a content hash per service in the registry so that repeated
+// Activate calls with unchanged schemas skip recompilation. When the
+// schema content changes, the mux entry is atomically replaced — no
+// deregister/register gap. When the gRPC service name changes, the old
+// registration stays live until the new one is fully registered, then
+// the old transport is removed.
 //
 // # Platform API version
 //
@@ -35,7 +40,9 @@ import (
 // version (defaulting to [platformresource.APIVersion]). Extension
 // [domain.ExtensionResourceSchema.Version] applies only to the
 // extension's own transport surface; it does not control the platform
-// route or gRPC identity for the shared collection.
+// route or gRPC identity for the shared collection. Platform
+// registrations are keyed by collection only (see
+// [PlatformRegistrationKey]).
 type DynamicSchemaActivator struct {
 	GRPCMux      *dynamicapi.DynamicServiceMux
 	HTTPMux      *dynamicapi.DynamicHTTPMux
@@ -47,49 +54,14 @@ type DynamicSchemaActivator struct {
 	// [platformresource.APIVersion] is used.
 	PlatformVersion string
 
-	// QuerySchemas, if set, is kept in sync with activation/
-	// deactivation: Activate registers the compiled spec descriptor it
-	// already has on hand (see specDesc below) so QueryRepository's
-	// resource.spec.* field validation can use it (see
-	// [domain.QuerySchemaProvider]'s doc); Deactivate removes it. Nil
-	// is a valid no-op default -- most callers (including today's
-	// tests) don't need query-time schema validation.
-	QuerySchemas QuerySchemaRegistry
+	// Registry is the shared activation + query-schema store. Required:
+	// Activate records transport identity, content hash, query schema,
+	// and platform ownership here so QueryRepository can validate
+	// resource.spec.* fields (see [domain.QuerySchemaProvider]). Wire
+	// the same instance into the store's SchemaProvider (see cli/serve.go).
+	Registry *ActiveResourceRegistry
 
-	mu     sync.Mutex
-	hashes map[string][32]byte               // service name → content hash
-	regs   map[string]*extensionRegistration // service name → registration state
-
-	refCount        map[string]int                   // platform key → refcount
-	platformHandles map[string]*platformRegistration // platform key → registration
-	extensionKeys   map[string]string                // gRPC service name → platform key
-}
-
-// QuerySchemaRegistry is the subset of application.QuerySchemaCatalog
-// that DynamicSchemaActivator needs. Declared here (rather than
-// depending on the concrete type) so this package states exactly what
-// it uses.
-type QuerySchemaRegistry interface {
-	Register(domain.ResourceQuerySchema)
-	Unregister(domain.ResourceType)
-}
-
-// extensionRegistration tracks the transport details for one activated
-// extension schema. Purely internal — the application layer only sees
-// an opaque [application.SchemaActivationID].
-type extensionRegistration struct {
-	grpcServiceName string
-	httpPrefix      string
-	descriptorPath  string
-	resourceType    domain.ResourceType
-}
-
-// platformRegistration tracks what was registered for a platform
-// service so it can be deregistered when the refcount drops to zero.
-type platformRegistration struct {
-	grpcServiceName string
-	httpPrefix      string
-	descriptorPath  string
+	mu sync.Mutex
 }
 
 var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
@@ -100,6 +72,9 @@ var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
 // without recompilation. If the content has changed, the mux entry is
 // atomically replaced.
 func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaActivationID, error) {
+	if a.Registry == nil {
+		return "", fmt.Errorf("DynamicSchemaActivator.Registry is required")
+	}
 	if schema.Management == nil {
 		return "", fmt.Errorf("schema for %q has no management section; cannot activate transport", schema.ResourceType)
 	}
@@ -117,22 +92,16 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	descriptorPath := fmt.Sprintf("dynamic/%s/%s_service.proto", pkgPath, lower)
 	canonicalPrefix := "/apis/" + string(schema.ResourceType.ServiceName()) + "/" + schema.Version + "/" + schema.CollectionID
 	platformKey := platformKeyForCollection(schema.CollectionID)
+	apiVersion := domain.APIVersion(schema.Version)
 
-	reg := &extensionRegistration{
-		grpcServiceName: serviceName,
-		httpPrefix:      canonicalPrefix,
-		descriptorPath:  descriptorPath,
-		resourceType:    schema.ResourceType,
-	}
 	hash := schemaContentHash(schema)
 	id := application.SchemaActivationID(serviceName)
 
+	// Cheap pre-compile skip when nothing material has changed.
+	// Full classification (replace / rename / multi-version) happens
+	// after compilation under the second lock.
 	a.mu.Lock()
-	if a.hashes == nil {
-		a.hashes = make(map[string][32]byte)
-	}
-	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
-		a.mu.Unlock()
+	if a.Registry.Contains(schema.ResourceType, apiVersion, serviceName, hash) {
 		return id, nil
 	}
 	a.mu.Unlock()
@@ -173,110 +142,137 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	// Re-check after compilation in case a concurrent Activate completed
-	// between our initial check and now.
-	if prev, ok := a.hashes[serviceName]; ok && prev == hash {
-		return id, nil
+	// Re-check after compilation in case a concurrent Activate completed.
+	// Walk type → version → content once.
+	var existing ActiveResourceVersion
+	var replaceInPlace, grpcRename bool
+	if active, hasType := a.Registry.Get(schema.ResourceType); hasType {
+		ver, hasVersion := active.Versions[apiVersion]
+		if !hasVersion {
+			return "", fmt.Errorf("%w: resource type %q already has API version %q registered; multiple versions are not supported",
+				domain.ErrInvalidArgument, schema.ResourceType, active.DefaultVersion)
+		}
+		if ver.GRPCServiceName == serviceName && ver.ContentHash == hash {
+			return id, nil
+		}
+		existing = *ver
+		replaceInPlace = ver.GRPCServiceName == serviceName
+		grpcRename = !replaceInPlace
 	}
 
-	if a.regs == nil {
-		a.regs = make(map[string]*extensionRegistration)
-	}
-
-	// Either new or changed — register or atomically replace.
-	oldReg, alreadyRegistered := a.regs[serviceName]
-	if alreadyRegistered {
+	if replaceInPlace {
 		a.GRPCMux.ReplaceDesc(svc.Desc)
 		if a.HTTPMux != nil {
-			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), oldReg.httpPrefix)
-			a.HTTPMux.ReplacePrefixHandler(reg.httpPrefix, handler)
-			if oldReg.httpPrefix != reg.httpPrefix {
-				a.HTTPMux.DeregisterByPrefix(oldReg.httpPrefix)
+			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), canonicalPrefix)
+			a.HTTPMux.ReplacePrefixHandler(canonicalPrefix, handler)
+			if existing.HTTPPrefix != "" && existing.HTTPPrefix != canonicalPrefix {
+				a.HTTPMux.DeregisterByPrefix(existing.HTTPPrefix)
 			}
 		}
 		if a.FileRegistry != nil {
-			if oldReg.descriptorPath != reg.descriptorPath {
-				a.FileRegistry.Deregister(oldReg.descriptorPath)
+			if existing.DescriptorPath != "" && existing.DescriptorPath != descriptorPath {
+				a.FileRegistry.Deregister(existing.DescriptorPath)
 			}
 			a.FileRegistry.Replace(svc.Descriptors.File)
 		}
 	} else {
+		// New gRPC name (first activation, or package rename). Register
+		// the new service first; on rename the old service stays until
+		// after Registry.Register succeeds.
 		if err := a.GRPCMux.RegisterDesc(svc.Desc); err != nil {
 			return "", fmt.Errorf("register gRPC: %w", err)
 		}
 		if a.HTTPMux != nil {
-			prefix := svc.Config.CanonicalHTTPPrefix()
-			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), prefix)
-			if err := a.HTTPMux.RegisterPrefixHandler(prefix, handler); err != nil {
-				a.GRPCMux.Deregister(reg.grpcServiceName)
+			handler := BuildHTTPHandler(svc, a.HTTPMux.Conn(), canonicalPrefix)
+			if err := a.HTTPMux.RegisterPrefixHandler(canonicalPrefix, handler); err != nil {
+				a.GRPCMux.Deregister(serviceName)
 				return "", fmt.Errorf("register HTTP: %w", err)
 			}
 		}
 		if a.FileRegistry != nil {
 			if err := a.FileRegistry.Register(svc.Descriptors.File); err != nil {
-				a.GRPCMux.Deregister(reg.grpcServiceName)
-				if a.HTTPMux != nil {
-					a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
-				}
+				a.deregisterExtensionTransport(serviceName, canonicalPrefix, descriptorPath)
 				return "", fmt.Errorf("register file descriptor: %w", err)
 			}
 		}
 	}
 
-	// Platform service refcounting — always reconcile the previous
-	// mapping so that transitions (including "had a key → now empty")
-	// are handled correctly.
-	a.initPlatformMaps()
-	prevKey := a.extensionKeys[serviceName]
+	// Platform ownership — reconcile against the *new* gRPC name.
+	// On rename, the old name's platform ownership is released after
+	// the registry swap below so a failed new registration does not
+	// drop the still-live old service's platform ref.
+	if platformKey.Collection != "" {
+		prevKey, hadPrev := a.Registry.PlatformKeyForOwner(serviceName)
+		needAcquire := !hadPrev || prevKey != platformKey
 
-	if prevKey != "" && prevKey != platformKey {
-		a.decrementRefCount(prevKey)
-		delete(a.extensionKeys, serviceName)
-	}
+		if hadPrev && prevKey != platformKey {
+			a.releasePlatformOwner(prevKey, serviceName)
+		}
 
-	if platformKey != "" && prevKey != platformKey {
-		a.refCount[platformKey]++
-		a.extensionKeys[serviceName] = platformKey
-
-		if a.refCount[platformKey] == 1 {
-			if err := a.registerPlatformService(schema); err != nil {
-				a.refCount[platformKey]--
-				delete(a.extensionKeys, serviceName)
-
-				// Rollback the extension registration regardless of
-				// whether this was a new registration or a replacement.
-				// For replacements we can't restore the old compiled
-				// service, so we deregister and clear cached state so
-				// the next Activate rebuilds from scratch.
-				a.GRPCMux.Deregister(reg.grpcServiceName)
-				if a.HTTPMux != nil {
-					a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
+		if needAcquire {
+			if err := a.acquirePlatform(schema, platformKey, serviceName); err != nil {
+				// Roll back only the *new* transport. On in-place
+				// replace we cannot restore the previous compiled
+				// service, so clear registry state for this name so
+				// the next Activate rebuilds. On rename the old
+				// registration is still intact.
+				a.deregisterExtensionTransport(serviceName, canonicalPrefix, descriptorPath)
+				if replaceInPlace {
+					a.Registry.UnregisterByGRPCServiceName(serviceName)
 				}
-				if a.FileRegistry != nil {
-					a.FileRegistry.Deregister(reg.descriptorPath)
-				}
-				delete(a.hashes, serviceName)
-				delete(a.regs, serviceName)
 				return "", fmt.Errorf("register platform service: %w", err)
 			}
 		}
 	}
 
-	a.hashes[serviceName] = hash
-	a.regs[serviceName] = reg
-
-	if a.QuerySchemas != nil {
-		a.QuerySchemas.Register(domain.ResourceQuerySchema{
+	if err := a.Registry.Register(ActiveResourceVersion{
+		APIVersion:      apiVersion,
+		GRPCServiceName: serviceName,
+		HTTPPrefix:      canonicalPrefix,
+		DescriptorPath:  descriptorPath,
+		ContentHash:     hash,
+		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   schema.ResourceType,
 			ServiceName:    schema.ResourceType.ServiceName(),
 			TypeName:       schema.Singular,
-			APIVersion:     domain.APIVersion(schema.Version),
+			APIVersion:     apiVersion,
 			CollectionName: domain.CollectionName(schema.CollectionID),
 			SpecDescriptor: specDesc.Message,
-		})
+		},
+	}); err != nil {
+		if !replaceInPlace {
+			a.deregisterExtensionTransport(serviceName, canonicalPrefix, descriptorPath)
+			if platformKey.Collection != "" {
+				a.releasePlatformOwner(platformKey, serviceName)
+			}
+		}
+		return "", err
+	}
+
+	if grpcRename {
+		// New registration is live; retire the previous gRPC identity.
+		a.deregisterExtensionTransport(existing.GRPCServiceName, existing.HTTPPrefix, existing.DescriptorPath)
+		if prevOldKey, ok := a.Registry.PlatformKeyForOwner(existing.GRPCServiceName); ok {
+			a.releasePlatformOwner(prevOldKey, existing.GRPCServiceName)
+		}
+		// Registry.Register already dropped the old gRPC name from
+		// extensionsByGRPC when the same type+version moved to the
+		// new name.
 	}
 
 	return id, nil
+}
+
+// deregisterExtensionTransport removes gRPC/HTTP/file registrations for
+// one extension service. Must be called with a.mu held.
+func (a *DynamicSchemaActivator) deregisterExtensionTransport(grpcServiceName, httpPrefix, descriptorPath string) {
+	a.GRPCMux.Deregister(grpcServiceName)
+	if a.HTTPMux != nil {
+		a.HTTPMux.DeregisterByPrefix(httpPrefix)
+	}
+	if a.FileRegistry != nil {
+		a.FileRegistry.Deregister(descriptorPath)
+	}
 }
 
 func (a *DynamicSchemaActivator) platformAPIVersion() string {
@@ -286,31 +282,24 @@ func (a *DynamicSchemaActivator) platformAPIVersion() string {
 	return platformresource.APIVersion
 }
 
-// platformKeyForCollection returns the refcounting key for a
-// collection's platform service, or "" if the collection lacks the
-// required identity field.
-func platformKeyForCollection(collectionID string) string {
-	if collectionID != "" {
-		return platformresource.ServiceName + "/" + collectionID
+// platformKeyForCollection returns the registry key for a collection's
+// platform service, or a zero key if the collection is empty.
+func platformKeyForCollection(collectionID string) PlatformRegistrationKey {
+	if collectionID == "" {
+		return PlatformRegistrationKey{}
 	}
-	return ""
+	return PlatformRegistrationKey{Collection: domain.CollectionName(collectionID)}
 }
 
-func (a *DynamicSchemaActivator) initPlatformMaps() {
-	if a.refCount == nil {
-		a.refCount = make(map[string]int)
+// acquirePlatform adds ownerGRPC as an owner of key. On 0→1 it builds
+// and registers the platform mux service, then records ownership.
+// Must be called with a.mu held (serializes Activate/Deactivate).
+func (a *DynamicSchemaActivator) acquirePlatform(schema domain.ExtensionResourceSchema, key PlatformRegistrationKey, ownerGRPC string) error {
+	if _, exists := a.Registry.GetPlatform(key); exists {
+		_, err := a.Registry.AddPlatformOwner(key, ownerGRPC, ActivePlatformRegistration{})
+		return err
 	}
-	if a.platformHandles == nil {
-		a.platformHandles = make(map[string]*platformRegistration)
-	}
-	if a.extensionKeys == nil {
-		a.extensionKeys = make(map[string]string)
-	}
-}
 
-// registerPlatformService builds and registers the platform-canonical
-// service for the schema's collection. Must be called with a.mu held.
-func (a *DynamicSchemaActivator) registerPlatformService(schema domain.ExtensionResourceSchema) error {
 	platformVersion := a.platformAPIVersion()
 	platCfg := &platformresource.Config{
 		CollectionConfig: dynamicapi.CollectionConfig{
@@ -326,55 +315,44 @@ func (a *DynamicSchemaActivator) registerPlatformService(schema domain.Extension
 		return fmt.Errorf("build: %w", err)
 	}
 
-	reg := &platformRegistration{
-		grpcServiceName: platCfg.GRPCServiceName(),
-		httpPrefix:      platCfg.HTTPPrefix(),
-		descriptorPath:  string(platSvc.Descriptors.File.Path()),
+	transport := ActivePlatformRegistration{
+		APIVersion:      domain.APIVersion(platformVersion),
+		GRPCServiceName: platCfg.GRPCServiceName(),
+		HTTPPrefix:      platCfg.HTTPPrefix(),
+		DescriptorPath:  string(platSvc.Descriptors.File.Path()),
 	}
 
 	if err := a.GRPCMux.RegisterDesc(platSvc.Desc); err != nil {
 		return fmt.Errorf("gRPC: %w", err)
 	}
 	if a.HTTPMux != nil {
-		prefix := platCfg.HTTPPrefix()
-		handler := platformresource.BuildHTTPHandler(platSvc, a.HTTPMux.Conn(), prefix)
-		if err := a.HTTPMux.RegisterPrefixHandler(prefix, handler); err != nil {
-			a.GRPCMux.Deregister(reg.grpcServiceName)
+		handler := platformresource.BuildHTTPHandler(platSvc, a.HTTPMux.Conn(), transport.HTTPPrefix)
+		if err := a.HTTPMux.RegisterPrefixHandler(transport.HTTPPrefix, handler); err != nil {
+			a.GRPCMux.Deregister(transport.GRPCServiceName)
 			return fmt.Errorf("HTTP: %w", err)
 		}
 	}
 	if a.FileRegistry != nil {
 		if err := a.FileRegistry.Register(platSvc.Descriptors.File); err != nil {
-			a.GRPCMux.Deregister(reg.grpcServiceName)
-			if a.HTTPMux != nil {
-				a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
-			}
+			a.deregisterExtensionTransport(transport.GRPCServiceName, transport.HTTPPrefix, transport.DescriptorPath)
 			return fmt.Errorf("file descriptor: %w", err)
 		}
 	}
 
-	platformKey := platformKeyForCollection(schema.CollectionID)
-	a.platformHandles[platformKey] = reg
+	if _, err := a.Registry.AddPlatformOwner(key, ownerGRPC, transport); err != nil {
+		a.deregisterExtensionTransport(transport.GRPCServiceName, transport.HTTPPrefix, transport.DescriptorPath)
+		return err
+	}
 	return nil
 }
 
-// decrementRefCount reduces the refcount for a platform key and
-// deregisters the platform service when it reaches zero. Must be
+// releasePlatformOwner drops ownerGRPC's platform reference and, if it
+// was the last owner, deregisters the platform mux service. Must be
 // called with a.mu held.
-func (a *DynamicSchemaActivator) decrementRefCount(platformKey string) {
-	a.refCount[platformKey]--
-	if a.refCount[platformKey] <= 0 {
-		delete(a.refCount, platformKey)
-		if reg, ok := a.platformHandles[platformKey]; ok {
-			a.GRPCMux.Deregister(reg.grpcServiceName)
-			if a.HTTPMux != nil {
-				a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
-			}
-			if a.FileRegistry != nil {
-				a.FileRegistry.Deregister(reg.descriptorPath)
-			}
-			delete(a.platformHandles, platformKey)
-		}
+func (a *DynamicSchemaActivator) releasePlatformOwner(key PlatformRegistrationKey, ownerGRPC string) {
+	dropped, last := a.Registry.RemovePlatformOwner(key, ownerGRPC)
+	if last {
+		a.deregisterExtensionTransport(dropped.GRPCServiceName, dropped.HTTPPrefix, dropped.DescriptorPath)
 	}
 }
 
@@ -399,37 +377,34 @@ func resolveEntryFile(schema domain.ExtensionResourceSchema) (string, error) {
 
 // Deactivate removes the gRPC, HTTP, and file descriptor registrations
 // for the extension identified by its activation ID, and clears the
-// cached content hash. If this was the last extension referencing a
+// registry entry. If this was the last extension referencing a
 // platform service, the platform service is deregistered as well.
 func (a *DynamicSchemaActivator) Deactivate(id application.SchemaActivationID) {
+	if a.Registry == nil {
+		return
+	}
 	serviceName := string(id)
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	reg, ok := a.regs[serviceName]
+	_, ver, ok := a.Registry.GetByGRPCServiceName(serviceName)
 	if !ok {
 		return
 	}
 
-	a.GRPCMux.Deregister(reg.grpcServiceName)
+	a.GRPCMux.Deregister(ver.GRPCServiceName)
 	if a.HTTPMux != nil {
-		a.HTTPMux.DeregisterByPrefix(reg.httpPrefix)
+		a.HTTPMux.DeregisterByPrefix(ver.HTTPPrefix)
 	}
 	if a.FileRegistry != nil {
-		a.FileRegistry.Deregister(reg.descriptorPath)
+		a.FileRegistry.Deregister(ver.DescriptorPath)
 	}
 
-	delete(a.hashes, serviceName)
-	delete(a.regs, serviceName)
+	a.Registry.UnregisterByGRPCServiceName(serviceName)
 
-	if a.QuerySchemas != nil {
-		a.QuerySchemas.Unregister(reg.resourceType)
-	}
-
-	if platformKey, hasPlatform := a.extensionKeys[serviceName]; hasPlatform {
-		delete(a.extensionKeys, serviceName)
-		a.decrementRefCount(platformKey)
+	if platformKey, ok := a.Registry.PlatformKeyForOwner(serviceName); ok {
+		a.releasePlatformOwner(platformKey, serviceName)
 	}
 }
 
@@ -473,10 +448,16 @@ func schemaContentHash(s domain.ExtensionResourceSchema) [32]byte {
 
 // ContentHash exposes the hash for a gRPC service name, for testing.
 func (a *DynamicSchemaActivator) ContentHash(grpcServiceName string) ([32]byte, bool) {
+	if a.Registry == nil {
+		return [32]byte{}, false
+	}
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	h, ok := a.hashes[grpcServiceName]
-	return h, ok
+	_, ver, ok := a.Registry.GetByGRPCServiceName(grpcServiceName)
+	if !ok {
+		return [32]byte{}, false
+	}
+	return ver.ContentHash, true
 }
 
 // SchemaContentHash is exported for testing the deterministic hash.

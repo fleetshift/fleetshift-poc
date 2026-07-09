@@ -19,7 +19,7 @@ Wire protocols, serialization, and transport level middleware. gRPC server lives
 Notable sub-packages for dynamic API extensibility:
 
 - **`transport/dynamicapi`** — shared leaf: dynamic gRPC mux (`DynamicServiceMux`), dynamic HTTP mux (`DynamicHTTPMux`), file registry, proto compiler, composite reflection, and exported helpers (field builders, timestamp marshaling, HTTP utilities). Has no knowledge of specific resource types.
-- **`transport/managedresource`** — extension services: service builder and gRPC/HTTP handlers for addon-defined extension APIs, plus the `DynamicSchemaActivator` that orchestrates schema compilation and mux registration.
+- **`transport/managedresource`** — extension services: service builder and gRPC/HTTP handlers for addon-defined extension APIs, plus the `DynamicSchemaActivator` that orchestrates schema compilation and mux registration. Activation bookkeeping for both extension and platform-canonical services (transport identity, content hash, query schema, platform ownership/refcount) lives in `ActiveResourceRegistry` in this package; the same instance is passed to Postgres as `domain.QuerySchemaProvider`.
 - **`transport/platformresource`** — platform-canonical services: service builder and handlers for platform resource identity APIs (labels, representations, aliases).
 
 ### Layer 3: Application (`internal/application`)

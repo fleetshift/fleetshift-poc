@@ -112,6 +112,7 @@ func TestReflection_ListServicesIncludesDynamic(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{},
+		Registry:     managedresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -131,6 +132,7 @@ func TestReflection_FileContainingSymbolReturnsDynamicDescriptor(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{},
+		Registry:     managedresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -159,6 +161,7 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{},
+		Registry:     managedresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -184,6 +187,7 @@ func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
 		Deps:         managedresource.Deps{},
+		Registry:     managedresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
