@@ -23,17 +23,22 @@ package postgres
 //
 // Run with:
 //
-//	FLEETSHIFT_QUERY_BENCH=1 go test ./internal/infrastructure/postgres/ -run TestQueryResourcesExplainPlan -v -timeout 10m
+//	FLEETSHIFT_QUERY_BENCH=1 go test ./internal/infrastructure/postgres/ -run 'TestQueryResources(ExplainPlan|Benchmark)$' -v -timeout 10m
 //
-// (skipped by default -- it spins up its own Postgres container and
-// seeds a multi-tens-of-thousands-row corpus, so it's too slow for
-// the default `go test ./...` loop.)
+// TestQueryResourcesExplainPlan logs one-shot EXPLAIN (ANALYZE,
+// BUFFERS) plans. TestQueryResourcesBenchmark times the real
+// QueryRepo.QueryResources path over repeated rounds (mean/p50/p95)
+// against the same corpus. Both are skipped by default -- they spin
+// up a dedicated Postgres container and seed a multi-tens-of-
+// thousands-row corpus, so they're too slow for the default
+// `go test ./...` loop.
 
 import (
 	"context"
 	"database/sql"
 	"fmt"
 	"os"
+	"sort"
 	"testing"
 	"time"
 
@@ -72,6 +77,17 @@ const (
 	qrbPlatformOnlyCount = 5_000
 
 	qrbChunk = 5000
+
+	// qrbRounds is how many timed QueryResources calls each scenario
+	// makes; timings report mean/p50/p95 across these. Matches the
+	// inventory write-path bench's rationale for a double-digit
+	// sample (container noise skews a single EXPLAIN ANALYZE more
+	// than a median over many rounds).
+	qrbRounds = 15
+
+	// qrbWarmupRounds discards cold-cache / first-plan cost before
+	// the timed sample.
+	qrbWarmupRounds = 2
 )
 
 var qrbFixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
@@ -370,23 +386,7 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 	}
 
 	db := openBenchDB(t)
-
-	t.Log("seeding corpus...")
-	seedStart := time.Now()
-	seedQRBTypes(t, db)
-	seedQRBPlatformOnly(t, db)
-	seedQRBClusters(t, db)
-	seedQRBNodes(t, db)
-	seedQRBAliasesAndRelationships(t, db)
-	if _, err := db.ExecContext(context.Background(), `ANALYZE
-		platform_resources, extension_resources, extension_resource_types,
-		extension_resource_managed, resource_intents, fulfillments,
-		extension_resource_inventory, resource_alias_claims, resource_relationships`); err != nil {
-		t.Fatalf("analyze: %v", err)
-	}
-	t.Logf("seeded corpus in %s", time.Since(seedStart))
-	qrbTableSizes(t, db)
-	t.Log("")
+	seedQRBCorpus(t, db)
 
 	// Empty-filter first page should seek idx_extension_resources_query_order.
 	explainQueryResources(t, db, "empty filter (default first page)", "", "", defaultQueryPageSize, nil)
@@ -413,4 +413,180 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 		fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "max page size (500), empty filter", "", "", maxQueryPageSize, nil)
+}
+
+// ---------------------------------------------------------------------------
+// Absolute timings (repeated QueryResources rounds)
+// ---------------------------------------------------------------------------
+
+type qrbTimings struct {
+	scenario  string
+	pageSize  int
+	durations []time.Duration
+}
+
+func (r qrbTimings) stats() (mean, p50, p95, minD, maxD time.Duration) {
+	sorted := append([]time.Duration(nil), r.durations...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var sum time.Duration
+	for _, d := range sorted {
+		sum += d
+	}
+	mean = sum / time.Duration(len(sorted))
+	p50 = sorted[len(sorted)*50/100]
+	p95 = sorted[min(len(sorted)*95/100, len(sorted)-1)]
+	return mean, p50, p95, sorted[0], sorted[len(sorted)-1]
+}
+
+func (r qrbTimings) String() string {
+	mean, p50, p95, minD, maxD := r.stats()
+	return fmt.Sprintf("n=%-2d  mean=%-10s  p50=%-10s  p95=%-10s  min=%-10s  max=%-10s",
+		len(r.durations), mean, p50, p95, minD, maxD)
+}
+
+// timeQueryResources times QueryRepo.QueryResources over warmup +
+// timed rounds. Each round uses its own read-only transaction
+// (begin/query/rollback), matching the store's one-tx-per-call shape.
+func timeQueryResources(t *testing.T, db *sql.DB, scenario string, req domain.QueryResourcesRequest) qrbTimings {
+	t.Helper()
+	ctx := context.Background()
+
+	runOnce := func() (domain.QueryResourcesPage, time.Duration, error) {
+		start := time.Now()
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			return domain.QueryResourcesPage{}, 0, fmt.Errorf("begin: %w", err)
+		}
+		page, err := (&QueryRepo{DB: tx}).QueryResources(ctx, req)
+		_ = tx.Rollback()
+		return page, time.Since(start), err
+	}
+
+	for i := 0; i < qrbWarmupRounds; i++ {
+		if _, _, err := runOnce(); err != nil {
+			t.Fatalf("%s warmup %d: %v", scenario, i, err)
+		}
+	}
+
+	durs := make([]time.Duration, qrbRounds)
+	var lastPage domain.QueryResourcesPage
+	for round := 0; round < qrbRounds; round++ {
+		page, d, err := runOnce()
+		if err != nil {
+			t.Fatalf("%s round %d: %v", scenario, round, err)
+		}
+		durs[round] = d
+		lastPage = page
+	}
+	t.Logf("%s  page_size=%d  rows=%d  next_token=%v  %s",
+		scenario, req.PageSize, len(lastPage.Resources), lastPage.NextPageToken != "",
+		qrbTimings{scenario: scenario, pageSize: int(req.PageSize), durations: durs})
+	return qrbTimings{scenario: scenario, pageSize: int(req.PageSize), durations: durs}
+}
+
+// seedQRBCorpus seeds the shared QueryResources bench corpus and
+// ANALYZEs. Used by both the EXPLAIN and absolute-timing drivers.
+func seedQRBCorpus(t *testing.T, db *sql.DB) {
+	t.Helper()
+	t.Log("seeding corpus...")
+	seedStart := time.Now()
+	seedQRBTypes(t, db)
+	seedQRBPlatformOnly(t, db)
+	seedQRBClusters(t, db)
+	seedQRBNodes(t, db)
+	seedQRBAliasesAndRelationships(t, db)
+	if _, err := db.ExecContext(context.Background(), `ANALYZE
+		platform_resources, extension_resources, extension_resource_types,
+		extension_resource_managed, resource_intents, fulfillments,
+		extension_resource_inventory, resource_alias_claims, resource_relationships`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+	t.Logf("seeded corpus in %s", time.Since(seedStart))
+	qrbTableSizes(t, db)
+	t.Log("")
+}
+
+// TestQueryResourcesBenchmark times QueryRepo.QueryResources against
+// the same corpus/scenarios as TestQueryResourcesExplainPlan, but as
+// repeated wall-clock samples (mean/p50/p95) rather than one-shot
+// EXPLAIN ANALYZE. EXPLAIN's "Execution Time" is useful for plan
+// shape; this is the absolute latency number for the full Go path
+// (compile + begin + query + scan + rollback).
+func TestQueryResourcesBenchmark(t *testing.T) {
+	if os.Getenv("FLEETSHIFT_QUERY_BENCH") == "" {
+		t.Skip("set FLEETSHIFT_QUERY_BENCH=1 to run (spins up a dedicated Postgres container and seeds a realistic-scale corpus)")
+	}
+
+	db := openBenchDB(t)
+	seedQRBCorpus(t, db)
+
+	t.Log("=== QueryResources absolute timings (warmup discarded) ===")
+	scenarios := []struct {
+		name string
+		req  domain.QueryResourcesRequest
+	}{
+		{"empty filter (default first page)", domain.QueryResourcesRequest{PageSize: int32(defaultQueryPageSize)}},
+		{"resource_type,name order first page", domain.QueryResourcesRequest{
+			PageSize: int32(defaultQueryPageSize),
+			OrderBy:  "resource_type,name",
+		}},
+		{"selective resource_type equality", domain.QueryResourcesRequest{
+			Filter:   fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType),
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"extension label equality", domain.QueryResourcesRequest{
+			Filter:   `resource.labels["team"] == "platform"`,
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"guarded spec filter", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`,
+				qrbClusterService, qrbClusterType),
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"inventory label equality", domain.QueryResourcesRequest{
+			Filter:   `resource.inventory.labels["node-role"] == "worker"`,
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"inventory condition equality", domain.QueryResourcesRequest{
+			Filter:   `resource.inventory.conditions["Ready"].status == "True"`,
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"guarded numeric observation filter", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}},
+		{"max page size (500), empty filter", domain.QueryResourcesRequest{PageSize: int32(maxQueryPageSize)}},
+	}
+
+	for _, sc := range scenarios {
+		t.Run(sc.name, func(t *testing.T) {
+			timeQueryResources(t, db, sc.name, sc.req)
+		})
+	}
+
+	// Second-page keyset: first call establishes a real token, then
+	// time resumed pages against that token.
+	t.Run("empty filter (default second page keyset)", func(t *testing.T) {
+		first, err := func() (domain.QueryResourcesPage, error) {
+			tx, err := db.BeginTx(context.Background(), nil)
+			if err != nil {
+				return domain.QueryResourcesPage{}, err
+			}
+			defer tx.Rollback()
+			return (&QueryRepo{DB: tx}).QueryResources(context.Background(), domain.QueryResourcesRequest{
+				PageSize: int32(defaultQueryPageSize),
+			})
+		}()
+		if err != nil {
+			t.Fatalf("first page: %v", err)
+		}
+		if first.NextPageToken == "" {
+			t.Fatal("expected next page token from first page")
+		}
+		timeQueryResources(t, db, "empty filter (default second page keyset)", domain.QueryResourcesRequest{
+			PageSize:  int32(defaultQueryPageSize),
+			PageToken: first.NextPageToken,
+		})
+	})
 }
