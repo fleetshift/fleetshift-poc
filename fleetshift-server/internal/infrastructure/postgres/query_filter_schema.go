@@ -69,6 +69,15 @@ func (r queryFieldResolver) validateObservationPath(ctx querysql.ResolveContext,
 // (api_server_port instead of the stored apiServerPort), silently
 // matching nothing. Returning the resolved JSON names lets the two
 // spellings behave identically.
+//
+// Only singular message/group fields may be traversed: repeated and
+// map fields are also MessageKind (maps expose a synthetic map-entry
+// message), but the query compiler has no list/map traversal
+// semantics (exists/all/map/filter macros are rejected; dotted and
+// ["..."] paths flatten to the same segments). Continuing through
+// them would otherwise validate and then emit plain JSON extraction
+// with wrong or null-ish semantics. Terminal selection of a
+// repeated/map field is still allowed.
 func validateDescriptorPath(desc protoreflect.MessageDescriptor, root string, names []string) ([]string, error) {
 	cur := desc
 	resolved := make([]string, len(names))
@@ -87,6 +96,10 @@ func validateDescriptorPath(desc protoreflect.MessageDescriptor, root string, na
 		}
 		if fd.Kind() != protoreflect.MessageKind && fd.Kind() != protoreflect.GroupKind {
 			return nil, fmt.Errorf("filter: %w: %s is not a message field, cannot select nested field %q",
+				domain.ErrInvalidArgument, joinDotted(root, names[:i+1]), names[i+1])
+		}
+		if fd.IsMap() || fd.IsList() {
+			return nil, fmt.Errorf("filter: %w: %s is a repeated or map field, cannot select nested field %q",
 				domain.ErrInvalidArgument, joinDotted(root, names[:i+1]), names[i+1])
 		}
 		cur = fd.Message()

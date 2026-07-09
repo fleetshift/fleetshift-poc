@@ -339,6 +339,67 @@ func TestQueryFieldResolver_SpecUsesJSONNameNotProtoNameForExtraction(t *testing
 	}
 }
 
+// nestedSpecTestDescriptor has a singular nested message (valid to
+// traverse), a repeated message field, and a string-to-message map.
+// The compiler has no list/map traversal semantics, so continuing
+// through the latter two must fail closed even though both are
+// MessageKind (maps expose a synthetic map-entry message).
+func nestedSpecTestDescriptor(t *testing.T) protoreflect.MessageDescriptor {
+	t.Helper()
+	const src = `
+syntax = "proto3";
+package querysql.test;
+message NestedSpec {
+  message Item {
+    string name = 1;
+  }
+  message Nested {
+    string value = 1;
+  }
+  Nested nested = 1;
+  repeated Item items = 2;
+  map<string, Item> labels = 3;
+}
+`
+	desc, err := dynamicapi.CompileInline(context.Background(),
+		map[string]string{"nested_spec.proto": src}, "nested_spec.proto", "querysql.test.NestedSpec")
+	if err != nil {
+		t.Fatalf("CompileInline: %v", err)
+	}
+	return desc.Message
+}
+
+func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.T) {
+	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	catalog := application.NewQuerySchemaCatalog()
+	catalog.Register(domain.ResourceQuerySchema{
+		ResourceType:   rt,
+		SpecDescriptor: nestedSpecTestDescriptor(t),
+	})
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: catalog}}
+
+	pred := compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
+	if !strings.Contains(pred.SQL, "ri.spec -> 'nested' ->> 'value'") {
+		t.Errorf("SQL = %q, want singular message traversal to remain valid", pred.SQL)
+	}
+
+	// Terminal selection of a repeated/map field is still allowed;
+	// only continuing through them is rejected.
+	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.items == "x"`)
+	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels == "x"`)
+
+	for _, filter := range []string{
+		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.items.name == "x"`,
+		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels.name == "x"`,
+		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].name == "x"`,
+	} {
+		err := compileWithResolverErr(t, c, filter)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+		}
+	}
+}
+
 func TestQueryFieldResolver_SpecPermissiveWhenSchemaAbsent(t *testing.T) {
 	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: application.NewQuerySchemaCatalog()}}
 	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.anything_goes == 5`)
