@@ -38,9 +38,11 @@ type QueryResourcesRequest struct {
 	// api_version, collection_name, and resource_id are not supported
 	// filter fields.
 	//
-	// resource.state comparisons lowercase string literals so API
-	// enum spellings from Get/List ("ACTIVE") match the lowercase
-	// values stored on fulfillments.state ("active").
+	// Ordinary string fields (== and startsWith) are case-sensitive
+	// on every backend. resource.state is the exception: comparisons
+	// and startsWith lowercase string literals so API enum spellings
+	// from Get/List ("ACTIVE") match the lowercase values stored on
+	// fulfillments.state ("active").
 	Filter string
 
 	// PageSize caps the number of rows returned. Non-positive values

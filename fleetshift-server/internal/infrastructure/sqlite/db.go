@@ -43,11 +43,16 @@ func Open(dsn string) (*sql.DB, error) {
 // openWithPragmas opens a SQLite connection with standard pragmas
 // but without running migrations.
 //
-// foreign_keys is set in the DSN so the driver applies it to every
-// new connection, not just the first one from the pool.
+// foreign_keys and case_sensitive_like are set in the DSN so the
+// driver applies them to every new connection, not just the first
+// one from the pool. case_sensitive_like aligns SQLite's LIKE with
+// Postgres (case-sensitive) so QueryResources startsWith filters
+// share one case contract across backends; see queryrepotest's
+// CaseSensitivity suite.
 func openWithPragmas(dsn string) (*sql.DB, error) {
 	dsn = withTxLock(dsn)
 	dsn = withPragma(dsn, "foreign_keys(1)")
+	dsn = withPragma(dsn, "case_sensitive_like(1)")
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, fmt.Errorf("open sqlite: %w", err)

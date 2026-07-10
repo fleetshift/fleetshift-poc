@@ -121,11 +121,13 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 	case "state":
 		if len(rest) == 0 {
 			// fulfillments.state is stored lowercase; lowercase string
-			// literals so API enum spellings ("ACTIVE") match.
+			// literals so API enum spellings ("ACTIVE") match for
+			// == / != / in / startsWith.
 			return querysql.SQLExpr{
-				SQL:     "f.state",
-				Compare: querysql.LowercaseStringCompare("f.state"),
-				In:      querysql.LowercaseStringIn("f.state"),
+				SQL:        "f.state",
+				Compare:    querysql.LowercaseStringCompare("f.state"),
+				In:         querysql.LowercaseStringIn("f.state"),
+				StartsWith: querysql.LowercaseStringStartsWith("f.state"),
 			}, nil
 		}
 	case "pause_reason":

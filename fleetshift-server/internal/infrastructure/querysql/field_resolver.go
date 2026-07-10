@@ -64,11 +64,19 @@ const (
 // In, when non-nil, likewise overrides the generic "SQL IN (...)"
 // path -- e.g. a Postgres resolver may rewrite resource_type in
 // ["a/T", "b/U"] to (er.service_name, er.type_name) IN (...).
+//
+// StartsWith, when non-nil, overrides the generic
+// "SQL LIKE <escaped prefix>% ESCAPE ..." path for
+// field.startsWith("prefix"). Resolvers use this for field-specific
+// case folding (e.g. lowercasing the prefix for stored-lowercase
+// columns) or dialect-specific prefix predicates; handled=false keeps
+// the generic LIKE.
 type SQLExpr struct {
 	SQL string
 
-	Compare func(op ComparisonOperator, lit any, bind func(any) string) (sql string, handled bool, err error)
-	In      func(values []any, bind func(any) string) (sql string, handled bool, err error)
+	Compare    func(op ComparisonOperator, lit any, bind func(any) string) (sql string, handled bool, err error)
+	In         func(values []any, bind func(any) string) (sql string, handled bool, err error)
+	StartsWith func(prefix string, bind func(any) string) (sql string, handled bool, err error)
 }
 
 // ResolveContext carries the per-compilation state a [FieldResolver]

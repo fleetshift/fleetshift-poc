@@ -51,3 +51,41 @@ func TestLowercaseStringIn(t *testing.T) {
 		t.Errorf("bound = %#v", binds)
 	}
 }
+
+func TestLowercaseStringStartsWith(t *testing.T) {
+	sw := querysql.LowercaseStringStartsWith("f.state")
+	binds := []any{}
+	bind := func(v any) string {
+		binds = append(binds, v)
+		return "?"
+	}
+
+	sql, handled, err := sw("CRE", bind)
+	if err != nil {
+		t.Fatalf("StartsWith: %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if sql != `f.state LIKE ? ESCAPE '\'` {
+		t.Errorf("SQL = %q, want f.state LIKE ? ESCAPE '\\'", sql)
+	}
+	if len(binds) != 1 || binds[0] != "cre%" {
+		t.Errorf("bound = %#v, want [\"cre%%\"]", binds)
+	}
+
+	binds = nil
+	sql, handled, err = sw(`A%B_C\D`, bind)
+	if err != nil {
+		t.Fatalf("StartsWith (metacharacters): %v", err)
+	}
+	if !handled {
+		t.Fatal("expected handled=true")
+	}
+	if sql != `f.state LIKE ? ESCAPE '\'` {
+		t.Errorf("SQL = %q", sql)
+	}
+	if len(binds) != 1 || binds[0] != `a\%b\_c\\d%` {
+		t.Errorf("bound = %#v, want escaped lowercased pattern", binds)
+	}
+}

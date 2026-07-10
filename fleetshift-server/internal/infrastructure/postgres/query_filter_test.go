@@ -511,6 +511,21 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 	if !found {
 		t.Errorf("args = %#v, want to include normalized \"active\"", pred.Args)
 	}
+
+	pred = compile(t, `resource.state.startsWith("CRE")`)
+	if !strings.Contains(pred.SQL, "f.state LIKE") || !strings.Contains(pred.SQL, `ESCAPE '\'`) {
+		t.Errorf("SQL = %q, want f.state LIKE ... ESCAPE", pred.SQL)
+	}
+	found = false
+	for _, a := range pred.Args {
+		if a == "cre%" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %#v, want to include normalized \"cre%%\"", pred.Args)
+	}
 }
 
 func TestQueryFieldResolver_UnsupportedField(t *testing.T) {

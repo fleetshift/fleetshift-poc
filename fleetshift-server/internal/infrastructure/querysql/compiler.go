@@ -269,6 +269,15 @@ func compileStartsWith(c ast.CallExpr, st *state) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	if expr.StartsWith != nil {
+		sql, handled, err := expr.StartsWith(prefix, st.b.bind)
+		if err != nil {
+			return "", err
+		}
+		if handled {
+			return sql, nil
+		}
+	}
 	pattern := escapeLikePattern(prefix) + "%"
 	return fmt.Sprintf("%s LIKE %s ESCAPE '\\'", expr.SQL, st.b.bind(pattern)), nil
 }

@@ -503,6 +503,50 @@ func TestCompileFilter_CompareHookOverridesGenericComparison(t *testing.T) {
 	}
 }
 
+// TestCompileFilter_StartsWithHookOverridesGenericStartsWith proves a
+// [querysql.SQLExpr.StartsWith] hook can replace the generic
+// "SQL LIKE ..." path when it reports handled=true, and that
+// handled=false falls back to the generic path.
+func TestCompileFilter_StartsWithHookOverridesGenericStartsWith(t *testing.T) {
+	c := querysql.Compiler{Fields: recordingResolver(func(path querysql.FieldPath, _ querysql.TypeHint, _ querysql.ResolveContext) (querysql.SQLExpr, error) {
+		return querysql.SQLExpr{
+			SQL: path.String(),
+			StartsWith: func(prefix string, bind func(any) string) (string, bool, error) {
+				if prefix != "A" {
+					return "", false, nil
+				}
+				return "STARTS_OVERRIDDEN(" + bind(prefix) + ")", true, nil
+			},
+		}, nil
+	})}
+
+	pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `name.startsWith("A")`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter: %v", err)
+	}
+	if pred.SQL != "STARTS_OVERRIDDEN($1)" {
+		t.Errorf("SQL = %q, want STARTS_OVERRIDDEN($1)", pred.SQL)
+	}
+	if len(pred.Args) != 1 || pred.Args[0] != "A" {
+		t.Errorf("Args = %#v, want [\"A\"]", pred.Args)
+	}
+
+	pred, err = c.CompileFilter(context.Background(), querysql.CompileFilterInput{
+		Filter: `name.startsWith("b")`,
+	})
+	if err != nil {
+		t.Fatalf("CompileFilter (fallback): %v", err)
+	}
+	if !strings.Contains(pred.SQL, "name LIKE $1 ESCAPE") {
+		t.Errorf("SQL = %q, want generic LIKE fallback", pred.SQL)
+	}
+	if len(pred.Args) != 1 || pred.Args[0] != `b%` {
+		t.Errorf("Args = %#v, want [\"b%%\"]", pred.Args)
+	}
+}
+
 // TestCompileFilter_InHookOverridesGenericIn proves a
 // [querysql.SQLExpr.In] hook can replace the generic "SQL IN (...)"
 // path when it reports handled=true, and that handled=false falls

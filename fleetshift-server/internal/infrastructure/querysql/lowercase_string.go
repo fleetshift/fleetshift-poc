@@ -43,3 +43,14 @@ func LowercaseStringIn(column string) func(values []any, bind func(any) string) 
 		return fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ", ")), true, nil
 	}
 }
+
+// LowercaseStringStartsWith returns a [SQLExpr.StartsWith] hook that
+// binds a lowercased, LIKE-escaped prefix pattern. Matches
+// [LowercaseStringCompare] for fields whose stored values are
+// lowercase while API spellings may be uppercase.
+func LowercaseStringStartsWith(column string) func(prefix string, bind func(any) string) (string, bool, error) {
+	return func(prefix string, bind func(any) string) (string, bool, error) {
+		pattern := escapeLikePattern(strings.ToLower(prefix)) + "%"
+		return fmt.Sprintf("%s LIKE %s ESCAPE '\\'", column, bind(pattern)), true, nil
+	}
+}
