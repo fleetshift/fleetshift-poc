@@ -296,8 +296,8 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	if !ok {
 		t.Fatal("ServiceInfo missing kind.fleetshift.v1.ClusterService")
 	}
-	if len(si.Methods) != 6 {
-		t.Errorf("method count = %d, want 6", len(si.Methods))
+	if len(si.Methods) != 5 {
+		t.Errorf("method count = %d, want 5", len(si.Methods))
 	}
 
 	methodNames := make(map[string]bool)

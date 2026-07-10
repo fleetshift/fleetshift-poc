@@ -145,8 +145,8 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ClusterService in mux ServiceInfo after Activate")
 	}
-	if len(si.Methods) != 6 {
-		t.Errorf("method count = %d, want 6", len(si.Methods))
+	if len(si.Methods) != 5 {
+		t.Errorf("method count = %d, want 5", len(si.Methods))
 	}
 }
 
@@ -378,8 +378,8 @@ func TestDynamicSchemaActivator_InventoryOnlyActivatesReadOnlyService(t *testing
 	for _, m := range svc.Methods {
 		methods[m.Name] = true
 	}
-	if methods["CreateNode"] || methods["DeleteNode"] || methods["ResumeNode"] || methods["UpdateNodeLabels"] {
-		t.Errorf("inventory-only service should not expose Create/Delete/Resume/UpdateLabels, got %v", methods)
+	if methods["CreateNode"] || methods["DeleteNode"] || methods["ResumeNode"] {
+		t.Errorf("inventory-only service should not expose Create/Delete/Resume, got %v", methods)
 	}
 	if !methods["GetNode"] || !methods["ListNodes"] {
 		t.Errorf("inventory-only service missing Get/List, got %v", methods)

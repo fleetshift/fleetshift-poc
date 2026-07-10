@@ -55,10 +55,6 @@ type ExtensionServiceDescriptors struct {
 	// Nil when the type has no management capability.
 	ResumeRequest protoreflect.MessageDescriptor
 
-	// UpdateLabelsRequest is the update-labels request message descriptor.
-	// Nil when the type has no management capability.
-	UpdateLabelsRequest protoreflect.MessageDescriptor
-
 	// Spec is the addon spec message descriptor.
 	// Nil when the type has no management capability.
 	Spec protoreflect.MessageDescriptor
@@ -166,7 +162,6 @@ func BuildExtensionServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoref
 		messages = append(messages,
 			buildDeleteRequest(singular),
 			buildResumeRequest(singular),
-			buildUpdateLabelsRequest(singular, resourceFQN),
 		)
 	}
 
@@ -204,7 +199,6 @@ func BuildExtensionServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoref
 		out.CreateRequest = fd.Messages().ByName(protoreflect.Name("Create" + singular + "Request"))
 		out.DeleteRequest = fd.Messages().ByName(protoreflect.Name("Delete" + singular + "Request"))
 		out.ResumeRequest = fd.Messages().ByName(protoreflect.Name("Resume" + singular + "Request"))
-		out.UpdateLabelsRequest = fd.Messages().ByName(protoreflect.Name("Update" + singular + "LabelsRequest"))
 		out.Spec = specDesc
 	}
 	return out, nil
@@ -346,25 +340,6 @@ func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
 	}
 }
 
-func buildUpdateLabelsRequest(singular, resourceFQN string) *descriptorpb.DescriptorProto {
-	pkg := resourceFQN[:strings.LastIndex(resourceFQN, ".")]
-	reqFQN := pkg + ".Update" + singular + "LabelsRequest"
-	msg := &descriptorpb.DescriptorProto{
-		Name: proto.String("Update" + singular + "LabelsRequest"),
-		Field: []*descriptorpb.FieldDescriptorProto{
-			dynamicapi.StringField("name", 1),
-		},
-	}
-	dynamicapi.AppendMapField(msg, dynamicapi.MapField(
-		reqFQN, "labels", 2,
-		descriptorpb.FieldDescriptorProto_TYPE_STRING,
-		descriptorpb.FieldDescriptorProto_TYPE_STRING,
-		"",
-	))
-	msg.Field = append(msg.Field, dynamicapi.StringField("etag", 3))
-	return msg
-}
-
 func buildService(singular, plural, pkg string, hasManagement bool) *descriptorpb.ServiceDescriptorProto {
 	fqnPrefix := "." + pkg + "."
 	methods := make([]*descriptorpb.MethodDescriptorProto, 0, 5)
@@ -397,11 +372,6 @@ func buildService(singular, plural, pkg string, hasManagement bool) *descriptorp
 			&descriptorpb.MethodDescriptorProto{
 				Name:       proto.String("Resume" + singular),
 				InputType:  proto.String(fqnPrefix + "Resume" + singular + "Request"),
-				OutputType: proto.String(fqnPrefix + singular),
-			},
-			&descriptorpb.MethodDescriptorProto{
-				Name:       proto.String("Update" + singular + "Labels"),
-				InputType:  proto.String(fqnPrefix + "Update" + singular + "LabelsRequest"),
 				OutputType: proto.String(fqnPrefix + singular),
 			},
 		)

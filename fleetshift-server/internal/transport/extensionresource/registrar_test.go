@@ -358,7 +358,7 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 	}
 }
 
-func TestDynamic_CreateAndUpdateLabels(t *testing.T) {
+func TestDynamic_CreateWithLabels(t *testing.T) {
 	env := setup(t)
 	ctx := context.Background()
 
@@ -392,24 +392,6 @@ func TestDynamic_CreateAndUpdateLabels(t *testing.T) {
 	got = getResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
 	if got != "dev" {
 		t.Errorf("get labels[env] = %q, want dev", got)
-	}
-
-	updateReq := dynamicpb.NewMessage(env.svc.Descriptors.UpdateLabelsRequest)
-	updateReq.Set(env.svc.Descriptors.UpdateLabelsRequest.Fields().ByName("name"), protoreflect.ValueOfString("clusters/labeled"))
-	updateLabelsField := env.svc.Descriptors.UpdateLabelsRequest.Fields().ByName("labels")
-	dynamicapi.SetMapStringString(updateReq, updateLabelsField, map[string]string{"env": "prod", "tier": "1"})
-
-	updateResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
-	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/UpdateClusterLabels", updateReq, updateResp); err != nil {
-		t.Fatalf("UpdateClusterLabels: %v", err)
-	}
-	got = updateResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
-	if got != "prod" {
-		t.Errorf("update labels[env] = %q, want prod", got)
-	}
-	got = updateResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("tier").MapKey()).String()
-	if got != "1" {
-		t.Errorf("update labels[tier] = %q, want 1", got)
 	}
 
 	// Create omitting labels → empty / unset.
@@ -656,8 +638,8 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	}
 
 	// Verify method count
-	if len(svc.Desc.Methods) != 6 {
-		t.Fatalf("method count = %d, want 6", len(svc.Desc.Methods))
+	if len(svc.Desc.Methods) != 5 {
+		t.Fatalf("method count = %d, want 5", len(svc.Desc.Methods))
 	}
 
 	// Verify method names
@@ -665,7 +647,7 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	for _, m := range svc.Desc.Methods {
 		methods[m.MethodName] = true
 	}
-	for _, want := range []string{"CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster", "UpdateClusterLabels"} {
+	for _, want := range []string{"CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster"} {
 		if !methods[want] {
 			t.Errorf("missing method %q", want)
 		}

@@ -109,7 +109,6 @@ func TestBuildHTTPHandler_InventoryOnlyUnsupportedVerbs404(t *testing.T) {
 		{"create", http.MethodPost, prefix + "?node_id=n1", `{}`},
 		{"delete", http.MethodDelete, prefix + "/n1", ""},
 		{"resume", http.MethodPost, prefix + "/n1:resume", `{}`},
-		{"updateLabels", http.MethodPost, prefix + "/n1:updateLabels", `{"labels":{"a":"1"}}`},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,8 +130,8 @@ func TestBuildHTTPHandler_InventoryOnlyUnsupportedVerbs404(t *testing.T) {
 	if managed.Descriptors.CreateRequest == nil {
 		t.Fatal("managed CreateRequest should be non-nil")
 	}
-	if len(managed.Desc.Methods) != 6 {
-		t.Fatalf("managed method count = %d, want 6", len(managed.Desc.Methods))
+	if len(managed.Desc.Methods) != 5 {
+		t.Fatalf("managed method count = %d, want 5", len(managed.Desc.Methods))
 	}
 	if len(svc.Desc.Methods) != 2 {
 		t.Fatalf("inventory-only method count = %d, want 2 (Get/List)", len(svc.Desc.Methods))

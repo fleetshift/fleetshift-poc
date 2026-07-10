@@ -102,8 +102,8 @@ func TestBuildExtensionServiceDescriptors_ManagedOnly(t *testing.T) {
 		t.Error("labels should be map<string,string>")
 	}
 
-	assertMethodNames(t, descs.Service, "CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster", "UpdateClusterLabels")
-	if descs.CreateRequest == nil || descs.DeleteRequest == nil || descs.ResumeRequest == nil || descs.UpdateLabelsRequest == nil {
+	assertMethodNames(t, descs.Service, "CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster")
+	if descs.CreateRequest == nil || descs.DeleteRequest == nil || descs.ResumeRequest == nil {
 		t.Error("management request descriptors should be present")
 	}
 	if descs.Spec == nil {
@@ -135,8 +135,8 @@ func TestBuildExtensionServiceDescriptors_InventoryOnly(t *testing.T) {
 	}
 
 	assertMethodNames(t, descs.Service, "GetCluster", "ListClusters")
-	assertMissingMethods(t, descs.Service, "CreateCluster", "DeleteCluster", "ResumeCluster", "UpdateClusterLabels")
-	if descs.CreateRequest != nil || descs.DeleteRequest != nil || descs.ResumeRequest != nil || descs.UpdateLabelsRequest != nil {
+	assertMissingMethods(t, descs.Service, "CreateCluster", "DeleteCluster", "ResumeCluster")
+	if descs.CreateRequest != nil || descs.DeleteRequest != nil || descs.ResumeRequest != nil {
 		t.Error("management request descriptors should be nil for inventory-only")
 	}
 	if descs.Spec != nil {
@@ -154,7 +154,7 @@ func TestBuildExtensionServiceDescriptors_ManagedAndInventory(t *testing.T) {
 	assertHasFields(t, res, "name", "uid", "labels", "create_time", "update_time", "etag",
 		"spec", "intent_version", "state", "reconciling",
 		"local_labels", "conditions", "observation", "local_update_time", "index_update_time")
-	assertMethodNames(t, descs.Service, "CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster", "UpdateClusterLabels")
+	assertMethodNames(t, descs.Service, "CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster")
 }
 
 func TestBuildExtensionServiceDescriptors_CommonLabelsOnAllShapes(t *testing.T) {

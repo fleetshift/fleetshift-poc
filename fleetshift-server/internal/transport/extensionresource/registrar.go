@@ -115,12 +115,6 @@ func Build(cfg *ResourceTypeConfig, deps Deps) (*RegisteredService, error) {
 			Handler:    handler.handleResume,
 		})
 	}
-	if svcDescs.UpdateLabelsRequest != nil {
-		methods = append(methods, grpc.MethodDesc{
-			MethodName: "Update" + cfg.Singular + "Labels",
-			Handler:    handler.handleUpdateLabels,
-		})
-	}
 
 	grpcDesc := &grpc.ServiceDesc{
 		ServiceName: cfg.GRPCServiceName(),
@@ -460,61 +454,6 @@ func (h *dynamicHandler) doResume(ctx context.Context, req proto.Message) (proto
 	}
 
 	view, err := h.resources.Resume(ctx, in)
-	if err != nil {
-		return nil, dynamicapi.ToStatusError(err)
-	}
-
-	return h.viewToResource(view)
-}
-
-func (h *dynamicHandler) handleUpdateLabels(
-	_ any,
-	ctx context.Context,
-	dec func(any) error,
-	interceptor grpc.UnaryServerInterceptor,
-) (any, error) {
-	req := dynamicpb.NewMessage(h.descs.UpdateLabelsRequest)
-	if err := dec(req); err != nil {
-		return nil, err
-	}
-
-	if interceptor != nil {
-		info := &grpc.UnaryServerInfo{
-			FullMethod: "/" + h.cfg.GRPCServiceName() + "/Update" + h.cfg.Singular + "Labels",
-		}
-		return interceptor(ctx, req, info, func(ctx context.Context, r any) (any, error) {
-			return h.doUpdateLabels(ctx, r.(proto.Message))
-		})
-	}
-	return h.doUpdateLabels(ctx, req)
-}
-
-func (h *dynamicHandler) doUpdateLabels(ctx context.Context, req proto.Message) (proto.Message, error) {
-	reqMsg := req.ProtoReflect()
-
-	nameField := h.descs.UpdateLabelsRequest.Fields().ByName("name")
-	name := reqMsg.Get(nameField).String()
-	resourceName, err := h.parseName(name)
-	if err != nil {
-		return nil, status.Errorf(codes.InvalidArgument, "invalid name: %v", err)
-	}
-
-	labelsField := h.descs.UpdateLabelsRequest.Fields().ByName("labels")
-	labels := dynamicapi.ExtractMapStringString(reqMsg, labelsField)
-	if labels == nil {
-		labels = map[string]string{}
-	}
-
-	in := application.UpdateExtensionResourceLabelsInput{
-		ResourceType: h.cfg.ResourceType,
-		Name:         resourceName,
-		Labels:       labels,
-	}
-	if etagField := h.descs.UpdateLabelsRequest.Fields().ByName("etag"); etagField != nil && reqMsg.Has(etagField) {
-		in.Etag = domain.Etag(reqMsg.Get(etagField).String())
-	}
-
-	view, err := h.resources.UpdateLabels(ctx, in)
 	if err != nil {
 		return nil, dynamicapi.ToStatusError(err)
 	}
