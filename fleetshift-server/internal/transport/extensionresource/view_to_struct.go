@@ -232,19 +232,14 @@ func setConditionsMap(descs *ExtensionServiceDescriptors, resource *dynamicpb.Me
 }
 
 func marshalObservationStruct(field protoreflect.FieldDescriptor, raw json.RawMessage) (protoreflect.Value, error) {
-	s := &structpb.Struct{}
+	// observation is google.protobuf.Struct (MVP). protojson unmarshals
+	// object JSON directly into a dynamicpb message with that
+	// descriptor — no intermediate structpb.Struct / wire round-trip.
+	obsMsg := dynamicpb.NewMessage(field.Message())
 	if len(raw) > 0 {
-		if err := protojson.Unmarshal(raw, s); err != nil {
+		if err := protojson.Unmarshal(raw, obsMsg); err != nil {
 			return protoreflect.Value{}, status.Errorf(codes.Internal, "unmarshal observation: %v", err)
 		}
-	}
-	obsMsg := dynamicpb.NewMessage(field.Message())
-	b, err := proto.Marshal(s)
-	if err != nil {
-		return protoreflect.Value{}, status.Errorf(codes.Internal, "marshal observation: %v", err)
-	}
-	if err := proto.Unmarshal(b, obsMsg); err != nil {
-		return protoreflect.Value{}, status.Errorf(codes.Internal, "unmarshal observation message: %v", err)
 	}
 	return protoreflect.ValueOfMessage(obsMsg), nil
 }

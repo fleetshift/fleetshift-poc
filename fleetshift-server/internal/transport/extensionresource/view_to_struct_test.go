@@ -2,6 +2,7 @@ package extensionresource
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -250,6 +251,63 @@ func TestViewToResource_ManagedOnly_NoObservedFields(t *testing.T) {
 	if descs.Resource.Fields().ByName("local_labels") != nil {
 		t.Fatal("managed-only descriptor unexpectedly has local_labels")
 	}
+}
+
+func TestMarshalObservationStruct(t *testing.T) {
+	cfg := inventoryOnlyConfig()
+	descs, err := BuildExtensionServiceDescriptors(cfg, nil)
+	if err != nil {
+		t.Fatalf("BuildExtensionServiceDescriptors: %v", err)
+	}
+	obsField := descs.Resource.Fields().ByName("observation")
+	if obsField == nil {
+		t.Fatal("observation field missing")
+	}
+
+	t.Run("empty raw leaves empty Struct", func(t *testing.T) {
+		val, err := marshalObservationStruct(obsField, nil)
+		if err != nil {
+			t.Fatalf("marshalObservationStruct: %v", err)
+		}
+		b, err := protojson.Marshal(val.Message().Interface())
+		if err != nil {
+			t.Fatalf("protojson.Marshal: %v", err)
+		}
+		if string(b) != "{}" {
+			t.Errorf("empty input: got %s, want {}", b)
+		}
+	})
+
+	t.Run("object JSON populates Struct fields", func(t *testing.T) {
+		val, err := marshalObservationStruct(obsField, json.RawMessage(`{"cpu":4,"ready":true}`))
+		if err != nil {
+			t.Fatalf("marshalObservationStruct: %v", err)
+		}
+		b, err := protojson.Marshal(val.Message().Interface())
+		if err != nil {
+			t.Fatalf("protojson.Marshal: %v", err)
+		}
+		var got map[string]any
+		if err := json.Unmarshal(b, &got); err != nil {
+			t.Fatalf("json.Unmarshal: %v", err)
+		}
+		if got["cpu"] != float64(4) {
+			t.Errorf("cpu = %v, want 4", got["cpu"])
+		}
+		if got["ready"] != true {
+			t.Errorf("ready = %v, want true", got["ready"])
+		}
+	})
+
+	t.Run("invalid JSON is Internal", func(t *testing.T) {
+		_, err := marshalObservationStruct(obsField, json.RawMessage(`{`))
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), "unmarshal observation") {
+			t.Errorf("err = %v, want unmarshal observation context", err)
+		}
+	})
 }
 
 func TestViewToResource_LabelsOnAllShapes(t *testing.T) {
