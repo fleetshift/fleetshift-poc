@@ -165,7 +165,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 	t.Run("TokenPassthrough", func(t *testing.T) {
 		reporter := newChannelReporter()
-		agent := kubeaddon.NewAgent(reporter)
+		agent := kubeaddon.NewDeliveryAgent(reporter)
 
 		manifests := []domain.Manifest{{
 			ManifestType: kubeaddon.ManifestManifestType,
@@ -201,7 +201,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 	t.Run("Idempotent", func(t *testing.T) {
 		reporter := newChannelReporter()
-		agent := kubeaddon.NewAgent(reporter)
+		agent := kubeaddon.NewDeliveryAgent(reporter)
 		auth := domain.DeliveryAuth{Token: domain.RawToken(saToken)}
 		manifest := json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"idempotent-test","namespace":"default"},"data":{"v":"1"}}`)
 		manifests := []domain.Manifest{{ManifestType: kubeaddon.ManifestManifestType, Raw: manifest}}
@@ -227,7 +227,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 	t.Run("MultipleManifests", func(t *testing.T) {
 		reporter := newChannelReporter()
-		agent := kubeaddon.NewAgent(reporter)
+		agent := kubeaddon.NewDeliveryAgent(reporter)
 		auth := domain.DeliveryAuth{Token: domain.RawToken(saToken)}
 
 		manifests := []domain.Manifest{
@@ -270,7 +270,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 		att := buildTestAttestation(t, "deployments/attested-dep", manifests)
 
 		reporter := newChannelReporter()
-		agent := kubeaddon.NewAgent(reporter,
+		agent := kubeaddon.NewDeliveryAgent(reporter,
 			kubeaddon.WithKeyResolver(att.keyResolver),
 			kubeaddon.WithHTTPClient(att.httpClient),
 			kubeaddon.WithVault(vault),
@@ -309,7 +309,7 @@ func TestKubernetesAgent_RealCluster(t *testing.T) {
 
 	t.Run("AttestedDelivery_VerificationFailure", func(t *testing.T) {
 		reporter := newChannelReporter()
-		agent := kubeaddon.NewAgent(reporter)
+		agent := kubeaddon.NewDeliveryAgent(reporter)
 
 		trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 		targetWithTrustSnap := k8sTarget.Snapshot()

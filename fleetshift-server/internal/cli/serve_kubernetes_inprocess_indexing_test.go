@@ -24,7 +24,7 @@ func seedKubernetesObjectType(t *testing.T, store domain.Store) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	sch := kubernetesaddon.Schema()
+	sch := kubernetesaddon.InventorySchema()
 	def := domain.NewExtensionResourceType(sch.ResourceType, domain.APIVersion(sch.Version), domain.CollectionID(sch.CollectionID), time.Now(), domain.WithInventory())
 	if err := tx.ExtensionResources().CreateType(ctx, def); err != nil {
 		t.Fatalf("CreateType: %v", err)
@@ -160,7 +160,7 @@ func TestNewKubernetesInProcessIndexing_WiresHooksAndController(t *testing.T) {
 
 	// serve.go registers this schema on addon Connect; keep the wiring
 	// contract explicit here so a schema drift fails without a full serve.
-	sch := kubernetesaddon.Schema()
+	sch := kubernetesaddon.InventorySchema()
 	if sch.ResourceType != kubernetesaddon.ObjectResourceType {
 		t.Fatalf("Schema.ResourceType = %q, want %q", sch.ResourceType, kubernetesaddon.ObjectResourceType)
 	}

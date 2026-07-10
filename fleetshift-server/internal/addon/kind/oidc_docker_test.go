@@ -277,7 +277,7 @@ func TestKindAddon_OIDCIntegration(t *testing.T) {
 		}}
 
 		kubeReporter := newChannelReporter()
-		kubeAgent := kubeaddon.NewAgent(kubeReporter)
+		kubeAgent := kubeaddon.NewDeliveryAgent(kubeReporter)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()

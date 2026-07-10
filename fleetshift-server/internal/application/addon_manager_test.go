@@ -1260,7 +1260,7 @@ func TestAddonManager_ConnectKubernetesSchemaRegistersInventoryTypeWithoutActiva
 	}
 
 	if err := env.mgr.Connect(ctx, kubernetesaddon.AddonID, application.ConnectInput{
-		Schemas: []domain.ExtensionResourceSchema{kubernetesaddon.Schema()},
+		Schemas: []domain.ExtensionResourceSchema{kubernetesaddon.InventorySchema()},
 	}); err != nil {
 		t.Fatalf("Connect: %v", err)
 	}

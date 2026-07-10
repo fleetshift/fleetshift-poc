@@ -101,7 +101,7 @@ func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]d
 // not fail delivery.
 func TestAgent_Deliver_SucceedsWhenIndexerAbsent(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -156,7 +156,7 @@ func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
 	}
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 	err := agent.Deliver(ctx, target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver with failed indexer: %v", err)
@@ -169,7 +169,7 @@ func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
 }
 
 func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
@@ -189,7 +189,7 @@ func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
 }
 
 func TestAgent_Deliver_EmptyAPIServer(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
@@ -208,7 +208,7 @@ func TestAgent_Deliver_EmptyAPIServer(t *testing.T) {
 }
 
 func TestAgent_Remove_EmptyAPIServer(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
@@ -227,7 +227,7 @@ func TestAgent_Remove_EmptyAPIServer(t *testing.T) {
 }
 
 func TestAgent_Deliver_MissingToken(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -249,7 +249,7 @@ func TestAgent_Deliver_MissingToken(t *testing.T) {
 
 func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -278,7 +278,7 @@ func TestAgent_Deliver_BadAPIServer(t *testing.T) {
 }
 
 func TestAgent_Remove_MissingAPIServer(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:         "k8s-test",
@@ -294,7 +294,7 @@ func TestAgent_Remove_MissingAPIServer(t *testing.T) {
 }
 
 func TestAgent_Remove_EmptyManifests(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -319,7 +319,7 @@ func TestAgent_Deliver_Unauthorized_ReportsAuthFailed(t *testing.T) {
 	defer ts.Close()
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -357,7 +357,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 	defer ts.Close()
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -388,7 +388,7 @@ func TestAgent_Deliver_Forbidden_ReportsAuthFailed(t *testing.T) {
 
 func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -425,7 +425,7 @@ func TestAgent_Deliver_AttestationFailure_ReturnsAuthFailed(t *testing.T) {
 
 func TestAgent_Deliver_WithAttestation_NoTrustBundle_ReturnsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -483,7 +483,7 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 	}
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	_ = agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, att, 1)
 	result1 := awaitDone(t, reporter.done)
@@ -500,7 +500,7 @@ func TestAgent_Deliver_VerifierCacheReuse(t *testing.T) {
 
 func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -537,7 +537,7 @@ func TestAgent_Deliver_WithAttestation_NoTokenRequired(t *testing.T) {
 
 func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	trustBundle := `[{"issuer_url":"https://trusted.example.com","jwks_uri":"https://trusted.example.com/jwks","enrollment_audience":"enroll"}]`
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -577,7 +577,7 @@ func TestAgent_Remove_AttestationFailure_ReportsAuthFailed(t *testing.T) {
 
 func TestAgent_Remove_WithAttestation_NoTrustBundle_ReportsAuthFailed(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -622,7 +622,7 @@ func TestAgent_Remove_DeleteFailure_ReportsFailed(t *testing.T) {
 	defer ts.Close()
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
 		Type: kubernetes.TargetType,
@@ -646,7 +646,7 @@ func TestAgent_Remove_DeleteFailure_ReportsFailed(t *testing.T) {
 }
 
 func TestAgent_Remove_MissingToken(t *testing.T) {
-	agent := kubernetes.NewAgent(nopReporter{})
+	agent := kubernetes.NewDeliveryAgent(nopReporter{})
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -675,7 +675,7 @@ func TestAgent_Remove_Unauthorized_ReportsAuthFailed(t *testing.T) {
 	defer ts.Close()
 
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	obj := json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"rm-unauth","namespace":"default"}}`)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -703,7 +703,7 @@ func TestAgent_Remove_Unauthorized_ReportsAuthFailed(t *testing.T) {
 
 func TestAgent_Remove_EmptyManifests_ReportsDelivered(t *testing.T) {
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter)
+	agent := kubernetes.NewDeliveryAgent(reporter)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "k8s-test",
@@ -726,7 +726,7 @@ func TestAgent_Remove_EmptyManifests_ReportsDelivered(t *testing.T) {
 func TestAgent_Deliver_AttestedPlatform_MissingCredentials_ReportsFailed(t *testing.T) {
 	bundle := buildUnitTestAttestation(t)
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter,
+	agent := kubernetes.NewDeliveryAgent(reporter,
 		kubernetes.WithKeyResolver(bundle.keyResolver),
 		kubernetes.WithHTTPClient(bundle.httpClient),
 	)
@@ -758,7 +758,7 @@ func TestAgent_Deliver_AttestedPlatform_MissingCredentials_ReportsFailed(t *test
 func TestAgent_Deliver_AttestedPlatform_DirectToken_EmptyManifests(t *testing.T) {
 	bundle := buildUnitTestAttestation(t)
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter,
+	agent := kubernetes.NewDeliveryAgent(reporter,
 		kubernetes.WithKeyResolver(bundle.keyResolver),
 		kubernetes.WithHTTPClient(bundle.httpClient),
 	)
@@ -790,7 +790,7 @@ func TestAgent_Deliver_AttestedPlatform_VaultToken_EmptyManifests(t *testing.T) 
 		"targets/k8s-test/sa": []byte("vault-platform-tok"),
 	}}
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter,
+	agent := kubernetes.NewDeliveryAgent(reporter,
 		kubernetes.WithKeyResolver(bundle.keyResolver),
 		kubernetes.WithHTTPClient(bundle.httpClient),
 		kubernetes.WithVault(vault),
@@ -820,7 +820,7 @@ func TestAgent_Deliver_AttestedPlatform_VaultToken_EmptyManifests(t *testing.T) 
 func TestAgent_Remove_AttestedPlatform_MissingCredentials_ReportsFailed(t *testing.T) {
 	bundle := buildUnitTestAttestation(t)
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter,
+	agent := kubernetes.NewDeliveryAgent(reporter,
 		kubernetes.WithKeyResolver(bundle.keyResolver),
 		kubernetes.WithHTTPClient(bundle.httpClient),
 	)
@@ -848,7 +848,7 @@ func TestAgent_Remove_AttestedPlatform_MissingCredentials_ReportsFailed(t *testi
 func TestAgent_Remove_AttestedPlatform_DirectToken_EmptyManifests(t *testing.T) {
 	bundle := buildUnitTestAttestation(t)
 	reporter := newChannelReporter()
-	agent := kubernetes.NewAgent(reporter,
+	agent := kubernetes.NewDeliveryAgent(reporter,
 		kubernetes.WithKeyResolver(bundle.keyResolver),
 		kubernetes.WithHTTPClient(bundle.httpClient),
 	)

@@ -730,24 +730,18 @@ func TestKubernetesInProcessIndexHost_StartStopIdempotent(t *testing.T) {
 	}
 }
 
-func TestKubernetesInProcessIndexHost_BuildRESTConfigFromVault(t *testing.T) {
+func TestBuildTargetRESTConfigFromVault(t *testing.T) {
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{
 		"targets/t1/sa-token": []byte("vault-token"),
 	}}
-	host := NewKubernetesInProcessIndexHost(
-		context.Background(),
-		vault,
-		&recordingReporter{},
-		slog.New(slog.DiscardHandler),
-	)
 
-	cfg, err := host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{
+	cfg, err := BuildTargetRESTConfig(context.Background(), vault, readyKubeTarget("t1", map[string]string{
 		PropAPIServer:              "https://cluster.example:6443",
 		PropCACert:                 "ca-data",
 		PropServiceAccountTokenRef: "targets/t1/sa-token",
 	}))
 	if err != nil {
-		t.Fatalf("buildRESTConfig: %v", err)
+		t.Fatalf("BuildTargetRESTConfig: %v", err)
 	}
 	if cfg.Host != "https://cluster.example:6443" {
 		t.Fatalf("Host = %q", cfg.Host)
@@ -1007,20 +1001,18 @@ func TestInProcessIndexController_TerminatingClearedWhenTargetLeavesList(t *test
 	}
 }
 
-func TestKubernetesInProcessIndexHost_BuildRESTConfigErrorsAndDirectToken(t *testing.T) {
-	host := NewKubernetesInProcessIndexHost(context.Background(), nil, &recordingReporter{}, slog.New(slog.DiscardHandler))
-
-	if _, err := host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{})); err == nil {
+func TestBuildTargetRESTConfigErrorsAndDirectToken(t *testing.T) {
+	if _, err := BuildTargetRESTConfig(context.Background(), nil, readyKubeTarget("t1", map[string]string{})); err == nil {
 		t.Fatal("expected missing api_server error")
 	}
 
-	cfg, err := host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{
+	cfg, err := BuildTargetRESTConfig(context.Background(), nil, readyKubeTarget("t1", map[string]string{
 		PropAPIServer:              "https://direct.example",
 		PropServiceAccountToken:    "direct-token",
 		PropServiceAccountTokenRef: "targets/t1/sa-token",
 	}))
 	if err != nil {
-		t.Fatalf("direct token buildRESTConfig: %v", err)
+		t.Fatalf("direct token BuildTargetRESTConfig: %v", err)
 	}
 	if cfg.BearerToken != "direct-token" {
 		t.Fatalf("BearerToken = %q, want direct-token (direct wins over vault ref)", cfg.BearerToken)
@@ -1028,11 +1020,11 @@ func TestKubernetesInProcessIndexHost_BuildRESTConfigErrorsAndDirectToken(t *tes
 
 	// API server alone is accepted: bearer token may be absent (e.g. test
 	// clusters using other auth). Callers that need a token must set one.
-	cfg, err = host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{
+	cfg, err = BuildTargetRESTConfig(context.Background(), nil, readyKubeTarget("t1", map[string]string{
 		PropAPIServer: "https://no-creds.example",
 	}))
 	if err != nil {
-		t.Fatalf("api_server-only buildRESTConfig: %v", err)
+		t.Fatalf("api_server-only BuildTargetRESTConfig: %v", err)
 	}
 	if cfg.Host != "https://no-creds.example" {
 		t.Fatalf("Host = %q", cfg.Host)
@@ -1041,7 +1033,7 @@ func TestKubernetesInProcessIndexHost_BuildRESTConfigErrorsAndDirectToken(t *tes
 		t.Fatalf("BearerToken = %q, want empty when no token/ref set", cfg.BearerToken)
 	}
 
-	if _, err := host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{
+	if _, err := BuildTargetRESTConfig(context.Background(), nil, readyKubeTarget("t1", map[string]string{
 		PropAPIServer:              "https://cluster.example",
 		PropServiceAccountTokenRef: "targets/t1/sa-token",
 	})); err == nil {
@@ -1049,8 +1041,7 @@ func TestKubernetesInProcessIndexHost_BuildRESTConfigErrorsAndDirectToken(t *tes
 	}
 
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{}}
-	host = NewKubernetesInProcessIndexHost(context.Background(), vault, &recordingReporter{}, slog.New(slog.DiscardHandler))
-	if _, err := host.buildRESTConfig(context.Background(), readyKubeTarget("t1", map[string]string{
+	if _, err := BuildTargetRESTConfig(context.Background(), vault, readyKubeTarget("t1", map[string]string{
 		PropAPIServer:              "https://cluster.example",
 		PropServiceAccountTokenRef: "missing-ref",
 	})); err == nil {

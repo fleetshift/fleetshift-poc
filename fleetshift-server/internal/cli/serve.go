@@ -473,14 +473,14 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	var kubeAgent domain.DeliveryAgent
 	if enabledAddons["kubernetes"] {
-		kubeAgentOpts := []kubernetesaddon.AgentOption{
+		kubeAgentOpts := []kubernetesaddon.DeliveryAgentOption{
 			kubernetesaddon.WithKeyResolver(keyResolver),
 			kubernetesaddon.WithVault(vault),
 		}
 		if oidcHTTPClient != nil {
 			kubeAgentOpts = append(kubeAgentOpts, kubernetesaddon.WithHTTPClient(oidcHTTPClient))
 		}
-		kubeAgent = kubernetesaddon.NewAgent(deliveryReporter, kubeAgentOpts...)
+		kubeAgent = kubernetesaddon.NewDeliveryAgent(deliveryReporter, kubeAgentOpts...)
 	}
 
 	// --- dynamic service infrastructure ---
@@ -685,7 +685,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	if enabledAddons["kubernetes"] {
 		if err := addonMgr.Connect(ctx, kubernetesaddon.Descriptor().ID, application.ConnectInput{
 			Agent:   kubeAgent,
-			Schemas: []domain.ExtensionResourceSchema{kubernetesaddon.Schema()},
+			Schemas: []domain.ExtensionResourceSchema{kubernetesaddon.InventorySchema()},
 		}); err != nil {
 			return fmt.Errorf("connect kubernetes addon: %w", err)
 		}

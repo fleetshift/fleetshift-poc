@@ -27,7 +27,7 @@ const ObjectResourceType domain.ResourceType = domain.ResourceType(AddonID) + "/
 //
 //	{TargetCollectionID}/{targetID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}
 //
-// ObjectCollectionID is also the schema CollectionID in [Schema].
+// ObjectCollectionID is also the schema CollectionID in [InventorySchema].
 const (
 	TargetCollectionID      domain.CollectionID = "clusters"
 	APIResourceCollectionID domain.CollectionID = "apiResources"

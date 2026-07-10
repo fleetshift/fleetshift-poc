@@ -204,9 +204,9 @@ func TestResourceNameCollectionIDs(t *testing.T) {
 	if kubernetes.ObjectCollectionID != "objects" {
 		t.Errorf("ObjectCollectionID = %q, want %q", kubernetes.ObjectCollectionID, "objects")
 	}
-	if kubernetes.Schema().CollectionID != string(kubernetes.ObjectCollectionID) {
-		t.Errorf("Schema().CollectionID = %q, want ObjectCollectionID %q",
-			kubernetes.Schema().CollectionID, kubernetes.ObjectCollectionID)
+	if kubernetes.InventorySchema().CollectionID != string(kubernetes.ObjectCollectionID) {
+		t.Errorf("InventorySchema().CollectionID = %q, want ObjectCollectionID %q",
+			kubernetes.InventorySchema().CollectionID, kubernetes.ObjectCollectionID)
 	}
 }
 

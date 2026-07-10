@@ -41,24 +41,24 @@ func (v *agentTestVault) Delete(_ context.Context, ref domain.SecretRef) error {
 	return nil
 }
 
-func TestResolvePlatformToken(t *testing.T) {
+func TestResolvePlatformTokenOptional(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("direct token wins over ref", func(t *testing.T) {
-		a := NewAgent(nopReporterForInternal{}, WithVault(&agentTestVault{
+		vault := &agentTestVault{
 			secrets: map[domain.SecretRef][]byte{"targets/t1/sa": []byte("vault-token")},
-		}))
+		}
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"service_account_token":     "direct-token",
-				"service_account_token_ref": "targets/t1/sa",
+				PropServiceAccountToken:    "direct-token",
+				PropServiceAccountTokenRef: "targets/t1/sa",
 			},
 		})
-		got, err := a.resolvePlatformToken(ctx, target)
+		got, err := resolvePlatformTokenOptional(ctx, vault, target)
 		if err != nil {
-			t.Fatalf("resolvePlatformToken: %v", err)
+			t.Fatalf("resolvePlatformTokenOptional: %v", err)
 		}
 		if got != "direct-token" {
 			t.Fatalf("token = %q, want direct-token", got)
@@ -66,48 +66,46 @@ func TestResolvePlatformToken(t *testing.T) {
 	})
 
 	t.Run("vault ref", func(t *testing.T) {
-		a := NewAgent(nopReporterForInternal{}, WithVault(&agentTestVault{
+		vault := &agentTestVault{
 			secrets: map[domain.SecretRef][]byte{"targets/t1/sa": []byte("vault-token")},
-		}))
+		}
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"service_account_token_ref": "targets/t1/sa",
+				PropServiceAccountTokenRef: "targets/t1/sa",
 			},
 		})
-		got, err := a.resolvePlatformToken(ctx, target)
+		got, err := resolvePlatformTokenOptional(ctx, vault, target)
 		if err != nil {
-			t.Fatalf("resolvePlatformToken: %v", err)
+			t.Fatalf("resolvePlatformTokenOptional: %v", err)
 		}
 		if got != "vault-token" {
 			t.Fatalf("token = %q, want vault-token", got)
 		}
 	})
 
-	t.Run("missing credentials", func(t *testing.T) {
-		a := NewAgent(nopReporterForInternal{})
+	t.Run("missing credentials returns empty", func(t *testing.T) {
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{},
 		})
-		_, err := a.resolvePlatformToken(ctx, target)
-		if err == nil {
-			t.Fatal("expected error")
+		got, err := resolvePlatformTokenOptional(ctx, nil, target)
+		if err != nil {
+			t.Fatalf("resolvePlatformTokenOptional: %v", err)
 		}
-		if !strings.Contains(err.Error(), "missing service_account_token") {
-			t.Fatalf("error = %v", err)
+		if got != "" {
+			t.Fatalf("token = %q, want empty", got)
 		}
 	})
 
 	t.Run("ref without vault", func(t *testing.T) {
-		a := NewAgent(nopReporterForInternal{})
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"service_account_token_ref": "targets/t1/sa",
+				PropServiceAccountTokenRef: "targets/t1/sa",
 			},
 		})
-		_, err := a.resolvePlatformToken(ctx, target)
+		_, err := resolvePlatformTokenOptional(ctx, nil, target)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -117,16 +115,14 @@ func TestResolvePlatformToken(t *testing.T) {
 	})
 
 	t.Run("vault get error", func(t *testing.T) {
-		a := NewAgent(nopReporterForInternal{}, WithVault(&agentTestVault{
-			err: errors.New("vault unavailable"),
-		}))
+		vault := &agentTestVault{err: errors.New("vault unavailable")}
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"service_account_token_ref": "targets/t1/sa",
+				PropServiceAccountTokenRef: "targets/t1/sa",
 			},
 		})
-		_, err := a.resolvePlatformToken(ctx, target)
+		_, err := resolvePlatformTokenOptional(ctx, vault, target)
 		if err == nil {
 			t.Fatal("expected error")
 		}
@@ -139,20 +135,19 @@ func TestResolvePlatformToken(t *testing.T) {
 func TestBuildPlatformRESTConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	a := NewAgent(nopReporterForInternal{})
 
 	t.Run("success with ca", func(t *testing.T) {
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"api_server":            "https://cluster.example:6443",
-				"ca_cert":               "pem-bytes",
-				"service_account_token": "tok",
+				PropAPIServer:           "https://cluster.example:6443",
+				PropCACert:              "pem-bytes",
+				PropServiceAccountToken: "tok",
 			},
 		})
-		cfg, err := a.buildPlatformRESTConfig(ctx, target)
+		cfg, err := BuildPlatformRESTConfig(ctx, nil, target)
 		if err != nil {
-			t.Fatalf("buildPlatformRESTConfig: %v", err)
+			t.Fatalf("BuildPlatformRESTConfig: %v", err)
 		}
 		if cfg.Host != "https://cluster.example:6443" {
 			t.Fatalf("Host = %q", cfg.Host)
@@ -169,28 +164,44 @@ func TestBuildPlatformRESTConfig(t *testing.T) {
 		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 			ID: "t1", Type: TargetType, Name: "t1",
 			Properties: map[string]string{
-				"service_account_token": "tok",
+				PropServiceAccountToken: "tok",
 			},
 		})
-		_, err := a.buildPlatformRESTConfig(ctx, target)
+		_, err := BuildPlatformRESTConfig(ctx, nil, target)
 		if err == nil {
 			t.Fatal("expected error")
 		}
 	})
+
+	t.Run("missing credentials", func(t *testing.T) {
+		target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID: "t1", Type: TargetType, Name: "t1",
+			Properties: map[string]string{
+				PropAPIServer: "https://cluster.example",
+			},
+		})
+		_, err := BuildPlatformRESTConfig(ctx, nil, target)
+		if err == nil {
+			t.Fatal("expected error")
+		}
+		if !strings.Contains(err.Error(), PropServiceAccountToken) {
+			t.Fatalf("error = %v", err)
+		}
+	})
 }
 
-func TestBuildRESTConfig_IncludesCA(t *testing.T) {
+func TestBuildCallerRESTConfig_IncludesCA(t *testing.T) {
 	t.Parallel()
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{
-			"api_server": "https://cluster.example",
-			"ca_cert":    "ca-pem",
+			PropAPIServer: "https://cluster.example",
+			PropCACert:    "ca-pem",
 		},
 	})
-	cfg, err := buildRESTConfig(target, "caller-token")
+	cfg, err := buildCallerRESTConfig(target, "caller-token")
 	if err != nil {
-		t.Fatalf("buildRESTConfig: %v", err)
+		t.Fatalf("buildCallerRESTConfig: %v", err)
 	}
 	if cfg.BearerToken != "caller-token" {
 		t.Fatalf("BearerToken = %q", cfg.BearerToken)
@@ -200,13 +211,13 @@ func TestBuildRESTConfig_IncludesCA(t *testing.T) {
 	}
 }
 
-func TestBuildRESTConfig_MissingAPIServer(t *testing.T) {
+func TestBuildCallerRESTConfig_MissingAPIServer(t *testing.T) {
 	t.Parallel()
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{},
 	})
-	_, err := buildRESTConfig(target, "tok")
+	_, err := buildCallerRESTConfig(target, "tok")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -217,7 +228,7 @@ func TestDeliverAsync_ReportsFailureWhenAPIServerMissing(t *testing.T) {
 	// Call the async helper directly: Deliver rejects missing api_server
 	// synchronously, so this branch is otherwise unreachable.
 	reporter := &deliveryRecordingReporter{}
-	a := NewAgent(reporter)
+	a := NewDeliveryAgent(reporter)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{},
@@ -230,7 +241,7 @@ func TestDeliverAsync_ReportsFailureWhenAPIServerMissing(t *testing.T) {
 
 func TestDeleteManifests_PropagatesDeleteError(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nopReporterForInternal{})
+	a := NewDeliveryAgent(nopReporterForInternal{})
 	cfg := &rest.Config{Host: "https://127.0.0.1:1", BearerToken: "tok"}
 	err := a.deleteManifests(context.Background(), cfg, []domain.Manifest{{
 		ManifestType: ManifestManifestType,
@@ -246,7 +257,7 @@ func TestDeleteManifests_PropagatesDeleteError(t *testing.T) {
 
 func TestDeleteManifests_InvalidManifestJSON(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nopReporterForInternal{})
+	a := NewDeliveryAgent(nopReporterForInternal{})
 	cfg := &rest.Config{Host: "https://127.0.0.1:6443", BearerToken: "tok"}
 	err := a.deleteManifests(context.Background(), cfg, []domain.Manifest{{
 		ManifestType: ManifestManifestType,
@@ -257,11 +268,11 @@ func TestDeleteManifests_InvalidManifestJSON(t *testing.T) {
 	}
 }
 
-func TestAgentOptions(t *testing.T) {
+func TestDeliveryAgentOptions(t *testing.T) {
 	t.Parallel()
 	vault := &agentTestVault{secrets: map[domain.SecretRef][]byte{}}
 	resolver := &domain.KeyResolver{}
-	a := NewAgent(nopReporterForInternal{},
+	a := NewDeliveryAgent(nopReporterForInternal{},
 		WithVault(vault),
 		WithKeyResolver(resolver),
 		WithHTTPClient(nil), // explicit nil is fine; option still applied
@@ -277,7 +288,7 @@ func TestAgentOptions(t *testing.T) {
 func TestDeliverAsyncPlatform_ReportsFailureWithoutCredentials(t *testing.T) {
 	t.Parallel()
 	reporter := &deliveryRecordingReporter{}
-	a := NewAgent(reporter)
+	a := NewDeliveryAgent(reporter)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{
@@ -296,7 +307,7 @@ func TestDeliverAsyncPlatform_ReportsFailureWithoutCredentials(t *testing.T) {
 func TestDeliverAsyncPlatform_EmptyManifestsSucceeds(t *testing.T) {
 	t.Parallel()
 	reporter := &deliveryRecordingReporter{}
-	a := NewAgent(reporter)
+	a := NewDeliveryAgent(reporter)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{
@@ -313,7 +324,7 @@ func TestDeliverAsyncPlatform_EmptyManifestsSucceeds(t *testing.T) {
 func TestApplyManifests_ReportsProgress(t *testing.T) {
 	t.Parallel()
 	reporter := &deliveryRecordingReporter{}
-	a := NewAgent(reporter)
+	a := NewDeliveryAgent(reporter)
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 	})
@@ -338,7 +349,7 @@ func TestApplyManifests_ReportsProgress(t *testing.T) {
 
 func TestDeleteManifests_PropagatesApplyBuildError(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nopReporterForInternal{})
+	a := NewDeliveryAgent(nopReporterForInternal{})
 	// Invalid host still builds clients; empty manifests succeed.
 	cfg := &rest.Config{Host: "https://127.0.0.1:6443", BearerToken: "tok"}
 	if err := a.deleteManifests(context.Background(), cfg, nil); err != nil {
@@ -348,7 +359,7 @@ func TestDeleteManifests_PropagatesApplyBuildError(t *testing.T) {
 
 func TestVerifierForTarget_InvalidTrustBundleJSON(t *testing.T) {
 	t.Parallel()
-	a := NewAgent(nopReporterForInternal{})
+	a := NewDeliveryAgent(nopReporterForInternal{})
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "t1", Type: TargetType, Name: "t1",
 		Properties: map[string]string{

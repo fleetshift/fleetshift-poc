@@ -34,7 +34,7 @@ func TestDescriptor_DeclaresDeliveryAndInventoryCapabilities(t *testing.T) {
 	}
 }
 
-// TestSchema_ObjectInventoryShape pins every field of the generic
+// TestInventorySchema_ObjectInventoryShape pins every field of the generic
 // object inventory schema. Most of these fields (ProtoPackage,
 // Singular, Plural) are never read back through
 // [domain.ExtensionResourceType] for an inventory-only schema -- the
@@ -42,8 +42,8 @@ func TestDescriptor_DeclaresDeliveryAndInventoryCapabilities(t *testing.T) {
 // skips schema activation entirely when Management is nil -- so an
 // AddonManager-level registration test cannot catch a typo in them.
 // This is the only test that can.
-func TestSchema_ObjectInventoryShape(t *testing.T) {
-	s := kubernetes.Schema()
+func TestInventorySchema_ObjectInventoryShape(t *testing.T) {
+	s := kubernetes.InventorySchema()
 
 	if s.ResourceType != kubernetes.ObjectResourceType {
 		t.Errorf("ResourceType = %q, want %q", s.ResourceType, kubernetes.ObjectResourceType)

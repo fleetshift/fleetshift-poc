@@ -42,13 +42,13 @@ type ClusterOutput struct {
 // secret rather than embedding the raw credential.
 func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	props := map[string]string{
-		"api_server": o.APIServer,
+		kubernetes.PropAPIServer: o.APIServer,
 	}
 	if len(o.CACert) > 0 {
-		props["ca_cert"] = string(o.CACert)
+		props[kubernetes.PropCACert] = string(o.CACert)
 	}
 	if o.SATokenRef != "" {
-		props["service_account_token_ref"] = string(o.SATokenRef)
+		props[kubernetes.PropServiceAccountTokenRef] = string(o.SATokenRef)
 	}
 	if len(o.TrustBundles) > 0 {
 		if data, err := json.Marshal(o.TrustBundles); err == nil {

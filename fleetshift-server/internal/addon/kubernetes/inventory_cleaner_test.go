@@ -102,7 +102,7 @@ func TestKubernetesTargetIndexedInventoryCleaner_RejectsEmptyTargetID(t *testing
 
 // seedKubernetesObjectType registers the real Kubernetes object
 // extension resource type (the same shape kubernetes.Descriptor's
-// InventoryResourceCapability and kubernetes.Schema declare), so the
+// InventoryResourceCapability and kubernetes.InventorySchema declare), so the
 // composition test below exercises actual ownership and inventory
 // metadata validation rather than a synthetic stand-in type.
 func seedKubernetesObjectType(t *testing.T, store domain.Store) {
@@ -113,7 +113,7 @@ func seedKubernetesObjectType(t *testing.T, store domain.Store) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer tx.Rollback()
-	sch := kubernetes.Schema()
+	sch := kubernetes.InventorySchema()
 	def := domain.NewExtensionResourceType(sch.ResourceType, domain.APIVersion(sch.Version), domain.CollectionID(sch.CollectionID), time.Now(), domain.WithInventory())
 	if err := tx.ExtensionResources().CreateType(ctx, def); err != nil {
 		t.Fatalf("CreateType: %v", err)

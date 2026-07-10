@@ -14,21 +14,6 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// Target property keys used to build a Kubernetes REST config for
-// in-process indexing. These match the delivery agent's platform-credential
-// property names so one target description drives both paths.
-const (
-	// PropAPIServer is the Kubernetes API server URL.
-	PropAPIServer = "api_server"
-	// PropCACert is the PEM-encoded cluster CA certificate.
-	PropCACert = "ca_cert"
-	// PropServiceAccountToken is a direct bearer token (tests / simple setups).
-	PropServiceAccountToken = "service_account_token"
-	// PropServiceAccountTokenRef is a vault [domain.SecretRef] for the
-	// bearer token when PropServiceAccountToken is unset.
-	PropServiceAccountTokenRef = "service_account_token_ref"
-)
-
 // KubernetesInProcessIndexHost hosts in-process per-target Kubernetes indexers.
 // It implements [InProcessIndexRuntime] for the in-process controller.
 type KubernetesInProcessIndexHost struct {
@@ -123,7 +108,9 @@ func NewKubernetesInProcessIndexHost(
 		},
 		running: make(map[domain.TargetID]*inProcessKubernetesIndexer),
 	}
-	h.buildConfig = h.buildRESTConfig
+	h.buildConfig = func(ctx context.Context, target domain.TargetInfo) (*rest.Config, error) {
+		return BuildTargetRESTConfig(ctx, h.vault, target)
+	}
 	for _, o := range opts {
 		o(h)
 	}
@@ -287,35 +274,4 @@ func (h *KubernetesInProcessIndexHost) HasIndexer(id domain.TargetID) bool {
 	defer h.mu.Unlock()
 	_, ok := h.running[id]
 	return ok
-}
-
-// buildRESTConfig constructs a [rest.Config] from the target's
-// properties and optional vault-backed service account token. Adapted
-// from the former AgentPool helper of the same name.
-func (h *KubernetesInProcessIndexHost) buildRESTConfig(ctx context.Context, target domain.TargetInfo) (*rest.Config, error) {
-	props := target.Properties()
-	host := props[PropAPIServer]
-	if host == "" {
-		return nil, fmt.Errorf("missing property %q", PropAPIServer)
-	}
-
-	cfg := &rest.Config{Host: host}
-	if ca := props[PropCACert]; ca != "" {
-		cfg.TLSClientConfig = rest.TLSClientConfig{CAData: []byte(ca)}
-	}
-
-	if tok := props[PropServiceAccountToken]; tok != "" {
-		cfg.BearerToken = tok
-	} else if ref := props[PropServiceAccountTokenRef]; ref != "" {
-		if h.vault == nil {
-			return nil, fmt.Errorf("vault required for %q but not configured", PropServiceAccountTokenRef)
-		}
-		val, err := h.vault.Get(ctx, domain.SecretRef(ref))
-		if err != nil {
-			return nil, fmt.Errorf("resolve vault ref %q: %w", ref, err)
-		}
-		cfg.BearerToken = string(val)
-	}
-
-	return cfg, nil
 }
