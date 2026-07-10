@@ -90,6 +90,61 @@ func TestMapField_StringMessage_ValueTypeName(t *testing.T) {
 	}
 }
 
+func TestMapField_MessageValue_EmptyTypeNamePanics(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("expected panic for empty valueTypeName with TYPE_MESSAGE")
+		}
+		msg, ok := r.(string)
+		if !ok {
+			t.Fatalf("panic value type = %T, want string", r)
+		}
+		if !strings.Contains(msg, "valueTypeName") {
+			t.Errorf("panic = %q, want mention of valueTypeName", msg)
+		}
+	}()
+	dynamicapi.MapField(
+		"test.v1.Widget",
+		"conditions",
+		41,
+		descriptorpb.FieldDescriptorProto_TYPE_STRING,
+		descriptorpb.FieldDescriptorProto_TYPE_MESSAGE,
+		"",
+	)
+}
+
+func TestMapField_EnumValue_EmptyTypeNamePanics(t *testing.T) {
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected panic for empty valueTypeName with TYPE_ENUM")
+		}
+	}()
+	dynamicapi.MapField(
+		"test.v1.Widget",
+		"states",
+		42,
+		descriptorpb.FieldDescriptorProto_TYPE_STRING,
+		descriptorpb.FieldDescriptorProto_TYPE_ENUM,
+		"",
+	)
+}
+
+func TestMapField_MessageValue_NormalizesTypeName(t *testing.T) {
+	parts := dynamicapi.MapField(
+		"test.v1.Widget",
+		"conditions",
+		41,
+		descriptorpb.FieldDescriptorProto_TYPE_STRING,
+		descriptorpb.FieldDescriptorProto_TYPE_MESSAGE,
+		"test.v1.Condition",
+	)
+	value := parts.Entry.Field[1]
+	if value.GetTypeName() != ".test.v1.Condition" {
+		t.Errorf("value type_name = %q, want .test.v1.Condition", value.GetTypeName())
+	}
+}
+
 func TestMapField_EntryName_SnakeToPascal(t *testing.T) {
 	parts := dynamicapi.MapField(
 		"pkg.Msg",

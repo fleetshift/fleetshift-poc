@@ -191,9 +191,10 @@ type MapFieldParts struct {
 // leading dot), used to form the entry type_name
 // (e.g. "kind.fleetshift.v1.Cluster" → ".kind.fleetshift.v1.Cluster.LabelsEntry").
 //
-// valueTypeName is empty for scalar values; for message values it is the
-// fully-qualified type name (with or without a leading dot),
-// e.g. ".pkg.Condition".
+// valueTypeName is empty for scalar values; for message or enum values it is
+// the fully-qualified type name (with or without a leading dot),
+// e.g. ".pkg.Condition". Empty valueTypeName with TYPE_MESSAGE or TYPE_ENUM
+// panics — otherwise normalization would produce the invalid type name ".".
 func MapField(
 	parentFQN string,
 	name string,
@@ -211,6 +212,9 @@ func MapField(
 	}
 	if valueType == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE ||
 		valueType == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+		if valueTypeName == "" {
+			panic("MapField: valueTypeName required for TYPE_MESSAGE/TYPE_ENUM")
+		}
 		fqn := valueTypeName
 		if !strings.HasPrefix(fqn, ".") {
 			fqn = "." + fqn
