@@ -11,7 +11,7 @@ import (
 func newResourceTypesCmd(ctx *cmdContext) *cobra.Command {
 	return &cobra.Command{
 		Use:   "types",
-		Short: "List available managed resource types",
+		Short: "List available extension resource types",
 		Args:  cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			client := dynamic.NewClient(ctx.conn)
@@ -21,7 +21,7 @@ func newResourceTypesCmd(ctx *cmdContext) *cobra.Command {
 			}
 
 			if len(types) == 0 {
-				fmt.Fprintln(cmd.OutOrStdout(), "No managed resource types available.")
+				fmt.Fprintln(cmd.OutOrStdout(), "No extension resource types available.")
 				return nil
 			}
 

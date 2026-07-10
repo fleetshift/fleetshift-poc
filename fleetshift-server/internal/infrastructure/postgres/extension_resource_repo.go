@@ -781,9 +781,10 @@ func nonNilStrings(s []string) []string {
 // extension_resource_inventory), so ReplaceInventory's
 // complete-latest-state contract is a single column assignment --
 // no delete-absent/upsert pair against a normalized table is needed.
-// ApplyInventoryDeltas's field-level set/upsert-plus-delete semantics
-// map directly onto the `-` (key-removal) and `||` (merge) jsonb
-// operators.
+// ApplyInventoryDeltas's ReplaceLabels/ReplaceConditions use the same
+// whole-column assign; DeleteLabels and UpsertConditions/
+// DeleteConditions map onto the `-` (key-removal) and `||` (merge)
+// jsonb operators when replace is absent.
 //
 // Neither statement writes observation/condition history any more:
 // extension_resource_inventory_observations/
@@ -1031,12 +1032,14 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 }
 
 // applyInventoryDeltasSQL implements the field-level counterpart of
-// replaceInventorySQL: set_labels/delete_labels/upsert_conditions/
-// delete_conditions carry one JSON value *per delta* (a JSON
-// object/array, empty when the delta doesn't touch that field) rather
-// than one flattened row per key, since Go already has the complete
-// per-delta shape in memory and building it once there is simpler
-// than an extra per-key UNNEST input CTE.
+// replaceInventorySQL. Labels support ReplaceLabels (whole-column
+// assign when replace_labels IS NOT NULL) or DeleteLabels (jsonb key
+// removal). Conditions support ReplaceConditions (whole-column assign
+// when replace_conditions IS NOT NULL) or UpsertConditions/
+// DeleteConditions (jsonb `-`/`||` merge). Replace and incremental
+// ops on the same field are mutually exclusive
+// ([domain.ValidateInventoryDelta]); Go passes NULL for an omitted
+// replace so empty `{}` can still mean "replace with empty".
 //
 // resolved_er seeds a brand-new row with this backend's JSONB object
 // alias payload: either the delta's UpsertAliases patch when the
@@ -1065,16 +1068,21 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // UPDATE target list at all. That keeps the cheap heartbeat path from
 // paying avoidable label/condition index-maintenance cost.
 //
+// ReplaceLabels/ReplaceConditions are whole-column assignments (same
+// shape as ReplaceInventory), not per-key loops. Incremental
+// DeleteLabels / UpsertConditions / DeleteConditions keep the jsonb
+// `-`/`||` path when the corresponding replace is absent.
+//
 // new_inv's INSERT covers resources with no inventory row yet
-// (deleting from an empty `{}` is a no-op, so the initial value is
-// just set_labels/upsert_conditions directly), with its own
-// ON CONFLICT DO UPDATE as a rare fallback for the narrow window where
-// a concurrent transaction created the row between the updated_inv_*
-// branches running and this INSERT executing -- that fallback
-// re-applies the same current-row-based merge, using a small
-// correlated subquery against er (scoped to this one row's own uid via
-// EXCLUDED, not a scan of the whole batch) since ON CONFLICT DO UPDATE
-// can only see EXCLUDED and the target row, not other CTEs directly.
+// (deleting from an empty `{}` is a no-op; replace uses the provided
+// JSON directly), with its own ON CONFLICT DO UPDATE as a rare
+// fallback for the narrow window where a concurrent transaction
+// created the row between the updated_inv_* branches running and this
+// INSERT executing -- that fallback re-applies the same
+// current-row-based merge/replace, using a small correlated subquery
+// against er (scoped to this one row's own uid via EXCLUDED, not a
+// scan of the whole batch) since ON CONFLICT DO UPDATE can only see
+// EXCLUDED and the target row, not other CTEs directly.
 // This still runs for every delta in the batch, including one with no
 // label/condition/observation change at all, which is what gives a
 // heartbeat delta (see [domain.InventoryDelta]'s doc) its "still bumps
@@ -1089,8 +1097,8 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // alias upserts, keeping extension_resources.updated_at stable when
 // the reported alias object is already identical.
 const applyInventoryDeltasSQL = `
-WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, set_labels, delete_labels, upsert_conditions, delete_conditions, observed_at, received_at, upsert_aliases, has_alias_work) AS MATERIALIZED (
-	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::jsonb[], $11::jsonb[], $12::timestamptz[], $13::timestamptz[], $14::jsonb[], $15::boolean[])
+WITH input_er(idx, service_name, type_name, collection_name, resource_id, candidate_uid, observation, replace_labels, delete_labels, replace_conditions, upsert_conditions, delete_conditions, observed_at, received_at, upsert_aliases, has_alias_work) AS MATERIALIZED (
+	SELECT * FROM UNNEST($1::int[], $2::text[], $3::text[], $4::text[], $5::text[], $6::uuid[], $7::jsonb[], $8::jsonb[], $9::jsonb[], $10::jsonb[], $11::jsonb[], $12::jsonb[], $13::timestamptz[], $14::timestamptz[], $15::jsonb[], $16::boolean[])
 ),
 resolved_er AS (
 	INSERT INTO extension_resources (uid, service_name, type_name, collection_name, resource_id, labels, reported_aliases, created_at, updated_at)
@@ -1103,10 +1111,10 @@ resolved_er AS (
 ),
 er AS MATERIALIZED (
 	SELECT i.idx, COALESCE(res.uid, ext.uid) AS uid,
-	       i.observation, i.set_labels, i.delete_labels, i.upsert_conditions, i.delete_conditions,
+	       i.observation, i.replace_labels, i.delete_labels, i.replace_conditions, i.upsert_conditions, i.delete_conditions,
 	       i.observed_at, i.received_at, i.upsert_aliases, i.has_alias_work,
-	       (i.set_labels <> '{}'::jsonb OR i.delete_labels <> '[]'::jsonb) AS has_label_work,
-	       (i.upsert_conditions <> '{}'::jsonb OR i.delete_conditions <> '[]'::jsonb) AS has_condition_work
+	       (i.replace_labels IS NOT NULL OR i.delete_labels <> '[]'::jsonb) AS has_label_work,
+	       (i.replace_conditions IS NOT NULL OR i.upsert_conditions <> '{}'::jsonb OR i.delete_conditions <> '[]'::jsonb) AS has_condition_work
 	FROM input_er i
 	LEFT JOIN resolved_er res
 	  ON res.service_name = i.service_name AND res.collection_name = i.collection_name AND res.resource_id = i.resource_id
@@ -1129,7 +1137,10 @@ updated_inv_labels AS (
 	UPDATE extension_resource_inventory inv
 	SET
 		observation = COALESCE(e.observation, inv.observation),
-		labels = (inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))) || e.set_labels,
+		labels = CASE
+			WHEN e.replace_labels IS NOT NULL THEN e.replace_labels
+			ELSE inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))
+		END,
 		observed_at = e.observed_at,
 		updated_at = e.received_at
 	FROM er e
@@ -1142,7 +1153,10 @@ updated_inv_conditions AS (
 	UPDATE extension_resource_inventory inv
 	SET
 		observation = COALESCE(e.observation, inv.observation),
-		conditions = (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions,
+		conditions = CASE
+			WHEN e.replace_conditions IS NOT NULL THEN e.replace_conditions
+			ELSE (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions
+		END,
 		observed_at = e.observed_at,
 		updated_at = e.received_at
 	FROM er e
@@ -1155,8 +1169,14 @@ updated_inv_labels_conditions AS (
 	UPDATE extension_resource_inventory inv
 	SET
 		observation = COALESCE(e.observation, inv.observation),
-		labels = (inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))) || e.set_labels,
-		conditions = (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions,
+		labels = CASE
+			WHEN e.replace_labels IS NOT NULL THEN e.replace_labels
+			ELSE inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))
+		END,
+		conditions = CASE
+			WHEN e.replace_conditions IS NOT NULL THEN e.replace_conditions
+			ELSE (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions
+		END,
 		observed_at = e.observed_at,
 		updated_at = e.received_at
 	FROM er e
@@ -1176,17 +1196,28 @@ updated_inv AS (
 ),
 new_inv AS (
 	INSERT INTO extension_resource_inventory (extension_resource_uid, observation, labels, conditions, observed_at, updated_at)
-	SELECT e.uid, e.observation, e.set_labels, e.upsert_conditions, e.observed_at, e.received_at
+	SELECT e.uid, e.observation,
+	       COALESCE(e.replace_labels, '{}'::jsonb),
+	       COALESCE(e.replace_conditions, e.upsert_conditions),
+	       e.observed_at, e.received_at
 	FROM er e
 	WHERE NOT EXISTS (SELECT 1 FROM updated_inv u WHERE u.extension_resource_uid = e.uid)
 	ON CONFLICT (extension_resource_uid) DO UPDATE SET
 		observation = COALESCE(EXCLUDED.observation, extension_resource_inventory.observation),
-		labels = (extension_resource_inventory.labels - ARRAY(
-			SELECT jsonb_array_elements_text(e2.delete_labels) FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid
-		)) || EXCLUDED.labels,
-		conditions = (extension_resource_inventory.conditions - ARRAY(
-			SELECT jsonb_array_elements_text(e3.delete_conditions) FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid
-		)) || EXCLUDED.conditions,
+		labels = CASE
+			WHEN (SELECT e2.replace_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid) IS NOT NULL
+				THEN (SELECT e2.replace_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid)
+			ELSE extension_resource_inventory.labels - ARRAY(
+				SELECT jsonb_array_elements_text(e2.delete_labels) FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid
+			)
+		END,
+		conditions = CASE
+			WHEN (SELECT e3.replace_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid) IS NOT NULL
+				THEN (SELECT e3.replace_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid)
+			ELSE (extension_resource_inventory.conditions - ARRAY(
+				SELECT jsonb_array_elements_text(e3.delete_conditions) FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid
+			)) || EXCLUDED.conditions
+		END,
 		observed_at = EXCLUDED.observed_at,
 		updated_at = EXCLUDED.updated_at
 	RETURNING 1
@@ -1205,11 +1236,12 @@ updated_alias_payloads AS (
 SELECT 1`
 
 // ApplyInventoryDeltas implements [domain.ExtensionResourceRepository.ApplyInventoryDeltas]
-// in one statement against Postgres. Labels, conditions, and alias
-// upserts all merge inside SQL against each row's current state, so
-// concurrent writers compose through Postgres row locking and
-// EvalPlanQual re-evaluation instead of through a Go-side
-// read-modify-write.
+// in one statement against Postgres. ReplaceLabels/ReplaceConditions
+// are whole-column JSONB assignments; DeleteLabels and
+// UpsertConditions/DeleteConditions merge inside SQL against each
+// row's current state, so concurrent incremental writers compose
+// through Postgres row locking and EvalPlanQual re-evaluation instead
+// of through a Go-side read-modify-write.
 func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas []domain.InventoryDelta) error {
 	if len(deltas) == 0 {
 		return nil
@@ -1228,8 +1260,9 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	resourceIDs := make([]string, n)
 	candidateUIDs := make([]string, n)
 	observations := make([]*string, n)
-	setLabels := make([]string, n)
+	replaceLabels := make([]*string, n)
 	deleteLabels := make([]string, n)
+	replaceConditions := make([]*string, n)
 	upsertConditions := make([]string, n)
 	deleteConditions := make([]string, n)
 	observedAts := make([]time.Time, n)
@@ -1249,17 +1282,29 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 			observations[i] = &s
 		}
 
-		setLabelsJSON, err := json.Marshal(nonNilLabels(d.SetLabels))
-		if err != nil {
-			return fmt.Errorf("marshal set labels: %w", err)
+		if d.ReplaceLabels != nil {
+			replaceLabelsJSON, err := json.Marshal(nonNilLabels(d.ReplaceLabels))
+			if err != nil {
+				return fmt.Errorf("marshal replace labels: %w", err)
+			}
+			s := string(replaceLabelsJSON)
+			replaceLabels[i] = &s
 		}
-		setLabels[i] = string(setLabelsJSON)
 
 		deleteLabelsJSON, err := json.Marshal(nonNilStrings(d.DeleteLabels))
 		if err != nil {
 			return fmt.Errorf("marshal delete labels: %w", err)
 		}
 		deleteLabels[i] = string(deleteLabelsJSON)
+
+		if d.ReplaceConditions != nil {
+			replaceConditionsJSON, err := conditionsToJSON(d.ReplaceConditions)
+			if err != nil {
+				return fmt.Errorf("marshal replace conditions: %w", err)
+			}
+			s := string(replaceConditionsJSON)
+			replaceConditions[i] = &s
+		}
 
 		upsertConditionsJSON, err := conditionsToJSON(d.UpsertConditions)
 		if err != nil {
@@ -1292,7 +1337,7 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 
 	_, err := r.DB.ExecContext(ctx, applyInventoryDeltasSQL,
 		idx, serviceNames, typeNames, collectionNames, resourceIDs, candidateUIDs,
-		observations, setLabels, deleteLabels, upsertConditions, deleteConditions,
+		observations, replaceLabels, deleteLabels, replaceConditions, upsertConditions, deleteConditions,
 		observedAts, receivedAts,
 		upsertAliases, hasAliasWork,
 	)

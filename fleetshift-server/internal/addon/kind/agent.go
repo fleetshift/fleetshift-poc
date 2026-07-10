@@ -37,10 +37,14 @@ const ClusterManifestType domain.ManifestType = "api.kind.cluster"
 type ClusterSpec struct {
 	// TODO: consider kube go-to-protobuf for addons to define this shape once if they want to support a struct + proto
 	// Or should tooling allow them to go the other way?
-	Name       string       `json:"name"`
-	Nodes      []NodeSpec   `json:"nodes,omitempty"`
-	Networking *NetworkSpec `json:"networking,omitempty"`
-	OIDC       *OIDCSpec    `json:"oidc,omitempty"`
+	Name string `json:"name"`
+	// ResourceName is the full platform resource name (e.g.
+	// "clusters/foo"). Kind/docker still use [ClusterSpec.Name] (the
+	// bare ID) as the container name.
+	ResourceName domain.ResourceName `json:"-"`
+	Nodes        []NodeSpec          `json:"nodes,omitempty"`
+	Networking   *NetworkSpec        `json:"networking,omitempty"`
+	OIDC         *OIDCSpec           `json:"oidc,omitempty"`
 }
 
 // NodeSpec describes a node in the kind cluster.
@@ -83,6 +87,7 @@ type Agent struct {
 	oidcCABundle    []byte
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
+	inventory       *InventoryWatcher
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -119,6 +124,12 @@ func WithTokenVerifier(v domain.OIDCTokenVerifier, cfg domain.OIDCConfig) AgentO
 		a.tokenVerifier = v
 		a.oidcConfig = &cfg
 	}
+}
+
+// WithInventoryWatcher registers a watcher that starts per-cluster
+// Node informers after successful create and stops them on remove.
+func WithInventoryWatcher(w *InventoryWatcher) AgentOption {
+	return func(a *Agent) { a.inventory = w }
 }
 
 // NewAgent returns an Agent. The reporter is the addon's client
@@ -256,6 +267,9 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 
 		provider := a.providerFactory(nil)
 		for _, spec := range specs {
+			if a.inventory != nil {
+				a.inventory.Unwatch(spec.ResourceName)
+			}
 			exists, err := a.clusterExistsErr(provider, spec.Name)
 			if err != nil {
 				_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
@@ -323,15 +337,9 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	defer probe.End()
 
 	if a.clusterExists(provider, spec.Name) {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventProgress,
-			Message: fmt.Sprintf("Deleting existing cluster %q for recreate", spec.Name),
-		})
-		if err := provider.Delete(spec.Name, ""); err != nil {
-			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, generation, "delete existing kind cluster %q for recreate: %v", spec.Name, err)
-			return nil, false
-		}
+		probe.Error(fmt.Errorf("kind cluster %q already exists", spec.Name))
+		failDelivery(ctx, a.reporter, deliveryID, generation, "kind cluster %q already exists", spec.Name)
+		return nil, false
 	}
 
 	rawConfig, source, err := a.resolveConfig(spec, auth)
@@ -418,6 +426,15 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	} else {
 		out.SATokenRef = ref
 		out.SAToken = token
+	}
+
+	if a.inventory != nil {
+		if err := a.inventory.Watch(spec.ResourceName, []byte(kc)); err != nil {
+			_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
+				Kind:    domain.DeliveryEventWarning,
+				Message: fmt.Sprintf("start inventory watch for %q: %v", spec.ResourceName, err),
+			})
+		}
 	}
 
 	return &out, true

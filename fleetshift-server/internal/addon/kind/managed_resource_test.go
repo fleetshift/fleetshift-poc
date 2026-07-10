@@ -90,6 +90,10 @@ func TestParseClusterManifest(t *testing.T) {
 			if got.Name != tt.want.Name {
 				t.Errorf("Name = %q, want %q", got.Name, tt.want.Name)
 			}
+			wantRN := domain.ResourceName("clusters/" + tt.want.Name)
+			if got.ResourceName != wantRN {
+				t.Errorf("ResourceName = %q, want %q", got.ResourceName, wantRN)
+			}
 			if len(got.Nodes) != len(tt.want.Nodes) {
 				t.Fatalf("Nodes len = %d, want %d", len(got.Nodes), len(tt.want.Nodes))
 			}
@@ -139,6 +143,9 @@ func TestParseClusterManifest_ManagedResourceWrapper(t *testing.T) {
 	}
 	if got.Name != "foo" {
 		t.Errorf("Name = %q, want %q", got.Name, "foo")
+	}
+	if got.ResourceName != resourceName {
+		t.Errorf("ResourceName = %q, want %q", got.ResourceName, resourceName)
 	}
 	if len(got.Nodes) != 1 || got.Nodes[0].Role != "control-plane" {
 		t.Errorf("Nodes = %+v, want a single control-plane node", got.Nodes)

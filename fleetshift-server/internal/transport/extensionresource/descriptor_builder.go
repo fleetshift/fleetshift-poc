@@ -145,11 +145,6 @@ func BuildExtensionServiceDescriptors(cfg *ResourceTypeConfig, specDesc protoref
 	resourceMsg := buildResourceMessage(cfg, singular, pkg, resourceFQN, specFullName, resourceStateEnumName)
 	messages = append(messages, resourceMsg)
 
-	if hasInventory {
-		// Condition is a file-level sibling so map entries can reference it.
-		messages = append([]*descriptorpb.DescriptorProto{buildConditionMessage()}, messages...)
-	}
-
 	if hasManagement {
 		messages = append(messages, buildCreateRequest(singular, lower, resourceFQN))
 	}
@@ -241,6 +236,10 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 	}
 
 	if cfg.Capabilities.Inventory != nil {
+		// Nest Condition under the resource message so multiple inventory
+		// schemas sharing a ProtoPackage (e.g. kind Cluster + Node) do not
+		// collide on a file-level kind.fleetshift.v1.Condition symbol.
+		msg.NestedType = append(msg.NestedType, buildConditionMessage())
 		dynamicapi.AppendMapField(msg, dynamicapi.MapField(
 			resourceFQN, "local_labels", 40,
 			descriptorpb.FieldDescriptorProto_TYPE_STRING,
@@ -251,7 +250,7 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 			resourceFQN, "conditions", 41,
 			descriptorpb.FieldDescriptorProto_TYPE_STRING,
 			descriptorpb.FieldDescriptorProto_TYPE_MESSAGE,
-			"."+pkg+".Condition",
+			"."+resourceFQN+".Condition",
 		))
 		msg.Field = append(msg.Field,
 			dynamicapi.MessageField("observation", 42, "google.protobuf.Struct"),
@@ -263,8 +262,10 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 	return msg
 }
 
-// buildConditionMessage synthesizes the wire Condition message used as the
-// value type of the conditions map. type is the map key, not a field here.
+// buildConditionMessage synthesizes the wire Condition message used as
+// the value type of the conditions map. type is the map key, not a
+// field here. The message is nested under the resource message so
+// multiple inventory schemas in one ProtoPackage do not collide.
 func buildConditionMessage() *descriptorpb.DescriptorProto {
 	return &descriptorpb.DescriptorProto{
 		Name: proto.String("Condition"),

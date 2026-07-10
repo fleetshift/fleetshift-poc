@@ -13,10 +13,14 @@ import (
 
 // TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates
 // reproduces the lost-update race ExtensionResourceRepo.ApplyInventoryDeltas's
-// doc comment describes: two concurrent calls setting different label
+// doc comment describes: two concurrent calls deleting different label
 // keys on the same, already-existing resource must both end up
-// present, not have the second overwrite the first's change with a
+// applied, not have the second overwrite the first's change with a
 // merge computed from data read before the first committed.
+//
+// (ReplaceLabels is a whole-column assign and cannot compose under
+// concurrency by design; DeleteLabels is the remaining incremental
+// label path that must merge against the current row.)
 //
 // The test drives this deterministically, without any fixed sleep,
 // by using two real transactions and Postgres's own row locking: txA
@@ -31,10 +35,10 @@ import (
 // once at statement start, then writing via
 // `ON CONFLICT DO UPDATE SET labels = EXCLUDED.labels`), txB's
 // unblocked write would still use its stale, pre-computed EXCLUDED
-// value and clobber txA's label. On the current design (merging
+// value and clobber txA's delete. On the current design (merging
 // inline against extension_resource_inventory's own current row in a
 // plain UPDATE, which Postgres re-evaluates against the latest
-// committed row once the lock is granted), both labels survive.
+// committed row once the lock is granted), both deletes survive.
 func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -56,8 +60,8 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	t0 := time.Unix(1_700_000_000, 0).UTC()
 	if err := seedRepo.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 		ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-		SetLabels:  map[string]string{"seed": "1"},
-		ObservedAt: t0, ReceivedAt: t0,
+		ReplaceLabels: map[string]string{"seed": "1", "a": "1", "b": "1"},
+		ObservedAt:    t0, ReceivedAt: t0,
 	}}); err != nil {
 		t.Fatalf("seed ApplyInventoryDeltas: %v", err)
 	}
@@ -71,8 +75,8 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	tA := t0.Add(time.Minute)
 	if err := repoA.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 		ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-		SetLabels:  map[string]string{"a": "1"},
-		ObservedAt: tA, ReceivedAt: tA,
+		DeleteLabels: []string{"a"},
+		ObservedAt:   tA, ReceivedAt: tA,
 	}}); err != nil {
 		t.Fatalf("repoA.ApplyInventoryDeltas: %v", err)
 	}
@@ -92,8 +96,8 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	go func() {
 		done <- repoB.ApplyInventoryDeltas(ctx, []domain.InventoryDelta{{
 			ResourceType: rt, Name: name, CandidateUID: domain.NewExtensionResourceUID(),
-			SetLabels:  map[string]string{"b": "1"},
-			ObservedAt: tB, ReceivedAt: tB,
+			DeleteLabels: []string{"b"},
+			ObservedAt:   tB, ReceivedAt: tB,
 		}})
 	}()
 
@@ -120,9 +124,9 @@ func TestApplyInventoryDeltas_ConcurrentDeltasForDifferentKeysDoNotLoseUpdates(t
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	want := map[string]string{"seed": "1", "a": "1", "b": "1"}
+	want := map[string]string{"seed": "1"}
 	if got := got.Inventory().Labels(); !reflect.DeepEqual(got, want) {
-		t.Fatalf("Labels() = %+v, want %+v (a concurrent delta's label was lost)", got, want)
+		t.Fatalf("Labels() = %+v, want %+v (a concurrent delta's delete was lost)", got, want)
 	}
 }
 

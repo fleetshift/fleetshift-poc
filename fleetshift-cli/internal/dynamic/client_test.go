@@ -27,8 +27,8 @@ func TestClient_ListResourceTypes(t *testing.T) {
 		t.Fatalf("ListResourceTypes: %v", err)
 	}
 
-	if len(types) < 2 {
-		t.Fatalf("expected at least 2 resource types (Kind + GCP HCP), got %d: %v", len(types), types)
+	if len(types) < 3 {
+		t.Fatalf("expected at least 3 resource types (Kind Cluster + Node + GCP HCP), got %d: %v", len(types), types)
 	}
 
 	byService := make(map[string]dynamic.ResourceType, len(types))
@@ -51,6 +51,17 @@ func TestClient_ListResourceTypes(t *testing.T) {
 	}
 	if kind.CollectionID != "clusters" {
 		t.Errorf("kind collection_id = %q, want clusters", kind.CollectionID)
+	}
+
+	node, ok := byService["kind.fleetshift.v1.NodeService"]
+	if !ok {
+		t.Fatalf("kind.fleetshift.v1.NodeService not found in types: %v", types)
+	}
+	if node.Singular != "Node" {
+		t.Errorf("node singular = %q, want Node", node.Singular)
+	}
+	if node.CollectionID != "nodes" {
+		t.Errorf("node collection_id = %q, want nodes", node.CollectionID)
 	}
 
 	gcp, ok := byService["gcphcp.fleetshift.v1.ClusterService"]

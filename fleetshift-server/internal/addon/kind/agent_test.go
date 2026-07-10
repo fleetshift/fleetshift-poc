@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -106,6 +107,12 @@ func (p *fakeProvider) clusterCount() int {
 	return len(p.clusters)
 }
 
+func (p *fakeProvider) deleteCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.deleted)
+}
+
 func fakeFactory(p *fakeProvider) kind.ClusterProviderFactory {
 	return func(logger log.Logger) kind.ClusterProvider {
 		p.logger = logger
@@ -179,10 +186,11 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
+func TestAgent_Deliver_RejectsExistingCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["dev-cluster"] = nil
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -195,9 +203,18 @@ func TestAgent_Deliver_RecreatesExistingCluster(t *testing.T) {
 		t.Fatalf("Deliver: %v", err)
 	}
 
-	<-provider.created
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
+	}
+	if !strings.Contains(result.Message, "already exists") {
+		t.Errorf("Message = %q, want already exists", result.Message)
+	}
+	if provider.deleteCount() != 0 {
+		t.Errorf("Delete called %d times, want 0 (reject, do not recreate)", provider.deleteCount())
+	}
 	if !provider.hasCluster("dev-cluster") {
-		t.Error("expected cluster 'dev-cluster' to exist after recreate")
+		t.Error("expected existing cluster to remain")
 	}
 }
 

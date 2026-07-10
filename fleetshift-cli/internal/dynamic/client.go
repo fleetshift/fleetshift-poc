@@ -1,5 +1,5 @@
 // Package dynamic provides a reflection-based gRPC client for
-// interacting with dynamically registered managed resource services.
+// interacting with dynamically registered extension resource services.
 // It uses gRPC server reflection to discover available resource types
 // and construct messages at runtime without compiled stubs.
 package dynamic
@@ -66,11 +66,12 @@ func NewClient(conn *grpc.ClientConn) *Client {
 	return &Client{conn: conn}
 }
 
-// ListResourceTypes discovers available managed resource services via
-// gRPC reflection. It filters out known static services and detects
-// dynamic resource services by descriptor shape: the service name ends
-// in "Service" and has Create/Get/List/Delete methods following AIP
-// naming conventions.
+// ListResourceTypes discovers available extension resource services via
+// gRPC reflection. It filters out known static services and platform
+// dual-registration services, and detects dynamic resource services by
+// descriptor shape: the service name ends in "Service" and exposes at
+// least Get + List (management-capable types also have Create/Delete;
+// inventory-only types do not).
 func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) {
 	services, err := c.listServices(ctx)
 	if err != nil {
@@ -80,6 +81,10 @@ func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) 
 	var types []ResourceType
 	for _, svcName := range services {
 		if staticServices[svcName] {
+			continue
+		}
+		// Platform dual-registration services (fleetshift.v1.Platform*).
+		if strings.HasPrefix(svcName, "fleetshift.v1.Platform") {
 			continue
 		}
 		if !strings.HasSuffix(svcName, "Service") {
@@ -99,8 +104,10 @@ func (c *Client) ListResourceTypes(ctx context.Context) ([]ResourceType, error) 
 }
 
 // probeResourceService uses reflection to determine whether a gRPC
-// service is a managed resource service by checking its method shape.
-// Returns nil if the service does not match the expected pattern.
+// service is an extension resource service by checking its method
+// shape. Returns nil if the service does not match the expected
+// pattern. Inventory-only services (Get/List only, no spec) are
+// accepted; management-capable services also expose Create/Delete.
 func (c *Client) probeResourceService(ctx context.Context, svcName string) (*ResourceType, error) {
 	descs, err := c.resolveServiceDescriptors(ctx, svcName)
 	if err != nil {
@@ -124,17 +131,17 @@ func (c *Client) probeResourceService(ctx context.Context, svcName string) (*Res
 	}
 	singular := localName[:len(localName)-len("Service")]
 
-	// Verify the service has the expected CRUD methods.
 	methods := make(map[string]bool, svcDesc.Methods().Len())
 	for i := range svcDesc.Methods().Len() {
 		methods[string(svcDesc.Methods().Get(i).Name())] = true
 	}
 
-	if !methods["Create"+singular] || !methods["Get"+singular] || !methods["Delete"+singular] {
+	// Get + List are required for every extension resource surface
+	// (managed, inventory-only, or both). Create/Delete are optional.
+	if !methods["Get"+singular] {
 		return nil, nil
 	}
 
-	// Find the List method to derive Plural and CollectionID.
 	var plural, collectionID string
 	for name := range methods {
 		if strings.HasPrefix(name, "List") && name != "List" {
@@ -162,12 +169,9 @@ func (c *Client) probeResourceService(ctx context.Context, svcName string) (*Res
 		collectionID = strings.ToLower(plural[:1]) + plural[1:]
 	}
 
-	// Verify the resource message has a spec field.
+	// Resource message must exist; inventory-only types have no spec.
 	resourceMsgDesc := findMessage(descs, protoPackage+"."+singular)
 	if resourceMsgDesc == nil {
-		return nil, nil
-	}
-	if resourceMsgDesc.Fields().ByName("spec") == nil {
 		return nil, nil
 	}
 

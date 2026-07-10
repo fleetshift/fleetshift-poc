@@ -1,6 +1,7 @@
 package dynamicapi
 
 import (
+	"fmt"
 	"sync"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -44,8 +45,17 @@ func (r *DynamicFileRegistry) Register(fd protoreflect.FileDescriptor) error {
 		return &alreadyRegisteredError{path: path}
 	}
 
+	before := make(map[string]protoreflect.FileDescriptor, len(r.files))
+	for k, v := range r.files {
+		before[k] = v
+	}
+
 	r.addWithDeps(fd)
-	r.rebuild()
+	if err := r.rebuild(); err != nil {
+		r.files = before
+		_ = r.rebuild() // restore prior registry; ignore secondary errors
+		return err
+	}
 	return nil
 }
 
@@ -55,8 +65,17 @@ func (r *DynamicFileRegistry) Replace(fd protoreflect.FileDescriptor) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
+	before := make(map[string]protoreflect.FileDescriptor, len(r.files))
+	for k, v := range r.files {
+		before[k] = v
+	}
 	r.addWithDeps(fd)
-	r.rebuild()
+	if err := r.rebuild(); err != nil {
+		// Keep the previous consistent registry rather than a partial one.
+		r.files = before
+		_ = r.rebuild()
+		return
+	}
 }
 
 // Deregister removes a file descriptor by path. No-op if the path is
@@ -82,7 +101,7 @@ func (r *DynamicFileRegistry) Deregister(path string) {
 		}
 	}
 
-	r.rebuild()
+	_ = r.rebuild()
 }
 
 // FindFileByPath satisfies protodesc.Resolver.
@@ -134,31 +153,48 @@ func (r *DynamicFileRegistry) collectDeps(fd protoreflect.FileDescriptor, out ma
 
 // rebuild constructs a fresh *protoregistry.Files from the current
 // files map. Must be called with mu held.
-func (r *DynamicFileRegistry) rebuild() {
+//
+// Registration errors are collected: silently ignoring them previously
+// allowed a later Register (e.g. a second schema in the same proto
+// package) to leave earlier files present in r.files but absent from
+// r.reg, breaking gRPC reflection for those services.
+func (r *DynamicFileRegistry) rebuild() error {
 	reg := new(protoregistry.Files)
 	// Register files in dependency order: deps before dependents.
 	registered := make(map[string]bool)
+	var firstErr error
 	for _, fd := range r.files {
-		r.registerOrdered(reg, fd, registered)
+		if err := r.registerOrdered(reg, fd, registered); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	if firstErr != nil {
+		return firstErr
 	}
 	r.reg = reg
+	return nil
 }
 
 // registerOrdered registers fd and its deps in topological order.
-func (r *DynamicFileRegistry) registerOrdered(reg *protoregistry.Files, fd protoreflect.FileDescriptor, registered map[string]bool) {
+func (r *DynamicFileRegistry) registerOrdered(reg *protoregistry.Files, fd protoreflect.FileDescriptor, registered map[string]bool) error {
 	path := string(fd.Path())
 	if registered[path] {
-		return
+		return nil
 	}
 	for i := range fd.Imports().Len() {
 		dep := fd.Imports().Get(i).FileDescriptor
 		depPath := string(dep.Path())
 		if _, inMap := r.files[depPath]; inMap {
-			r.registerOrdered(reg, dep, registered)
+			if err := r.registerOrdered(reg, dep, registered); err != nil {
+				return err
+			}
 		}
 	}
-	_ = reg.RegisterFile(fd)
+	if err := reg.RegisterFile(fd); err != nil {
+		return fmt.Errorf("register %q: %w", path, err)
+	}
 	registered[path] = true
+	return nil
 }
 
 type alreadyRegisteredError struct {

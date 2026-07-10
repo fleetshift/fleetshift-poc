@@ -23,13 +23,16 @@ import (
 // addon's handling of managed-resource manifests. Using the full
 // resource name (which includes its collection prefix, e.g.
 // "clusters/foo") verbatim as the cluster name would produce an
-// invalid docker/podman container name.
+// invalid docker/podman container name. The full [domain.ResourceName]
+// is retained on [ClusterSpec.ResourceName] for inventory reporting.
 func parseClusterManifest(raw json.RawMessage) (ClusterSpec, error) {
 	innerRaw := raw
 	var name string
+	var resourceName domain.ResourceName
 	if mrs, err := domain.UnwrapManagedResourceSpec(raw); err == nil {
 		innerRaw = mrs.Spec
 		name = string(mrs.Name.ID())
+		resourceName = mrs.Name
 	}
 
 	var spec ClusterSpec
@@ -41,6 +44,15 @@ func parseClusterManifest(raw json.RawMessage) (ClusterSpec, error) {
 	}
 	if err := validateClusterSpec(spec); err != nil {
 		return ClusterSpec{}, err
+	}
+	if resourceName != "" {
+		spec.ResourceName = resourceName
+	} else {
+		rn, err := domain.NewResourceName("clusters", domain.ResourceID(spec.Name))
+		if err != nil {
+			return ClusterSpec{}, fmt.Errorf("%w: cluster resource name: %v", domain.ErrInvalidArgument, err)
+		}
+		spec.ResourceName = rn
 	}
 	return spec, nil
 }

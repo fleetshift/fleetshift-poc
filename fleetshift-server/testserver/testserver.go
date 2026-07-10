@@ -231,7 +231,7 @@ func Start(t *testing.T) string {
 			Name:                  "Local Kind Provider",
 			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
 		})},
-		Schemas: []domain.ExtensionResourceSchema{schema},
+		Schemas: []domain.ExtensionResourceSchema{schema, kindaddon.NodeSchema()},
 	}); err != nil {
 		t.Fatalf("connect kind addon: %v", err)
 	}

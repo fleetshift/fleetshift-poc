@@ -36,10 +36,22 @@ func TestValidateInventoryDelta(t *testing.T) {
 			},
 		},
 		{
-			name: "same label key in SetLabels and DeleteLabels is rejected",
+			name: "ReplaceLabels alone is valid",
 			delta: InventoryDelta{
-				SetLabels:    map[string]string{"env": "prod"},
-				DeleteLabels: []string{"env"},
+				ReplaceLabels: map[string]string{"env": "prod"},
+			},
+		},
+		{
+			name: "empty ReplaceLabels (clear all) is valid",
+			delta: InventoryDelta{
+				ReplaceLabels: map[string]string{},
+			},
+		},
+		{
+			name: "ReplaceLabels combined with DeleteLabels is rejected",
+			delta: InventoryDelta{
+				ReplaceLabels: map[string]string{"env": "prod"},
+				DeleteLabels:  []string{"tier"},
 			},
 			wantErr: ErrInvalidArgument,
 		},
@@ -48,6 +60,34 @@ func TestValidateInventoryDelta(t *testing.T) {
 			delta: InventoryDelta{
 				UpsertConditions: []Condition{ready},
 				DeleteConditions: []ConditionType{ready.Type()},
+			},
+			wantErr: ErrInvalidArgument,
+		},
+		{
+			name: "ReplaceConditions alone is valid",
+			delta: InventoryDelta{
+				ReplaceConditions: []Condition{ready},
+			},
+		},
+		{
+			name: "empty ReplaceConditions (clear all) is valid",
+			delta: InventoryDelta{
+				ReplaceConditions: []Condition{},
+			},
+		},
+		{
+			name: "ReplaceConditions combined with UpsertConditions is rejected",
+			delta: InventoryDelta{
+				ReplaceConditions: []Condition{ready},
+				UpsertConditions:  []Condition{ready},
+			},
+			wantErr: ErrInvalidArgument,
+		},
+		{
+			name: "ReplaceConditions combined with DeleteConditions is rejected",
+			delta: InventoryDelta{
+				ReplaceConditions: []Condition{ready},
+				DeleteConditions:  []ConditionType{ready.Type()},
 			},
 			wantErr: ErrInvalidArgument,
 		},

@@ -225,7 +225,7 @@ type InventoryReplacement struct {
 // semantics, shared with [ExtensionResourceRepository.ApplyInventoryDeltas].
 //
 // Aliases are identity-bearing, unlike Labels/Conditions below, so
-// unlike those two fields' Set/Upsert-plus-Delete shape, they get a
+// unlike those two fields' Replace-or-incremental shape, they get a
 // third op mirroring [InventoryReplacement.Aliases]'s "this is my
 // complete state" shape: UpsertAliases, DeleteAliases, and
 // ReplaceAliases. Per [InventoryReplacement.Aliases]'s doc, reported
@@ -246,10 +246,16 @@ type InventoryReplacement struct {
 // than accepting it and silently leaving stale pending aliases in
 // place.
 //
-// Fields left at their zero value are unchanged: SetLabels/DeleteLabels
-// only touch the named keys, and UpsertConditions/DeleteConditions only
-// touch the named condition types. A delta with no field-level changes
-// is a valid heartbeat that still bumps resource-level freshness.
+// Labels and conditions each support a full-replace op
+// ([InventoryDelta.ReplaceLabels], [InventoryDelta.ReplaceConditions])
+// plus incremental ops ([InventoryDelta.DeleteLabels];
+// [InventoryDelta.UpsertConditions]/[InventoryDelta.DeleteConditions]).
+// Replace* is mutually exclusive with the incremental ops on the same
+// field (see [ValidateInventoryDelta]). Nil ReplaceLabels /
+// ReplaceConditions means unchanged; a non-nil value (including empty)
+// replaces the entire latest map/set. A delta with no field-level
+// changes is a valid heartbeat that still bumps resource-level
+// freshness.
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacement.Observation]: nil, or non-nil pointing to the
@@ -278,22 +284,34 @@ type InventoryDelta struct {
 	// here is rejected outright by [ValidateInventoryDelta].
 	ReplaceAliases AliasSet
 
-	SetLabels    map[string]string
+	// ReplaceLabels, when non-nil (including empty), replaces the
+	// entire latest local_labels map. Nil leaves labels unchanged.
+	// Mutually exclusive with [InventoryDelta.DeleteLabels].
+	ReplaceLabels map[string]string
+	// DeleteLabels removes the named keys from latest local_labels.
+	// Mutually exclusive with [InventoryDelta.ReplaceLabels].
 	DeleteLabels []string
 
 	Observation *json.RawMessage
 
+	// ReplaceConditions, when non-nil (including empty), replaces the
+	// entire latest condition set. Nil leaves conditions unchanged.
+	// Mutually exclusive with UpsertConditions and DeleteConditions.
+	ReplaceConditions []Condition
+	// UpsertConditions adds or updates the named condition types.
+	// Mutually exclusive with [InventoryDelta.ReplaceConditions].
 	UpsertConditions []Condition
+	// DeleteConditions removes the named condition types.
+	// Mutually exclusive with [InventoryDelta.ReplaceConditions].
 	DeleteConditions []ConditionType
 
 	ObservedAt time.Time
 	ReceivedAt time.Time
 }
 
-// ValidateInventoryDelta rejects a delta whose SetLabels/DeleteLabels
-// or UpsertConditions/DeleteConditions contradict each other -- the
-// same key present on both sides of a pair -- and rejects any delta
-// that sets DeleteAliases or ReplaceAliases at all, since neither is
+// ValidateInventoryDelta rejects a delta whose label or condition ops
+// contradict each other, and rejects any delta that sets
+// DeleteAliases or ReplaceAliases at all, since neither is
 // implemented against the reported-alias payload yet (see
 // [InventoryDelta]'s doc). Rejecting outright, rather than silently
 // accepting and ignoring them, means a caller that expects a delete or
@@ -301,23 +319,30 @@ type InventoryDelta struct {
 // stale pending aliases in place with no indication anything went
 // wrong.
 //
-// The label/condition checks can't be left for either backend's
-// ApplyInventoryDeltas to resolve on its own: Postgres's
-// applyInventoryDeltasCoreCTEs runs a pair's set/upsert and delete
-// sides as sibling writable CTEs with no defined execution order
-// between them when they touch the same table, while SQLite's Go
-// orchestration happens to run them as ordered sequential statements
-// -- so the very same contradictory delta would silently resolve
-// differently per backend if it ever reached either one. Both
+// Label/condition mutual exclusion:
+//   - ReplaceLabels may not be combined with DeleteLabels
+//   - ReplaceConditions may not be combined with UpsertConditions or
+//     DeleteConditions
+//   - UpsertConditions and DeleteConditions may not name the same type
+//
+// These checks can't be left for either backend's ApplyInventoryDeltas
+// to resolve on its own: Postgres's applyInventoryDeltasCoreCTEs runs
+// a pair's upsert and delete sides as sibling writable CTEs with no
+// defined execution order between them when they touch the same
+// table, while SQLite's Go orchestration happens to run them as
+// ordered sequential statements -- so the very same contradictory
+// delta would silently resolve differently per backend if it ever
+// reached either one. Both
 // [ExtensionResourceRepository.ApplyInventoryDeltas] implementations
 // call this for every delta before building any batch argument, so
 // every rejection here is always caught in Go before any SQL runs,
 // regardless of caller.
 func ValidateInventoryDelta(d InventoryDelta) error {
-	for _, k := range d.DeleteLabels {
-		if _, ok := d.SetLabels[k]; ok {
-			return fmt.Errorf("%w: label %q is present in both SetLabels and DeleteLabels", ErrInvalidArgument, k)
-		}
+	if d.ReplaceLabels != nil && len(d.DeleteLabels) > 0 {
+		return fmt.Errorf("%w: ReplaceLabels cannot be combined with DeleteLabels", ErrInvalidArgument)
+	}
+	if d.ReplaceConditions != nil && (len(d.UpsertConditions) > 0 || len(d.DeleteConditions) > 0) {
+		return fmt.Errorf("%w: ReplaceConditions cannot be combined with UpsertConditions or DeleteConditions", ErrInvalidArgument)
 	}
 	deletedConditions := make(map[ConditionType]struct{}, len(d.DeleteConditions))
 	for _, t := range d.DeleteConditions {

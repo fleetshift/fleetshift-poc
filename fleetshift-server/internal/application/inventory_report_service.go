@@ -126,12 +126,15 @@ type InventoryDeltaBatchInput struct {
 // DeleteAliases's whole point is identifying a contribution to retract
 // by (namespace, key) alone, with no value to resolve by.
 //
-// Fields left at their zero value are unchanged: SetLabels/DeleteLabels
-// only touch the named keys, and UpsertConditions/DeleteConditions only
-// touch the named condition types. A delta with no field-level changes
-// is a valid heartbeat that still bumps resource-level freshness. See
-// [domain.InventoryDelta]'s doc for the full Upsert/Delete/Replace
-// alias contract this passes straight through.
+// Labels and conditions each support a full-replace op
+// (ReplaceLabels/ReplaceConditions) plus incremental ops
+// (DeleteLabels; UpsertConditions/DeleteConditions). Nil Replace*
+// means unchanged; a non-nil value (including empty) replaces the
+// entire latest map/set. Replace* is mutually exclusive with the
+// incremental ops on the same field. A delta with no field-level
+// changes is a valid heartbeat that still bumps resource-level
+// freshness. See [domain.InventoryDelta]'s doc for the full
+// Upsert/Delete/Replace alias contract this passes straight through.
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacementInput.Observation]: nil, or non-nil pointing to
@@ -146,13 +149,14 @@ type InventoryDeltaInput struct {
 	DeleteAliases  []domain.AliasRef
 	ReplaceAliases domain.AliasSet
 
-	SetLabels    map[string]string
-	DeleteLabels []string
+	ReplaceLabels map[string]string
+	DeleteLabels  []string
 
 	Observation *json.RawMessage
 
-	UpsertConditions []domain.Condition
-	DeleteConditions []domain.ConditionType
+	ReplaceConditions []domain.Condition
+	UpsertConditions  []domain.Condition
+	DeleteConditions  []domain.ConditionType
 
 	ObservedAt time.Time
 }
@@ -278,19 +282,20 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 		deltas := make([]domain.InventoryDelta, len(chunk))
 		for i, report := range chunk {
 			deltas[i] = domain.InventoryDelta{
-				ResourceType:     report.ResourceType,
-				Name:             targets[i],
-				CandidateUID:     domain.NewExtensionResourceUID(),
-				UpsertAliases:    report.UpsertAliases,
-				DeleteAliases:    report.DeleteAliases,
-				ReplaceAliases:   report.ReplaceAliases,
-				SetLabels:        report.SetLabels,
-				DeleteLabels:     report.DeleteLabels,
-				Observation:      report.Observation,
-				UpsertConditions: report.UpsertConditions,
-				DeleteConditions: report.DeleteConditions,
-				ObservedAt:       report.ObservedAt,
-				ReceivedAt:       now,
+				ResourceType:      report.ResourceType,
+				Name:              targets[i],
+				CandidateUID:      domain.NewExtensionResourceUID(),
+				UpsertAliases:     report.UpsertAliases,
+				DeleteAliases:     report.DeleteAliases,
+				ReplaceAliases:    report.ReplaceAliases,
+				ReplaceLabels:     report.ReplaceLabels,
+				DeleteLabels:      report.DeleteLabels,
+				Observation:       report.Observation,
+				ReplaceConditions: report.ReplaceConditions,
+				UpsertConditions:  report.UpsertConditions,
+				DeleteConditions:  report.DeleteConditions,
+				ObservedAt:        report.ObservedAt,
+				ReceivedAt:        now,
 			}
 		}
 		if err := tx.ExtensionResources().ApplyInventoryDeltas(ctx, deltas); err != nil {
@@ -314,13 +319,14 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 // contract stay backed by exactly one implementation.
 func validateDeltaReport(report InventoryDeltaInput) error {
 	return domain.ValidateInventoryDelta(domain.InventoryDelta{
-		UpsertAliases:    report.UpsertAliases,
-		DeleteAliases:    report.DeleteAliases,
-		ReplaceAliases:   report.ReplaceAliases,
-		SetLabels:        report.SetLabels,
-		DeleteLabels:     report.DeleteLabels,
-		UpsertConditions: report.UpsertConditions,
-		DeleteConditions: report.DeleteConditions,
+		UpsertAliases:     report.UpsertAliases,
+		DeleteAliases:     report.DeleteAliases,
+		ReplaceAliases:    report.ReplaceAliases,
+		ReplaceLabels:     report.ReplaceLabels,
+		DeleteLabels:      report.DeleteLabels,
+		ReplaceConditions: report.ReplaceConditions,
+		UpsertConditions:  report.UpsertConditions,
+		DeleteConditions:  report.DeleteConditions,
 	})
 }
 

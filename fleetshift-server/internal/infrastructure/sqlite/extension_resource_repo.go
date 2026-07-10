@@ -869,12 +869,13 @@ func nonNilLabels(m map[string]string) map[string]string {
 // upsert, regardless of batch size.
 //
 // Unlike the Postgres sibling, SQLite has no writable CTEs, so
-// ApplyInventoryDeltas's field-level set/upsert-plus-delete semantics
+// ApplyInventoryDeltas's ReplaceLabels/ReplaceConditions are whole-
+// column assigns; DeleteLabels and UpsertConditions/DeleteConditions
 // can't be expressed as a single INSERT ... SELECT the way Postgres's
 // jsonb `-`/`||` operators allow; instead this reads every affected
-// resource's current labels/conditions in one query, merges in Go,
-// and writes the complete merged result back through the same
-// batchUpsertInventoryRows primitive ReplaceInventory uses. This is
+// resource's current labels/conditions in one query, merges in Go
+// when replace is absent, and writes the complete result back through
+// the same batchUpsertInventoryRows primitive ReplaceInventory uses. This is
 // still a fixed number of round trips per batch, not one per item.
 //
 // Neither method writes observation/condition history any more:
@@ -1212,36 +1213,50 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 	invItems := make([]inventoryRowInput, n)
 	var aliasWorkIdx []int
 	for i, d := range deltas {
-		labels := map[string]string{}
-		for k, v := range prevLabels[uids[i]] {
-			labels[k] = v
-		}
-		for _, k := range d.DeleteLabels {
-			delete(labels, k)
-		}
-		for k, v := range d.SetLabels {
-			labels[k] = v
-		}
-		labelsJSON, err := json.Marshal(labels)
-		if err != nil {
-			return fmt.Errorf("marshal merged labels: %w", err)
-		}
-
-		conditions := map[string]ConditionJSON{}
-		for t, c := range prevConditions[uids[i]] {
-			conditions[t] = c
-		}
-		for _, t := range d.DeleteConditions {
-			delete(conditions, string(t))
-		}
-		for _, c := range d.UpsertConditions {
-			conditions[string(c.Type())] = ConditionJSON{
-				Status: c.Status(), Reason: c.Reason(), Message: c.Message(), LastTransitionTime: c.LastTransitionTime(),
+		var labelsJSON []byte
+		var err error
+		if d.ReplaceLabels != nil {
+			labelsJSON, err = json.Marshal(nonNilLabels(d.ReplaceLabels))
+			if err != nil {
+				return fmt.Errorf("marshal replace labels: %w", err)
+			}
+		} else {
+			labels := map[string]string{}
+			for k, v := range prevLabels[uids[i]] {
+				labels[k] = v
+			}
+			for _, k := range d.DeleteLabels {
+				delete(labels, k)
+			}
+			labelsJSON, err = json.Marshal(labels)
+			if err != nil {
+				return fmt.Errorf("marshal merged labels: %w", err)
 			}
 		}
-		conditionsJSON, err := json.Marshal(conditions)
-		if err != nil {
-			return fmt.Errorf("marshal merged conditions: %w", err)
+
+		var conditionsJSON []byte
+		if d.ReplaceConditions != nil {
+			conditionsJSON, err = conditionsToJSON(d.ReplaceConditions)
+			if err != nil {
+				return fmt.Errorf("marshal replace conditions: %w", err)
+			}
+		} else {
+			conditions := map[string]ConditionJSON{}
+			for t, c := range prevConditions[uids[i]] {
+				conditions[t] = c
+			}
+			for _, t := range d.DeleteConditions {
+				delete(conditions, string(t))
+			}
+			for _, c := range d.UpsertConditions {
+				conditions[string(c.Type())] = ConditionJSON{
+					Status: c.Status(), Reason: c.Reason(), Message: c.Message(), LastTransitionTime: c.LastTransitionTime(),
+				}
+			}
+			conditionsJSON, err = json.Marshal(conditions)
+			if err != nil {
+				return fmt.Errorf("marshal merged conditions: %w", err)
+			}
 		}
 
 		invItems[i] = inventoryRowInput{

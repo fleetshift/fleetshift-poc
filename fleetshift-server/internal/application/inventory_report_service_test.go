@@ -798,14 +798,10 @@ func TestInventoryReportService_ReplaceBatch_ObservationNilLeavesLatestUnchanged
 	}
 }
 
-// TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete
-// covers validateDeltaReport's first guard: a key present in both
-// SetLabels and DeleteLabels is self-contradictory and must be
-// rejected before identity resolution or any SQL runs, rather than
-// left for the repository to interpret (see the label CTEs' doc
-// comments for why the repository itself does not define an ordering
-// between the two).
-func TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete(t *testing.T) {
+// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithDeleteLabels
+// covers validateDeltaReport's ReplaceLabels/DeleteLabels mutual
+// exclusion: the two ops must not be combined in one delta.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithDeleteLabels(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -824,9 +820,9 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete(t
 	err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType: inventoryReportTestType, Name: &name,
-			SetLabels:    map[string]string{"zone": "us-west-2"},
-			DeleteLabels: []string{"zone"},
-			ObservedAt:   time.Now(),
+			ReplaceLabels: map[string]string{"zone": "us-west-2"},
+			DeleteLabels:  []string{"zone"},
+			ObservedAt:    time.Now(),
 		}},
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -840,9 +836,42 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothSetAndDelete(t
 	}
 }
 
+// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceConditionsWithIncremental
+// covers validateDeltaReport's ReplaceConditions mutual exclusion with
+// UpsertConditions / DeleteConditions.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceConditionsWithIncremental(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	ready := mustCondition(t, "Ready", domain.ConditionTrue, "AllGood", "ok", time.Now())
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			Conditions: []domain.Condition{ready}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			ReplaceConditions: []domain.Condition{ready},
+			DeleteConditions:  []domain.ConditionType{"Ready"},
+			ObservedAt:        time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+}
+
 // TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndDelete
-// is RejectsLabelInBothSetAndDelete's condition counterpart, covering
-// validateDeltaReport's second guard.
+// covers validateDeltaReport's UpsertConditions/DeleteConditions overlap
+// guard.
 func TestInventoryReportService_ApplyDeltaBatch_RejectsConditionInBothUpsertAndDelete(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
@@ -1039,7 +1068,7 @@ func TestInventoryReportService_ApplyDeltaBatch_ObservationNilVsReplace(t *testi
 	}
 }
 
-func TestInventoryReportService_ApplyDeltaBatch_SetsLabelsAndConditionsLeavingOthersUntouched(t *testing.T) {
+func TestInventoryReportService_ApplyDeltaBatch_ReplacesLabelsAndUpsertsConditionsLeavingOthersUntouched(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -1064,8 +1093,7 @@ func TestInventoryReportService_ApplyDeltaBatch_SetsLabelsAndConditionsLeavingOt
 		Reports: []application.InventoryDeltaInput{{
 			ResourceType:     inventoryReportTestType,
 			Name:             &name,
-			SetLabels:        map[string]string{"region": "us-west-2"},
-			DeleteLabels:     []string{"env"},
+			ReplaceLabels:    map[string]string{"region": "us-west-2"},
 			UpsertConditions: []domain.Condition{mustCondition(t, "Ready", domain.ConditionFalse, "Degraded", "", now)},
 			ObservedAt:       now,
 		}},
@@ -1076,7 +1104,7 @@ func TestInventoryReportService_ApplyDeltaBatch_SetsLabelsAndConditionsLeavingOt
 	er := getExtensionResource(t, store, name)
 	inv := er.Inventory()
 	if _, ok := inv.Labels()["env"]; ok {
-		t.Errorf("Labels[env] should be deleted, got %q", inv.Labels()["env"])
+		t.Errorf("Labels[env] should be gone after ReplaceLabels, got %q", inv.Labels()["env"])
 	}
 	if inv.Labels()["region"] != "us-west-2" {
 		t.Errorf("Labels[region] = %q, want us-west-2", inv.Labels()["region"])
@@ -1197,10 +1225,10 @@ func TestInventoryReportService_ApplyDeltaBatch_NewIdentityGetsNoLabelsFromRepor
 	name := domain.ResourceName("clusters/c1")
 	if err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
 		Reports: []application.InventoryDeltaInput{{
-			ResourceType: inventoryReportTestType,
-			Name:         &name,
-			SetLabels:    map[string]string{"env": "prod"},
-			ObservedAt:   time.Now(),
+			ResourceType:  inventoryReportTestType,
+			Name:          &name,
+			ReplaceLabels: map[string]string{"env": "prod"},
+			ObservedAt:    time.Now(),
 		}},
 	}); err != nil {
 		t.Fatalf("ApplyDeltaBatch: %v", err)
