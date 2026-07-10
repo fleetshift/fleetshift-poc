@@ -37,8 +37,7 @@ func RunUnimplemented(t *testing.T, factory Factory) {
 
 // Run exercises the full [domain.QueryRepository] contract for a
 // backend that implements CEL filtering over extension resources.
-// Platform aggregate rows are intentionally out of scope for this
-// iteration.
+// Platform aggregate rows are out of scope for QueryResources today.
 func Run(t *testing.T, factory Factory) {
 	t.Run("EmptyFilter", func(t *testing.T) { runEmptyFilterTests(t, factory) })
 	t.Run("HydrationEquivalence", func(t *testing.T) { runHydrationEquivalenceTests(t, factory) })
@@ -136,7 +135,7 @@ func runEmptyFilterTests(t *testing.T, factory Factory) {
 		defer tx.Rollback()
 
 		// Platform-only fixtures remain seeded for other repositories,
-		// but QueryResources must not surface them in this iteration.
+		// but QueryResources must not surface them.
 		results := queryAll(t, tx, "")
 		platformName := string(domain.NewFullResourceName("fleetshift.io", fx.PlatformOnlyName))
 		if _, ok := findByName(results, platformName); ok {

@@ -15,11 +15,9 @@ import (
 // compiler owns CEL AST lowering and knows nothing about any of this
 // -- see querysql's package doc for why the split lands here.
 //
-// Public CEL fields match the target QueryResources response shape:
-// envelope name, envelope resource_type, and fields under resource.
-// Old POC envelope aliases (platform_name, kind, service_name,
-// api_version, collection_name, resource_id) and platform-only body
-// fields are rejected.
+// Public CEL fields match the QueryResources response shape: envelope
+// name, envelope resource_type, and fields under resource. Top-level
+// identity components and platform-only body fields are rejected.
 type queryFieldResolver struct {
 	// SchemaProvider, if set, lets resource.spec.* and
 	// resource.observation.* paths be validated against a real
@@ -33,9 +31,9 @@ type queryFieldResolver struct {
 
 var _ querysql.FieldResolver = queryFieldResolver{}
 
-// conditionSubfields are the resource.conditions["Type"].* fields the
-// plan documents; all are text-valued so no cast handling is needed
-// for them either.
+// conditionSubfields are the resource.conditions["Type"].* fields
+// supported in filters; all are text-valued so no cast handling is
+// needed for them.
 var conditionSubfields = map[string]bool{
 	"status":             true,
 	"reason":             true,
@@ -103,7 +101,8 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 	case "name":
 		if len(rest) == 0 {
 			// Body-level relative resource name
-			// (collection_name/resource_id), not an envelope alias.
+			// (collection_name/resource_id), distinct from the
+			// envelope's full name.
 			return querysql.SQLExpr{SQL: "er.collection_name || '/' || er.resource_id"}, nil
 		}
 	case "uid":
@@ -187,8 +186,9 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			return querysql.SQLExpr{SQL: "inv.updated_at"}, nil
 		}
 	case "inventory":
-		// Nested resource.inventory.* was renamed to inlined wire
-		// names (local_labels, conditions, observation, ...).
+		// Observed state is filtered via inlined resource.* fields
+		// (local_labels, conditions, observation, ...), not nested
+		// under resource.inventory.
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.inventory\"", domain.ErrInvalidArgument)
 	case "effective_labels", "nxt", "aliases", "relationships":
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))

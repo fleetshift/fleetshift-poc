@@ -33,15 +33,15 @@ type QueryResourcesRequest struct {
 	// the repository's [QuerySchemaProvider] is set; with a nil
 	// provider there is no activation scope.
 	//
-	// Public CEL fields for this iteration are envelope name,
-	// envelope resource_type, and fields under resource (labels,
-	// managed fields, inlined observed-state fields such as
-	// local_labels/conditions/observation/local_update_time/
-	// index_update_time, and guarded spec/observation). Nested
-	// resource.inventory.* paths are rejected. Old POC envelope
-	// aliases such as platform_name, kind, service_name, api_version,
-	// collection_name, and resource_id are not supported filter
-	// fields.
+	// Supported CEL fields are envelope name, envelope resource_type,
+	// and fields under resource (labels, managed fields, observed-state
+	// fields such as local_labels/conditions/observation/
+	// local_update_time/index_update_time, and guarded
+	// spec/observation). Top-level identity components
+	// (service_name, collection_name, resource_id, and similar) are
+	// not filter fields; use name / resource_type instead. Nested
+	// resource.inventory.* paths are not supported — observed state
+	// is filtered via the inlined resource.* fields above.
 	//
 	// Ordinary string fields (== and startsWith) are case-sensitive
 	// on every backend. resource.state is the exception: comparisons
@@ -66,9 +66,9 @@ type QueryResourcesRequest struct {
 
 	// OrderBy selects a supported deterministic ordering. Leave empty
 	// for the default order (collection_name, resource_id,
-	// service_name, type_name). The only other supported value in
-	// this iteration is "resource_type,name". Arbitrary expressions
-	// return [ErrInvalidArgument].
+	// service_name, type_name). The only other supported value is
+	// "resource_type,name". Arbitrary expressions return
+	// [ErrInvalidArgument].
 	OrderBy string
 }
 
@@ -87,7 +87,7 @@ type QueryResourcesPage struct {
 type QueryResourceResult struct {
 	// Kind discriminates which of Platform/Extension is populated.
 	// It is implementation metadata for callers that find the
-	// discriminator convenient; it is not part of the target public
+	// discriminator convenient; it is not part of the public
 	// QueryResources response shape, and CEL filters must not select
 	// on it. Prefer resource_type for type selection. The current
 	// implementation always sets Kind to [QueryResourceKindExtension].

@@ -59,7 +59,7 @@ import "fmt"
 // is acceptable -- containment still preserves correct equality
 // semantics and remains available when selectivity favors it.
 // Normalized label/condition side tables are intentionally out of
-// scope this iteration.
+// scope for now.
 //
 // See query_repo_bench_test.go's TestQueryResourcesExplainPlan
 // (FLEETSHIFT_QUERY_BENCH=1) for measured plans.

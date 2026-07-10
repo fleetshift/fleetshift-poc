@@ -20,8 +20,7 @@ import (
 // doc), so its identity is exactly its [domain.ResourceName] -- a
 // struct literal, not a lookup.
 //
-// The two methods correspond to the two batched reporting modes
-// described in scratch/inventory_phase4b_report_contract_rework_plan.md:
+// The two methods correspond to the two batched reporting modes:
 // [InventoryReportService.ReplaceBatch] treats each report as the
 // complete latest inventory state, while
 // [InventoryReportService.ApplyDeltaBatch] applies incremental,
@@ -37,12 +36,11 @@ type InventoryReportService struct {
 // pathologically large call is split into chunks of this size, which
 // keeps every chunk's multi-row statements safely under Postgres's
 // hard per-statement parameter limit (65535) and bounds the cost of
-// any one round trip -- see the nameless-platform-identity plan's
-// "cost model" section for the round-trip analysis this is based on.
-// Chunking only bounds per-statement size: it does not change
-// all-or-nothing batch semantics or split the transaction -- every
-// chunk runs inside the same transaction and commits together (see
-// [reportResolver], which tracks duplicates across chunk boundaries).
+// any one round trip. Chunking only bounds per-statement size: it
+// does not change all-or-nothing batch semantics or split the
+// transaction -- every chunk runs inside the same transaction and
+// commits together (see [reportResolver], which tracks duplicates
+// across chunk boundaries).
 const defaultReportChunkSize = 1000
 
 // InventoryReportServiceOption configures an [InventoryReportService].

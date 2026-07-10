@@ -360,10 +360,9 @@ func ValidateInventoryDelta(d InventoryDelta) error {
 // and Create/Update -- a separate, deliberately-not-yet-connected
 // concept from [InventoryReplacement.Aliases]'s pending, per-extension-
 // resource reported payload. Inventory reporting's ReplaceInventory/
-// ApplyInventoryDeltas do not call into this repository's aliases at
-// all in this iteration; a future asynchronous reconciliation process
-// is what will eventually decide which reported aliases become
-// accepted here.
+// ApplyInventoryDeltas do not call into this repository's aliases;
+// a future asynchronous reconciliation process is what will
+// eventually decide which reported aliases become accepted here.
 type ResourceIdentityRepository interface {
 	Create(ctx context.Context, r *PlatformResource) error
 	GetByName(ctx context.Context, name ResourceName) (*PlatformResource, error)

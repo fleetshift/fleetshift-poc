@@ -171,8 +171,7 @@ func TestDynamicSchemaActivator_DeactivateRemovesService(t *testing.T) {
 }
 
 // TestDynamicSchemaActivator_ActivateRegistersQuerySchema proves that
-// Activate records its compiled spec descriptor in Registry (see
-// the QueryRepository POC plan's "Schema Provider" section) and that
+// Activate records its compiled spec descriptor in Registry and that
 // Deactivate removes it again.
 func TestDynamicSchemaActivator_ActivateRegistersQuerySchema(t *testing.T) {
 	activator, _ := newActivator(t)
@@ -1593,9 +1592,10 @@ func TestExtensionCreate_VisibleInPlatformAPI(t *testing.T) {
 // PlatformResourceService.Create, or an alias) -- this managed resource
 // never got either, so once its one and only representation is gone,
 // there's nothing left to derive a virtual platform resource from, and
-// the platform resource disappears along with it (see the
-// nameless-platform-identity plan's "virtual platform resource"
-// semantics).
+// the platform resource disappears along with it. Virtual platform
+// resources exist only while something (representations, aliases, or
+// relationships) still derives them; with no physical row and no
+// remaining representation, the name is gone.
 func TestExtensionDelete_RemovesPlatformRepresentation(t *testing.T) {
 	env := newActivatorWithResourcesAndPlatform(t)
 	ctx, cancel := context.WithTimeout(context.Background(), testutil.ServiceTimeout)

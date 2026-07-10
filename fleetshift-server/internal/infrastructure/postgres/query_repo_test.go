@@ -20,8 +20,7 @@ func queryRepoTestTx(t *testing.T) domain.Tx {
 }
 
 // TestQueryRepo exercises the full QueryRepository contract against
-// the real Postgres implementation -- see queryrepotest.Run's doc and
-// the QueryRepository POC plan's "Tests" section.
+// the real Postgres implementation (see queryrepotest.Run).
 func TestQueryRepo(t *testing.T) {
 	t.Parallel()
 	queryrepotest.Run(t, queryRepoTestTx)

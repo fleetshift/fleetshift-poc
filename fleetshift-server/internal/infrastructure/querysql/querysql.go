@@ -1,23 +1,18 @@
-// Package querysql implements the small local CEL-to-SQL adapter
-// called for in the QueryRepository POC plan's "cel2sql Adapter"
-// section: it compiles a CEL filter, evaluated against
+// Package querysql compiles a CEL filter, evaluated against
 // QueryResources' result envelope, into a parameterized SQL
 // predicate.
 //
 // # Why not github.com/spandigital/cel2sql/v3
 //
-// The plan calls for evaluating whether a cel2sql-style library fits
-// FleetShift's data model before writing a local adapter, without
-// naming a specific package (see the plan's "cel2sql Adapter"
-// section). github.com/spandigital/cel2sql/v3 (v3.8.8 at evaluation
-// time) is the most prominent Go implementation and the one this was
-// evaluated against, hands-on rather than assumed. It does not fit.
-// That library does target Postgres by default (it is genuinely
-// multi-dialect -- Postgres, MySQL, SQLite, DuckDB, BigQuery, Spark --
-// with real JSON/JSONB and parameterized-query support), so the
-// objection isn't "wrong database". Two concrete incompatibilities
-// with this package's required field set surfaced from compiling
-// representative filters through it directly:
+// github.com/spandigital/cel2sql/v3 (v3.8.8 at evaluation time) is the
+// most prominent Go CEL-to-SQL library and was evaluated hands-on
+// rather than assumed. It does not fit. That library does target
+// Postgres by default (it is genuinely multi-dialect -- Postgres,
+// MySQL, SQLite, DuckDB, BigQuery, Spark -- with real JSON/JSONB and
+// parameterized-query support), so the objection isn't "wrong
+// database". Two concrete incompatibilities with this package's
+// required field set surfaced from compiling representative filters
+// through it directly:
 //
 //  1. Map-keyed JSONB access nested under a dynamically-typed parent
 //     -- exactly this package's resource.labels["team"],
@@ -91,7 +86,7 @@ import (
 // CELSQLCompiler compiles a CEL filter into a parameterized SQL
 // predicate. Exists as an interface -- rather than a bare function --
 // so repository code depends on this role rather than a concrete
-// cel-go wiring, per the plan's cel2sql adapter guidance.
+// cel-go wiring.
 type CELSQLCompiler interface {
 	CompileFilter(ctx context.Context, in CompileFilterInput) (SQLPredicate, error)
 }
@@ -208,11 +203,10 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 // forces checker init at construction so concurrent Compile calls on
 // the shared Env do not race on lazy checker setup.
 func newCELEnv() (*cel.Env, error) {
-	// Public CEL envelope fields for this iteration: name and
-	// resource_type only. Old POC aliases (kind, platform_name,
-	// service_name, api_version, collection_name, resource_id) are
-	// intentionally undeclared so CEL rejects them before the field
-	// resolver runs; resource.* validation remains the resolver's job.
+	// Top-level CEL variables are name and resource_type. Identity
+	// components are not declared as top-level variables so CEL
+	// rejects them before the field resolver runs; resource.*
+	// validation remains the resolver's job.
 	return cel.NewEnv(
 		cel.EagerlyValidateDeclarations(true),
 		cel.Variable("name", cel.StringType),

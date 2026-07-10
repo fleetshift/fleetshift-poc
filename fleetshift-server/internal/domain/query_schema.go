@@ -11,9 +11,8 @@ import (
 
 // QuerySchemaProvider gives [QueryRepository] implementations
 // optional protobuf schema knowledge for type-specific CEL field
-// validation -- see the QueryRepository POC plan's "Schema Provider"
-// section and the postgres query field resolver (the only current
-// caller; it implements infrastructure/querysql.FieldResolver).
+// validation. The postgres/sqlite query field resolvers are the
+// current callers (they implement infrastructure/querysql.FieldResolver).
 //
 // It is intentionally narrow and transport-agnostic: it knows nothing
 // about internal/transport's dynamic gRPC/HTTP registration, only the
@@ -25,20 +24,18 @@ import (
 // stays free of that dependency direction.
 //
 // Absence of a schema is an explicit, first-class outcome (the bool
-// return), not an error. The POC's field resolver treats "no schema
-// registered for this type" and "schema registered but its
-// descriptor is nil" both as "validate this path structurally only"
-// (any well-formed dotted JSON path is accepted), rather than failing
-// closed -- types without a SpecDescriptor (including inventory-only
-// activations) validate structurally only. Only a resolvable schema
-// *with* a descriptor triggers field-name validation.
+// return), not an error. Field resolvers treat "no schema registered
+// for this type" and "schema registered but its descriptor is nil"
+// both as "validate this path structurally only" (any well-formed
+// dotted JSON path is accepted), rather than failing closed -- types
+// without a SpecDescriptor (including inventory-only activations)
+// validate structurally only. Only a resolvable schema *with* a
+// descriptor triggers field-name validation.
 //
-// The plan's interface sketch also included platform resource schema
-// lookup (GetPlatformQuerySchema); it is omitted here because
-// platform resources have no schema story yet in this POC at all
-// (see the plan's "Open Questions" on platform resource_type) --
-// adding an always-empty method would be speculative surface with no
-// caller.
+// Platform resource schema lookup is omitted: platform resources have
+// no query schema story yet, and QueryResources does not emit
+// platform rows. Adding an always-empty method would be speculative
+// surface with no caller.
 type QuerySchemaProvider interface {
 	// GetResourceQuerySchema returns rt's query schema, if known.
 	GetResourceQuerySchema(ctx context.Context, rt ResourceType) (ResourceQuerySchema, bool, error)

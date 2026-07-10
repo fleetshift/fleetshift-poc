@@ -15,8 +15,7 @@ var fixedTime = time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
 // Fixture holds the identifiers queryrepotest's core seeded resources
 // are addressed by, so individual test cases don't need to re-derive
-// names/types/UIDs. See the plan's "Core fixtures" section for the
-// exact shapes seeded here.
+// names/types/UIDs.
 type Fixture struct {
 	// PlatformOnlyName is a physical platform resource with no
 	// extension representation: clusters/platform-only, env=prod.
@@ -41,11 +40,11 @@ type Fixture struct {
 	InventoryUID  domain.ExtensionResourceUID
 }
 
-// SeedCoreFixtures seeds the plan's four core fixtures (a physical
-// platform resource, a managed extension resource, an inventory-only
-// extension resource, and -- implicitly, since neither extension
-// resource has a physical platform_resources row -- two virtual
-// platform resources) into tx, and returns their identifiers.
+// SeedCoreFixtures seeds four core fixtures (a physical platform
+// resource, a managed extension resource, an inventory-only extension
+// resource, and -- implicitly, since neither extension resource has a
+// physical platform_resources row -- two virtual platform resources)
+// into tx, and returns their identifiers.
 func SeedCoreFixtures(t *testing.T, tx domain.Tx) Fixture {
 	t.Helper()
 	ctx := context.Background()

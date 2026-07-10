@@ -18,11 +18,11 @@ var _ domain.QueryRepository = (*QueryRepo)(nil)
 // [domain.QueryRepository]'s doc for why this is not an aggregate
 // repository.
 //
-// TODO: do not restore platform aggregate search by re-adding the
-// old platform_rows CTE union in buildQueryResourcesSQL. Platform
-// rows are reserved for a future identity/query model with its own
-// indexes; a derived approximation over extension_resources is what
-// this iteration deliberately removed.
+// TODO: do not restore platform aggregate search by re-adding a
+// platform_rows CTE union in buildQueryResourcesSQL. Platform rows
+// are reserved for a future identity/query model with its own
+// indexes; a derived approximation over extension_resources is not
+// the intended surface.
 type QueryRepo struct {
 	DB *sql.Tx
 

@@ -406,11 +406,11 @@ func fieldPathFromExpr(e ast.Expr) (FieldPath, bool, error) {
 
 // hasResourceTypeGuard returns the resource_type literal from a
 // top-level `resource_type == "..."` conjunct -- i.e. reachable by
-// descending only through `&&` -- per the plan's "Minimum acceptable
-// POC" rule that type-specific fields (e.g. resource.spec.*) require
-// an explicit type filter in the same AND chain. Returns nil if there
-// is no such conjunct. A guard inside an `||` branch does not count:
-// that branch might not hold for the type-specific side of an OR.
+// descending only through `&&`. Type-specific fields (e.g.
+// resource.spec.*) require an explicit type filter in the same AND
+// chain. Returns nil if there is no such conjunct. A guard inside an
+// `||` branch does not count: that branch might not hold for the
+// type-specific side of an OR.
 //
 // Only equality establishes a single-type guard for schema-backed
 // paths; activation scoping uses [domain.ResolveQueryResourceTypeScope]
