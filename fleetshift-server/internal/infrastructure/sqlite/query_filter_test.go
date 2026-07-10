@@ -197,6 +197,12 @@ func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
 	if !strings.Contains(pred.SQL, " OR ") {
 		t.Errorf("SQL = %q, want an OR of the two typed branches", pred.SQL)
 	}
+	if !strings.Contains(pred.SQL, "ri.spec") {
+		t.Errorf("SQL = %q, want ri.spec from the Cluster branch", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, "inv.observation") {
+		t.Errorf("SQL = %q, want inv.observation from the Node branch", pred.SQL)
+	}
 }
 
 func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testing.T) {
