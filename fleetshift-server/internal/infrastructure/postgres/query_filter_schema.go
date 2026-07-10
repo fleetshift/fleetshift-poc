@@ -10,18 +10,13 @@ import (
 )
 
 // validateSpecPath checks names -- the parsed resource.spec.<path>
-// segments -- against r's schema provider, when one is configured and
-// has a descriptor registered for ctx's guarded resource type, and
-// returns the path to actually use for JSON key extraction (see
-// jsonTextField). Callers must only reach this once
-// ctx.GuardedResourceType is known to be non-nil. See
-// [domain.QuerySchemaProvider]'s doc for why "no provider", "no
-// schema for this type", and "schema with no descriptor" all fall
-// back to returning names unchanged (structural validation only)
-// rather than an error: most resource types have no descriptor
-// activated through this path yet.
+// segments -- against r's schema provider when a top-level
+// resource_type == guard is present and a descriptor is registered
+// for that type. Without a guard (or without a descriptor), names are
+// returned unchanged for structural JSON extraction: schema validation
+// is optional, not a prerequisite for querying spec paths.
 func (r queryFieldResolver) validateSpecPath(ctx querysql.ResolveContext, names []string) ([]string, error) {
-	if r.SchemaProvider == nil {
+	if r.SchemaProvider == nil || ctx.GuardedResourceType == nil {
 		return names, nil
 	}
 	rt := *ctx.GuardedResourceType
@@ -37,11 +32,10 @@ func (r queryFieldResolver) validateSpecPath(ctx querysql.ResolveContext, names 
 
 // validateObservationPath is validateSpecPath's counterpart for
 // resource.observation.<path>. InventoryObservationDescriptor is
-// always nil today (see its doc), so this always returns names
-// unchanged in practice; it exists so activating inventory schemas
-// later does not require touching the resolver.
+// often nil, so this usually returns names unchanged; when a guard
+// and descriptor are both present, field names are validated.
 func (r queryFieldResolver) validateObservationPath(ctx querysql.ResolveContext, names []string) ([]string, error) {
-	if r.SchemaProvider == nil {
+	if r.SchemaProvider == nil || ctx.GuardedResourceType == nil {
 		return names, nil
 	}
 	rt := *ctx.GuardedResourceType

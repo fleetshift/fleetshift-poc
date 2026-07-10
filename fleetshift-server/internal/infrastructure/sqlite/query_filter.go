@@ -149,11 +149,6 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		}
 	case "spec":
 		if len(rest) > 0 {
-			if ctx.GuardedResourceType == nil {
-				return querysql.SQLExpr{}, fmt.Errorf(
-					"filter: %w: resource.spec.* requires a top-level resource_type == \"...\" conjunct",
-					domain.ErrInvalidArgument)
-			}
 			names, err := r.validateSpecPath(ctx, rest)
 			if err != nil {
 				return querysql.SQLExpr{}, err
@@ -177,11 +172,6 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		}
 	case "observation":
 		if len(rest) > 0 {
-			if ctx.GuardedResourceType == nil {
-				return querysql.SQLExpr{}, fmt.Errorf(
-					"filter: %w: resource.observation.* requires a top-level resource_type == \"...\" conjunct",
-					domain.ErrInvalidArgument)
-			}
 			names, err := r.validateObservationPath(ctx, rest)
 			if err != nil {
 				return querysql.SQLExpr{}, err

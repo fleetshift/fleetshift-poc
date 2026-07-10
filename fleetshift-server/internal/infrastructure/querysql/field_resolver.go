@@ -91,8 +91,9 @@ type ResolveContext struct {
 	// GuardedResourceType is the resource_type literal from the
 	// filter's top-level `resource_type == "..."` conjunct (see
 	// hasResourceTypeGuard's doc), or nil if the filter has none.
-	// Fields backed by a JSON shape that differs per resource_type
-	// (e.g. resource.spec.*) require this to be non-nil.
+	// When non-nil, resolvers may optionally validate type-shaped
+	// paths (resource.spec.*/resource.observation.*) against that
+	// type's schema. A guard is not required to compile those paths.
 	GuardedResourceType *domain.ResourceType
 
 	// Bind registers v as a SQL bind parameter and returns the

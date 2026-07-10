@@ -269,10 +269,32 @@ func TestQueryFieldResolver_SpecGuardedByResourceType(t *testing.T) {
 	}
 }
 
-func TestQueryFieldResolver_SpecWithoutGuardIsInvalid(t *testing.T) {
-	err := compileErr(t, `resource.spec.provider == "aws"`)
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("err = %v, want ErrInvalidArgument", err)
+func TestQueryFieldResolver_SpecWithoutGuardCompiles(t *testing.T) {
+	pred := compile(t, `resource.spec.provider == "aws"`)
+	if !strings.Contains(pred.SQL, "ri.spec") {
+		t.Errorf("SQL = %q, want a ri.spec extraction without a resource_type guard", pred.SQL)
+	}
+}
+
+func TestQueryFieldResolver_ObservationWithoutGuardCompiles(t *testing.T) {
+	pred := compile(t, `resource.observation.capacity.cpu > 4`)
+	if !strings.Contains(pred.SQL, "inv.observation") {
+		t.Errorf("SQL = %q, want an inv.observation extraction without a resource_type guard", pred.SQL)
+	}
+}
+
+func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
+	// Each branch carries its own resource_type == in the SQL; a
+	// root-level guard is not required to compile type-shaped paths.
+	pred := compile(t, `(resource_type == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws") || (resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4)`)
+	if !strings.Contains(pred.SQL, " OR ") {
+		t.Errorf("SQL = %q, want an OR of the two typed branches", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, "ri.spec") {
+		t.Errorf("SQL = %q, want ri.spec from the Cluster branch", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, "inv.observation") {
+		t.Errorf("SQL = %q, want inv.observation from the Node branch", pred.SQL)
 	}
 }
 
@@ -327,13 +349,6 @@ func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testi
 				t.Errorf("SQL = %q, want the ::%s cast wrapped in a CASE WHEN pg_input_is_valid(...) guard", pred.SQL, tt.sqlType)
 			}
 		})
-	}
-}
-
-func TestQueryFieldResolver_ObservationWithoutGuardIsInvalid(t *testing.T) {
-	err := compileErr(t, `resource.observation.capacity.cpu > 4`)
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("err = %v, want ErrInvalidArgument", err)
 	}
 }
 
@@ -474,10 +489,13 @@ func TestQueryFieldResolver_SpecPermissiveWhenSchemaAbsent(t *testing.T) {
 	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.anything_goes == 5`)
 }
 
-func TestQueryFieldResolver_GuardInsideOrDoesNotCount(t *testing.T) {
-	err := compileErr(t, `(resource_type == "kind.fleetshift.io/Cluster") || resource.spec.provider == "aws"`)
-	if !errors.Is(err, domain.ErrInvalidArgument) {
-		t.Errorf("err = %v, want ErrInvalidArgument", err)
+func TestQueryFieldResolver_SpecOnOneSideOfOrCompiles(t *testing.T) {
+	pred := compile(t, `(resource_type == "kind.fleetshift.io/Cluster") || resource.spec.provider == "aws"`)
+	if !strings.Contains(pred.SQL, " OR ") {
+		t.Errorf("SQL = %q, want OR", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, "ri.spec") {
+		t.Errorf("SQL = %q, want ri.spec on the unguarded side of OR", pred.SQL)
 	}
 }
 

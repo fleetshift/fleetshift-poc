@@ -422,10 +422,9 @@ func TestCompileFilter_InEmptyListStillResolvesField(t *testing.T) {
 func TestCompileFilter_GuardInsideOrDoesNotCount(t *testing.T) {
 	// The resource_type guard only counts when it's a top-level `&&`
 	// conjunct; inside an `||` branch it doesn't establish the type
-	// for the whole expression. This is exercised here via
-	// GuardedResourceType directly, since guard *detection* is this
-	// package's job even though what a guard *licenses* is the
-	// resolver's.
+	// for optional schema validation of the whole expression. Spec
+	// paths still compile without a guard; this test only checks
+	// guard *detection*.
 	var gotGuard *domain.ResourceType
 	c := querysql.Compiler{Fields: recordingResolver(func(_ querysql.FieldPath, _ querysql.TypeHint, ctx querysql.ResolveContext) (querysql.SQLExpr, error) {
 		gotGuard = ctx.GuardedResourceType

@@ -47,8 +47,8 @@ func flipComparison(sql string, op ComparisonOperator) (string, ComparisonOperat
 // package doc -- into a SQL boolean expression. st.guard carries
 // whether (and against which type) the overall filter has a
 // top-level `resource_type == "..."` conjunct (see
-// hasResourceTypeGuard), which st.fields may require for
-// type-specific fields.
+// hasResourceTypeGuard), which resolvers may use for optional
+// schema-backed path validation.
 func compileBool(e ast.Expr, st *state) (string, error) {
 	switch e.Kind() {
 	case ast.CallKind:
@@ -406,11 +406,11 @@ func fieldPathFromExpr(e ast.Expr) (FieldPath, bool, error) {
 
 // hasResourceTypeGuard returns the resource_type literal from a
 // top-level `resource_type == "..."` conjunct -- i.e. reachable by
-// descending only through `&&`. Type-specific fields (e.g.
-// resource.spec.*) require an explicit type filter in the same AND
-// chain. Returns nil if there is no such conjunct. A guard inside an
-// `||` branch does not count: that branch might not hold for the
-// type-specific side of an OR.
+// descending only through `&&`. Resolvers may use this for optional
+// schema-backed validation of type-shaped paths; it is not required
+// to compile resource.spec.*/resource.observation.*. A guard inside
+// an `||` branch does not count for the whole expression: that
+// branch might not hold for the other side of an OR.
 //
 // Only equality establishes a single-type guard for schema-backed
 // paths; activation scoping uses [domain.ResolveQueryResourceTypeScope]
