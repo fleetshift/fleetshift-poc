@@ -1,6 +1,11 @@
 // Package kubernetes implements a [domain.DeliveryAgent] that applies
-// Kubernetes manifests to a cluster via server-side apply (SSA). It
-// supports two modes:
+// Kubernetes manifests to a cluster via server-side apply (SSA), and
+// hosts in-process inventory indexing for watched cluster objects.
+// Delivery ([Agent]) and indexing ([KubernetesInProcessIndexHost]) are
+// independent: an absent or failed indexer does not block delivery
+// routing.
+//
+// Delivery supports two modes:
 //
 //   - Token passthrough: authenticates using the caller's JWT (legacy).
 //   - Attested delivery: verifies the attestation bundle, then applies
@@ -16,14 +21,7 @@ import (
 	"sync"
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/api/meta"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/discovery/cached/memory"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/restmapper"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/attestation"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -36,8 +34,6 @@ const TargetType domain.TargetType = "kubernetes"
 // ManifestManifestType is the [domain.ManifestType] for generic
 // Kubernetes manifests applied via server-side apply.
 const ManifestManifestType domain.ManifestType = "kubernetes"
-
-const fieldManager = "fleetshift"
 
 // Agent implements [domain.DeliveryAgent] for Kubernetes clusters.
 // When a target has a trust_bundle property and an attestation is
@@ -397,96 +393,4 @@ func buildRESTConfig(target domain.TargetInfo, token domain.RawToken) (*rest.Con
 		cfg.TLSClientConfig.CAData = []byte(ca)
 	}
 	return cfg, nil
-}
-
-// applier wraps a dynamic client and REST mapper for SSA.
-type applier struct {
-	client dynamic.Interface
-	mapper meta.RESTMapper
-}
-
-func newApplierFromConfig(cfg *rest.Config) (*applier, error) {
-	dc, err := discovery.NewDiscoveryClientForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create discovery client: %w", err)
-	}
-
-	dyn, err := dynamic.NewForConfig(cfg)
-	if err != nil {
-		return nil, fmt.Errorf("create dynamic client: %w", err)
-	}
-
-	mapper := restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(dc))
-
-	return &applier{client: dyn, mapper: mapper}, nil
-}
-
-func (a *applier) apply(ctx context.Context, raw json.RawMessage) error {
-	obj := &unstructured.Unstructured{}
-	if err := obj.UnmarshalJSON(raw); err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
-	}
-
-	gvk := obj.GroupVersionKind()
-	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-	if err != nil {
-		return fmt.Errorf("resolve GVR for %s: %w", gvk, err)
-	}
-
-	var dr dynamic.ResourceInterface
-	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		ns := obj.GetNamespace()
-		if ns == "" {
-			ns = "default"
-		}
-		dr = a.client.Resource(mapping.Resource).Namespace(ns)
-	} else {
-		dr = a.client.Resource(mapping.Resource)
-	}
-
-	data, err := json.Marshal(obj)
-	if err != nil {
-		return fmt.Errorf("marshal object: %w", err)
-	}
-
-	_, err = dr.Patch(ctx, obj.GetName(), "application/apply-patch+yaml", data, metav1.PatchOptions{
-		FieldManager: fieldManager,
-	})
-	if err != nil {
-		return fmt.Errorf("apply %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
-	}
-
-	return nil
-}
-
-func (a *applier) delete(ctx context.Context, raw json.RawMessage) error {
-	obj := &unstructured.Unstructured{}
-	if err := obj.UnmarshalJSON(raw); err != nil {
-		return fmt.Errorf("parse manifest: %w", err)
-	}
-
-	gvk := obj.GroupVersionKind()
-	mapping, err := a.mapper.RESTMapping(gvk.GroupKind(), gvk.Version)
-	if err != nil {
-		return fmt.Errorf("resolve GVR for %s: %w", gvk, err)
-	}
-
-	var dr dynamic.ResourceInterface
-	if mapping.Scope.Name() == meta.RESTScopeNameNamespace {
-		ns := obj.GetNamespace()
-		if ns == "" {
-			ns = "default"
-		}
-		dr = a.client.Resource(mapping.Resource).Namespace(ns)
-	} else {
-		dr = a.client.Resource(mapping.Resource)
-	}
-
-	if err := dr.Delete(ctx, obj.GetName(), metav1.DeleteOptions{}); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return fmt.Errorf("delete %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
-	}
-	return nil
 }

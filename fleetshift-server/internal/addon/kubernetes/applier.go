@@ -14,8 +14,6 @@ import (
 	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/restmapper"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 const fieldManager = "fleetshift"
@@ -116,14 +114,4 @@ func (a *applier) delete(ctx context.Context, raw json.RawMessage) error {
 		return fmt.Errorf("delete %s %s/%s: %w", gvk.Kind, obj.GetNamespace(), obj.GetName(), err)
 	}
 	return nil
-}
-
-// deliveryStateForError returns [domain.DeliveryStateAuthFailed] for
-// Kubernetes API authentication/authorization errors (401/403), and
-// [domain.DeliveryStateFailed] for everything else.
-func deliveryStateForError(err error) domain.DeliveryState {
-	if apierrors.IsUnauthorized(err) || apierrors.IsForbidden(err) {
-		return domain.DeliveryStateAuthFailed
-	}
-	return domain.DeliveryStateFailed
 }

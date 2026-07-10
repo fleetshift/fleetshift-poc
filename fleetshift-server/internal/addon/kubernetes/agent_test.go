@@ -2,6 +2,10 @@ package kubernetes_test
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/sha256"
 	"encoding/json"
 	"encoding/pem"
 	"errors"
@@ -13,8 +17,12 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/rest"
+
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/keyregistry"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/oidc/oidctest"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
 
@@ -84,6 +92,80 @@ func (nopReporter) ReportResult(context.Context, domain.DeliveryID, domain.Gener
 }
 func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
 	return nil, nil
+}
+
+// TestAgent_Deliver_SucceedsWhenIndexerAbsent asserts that delivery
+// routing does not require an in-process indexer. The delivery Agent is
+// constructed with no index host or controller; Deliver must still
+// accept a valid request and report success. Indexing being down must
+// not fail delivery.
+func TestAgent_Deliver_SucceedsWhenIndexerAbsent(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	})
+
+	// Empty manifests: client construction succeeds without dialing, and
+	// the apply loop is a no-op that reports Delivered. No indexer is
+	// constructed or consulted.
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
+	if err != nil {
+		t.Fatalf("Deliver with indexer absent: %v", err)
+	}
+
+	asyncResult := awaitDone(t, reporter.done)
+	if asyncResult.State != domain.DeliveryStateDelivered {
+		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateDelivered)
+	}
+}
+
+// TestAgent_Deliver_SucceedsWhenIndexerStartFails asserts that a
+// failing in-process index host does not block delivery. Delivery and
+// indexing are separate types; StartIndexer failure on the host must not
+// affect Agent.Deliver.
+func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
+	ctx := context.Background()
+	host := kubernetes.NewKubernetesInProcessIndexHost(
+		ctx,
+		nil,
+		nil,
+		nil,
+		kubernetes.WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
+			return nil, errors.New("indexer intentionally down")
+		}),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":            "https://127.0.0.1:6443",
+			"service_account_token": "token",
+		},
+	})
+	if err := host.StartIndexer(ctx, target); err == nil {
+		t.Fatal("expected StartIndexer to fail when indexer is down")
+	}
+
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+	err := agent.Deliver(ctx, target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
+	if err != nil {
+		t.Fatalf("Deliver with failed indexer: %v", err)
+	}
+
+	asyncResult := awaitDone(t, reporter.done)
+	if asyncResult.State != domain.DeliveryStateDelivered {
+		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateDelivered)
+	}
 }
 
 func TestAgent_Deliver_MissingAPIServer(t *testing.T) {
@@ -528,5 +610,397 @@ func TestAgent_Remove_WithAttestation_NoTrustBundle_ReportsAuthFailed(t *testing
 	}
 	if !strings.Contains(result.Message, "trust_bundle") {
 		t.Errorf("expected trust_bundle error in message, got: %q", result.Message)
+	}
+}
+
+func TestAgent_Remove_DeleteFailure_ReportsFailed(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"boom","reason":"InternalError","code":500}`)
+	}))
+	defer ts.Close()
+
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	})
+	err := agent.Remove(context.Background(), target, "d1", []domain.Manifest{{
+		ManifestType: kubernetes.ManifestManifestType,
+		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"rm-fail","namespace":"default"}}`),
+	}}, domain.DeliveryAuth{Token: "tok"}, nil, 1)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateFailed, result.Message)
+	}
+}
+
+func TestAgent_Remove_MissingToken(t *testing.T) {
+	agent := kubernetes.NewAgent(nopReporter{})
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	})
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, nil, 1)
+	if err == nil {
+		t.Fatal("expected error for missing token")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("expected ErrInvalidArgument, got: %v", err)
+	}
+}
+
+func TestAgent_Remove_Unauthorized_ReportsAuthFailed(t *testing.T) {
+	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnauthorized)
+		fmt.Fprintf(w, `{"kind":"Status","apiVersion":"v1","metadata":{},"status":"Failure","message":"Unauthorized","reason":"Unauthorized","code":401}`)
+	}))
+	defer ts.Close()
+
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+
+	obj := json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"rm-unauth","namespace":"default"}}`)
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": ts.URL,
+			"ca_cert":    tlsServerCAPEM(ts),
+		},
+	})
+
+	err := agent.Remove(context.Background(), target, "d1", []domain.Manifest{{
+		ManifestType: kubernetes.ManifestManifestType,
+		Raw:          obj,
+	}}, domain.DeliveryAuth{Token: "bad-token"}, nil, 1)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateAuthFailed {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateAuthFailed, result.Message)
+	}
+}
+
+func TestAgent_Remove_EmptyManifests_ReportsDelivered(t *testing.T) {
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server": "https://127.0.0.1:6443",
+		},
+	})
+
+	if err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{Token: "tok"}, nil, 1); err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateDelivered, result.Message)
+	}
+}
+
+func TestAgent_Deliver_AttestedPlatform_MissingCredentials_ReportsFailed(t *testing.T) {
+	bundle := buildUnitTestAttestation(t)
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter,
+		kubernetes.WithKeyResolver(bundle.keyResolver),
+		kubernetes.WithHTTPClient(bundle.httpClient),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": bundle.trustBundleJSON,
+			// intentionally no service_account_token / ref
+		},
+	})
+
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, bundle.attestation, 1)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateFailed, result.Message)
+	}
+	if !strings.Contains(result.Message, "service_account_token") && !strings.Contains(result.Message, "platform") {
+		t.Errorf("expected platform credential error, got: %q", result.Message)
+	}
+}
+
+func TestAgent_Deliver_AttestedPlatform_DirectToken_EmptyManifests(t *testing.T) {
+	bundle := buildUnitTestAttestation(t)
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter,
+		kubernetes.WithKeyResolver(bundle.keyResolver),
+		kubernetes.WithHTTPClient(bundle.httpClient),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":            "https://127.0.0.1:6443",
+			"trust_bundle":          bundle.trustBundleJSON,
+			"service_account_token": "platform-tok",
+		},
+	})
+
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, bundle.attestation, 1)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateDelivered, result.Message)
+	}
+}
+
+func TestAgent_Deliver_AttestedPlatform_VaultToken_EmptyManifests(t *testing.T) {
+	bundle := buildUnitTestAttestation(t)
+	vault := &mapVault{secrets: map[domain.SecretRef][]byte{
+		"targets/k8s-test/sa": []byte("vault-platform-tok"),
+	}}
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter,
+		kubernetes.WithKeyResolver(bundle.keyResolver),
+		kubernetes.WithHTTPClient(bundle.httpClient),
+		kubernetes.WithVault(vault),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":                "https://127.0.0.1:6443",
+			"trust_bundle":              bundle.trustBundleJSON,
+			"service_account_token_ref": "targets/k8s-test/sa",
+		},
+	})
+
+	err := agent.Deliver(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, bundle.attestation, 1)
+	if err != nil {
+		t.Fatalf("Deliver: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateDelivered, result.Message)
+	}
+}
+
+func TestAgent_Remove_AttestedPlatform_MissingCredentials_ReportsFailed(t *testing.T) {
+	bundle := buildUnitTestAttestation(t)
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter,
+		kubernetes.WithKeyResolver(bundle.keyResolver),
+		kubernetes.WithHTTPClient(bundle.httpClient),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":   "https://127.0.0.1:6443",
+			"trust_bundle": bundle.trustBundleJSON,
+		},
+	})
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, bundle.attestation, 1)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateFailed {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateFailed, result.Message)
+	}
+}
+
+func TestAgent_Remove_AttestedPlatform_DirectToken_EmptyManifests(t *testing.T) {
+	bundle := buildUnitTestAttestation(t)
+	reporter := newChannelReporter()
+	agent := kubernetes.NewAgent(reporter,
+		kubernetes.WithKeyResolver(bundle.keyResolver),
+		kubernetes.WithHTTPClient(bundle.httpClient),
+	)
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+		ID:   "k8s-test",
+		Type: kubernetes.TargetType,
+		Name: "test-cluster",
+		Properties: map[string]string{
+			"api_server":            "https://127.0.0.1:6443",
+			"trust_bundle":          bundle.trustBundleJSON,
+			"service_account_token": "platform-tok",
+		},
+	})
+
+	err := agent.Remove(context.Background(), target, "d1", nil, domain.DeliveryAuth{}, bundle.attestation, 1)
+	if err != nil {
+		t.Fatalf("Remove: %v", err)
+	}
+	result := awaitDone(t, reporter.done)
+	if result.State != domain.DeliveryStateDelivered {
+		t.Errorf("State = %q, want %q; message: %s", result.State, domain.DeliveryStateDelivered, result.Message)
+	}
+}
+
+type mapVault struct {
+	secrets map[domain.SecretRef][]byte
+}
+
+func (v *mapVault) Get(_ context.Context, ref domain.SecretRef) ([]byte, error) {
+	val, ok := v.secrets[ref]
+	if !ok {
+		return nil, domain.ErrNotFound
+	}
+	return val, nil
+}
+func (v *mapVault) Put(_ context.Context, ref domain.SecretRef, val []byte) error {
+	v.secrets[ref] = val
+	return nil
+}
+func (v *mapVault) Delete(_ context.Context, ref domain.SecretRef) error {
+	delete(v.secrets, ref)
+	return nil
+}
+
+type unitTestAttestationBundle struct {
+	attestation     *domain.Attestation
+	keyResolver     *domain.KeyResolver
+	httpClient      *http.Client
+	trustBundleJSON string
+}
+
+func buildUnitTestAttestation(t *testing.T) unitTestAttestationBundle {
+	t.Helper()
+
+	provider := oidctest.Start(t, oidctest.WithAudience("fleetshift-enroll"))
+	signerID := domain.SubjectID("unit-test-user")
+	issuer := provider.IssuerURL()
+	registrySubject := domain.RegistrySubject("gh-unit-test-user")
+
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+
+	identityToken := provider.IssueToken(t, oidctest.TokenClaims{
+		Subject:  string(signerID),
+		Audience: "fleetshift-enroll",
+		Extra:    map[string]any{"preferred_username": registrySubject},
+	})
+
+	fakeReg := keyregistry.NewFake()
+	fakeReg.Register("https://api.github.com", registrySubject, &privKey.PublicKey)
+
+	manifests := []domain.Manifest{{
+		ManifestType: kubernetes.ManifestManifestType,
+		Raw:          json.RawMessage(`{"apiVersion":"v1","kind":"ConfigMap","metadata":{"name":"unit","namespace":"default"}}`),
+	}}
+	ms := domain.ManifestStrategySpec{
+		Type:      domain.ManifestStrategyInline,
+		Manifests: manifests,
+	}
+	ps := domain.PlacementStrategySpec{
+		Type:    domain.PlacementStrategyStatic,
+		Targets: []domain.TargetID{"k8s-test"},
+	}
+	validUntil := time.Now().Add(24 * time.Hour)
+	gen := domain.Generation(1)
+
+	envelope, err := domain.BuildSignedInputEnvelope("deployments/unit-dep", ms, ps, validUntil, nil, gen)
+	if err != nil {
+		t.Fatalf("build envelope: %v", err)
+	}
+	envelopeHash := domain.HashIntent(envelope)
+
+	hash := sha256.Sum256(envelope)
+	sigBytes, err := ecdsa.SignASN1(rand.Reader, privKey, hash[:])
+	if err != nil {
+		t.Fatalf("sign envelope: %v", err)
+	}
+
+	att := &domain.Attestation{
+		Input: domain.SignedInput{
+			Provenance: domain.Provenance{
+				Content: domain.DeploymentContent{
+					Name:              "deployments/unit-dep",
+					ManifestStrategy:  ms,
+					PlacementStrategy: ps,
+				},
+				Sig: domain.Signature{
+					Signer:         domain.FederatedIdentity{Subject: signerID, Issuer: issuer},
+					ContentHash:    envelopeHash,
+					SignatureBytes: sigBytes,
+				},
+				ValidUntil:         validUntil,
+				ExpectedGeneration: gen,
+			},
+			Signer: domain.SignerAssertion{
+				IdentityToken:   domain.RawToken(identityToken),
+				RegistryID:      "github.com",
+				RegistrySubject: registrySubject,
+			},
+		},
+		Output: &domain.PutManifests{Manifests: manifests},
+	}
+
+	keyResolver := &domain.KeyResolver{
+		Registries: domain.BuiltInKeyRegistries(),
+		Clients: map[domain.KeyRegistryType]domain.RegistryClient{
+			domain.KeyRegistryTypeGitHub: fakeReg,
+		},
+	}
+
+	jwksURI := string(issuer) + "/jwks"
+	trustBundle := []domain.TrustBundleEntry{{
+		IssuerURL:          issuer,
+		JWKSURI:            domain.EndpointURL(jwksURI),
+		EnrollmentAudience: "fleetshift-enroll",
+		RegistrySubjectMapping: &domain.RegistrySubjectMapping{
+			RegistryID: "github.com",
+			Expression: `claims.preferred_username`,
+		},
+	}}
+	trustJSON, err := json.Marshal(trustBundle)
+	if err != nil {
+		t.Fatalf("marshal trust bundle: %v", err)
+	}
+
+	return unitTestAttestationBundle{
+		attestation:     att,
+		keyResolver:     keyResolver,
+		httpClient:      provider.HTTPClient(),
+		trustBundleJSON: string(trustJSON),
 	}
 }
