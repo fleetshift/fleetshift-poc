@@ -70,21 +70,6 @@ Other target types follow the same pattern:
 - **platform targets**: platform-internal status can be indexed without an external agent
 - **addon-defined targets**: the addon defines both the schema and the indexer agent
 
-### Kind addon (in-process)
-
-The kind addon demonstrates in-process inventory reporting without a
-fleetlet index channel: after a successful cluster create it starts a
-per-cluster Kubernetes Node informer and coalesces Node + Cluster
-deltas into one `ApplyDeltaBatch` via an addon-facing
-`domain.InventoryReporter`. Cluster is managed+inventory;
-`kind.fleetshift.io/Node` is inventory-only and addressed as flat
-`nodes/{name}` (parent cluster linked in observation) until nested
-HTTP routes exist. Node `local_labels` mirror the kube Node's
-`.metadata.labels`. Watches are not re-attached after a serve restart
-(they resume on a subsequent deliver). Creating a cluster that already
-exists fails the delivery rather than delete+recreate, so an active
-inventory watch is preserved.
-
 Inventory items are typically associated with a fulfillment and target, with an optional manifest correlation key when the observed resource maps back to delivered intent. Some observed resources are side effects and therefore have no direct manifest correlation.
 
 ## Index schemas
