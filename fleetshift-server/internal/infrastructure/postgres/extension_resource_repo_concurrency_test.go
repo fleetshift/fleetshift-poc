@@ -19,8 +19,8 @@ import (
 // merge computed from data read before the first committed.
 //
 // (ReplaceLabels is a whole-column assign and cannot compose under
-// concurrency by design; DeleteLabels is the remaining incremental
-// label path that must merge against the current row.)
+// concurrency by design; UpsertLabels and DeleteLabels are the
+// incremental label paths that must merge against the current row.)
 //
 // The test drives this deterministically, without any fixed sleep,
 // by using two real transactions and Postgres's own row locking: txA

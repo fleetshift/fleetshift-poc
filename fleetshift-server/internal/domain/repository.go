@@ -225,9 +225,9 @@ type InventoryReplacement struct {
 // semantics, shared with [ExtensionResourceRepository.ApplyInventoryDeltas].
 //
 // Aliases are identity-bearing, unlike Labels/Conditions below, so
-// unlike those two fields' Replace-or-incremental shape, they get a
-// third op mirroring [InventoryReplacement.Aliases]'s "this is my
-// complete state" shape: UpsertAliases, DeleteAliases, and
+// they get the same Upsert/Delete/Replace shape but with pending-
+// payload semantics mirroring [InventoryReplacement.Aliases]'s "this
+// is my complete state" replace: UpsertAliases, DeleteAliases, and
 // ReplaceAliases. Per [InventoryReplacement.Aliases]'s doc, reported
 // aliases are a pending payload, not reconciled or conflict-checked
 // synchronously at write time.
@@ -246,16 +246,15 @@ type InventoryReplacement struct {
 // than accepting it and silently leaving stale pending aliases in
 // place.
 //
-// Labels and conditions each support a full-replace op
-// ([InventoryDelta.ReplaceLabels], [InventoryDelta.ReplaceConditions])
-// plus incremental ops ([InventoryDelta.DeleteLabels];
-// [InventoryDelta.UpsertConditions]/[InventoryDelta.DeleteConditions]).
-// Replace* is mutually exclusive with the incremental ops on the same
-// field (see [ValidateInventoryDelta]). Nil ReplaceLabels /
-// ReplaceConditions means unchanged; a non-nil value (including empty)
-// replaces the entire latest map/set. A delta with no field-level
-// changes is a valid heartbeat that still bumps resource-level
-// freshness.
+// Labels and conditions share the same Upsert/Delete/Replace shape as
+// aliases (see [InventoryDelta.UpsertLabels],
+// [InventoryDelta.DeleteLabels], [InventoryDelta.ReplaceLabels], and
+// the matching condition fields). Replace* is mutually exclusive with
+// the incremental ops on the same field (see [ValidateInventoryDelta]).
+// Nil ReplaceLabels / ReplaceConditions means unchanged; a non-nil
+// value (including empty) replaces the entire latest map/set. A delta
+// with no field-level changes is a valid heartbeat that still bumps
+// resource-level freshness.
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacement.Observation]: nil, or non-nil pointing to the
@@ -286,8 +285,12 @@ type InventoryDelta struct {
 
 	// ReplaceLabels, when non-nil (including empty), replaces the
 	// entire latest local_labels map. Nil leaves labels unchanged.
-	// Mutually exclusive with [InventoryDelta.DeleteLabels].
+	// Mutually exclusive with UpsertLabels and DeleteLabels.
 	ReplaceLabels map[string]string
+	// UpsertLabels adds or updates the named keys in latest
+	// local_labels. Mutually exclusive with
+	// [InventoryDelta.ReplaceLabels].
+	UpsertLabels map[string]string
 	// DeleteLabels removes the named keys from latest local_labels.
 	// Mutually exclusive with [InventoryDelta.ReplaceLabels].
 	DeleteLabels []string
@@ -320,7 +323,9 @@ type InventoryDelta struct {
 // wrong.
 //
 // Label/condition mutual exclusion:
-//   - ReplaceLabels may not be combined with DeleteLabels
+//   - ReplaceLabels may not be combined with UpsertLabels or
+//     DeleteLabels
+//   - UpsertLabels and DeleteLabels may not name the same key
 //   - ReplaceConditions may not be combined with UpsertConditions or
 //     DeleteConditions
 //   - UpsertConditions and DeleteConditions may not name the same type
@@ -338,8 +343,17 @@ type InventoryDelta struct {
 // every rejection here is always caught in Go before any SQL runs,
 // regardless of caller.
 func ValidateInventoryDelta(d InventoryDelta) error {
-	if d.ReplaceLabels != nil && len(d.DeleteLabels) > 0 {
-		return fmt.Errorf("%w: ReplaceLabels cannot be combined with DeleteLabels", ErrInvalidArgument)
+	if d.ReplaceLabels != nil && (len(d.UpsertLabels) > 0 || len(d.DeleteLabels) > 0) {
+		return fmt.Errorf("%w: ReplaceLabels cannot be combined with UpsertLabels or DeleteLabels", ErrInvalidArgument)
+	}
+	deletedLabels := make(map[string]struct{}, len(d.DeleteLabels))
+	for _, k := range d.DeleteLabels {
+		deletedLabels[k] = struct{}{}
+	}
+	for k := range d.UpsertLabels {
+		if _, ok := deletedLabels[k]; ok {
+			return fmt.Errorf("%w: label key %q is present in both UpsertLabels and DeleteLabels", ErrInvalidArgument, k)
+		}
 	}
 	if d.ReplaceConditions != nil && (len(d.UpsertConditions) > 0 || len(d.DeleteConditions) > 0) {
 		return fmt.Errorf("%w: ReplaceConditions cannot be combined with UpsertConditions or DeleteConditions", ErrInvalidArgument)

@@ -798,10 +798,10 @@ func TestInventoryReportService_ReplaceBatch_ObservationNilLeavesLatestUnchanged
 	}
 }
 
-// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithDeleteLabels
-// covers validateDeltaReport's ReplaceLabels/DeleteLabels mutual
-// exclusion: the two ops must not be combined in one delta.
-func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithDeleteLabels(t *testing.T) {
+// TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithIncremental
+// covers validateDeltaReport's ReplaceLabels mutual exclusion with
+// UpsertLabels / DeleteLabels.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithIncremental(t *testing.T) {
 	store := newStore(t)
 	seedInventoryType(t, store)
 	svc := application.NewInventoryReportService(store)
@@ -829,7 +829,55 @@ func TestInventoryReportService_ApplyDeltaBatch_RejectsReplaceLabelsWithDeleteLa
 		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
 	}
 
+	err = svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			ReplaceLabels: map[string]string{"zone": "us-west-2"},
+			UpsertLabels:  map[string]string{"tier": "1"},
+			ObservedAt:    time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch (Replace+Upsert) err = %v, want ErrInvalidArgument", err)
+	}
+
 	// Rejected before any write: the label must be untouched.
+	er := getExtensionResource(t, store, name)
+	if got := er.Inventory().Labels()["zone"]; got != "us-east-1" {
+		t.Errorf("Labels[zone] = %q, want unchanged %q", got, "us-east-1")
+	}
+}
+
+// TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothUpsertAndDelete
+// covers validateDeltaReport's UpsertLabels/DeleteLabels overlap guard.
+func TestInventoryReportService_ApplyDeltaBatch_RejectsLabelInBothUpsertAndDelete(t *testing.T) {
+	store := newStore(t)
+	seedInventoryType(t, store)
+	svc := application.NewInventoryReportService(store)
+	ctx := context.Background()
+
+	name := domain.ResourceName("clusters/c1")
+	if err := svc.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
+		Reports: []application.InventoryReplacementInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			Labels: map[string]string{"zone": "us-east-1"}, ObservedAt: time.Now(),
+		}},
+	}); err != nil {
+		t.Fatalf("seed ReplaceBatch: %v", err)
+	}
+
+	err := svc.ApplyDeltaBatch(ctx, application.InventoryDeltaBatchInput{
+		Reports: []application.InventoryDeltaInput{{
+			ResourceType: inventoryReportTestType, Name: &name,
+			UpsertLabels: map[string]string{"zone": "us-west-2"},
+			DeleteLabels: []string{"zone"},
+			ObservedAt:   time.Now(),
+		}},
+	})
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("ApplyDeltaBatch err = %v, want ErrInvalidArgument", err)
+	}
+
 	er := getExtensionResource(t, store, name)
 	if got := er.Inventory().Labels()["zone"]; got != "us-east-1" {
 		t.Errorf("Labels[zone] = %q, want unchanged %q", got, "us-east-1")

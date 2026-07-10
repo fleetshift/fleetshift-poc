@@ -48,10 +48,39 @@ func TestValidateInventoryDelta(t *testing.T) {
 			},
 		},
 		{
+			name: "UpsertLabels alone is valid",
+			delta: InventoryDelta{
+				UpsertLabels: map[string]string{"env": "prod"},
+			},
+		},
+		{
+			name: "UpsertLabels combined with DeleteLabels for different keys is valid",
+			delta: InventoryDelta{
+				UpsertLabels: map[string]string{"env": "prod"},
+				DeleteLabels: []string{"tier"},
+			},
+		},
+		{
 			name: "ReplaceLabels combined with DeleteLabels is rejected",
 			delta: InventoryDelta{
 				ReplaceLabels: map[string]string{"env": "prod"},
 				DeleteLabels:  []string{"tier"},
+			},
+			wantErr: ErrInvalidArgument,
+		},
+		{
+			name: "ReplaceLabels combined with UpsertLabels is rejected",
+			delta: InventoryDelta{
+				ReplaceLabels: map[string]string{"env": "prod"},
+				UpsertLabels:  map[string]string{"tier": "1"},
+			},
+			wantErr: ErrInvalidArgument,
+		},
+		{
+			name: "same label key in UpsertLabels and DeleteLabels is rejected",
+			delta: InventoryDelta{
+				UpsertLabels: map[string]string{"env": "prod"},
+				DeleteLabels: []string{"env"},
 			},
 			wantErr: ErrInvalidArgument,
 		},

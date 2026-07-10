@@ -35,6 +35,7 @@ func (a *InventoryReporterAdapter) ApplyDeltaBatch(ctx context.Context, batch do
 			DeleteAliases:     r.DeleteAliases,
 			ReplaceAliases:    r.ReplaceAliases,
 			ReplaceLabels:     r.ReplaceLabels,
+			UpsertLabels:      r.UpsertLabels,
 			DeleteLabels:      r.DeleteLabels,
 			Observation:       r.Observation,
 			ReplaceConditions: r.ReplaceConditions,

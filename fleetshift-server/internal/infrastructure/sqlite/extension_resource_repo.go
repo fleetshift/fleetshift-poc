@@ -870,12 +870,13 @@ func nonNilLabels(m map[string]string) map[string]string {
 //
 // Unlike the Postgres sibling, SQLite has no writable CTEs, so
 // ApplyInventoryDeltas's ReplaceLabels/ReplaceConditions are whole-
-// column assigns; DeleteLabels and UpsertConditions/DeleteConditions
-// can't be expressed as a single INSERT ... SELECT the way Postgres's
-// jsonb `-`/`||` operators allow; instead this reads every affected
-// resource's current labels/conditions in one query, merges in Go
-// when replace is absent, and writes the complete result back through
-// the same batchUpsertInventoryRows primitive ReplaceInventory uses. This is
+// column assigns; UpsertLabels/DeleteLabels and
+// UpsertConditions/DeleteConditions can't be expressed as a single
+// INSERT ... SELECT the way Postgres's jsonb `-`/`||` operators allow;
+// instead this reads every affected resource's current
+// labels/conditions in one query, merges in Go when replace is absent,
+// and writes the complete result back through the same
+// batchUpsertInventoryRows primitive ReplaceInventory uses. This is
 // still a fixed number of round trips per batch, not one per item.
 //
 // Neither method writes observation/condition history any more:
@@ -1227,6 +1228,9 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 			}
 			for _, k := range d.DeleteLabels {
 				delete(labels, k)
+			}
+			for k, v := range d.UpsertLabels {
+				labels[k] = v
 			}
 			labelsJSON, err = json.Marshal(labels)
 			if err != nil {

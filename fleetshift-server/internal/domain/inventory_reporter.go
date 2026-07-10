@@ -31,8 +31,9 @@ type InventoryDeltaBatch struct {
 // to a single extension resource's inventory state, identified by
 // resource type and name. Semantics match [InventoryDelta]: nil
 // ReplaceLabels/ReplaceConditions mean unchanged; non-nil (including
-// empty) replaces the entire map/set. Replace* is mutually exclusive
-// with the corresponding incremental ops.
+// empty) replaces the entire map/set. Labels and conditions share the
+// Upsert/Delete/Replace shape; Replace* is mutually exclusive with the
+// corresponding incremental ops.
 type InventoryDeltaReport struct {
 	ResourceType ResourceType
 	Name         ResourceName
@@ -42,6 +43,7 @@ type InventoryDeltaReport struct {
 	ReplaceAliases AliasSet
 
 	ReplaceLabels map[string]string
+	UpsertLabels  map[string]string
 	DeleteLabels  []string
 
 	Observation *json.RawMessage

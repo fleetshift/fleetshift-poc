@@ -126,15 +126,14 @@ type InventoryDeltaBatchInput struct {
 // DeleteAliases's whole point is identifying a contribution to retract
 // by (namespace, key) alone, with no value to resolve by.
 //
-// Labels and conditions each support a full-replace op
-// (ReplaceLabels/ReplaceConditions) plus incremental ops
-// (DeleteLabels; UpsertConditions/DeleteConditions). Nil Replace*
-// means unchanged; a non-nil value (including empty) replaces the
-// entire latest map/set. Replace* is mutually exclusive with the
-// incremental ops on the same field. A delta with no field-level
-// changes is a valid heartbeat that still bumps resource-level
-// freshness. See [domain.InventoryDelta]'s doc for the full
-// Upsert/Delete/Replace alias contract this passes straight through.
+// Labels and conditions share the same Upsert/Delete/Replace shape as
+// aliases (see [domain.InventoryDelta]). Nil Replace* means unchanged;
+// a non-nil value (including empty) replaces the entire latest
+// map/set. Replace* is mutually exclusive with the incremental ops on
+// the same field. A delta with no field-level changes is a valid
+// heartbeat that still bumps resource-level freshness. See
+// [domain.InventoryDelta]'s doc for the full Upsert/Delete/Replace
+// alias contract this passes straight through.
 //
 // Observation follows the same pointer semantics as
 // [InventoryReplacementInput.Observation]: nil, or non-nil pointing to
@@ -150,6 +149,7 @@ type InventoryDeltaInput struct {
 	ReplaceAliases domain.AliasSet
 
 	ReplaceLabels map[string]string
+	UpsertLabels  map[string]string
 	DeleteLabels  []string
 
 	Observation *json.RawMessage
@@ -289,6 +289,7 @@ func (s *InventoryReportService) ApplyDeltaBatch(ctx context.Context, in Invento
 				DeleteAliases:     report.DeleteAliases,
 				ReplaceAliases:    report.ReplaceAliases,
 				ReplaceLabels:     report.ReplaceLabels,
+				UpsertLabels:      report.UpsertLabels,
 				DeleteLabels:      report.DeleteLabels,
 				Observation:       report.Observation,
 				ReplaceConditions: report.ReplaceConditions,
@@ -323,6 +324,7 @@ func validateDeltaReport(report InventoryDeltaInput) error {
 		DeleteAliases:     report.DeleteAliases,
 		ReplaceAliases:    report.ReplaceAliases,
 		ReplaceLabels:     report.ReplaceLabels,
+		UpsertLabels:      report.UpsertLabels,
 		DeleteLabels:      report.DeleteLabels,
 		ReplaceConditions: report.ReplaceConditions,
 		UpsertConditions:  report.UpsertConditions,
