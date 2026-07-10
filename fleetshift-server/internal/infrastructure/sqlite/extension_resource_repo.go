@@ -204,32 +204,6 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 	return nil
 }
 
-// Update persists mutable extension-resource fields (labels and
-// updated_at) identified by UID.
-func (r *ExtensionResourceRepo) Update(ctx context.Context, er *domain.ExtensionResource) error {
-	s := er.Snapshot()
-
-	labelsJSON, err := json.Marshal(nonNilLabels(s.Labels))
-	if err != nil {
-		return fmt.Errorf("marshal labels: %w", err)
-	}
-
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE extension_resources SET labels = ?, updated_at = ? WHERE uid = ?`,
-		string(labelsJSON),
-		s.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		s.UID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("update extension resource: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("extension resource %s: %w", s.UID, domain.ErrNotFound)
-	}
-	return nil
-}
-
 // erInstanceQuerySQLite is the shared SELECT + FROM + JOINs for
 // instance aggregate reads. Callers append a WHERE clause.
 //

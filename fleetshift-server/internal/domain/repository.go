@@ -85,11 +85,6 @@ type ExtensionResourceRepository interface {
 
 	// Instance aggregate
 	Create(ctx context.Context, r *ExtensionResource) error
-	// Update persists mutable extension-resource fields (currently
-	// labels and updated_at) identified by UID. Other aggregate state
-	// (managed, inventory, intents) is written through dedicated
-	// methods.
-	Update(ctx context.Context, r *ExtensionResource) error
 	Get(ctx context.Context, name FullResourceName) (*ExtensionResource, error)
 	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)

@@ -176,32 +176,6 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 	return nil
 }
 
-// Update persists mutable extension-resource fields (labels and
-// updated_at) identified by UID.
-func (r *ExtensionResourceRepo) Update(ctx context.Context, er *domain.ExtensionResource) error {
-	snap := er.Snapshot()
-
-	labelsJSON, err := json.Marshal(nonNilLabels(snap.Labels))
-	if err != nil {
-		return fmt.Errorf("marshal labels: %w", err)
-	}
-
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE extension_resources SET labels = $1, updated_at = $2 WHERE uid = $3`,
-		string(labelsJSON),
-		snap.UpdatedAt.UTC(),
-		snap.UID.String(),
-	)
-	if err != nil {
-		return fmt.Errorf("update extension resource: %w", err)
-	}
-	n, _ := res.RowsAffected()
-	if n == 0 {
-		return fmt.Errorf("extension resource %s: %w", snap.UID, domain.ErrNotFound)
-	}
-	return nil
-}
-
 // erInstanceFromClause is the shared FROM + JOINs for instance
 // aggregate reads. Callers prepend erSelectColumns and append WHERE.
 const erInstanceFromClause = `
