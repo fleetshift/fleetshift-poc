@@ -37,6 +37,14 @@ type ResyncEvent struct {
 	Resources []*unstructured.Unstructured
 }
 
+// RemoveGVREvent signals that a GVR is no longer being indexed. The
+// writer deletes that exact target+GVR inventory collection. Informer
+// shutdown / StopAll must not emit this event — local cache eviction is
+// not a source-of-truth object delete.
+type RemoveGVREvent struct {
+	GVR schema.GroupVersionResource
+}
+
 // GenericInformer performs LIST+WATCH for a single GVR and sends events to
 // channels. It tracks only UID -> resourceVersion for minimal memory usage.
 type GenericInformer struct {
@@ -75,21 +83,14 @@ func NewInformer(
 }
 
 // Run starts the informer loop. It blocks until ctx is cancelled.
-// On shutdown it sends Delete events for all tracked resources.
+// Shutdown is a runtime lifecycle event, not a Kubernetes source-of-truth
+// delete: tracked UIDs are discarded locally and no EventDelete is emitted.
+// Stale-object deletes still come from listAndResync / watch tombstones.
 func (i *GenericInformer) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			i.logger.Info("informer stopped")
-			for uid := range i.resourceIndex {
-				i.logger.Debug("removing tracked resource on stop", "uid", uid)
-				obj := newUnstructured(i.gvr.Resource, uid)
-				i.eventCh <- ResourceEvent{
-					Op:       EventDelete,
-					Resource: obj,
-					GVR:      i.gvr,
-				}
-			}
 			return
 		default:
 			if i.retries > 0 {
@@ -180,20 +181,11 @@ func (i *GenericInformer) listAndResync(ctx context.Context) error {
 		}
 	}
 
-	// Delete stale resources that existed before but are no longer present.
-	for uid := range i.resourceIndex {
-		if _, exists := newResourceIndex[uid]; !exists {
-			i.logger.Debug("deleting stale resource", "uid", uid)
-			obj := newUnstructured(i.gvr.Resource, uid)
-			i.eventCh <- ResourceEvent{
-				Op:       EventDelete,
-				Resource: obj,
-				GVR:      i.gvr,
-			}
-		}
-	}
-
-	// BUG FIX 1: write newResourceIndex back (search-collector never did this).
+	// Drop UIDs that disappeared from the LIST from the local index only.
+	// Do not emit EventDelete for them: the ResyncEvent below becomes
+	// ReplaceCollection, which already prunes the exact target+GVR
+	// inventory collection. Per-UID deletes here would only duplicate
+	// that prune. Watch tombstones still use EventDelete.
 	i.resourceIndex = newResourceIndex
 
 	// Send resync with full resource set after list completes.
@@ -319,18 +311,22 @@ type InformerManager struct {
 	discovery discovery.DiscoveryInterface
 	eventCh   chan<- ResourceEvent
 	resyncCh  chan<- ResyncEvent
+	removeCh  chan<- RemoveGVREvent
 	nsFilter  *NamespaceFilter
 	stoppers  map[schema.GroupVersionResource]context.CancelFunc
 	logger    *slog.Logger
 }
 
 // NewInformerManager creates an InformerManager. If nsFilter is non-nil it is
-// passed to each GenericInformer to restrict events by namespace.
+// passed to each GenericInformer to restrict events by namespace. removeCh may
+// be nil; when set, Reconcile sends [RemoveGVREvent] for GVRs that leave the
+// desired set. StopAll does not send remove events.
 func NewInformerManager(
 	client dynamic.Interface,
 	disc discovery.DiscoveryInterface,
 	eventCh chan<- ResourceEvent,
 	resyncCh chan<- ResyncEvent,
+	removeCh chan<- RemoveGVREvent,
 	nsFilter *NamespaceFilter,
 	logger *slog.Logger,
 ) *InformerManager {
@@ -339,6 +335,7 @@ func NewInformerManager(
 		discovery: disc,
 		eventCh:   eventCh,
 		resyncCh:  resyncCh,
+		removeCh:  removeCh,
 		nsFilter:  nsFilter,
 		stoppers:  make(map[schema.GroupVersionResource]context.CancelFunc),
 		logger:    logger,
@@ -365,10 +362,19 @@ func (m *InformerManager) Reconcile(ctx context.Context, desired []schema.GroupV
 			// Already running, don't restart.
 			delete(desiredSet, gvr)
 		} else {
-			// No longer desired, stop.
+			// No longer desired, stop and ask the writer to delete the
+			// exact target+GVR inventory collection. StopAll does not
+			// take this path — shutdown is not a source delete.
 			m.logger.Info("stopping informer", "gvr", gvr.String())
 			stopper()
 			delete(m.stoppers, gvr)
+			if m.removeCh != nil {
+				select {
+				case m.removeCh <- RemoveGVREvent{GVR: gvr}:
+				case <-ctx.Done():
+					return
+				}
+			}
 		}
 	}
 

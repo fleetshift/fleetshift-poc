@@ -7,8 +7,6 @@ import (
 
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
-
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // IndexConfig holds configuration for the indexer delegate.
@@ -20,37 +18,44 @@ type IndexConfig struct {
 	BatchInterval   time.Duration
 }
 
-// indexerDelegate holds indexing-specific state for an Agent.
-// It manages the informer-to-writer pipeline that watches Kubernetes
-// resources and writes inventory items via an InventoryWriter.
+// indexerDelegate holds indexing-specific state for one target. It
+// manages the informer-to-writer pipeline that watches Kubernetes
+// resources and reports inventory through an [InventoryReporter].
 type indexerDelegate struct {
 	targetID   string
 	dynClient  dynamic.Interface
 	discClient discovery.DiscoveryInterface
-	writer     domain.InventoryWriter
+	reporter   InventoryReporter
+	edgeSink   EdgeSink
 	cfg        IndexConfig
 	logger     *slog.Logger
 	done       chan struct{}
 }
 
 // newIndexerDelegate creates an indexerDelegate. A zero batchInterval
-// in cfg defaults to 5 seconds.
+// in cfg defaults to 5 seconds. If edgeSink is nil, [NoopEdgeSink] is
+// used.
 func newIndexerDelegate(
 	targetID string,
 	dynClient dynamic.Interface,
 	discClient discovery.DiscoveryInterface,
-	writer domain.InventoryWriter,
+	reporter InventoryReporter,
+	edgeSink EdgeSink,
 	cfg IndexConfig,
 	logger *slog.Logger,
 ) *indexerDelegate {
 	if cfg.BatchInterval == 0 {
 		cfg.BatchInterval = 5 * time.Second
 	}
+	if edgeSink == nil {
+		edgeSink = NoopEdgeSink{}
+	}
 	return &indexerDelegate{
 		targetID:   targetID,
 		dynClient:  dynClient,
 		discClient: discClient,
-		writer:     writer,
+		reporter:   reporter,
+		edgeSink:   edgeSink,
 		cfg:        cfg,
 		logger:     logger,
 		done:       make(chan struct{}),
@@ -70,13 +75,14 @@ func (ic *indexerDelegate) start(ctx context.Context) {
 		nsFilter = NewNamespaceFilter(*ic.cfg.NamespaceFilter)
 	}
 
-	w := NewWriter(ic.targetID, ic.writer, schemaMap, ic.cfg.BatchInterval, ic.logger)
+	w := NewWriter(ic.targetID, ic.reporter, ic.edgeSink, schemaMap, ic.cfg.BatchInterval, ic.logger)
 
 	mgr := NewInformerManager(
 		ic.dynClient,
 		ic.discClient,
 		w.EventCh(),
 		w.ResyncCh(),
+		w.RemoveCh(),
 		nsFilter,
 		ic.logger,
 	)
@@ -94,7 +100,9 @@ func (ic *indexerDelegate) start(ctx context.Context) {
 	// reconciliation and re-reconciling when CRDs change.
 	mgr.RunContinuous(ctx, ic.cfg.DenyList, ic.cfg.AllowList)
 
-	// Context is done; clean up informers and writer.
+	// Context is done; clean up informers and writer. StopAll does not
+	// emit RemoveGVR events, so local cache eviction is not persisted
+	// as object or collection deletes.
 	mgr.StopAll()
 	writerCancel()
 	<-writerDone

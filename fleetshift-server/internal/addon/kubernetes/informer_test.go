@@ -206,7 +206,7 @@ func TestInformerManager_Reconcile_StartNew(t *testing.T) {
 	})
 
 	dynClient := newFakeDynamicClient(podsGVR, svcsGVR)
-	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, nil, logger)
+	mgr := NewInformerManager(dynClient, disc, eventCh, resyncCh, nil, nil, logger)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -241,7 +241,7 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 		},
 	})
 
-	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, logger)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, nil, logger)
 
 	// Pre-populate stoppers to simulate previously-running informers.
 	stopped := false
@@ -265,13 +265,67 @@ func TestInformerManager_Reconcile_StopRemoved(t *testing.T) {
 	}
 }
 
+func TestInformerManager_Reconcile_SendsRemoveGVREvent(t *testing.T) {
+	eventCh := make(chan ResourceEvent, 100)
+	resyncCh := make(chan ResyncEvent, 100)
+	removeCh := make(chan RemoveGVREvent, 100)
+	logger := slog.Default()
+
+	podsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"}
+	svcsGVR := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "services"}
+
+	disc := newFakeDiscovery(nil)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, removeCh, nil, logger)
+
+	mgr.stoppers[svcsGVR] = func() {}
+	mgr.stoppers[podsGVR] = func() {}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	mgr.Reconcile(ctx, []schema.GroupVersionResource{podsGVR})
+
+	select {
+	case got := <-removeCh:
+		if got.GVR != svcsGVR {
+			t.Fatalf("RemoveGVREvent GVR = %v, want %v", got.GVR, svcsGVR)
+		}
+	default:
+		t.Fatal("expected RemoveGVREvent for stopped services GVR")
+	}
+	select {
+	case got := <-removeCh:
+		t.Fatalf("unexpected extra RemoveGVREvent: %v", got.GVR)
+	default:
+	}
+}
+
+func TestInformerManager_StopAll_DoesNotSendRemoveGVREvent(t *testing.T) {
+	eventCh := make(chan ResourceEvent, 100)
+	resyncCh := make(chan ResyncEvent, 100)
+	removeCh := make(chan RemoveGVREvent, 100)
+	logger := slog.Default()
+
+	disc := newFakeDiscovery(nil)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, removeCh, nil, logger)
+	mgr.stoppers[schema.GroupVersionResource{Resource: "a"}] = func() {}
+	mgr.stoppers[schema.GroupVersionResource{Resource: "b"}] = func() {}
+
+	mgr.StopAll()
+
+	select {
+	case got := <-removeCh:
+		t.Fatalf("StopAll must not emit RemoveGVREvent, got %v", got.GVR)
+	default:
+	}
+}
+
 func TestInformerManager_StopAll(t *testing.T) {
 	eventCh := make(chan ResourceEvent, 100)
 	resyncCh := make(chan ResyncEvent, 100)
 	logger := slog.Default()
 
 	disc := newFakeDiscovery(nil)
-	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, logger)
+	mgr := NewInformerManager(nil, disc, eventCh, resyncCh, nil, nil, logger)
 
 	called := 0
 	mgr.stoppers[schema.GroupVersionResource{Resource: "a"}] = func() { called++ }

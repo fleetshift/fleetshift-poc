@@ -159,7 +159,7 @@ func TestListAndResync_SkipsDisallowedNamespaces(t *testing.T) {
 	}
 }
 
-func TestListAndResync_DeletesStaleResources(t *testing.T) {
+func TestListAndResync_PrunesStaleIndexWithoutEventDelete(t *testing.T) {
 	gvr := podsGVR()
 	dyn := newFakeDynamicClient(gvr)
 	eventCh := make(chan ResourceEvent, 10)
@@ -171,18 +171,27 @@ func TestListAndResync_DeletesStaleResources(t *testing.T) {
 		t.Fatalf("listAndResync: %v", err)
 	}
 
+	// Stale absence is owned by ResyncEvent → ReplaceCollection, not
+	// per-UID EventDelete (which would duplicate the collection prune).
 	select {
 	case ev := <-eventCh:
-		if ev.Op != EventDelete || ev.Resource.GetUID() != "stale-uid" {
-			t.Fatalf("unexpected event: op=%v uid=%s", ev.Op, ev.Resource.GetUID())
-		}
+		t.Fatalf("unexpected event on empty LIST: op=%v uid=%s", ev.Op, ev.Resource.GetUID())
 	default:
-		t.Fatal("expected stale EventDelete")
 	}
 	if _, ok := inf.resourceIndex["stale-uid"]; ok {
 		t.Fatal("stale uid should be removed from resourceIndex")
 	}
-	<-resyncCh
+	select {
+	case rs := <-resyncCh:
+		if rs.GVR != gvr {
+			t.Fatalf("resync GVR = %v, want %v", rs.GVR, gvr)
+		}
+		if len(rs.Resources) != 0 {
+			t.Fatalf("resync resources = %d, want 0", len(rs.Resources))
+		}
+	default:
+		t.Fatal("expected ResyncEvent")
+	}
 }
 
 func TestListAndResync_ListError(t *testing.T) {
@@ -452,7 +461,7 @@ func TestWatch_ChannelClosedEndsWatch(t *testing.T) {
 	})
 }
 
-func TestGenericInformer_Run_ShutdownDeletesTracked(t *testing.T) {
+func TestGenericInformer_Run_ShutdownDoesNotEmitDeletes(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		gvr := podsGVR()
 		dyn := newFakeDynamicClient(gvr)
@@ -494,20 +503,15 @@ func TestGenericInformer_Run_ShutdownDeletesTracked(t *testing.T) {
 		synctest.Wait()
 		<-done
 
-		foundDelete := false
 		for {
 			select {
 			case ev := <-eventCh:
-				if ev.Op == EventDelete && string(ev.Resource.GetUID()) == "uid-1" {
-					foundDelete = true
+				if ev.Op == EventDelete {
+					t.Fatalf("informer shutdown must not emit EventDelete, got uid=%s", ev.Resource.GetUID())
 				}
 			default:
-				goto doneDrain
+				return
 			}
-		}
-	doneDrain:
-		if !foundDelete {
-			t.Fatal("expected shutdown EventDelete for tracked uid-1")
 		}
 	})
 }
@@ -525,7 +529,7 @@ func TestDiscoverAndReconcile_StartsAllowedInformers(t *testing.T) {
 		dyn := newFakeDynamicClient(gvr, schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"})
 		eventCh := make(chan ResourceEvent, 10)
 		resyncCh := make(chan ResyncEvent, 10)
-		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -549,7 +553,7 @@ func TestDiscoverAndReconcile_DiscoveryErrorNilSupported(t *testing.T) {
 		err:                        errors.New("discovery failed"),
 		nilResources:               true,
 	}
-	mgr := NewInformerManager(nil, disc, make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, slog.Default())
+	mgr := NewInformerManager(nil, disc, make(chan ResourceEvent, 1), make(chan ResyncEvent, 1), nil, nil, slog.Default())
 	mgr.discoverAndReconcile(context.Background(), nil, nil)
 	if len(mgr.stoppers) != 0 {
 		t.Fatalf("expected no stoppers on hard discovery failure, got %d", len(mgr.stoppers))
@@ -576,7 +580,7 @@ func TestRunContinuous_InitialReconcileThenCancel(t *testing.T) {
 		dyn := newFakeDynamicClient(gvr, crdGVR)
 		eventCh := make(chan ResourceEvent, 100)
 		resyncCh := make(chan ResyncEvent, 100)
-		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -609,7 +613,7 @@ func TestRunContinuous_CRDEventTriggersReconcile(t *testing.T) {
 		dyn := newFakeDynamicClient(gvr, crdGVR)
 		eventCh := make(chan ResourceEvent, 100)
 		resyncCh := make(chan ResyncEvent, 100)
-		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, eventCh, resyncCh, nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -850,7 +854,7 @@ func TestRunContinuous_ImmediateReconcileAfterThrottleWindow(t *testing.T) {
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
-		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -897,7 +901,7 @@ func TestRunContinuous_ThrottleTimerFires(t *testing.T) {
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
-		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
@@ -933,7 +937,7 @@ func TestRunContinuous_DuplicateCRDEventsWhilePending(t *testing.T) {
 			},
 		}})
 		dyn := newFakeDynamicClient(gvr, crdGVR)
-		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, slog.Default())
+		mgr := NewInformerManager(dyn, disc, make(chan ResourceEvent, 100), make(chan ResyncEvent, 100), nil, nil, slog.Default())
 
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
