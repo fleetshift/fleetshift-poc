@@ -20,7 +20,10 @@ type QueryResourcesInput struct {
 
 	// Filter is a CEL expression passed through to
 	// [domain.QueryRepository.QueryResources]. Empty matches all
-	// resources in scope. The application layer does not parse CEL.
+	// activated resource types in scope when the store's
+	// [domain.QuerySchemaProvider] is set. Activation scoping and
+	// inactive-type rejection live in the repository (see
+	// [domain.ResolveQueryResourceTypeScope]).
 	Filter string
 
 	// PageSize is passed through to the repository. Non-positive values
@@ -43,16 +46,21 @@ type ResourceQueryService struct {
 }
 
 // NewResourceQueryService creates a [ResourceQueryService] backed by
-// store.
+// store. Activation scoping uses the store's [domain.QuerySchemaProvider]
+// (threaded into [domain.QueryRepository]); see
+// [domain.ResolveQueryResourceTypeScope].
 func NewResourceQueryService(store domain.Store) *ResourceQueryService {
 	return &ResourceQueryService{store: store}
 }
 
 // QueryResources returns one page of extension resource query results
 // for the given scope. In v0, scope must be [WholePlatformScope]; other
-// values return [domain.ErrInvalidArgument]. Filter, pagination, and
-// ordering are passed through to the repository without CEL
-// introspection.
+// values return [domain.ErrInvalidArgument].
+//
+// Type scoping is owned by the query repository via its
+// [domain.QuerySchemaProvider]: empty filters are limited to activated
+// types, and named resource_type constraints must refer to activated
+// types.
 func (s *ResourceQueryService) QueryResources(ctx context.Context, in QueryResourcesInput) (domain.QueryResourcesPage, error) {
 	if in.Scope != WholePlatformScope {
 		return domain.QueryResourcesPage{}, fmt.Errorf(

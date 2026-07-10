@@ -74,12 +74,22 @@ type DeliveryRepository interface {
 type ExtensionResourceRepository interface {
 	// Type registration
 	CreateType(ctx context.Context, def ExtensionResourceType) error
+	// UpdateType persists capability metadata (management / inventory)
+	// and updated_at for an existing type. API identity fields
+	// (resource type, version, collection) are matched by primary key
+	// and are not rewritten beyond what the caller supplies on def.
+	UpdateType(ctx context.Context, def ExtensionResourceType) error
 	GetType(ctx context.Context, rt ResourceType) (ExtensionResourceType, error)
 	ListTypes(ctx context.Context) ([]ExtensionResourceType, error)
 	DeleteType(ctx context.Context, rt ResourceType) error
 
 	// Instance aggregate
 	Create(ctx context.Context, r *ExtensionResource) error
+	// Update persists mutable extension-resource fields (currently
+	// labels and updated_at) identified by UID. Other aggregate state
+	// (managed, inventory, intents) is written through dedicated
+	// methods.
+	Update(ctx context.Context, r *ExtensionResource) error
 	Get(ctx context.Context, name FullResourceName) (*ExtensionResource, error)
 	GetByUID(ctx context.Context, uid ExtensionResourceUID) (*ExtensionResource, error)
 	ListByResourceType(ctx context.Context, rt ResourceType) ([]*ExtensionResource, error)
@@ -105,6 +115,11 @@ type ExtensionResourceRepository interface {
 	// interface, these resolve-or-create the extension_resources row
 	// themselves (see [InventoryReplacement]/[InventoryDelta]'s natural
 	// key doc) rather than requiring the row to already exist.
+	//
+	// TODO: Consider requiring that these validate the type(s) actually
+	// have inventory capabilities in their specs. This MUST be doable
+	// with at most one additional DB lookup for the whole batch,
+	// in that case.
 	//
 	// ReplaceInventory treats each [InventoryReplacement] as the
 	// complete latest inventory state for its resource: fields absent

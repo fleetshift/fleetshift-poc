@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"testing"
@@ -8,7 +8,7 @@ import (
 	gcphcpaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/gcphcp"
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
@@ -28,21 +28,25 @@ func buildClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor {
 		t.Fatalf("CompileInline: %v", err)
 	}
 
-	cfg := &managedresource.ResourceTypeConfig{
+	cfg := &extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   kindaddon.ClusterResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.Management.SpecMessage,
-		SpecDescriptor: spec.Message,
+		ResourceType: kindaddon.ClusterResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    schema.Management.SpecMessage,
+				SpecDescriptor: spec.Message,
+			},
+		},
 	}
-	descs, err := managedresource.BuildServiceDescriptors(cfg, spec.Message)
+	descs, err := extensionresource.BuildExtensionServiceDescriptors(cfg, spec.Message)
 	if err != nil {
-		t.Fatalf("BuildServiceDescriptors: %v", err)
+		t.Fatalf("BuildExtensionServiceDescriptors: %v", err)
 	}
 	return descs.File
 }
@@ -60,21 +64,25 @@ func buildGCPHCPClusterFileDescriptor(t *testing.T) protoreflect.FileDescriptor 
 		t.Fatalf("CompileInline: %v", err)
 	}
 
-	cfg := &managedresource.ResourceTypeConfig{
+	cfg := &extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   gcphcpaddon.ClusterResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.Management.SpecMessage,
-		SpecDescriptor: spec.Message,
+		ResourceType: gcphcpaddon.ClusterResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    schema.Management.SpecMessage,
+				SpecDescriptor: spec.Message,
+			},
+		},
 	}
-	descs, err := managedresource.BuildServiceDescriptors(cfg, spec.Message)
+	descs, err := extensionresource.BuildExtensionServiceDescriptors(cfg, spec.Message)
 	if err != nil {
-		t.Fatalf("BuildServiceDescriptors: %v", err)
+		t.Fatalf("BuildExtensionServiceDescriptors: %v", err)
 	}
 	return descs.File
 }

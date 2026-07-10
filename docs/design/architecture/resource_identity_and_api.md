@@ -76,6 +76,7 @@ graph TB
     platformCluster -->|representation| k8s
     platformCluster -->|representation| acs
     gcphcp -.->|roles| managed
+    gcphcp -.->|roles| inventory
     k8s -.->|roles| target
     k8s -.->|roles| inventory
     acs -.->|roles| inventory
@@ -252,21 +253,21 @@ Conflicts arise from:
 
 ### Extension representations
 
-The platform resource tracks its representations. Each declares its roles:
+The platform resource tracks its representations. Each representation's roles come from the extension resource **type definition**, which declares independent capability axes. Management and inventory compose: a type may declare either, both, or (with target) any combination the addon needs. "Managed-only" and "inventory-only" are useful names for common combinations, not separate resource kinds.
 
 
-| Role        | Description                                                         | Mutual exclusivity                               |
-| ----------- | ------------------------------------------------------------------- | ------------------------------------------------ |
-| `managed`   | The extension resource has a writable spec driving a fulfillment    | Mutually exclusive with `inventory` (for now)    |
-| `inventory` | The extension resource reports observed state                       | Mutually exclusive with `managed` (for now)      |
-| `target`    | The extension resource provides delivery connectivity configuration | Can combine with either `managed` or `inventory` |
+| Role        | Description                                                         | Composition                                              |
+| ----------- | ------------------------------------------------------------------- | -------------------------------------------------------- |
+| `managed`   | The extension resource has a writable spec driving a fulfillment    | Composes with `inventory` and/or `target`                |
+| `inventory` | The extension resource reports observed state                       | Composes with `managed` and/or `target`                  |
+| `target`    | The extension resource provides delivery connectivity configuration | Composes with `managed` and/or `inventory`               |
 
 
-A representation can combine `target` with either `managed` or `inventory`. For example, `//kubernetes.fleetshift.io/clusters/foo` might declare roles: `target`, `inventory`.
+For example, `//kubernetes.fleetshift.io/clusters/foo` might declare roles: `target`, `inventory`. A provisioning addon might declare `managed` and `inventory` on the same type so one extension resource carries both intent and observed state.
 
 Example: platform resource `clusters/foo` has representations:
 
-- `//gcphcp.fleetshift.io/clusters/foo` — roles: `managed`
+- `//gcphcp.fleetshift.io/clusters/foo` — roles: `managed`, `inventory`
 - `//kubernetes.fleetshift.io/clusters/foo` — roles: `target`, `inventory`
 - `//acs.fleetshift.io/clusters/foo` — roles: `inventory`
 
@@ -288,27 +289,30 @@ Open question: whether semantic relationships should be schema-extended per reso
 
 ## Resource shapes taxonomy
 
-Extension resources fall into three shapes based on their representation roles. These are not mutually exclusive at the extension level — a single extension resource can combine roles.
+Extension resources are shaped by the capability axes their type definition declares. The labels below name common combinations; they are not separate APIs or mutually exclusive kinds. A single extension resource can declare any combination of management, inventory, and (later) target.
 
 ### Managed resource
 
-A managed resource has a writable spec that drives a fulfillment. It also has common metadata (labels, conditions) and optionally extension-defined observation schema. It is declarative-friendly.
-
-The distinguishing trait is the spec → fulfillment lifecycle. See [../managed_resources.md](../managed_resources.md) for the full design.
+A managed resource declares the management axis: a writable `spec` that drives a fulfillment, plus management fields (intent version, fulfillment lifecycle, provenance, generation). Extension `labels` are user-writable on management-capable types. See [../managed_resources.md](../managed_resources.md) for the full design.
 
 ### Inventoried resource
 
-An inventoried resource has common metadata (labels, conditions) and extension-defined observation schema, but no writable spec and no fulfillment. It is read-only from the user's perspective; reported by addons.
+An inventoried resource declares the inventory axis: it reports observed state. Inventory-only types have no writable `spec` and no fulfillment; they are read-only from the user's perspective and are reported by addons. Types that also declare management carry the same observed-state fields on the same resource.
 
 ### Target resource
 
 A target resource provides configuration for delivery connectivity. It has extension-defined schema and is declarative-friendly (can be managed by GitOps tooling or operator configuration).
 
-### Common surface
+### Common envelope and capability fields
 
-Managed and inventoried resources share the same common metadata surface (labels, conditions) and can both define observation schema. The difference is solely whether the resource has a user-writable spec driving fulfillment.
+Every activated extension resource shares a common envelope: identity (`name`, `uid`), extension `labels`, resource timestamps (`create_time`, `update_time`), and `etag`.
 
-A single extension resource can combine roles. For example, `//kubernetes.fleetshift.io/clusters/foo` can be both a target resource and an inventory reporter.
+Capability fields are additive on that envelope:
+
+- **Management** (when declared): `spec`, intent version, fulfillment lifecycle fields, provenance, generation, and writable extension `labels`.
+- **Inventory** (when declared): inlined observed-state fields — `local_labels`, `conditions`, `observation`, `local_update_time`, `index_update_time`. These use real-world wire names (not inventory-prefixed) and are the same whether or not management is also declared. They are distinct from fulfillment lifecycle fields and from user-writable extension `labels`.
+
+A single extension resource can combine axes. For example, `//kubernetes.fleetshift.io/clusters/foo` can be both a target and an inventory reporter; a provisioning type can be managed and inventory-capable on one message.
 
 Stable generated values that should appear in the indexed projection are modeled as `properties`; see [resource_indexing.md](resource_indexing.md#inventory-item-shape).
 

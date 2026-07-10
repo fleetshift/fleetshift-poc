@@ -43,6 +43,36 @@ func MarshalTimestamp(field protoreflect.FieldDescriptor, t time.Time) (protoref
 	return protoreflect.ValueOfMessage(tsMsg), nil
 }
 
+// ExtractMapStringString reads a proto3 map<string,string> field from a
+// dynamic message. Returns nil when the field is unset.
+func ExtractMapStringString(msg protoreflect.Message, field protoreflect.FieldDescriptor) map[string]string {
+	if field == nil || !msg.Has(field) {
+		return nil
+	}
+	m := msg.Get(field).Map()
+	result := make(map[string]string, m.Len())
+	m.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
+		result[k.String()] = v.String()
+		return true
+	})
+	return result
+}
+
+// SetMapStringString writes a Go map into a proto3 map<string,string>
+// field on a dynamic message. An empty or nil map leaves the field unset.
+func SetMapStringString(msg *dynamicpb.Message, field protoreflect.FieldDescriptor, m map[string]string) {
+	if field == nil || len(m) == 0 {
+		return
+	}
+	mapField := msg.Mutable(field).Map()
+	for k, v := range m {
+		mapField.Set(
+			protoreflect.ValueOfString(k).MapKey(),
+			protoreflect.ValueOfString(v),
+		)
+	}
+}
+
 // --- proto field builder helpers ---
 //
 // These construct descriptorpb.FieldDescriptorProto values used by
@@ -97,4 +127,98 @@ func RepeatedMessageField(name string, number int32, typeName string) *descripto
 		TypeName: proto.String(fqn),
 		Label:    descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
 	}
+}
+
+// MapFieldParts is both halves of a proto3 map: the repeated field and the
+// nested MapEntry message that must be attached to the parent DescriptorProto.
+type MapFieldParts struct {
+	Field *descriptorpb.FieldDescriptorProto // LABEL_REPEATED, type = entry
+	Entry *descriptorpb.DescriptorProto      // nested type, map_entry = true
+}
+
+// MapField builds both pieces of a proto3 map field. Callers must append
+// Field to parent.Field and Entry to parent.NestedType (or use
+// [AppendMapField]). Returning only the field is incorrect — the nested
+// MapEntry message is required for protodesc / dynamicpb to treat the
+// field as a map.
+//
+// parentFQN is the fully-qualified name of the parent message (without a
+// leading dot), used to form the entry type_name
+// (e.g. "kind.fleetshift.v1.Cluster" → ".kind.fleetshift.v1.Cluster.LabelsEntry").
+//
+// valueTypeName is empty for scalar values; for message values it is the
+// fully-qualified type name (with or without a leading dot),
+// e.g. ".pkg.Condition".
+func MapField(
+	parentFQN string,
+	name string,
+	number int32,
+	keyType descriptorpb.FieldDescriptorProto_Type,
+	valueType descriptorpb.FieldDescriptorProto_Type,
+	valueTypeName string,
+) MapFieldParts {
+	entryName := mapEntryName(name)
+	valueField := &descriptorpb.FieldDescriptorProto{
+		Name:   proto.String("value"),
+		Number: proto.Int32(2),
+		Type:   valueType.Enum(),
+		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+	if valueType == descriptorpb.FieldDescriptorProto_TYPE_MESSAGE ||
+		valueType == descriptorpb.FieldDescriptorProto_TYPE_ENUM {
+		fqn := valueTypeName
+		if !strings.HasPrefix(fqn, ".") {
+			fqn = "." + fqn
+		}
+		valueField.TypeName = proto.String(fqn)
+	}
+
+	entry := &descriptorpb.DescriptorProto{
+		Name: proto.String(entryName),
+		Field: []*descriptorpb.FieldDescriptorProto{
+			{
+				Name:   proto.String("key"),
+				Number: proto.Int32(1),
+				Type:   keyType.Enum(),
+				Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+			},
+			valueField,
+		},
+		Options: &descriptorpb.MessageOptions{
+			MapEntry: proto.Bool(true),
+		},
+	}
+
+	field := &descriptorpb.FieldDescriptorProto{
+		Name:     proto.String(name),
+		Number:   proto.Int32(number),
+		Type:     descriptorpb.FieldDescriptorProto_TYPE_MESSAGE.Enum(),
+		TypeName: proto.String("." + parentFQN + "." + entryName),
+		Label:    descriptorpb.FieldDescriptorProto_LABEL_REPEATED.Enum(),
+	}
+	return MapFieldParts{Field: field, Entry: entry}
+}
+
+// AppendMapField appends both halves of a [MapFieldParts] to parent.
+func AppendMapField(parent *descriptorpb.DescriptorProto, parts MapFieldParts) {
+	parent.Field = append(parent.Field, parts.Field)
+	parent.NestedType = append(parent.NestedType, parts.Entry)
+}
+
+// mapEntryName converts a snake_case field name to a PascalCase MapEntry
+// message name (e.g. "local_labels" → "LocalLabelsEntry").
+func mapEntryName(fieldName string) string {
+	parts := strings.Split(fieldName, "_")
+	var b strings.Builder
+	for _, p := range parts {
+		if p == "" {
+			continue
+		}
+		b.WriteString(strings.ToUpper(p[:1]))
+		if len(p) > 1 {
+			b.WriteString(p[1:])
+		}
+	}
+	b.WriteString("Entry")
+	return b.String()
 }

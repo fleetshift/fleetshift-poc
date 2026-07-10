@@ -45,6 +45,7 @@ func Run(t *testing.T, factory Factory) {
 	t.Run("Pagination", func(t *testing.T) { runPaginationTests(t, factory) })
 	t.Run("EnvelopeFieldFilters", func(t *testing.T) { runEnvelopeFieldFilterTests(t, factory) })
 	t.Run("ResourceFieldFilters", func(t *testing.T) { runResourceFieldFilterTests(t, factory) })
+	t.Run("ResourceTypesConstraint", func(t *testing.T) { runNilSchemaProviderTypeScopeTests(t, factory) })
 	t.Run("CaseSensitivity", func(t *testing.T) { runCaseSensitivityFilterTests(t, factory) })
 	t.Run("InvalidFilters", func(t *testing.T) { runInvalidFilterTests(t, factory) })
 	t.Run("Hardening", func(t *testing.T) { runHardeningTests(t, factory) })

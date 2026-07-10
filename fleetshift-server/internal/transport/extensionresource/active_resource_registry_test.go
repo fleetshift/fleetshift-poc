@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 	"google.golang.org/protobuf/types/known/timestamppb"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	ctx := context.Background()
 
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
@@ -22,7 +22,7 @@ func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 		t.Fatalf("GetResourceQuerySchema before Register: ok=%v err=%v, want ok=false err=nil", ok, err)
 	}
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "kind.fleetshift.io.v1.ClusterService",
 		HTTPPrefix:      "/apis/kind.fleetshift.io/v1/clusters",
@@ -75,11 +75,11 @@ func TestActiveResourceRegistry_RegisterAndGet(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_Unregister(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	ctx := context.Background()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "svc",
 		QuerySchema:     domain.ResourceQuerySchema{ResourceType: rt, APIVersion: "v1"},
@@ -101,10 +101,10 @@ func TestActiveResourceRegistry_Unregister(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_RegisterSameVersionReplaces(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "old.Service",
 		HTTPPrefix:      "/old",
@@ -114,7 +114,7 @@ func TestActiveResourceRegistry_RegisterSameVersionReplaces(t *testing.T) {
 		t.Fatalf("first Register: %v", err)
 	}
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "new.Service",
 		HTTPPrefix:      "/new",
@@ -141,10 +141,10 @@ func TestActiveResourceRegistry_RegisterSameVersionReplaces(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_RegisterSecondVersionErrors(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "svc.v1",
 		QuerySchema:     domain.ResourceQuerySchema{ResourceType: rt, APIVersion: "v1"},
@@ -152,7 +152,7 @@ func TestActiveResourceRegistry_RegisterSecondVersionErrors(t *testing.T) {
 		t.Fatalf("Register v1: %v", err)
 	}
 
-	err := r.Register(managedresource.ActiveResourceVersion{
+	err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v2",
 		GRPCServiceName: "svc.v2",
 		QuerySchema:     domain.ResourceQuerySchema{ResourceType: rt, APIVersion: "v2"},
@@ -174,10 +174,10 @@ func TestActiveResourceRegistry_RegisterSecondVersionErrors(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_GetByGRPCServiceName(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "kind.ClusterService",
 		QuerySchema:     domain.ResourceQuerySchema{ResourceType: rt, APIVersion: "v1"},
@@ -198,7 +198,7 @@ func TestActiveResourceRegistry_GetByGRPCServiceName(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_Contains(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 	hash := [32]byte{9}
 
@@ -206,7 +206,7 @@ func TestActiveResourceRegistry_Contains(t *testing.T) {
 		t.Fatal("Contains before Register: true, want false")
 	}
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "svc",
 		ContentHash:     hash,
@@ -233,9 +233,9 @@ func TestActiveResourceRegistry_Contains(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "shared.Service",
 		QuerySchema: domain.ResourceQuerySchema{
@@ -246,7 +246,7 @@ func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
 		t.Fatalf("Register A: %v", err)
 	}
 
-	err := r.Register(managedresource.ActiveResourceVersion{
+	err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "shared.Service",
 		QuerySchema: domain.ResourceQuerySchema{
@@ -268,11 +268,11 @@ func TestActiveResourceRegistry_RegisterRejectsForeignGRPCName(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const coll = domain.CollectionName("clusters")
-	key := managedresource.PlatformRegistrationKey{Collection: coll}
+	key := extensionresource.PlatformRegistrationKey{Collection: coll}
 
-	transport := managedresource.ActivePlatformRegistration{
+	transport := extensionresource.ActivePlatformRegistration{
 		APIVersion:      "v1",
 		GRPCServiceName: "fleetshift.v1.PlatformClusterService",
 		HTTPPrefix:      "/apis/fleetshift.io/v1/clusters",
@@ -303,7 +303,7 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 		t.Fatalf("PlatformKeyForOwner = (%v, %v), want %v", ownerKey, ok, key)
 	}
 
-	created, err = r.AddPlatformOwner(key, "gcphcp.ClusterService", managedresource.ActivePlatformRegistration{})
+	created, err = r.AddPlatformOwner(key, "gcphcp.ClusterService", extensionresource.ActivePlatformRegistration{})
 	if err != nil {
 		t.Fatalf("AddPlatformOwner second: %v", err)
 	}
@@ -316,7 +316,7 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 	}
 
 	// Idempotent re-add of the same owner.
-	created, err = r.AddPlatformOwner(key, "kind.ClusterService", managedresource.ActivePlatformRegistration{})
+	created, err = r.AddPlatformOwner(key, "kind.ClusterService", extensionresource.ActivePlatformRegistration{})
 	if err != nil || created {
 		t.Fatalf("idempotent AddPlatformOwner: created=%v err=%v, want created=false err=nil", created, err)
 	}
@@ -349,10 +349,10 @@ func TestActiveResourceRegistry_PlatformAcquireRelease(t *testing.T) {
 }
 
 func TestActiveResourceRegistry_PlatformRejectsExtensionGRPCCollision(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const name = "fleetshift.v1.PlatformClusterService"
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: name,
 		QuerySchema: domain.ResourceQuerySchema{
@@ -364,9 +364,9 @@ func TestActiveResourceRegistry_PlatformRejectsExtensionGRPCCollision(t *testing
 	}
 
 	_, err := r.AddPlatformOwner(
-		managedresource.PlatformRegistrationKey{Collection: "clusters"},
+		extensionresource.PlatformRegistrationKey{Collection: "clusters"},
 		"kind.ClusterService",
-		managedresource.ActivePlatformRegistration{GRPCServiceName: name, APIVersion: "v1"},
+		extensionresource.ActivePlatformRegistration{GRPCServiceName: name, APIVersion: "v1"},
 	)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("AddPlatformOwner colliding with extension: err = %v, want ErrInvalidArgument", err)
@@ -374,18 +374,18 @@ func TestActiveResourceRegistry_PlatformRejectsExtensionGRPCCollision(t *testing
 }
 
 func TestActiveResourceRegistry_ExtensionRejectsPlatformGRPCCollision(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const name = "fleetshift.v1.PlatformClusterService"
 
 	if _, err := r.AddPlatformOwner(
-		managedresource.PlatformRegistrationKey{Collection: "clusters"},
+		extensionresource.PlatformRegistrationKey{Collection: "clusters"},
 		"kind.ClusterService",
-		managedresource.ActivePlatformRegistration{GRPCServiceName: name, APIVersion: "v1"},
+		extensionresource.ActivePlatformRegistration{GRPCServiceName: name, APIVersion: "v1"},
 	); err != nil {
 		t.Fatalf("AddPlatformOwner: %v", err)
 	}
 
-	err := r.Register(managedresource.ActiveResourceVersion{
+	err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: name,
 		QuerySchema: domain.ResourceQuerySchema{
@@ -399,14 +399,14 @@ func TestActiveResourceRegistry_ExtensionRejectsPlatformGRPCCollision(t *testing
 }
 
 func TestActiveResourceRegistry_GetVersion(t *testing.T) {
-	r := managedresource.NewActiveResourceRegistry()
+	r := extensionresource.NewActiveResourceRegistry()
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 
 	if _, ok := r.GetVersion(rt, "v1"); ok {
 		t.Fatal("GetVersion empty: ok=true, want false")
 	}
 
-	if err := r.Register(managedresource.ActiveResourceVersion{
+	if err := r.Register(extensionresource.ActiveResourceVersion{
 		APIVersion:      "v1",
 		GRPCServiceName: "svc.v1",
 		HTTPPrefix:      "/old",

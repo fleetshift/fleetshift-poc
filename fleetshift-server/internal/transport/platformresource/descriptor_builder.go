@@ -15,7 +15,7 @@ import (
 
 // ServiceDescriptors holds the compiled descriptors for a
 // dynamically-built platform-canonical resource service. Unlike
-// extension [managedresource.ServiceDescriptors] (which targets
+// extension [extensionresource.ExtensionServiceDescriptors] (which targets
 // extension APIs with a spec envelope), these descriptors model the
 // platform's generic resource shape — identity, labels,
 // representations, aliases, and relationships.

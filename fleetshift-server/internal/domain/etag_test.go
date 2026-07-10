@@ -274,6 +274,27 @@ func TestExtensionResourceView_Etag_ChangesOnMutation(t *testing.T) {
 		}
 	})
 
+	t.Run("labels change", func(t *testing.T) {
+		now := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+		er := ExtensionResourceFromSnapshot(ExtensionResourceSnapshot{
+			UID:          base.Resource.UID(),
+			ResourceType: base.Resource.ResourceType(),
+			Name:         base.Resource.Name(),
+			Labels:       map[string]string{"env": "prod"},
+			Managed: &ManagedStateSnapshot{
+				CurrentVersion: 1,
+				FulfillmentID:  "f-1",
+			},
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+		v := base
+		v.Resource = *er
+		if v.Etag() == baseEtag {
+			t.Error("etag should change when labels change")
+		}
+	})
+
 	t.Run("resolved targets change", func(t *testing.T) {
 		snap := base.Fulfillment.Snapshot()
 		snap.ResolvedTargets = []TargetID{"t1", "t2", "t3"}

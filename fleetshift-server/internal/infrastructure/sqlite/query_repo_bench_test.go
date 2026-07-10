@@ -400,11 +400,11 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 		fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`, qrbClusterService, qrbClusterType),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "inventory label equality (json_extract)",
-		`resource.inventory.labels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
+		`resource.local_labels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "inventory condition equality (json_extract)",
-		`resource.inventory.conditions["Ready"].status == "True"`, "", defaultQueryPageSize, nil)
+		`resource.conditions["Ready"].status == "True"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "guarded numeric observation filter (safeJSONNumberCast)",
-		fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
+		fmt.Sprintf(`resource_type == "%s/%s" && resource.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "max page size (500), empty filter", "", "", maxQueryPageSize, nil)
 }
@@ -507,15 +507,15 @@ func TestQueryResourcesBenchmark(t *testing.T) {
 			PageSize: int32(defaultQueryPageSize),
 		}},
 		{"inventory label equality", domain.QueryResourcesRequest{
-			Filter:   `resource.inventory.labels["node-role"] == "worker"`,
+			Filter:   `resource.local_labels["node-role"] == "worker"`,
 			PageSize: int32(defaultQueryPageSize),
 		}},
 		{"inventory condition equality", domain.QueryResourcesRequest{
-			Filter:   `resource.inventory.conditions["Ready"].status == "True"`,
+			Filter:   `resource.conditions["Ready"].status == "True"`,
 			PageSize: int32(defaultQueryPageSize),
 		}},
 		{"guarded numeric observation filter", domain.QueryResourcesRequest{
-			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.inventory.observation.capacity.cpu > 32`,
+			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.observation.capacity.cpu > 32`,
 				qrbNodeService, qrbNodeType),
 			PageSize: int32(defaultQueryPageSize),
 		}},

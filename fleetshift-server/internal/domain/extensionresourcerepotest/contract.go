@@ -222,6 +222,38 @@ func runTypeTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("UpdateTypeBackfillsCapabilities", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ExtensionResources()
+		rt := domain.ResourceType("test.fleetshift.io/Widget")
+		def := domain.NewExtensionResourceType(rt, "v1", "widgets", fixedTime)
+		if err := repo.CreateType(ctx, def); err != nil {
+			t.Fatalf("CreateType: %v", err)
+		}
+
+		snap := def.Snapshot()
+		snap.Management = &domain.ManagementTypeSnapshot{
+			Relation: domain.NewRegisteredSelfTarget("widget-addon", "widgets"),
+		}
+		snap.Inventory = &domain.InventoryTypeSnapshot{}
+		snap.UpdatedAt = fixedTime.Add(time.Second)
+		if err := repo.UpdateType(ctx, domain.ExtensionResourceTypeFromSnapshot(snap)); err != nil {
+			t.Fatalf("UpdateType: %v", err)
+		}
+
+		got, err := repo.GetType(ctx, rt)
+		if err != nil {
+			t.Fatalf("GetType: %v", err)
+		}
+		if got.Management() == nil {
+			t.Fatal("Management() is nil after UpdateType backfill")
+		}
+		if got.Inventory() == nil {
+			t.Fatal("Inventory() is nil after UpdateType backfill")
+		}
+	})
+
 	t.Run("CreateTypeWithoutManagement", func(t *testing.T) {
 		tx := factory(t)
 		defer tx.Rollback()
@@ -544,6 +576,43 @@ func runInstanceTests(t *testing.T, factory Factory) {
 		}
 		assertEqual(t, "Labels[env]", got.Labels()["env"], "prod")
 		assertEqual(t, "Labels[tier]", got.Labels()["tier"], "1")
+	})
+
+	t.Run("LabelsUpdate", func(t *testing.T) {
+		tx := factory(t)
+		defer tx.Rollback()
+		repo := tx.ExtensionResources()
+
+		seedType(t, tx, "test.fleetshift.io/Cluster")
+		fID := domain.FulfillmentID("f-er-labels-update")
+		seedFulfillment(t, tx, fID, fixedTime)
+
+		r := domain.NewExtensionResource(
+			domain.NewExtensionResourceUID(),
+			"test.fleetshift.io/Cluster", "clusters/relabel", fixedTime,
+			domain.WithManagedState(fID),
+			domain.WithExtensionLabels(map[string]string{"env": "dev"}),
+		)
+		r.RecordIntent(json.RawMessage(`{}`), fixedTime)
+		if err := repo.Create(ctx, r); err != nil {
+			t.Fatalf("Create: %v", err)
+		}
+
+		later := fixedTime.Add(time.Hour)
+		r.SetLabels(map[string]string{"env": "prod", "tier": "2"}, later)
+		if err := repo.Update(ctx, r); err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+
+		got, err := repo.Get(ctx, "//test.fleetshift.io/clusters/relabel")
+		if err != nil {
+			t.Fatalf("Get: %v", err)
+		}
+		assertEqual(t, "Labels[env]", got.Labels()["env"], "prod")
+		assertEqual(t, "Labels[tier]", got.Labels()["tier"], "2")
+		if !got.UpdatedAt().Equal(later) {
+			t.Errorf("UpdatedAt = %v, want %v", got.UpdatedAt(), later)
+		}
 	})
 }
 

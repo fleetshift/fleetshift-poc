@@ -145,6 +145,34 @@ func TestExtensionResource_WithLabels(t *testing.T) {
 	assertEq(t, "Labels[tier]", r.Labels()["tier"], "test")
 }
 
+func TestExtensionResource_SetLabels(t *testing.T) {
+	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	r := NewExtensionResource(
+		NewExtensionResourceUID(),
+		"kind.fleetshift.io/Cluster",
+		"clusters/dev",
+		now,
+		WithExtensionLabels(map[string]string{"env": "dev"}),
+	)
+
+	later := now.Add(time.Minute)
+	incoming := map[string]string{"env": "prod", "tier": "1"}
+	r.SetLabels(incoming, later)
+
+	assertEq(t, "Labels[env]", r.Labels()["env"], "prod")
+	assertEq(t, "Labels[tier]", r.Labels()["tier"], "1")
+	assertEq(t, "UpdatedAt", r.UpdatedAt(), later)
+
+	// Caller mutation must not affect the resource's stored map.
+	incoming["env"] = "mutated"
+	assertEq(t, "Labels[env] after caller mutate", r.Labels()["env"], "prod")
+
+	r.SetLabels(nil, later.Add(time.Second))
+	if len(r.Labels()) != 0 {
+		t.Errorf("SetLabels(nil): got %v, want empty", r.Labels())
+	}
+}
+
 func TestExtensionResource_WithManagedState(t *testing.T) {
 	now := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 	uid := NewExtensionResourceUID()

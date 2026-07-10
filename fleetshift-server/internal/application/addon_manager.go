@@ -80,7 +80,7 @@ type addonRecord struct {
 // created) and optionally activated in the transport layer.
 type registeredSchema struct {
 	// activation is non-nil when the schema has a live transport
-	// registration (managed schemas). Nil for inventory-only schemas.
+	// registration (management and/or inventory schemas).
 	activation *SchemaActivationID
 }
 
@@ -214,9 +214,8 @@ func (m *AddonManager) Connect(ctx context.Context, addonID domain.AddonID, in C
 //  2. Validates each schema section against the addon's declared
 //     capabilities.
 //  3. Registers the schema (creates the type definition).
-//  4. For schemas with a Management section, calls
+//  4. For schemas with Management and/or Inventory, calls
 //     [SchemaActivator.Activate] to compile the transport API surface.
-//     Inventory-only schemas skip activation (no dynamic API yet).
 func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, schemas []domain.ExtensionResourceSchema) error {
 	newTypes := make(map[domain.ResourceType]struct{}, len(schemas))
 	for _, s := range schemas {
@@ -240,13 +239,11 @@ func (m *AddonManager) connectSchemas(ctx context.Context, rec *addonRecord, sch
 		if err := m.registerSchema(ctx, rec, schema); err != nil {
 			return fmt.Errorf("register schema for %q: %w", schema.ResourceType, err)
 		}
-		// TODO: no inventory schema yet
-		if schema.Management != nil {
+		if schema.Management != nil || schema.Inventory != nil {
 			if err := m.activateSchema(ctx, rec, schema); err != nil {
 				return fmt.Errorf("activate schema for %q: %w", schema.ResourceType, err)
 			}
 		}
-		// TODO: handle if schema stays but drops capability
 	}
 	return nil
 }
@@ -438,13 +435,12 @@ func hasCapabilityFor[C resourceCapability](rec *addonRecord, rt domain.Resource
 }
 
 // registerSchema ensures the extension resource type definition exists
-// in the store. It is called for every schema (managed, inventory, or
-// both) before any transport activation.
+// in the store and that its capability metadata matches the schema.
+// Additive capability backfill (nil → present) is persisted; dropping a
+// capability or changing an existing management relation is rejected.
+// It is called for every schema (managed, inventory, or both) before
+// any transport activation.
 func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
-	if _, ok := rec.registeredSchemas[schema.ResourceType]; ok {
-		return nil
-	}
-
 	newVer := domain.APIVersion(schema.Version)
 	newCol := domain.CollectionID(schema.CollectionID)
 
@@ -474,20 +470,93 @@ func (m *AddonManager) registerSchema(ctx context.Context, rec *addonRecord, sch
 		if !errors.Is(err, domain.ErrAlreadyExists) {
 			return fmt.Errorf("create type def: %w", err)
 		}
-		if err := m.detectAPIMetadataDrift(ctx, schema.ResourceType, newVer, newCol, newRelation); err != nil {
+		if err := m.reconcileExistingTypeCapabilities(ctx, schema, newVer, newCol, newRelation); err != nil {
 			return err
 		}
 	}
 	if rec.registeredSchemas == nil {
 		rec.registeredSchemas = make(map[domain.ResourceType]registeredSchema)
 	}
-	rec.registeredSchemas[schema.ResourceType] = registeredSchema{}
+	if _, ok := rec.registeredSchemas[schema.ResourceType]; !ok {
+		rec.registeredSchemas[schema.ResourceType] = registeredSchema{}
+	}
+	return nil
+}
+
+// reconcileExistingTypeCapabilities loads the persisted type def and
+// either backfills missing capability metadata or rejects incompatible
+// reconnect changes (capability drops, relation drift, API identity
+// drift).
+func (m *AddonManager) reconcileExistingTypeCapabilities(
+	ctx context.Context,
+	schema domain.ExtensionResourceSchema,
+	newVer domain.APIVersion,
+	newCol domain.CollectionID,
+	newRelation domain.FulfillmentRelation,
+) error {
+	existing, err := m.typeSvc.Get(ctx, schema.ResourceType)
+	if err != nil {
+		return fmt.Errorf("load existing type def for capability reconcile: %w", err)
+	}
+	if existing.APIVersion() != newVer {
+		return fmt.Errorf("%w: API version drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIVersion(), newVer)
+	}
+	if existing.CollectionID() != newCol {
+		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID(), newCol)
+	}
+
+	wantMgmt := schema.Management != nil
+	haveMgmt := existing.Management() != nil
+	wantInv := schema.Inventory != nil
+	haveInv := existing.Inventory() != nil
+
+	if haveMgmt && !wantMgmt {
+		return fmt.Errorf("%w: cannot drop management capability for %q on reconnect", domain.ErrInvalidArgument, schema.ResourceType)
+	}
+	if haveInv && !wantInv {
+		return fmt.Errorf("%w: cannot drop inventory capability for %q on reconnect", domain.ErrInvalidArgument, schema.ResourceType)
+	}
+
+	if haveMgmt && wantMgmt {
+		existingRelation := existing.Management().Relation()
+		existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
+		if err != nil {
+			return fmt.Errorf("marshal existing relation for drift detection: %w", err)
+		}
+		newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
+		if err != nil {
+			return fmt.Errorf("marshal new relation for drift detection: %w", err)
+		}
+		if string(existingRelJSON) != string(newRelJSON) {
+			return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, schema.ResourceType)
+		}
+	}
+
+	needBackfill := (!haveMgmt && wantMgmt) || (!haveInv && wantInv)
+	if !needBackfill {
+		return nil
+	}
+
+	snap := existing.Snapshot()
+	if !haveMgmt && wantMgmt {
+		snap.Management = &domain.ManagementTypeSnapshot{
+			Relation:  newRelation,
+			Signature: domain.Signature{},
+		}
+	}
+	if !haveInv && wantInv {
+		snap.Inventory = &domain.InventoryTypeSnapshot{}
+	}
+	snap.UpdatedAt = m.now()
+	if err := m.typeSvc.Update(ctx, domain.ExtensionResourceTypeFromSnapshot(snap)); err != nil {
+		return fmt.Errorf("backfill type capabilities for %q: %w", schema.ResourceType, err)
+	}
 	return nil
 }
 
 // activateSchema delegates to the SchemaActivator and records the
-// resulting activation ID. Only called for schemas with a Management
-// section — the schema has already been registered by [registerSchema].
+// resulting activation ID. Called for schemas with Management and/or
+// Inventory — the schema has already been registered by [registerSchema].
 func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, schema domain.ExtensionResourceSchema) error {
 	id, err := m.activator.Activate(ctx, schema)
 	if err != nil {
@@ -501,49 +570,6 @@ func (m *AddonManager) activateSchema(ctx context.Context, rec *addonRecord, sch
 		m.activator.Deactivate(*reg.activation)
 	}
 	rec.registeredSchemas[schema.ResourceType] = registeredSchema{activation: &id}
-
-	return nil
-}
-
-// detectAPIMetadataDrift loads the existing type def and rejects
-// reconnection attempts that change the API identity fields. The
-// service name is not checked because it is derived from the
-// [domain.ResourceType], which is already the lookup key.
-func (m *AddonManager) detectAPIMetadataDrift(ctx context.Context, rt domain.ResourceType, newVer domain.APIVersion, newCol domain.CollectionID, newRelation domain.FulfillmentRelation) error {
-	existing, err := m.typeSvc.Get(ctx, rt)
-	if err != nil {
-		return fmt.Errorf("load existing type def for drift detection: %w", err)
-	}
-	if existing.APIVersion() != newVer {
-		return fmt.Errorf("%w: API version drift: existing %q, new %q", domain.ErrInvalidArgument, existing.APIVersion(), newVer)
-	}
-	if existing.CollectionID() != newCol {
-		return fmt.Errorf("%w: collection ID drift: existing %q, new %q", domain.ErrInvalidArgument, existing.CollectionID(), newCol)
-	}
-
-	// Compare management relation to detect stale metadata from addon
-	// reconnections. Uses JSON serialization because FulfillmentRelation
-	// is a sealed interface whose future implementations may not be
-	// comparable with ==.
-	//
-	// When the persisted type def has no management metadata yet
-	// (existing.Management() is nil), the missing relation is treated as
-	// repairable/backfillable rather than drift — only reject when both
-	// sides are present and truly differ.
-	if mgmt := existing.Management(); mgmt != nil {
-		existingRelation := mgmt.Relation()
-		existingRelJSON, err := domain.MarshalFulfillmentRelation(existingRelation)
-		if err != nil {
-			return fmt.Errorf("marshal existing relation for drift detection: %w", err)
-		}
-		newRelJSON, err := domain.MarshalFulfillmentRelation(newRelation)
-		if err != nil {
-			return fmt.Errorf("marshal new relation for drift detection: %w", err)
-		}
-		if string(existingRelJSON) != string(newRelJSON) {
-			return fmt.Errorf("%w: management relation drift for %q", domain.ErrInvalidArgument, rt)
-		}
-	}
 
 	return nil
 }

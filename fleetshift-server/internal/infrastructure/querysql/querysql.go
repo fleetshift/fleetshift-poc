@@ -21,8 +21,8 @@
 //
 //  1. Map-keyed JSONB access nested under a dynamically-typed parent
 //     -- exactly this package's resource.labels["team"],
-//     resource.inventory.labels[...], and
-//     resource.inventory.conditions["Ready"].status shapes -- does
+//     resource.local_labels[...], and
+//     resource.conditions["Ready"].status shapes -- does
 //     not compile to a keyed lookup. `resource.labels["team"] ==
 //     "platform"` compiled (across every schema declaration style
 //     tried: WithJSONVariables, an opaque WithSchemas entry, and a
@@ -37,7 +37,7 @@
 //  2. Its schema model (schema.Schema/FieldSchema) describes one
 //     fixed, closed-world shape per compiled expression -- there is
 //     no per-row discriminator concept. This package's
-//     resource.spec.*/resource.inventory.observation.* fields are
+//     resource.spec.*/resource.observation.* fields are
 //     read from a JSON column whose *shape differs by
 //     resource_type*, resolved only once resource_type == "..." is
 //     known (see hasResourceTypeGuard), across a single query
@@ -125,7 +125,7 @@ type SQLPredicate struct {
 // Compile calls are safe once that env has been initialized.
 type Compiler struct {
 	// Fields resolves the field paths a filter references (envelope
-	// columns, resource.*, resource.inventory.*, ...) to SQL
+	// columns, resource.*, ...) to SQL
 	// expressions. A nil Fields is only valid for filters that
 	// reference no fields at all (e.g. the empty filter, or a filter
 	// built entirely from macros/literals -- both already rejected

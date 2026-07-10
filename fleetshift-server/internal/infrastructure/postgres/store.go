@@ -16,10 +16,11 @@ type Store struct {
 
 	// SchemaProvider is threaded into every QueryRepo this store
 	// hands out (see storeTx.Queries), so query-time
-	// resource.spec.*/resource.inventory.observation.* field
-	// validation can use real descriptors once schemas are activated
-	// (see [domain.QuerySchemaProvider]'s doc). Nil is a valid,
-	// permissive default.
+	// resource.spec.*/resource.observation.* field validation and
+	// activation scoping can use the activated type set (see
+	// [domain.QuerySchemaProvider] and
+	// [domain.ResolveQueryResourceTypeScope]). Nil is a valid,
+	// permissive default (no activation IN constraint).
 	SchemaProvider domain.QuerySchemaProvider
 }
 

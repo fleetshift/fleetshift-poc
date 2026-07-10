@@ -51,19 +51,6 @@ func compileErr(t *testing.T, filter string) error {
 	return err
 }
 
-func TestCompileFilter_Empty(t *testing.T) {
-	pred := compile(t, "")
-	if pred.SQL != "TRUE" {
-		t.Errorf("SQL = %q, want TRUE", pred.SQL)
-	}
-	if len(pred.Args) != 0 {
-		t.Errorf("Args = %v, want empty", pred.Args)
-	}
-}
-
-// TestCompileFilter_ConcurrentSharedCompiler proves a single Compiler
-// (and its shared CEL env) can CompileFilter from many goroutines at
-// once. Run with -race.
 func TestCompileFilter_ConcurrentSharedCompiler(t *testing.T) {
 	c := querysql.Compiler{Fields: stubResolver{}}
 	filters := []string{

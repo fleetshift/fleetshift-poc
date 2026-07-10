@@ -34,7 +34,7 @@ func runHardeningTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed injection-payload label: %v", err)
 		}
 
-		filter := fmt.Sprintf("resource.inventory.labels[\"node-role\"] == %q", payload)
+		filter := fmt.Sprintf("resource.local_labels[\"node-role\"] == %q", payload)
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1 (the payload should match as ordinary data)", len(results))

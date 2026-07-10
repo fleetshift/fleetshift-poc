@@ -1,12 +1,12 @@
-// Package managedresource provides in-process proto compilation and dynamic
-// gRPC + HTTP service registration for addon-defined managed resource types.
+// Package extensionresource provides in-process proto compilation and dynamic
+// gRPC + HTTP service registration for addon-defined extension resource types.
 // It enables the platform to host typed, AIP-compliant gRPC services
 // without requiring compile-time Go stub generation for each addon type.
 //
 // Platform-canonical resource APIs live in the sibling
 // [platformresource] package. Shared infrastructure (dynamic mux, file
 // registry, compiler, helpers) lives in [dynamicapi].
-package managedresource
+package extensionresource
 
 import (
 	"google.golang.org/protobuf/reflect/protoreflect"
@@ -27,6 +27,9 @@ import (
 // clusters, another inventories them), each under its own service name
 // (derived from [domain.ResourceType]) but sharing the same
 // [dynamicapi.CollectionConfig.CollectionID].
+//
+// Capabilities are composable: Management and Inventory may each be set
+// independently, matching [domain.ExtensionResourceSchema].
 type ResourceTypeConfig struct {
 	dynamicapi.CollectionConfig
 
@@ -49,6 +52,23 @@ type ResourceTypeConfig struct {
 	// CollectionID.
 	ProtoPackage string
 
+	// Capabilities holds the optional management and inventory
+	// capability configs. Presence of each pointer drives which
+	// fields and methods the dynamic service exposes.
+	Capabilities ResourceCapabilities
+}
+
+// ResourceCapabilities groups optional per-capability configs for a
+// resource type. Either or both may be set.
+type ResourceCapabilities struct {
+	Management *ManagementCapabilityConfig
+	Inventory  *InventoryCapabilityConfig
+}
+
+// ManagementCapabilityConfig holds the fields needed to build a
+// management-capable extension resource surface (spec, Create/Delete/
+// Resume, intent/fulfillment lifecycle fields).
+type ManagementCapabilityConfig struct {
 	// SpecMessage is the fully-qualified name of the addon spec message
 	// (e.g. "addons.kind.v1.KindClusterSpec").
 	SpecMessage protoreflect.FullName
@@ -57,6 +77,15 @@ type ResourceTypeConfig struct {
 	// If set, SpecMessage is used only for identification; the descriptor
 	// is used directly without consulting the global registry.
 	SpecDescriptor protoreflect.MessageDescriptor
+}
+
+// InventoryCapabilityConfig holds the fields needed to build an
+// inventory-capable extension resource surface (observed-state fields).
+// ObservationDescriptor is optional; nil means observation is Struct MVP.
+type InventoryCapabilityConfig struct {
+	// ObservationDescriptor is the optional typed observation message.
+	// Nil means observation is google.protobuf.Struct.
+	ObservationDescriptor protoreflect.MessageDescriptor
 }
 
 // GRPCServiceName returns the fully-qualified gRPC service name

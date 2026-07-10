@@ -25,8 +25,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 type resourceQueryEnv struct {
@@ -38,27 +38,28 @@ func setupResourceQuery(t *testing.T) *resourceQueryEnv {
 	t.Helper()
 
 	db := sqlite.OpenTestDB(t)
-	registry := managedresource.NewActiveResourceRegistry()
+	registry := extensionresource.NewActiveResourceRegistry()
 	store := &sqlite.Store{DB: db, SchemaProvider: registry}
 
 	cfg := kindClusterConfig(t)
-	built, err := managedresource.Build(cfg, managedresource.Deps{})
+	built, err := extensionresource.Build(cfg, extensionresource.Deps{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if err := registry.Register(managedresource.ActiveResourceVersion{
-		APIVersion:         domain.APIVersion(cfg.Version),
-		GRPCServiceName:    cfg.ProtoPackage + "." + cfg.Singular + "Service",
-		HTTPPrefix:         "/apis/" + string(cfg.ResourceType.ServiceName()) + "/" + cfg.Version + "/" + cfg.CollectionID,
-		DescriptorPath:     string(built.Descriptors.File.Path()),
-		ServiceDescriptors: built.Descriptors,
+	if err := registry.Register(extensionresource.ActiveResourceVersion{
+		APIVersion:                  domain.APIVersion(cfg.Version),
+		GRPCServiceName:             cfg.ProtoPackage + "." + cfg.Singular + "Service",
+		HTTPPrefix:                  "/apis/" + string(cfg.ResourceType.ServiceName()) + "/" + cfg.Version + "/" + cfg.CollectionID,
+		DescriptorPath:              string(built.Descriptors.File.Path()),
+		ExtensionServiceDescriptors: built.Descriptors,
+		Config:                      cfg,
 		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   cfg.ResourceType,
 			ServiceName:    cfg.ResourceType.ServiceName(),
 			TypeName:       cfg.Singular,
 			APIVersion:     domain.APIVersion(cfg.Version),
 			CollectionName: domain.CollectionName(cfg.CollectionID),
-			SpecDescriptor: cfg.SpecDescriptor,
+			SpecDescriptor: cfg.Capabilities.Management.SpecDescriptor,
 		},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -140,7 +141,7 @@ func setupResourceQuery(t *testing.T) *resourceQueryEnv {
 	}
 }
 
-func kindClusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
+func kindClusterConfig(t *testing.T) *extensionresource.ResourceTypeConfig {
 	t.Helper()
 	schema := kindaddon.Schema()
 	desc, err := dynamicapi.CompileInline(
@@ -152,17 +153,21 @@ func kindClusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
 	}
-	return &managedresource.ResourceTypeConfig{
+	return &extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   kindaddon.ClusterResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.Management.SpecMessage,
-		SpecDescriptor: desc.Message,
+		ResourceType: kindaddon.ClusterResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    schema.Management.SpecMessage,
+				SpecDescriptor: desc.Message,
+			},
+		},
 	}
 }
 
@@ -206,11 +211,10 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 	if r.Resource.Fields["spec"] == nil {
 		t.Error("resource.spec missing")
 	}
-	if _, ok := r.Resource.Fields["labels"]; ok {
-		t.Error("labels must not appear on v0 Struct body")
-	}
+	// Nested inventory message must not appear — observed state is
+	// inlined when the type declares inventory capability.
 	if _, ok := r.Resource.Fields["inventory"]; ok {
-		t.Error("inventory must not appear on v0 Struct body")
+		t.Error("nested inventory must not appear on Struct body")
 	}
 }
 
@@ -234,9 +238,9 @@ func TestResourceQuery_HappyPathHTTP(t *testing.T) {
 	}
 }
 
-func TestResourceQuery_InactiveTypeFailsClearly(t *testing.T) {
+func TestResourceQuery_InactiveTypeReturnsEmptyPage(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
-	registry := managedresource.NewActiveResourceRegistry()
+	registry := extensionresource.NewActiveResourceRegistry()
 	store := &sqlite.Store{DB: db, SchemaProvider: registry}
 	ctx := context.Background()
 
@@ -283,12 +287,13 @@ func TestResourceQuery_InactiveTypeFailsClearly(t *testing.T) {
 	t.Cleanup(func() { conn.Close() })
 
 	client := pb.NewResourceQueryServiceClient(conn)
-	_, err = client.QueryResources(ctx, &pb.QueryResourcesRequest{Scope: "-", PageSize: 10})
-	st, ok := status.FromError(err)
-	if !ok {
-		t.Fatalf("err = %v, want status", err)
+	// Empty activated set must not surface inactive store rows (and
+	// must not FailedPrecondition on projection of those rows).
+	resp, err := client.QueryResources(ctx, &pb.QueryResourcesRequest{Scope: "-", PageSize: 10})
+	if err != nil {
+		t.Fatalf("QueryResources: %v", err)
 	}
-	if st.Code() != codes.FailedPrecondition {
-		t.Fatalf("code = %v, want FailedPrecondition; msg=%s", st.Code(), st.Message())
+	if len(resp.Resources) != 0 {
+		t.Fatalf("len(resources) = %d, want 0 when no types are activated", len(resp.Resources))
 	}
 }

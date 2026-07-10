@@ -21,8 +21,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 // stubVerifier returns a fixed test identity for any token.
@@ -198,14 +198,14 @@ func Start(t *testing.T) string {
 	})
 	dynamicapi.RegisterCompositeReflection(srv, dynamicMux, fileRegistry)
 
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		FileRegistry: fileRegistry,
-		Deps: managedresource.Deps{
+		Deps: extensionresource.Deps{
 			Resources: extensionResourceSvc,
 			Validator: specValidator,
 		},
-		Registry: managedresource.NewActiveResourceRegistry(),
+		Registry: extensionresource.NewActiveResourceRegistry(),
 	}
 
 	// Use the AddonManager lifecycle (Enable → Connect) to match

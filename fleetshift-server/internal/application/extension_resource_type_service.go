@@ -123,6 +123,22 @@ func (s *ExtensionResourceTypeService) Create(ctx context.Context, in CreateExte
 	return def, nil
 }
 
+// Update persists an existing extension resource type definition
+// (capability metadata and updated_at). Used to backfill management /
+// inventory on reconnect when the catalog row already exists.
+func (s *ExtensionResourceTypeService) Update(ctx context.Context, def domain.ExtensionResourceType) error {
+	tx, err := s.store.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	if err := tx.ExtensionResources().UpdateType(ctx, def); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // Get retrieves an extension resource type definition by resource type.
 func (s *ExtensionResourceTypeService) Get(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	tx, err := s.store.BeginReadOnly(ctx)

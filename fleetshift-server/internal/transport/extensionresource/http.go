@@ -1,4 +1,4 @@
-package managedresource
+package extensionresource
 
 import (
 	"io"
@@ -19,10 +19,12 @@ import (
 // given HTTP mux. Routes follow the AIP HTTP binding pattern at the
 // canonical /apis/{service}/{version}/{collection} prefix:
 //
-//	POST   {prefix}          -> Create
-//	GET    {prefix}/{id}     -> Get
-//	GET    {prefix}          -> List
-//	DELETE {prefix}/{id}     -> Delete
+//	POST   {prefix}                 -> Create
+//	GET    {prefix}/{id}            -> Get
+//	GET    {prefix}                 -> List
+//	DELETE {prefix}/{id}            -> Delete
+//	POST   {prefix}/{id}:resume     -> Resume
+//	POST   {prefix}/{id}:updateLabels -> UpdateLabels
 //
 // The conn is a gRPC client connection to the server hosting the service.
 //
@@ -51,17 +53,37 @@ func BuildHTTPHandler(svc *RegisteredService, conn *grpc.ClientConn, prefix stri
 
 		switch {
 		case r.Method == http.MethodPost && (rest == "" || rest == "/"):
+			if svc.Descriptors.CreateRequest == nil {
+				http.NotFound(w, r)
+				return
+			}
 			handleHTTPCreate(w, r, conn, svc)
 		case r.Method == http.MethodPost && strings.HasSuffix(rest, ":resume"):
+			if svc.Descriptors.ResumeRequest == nil {
+				http.NotFound(w, r)
+				return
+			}
 			id := strings.TrimPrefix(rest, "/")
 			id = strings.TrimSuffix(id, ":resume")
 			handleHTTPResume(w, r, conn, svc, id)
+		case r.Method == http.MethodPost && strings.HasSuffix(rest, ":updateLabels"):
+			if svc.Descriptors.UpdateLabelsRequest == nil {
+				http.NotFound(w, r)
+				return
+			}
+			id := strings.TrimPrefix(rest, "/")
+			id = strings.TrimSuffix(id, ":updateLabels")
+			handleHTTPUpdateLabels(w, r, conn, svc, id)
 		case r.Method == http.MethodGet && (rest == "" || rest == "/"):
 			handleHTTPList(w, r, conn, svc)
 		case r.Method == http.MethodGet && len(rest) > 1:
 			id := strings.TrimPrefix(rest, "/")
 			handleHTTPGet(w, r, conn, svc, id)
 		case r.Method == http.MethodDelete && len(rest) > 1:
+			if svc.Descriptors.DeleteRequest == nil {
+				http.NotFound(w, r)
+				return
+			}
 			id := strings.TrimPrefix(rest, "/")
 			handleHTTPDelete(w, r, conn, svc, id)
 		default:
@@ -190,6 +212,35 @@ func handleHTTPResume(w http.ResponseWriter, r *http.Request, conn *grpc.ClientC
 	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
 	method := "/" + svc.Config.GRPCServiceName() + "/Resume" + svc.Config.Singular
 	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, resumeReq, resp); err != nil {
+		dynamicapi.GRPCHTTPError(w, err)
+		return
+	}
+
+	dynamicapi.WriteJSON(w, http.StatusOK, resp)
+}
+
+func handleHTTPUpdateLabels(w http.ResponseWriter, r *http.Request, conn *grpc.ClientConn, svc *RegisteredService, id string) {
+	updateReq := dynamicpb.NewMessage(svc.Descriptors.UpdateLabelsRequest)
+	nameField := svc.Descriptors.UpdateLabelsRequest.Fields().ByName("name")
+	updateReq.Set(nameField, stringValue(svc.Config.Collection()+id))
+
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		dynamicapi.HTTPError(w, codes.InvalidArgument, "read body: "+err.Error())
+		return
+	}
+	if len(body) > 0 {
+		if err := protojson.Unmarshal(body, updateReq); err != nil {
+			dynamicapi.HTTPError(w, codes.InvalidArgument, "parse body: "+err.Error())
+			return
+		}
+		// Re-set name since body unmarshal might have cleared it.
+		updateReq.Set(nameField, stringValue(svc.Config.Collection()+id))
+	}
+
+	resp := dynamicpb.NewMessage(svc.Descriptors.Resource)
+	method := "/" + svc.Config.GRPCServiceName() + "/Update" + svc.Config.Singular + "Labels"
+	if err := conn.Invoke(dynamicapi.GRPCContext(r), method, updateReq, resp); err != nil {
 		dynamicapi.GRPCHTTPError(w, err)
 		return
 	}

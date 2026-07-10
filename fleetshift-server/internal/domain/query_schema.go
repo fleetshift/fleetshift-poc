@@ -20,7 +20,7 @@ import (
 // descriptors that registration already produces. A concrete
 // implementation that *does* know how to populate it from schema
 // activation lives in a higher layer -- see
-// transport/managedresource's ActiveResourceRegistry, which is also the
+// transport/extensionresource's ActiveResourceRegistry, which is also the
 // activator's state store -- so this interface itself
 // stays free of that dependency direction.
 //
@@ -29,10 +29,9 @@ import (
 // registered for this type" and "schema registered but its
 // descriptor is nil" both as "validate this path structurally only"
 // (any well-formed dotted JSON path is accepted), rather than failing
-// closed -- most resource types have no descriptor activated through
-// this path yet (see the plan's "Important gap" on inventory-only
-// activation). Only a resolvable schema *with* a descriptor triggers
-// field-name validation.
+// closed -- types without a SpecDescriptor (including inventory-only
+// activations) validate structurally only. Only a resolvable schema
+// *with* a descriptor triggers field-name validation.
 //
 // The plan's interface sketch also included platform resource schema
 // lookup (GetPlatformQuerySchema); it is omitted here because
@@ -45,10 +44,11 @@ type QuerySchemaProvider interface {
 	GetResourceQuerySchema(ctx context.Context, rt ResourceType) (ResourceQuerySchema, bool, error)
 
 	// ListResourceQuerySchemas returns every currently known resource
-	// query schema. The POC's compiler does not call this (it only
-	// ever looks up one type at a time, guarded by a resource_type
-	// filter conjunct); kept for parity with the plan's sketch and for
-	// future admin/debug surfaces.
+	// query schema. [QueryRepository] uses this to scope QueryResources
+	// to activated types (see [ResolveQueryResourceTypeScope]). The
+	// query compiler still looks up one type at a time via
+	// GetResourceQuerySchema when validating guarded
+	// resource.spec.*/resource.observation.* paths.
 	ListResourceQuerySchemas(ctx context.Context) ([]ResourceQuerySchema, error)
 }
 
@@ -63,15 +63,15 @@ type ResourceQuerySchema struct {
 
 	// SpecDescriptor describes the managed resource's intent spec
 	// message, when the type is managed and its schema has been
-	// activated (see managedresource.DynamicSchemaActivator.Activate,
+	// activated (see extensionresource.DynamicSchemaActivator.Activate,
 	// which already compiles this exact descriptor). Query-time field
 	// resolution walks it to validate resource.spec.<path> segments;
 	// nil means "validate this type's spec paths structurally only".
 	SpecDescriptor protoreflect.MessageDescriptor
 
-	// InventoryObservationDescriptor is reserved for future inventory
-	// schema activation -- DynamicSchemaActivator does not yet support
-	// activating inventory-only capabilities (see the plan's
-	// "Important gap" section) -- so this is always nil today.
+	// InventoryObservationDescriptor describes a typed observation
+	// message when InventorySchema carries one. Nil while observation
+	// is google.protobuf.Struct MVP (including inventory-only
+	// activations that still register query schemas).
 	InventoryObservationDescriptor protoreflect.MessageDescriptor
 }

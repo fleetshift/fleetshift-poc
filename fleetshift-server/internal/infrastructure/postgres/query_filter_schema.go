@@ -36,8 +36,8 @@ func (r queryFieldResolver) validateSpecPath(ctx querysql.ResolveContext, names 
 }
 
 // validateObservationPath is validateSpecPath's counterpart for
-// resource.inventory.observation.<path>. InventoryObservationDescriptor
-// is always nil today (see its doc), so this always returns names
+// resource.observation.<path>. InventoryObservationDescriptor is
+// always nil today (see its doc), so this always returns names
 // unchanged in practice; it exists so activating inventory schemas
 // later does not require touching the resolver.
 func (r queryFieldResolver) validateObservationPath(ctx querysql.ResolveContext, names []string) ([]string, error) {
@@ -52,7 +52,7 @@ func (r queryFieldResolver) validateObservationPath(ctx querysql.ResolveContext,
 	if !ok || schema.InventoryObservationDescriptor == nil {
 		return names, nil
 	}
-	return validateDescriptorPath(schema.InventoryObservationDescriptor, "resource.inventory.observation", names)
+	return validateDescriptorPath(schema.InventoryObservationDescriptor, "resource.observation", names)
 }
 
 // validateDescriptorPath walks desc field-by-field through names,

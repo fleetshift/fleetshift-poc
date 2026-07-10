@@ -1,4 +1,4 @@
-package managedresource
+package extensionresource
 
 import (
 	"context"
@@ -38,12 +38,18 @@ type ActiveResourceVersion struct {
 
 	QuerySchema domain.ResourceQuerySchema
 
-	// ServiceDescriptors are the activated dynamic managed-resource
-	// descriptors for this version. Used by QueryResources to project
-	// ExtensionResourceView into the same body shape as typed Get/List.
-	// Nil only for registry entries constructed in tests that do not
-	// exercise body projection.
-	ServiceDescriptors *ServiceDescriptors
+	// ExtensionServiceDescriptors are the activated dynamic extension
+	// resource descriptors for this version. Used by QueryResources to
+	// project ExtensionResourceView into the same body shape as typed
+	// Get/List. Nil only for registry entries constructed in tests that
+	// do not exercise body projection.
+	ExtensionServiceDescriptors *ExtensionServiceDescriptors
+
+	// Config is the resource type config used to activate this version.
+	// Required for capability-aware body projection (labels / observed
+	// state). Nil only for registry entries constructed in tests that
+	// do not exercise body projection.
+	Config *ResourceTypeConfig
 }
 
 // PlatformRegistrationKey identifies a shared platform-canonical

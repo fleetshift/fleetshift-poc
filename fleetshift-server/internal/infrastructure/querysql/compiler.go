@@ -360,7 +360,7 @@ func literalValue(e ast.Expr) (any, error) {
 // arithmetic expression -- so callers can distinguish "not a field"
 // from "malformed field". Index keys must be string literals, since
 // every field path this package's resolvers support (resource.labels
-// [...], resource.inventory.conditions[...], ...) is keyed that way;
+// [...], resource.conditions[...], ...) is keyed that way;
 // index keys become plain path segments, so a [FieldResolver] never
 // sees the difference between resource.spec.foo and
 // resource.spec["foo"].
@@ -411,6 +411,10 @@ func fieldPathFromExpr(e ast.Expr) (FieldPath, bool, error) {
 // an explicit type filter in the same AND chain. Returns nil if there
 // is no such conjunct. A guard inside an `||` branch does not count:
 // that branch might not hold for the type-specific side of an OR.
+//
+// Only equality establishes a single-type guard for schema-backed
+// paths; activation scoping uses [domain.ResolveQueryResourceTypeScope]
+// for the broader equality-or-`in` set against the schema provider.
 func hasResourceTypeGuard(e ast.Expr) *domain.ResourceType {
 	if rt, ok := resourceTypeEquality(e); ok {
 		return rt

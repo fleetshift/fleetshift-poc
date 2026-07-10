@@ -20,7 +20,7 @@ import (
 // RegisteredService is a fully built dynamic gRPC service for
 // the platform-canonical API, ready to be registered on a
 // [dynamicapi.DynamicServiceMux]. It parallels
-// [managedresource.RegisteredService] for extension APIs.
+// [extensionresource.RegisteredService] for extension APIs.
 type RegisteredService struct {
 	Desc        *grpc.ServiceDesc
 	Descriptors *ServiceDescriptors
@@ -125,7 +125,7 @@ func (h *platformHandler) doCreate(ctx context.Context, req proto.Message) (prot
 		resourceMsg := reqMsg.Get(resourceField).Message()
 		labelsField := h.descs.Resource.Fields().ByName("labels")
 		if labelsField != nil {
-			labels = extractMapStringString(resourceMsg, labelsField)
+			labels = dynamicapi.ExtractMapStringString(resourceMsg, labelsField)
 		}
 	}
 
@@ -254,10 +254,10 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	msg.Set(nameField, protoreflect.ValueOfString(string(pr.Name())))
 
 	labelsField := h.descs.Resource.Fields().ByName("labels")
-	setMapStringString(msg, labelsField, pr.Labels())
+	dynamicapi.SetMapStringString(msg, labelsField, pr.Labels())
 
 	effectiveLabelsField := h.descs.Resource.Fields().ByName("effective_labels")
-	setMapStringString(msg, effectiveLabelsField, pr.EffectiveLabels())
+	dynamicapi.SetMapStringString(msg, effectiveLabelsField, pr.EffectiveLabels())
 
 	repsField := h.descs.Resource.Fields().ByName("representations")
 	repList := msg.Mutable(repsField).List()
@@ -319,34 +319,4 @@ func (h *platformHandler) resourceToMessage(pr *domain.PlatformResource) (proto.
 	}
 
 	return msg, nil
-}
-
-// extractMapStringString reads a proto3 map<string,string> field from a
-// dynamic message.
-func extractMapStringString(msg protoreflect.Message, field protoreflect.FieldDescriptor) map[string]string {
-	if !msg.Has(field) {
-		return nil
-	}
-	m := msg.Get(field).Map()
-	result := make(map[string]string, m.Len())
-	m.Range(func(k protoreflect.MapKey, v protoreflect.Value) bool {
-		result[k.String()] = v.String()
-		return true
-	})
-	return result
-}
-
-// setMapStringString writes a Go map into a proto3 map<string,string>
-// field on a dynamic message.
-func setMapStringString(msg *dynamicpb.Message, field protoreflect.FieldDescriptor, m map[string]string) {
-	if len(m) == 0 {
-		return
-	}
-	mapField := msg.Mutable(field).Map()
-	for k, v := range m {
-		mapField.Set(
-			protoreflect.ValueOfString(k).MapKey(),
-			protoreflect.ValueOfString(v),
-		)
-	}
 }

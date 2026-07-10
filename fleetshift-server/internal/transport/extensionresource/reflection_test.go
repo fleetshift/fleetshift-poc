@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -14,12 +14,12 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 const kindClusterServiceName = "kind.fleetshift.v1.ClusterService"
 
-func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchemaActivator, mux *dynamicapi.DynamicServiceMux, fileReg *dynamicapi.DynamicFileRegistry) *grpc.ClientConn {
+func startReflectionServer(t *testing.T, activator *extensionresource.DynamicSchemaActivator, mux *dynamicapi.DynamicServiceMux, fileReg *dynamicapi.DynamicFileRegistry) *grpc.ClientConn {
 	t.Helper()
 
 	srv := grpc.NewServer(grpc.UnknownServiceHandler(mux.Handle))
@@ -42,7 +42,7 @@ func startReflectionServer(t *testing.T, activator *managedresource.DynamicSchem
 	return conn
 }
 
-func activateKindCluster(t *testing.T, activator *managedresource.DynamicSchemaActivator) {
+func activateKindCluster(t *testing.T, activator *extensionresource.DynamicSchemaActivator) {
 	t.Helper()
 	_, err := activator.Activate(context.Background(), kindaddon.Schema())
 	if err != nil {
@@ -108,11 +108,11 @@ func fileContainingSymbol(t *testing.T, conn *grpc.ClientConn, symbol string) *r
 func TestReflection_ListServicesIncludesDynamic(t *testing.T) {
 	mux := dynamicapi.NewDynamicServiceMux()
 	fileReg := dynamicapi.NewDynamicFileRegistry()
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
-		Deps:         managedresource.Deps{},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Deps:         extensionresource.Deps{},
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -128,11 +128,11 @@ func TestReflection_ListServicesIncludesDynamic(t *testing.T) {
 func TestReflection_FileContainingSymbolReturnsDynamicDescriptor(t *testing.T) {
 	mux := dynamicapi.NewDynamicServiceMux()
 	fileReg := dynamicapi.NewDynamicFileRegistry()
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
-		Deps:         managedresource.Deps{},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Deps:         extensionresource.Deps{},
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -157,11 +157,11 @@ func TestReflection_FileContainingSymbolReturnsDynamicDescriptor(t *testing.T) {
 func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 	mux := dynamicapi.NewDynamicServiceMux()
 	fileReg := dynamicapi.NewDynamicFileRegistry()
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
-		Deps:         managedresource.Deps{},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Deps:         extensionresource.Deps{},
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)
@@ -183,11 +183,11 @@ func TestReflection_FileContainingSymbolResolvesMessages(t *testing.T) {
 func TestReflection_DeactivateRemovesFromReflection(t *testing.T) {
 	mux := dynamicapi.NewDynamicServiceMux()
 	fileReg := dynamicapi.NewDynamicFileRegistry()
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
-		Deps:         managedresource.Deps{},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Deps:         extensionresource.Deps{},
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}
 
 	activateKindCluster(t, activator)

@@ -48,9 +48,9 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/slogutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
 	transporthttp "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/http"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
@@ -120,9 +120,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// activeResources backs QueryRepository's optional type-specific
 	// field validation and DynamicSchemaActivator's activation state
 	// (see [domain.QuerySchemaProvider] and
-	// [managedresource.ActiveResourceRegistry]). It starts empty and is
+	// [extensionresource.ActiveResourceRegistry]). It starts empty and is
 	// populated as managed resource schemas are activated below.
-	activeResources := managedresource.NewActiveResourceRegistry()
+	activeResources := extensionresource.NewActiveResourceRegistry()
 
 	if f.databaseURL != "" {
 		var err error
@@ -593,11 +593,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	typeSvc := application.NewExtensionResourceTypeService(store)
 	platformResourceSvc := application.NewPlatformResourceService(store)
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      dynamicMux,
 		HTTPMux:      dynamicHTTPMux,
 		FileRegistry: fileRegistry,
-		Deps: managedresource.Deps{
+		Deps: extensionresource.Deps{
 			Resources: extensionResourceSvc,
 			Validator: specValidator,
 		},

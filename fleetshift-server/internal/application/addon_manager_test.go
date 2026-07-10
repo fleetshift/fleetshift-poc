@@ -886,8 +886,7 @@ func TestAddonManager_ConnectRejectsConflictingManagementRelation(t *testing.T) 
 
 // TestAddonManager_ConnectAllowsBackfillWhenManagementNil verifies that
 // reconnecting an addon whose persisted type def has no management
-// metadata (Management() == nil) does NOT produce a drift error. The
-// missing metadata is treated as repairable/backfillable.
+// metadata backfills Management onto the catalog so Create can succeed.
 func TestAddonManager_ConnectAllowsBackfillWhenManagementNil(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
@@ -928,13 +927,19 @@ func TestAddonManager_ConnectAllowsBackfillWhenManagementNil(t *testing.T) {
 		t.Fatalf("register target: %v", err)
 	}
 
-	// Connect with a non-nil relation — should succeed because existing
-	// management is nil (backfillable), not conflicting.
 	schema := clusterSchema()
 	if err := mgr.Connect(ctx, "test.fleetshift.io", application.ConnectInput{
 		Schemas: []domain.ExtensionResourceSchema{schema},
 	}); err != nil {
-		t.Fatalf("Connect should allow backfill when existing management is nil, got: %v", err)
+		t.Fatalf("Connect should backfill when existing management is nil, got: %v", err)
+	}
+
+	got, err := typeSvc.Get(ctx, "test.fleetshift.io/Cluster")
+	if err != nil {
+		t.Fatalf("Get after Connect: %v", err)
+	}
+	if got.Management() == nil {
+		t.Fatal("Management() still nil after Connect; Create would reject the catalog type")
 	}
 }
 
@@ -1065,7 +1070,7 @@ func managedAndInventorySchema() domain.ExtensionResourceSchema {
 	return s
 }
 
-func TestAddonManager_ConnectInventoryOnlyRegistersTypeDefWithoutActivation(t *testing.T) {
+func TestAddonManager_ConnectInventoryOnlyActivatesAndRegistersTypeDef(t *testing.T) {
 	env := setupAddonManager(t)
 	ctx := context.Background()
 
@@ -1085,10 +1090,22 @@ func TestAddonManager_ConnectInventoryOnlyRegistersTypeDefWithoutActivation(t *t
 		t.Errorf("state = %d, want %d (connected)", addon.State, domain.AddonStateConnected)
 	}
 
-	// Inventory-only schemas must NOT trigger schema activation (no
-	// dynamic API surface yet).
-	if env.activator.activatedCount() != 0 {
-		t.Errorf("activated count = %d, want 0 (inventory-only addon)", env.activator.activatedCount())
+	// Inventory-only schemas must trigger schema activation (read-only
+	// dynamic API + platform surface).
+	if env.activator.activatedCount() != 1 {
+		t.Errorf("activated count = %d, want 1 (inventory-only addon)", env.activator.activatedCount())
+	}
+	if env.activator.activatedCount() == 1 {
+		got := env.activator.activated[0]
+		if got.ResourceType != "test.fleetshift.io/Node" {
+			t.Errorf("activated resource type = %q, want test.fleetshift.io/Node", got.ResourceType)
+		}
+		if got.Inventory == nil {
+			t.Error("activated schema Inventory is nil, want non-nil")
+		}
+		if got.Management != nil {
+			t.Error("activated schema Management is non-nil, want nil")
+		}
 	}
 
 	// The type def should exist with Inventory set and Management nil.

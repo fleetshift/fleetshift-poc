@@ -56,6 +56,34 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 	return nil
 }
 
+func (r *ExtensionResourceRepo) UpdateType(ctx context.Context, def domain.ExtensionResourceType) error {
+	snap := def.Snapshot()
+	mgmtJSON, err := marshalManagementSnapshot(snap.Management)
+	if err != nil {
+		return fmt.Errorf("marshal management: %w", err)
+	}
+	var invJSON sql.NullString
+	if snap.Inventory != nil {
+		invJSON = sql.NullString{String: "{}", Valid: true}
+	}
+	res, err := r.DB.ExecContext(ctx,
+		`UPDATE extension_resource_types
+		 SET management = $1, inventory = $2, updated_at = $3
+		 WHERE service_name = $4 AND type_name = $5`,
+		nullStringFromBytes(mgmtJSON),
+		invJSON,
+		snap.UpdatedAt.UTC(),
+		string(snap.ResourceType.ServiceName()), snap.ResourceType.TypeName())
+	if err != nil {
+		return fmt.Errorf("update extension resource type: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: resource type %q", domain.ErrNotFound, snap.ResourceType)
+	}
+	return nil
+}
+
 func (r *ExtensionResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at
@@ -145,6 +173,32 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 		}
 	}
 
+	return nil
+}
+
+// Update persists mutable extension-resource fields (labels and
+// updated_at) identified by UID.
+func (r *ExtensionResourceRepo) Update(ctx context.Context, er *domain.ExtensionResource) error {
+	snap := er.Snapshot()
+
+	labelsJSON, err := json.Marshal(nonNilLabels(snap.Labels))
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+
+	res, err := r.DB.ExecContext(ctx,
+		`UPDATE extension_resources SET labels = $1, updated_at = $2 WHERE uid = $3`,
+		string(labelsJSON),
+		snap.UpdatedAt.UTC(),
+		snap.UID.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("update extension resource: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("extension resource %s: %w", snap.UID, domain.ErrNotFound)
+	}
 	return nil
 }
 

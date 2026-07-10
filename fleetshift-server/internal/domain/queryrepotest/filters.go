@@ -149,7 +149,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, `resource.inventory.labels["node-role"] == "worker"`)
+		results := queryAll(t, tx, `resource.local_labels["node-role"] == "worker"`)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
 		}
@@ -162,7 +162,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, `resource.inventory.conditions["Ready"].status == "True"`)
+		results := queryAll(t, tx, `resource.conditions["Ready"].status == "True"`)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
 		}
@@ -175,7 +175,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.inventory.observation.capacity.cpu > 4`, string(fx.InventoryType))
+		filter := fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -184,7 +184,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Errorf("result Name = %q, want the inventory-only node", results[0].Name)
 		}
 
-		filter = fmt.Sprintf(`resource_type == %q && resource.inventory.observation.capacity.cpu > 100`, string(fx.InventoryType))
+		filter = fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 100`, string(fx.InventoryType))
 		results = queryAll(t, tx, filter)
 		if len(results) != 0 {
 			t.Fatalf("len(results) = %d, want 0 for an unmet numeric threshold", len(results))
@@ -216,7 +216,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed conflicting-type inventory: %v", err)
 		}
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.inventory.observation.capacity.cpu > 4`, string(fx.InventoryType))
+		filter := fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -244,7 +244,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed boolean observation: %v", err)
 		}
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.inventory.observation.healthy == true`, string(rt))
+		filter := fmt.Sprintf(`resource_type == %q && resource.observation.healthy == true`, string(rt))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -439,6 +439,39 @@ func runInvalidFilterTests(t *testing.T, factory Factory) {
 		err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: `["a","b"].exists(x, x == "a")`})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
+
+	t.Run("NestedInventoryPathsRejected", func(t *testing.T) {
+		tx, _ := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		for _, filter := range []string{
+			`resource.inventory.labels["node-role"] == "worker"`,
+			`resource.inventory.conditions["Ready"].status == "True"`,
+			`resource_type == "kubernetes.fleetshift.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
+		} {
+			err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
+		}
+	})
+}
+
+func runNilSchemaProviderTypeScopeTests(t *testing.T, factory Factory) {
+	t.Run("NilSchemaProviderMeansNoActivationScope", func(t *testing.T) {
+		tx, _ := newFixtureTx(t, factory)
+		defer tx.Rollback()
+
+		page, err := tx.Queries().QueryResources(context.Background(), domain.QueryResourcesRequest{
+			PageSize: 500,
+		})
+		if err != nil {
+			t.Fatalf("QueryResources: %v", err)
+		}
+		if len(page.Resources) != 2 {
+			t.Fatalf("len(resources) = %d, want 2 (nil SchemaProvider does not invent a type scope)", len(page.Resources))
 		}
 	})
 }

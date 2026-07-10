@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -15,13 +15,13 @@ import (
 	kindaddon "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 // benchEnv holds pre-built descriptors for benchmarking the dynamic handler
 // hot paths in isolation (no gRPC, no DB).
 type benchEnv struct {
-	svc       *managedresource.RegisteredService
+	svc       *extensionresource.RegisteredService
 	specDesc  protoreflect.MessageDescriptor
 	validator protovalidate.Validator
 }
@@ -50,20 +50,24 @@ func setupBench(b *testing.B) *benchEnv {
 		b.Fatalf("protovalidate.New: %v", err)
 	}
 
-	cfg := &managedresource.ResourceTypeConfig{
+	cfg := &extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   kindaddon.ClusterResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.Management.SpecMessage,
-		SpecDescriptor: desc.Message,
+		ResourceType: kindaddon.ClusterResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    schema.Management.SpecMessage,
+				SpecDescriptor: desc.Message,
+			},
+		},
 	}
 
-	svc, err := managedresource.Build(cfg, managedresource.Deps{
+	svc, err := extensionresource.Build(cfg, extensionresource.Deps{
 		Validator: validator,
 	})
 	if err != nil {

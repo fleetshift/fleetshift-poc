@@ -21,7 +21,7 @@ import (
 
 // staticQuerySchemas is a minimal [domain.QuerySchemaProvider] for
 // field-resolver tests. Kept local so this package does not import
-// transport/managedresource (layering: infrastructure → domain only).
+// transport/extensionresource (layering: infrastructure → domain only).
 type staticQuerySchemas map[domain.ResourceType]domain.ResourceQuerySchema
 
 func (s staticQuerySchemas) GetResourceQuerySchema(_ context.Context, rt domain.ResourceType) (domain.ResourceQuerySchema, bool, error) {
@@ -150,7 +150,7 @@ func TestQueryFieldResolver_ResourceLabelsUseJSONExtract(t *testing.T) {
 }
 
 func TestQueryFieldResolver_HyphenatedLabelKey(t *testing.T) {
-	pred := compile(t, `resource.inventory.labels["node-role"] == "worker"`)
+	pred := compile(t, `resource.local_labels["node-role"] == "worker"`)
 	if !strings.Contains(pred.SQL, `'$."'`) {
 		t.Errorf("SQL = %q, want quoted JSON path segment for hyphenated keys", pred.SQL)
 	}
@@ -160,7 +160,7 @@ func TestQueryFieldResolver_HyphenatedLabelKey(t *testing.T) {
 }
 
 func TestQueryFieldResolver_InventoryConditionsUseJSONExtract(t *testing.T) {
-	pred := compile(t, `resource.inventory.conditions["Ready"].status == "True"`)
+	pred := compile(t, `resource.conditions["Ready"].status == "True"`)
 	if !strings.Contains(pred.SQL, "json_extract(inv.conditions") {
 		t.Errorf("SQL = %q, want json_extract for condition subfields", pred.SQL)
 	}
@@ -199,7 +199,7 @@ func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testi
 	}{
 		{
 			name:   "observation numeric comparison",
-			filter: `resource_type == "kubernetes.fleetshift.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
+			filter: `resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`,
 		},
 		{
 			name:   "spec numeric comparison",
@@ -289,7 +289,7 @@ func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testi
 }
 
 func TestQueryFieldResolver_BooleanJSONCast(t *testing.T) {
-	pred := compile(t, `resource_type == "kind.fleetshift.io/Cluster" && resource.inventory.observation.healthy == true`)
+	pred := compile(t, `resource_type == "kind.fleetshift.io/Cluster" && resource.observation.healthy == true`)
 	if !strings.Contains(pred.SQL, "typeof(") {
 		t.Errorf("SQL = %q, want typeof guard for boolean cast", pred.SQL)
 	}
@@ -391,5 +391,18 @@ func TestQueryFieldResolver_InjectionAttempt(t *testing.T) {
 	}
 	if !found {
 		t.Errorf("Args = %v, want the raw payload bound as a parameter", pred.Args)
+	}
+}
+
+func TestQueryFieldResolver_NestedInventoryPathsRejected(t *testing.T) {
+	for _, filter := range []string{
+		`resource.inventory.labels["node-role"] == "worker"`,
+		`resource.inventory.conditions["Ready"].status == "True"`,
+		`resource.inventory.observation.capacity.cpu > 4`,
+	} {
+		err := compileErr(t, filter)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+		}
 	}
 }

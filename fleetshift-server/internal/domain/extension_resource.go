@@ -531,11 +531,18 @@ type ExtensionResource struct {
 type ExtensionResourceOption func(*ExtensionResource)
 
 // WithExtensionLabels sets the labels on a new extension resource.
+// The map is copied so later caller mutations do not affect the
+// aggregate (same guarantee as [ExtensionResource.SetLabels]).
 func WithExtensionLabels(labels map[string]string) ExtensionResourceOption {
 	return func(r *ExtensionResource) {
-		if labels != nil {
-			r.labels = labels
+		if labels == nil {
+			return
 		}
+		cp := make(map[string]string, len(labels))
+		for k, v := range labels {
+			cp[k] = v
+		}
+		r.labels = cp
 	}
 }
 
@@ -621,6 +628,23 @@ func (r *ExtensionResource) FullResourceName() FullResourceName {
 
 // Labels returns the user-defined extension resource labels.
 func (r *ExtensionResource) Labels() map[string]string { return r.labels }
+
+// SetLabels replaces the extension resource labels and bumps updatedAt.
+// The labels map is copied so later caller mutations do not affect the
+// aggregate. A nil labels argument clears labels to an empty map.
+func (r *ExtensionResource) SetLabels(labels map[string]string, now time.Time) {
+	if labels == nil {
+		labels = map[string]string{}
+	} else {
+		copied := make(map[string]string, len(labels))
+		for k, v := range labels {
+			copied[k] = v
+		}
+		labels = copied
+	}
+	r.labels = labels
+	r.updatedAt = now
+}
 
 // Managed returns the managed lifecycle state, or nil for
 // inventory-only resources.

@@ -146,13 +146,24 @@ type queryPageToken struct {
 	TypeName       string `json:"type_name"`
 }
 
-// queryFilterHash hashes the filter/order_by pair a page token was
-// minted against, so a token replayed against a different filter or
-// ordering fails closed instead of silently resuming a different
-// query's keyset with stale semantics.
-func queryFilterHash(filter, orderBy string) string {
-	sum := sha256.Sum256([]byte(filter + "\x00" + orderBy))
-	return base64.RawURLEncoding.EncodeToString(sum[:])
+// queryFilterHash hashes the filter/order_by/activated-types triple a
+// page token was minted against, so a token replayed against a
+// different filter, ordering, or activation scope fails closed instead
+// of silently resuming a different query's keyset with stale
+// semantics. resourceTypes is the effective activation scope from
+// [domain.ResolveQueryResourceTypeScope] (nil when no provider).
+func queryFilterHash(filter, orderBy string, resourceTypes []domain.ResourceType) string {
+	h := sha256.New()
+	h.Write([]byte(filter))
+	h.Write([]byte{0})
+	h.Write([]byte(orderBy))
+	h.Write([]byte{0})
+	for _, rt := range resourceTypes {
+		h.Write([]byte(rt))
+		h.Write([]byte{0})
+	}
+	sum := h.Sum(nil)
+	return base64.RawURLEncoding.EncodeToString(sum)
 }
 
 // encodeQueryPageToken encodes tok as opaque base64url JSON.
@@ -165,12 +176,13 @@ func encodeQueryPageToken(tok queryPageToken) (string, error) {
 }
 
 // decodeQueryPageToken decodes and validates a page token against the
-// filter/order_by of the current request. Any structural problem or
-// filter/order_by mismatch is [domain.ErrInvalidArgument]: the
-// request that minted the token wasn't necessarily malformed, but
-// resuming it against a different query is a precondition violation
-// the caller must fix, not a retryable server condition.
-func decodeQueryPageToken(raw, filter, orderBy string) (queryPageToken, error) {
+// filter/order_by/activation-scope of the current request. Any
+// structural problem or filter/order_by/type-scope mismatch is
+// [domain.ErrInvalidArgument]: the request that minted the token
+// wasn't necessarily malformed, but resuming it against a different
+// query is a precondition violation the caller must fix, not a
+// retryable server condition.
+func decodeQueryPageToken(raw, filter, orderBy string, resourceTypes []domain.ResourceType) (queryPageToken, error) {
 	var tok queryPageToken
 	data, err := base64.RawURLEncoding.DecodeString(raw)
 	if err != nil {
@@ -182,7 +194,7 @@ func decodeQueryPageToken(raw, filter, orderBy string) (queryPageToken, error) {
 	if tok.Version != queryPageTokenVersion {
 		return queryPageToken{}, fmt.Errorf("page_token: %w: unsupported version %d", domain.ErrInvalidArgument, tok.Version)
 	}
-	if tok.FilterHash != queryFilterHash(filter, orderBy) {
+	if tok.FilterHash != queryFilterHash(filter, orderBy, resourceTypes) {
 		return queryPageToken{}, fmt.Errorf("page_token: %w: does not match the current filter/order_by", domain.ErrInvalidArgument)
 	}
 	return tok, nil

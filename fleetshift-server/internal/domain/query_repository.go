@@ -29,20 +29,30 @@ const (
 type QueryResourcesRequest struct {
 	// Filter is a CEL expression evaluated against the query result
 	// envelope (see each backend's field resolver for the supported
-	// field set). Empty matches every row.
+	// field set). Empty matches every activated extension type when
+	// the repository's [QuerySchemaProvider] is set; with a nil
+	// provider there is no activation scope.
 	//
 	// Public CEL fields for this iteration are envelope name,
 	// envelope resource_type, and fields under resource (labels,
-	// managed fields, inventory, and guarded spec/observation). Old
-	// POC envelope aliases such as platform_name, kind, service_name,
-	// api_version, collection_name, and resource_id are not supported
-	// filter fields.
+	// managed fields, inlined observed-state fields such as
+	// local_labels/conditions/observation/local_update_time/
+	// index_update_time, and guarded spec/observation). Nested
+	// resource.inventory.* paths are rejected. Old POC envelope
+	// aliases such as platform_name, kind, service_name, api_version,
+	// collection_name, and resource_id are not supported filter
+	// fields.
 	//
 	// Ordinary string fields (== and startsWith) are case-sensitive
 	// on every backend. resource.state is the exception: comparisons
 	// and startsWith lowercase string literals so API enum spellings
 	// from Get/List ("ACTIVE") match the lowercase values stored on
 	// fulfillments.state ("active").
+	//
+	// When a [QuerySchemaProvider] is configured, results are limited
+	// to types it lists (see [ResolveQueryResourceTypeScope]). Named
+	// top-level resource_type == / in constraints must refer to
+	// activated types or the call fails with [ErrInvalidArgument].
 	Filter string
 
 	// PageSize caps the number of rows returned. Non-positive values

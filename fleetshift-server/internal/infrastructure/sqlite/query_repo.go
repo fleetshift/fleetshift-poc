@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
@@ -30,10 +31,11 @@ type QueryRepo struct {
 	Compiler querysql.CELSQLCompiler
 
 	// SchemaProvider is threaded into the default compiler's field
-	// resolver so resource.spec.*/resource.inventory.observation.*
-	// field paths can be validated against real descriptors when
-	// known (see [domain.QuerySchemaProvider]'s doc). Nil is a valid,
-	// permissive default.
+	// resolver so resource.spec.*/resource.observation.* field paths
+	// can be validated against real descriptors when known, and is
+	// also used to scope QueryResources to activated types (see
+	// [domain.ResolveQueryResourceTypeScope]). Nil is a valid,
+	// permissive default (no activation IN constraint).
 	SchemaProvider domain.QuerySchemaProvider
 }
 
@@ -63,23 +65,43 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 		return domain.QueryResourcesPage{}, err
 	}
 
+	scope, err := domain.ResolveQueryResourceTypeScope(ctx, r.SchemaProvider, req.Filter)
+	if err != nil {
+		return domain.QueryResourcesPage{}, err
+	}
+
+	// Compile before honoring an empty activation scope so invalid
+	// filters (deprecated paths, unsupported operators) still fail
+	// closed instead of returning a silent empty page.
+	predicate, err := r.compiler().CompileFilter(ctx, querysql.CompileFilterInput{Filter: req.Filter})
+	if err != nil {
+		return domain.QueryResourcesPage{}, err
+	}
+	if scope.Empty {
+		return domain.QueryResourcesPage{}, nil
+	}
+
 	limit := clampQueryPageSize(req.PageSize)
 
 	var keyset *queryPageToken
 	if req.PageToken != "" {
-		tok, err := decodeQueryPageToken(req.PageToken, req.Filter, req.OrderBy)
+		tok, err := decodeQueryPageToken(req.PageToken, req.Filter, req.OrderBy, scope.Types)
 		if err != nil {
 			return domain.QueryResourcesPage{}, err
 		}
 		keyset = &tok
 	}
 
-	predicate, err := r.compiler().CompileFilter(ctx, querysql.CompileFilterInput{Filter: req.Filter})
+	predicateSQL := predicate.SQL
+	args := append([]any{}, predicate.Args...)
+
+	typeSQL, args, err := resourceTypesPredicateSQL(scope.Types, args)
 	if err != nil {
 		return domain.QueryResourcesPage{}, err
 	}
-	predicateSQL := predicate.SQL
-	args := append([]any{}, predicate.Args...)
+	if typeSQL != "TRUE" {
+		predicateSQL = "(" + predicateSQL + ") AND (" + typeSQL + ")"
+	}
 
 	keysetSQL := "TRUE"
 	if keyset != nil {
@@ -109,7 +131,7 @@ func (r *QueryRepo) QueryResources(ctx context.Context, req domain.QueryResource
 		last := scanned[len(scanned)-1]
 		tok, err := encodeQueryPageToken(queryPageToken{
 			Version:        queryPageTokenVersion,
-			FilterHash:     queryFilterHash(req.Filter, req.OrderBy),
+			FilterHash:     queryFilterHash(req.Filter, req.OrderBy, scope.Types),
 			OrderBy:        req.OrderBy,
 			CollectionName: string(last.result.CollectionName),
 			ResourceID:     string(last.result.ResourceID),
@@ -199,4 +221,26 @@ func scanQueryResourceRow(s scanner) (queryResourceRow, error) {
 	}
 
 	return queryResourceRow{result: result, typeName: typeName}, nil
+}
+
+// resourceTypesPredicateSQL ANDs an IN constraint on
+// (er.service_name, er.type_name) when types is non-empty. Nil/empty
+// types means no extra constraint (TRUE) -- used when
+// [domain.QuerySchemaProvider] is nil. Malformed ResourceType values
+// return [domain.ErrInvalidArgument].
+func resourceTypesPredicateSQL(types []domain.ResourceType, args []any) (string, []any, error) {
+	if len(types) == 0 {
+		return "TRUE", args, nil
+	}
+	tuples := make([]string, 0, len(types))
+	for _, rt := range types {
+		parsed, err := domain.ParseResourceType(string(rt))
+		if err != nil {
+			return "", nil, fmt.Errorf("resource_types: %w: %v", domain.ErrInvalidArgument, err)
+		}
+		args = append(args, string(parsed.ServiceName()), parsed.TypeName())
+		n := len(args)
+		tuples = append(tuples, fmt.Sprintf("(?%d, ?%d)", n-1, n))
+	}
+	return fmt.Sprintf("(er.service_name, er.type_name) IN (%s)", strings.Join(tuples, ", ")), args, nil
 }

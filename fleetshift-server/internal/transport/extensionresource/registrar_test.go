@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -25,12 +25,12 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 const clusterTargetType domain.TargetType = "cluster-addon"
 
-func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
+func clusterConfig(t *testing.T) *extensionresource.ResourceTypeConfig {
 	t.Helper()
 
 	schema := kindaddon.Schema()
@@ -49,23 +49,27 @@ func clusterConfig(t *testing.T) *managedresource.ResourceTypeConfig {
 		t.Fatalf("CompileInline: %v", err)
 	}
 
-	return &managedresource.ResourceTypeConfig{
+	return &extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   kindaddon.ClusterResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    schema.Management.SpecMessage,
-		SpecDescriptor: desc.Message,
+		ResourceType: kindaddon.ClusterResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    schema.Management.SpecMessage,
+				SpecDescriptor: desc.Message,
+			},
+		},
 	}
 }
 
 type testEnv struct {
 	conn  *grpc.ClientConn
-	svc   *managedresource.RegisteredService
+	svc   *extensionresource.RegisteredService
 	store domain.Store
 }
 
@@ -254,7 +258,7 @@ func setupWithDelivery(
 	}
 	srv := grpc.NewServer(grpc.UnaryInterceptor(testAuthInterceptor))
 
-	svc, err := managedresource.BuildAndRegister(srv, clusterConfig(t), managedresource.Deps{
+	svc, err := extensionresource.BuildAndRegister(srv, clusterConfig(t), extensionresource.Deps{
 		Resources: extensionResourceSvc,
 		Validator: validator,
 	})
@@ -351,6 +355,77 @@ func TestDynamic_CreateThenGet(t *testing.T) {
 
 	if getResp.Get(nameField).String() != "clusters/dev-cluster" {
 		t.Errorf("get name = %q, want %q", getResp.Get(nameField).String(), "clusters/dev-cluster")
+	}
+}
+
+func TestDynamic_CreateAndUpdateLabels(t *testing.T) {
+	env := setup(t)
+	ctx := context.Background()
+
+	createReq := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(1), protoreflect.ValueOfString("labeled"))
+
+	resource := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	spec := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("labeled"))
+	resource.Set(env.svc.Descriptors.Resource.Fields().ByName("spec"), protoreflect.ValueOfMessage(spec))
+
+	labelsField := env.svc.Descriptors.Resource.Fields().ByName("labels")
+	dynamicapi.SetMapStringString(resource, labelsField, map[string]string{"env": "dev"})
+	createReq.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource))
+
+	createResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq, createResp); err != nil {
+		t.Fatalf("CreateCluster: %v", err)
+	}
+	got := createResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
+	if got != "dev" {
+		t.Errorf("create labels[env] = %q, want dev", got)
+	}
+
+	getReq := dynamicpb.NewMessage(env.svc.Descriptors.GetRequest)
+	getReq.Set(env.svc.Descriptors.GetRequest.Fields().ByName("name"), protoreflect.ValueOfString("clusters/labeled"))
+	getResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/GetCluster", getReq, getResp); err != nil {
+		t.Fatalf("GetCluster: %v", err)
+	}
+	got = getResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
+	if got != "dev" {
+		t.Errorf("get labels[env] = %q, want dev", got)
+	}
+
+	updateReq := dynamicpb.NewMessage(env.svc.Descriptors.UpdateLabelsRequest)
+	updateReq.Set(env.svc.Descriptors.UpdateLabelsRequest.Fields().ByName("name"), protoreflect.ValueOfString("clusters/labeled"))
+	updateLabelsField := env.svc.Descriptors.UpdateLabelsRequest.Fields().ByName("labels")
+	dynamicapi.SetMapStringString(updateReq, updateLabelsField, map[string]string{"env": "prod", "tier": "1"})
+
+	updateResp := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/UpdateClusterLabels", updateReq, updateResp); err != nil {
+		t.Fatalf("UpdateClusterLabels: %v", err)
+	}
+	got = updateResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("env").MapKey()).String()
+	if got != "prod" {
+		t.Errorf("update labels[env] = %q, want prod", got)
+	}
+	got = updateResp.Get(labelsField).Map().Get(protoreflect.ValueOfString("tier").MapKey()).String()
+	if got != "1" {
+		t.Errorf("update labels[tier] = %q, want 1", got)
+	}
+
+	// Create omitting labels → empty / unset.
+	createReq2 := dynamicpb.NewMessage(env.svc.Descriptors.CreateRequest)
+	createReq2.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(1), protoreflect.ValueOfString("unlabeled"))
+	resource2 := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	spec2 := dynamicpb.NewMessage(env.svc.Descriptors.Spec)
+	spec2.Set(env.svc.Descriptors.Spec.Fields().ByName("name"), protoreflect.ValueOfString("unlabeled"))
+	resource2.Set(env.svc.Descriptors.Resource.Fields().ByName("spec"), protoreflect.ValueOfMessage(spec2))
+	createReq2.Set(env.svc.Descriptors.CreateRequest.Fields().ByNumber(2), protoreflect.ValueOfMessage(resource2))
+	createResp2 := dynamicpb.NewMessage(env.svc.Descriptors.Resource)
+	if err := env.conn.Invoke(ctx, "/kind.fleetshift.v1.ClusterService/CreateCluster", createReq2, createResp2); err != nil {
+		t.Fatalf("CreateCluster unlabeled: %v", err)
+	}
+	if createResp2.Has(labelsField) {
+		t.Errorf("omitted labels should be unset, got %v", createResp2.Get(labelsField).Map())
 	}
 }
 
@@ -568,7 +643,7 @@ func TestDynamic_GetNotFound(t *testing.T) {
 // correctly-shaped message and service descriptors.
 func TestDynamic_ServiceDescriptors(t *testing.T) {
 	validator, _ := protovalidate.New()
-	svc, err := managedresource.Build(clusterConfig(t), managedresource.Deps{
+	svc, err := extensionresource.Build(clusterConfig(t), extensionresource.Deps{
 		Validator: validator,
 	})
 	if err != nil {
@@ -581,8 +656,8 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	}
 
 	// Verify method count
-	if len(svc.Desc.Methods) != 5 {
-		t.Fatalf("method count = %d, want 5", len(svc.Desc.Methods))
+	if len(svc.Desc.Methods) != 6 {
+		t.Fatalf("method count = %d, want 6", len(svc.Desc.Methods))
 	}
 
 	// Verify method names
@@ -590,7 +665,7 @@ func TestDynamic_ServiceDescriptors(t *testing.T) {
 	for _, m := range svc.Desc.Methods {
 		methods[m.MethodName] = true
 	}
-	for _, want := range []string{"CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster"} {
+	for _, want := range []string{"CreateCluster", "GetCluster", "ListClusters", "DeleteCluster", "ResumeCluster", "UpdateClusterLabels"} {
 		if !methods[want] {
 			t.Errorf("missing method %q", want)
 		}
@@ -627,7 +702,7 @@ func TestDynamic_SpecDescriptorIdentity(t *testing.T) {
 		t.Fatalf("protovalidate.New: %v", err)
 	}
 
-	svc, err := managedresource.Build(cfg, managedresource.Deps{Validator: validator})
+	svc, err := extensionresource.Build(cfg, extensionresource.Deps{Validator: validator})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}

@@ -1,4 +1,4 @@
-package managedresource
+package extensionresource
 
 import (
 	"context"
@@ -66,23 +66,27 @@ type DynamicSchemaActivator struct {
 
 var _ application.SchemaActivator = (*DynamicSchemaActivator)(nil)
 
-// Activate compiles the schema's inline proto, builds a dynamic gRPC
-// service, and registers it in the mux. If the schema is already active
-// with identical content, the existing registration ID is returned
-// without recompilation. If the content has changed, the mux entry is
+// Activate compiles the schema's inline proto (when management is
+// present), builds a dynamic gRPC service, and registers it in the mux.
+// Schemas with Management and/or Inventory are activated; at least one
+// is required. Inventory-only schemas need no ProtoFiles (observation
+// is Struct MVP). If the schema is already active with identical
+// content, the existing registration ID is returned without
+// recompilation. If the content has changed, the mux entry is
 // atomically replaced.
 func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.ExtensionResourceSchema) (application.SchemaActivationID, error) {
 	if a.Registry == nil {
 		return "", fmt.Errorf("DynamicSchemaActivator.Registry is required")
 	}
-	if schema.Management == nil {
-		return "", fmt.Errorf("schema for %q has no management section; cannot activate transport", schema.ResourceType)
+	if schema.Management == nil && schema.Inventory == nil {
+		return "", fmt.Errorf("schema for %q has neither management nor inventory section; cannot activate transport", schema.ResourceType)
 	}
-	if len(schema.ProtoFiles) == 0 {
-		return "", fmt.Errorf("schema for %q has no proto files", schema.ResourceType)
+	if schema.Management != nil && len(schema.ProtoFiles) == 0 {
+		return "", fmt.Errorf("schema for %q has management but no proto files", schema.ResourceType)
 	}
-
-	mgmt := schema.Management
+	if schema.Singular == "" {
+		return "", fmt.Errorf("%w: schema for %q has empty Singular", domain.ErrInvalidArgument, schema.ResourceType)
+	}
 
 	// Compute registration identity and content hash before expensive
 	// compilation so we can short-circuit when the schema is unchanged.
@@ -107,19 +111,33 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 		return id, nil
 	}
 
-	entryFile, err := resolveEntryFile(schema)
-	if err != nil {
-		return "", err
-	}
+	caps := ResourceCapabilities{}
+	var specDesc *dynamicapi.SpecDescriptor
 
-	specDesc, err := dynamicapi.CompileInline(
-		ctx,
-		schema.ProtoFiles,
-		entryFile,
-		protoreflect.FullName(mgmt.SpecMessage),
-	)
-	if err != nil {
-		return "", fmt.Errorf("compile proto: %w", err)
+	if schema.Management != nil {
+		entryFile, err := resolveEntryFile(schema)
+		if err != nil {
+			return "", err
+		}
+
+		compiled, err := dynamicapi.CompileInline(
+			ctx,
+			schema.ProtoFiles,
+			entryFile,
+			protoreflect.FullName(schema.Management.SpecMessage),
+		)
+		if err != nil {
+			return "", fmt.Errorf("compile proto: %w", err)
+		}
+		specDesc = compiled
+		caps.Management = &ManagementCapabilityConfig{
+			SpecMessage:    schema.Management.SpecMessage,
+			SpecDescriptor: compiled.Message,
+		}
+	}
+	if schema.Inventory != nil {
+		// ObservationDescriptor stays nil for Struct MVP.
+		caps.Inventory = &InventoryCapabilityConfig{}
 	}
 
 	cfg := &ResourceTypeConfig{
@@ -129,16 +147,27 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   schema.ResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    mgmt.SpecMessage,
-		SpecDescriptor: specDesc.Message,
+		ResourceType: schema.ResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: caps,
 	}
 
 	svc, err := Build(cfg, a.Deps)
 	if err != nil {
 		return "", fmt.Errorf("build service: %w", err)
 	}
+
+	querySchema := domain.ResourceQuerySchema{
+		ResourceType:   schema.ResourceType,
+		ServiceName:    schema.ResourceType.ServiceName(),
+		TypeName:       schema.Singular,
+		APIVersion:     apiVersion,
+		CollectionName: domain.CollectionName(schema.CollectionID),
+	}
+	if caps.Management != nil && specDesc != nil {
+		querySchema.SpecDescriptor = specDesc.Message
+	}
+	// InventoryObservationDescriptor stays nil while observation is Struct MVP.
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
@@ -252,20 +281,14 @@ func (a *DynamicSchemaActivator) Activate(ctx context.Context, schema domain.Ext
 	}
 
 	if err := a.Registry.Register(ActiveResourceVersion{
-		APIVersion:         apiVersion,
-		GRPCServiceName:    serviceName,
-		HTTPPrefix:         canonicalPrefix,
-		DescriptorPath:     descriptorPath,
-		ContentHash:        hash,
-		ServiceDescriptors: svc.Descriptors,
-		QuerySchema: domain.ResourceQuerySchema{
-			ResourceType:   schema.ResourceType,
-			ServiceName:    schema.ResourceType.ServiceName(),
-			TypeName:       schema.Singular,
-			APIVersion:     apiVersion,
-			CollectionName: domain.CollectionName(schema.CollectionID),
-			SpecDescriptor: specDesc.Message,
-		},
+		APIVersion:                  apiVersion,
+		GRPCServiceName:             serviceName,
+		HTTPPrefix:                  canonicalPrefix,
+		DescriptorPath:              descriptorPath,
+		ContentHash:                 hash,
+		ExtensionServiceDescriptors: svc.Descriptors,
+		Config:                      cfg,
+		QuerySchema:                 querySchema,
 	}); err != nil {
 		if !replaceInPlace {
 			a.rollbackNewExtensionTransport(serviceName, canonicalPrefix, descriptorPath, sameHTTPPrefix)
@@ -478,6 +501,10 @@ func schemaContentHash(s domain.ExtensionResourceSchema) [32]byte {
 	h.Write([]byte{0})
 	if s.Management != nil {
 		h.Write([]byte(s.Management.SpecMessage))
+	}
+	h.Write([]byte{0})
+	if s.Inventory != nil {
+		h.Write([]byte("inventory"))
 	}
 	h.Write([]byte{0})
 	h.Write([]byte(s.Singular))

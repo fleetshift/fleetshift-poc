@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -29,7 +29,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/platformresource"
 )
 
@@ -37,22 +37,22 @@ func widgetRel() domain.RegisteredSelfTarget {
 	return domain.NewRegisteredSelfTarget("widget-addon", "widgets")
 }
 
-func newActivator(t *testing.T) (*managedresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
+func newActivator(t *testing.T) (*extensionresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
 	t.Helper()
 	mux := dynamicapi.NewDynamicServiceMux()
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
 	}
-	return &managedresource.DynamicSchemaActivator{
+	return &extensionresource.DynamicSchemaActivator{
 		GRPCMux:  mux,
-		Deps:     managedresource.Deps{Validator: validator},
-		Registry: managedresource.NewActiveResourceRegistry(),
+		Deps:     extensionresource.Deps{Validator: validator},
+		Registry: extensionresource.NewActiveResourceRegistry(),
 	}, mux
 }
 
 type activatorHTTPEnv struct {
-	activator *managedresource.DynamicSchemaActivator
+	activator *extensionresource.DynamicSchemaActivator
 	grpcMux   *dynamicapi.DynamicServiceMux
 	httpMux   *dynamicapi.DynamicHTTPMux
 	httpURL   string
@@ -102,11 +102,11 @@ func newActivatorWithHTTP(t *testing.T) activatorHTTPEnv {
 	t.Cleanup(ts.Close)
 
 	return activatorHTTPEnv{
-		activator: &managedresource.DynamicSchemaActivator{
+		activator: &extensionresource.DynamicSchemaActivator{
 			GRPCMux:  grpcMux,
 			HTTPMux:  httpMux,
-			Deps:     managedresource.Deps{Validator: validator},
-			Registry: managedresource.NewActiveResourceRegistry(),
+			Deps:     extensionresource.Deps{Validator: validator},
+			Registry: extensionresource.NewActiveResourceRegistry(),
 		},
 		grpcMux: grpcMux,
 		httpMux: httpMux,
@@ -145,8 +145,8 @@ func TestDynamicSchemaActivator_ActivateRegistersService(t *testing.T) {
 	if !ok {
 		t.Fatal("expected ClusterService in mux ServiceInfo after Activate")
 	}
-	if len(si.Methods) != 5 {
-		t.Errorf("method count = %d, want 5", len(si.Methods))
+	if len(si.Methods) != 6 {
+		t.Errorf("method count = %d, want 6", len(si.Methods))
 	}
 }
 
@@ -327,7 +327,162 @@ func TestDynamicSchemaActivator_EmptyProtoFilesReturnsError(t *testing.T) {
 
 	_, err := activator.Activate(context.Background(), schema)
 	if err == nil {
-		t.Fatal("expected error for schema with no proto files")
+		t.Fatal("expected error for management schema with no proto files")
+	}
+}
+
+func TestDynamicSchemaActivator_EmptySingularReturnsError(t *testing.T) {
+	activator, _ := newActivator(t)
+
+	schema := inventoryOnlyNodeSchema()
+	schema.Singular = ""
+
+	_, err := activator.Activate(context.Background(), schema)
+	if err == nil {
+		t.Fatal("expected error for empty Singular, not a panic")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func inventoryOnlyNodeSchema() domain.ExtensionResourceSchema {
+	return domain.ExtensionResourceSchema{
+		ResourceType: "test.fleetshift.io/Node",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "nodes",
+		Singular:     "Node",
+		Plural:       "Nodes",
+		Inventory:    &domain.InventorySchema{},
+	}
+}
+
+func TestDynamicSchemaActivator_InventoryOnlyActivatesReadOnlyService(t *testing.T) {
+	activator, mux := newActivator(t)
+	schema := inventoryOnlyNodeSchema()
+
+	id, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+	if id != "test.fleetshift.v1.NodeService" {
+		t.Errorf("id = %q, want test.fleetshift.v1.NodeService", id)
+	}
+
+	info := mux.ServiceInfo()
+	svc, ok := info["test.fleetshift.v1.NodeService"]
+	if !ok {
+		t.Fatal("expected NodeService in mux after inventory-only Activate")
+	}
+	methods := map[string]bool{}
+	for _, m := range svc.Methods {
+		methods[m.Name] = true
+	}
+	if methods["CreateNode"] || methods["DeleteNode"] || methods["ResumeNode"] || methods["UpdateNodeLabels"] {
+		t.Errorf("inventory-only service should not expose Create/Delete/Resume/UpdateLabels, got %v", methods)
+	}
+	if !methods["GetNode"] || !methods["ListNodes"] {
+		t.Errorf("inventory-only service missing Get/List, got %v", methods)
+	}
+
+	_, ver, ok := activator.Registry.GetByGRPCServiceName(string(id))
+	if !ok {
+		t.Fatal("registry missing inventory-only registration")
+	}
+	if ver.ExtensionServiceDescriptors == nil {
+		t.Fatal("ExtensionServiceDescriptors is nil")
+	}
+	if ver.ExtensionServiceDescriptors.CreateRequest != nil {
+		t.Error("CreateRequest should be nil for inventory-only")
+	}
+	res := ver.ExtensionServiceDescriptors.Resource
+	if res.Fields().ByName("local_labels") == nil {
+		t.Error("resource missing local_labels")
+	}
+	if res.Fields().ByName("spec") != nil {
+		t.Error("inventory-only resource should not have spec")
+	}
+	if ver.QuerySchema.SpecDescriptor != nil {
+		t.Error("SpecDescriptor should be nil for inventory-only")
+	}
+}
+
+func TestDynamicSchemaActivator_InventoryOnlyActivatesPlatform(t *testing.T) {
+	activator, mux := newActivatorWithPlatform(t)
+	schema := inventoryOnlyNodeSchema()
+
+	id, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	info := mux.ServiceInfo()
+	if _, ok := info["test.fleetshift.v1.NodeService"]; !ok {
+		t.Error("expected extension NodeService")
+	}
+	if _, ok := info["fleetshift.v1.PlatformNodeService"]; !ok {
+		t.Error("expected PlatformNodeService after inventory-only Activate")
+	}
+
+	activator.Deactivate(id)
+
+	info = mux.ServiceInfo()
+	if _, ok := info["test.fleetshift.v1.NodeService"]; ok {
+		t.Error("extension service should be gone after Deactivate")
+	}
+	if _, ok := info["fleetshift.v1.PlatformNodeService"]; ok {
+		t.Error("platform service should be gone after last owner Deactivate")
+	}
+}
+
+func TestDynamicSchemaActivator_ManagedAndInventoryActivatesBoth(t *testing.T) {
+	activator, mux := newActivatorWithPlatform(t)
+	schema := kindaddon.Schema()
+	schema.Inventory = &domain.InventorySchema{}
+
+	id, err := activator.Activate(context.Background(), schema)
+	if err != nil {
+		t.Fatalf("Activate: %v", err)
+	}
+
+	info := mux.ServiceInfo()
+	if _, ok := info["kind.fleetshift.v1.ClusterService"]; !ok {
+		t.Error("expected extension ClusterService")
+	}
+	if _, ok := info["fleetshift.v1.PlatformClusterService"]; !ok {
+		t.Error("expected PlatformClusterService")
+	}
+
+	_, ver, ok := activator.Registry.GetByGRPCServiceName(string(id))
+	if !ok {
+		t.Fatal("registry missing registration")
+	}
+	res := ver.ExtensionServiceDescriptors.Resource
+	if res.Fields().ByName("spec") == nil {
+		t.Error("managed+inventory resource missing spec")
+	}
+	if res.Fields().ByName("local_labels") == nil {
+		t.Error("managed+inventory resource missing local_labels")
+	}
+	if ver.QuerySchema.SpecDescriptor == nil {
+		t.Error("SpecDescriptor should be set when management is present")
+	}
+}
+
+func TestDynamicSchemaActivator_NeitherCapabilityReturnsError(t *testing.T) {
+	activator, _ := newActivator(t)
+	schema := domain.ExtensionResourceSchema{
+		ResourceType: "test.fleetshift.io/Orphan",
+		ProtoPackage: "test.fleetshift.v1",
+		Version:      "v1",
+		CollectionID: "orphans",
+		Singular:     "Orphan",
+		Plural:       "Orphans",
+	}
+	_, err := activator.Activate(context.Background(), schema)
+	if err == nil {
+		t.Fatal("expected error when schema has neither management nor inventory")
 	}
 }
 
@@ -342,15 +497,15 @@ func TestSchemaContentHash_Deterministic(t *testing.T) {
 		ProtoFiles: map[string]string{"a.proto": "syntax=\"proto3\";", "b.proto": "message B {}"},
 	}
 
-	h1 := managedresource.SchemaContentHash(s)
-	h2 := managedresource.SchemaContentHash(s)
+	h1 := extensionresource.SchemaContentHash(s)
+	h2 := extensionresource.SchemaContentHash(s)
 	if h1 != h2 {
 		t.Fatalf("non-deterministic: %s vs %s", h1, h2)
 	}
 
 	s2 := s
 	s2.Management = &domain.ManagementSchema{SpecMessage: "ClusterSpecV2"}
-	h3 := managedresource.SchemaContentHash(s2)
+	h3 := extensionresource.SchemaContentHash(s2)
 	if h1 == h3 {
 		t.Fatal("expected different hash for different SpecMessage")
 	}
@@ -613,7 +768,7 @@ func TestDynamicSchemaActivator_PackageRenameSameHTTPPrefix(t *testing.T) {
 const widgetTargetType domain.TargetType = "widget-target"
 
 type activatorResourceEnv struct {
-	activator *managedresource.DynamicSchemaActivator
+	activator *extensionresource.DynamicSchemaActivator
 	conn      *grpc.ClientConn
 	typeSvc   *application.ExtensionResourceTypeService
 }
@@ -697,13 +852,13 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 	}
 
 	return activatorResourceEnv{
-		activator: &managedresource.DynamicSchemaActivator{
+		activator: &extensionresource.DynamicSchemaActivator{
 			GRPCMux: grpcMux,
-			Deps: managedresource.Deps{
+			Deps: extensionresource.Deps{
 				Resources: resourceSvc,
 				Validator: validator,
 			},
-			Registry: managedresource.NewActiveResourceRegistry(),
+			Registry: extensionresource.NewActiveResourceRegistry(),
 		},
 		conn:    conn,
 		typeSvc: application.NewExtensionResourceTypeService(store),
@@ -714,7 +869,7 @@ func newActivatorWithResources(t *testing.T) activatorResourceEnv {
 // descriptors needed to construct dynamic gRPC messages. This is
 // separate from the activator (which does its own compilation) — it
 // just gives the test access to the message descriptors.
-func widgetDescriptors(t *testing.T, schema domain.ExtensionResourceSchema) *managedresource.ServiceDescriptors {
+func widgetDescriptors(t *testing.T, schema domain.ExtensionResourceSchema) *extensionresource.ExtensionServiceDescriptors {
 	t.Helper()
 	if schema.Management == nil {
 		t.Fatal("widgetDescriptors requires a schema with Management")
@@ -733,20 +888,24 @@ func widgetDescriptors(t *testing.T, schema domain.ExtensionResourceSchema) *man
 	if err != nil {
 		t.Fatalf("CompileInline: %v", err)
 	}
-	descs, err := managedresource.BuildServiceDescriptors(&managedresource.ResourceTypeConfig{
+	descs, err := extensionresource.BuildExtensionServiceDescriptors(&extensionresource.ResourceTypeConfig{
 		CollectionConfig: dynamicapi.CollectionConfig{
 			Version:      schema.Version,
 			CollectionID: schema.CollectionID,
 			Singular:     schema.Singular,
 			Plural:       schema.Plural,
 		},
-		ResourceType:   schema.ResourceType,
-		ProtoPackage:   schema.ProtoPackage,
-		SpecMessage:    protoreflect.FullName(schema.Management.SpecMessage),
-		SpecDescriptor: specDesc.Message,
+		ResourceType: schema.ResourceType,
+		ProtoPackage: schema.ProtoPackage,
+		Capabilities: extensionresource.ResourceCapabilities{
+			Management: &extensionresource.ManagementCapabilityConfig{
+				SpecMessage:    protoreflect.FullName(schema.Management.SpecMessage),
+				SpecDescriptor: specDesc.Message,
+			},
+		},
 	}, specDesc.Message)
 	if err != nil {
-		t.Fatalf("BuildServiceDescriptors: %v", err)
+		t.Fatalf("BuildExtensionServiceDescriptors: %v", err)
 	}
 	return descs
 }
@@ -880,7 +1039,7 @@ message WidgetSpec {
 // newActivatorWithPlatform creates an activator wired with a real
 // PlatformResourceService backed by an in-memory SQLite store. This is
 // the minimal setup needed for the platform refcounting code path.
-func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
+func newActivatorWithPlatform(t *testing.T) (*extensionresource.DynamicSchemaActivator, *dynamicapi.DynamicServiceMux) {
 	t.Helper()
 	mux := dynamicapi.NewDynamicServiceMux()
 	validator, err := protovalidate.New()
@@ -889,11 +1048,11 @@ func newActivatorWithPlatform(t *testing.T) (*managedresource.DynamicSchemaActiv
 	}
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
-	return &managedresource.DynamicSchemaActivator{
+	return &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
-		Deps:         managedresource.Deps{Validator: validator},
+		Deps:         extensionresource.Deps{Validator: validator},
 		PlatformDeps: platformresource.Deps{Resources: application.NewPlatformResourceService(store)},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}, mux
 }
 
@@ -1054,12 +1213,12 @@ func TestPlatformReflection(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
 
-	activator := &managedresource.DynamicSchemaActivator{
+	activator := &extensionresource.DynamicSchemaActivator{
 		GRPCMux:      mux,
 		FileRegistry: fileReg,
-		Deps:         managedresource.Deps{Validator: validator},
+		Deps:         extensionresource.Deps{Validator: validator},
 		PlatformDeps: platformresource.Deps{Resources: application.NewPlatformResourceService(store)},
-		Registry:     managedresource.NewActiveResourceRegistry(),
+		Registry:     extensionresource.NewActiveResourceRegistry(),
 	}
 
 	schema := kindaddon.Schema()
@@ -1084,7 +1243,7 @@ func TestPlatformReflection(t *testing.T) {
 	}
 }
 
-var _ application.SchemaActivator = (*managedresource.DynamicSchemaActivator)(nil)
+var _ application.SchemaActivator = (*extensionresource.DynamicSchemaActivator)(nil)
 
 // ---------------------------------------------------------------------------
 // Platform version selection tests
@@ -1118,7 +1277,7 @@ func TestPlatformHTTPVersionIsFixed(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 type activatorPlatformResourceEnv struct {
-	activator *managedresource.DynamicSchemaActivator
+	activator *extensionresource.DynamicSchemaActivator
 	conn      *grpc.ClientConn
 	typeSvc   *application.ExtensionResourceTypeService
 	store     domain.Store
@@ -1205,16 +1364,16 @@ func newActivatorWithResourcesAndPlatform(t *testing.T) activatorPlatformResourc
 	}
 
 	return activatorPlatformResourceEnv{
-		activator: &managedresource.DynamicSchemaActivator{
+		activator: &extensionresource.DynamicSchemaActivator{
 			GRPCMux: grpcMux,
-			Deps: managedresource.Deps{
+			Deps: extensionresource.Deps{
 				Resources: resourceSvc,
 				Validator: validator,
 			},
 			PlatformDeps: platformresource.Deps{
 				Resources: platformResourceSvc,
 			},
-			Registry: managedresource.NewActiveResourceRegistry(),
+			Registry: extensionresource.NewActiveResourceRegistry(),
 		},
 		conn:    conn,
 		typeSvc: application.NewExtensionResourceTypeService(store),
@@ -1265,7 +1424,7 @@ func platformWidgetDescs(t *testing.T) *platformresource.ServiceDescriptors {
 // createWidgetViaExtension sends a CreateWidget gRPC request through the
 // extension service and returns the extension descriptors for follow-up
 // requests (e.g. delete).
-func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.ClientConn, schema domain.ExtensionResourceSchema, id string) *managedresource.ServiceDescriptors {
+func createWidgetViaExtension(t *testing.T, ctx context.Context, conn *grpc.ClientConn, schema domain.ExtensionResourceSchema, id string) *extensionresource.ExtensionServiceDescriptors {
 	t.Helper()
 	descs := widgetDescriptors(t, schema)
 

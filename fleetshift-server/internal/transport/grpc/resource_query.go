@@ -9,14 +9,14 @@ import (
 	pb "github.com/fleetshift/fleetshift-poc/fleetshift-server/gen/fleetshift/v1"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 // ResourceQueryServer implements [pb.ResourceQueryServiceServer].
 type ResourceQueryServer struct {
 	pb.UnimplementedResourceQueryServiceServer
 	Queries  *application.ResourceQueryService
-	Registry *managedresource.ActiveResourceRegistry
+	Registry *extensionresource.ActiveResourceRegistry
 }
 
 func (s *ResourceQueryServer) QueryResources(ctx context.Context, req *pb.QueryResourcesRequest) (*pb.QueryResourcesResponse, error) {
@@ -59,12 +59,12 @@ func (s *ResourceQueryServer) projectRow(row domain.QueryResourceResult) (*pb.Re
 			"resource type %q is not activated; cannot project query result body", row.ResourceType)
 	}
 	ver, ok := active.Versions[active.DefaultVersion]
-	if !ok || ver.ServiceDescriptors == nil {
+	if !ok || ver.ExtensionServiceDescriptors == nil {
 		return nil, status.Errorf(codes.FailedPrecondition,
 			"resource type %q has no activated service descriptors", row.ResourceType)
 	}
 
-	body, err := managedresource.ViewToStruct(ver.ServiceDescriptors, *row.Extension)
+	body, err := extensionresource.ViewToStruct(ver.ExtensionServiceDescriptors, ver.Config, *row.Extension)
 	if err != nil {
 		return nil, status.Errorf(codes.Internal, "project resource body: %v", err)
 	}

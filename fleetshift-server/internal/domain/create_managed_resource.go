@@ -16,6 +16,7 @@ type CreateManagedResourceInput struct {
 	ResourceType ResourceType
 	Name         ResourceName
 	Spec         json.RawMessage
+	Labels       map[string]string
 	TypeDef      ExtensionResourceType
 	Provenance   *Provenance
 	Auth         DeliveryAuth
@@ -68,6 +69,7 @@ func (s *CreateManagedResourceWorkflowSpec) PersistManagedResource() Activity[Cr
 		// Create the extension resource with managed state.
 		er := NewExtensionResource(NewExtensionResourceUID(), in.ResourceType, in.Name, now,
 			WithManagedState(fID),
+			WithExtensionLabels(in.Labels),
 		)
 		intent, err := er.RecordIntent(in.Spec, now)
 		if err != nil {

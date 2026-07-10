@@ -1,4 +1,4 @@
-package managedresource_test
+package extensionresource_test
 
 import (
 	"context"
@@ -29,20 +29,20 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/memworkflow"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/dynamicapi"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 )
 
 // buildClusterService creates a RegisteredService backed only by the
 // proto compiler and a validator. The handlers will panic if invoked
 // because the Resources dependency is nil — use buildFullClusterService
 // for tests that invoke actual CRUD operations through the mux.
-func buildClusterService(t *testing.T) *managedresource.RegisteredService {
+func buildClusterService(t *testing.T) *extensionresource.RegisteredService {
 	t.Helper()
 	validator, err := protovalidate.New()
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
 	}
-	svc, err := managedresource.Build(clusterConfig(t), managedresource.Deps{Validator: validator})
+	svc, err := extensionresource.Build(clusterConfig(t), extensionresource.Deps{Validator: validator})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
@@ -56,7 +56,7 @@ func buildClusterService(t *testing.T) *managedresource.RegisteredService {
 // Each call within the same test reuses the same database (keyed by
 // t.Name()). Use buildFullClusterServiceN when you need multiple
 // independent instances in one test (e.g. Replace scenarios).
-func buildFullClusterService(t *testing.T) *managedresource.RegisteredService {
+func buildFullClusterService(t *testing.T) *extensionresource.RegisteredService {
 	t.Helper()
 	return buildFullClusterServiceN(t, 0)
 }
@@ -65,7 +65,7 @@ func buildFullClusterService(t *testing.T) *managedresource.RegisteredService {
 // sequence number to create a distinct in-memory database per call. This
 // allows tests that need multiple independent services (e.g. Replace)
 // within a single test function.
-func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredService {
+func buildFullClusterServiceN(t *testing.T, n int) *extensionresource.RegisteredService {
 	t.Helper()
 
 	dsn := fmt.Sprintf("file:%s_%d?mode=memory&cache=shared", t.Name(), n)
@@ -142,7 +142,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *managedresource.RegisteredSe
 		t.Fatalf("protovalidate.New: %v", err)
 	}
 
-	svc, err := managedresource.Build(clusterConfig(t), managedresource.Deps{
+	svc, err := extensionresource.Build(clusterConfig(t), extensionresource.Deps{
 		Resources: managedResourceSvc, Validator: validator,
 	})
 	if err != nil {
@@ -178,7 +178,7 @@ func dialMux(t *testing.T, mux *dynamicapi.DynamicServiceMux, opts ...grpc.Serve
 
 // createClusterRequest builds a valid CreateCluster request from
 // the service's dynamic message descriptors.
-func createClusterRequest(svc *managedresource.RegisteredService, id string) *dynamicpb.Message {
+func createClusterRequest(svc *extensionresource.RegisteredService, id string) *dynamicpb.Message {
 	req := dynamicpb.NewMessage(svc.Descriptors.CreateRequest)
 	req.Set(svc.Descriptors.CreateRequest.Fields().ByNumber(1), protoreflect.ValueOfString(id))
 
@@ -296,8 +296,8 @@ func TestDynamicMux_ServiceInfo(t *testing.T) {
 	if !ok {
 		t.Fatal("ServiceInfo missing kind.fleetshift.v1.ClusterService")
 	}
-	if len(si.Methods) != 5 {
-		t.Errorf("method count = %d, want 5", len(si.Methods))
+	if len(si.Methods) != 6 {
+		t.Errorf("method count = %d, want 6", len(si.Methods))
 	}
 
 	methodNames := make(map[string]bool)
@@ -441,7 +441,7 @@ func TestDynamicMux_StreamInterceptorFires(t *testing.T) {
 // registered via a DynamicServiceMux and returns the listener address
 // and a client connection to it. The DynamicServiceMux is also
 // returned so callers can replace the service for swap tests.
-func serveGRPCOverTCP(t *testing.T, svc *managedresource.RegisteredService) (string, *grpc.ClientConn, *dynamicapi.DynamicServiceMux) {
+func serveGRPCOverTCP(t *testing.T, svc *extensionresource.RegisteredService) (string, *grpc.ClientConn, *dynamicapi.DynamicServiceMux) {
 	t.Helper()
 	grpcMux := dynamicapi.NewDynamicServiceMux()
 	if err := grpcMux.RegisterDesc(svc.Desc); err != nil {
@@ -479,17 +479,17 @@ func dummyGRPCConn(t *testing.T) *grpc.ClientConn {
 // registerHTTPService is a test helper that inlines the old
 // DynamicHTTPMux.Register convenience that was removed when the mux
 // moved to the dynamicapi leaf package.
-func registerHTTPService(httpMux *dynamicapi.DynamicHTTPMux, svc *managedresource.RegisteredService) error {
+func registerHTTPService(httpMux *dynamicapi.DynamicHTTPMux, svc *extensionresource.RegisteredService) error {
 	prefix := svc.Config.CanonicalHTTPPrefix()
-	handler := managedresource.BuildHTTPHandler(svc, httpMux.Conn(), prefix)
+	handler := extensionresource.BuildHTTPHandler(svc, httpMux.Conn(), prefix)
 	return httpMux.RegisterPrefixHandler(prefix, handler)
 }
 
 // replaceHTTPService is a test helper that inlines the old
 // DynamicHTTPMux.Replace convenience.
-func replaceHTTPService(httpMux *dynamicapi.DynamicHTTPMux, svc *managedresource.RegisteredService) {
+func replaceHTTPService(httpMux *dynamicapi.DynamicHTTPMux, svc *extensionresource.RegisteredService) {
 	prefix := svc.Config.CanonicalHTTPPrefix()
-	handler := managedresource.BuildHTTPHandler(svc, httpMux.Conn(), prefix)
+	handler := extensionresource.BuildHTTPHandler(svc, httpMux.Conn(), prefix)
 	httpMux.ReplacePrefixHandler(prefix, handler)
 }
 
@@ -606,11 +606,11 @@ func TestDynamicHTTPMux_KeyedByFullPrefix(t *testing.T) {
 	if err != nil {
 		t.Fatalf("protovalidate.New: %v", err)
 	}
-	kindSvc, err := managedresource.Build(kindCfg, managedresource.Deps{Validator: validator})
+	kindSvc, err := extensionresource.Build(kindCfg, extensionresource.Deps{Validator: validator})
 	if err != nil {
 		t.Fatalf("Build kind: %v", err)
 	}
-	gcpSvc, err := managedresource.Build(gcpCfg, managedresource.Deps{Validator: validator})
+	gcpSvc, err := extensionresource.Build(gcpCfg, extensionresource.Deps{Validator: validator})
 	if err != nil {
 		t.Fatalf("Build gcp: %v", err)
 	}
@@ -698,7 +698,7 @@ func TestDynamicHTTPMux_ReplaceAddsIfAbsent(t *testing.T) {
 // interceptor authenticates when an "authorization" metadata value is
 // present. The dynamic mux dispatches through [grpc.UnknownServiceHandler]
 // which fires stream interceptors, matching production wiring.
-func serveGRPCOverTCPWithAuth(t *testing.T, svc *managedresource.RegisteredService) *grpc.ClientConn {
+func serveGRPCOverTCPWithAuth(t *testing.T, svc *extensionresource.RegisteredService) *grpc.ClientConn {
 	t.Helper()
 	grpcMux := dynamicapi.NewDynamicServiceMux()
 	if err := grpcMux.RegisterDesc(svc.Desc); err != nil {

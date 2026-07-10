@@ -24,7 +24,7 @@ const APIVersion = "v1"
 const ServiceName = "fleetshift.io"
 
 // Config describes a platform-canonical resource service. Unlike
-// extension [managedresource.ResourceTypeConfig] (which is
+// extension [extensionresource.ResourceTypeConfig] (which is
 // extension-specific), the platform config uses the fixed service name
 // "fleetshift.io", proto package "fleetshift.v1", and platform API
 // version [APIVersion]. It only needs the [dynamicapi.CollectionConfig]

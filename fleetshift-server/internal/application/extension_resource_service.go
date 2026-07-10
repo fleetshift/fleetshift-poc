@@ -70,6 +70,7 @@ type CreateExtensionResourceInput struct {
 	ResourceType  domain.ResourceType
 	Name          domain.ResourceName
 	Spec          json.RawMessage
+	Labels        map[string]string
 	Provenance    *domain.Provenance
 	UserSignature []byte
 	ValidUntil    time.Time
@@ -147,6 +148,7 @@ func (s *ExtensionResourceService) Create(ctx context.Context, in CreateExtensio
 		ResourceType: in.ResourceType,
 		Name:         in.Name,
 		Spec:         in.Spec,
+		Labels:       in.Labels,
 		TypeDef:      typeDef,
 		Provenance:   prov,
 		Auth:         auth,
@@ -156,6 +158,70 @@ func (s *ExtensionResourceService) Create(ctx context.Context, in CreateExtensio
 	}
 
 	return exec.AwaitResult(ctx)
+}
+
+// UpdateExtensionResourceLabelsInput carries the fields needed to
+// replace extension resource labels.
+type UpdateExtensionResourceLabelsInput struct {
+	ResourceType domain.ResourceType
+	Name         domain.ResourceName
+	Labels       map[string]string
+	// Etag is an optional optimistic-concurrency precondition. When
+	// non-empty it must match the current view etag or the update
+	// fails with [domain.ErrStaleGeneration].
+	Etag domain.Etag
+}
+
+// UpdateLabels replaces the labels on a management-capable extension
+// resource. Inventory-only types reject the write with
+// [domain.ErrInvalidArgument].
+func (s *ExtensionResourceService) UpdateLabels(ctx context.Context, in UpdateExtensionResourceLabelsInput) (domain.ExtensionResourceView, error) {
+	tx, err := s.store.Begin(ctx)
+	if err != nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback()
+
+	typeDef, err := tx.ExtensionResources().GetType(ctx, in.ResourceType)
+	if err != nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf("lookup type %q: %w", in.ResourceType, err)
+	}
+	if typeDef.Management() == nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf(
+			"%w: type %q has no management metadata; cannot update labels",
+			domain.ErrInvalidArgument, in.ResourceType)
+	}
+
+	fullName := in.ResourceType.FullName(in.Name)
+	view, err := tx.ExtensionResources().GetView(ctx, fullName)
+	if err != nil {
+		return domain.ExtensionResourceView{}, err
+	}
+	if in.Etag != "" && in.Etag != view.Etag() {
+		return domain.ExtensionResourceView{}, fmt.Errorf(
+			"%w: etag mismatch (client sent %q, current is %q)",
+			domain.ErrStaleGeneration, in.Etag, view.Etag())
+	}
+
+	er := view.Resource
+	er.SetLabels(in.Labels, s.now())
+	if err := tx.ExtensionResources().Update(ctx, &er); err != nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf("update labels: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf("commit: %w", err)
+	}
+
+	tx2, err := s.store.BeginReadOnly(ctx)
+	if err != nil {
+		return domain.ExtensionResourceView{}, fmt.Errorf("begin read tx: %w", err)
+	}
+	defer tx2.Rollback()
+	out, err := tx2.ExtensionResources().GetView(ctx, fullName)
+	if err != nil {
+		return domain.ExtensionResourceView{}, err
+	}
+	return out, tx2.Commit()
 }
 
 // Get retrieves an extension resource view by type and name.

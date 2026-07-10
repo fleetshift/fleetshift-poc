@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"hash"
+	"slices"
 )
 
 // Etag returns a weak domain-state concurrency token (RFC 9110 Section
@@ -33,6 +34,7 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 	hashString(h, string(v.Resource.resourceType))
 	hashString(h, string(v.Resource.name))
 	hashString(h, v.Resource.uid.String())
+	hashStringStringMap(h, v.Resource.labels)
 	if v.Resource.managed != nil {
 		binary.Write(h, binary.BigEndian, int64(v.Resource.managed.currentVersion))
 	}
@@ -40,7 +42,16 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 		binary.Write(h, binary.BigEndian, int64(v.Intent.Version))
 		hashBytes(h, v.Intent.Spec)
 	}
+	// TODO: If the capability is no longer active, we should either:
+	// - Not return this from repository queries at all (ideal)
+	// - Make etag type-aware to avoid etag changing for invisible reasons
+	// (the data won't be returned at the transport layer,
+	// so if considered for etag still, it can be surprising)
 	if v.Resource.inventory != nil {
+		// Wire local_labels / index_update_time / local_update_time /
+		// conditions / observation — all API-visible when inventory
+		// capability is declared.
+		hashStringStringMap(h, v.Resource.inventory.labels)
 		if v.Resource.inventory.observation != nil {
 			hashBytes(h, *v.Resource.inventory.observation)
 		}
@@ -52,6 +63,7 @@ func hashExtensionResourceFields(h hash.Hash, v ExtensionResourceView) {
 			hashString(h, c.message)
 		}
 		binary.Write(h, binary.BigEndian, v.Resource.inventory.observedAt.UnixNano())
+		binary.Write(h, binary.BigEndian, v.Resource.inventory.updatedAt.UnixNano())
 	}
 	hashAliases(h, v.Resource.reportedAliases)
 }
@@ -91,6 +103,24 @@ func hashAliases(h hash.Hash, aliases AliasSet) {
 		hashString(h, string(alias.Namespace()))
 		hashString(h, string(alias.Key()))
 		hashString(h, string(alias.Value()))
+	}
+}
+
+// hashStringStringMap writes map entries in sorted key order so etag
+// computation is independent of Go map iteration order.
+func hashStringStringMap(h hash.Hash, m map[string]string) {
+	binary.Write(h, binary.BigEndian, int64(len(m)))
+	if len(m) == 0 {
+		return
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	slices.Sort(keys)
+	for _, k := range keys {
+		hashString(h, k)
+		hashString(h, m[k])
 	}
 }
 

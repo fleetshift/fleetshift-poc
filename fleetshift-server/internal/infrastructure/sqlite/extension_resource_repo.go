@@ -65,6 +65,42 @@ func (r *ExtensionResourceRepo) CreateType(ctx context.Context, def domain.Exten
 	return nil
 }
 
+func (r *ExtensionResourceRepo) UpdateType(ctx context.Context, def domain.ExtensionResourceType) error {
+	snap := def.Snapshot()
+
+	var mgmtJSON sql.NullString
+	if snap.Management != nil {
+		mt, _ := domain.NewManagementType(snap.Management.Relation, snap.Management.Signature)
+		b, err := json.Marshal(mt)
+		if err != nil {
+			return fmt.Errorf("marshal management: %w", err)
+		}
+		mgmtJSON = sql.NullString{String: string(b), Valid: true}
+	}
+
+	var invJSON sql.NullString
+	if snap.Inventory != nil {
+		invJSON = sql.NullString{String: "{}", Valid: true}
+	}
+
+	res, err := r.DB.ExecContext(ctx,
+		`UPDATE extension_resource_types
+		 SET management = ?, inventory = ?, updated_at = ?
+		 WHERE service_name = ? AND type_name = ?`,
+		mgmtJSON,
+		invJSON,
+		snap.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		string(snap.ResourceType.ServiceName()), snap.ResourceType.TypeName())
+	if err != nil {
+		return fmt.Errorf("update extension resource type: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("%w: extension resource type %q", domain.ErrNotFound, snap.ResourceType)
+	}
+	return nil
+}
+
 func (r *ExtensionResourceRepo) GetType(ctx context.Context, rt domain.ResourceType) (domain.ExtensionResourceType, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT service_name, type_name, api_version, collection_id, management, inventory, created_at, updated_at
@@ -165,6 +201,32 @@ func (r *ExtensionResourceRepo) Create(ctx context.Context, er *domain.Extension
 		}
 	}
 
+	return nil
+}
+
+// Update persists mutable extension-resource fields (labels and
+// updated_at) identified by UID.
+func (r *ExtensionResourceRepo) Update(ctx context.Context, er *domain.ExtensionResource) error {
+	s := er.Snapshot()
+
+	labelsJSON, err := json.Marshal(nonNilLabels(s.Labels))
+	if err != nil {
+		return fmt.Errorf("marshal labels: %w", err)
+	}
+
+	res, err := r.DB.ExecContext(ctx,
+		`UPDATE extension_resources SET labels = ?, updated_at = ? WHERE uid = ?`,
+		string(labelsJSON),
+		s.UpdatedAt.UTC().Format(time.RFC3339Nano),
+		s.UID.String(),
+	)
+	if err != nil {
+		return fmt.Errorf("update extension resource: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return fmt.Errorf("extension resource %s: %w", s.UID, domain.ErrNotFound)
+	}
 	return nil
 }
 

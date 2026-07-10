@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
 	"google.golang.org/grpc/test/bufconn"
 	"google.golang.org/protobuf/types/known/structpb"
 
@@ -20,8 +22,8 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/application"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/extensionresource"
 	transportgrpc "github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/grpc"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/transport/managedresource"
 )
 
 // seedManagedCluster describes one managed extension resource to seed
@@ -37,8 +39,8 @@ type seedManagedCluster struct {
 
 type resourceQueryHarness struct {
 	client   pb.ResourceQueryServiceClient
-	registry *managedresource.ActiveResourceRegistry
-	cfg      *managedresource.ResourceTypeConfig
+	registry *extensionresource.ActiveResourceRegistry
+	cfg      *extensionresource.ResourceTypeConfig
 }
 
 // setupResourceQueryHarness activates the kind Cluster type and seeds
@@ -47,27 +49,28 @@ func setupResourceQueryHarness(t *testing.T, seeds []seedManagedCluster) *resour
 	t.Helper()
 
 	db := sqlite.OpenTestDB(t)
-	registry := managedresource.NewActiveResourceRegistry()
+	registry := extensionresource.NewActiveResourceRegistry()
 	store := &sqlite.Store{DB: db, SchemaProvider: registry}
 
 	cfg := kindClusterConfig(t)
-	built, err := managedresource.Build(cfg, managedresource.Deps{})
+	built, err := extensionresource.Build(cfg, extensionresource.Deps{})
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	if err := registry.Register(managedresource.ActiveResourceVersion{
-		APIVersion:         domain.APIVersion(cfg.Version),
-		GRPCServiceName:    cfg.ProtoPackage + "." + cfg.Singular + "Service",
-		HTTPPrefix:         "/apis/" + string(cfg.ResourceType.ServiceName()) + "/" + cfg.Version + "/" + cfg.CollectionID,
-		DescriptorPath:     string(built.Descriptors.File.Path()),
-		ServiceDescriptors: built.Descriptors,
+	if err := registry.Register(extensionresource.ActiveResourceVersion{
+		APIVersion:                  domain.APIVersion(cfg.Version),
+		GRPCServiceName:             cfg.ProtoPackage + "." + cfg.Singular + "Service",
+		HTTPPrefix:                  "/apis/" + string(cfg.ResourceType.ServiceName()) + "/" + cfg.Version + "/" + cfg.CollectionID,
+		DescriptorPath:              string(built.Descriptors.File.Path()),
+		ExtensionServiceDescriptors: built.Descriptors,
+		Config:                      cfg,
 		QuerySchema: domain.ResourceQuerySchema{
 			ResourceType:   cfg.ResourceType,
 			ServiceName:    cfg.ResourceType.ServiceName(),
 			TypeName:       cfg.Singular,
 			APIVersion:     domain.APIVersion(cfg.Version),
 			CollectionName: domain.CollectionName(cfg.CollectionID),
-			SpecDescriptor: cfg.SpecDescriptor,
+			SpecDescriptor: cfg.Capabilities.Management.SpecDescriptor,
 		},
 	}); err != nil {
 		t.Fatalf("Register: %v", err)
@@ -373,9 +376,14 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		if n := queryCount(t, h, filter); n != len(seeds) {
 			t.Fatalf("%s: got %d, want %d", filter, n, len(seeds))
 		}
-		// A type that is not seeded must return empty, not error.
-		if n := queryCount(t, h, `resource_type in ["other.fleetshift.io/Widget"]`); n != 0 {
-			t.Fatalf("unrelated type in-list: got %d, want 0", n)
+		// A type that is not activated must fail closed, not silently
+		// return an empty page that looks like "no matches."
+		_, err := h.client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
+			Scope:  "-",
+			Filter: `resource_type in ["other.fleetshift.io/Widget"]`,
+		})
+		if status.Code(err) != codes.InvalidArgument {
+			t.Fatalf("inactive type in-list: err = %v, want InvalidArgument", err)
 		}
 	})
 	t.Run("envelope_name_in", func(t *testing.T) {
