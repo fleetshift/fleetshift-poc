@@ -230,11 +230,11 @@ func buildResourceMessage(cfg *ResourceTypeConfig, singular, pkg, resourceFQN, s
 		}
 		msg.Field = append(msg.Field,
 			dynamicapi.MessageField("spec", 20, specFullName),
-			int64Field("intent_version", 21),
-			enumField("state", 22, pkg+"."+singular+"."+resourceStateEnumName),
-			boolField("reconciling", 23),
+			dynamicapi.Int64Field("intent_version", 21),
+			dynamicapi.EnumField("state", 22, pkg+"."+singular+"."+resourceStateEnumName),
+			dynamicapi.BoolField("reconciling", 23),
 			dynamicapi.StringField("pause_reason", 24),
-			int64Field("generation", 25),
+			dynamicapi.Int64Field("generation", 25),
 			dynamicapi.MessageField("provenance", 26, "fleetshift.v1.Provenance"),
 			dynamicapi.MessageField("delete_time", 27, "google.protobuf.Timestamp"),
 		)
@@ -283,7 +283,7 @@ func buildCreateRequest(singular, lower, resourceFQN string) *descriptorpb.Descr
 		Field: []*descriptorpb.FieldDescriptorProto{
 			dynamicapi.StringField(lower+"_id", 1),
 			dynamicapi.MessageField(lower, 2, resourceFQN),
-			bytesField("user_signature", 3),
+			dynamicapi.BytesField("user_signature", 3),
 			dynamicapi.MessageField("valid_until", 4, "google.protobuf.Timestamp"),
 		},
 	}
@@ -332,10 +332,10 @@ func buildResumeRequest(singular string) *descriptorpb.DescriptorProto {
 		Name: proto.String("Resume" + singular + "Request"),
 		Field: []*descriptorpb.FieldDescriptorProto{
 			dynamicapi.StringField("name", 1),
-			bytesField("user_signature", 2),
+			dynamicapi.BytesField("user_signature", 2),
 			dynamicapi.MessageField("valid_until", 3, "google.protobuf.Timestamp"),
 			dynamicapi.StringField("etag", 4),
-			int64Field("expected_generation", 5),
+			dynamicapi.Int64Field("expected_generation", 5),
 		},
 	}
 }
@@ -394,49 +394,6 @@ func buildResourceStateEnum(name string) *descriptorpb.EnumDescriptorProto {
 			{Name: proto.String("DELETING"), Number: proto.Int32(3)},
 			{Name: proto.String("FAILED"), Number: proto.Int32(4)},
 		},
-	}
-}
-
-func enumField(name string, number int32, typeName string) *descriptorpb.FieldDescriptorProto {
-	fqn := typeName
-	if !strings.HasPrefix(fqn, ".") {
-		fqn = "." + fqn
-	}
-	return &descriptorpb.FieldDescriptorProto{
-		Name:     proto.String(name),
-		Number:   proto.Int32(number),
-		Type:     descriptorpb.FieldDescriptorProto_TYPE_ENUM.Enum(),
-		TypeName: proto.String(fqn),
-		Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
-
-// --- extension-only field builder helpers ---
-
-func bytesField(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
-
-func int64Field(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_INT64.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
-	}
-}
-
-func boolField(name string, number int32) *descriptorpb.FieldDescriptorProto {
-	return &descriptorpb.FieldDescriptorProto{
-		Name:   proto.String(name),
-		Number: proto.Int32(number),
-		Type:   descriptorpb.FieldDescriptorProto_TYPE_BOOL.Enum(),
-		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
 	}
 }
 

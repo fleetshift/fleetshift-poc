@@ -99,6 +99,51 @@ func Int32Field(name string, number int32) *descriptorpb.FieldDescriptorProto {
 	}
 }
 
+// Int64Field builds a proto3 int64 field descriptor.
+func Int64Field(name string, number int32) *descriptorpb.FieldDescriptorProto {
+	return &descriptorpb.FieldDescriptorProto{
+		Name:   proto.String(name),
+		Number: proto.Int32(number),
+		Type:   descriptorpb.FieldDescriptorProto_TYPE_INT64.Enum(),
+		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+}
+
+// BoolField builds a proto3 bool field descriptor.
+func BoolField(name string, number int32) *descriptorpb.FieldDescriptorProto {
+	return &descriptorpb.FieldDescriptorProto{
+		Name:   proto.String(name),
+		Number: proto.Int32(number),
+		Type:   descriptorpb.FieldDescriptorProto_TYPE_BOOL.Enum(),
+		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+}
+
+// BytesField builds a proto3 bytes field descriptor.
+func BytesField(name string, number int32) *descriptorpb.FieldDescriptorProto {
+	return &descriptorpb.FieldDescriptorProto{
+		Name:   proto.String(name),
+		Number: proto.Int32(number),
+		Type:   descriptorpb.FieldDescriptorProto_TYPE_BYTES.Enum(),
+		Label:  descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+}
+
+// EnumField builds a proto3 enum field descriptor.
+func EnumField(name string, number int32, typeName string) *descriptorpb.FieldDescriptorProto {
+	fqn := typeName
+	if !strings.HasPrefix(fqn, ".") {
+		fqn = "." + fqn
+	}
+	return &descriptorpb.FieldDescriptorProto{
+		Name:     proto.String(name),
+		Number:   proto.Int32(number),
+		Type:     descriptorpb.FieldDescriptorProto_TYPE_ENUM.Enum(),
+		TypeName: proto.String(fqn),
+		Label:    descriptorpb.FieldDescriptorProto_LABEL_OPTIONAL.Enum(),
+	}
+}
+
 // MessageField builds a proto3 message field descriptor.
 func MessageField(name string, number int32, typeName string) *descriptorpb.FieldDescriptorProto {
 	fqn := typeName
