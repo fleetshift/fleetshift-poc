@@ -348,35 +348,25 @@ Whether to support a short-form path for a "default" service context (the platfo
 
 ## Inventory search API
 
-The inventory search API provides cross-cutting fleet-wide discovery and aggregation across all resource shapes.
+The inventory search API provides cross-cutting fleet-wide discovery and aggregation across resource shapes. That surface is `queryResources` — coverage starts with activated extension resources and grows to include platform aggregates and other inventory-held shapes.
+
+`queryResources` returns the same platform-held resource data as typed Get/List for matching hits. Selectivity is in what reporters extract into inventory, not in the query surface being a thinner view of those resources.
 
 ### Shape
 
 A custom GET method on the platform API surface over an arbitrary scope:
 
 ```
-GET /apis/fleetshift.io/v1/{scope}:searchResources?filter={cel_expression}
+GET /apis/fleetshift.io/v1/{scope}:queryResources?filter={cel_expression}
 ```
 
 - **Scope**: a cluster, a workspace, the whole platform, or any other level of the resource hierarchy.
-- **Filter**: a CEL expression for filtering.
+- **Filter**: a CEL expression over the result envelope (identity and resource body).
 - **Pagination**: follows AIP conventions.
 
-If the platform later standardizes a short-form alias for its own API, the same method could also be exposed at `/v1/{scope}:searchResources`.
+If the platform later standardizes a short-form alias for its own API, the same method could also be exposed at `/v1/{scope}:queryResources`.
 
-### Response shape
-
-Responses include:
-
-- Resource identity (full name including service)
-- Common metadata (labels, conditions)
-- A `google.protobuf.Struct` payload for extension-specific fields
-
-The Struct payload avoids unbounded `oneof` / `Any` / type proliferation while still carrying typed data.
-
-### Relationship to typed APIs
-
-Search is for fleet-wide discovery and aggregation. Typed extension APIs are for full-fidelity CRUD. The search index is a projection, not a replacement for the typed APIs.
+See [resource_indexing.md](resource_indexing.md#search-api-shape) for filter/response shape and how coverage expands. For live objects on a target beyond what was reported, use API proxying or addon-specific APIs — not a deeper read of the same platform resources.
 
 ---
 

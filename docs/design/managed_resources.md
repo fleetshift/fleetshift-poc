@@ -341,7 +341,9 @@ CREATE TABLE condition_events (
 );
 ```
 
-Fulfillment / delivery conditions and inventory observed-state `conditions` are separate surfaces. Delivery conditions stay on the fulfillment model; inventory conditions are the inlined `conditions` map on inventory-capable extension resources. Do not merge them for the consumer API.
+Currently, conditions are part of the inventory model (implied by being a managed resource).
+
+TODO: Reconcile between delivery conditions and inventoried conditions? Both are still intended to contribute to the consumer-facing health picture somehow; how they merge (or otherwise compose) is not settled.
 
 ### Inventory
 
@@ -349,7 +351,7 @@ Inventory is the system for all historical observations — a point-in-time repo
 
 Inventory stores per-resource projections keyed by extension resource identity and linked to the platform resource via identity equivalence. Management and inventory are composable type capabilities: inventory-only types declare inventory without management; managed types may also declare inventory and carry observed state on the same extension resource. See [architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md) for the resource identity model and capability axes.
 
-Inventory is a projection, not a literal copy of the source resource. The addon extracts relevant fields, like ACM search collectors extract a subset of K8s fields.
+Inventory is a projection of what the addon extracts from the source resource, not a literal copy of that source (comparable to ACM search collectors extracting a subset of K8s fields). Once reported, those fields are the platform-held resource data — available the same way on typed Get/List and on `queryResources`.
 
 Each inventory item has:
 
@@ -368,40 +370,25 @@ Validated against real cloud APIs: EKS (health issues list), GKE (gRPC-coded con
 
 #### Managed resource API projection
 
-The extension resource consumer API projects from capability-specific sources. Management and inventory fields stay separate on the wire — they are not merged into one ambiguous list.
+The managed resource consumer view projects from several kinds of data. The point of this section is *what* those kinds are and *why* they are separated — not a wire-field catalog.
 
-**Common envelope** (all activated types):
+- **Spec** → versioned intent (`resource_intents`). The user's declared desired state.
+- **Lifecycle state** → Fulfillment (PROVISIONING, ACTIVE, FAILED, DELETING, …). Whether the management / delivery pipeline is progressing, stuck, or done — not "is the workload healthy."
+- **Properties** → inventory projection for this managed resource (when present). Stable generated values (api_url, provider_id, console_url). Written once, rarely change, no history needed. Live on the inventory item because a single Fulfillment can fan out to many objects, each with its own properties.
+- **Observations** → inventory projection for this managed resource (when present). The latest point-in-time report of what the observer saw.
+- **Conditions** → intended to draw from *both* Fulfillment (aggregated from delivery conditions via CEL — always available because every managed resource has a Fulfillment; operational / management view) *and* inventory conditions when a matching inventory projection exists (resource-health signals). Condition types are self-describing; the consumer should not need a separate API just to tell sources apart. **How those sources merge or otherwise compose on the consumer surface is still an open design question** — today's implementation keeps fulfillment lifecycle and inventory observed-state on distinct paths, which is a staging choice, not a rejection of the merge.
 
-- **Identity / etag** → extension resource row (`name`, `uid`, `create_time`, `update_time`, `etag`)
-- **Labels** → extension resource `labels`. User-writable for management-capable types; distinct from reporter `local_labels`.
-
-**Management fields** (when the type declares management):
-
-- **Spec** → `resource_intents` (the version the managed resource tracks). The user's declared intent.
-- **State / reconciling / pause_reason / generation / provenance** → Fulfillment lifecycle. The AIP-compliant management view ("is the delivery pipeline working?").
-
-**Observed-state fields** (when the type declares inventory; inlined, not inventory-prefixed):
-
-- **`local_labels`** → latest inventory report. Labels as seen / claimed by the local observer or source.
-- **`conditions`** → latest inventory conditions map. Resource-health signals ("is the resource itself healthy?"). Not merged with fulfillment lifecycle fields.
-- **`observation`** → latest inventory observation payload.
-- **`local_update_time`** → when the local observer / source last updated this view (AIP-142 `{imperative}_time`).
-- **`index_update_time`** → when the platform inventory store last accepted a report for this resource (disambiguates from resource `update_time`).
-- **Properties** (indexed projection; not yet on the extension wire shape) → stable generated values on the inventory item when present.
+Management and inventory are composable type capabilities: a type may declare either or both. That does not change the data kinds above; it only means observed-state fields appear when inventory is in play, and management fields when management is.
 
 ```
 GET /apis/kind.fleetshift.io/v1/clusters/prod-us-east-1
-  labels:            → extension resource labels (user-writable when managed)
-  spec:              → from resource_intents @current_version (managed resource HEAD)
-  state:             → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
-  local_labels:      → from latest inventory report (if inventory declared)
-  conditions:        → from latest inventory report (if inventory declared)
-  observation:       → from latest inventory report (if inventory declared)
-  local_update_time: → inventory ObservedAt
-  index_update_time: → inventory store UpdatedAt
+  spec:         → from resource_intents @current_version (managed resource HEAD)
+  state:        → from Fulfillment (PROVISIONING/ACTIVE/FAILED/DELETING)
+  properties:   → from inventory item (if present)
+  observations: → from inventory item (if present)
+  conditions:   → from Fulfillment (always) + inventory item (if present)
+                  [composition of these sources: TBD]
 ```
-
-Fulfillment / delivery conditions remain on the management / fulfillment model. Inventory `conditions` are the inlined observed-state map when inventory is declared. Do not collapse the two into one consumer-facing list.
 
 > OPEN QUESTION: Could / should we support managed resources backed by addons with their own state. We know some addons will have their own state (ACS in a relational db, MCOA in prometheus/thanos, ...).
 
@@ -414,7 +401,7 @@ The unique key is `(service_name, resource_name)` — i.e. the full resource nam
 The extension resource is the query entry point, not the Fulfillment. Listing all resources of a type (for example `GET /apis/kind.fleetshift.io/v1/clusters`) is a direct scan on this table, joined to `resource_intents` for the spec and to the Fulfillment for lifecycle state.
 
 
-State is not denormalized — the Fulfillment join is already required for lifecycle state. Inventory observed-state fields come from the latest inventory report when the type declares inventory. Properties remain an index-projection concern until exposed on the extension wire shape.
+State is not denormalized — the Fulfillment join is already required for lifecycle state. Conditions are sourced from both the Fulfillment (always) and a matching inventory item (if present); how those compose for the consumer is still open. Properties and observations come from inventory.
 
 Writes: `INSERT` on create, `UPDATE current_version` on spec change, `UPDATE deleted_at` on delete. Updating `current_version` is a managed resource layer operation; it triggers a corresponding manifest strategy version on the Fulfillment (see [Fulfillment strategy versioning](#fulfillment-strategy-versioning)), but the two version counters are independent.
 
@@ -503,7 +490,7 @@ When an addon [re]connects...
 
 - **Mutable managed_resources table** — replaced by versioned intent
 - **Separate managed resource status table** — observations through inventory
-- **Single Fulfillment field as the sole observation mechanism** — per-object knowledge (properties, observations) lives on inventory items; Fulfillment owns lifecycle state and aggregated delivery conditions; inventory-capable extension resources expose a separate inlined `conditions` map for resource health — do not merge the two for the consumer API
+- **Single Fulfillment field as the sole observation mechanism** — per-object knowledge (properties, observations, resource-health conditions) lives on inventory items; Fulfillment owns lifecycle state and aggregated delivery conditions. How fulfillment/delivery conditions and inventory conditions compose on the consumer surface remains open; they are not meant to stay forever as unrelated APIs.
 - **Per-manifest condition layer on deliveries** — inventory is the per-resource condition system
 - **Three-level condition hierarchy** — two levels sufficient (delivery + Fulfillment)
 - **Multiple intent pointers per Fulfillment** — bundled intent preferred; strategy versioning is per strategy type, not per intent

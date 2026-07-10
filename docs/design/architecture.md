@@ -117,7 +117,7 @@ The organizational model and permission boundary live in [docs/design/architectu
 
 ### Indexing and search
 
-The platform continuously indexes observations from managed targets into a fleet-wide search index. Inventoried resources are extension API resources in their addon's package, linked to platform resource identities through the two-layer API model. The platform owns the indexing infrastructure; target types define what is indexable through schemas and agents.
+The platform continuously indexes observations from managed targets into fleet-wide inventory. Inventoried resources are extension API resources in their addon's package, linked to platform resource identities through the two-layer API model. Schemas and agents define what is extracted and reported; `queryResources` then queries those platform-held resources (the same data as typed Get/List), not a thinner search copy. The platform owns the indexing infrastructure.
 
 The indexing design lives in [docs/design/architecture/resource_indexing.md](architecture/resource_indexing.md). The resource identity model that underpins cross-extension correlation lives in [docs/design/architecture/resource_identity_and_api.md](architecture/resource_identity_and_api.md).
 

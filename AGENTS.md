@@ -25,10 +25,11 @@ The architecture documentation lives in docs/design/ and is the primary source o
 - For gRPC / proto generation and linting, see docs/buf.md
 - For API design conventions (AIP-aligned), see docs/api-design.md
 
-## Cross-cutting concerns
+## Cross-cutting concerns (very important)
 
 - This is a prototype. Don't be afraid to break contracts if it would produce a more ideal design for the task at hand. We'd rather learn and experiment with a potentially better way. There's little value to backwards compatibility for compatibility's sake.
-- _Please never remove comments unless they are truly no longer relevant_ (e.g. a TODO that is now implemented or obsolete). Prefer updating out of date explanations unless new behavior is trivially obvious.
+- _Please don't casually remove comments unless they are truly no longer relevant_ (e.g. a TODO that is now implemented or obsolete, or out of date explanations). Prefer updates to removal, unless behavior is obvious from the code or signature.
+- Keep design documentation up to date, but focused on the design and vision. _Do not overfit design documentation to the code, specific API, or current implementation_. It is a guide for how we intend the implementation to evolve, not a description of its current state. We should update them when, during the course of implementation and planning, we realize that the design and vision itself should change, or has become out of alignment with what we are building in non-temporary ways.
 - Prefer modern stdlib abstractions and utilities where relevant (especially around crypto or low level encoding / decoding)
 - Follow test-driven development. When at all possible, write failing tests **first**, then write the code to make the test pass.
 - See the Taskfile (used w/ `task` cli) for common development tasks like generating proto and building binaries (`task -l` for available tasks)
