@@ -59,6 +59,12 @@ func TestBytesField(t *testing.T) {
 func TestEnumField(t *testing.T) {
 	t.Run("adds leading dot", func(t *testing.T) {
 		f := dynamicapi.EnumField("state", 22, "kind.v1.Cluster.State")
+		if f.GetName() != "state" {
+			t.Errorf("name = %q, want state", f.GetName())
+		}
+		if f.GetNumber() != 22 {
+			t.Errorf("number = %d, want 22", f.GetNumber())
+		}
 		if f.GetType() != descriptorpb.FieldDescriptorProto_TYPE_ENUM {
 			t.Errorf("type = %v, want TYPE_ENUM", f.GetType())
 		}
