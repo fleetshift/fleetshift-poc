@@ -38,12 +38,13 @@ func awaitDone(t *testing.T, ch <-chan domain.DeliveryResult) domain.DeliveryRes
 // Create call (success or failure), enabling deterministic waits for
 // the async delivery goroutine.
 type fakeProvider struct {
-	mu        sync.Mutex
-	clusters  map[string][]byte // name → raw config
-	createErr error
-	logger    log.Logger
-	created   chan string // receives cluster name after each Create; buffered
-	deleted   []string    // tracks deleted cluster names
+	mu          sync.Mutex
+	clusters    map[string][]byte // name → raw config
+	createErr   error
+	logger      log.Logger
+	created     chan string // receives cluster name after each Create; buffered
+	deleted     []string    // tracks deleted cluster names
+	createCalls int
 }
 
 func newFakeProvider() *fakeProvider {
@@ -58,6 +59,9 @@ func (p *fakeProvider) Create(name string, opts ...cluster.CreateOption) error {
 		p.logger.V(0).Infof("Creating cluster %q", name)
 	}
 	defer func() { p.created <- name }()
+	p.mu.Lock()
+	p.createCalls++
+	p.mu.Unlock()
 	if p.createErr != nil {
 		return p.createErr
 	}
@@ -111,6 +115,12 @@ func (p *fakeProvider) deleteCount() int {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return len(p.deleted)
+}
+
+func (p *fakeProvider) createCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.createCalls
 }
 
 func fakeFactory(p *fakeProvider) kind.ClusterProviderFactory {
@@ -186,7 +196,7 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_RejectsExistingCluster(t *testing.T) {
+func TestAgent_Deliver_RejectsUnmanagedExistingCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["dev-cluster"] = nil
 	reporter := newChannelReporter()
@@ -207,14 +217,57 @@ func TestAgent_Deliver_RejectsExistingCluster(t *testing.T) {
 	if result.State != domain.DeliveryStateFailed {
 		t.Errorf("State = %q, want %q", result.State, domain.DeliveryStateFailed)
 	}
-	if !strings.Contains(result.Message, "already exists") {
-		t.Errorf("Message = %q, want already exists", result.Message)
+	if !strings.Contains(result.Message, "not managed") {
+		t.Errorf("Message = %q, want not managed", result.Message)
 	}
 	if provider.deleteCount() != 0 {
 		t.Errorf("Delete called %d times, want 0 (reject, do not recreate)", provider.deleteCount())
 	}
 	if !provider.hasCluster("dev-cluster") {
 		t.Error("expected existing cluster to remain")
+	}
+}
+
+func TestAgent_Deliver_ExistingManagedClusterSkipsCreate(t *testing.T) {
+	provider := newFakeProvider()
+	reporter := newChannelReporter()
+	agent := kind.NewAgent(reporter, fakeFactory(provider))
+
+	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
+	manifests := []domain.Manifest{{
+		ManifestType: kind.ClusterManifestType,
+		Raw:          json.RawMessage(`{"name": "dev-cluster"}`),
+	}}
+
+	if err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
+		t.Fatalf("first Deliver: %v", err)
+	}
+	first := awaitDone(t, reporter.done)
+	if first.State != domain.DeliveryStateDelivered {
+		t.Fatalf("first State = %q, want %q", first.State, domain.DeliveryStateDelivered)
+	}
+	if got := provider.createCount(); got != 1 {
+		t.Fatalf("Create called %d times after first deliver, want 1", got)
+	}
+
+	// At-least-once retry after inflight is cleared: cluster exists but
+	// we already manage it, so create must be skipped and delivery
+	// must still succeed (re-emitting provisioned targets).
+	if err := agent.Deliver(context.Background(), target, "d2:k1", manifests, domain.DeliveryAuth{}, nil, 2); err != nil {
+		t.Fatalf("second Deliver: %v", err)
+	}
+	second := awaitDone(t, reporter.done)
+	if second.State != domain.DeliveryStateDelivered {
+		t.Fatalf("second State = %q, want %q", second.State, domain.DeliveryStateDelivered)
+	}
+	if got := provider.createCount(); got != 1 {
+		t.Fatalf("Create called %d times after retry, want 1 (skip create)", got)
+	}
+	if provider.deleteCount() != 0 {
+		t.Errorf("Delete called %d times, want 0", provider.deleteCount())
+	}
+	if len(second.ProvisionedTargets) != 1 {
+		t.Fatalf("second ProvisionedTargets count = %d, want 1", len(second.ProvisionedTargets))
 	}
 }
 

@@ -96,6 +96,15 @@ type Agent struct {
 	// The platform provides at-least-once delivery; a retry for a
 	// delivery that is already being processed is safely skipped.
 	inflight sync.Map // map[domain.DeliveryID]struct{}
+
+	// managed tracks kind cluster names this agent process has
+	// successfully created (or adopted via a prior deliver). Used so
+	// at-least-once retries skip create instead of failing on the
+	// cluster left by a prior attempt. An existing local cluster that
+	// is not in this set is treated as foreign and rejected rather
+	// than delete+recreated. The set is process-local: after a serve
+	// restart it is empty again (same lifetime as inventory watches).
+	managed sync.Map // map[string]struct{} keyed by kind cluster name
 }
 
 // AgentOption configures an [Agent].
@@ -278,6 +287,7 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 				return
 			}
 			if !exists {
+				a.unmarkManaged(spec.Name)
 				continue
 			}
 			if err := provider.Delete(spec.Name, ""); err != nil {
@@ -286,6 +296,7 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 				})
 				return
 			}
+			a.unmarkManaged(spec.Name)
 		}
 		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
 			State: domain.DeliveryStateDelivered,
@@ -332,40 +343,53 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 // deliverCluster handles a single cluster spec. Returns the output on
 // success and true to continue, or nil and false if the delivery failed
 // (reporter.ReportResult already called).
+//
+// Create is idempotent for clusters this agent already manages: a
+// retry after a successful (or partially successful) prior attempt
+// skips create and continues the ensure path so provisioned targets
+// can be re-emitted. An existing local cluster that this agent does
+// not manage is rejected — we do not delete+recreate foreign clusters.
 func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) (*ClusterOutput, bool) {
 	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, spec.Name)
 	defer probe.End()
 
 	if a.clusterExists(provider, spec.Name) {
-		probe.Error(fmt.Errorf("kind cluster %q already exists", spec.Name))
-		failDelivery(ctx, a.reporter, deliveryID, generation, "kind cluster %q already exists", spec.Name)
-		return nil, false
-	}
+		if !a.isManaged(spec.Name) {
+			probe.Error(fmt.Errorf("kind cluster %q already exists and is not managed by this agent", spec.Name))
+			failDelivery(ctx, a.reporter, deliveryID, generation, "kind cluster %q already exists and is not managed by this agent", spec.Name)
+			return nil, false
+		}
+		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
+			Kind:    domain.DeliveryEventProgress,
+			Message: fmt.Sprintf("Kind cluster %q already managed; skipping create", spec.Name),
+		})
+	} else {
+		rawConfig, source, err := a.resolveConfig(spec, auth)
+		if err != nil {
+			probe.Error(err)
+			failDelivery(ctx, a.reporter, deliveryID, generation, "resolve config for kind cluster %q: %v", spec.Name, err)
+			return nil, false
+		}
 
-	rawConfig, source, err := a.resolveConfig(spec, auth)
-	if err != nil {
-		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, generation, "resolve config for kind cluster %q: %v", spec.Name, err)
-		return nil, false
-	}
+		var issuer domain.IssuerURL
+		var aud domain.Audience
+		if source == ConfigSourceOIDC {
+			issuer = auth.Caller.Issuer
+			aud = auth.Audience[0]
+		}
+		probe.ConfigResolved(source, issuer, aud)
 
-	var issuer domain.IssuerURL
-	var aud domain.Audience
-	if source == ConfigSourceOIDC {
-		issuer = auth.Caller.Issuer
-		aud = auth.Audience[0]
-	}
-	probe.ConfigResolved(source, issuer, aud)
+		var opts []cluster.CreateOption
+		if rawConfig != nil {
+			opts = append(opts, cluster.CreateWithRawConfig(rawConfig))
+		}
 
-	var opts []cluster.CreateOption
-	if rawConfig != nil {
-		opts = append(opts, cluster.CreateWithRawConfig(rawConfig))
-	}
-
-	if err := provider.Create(spec.Name, opts...); err != nil {
-		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, generation, "create kind cluster %q: %v", spec.Name, err)
-		return nil, false
+		if err := provider.Create(spec.Name, opts...); err != nil {
+			probe.Error(err)
+			failDelivery(ctx, a.reporter, deliveryID, generation, "create kind cluster %q: %v", spec.Name, err)
+			return nil, false
+		}
+		a.markManaged(spec.Name)
 	}
 
 	// When KIND_EXPERIMENTAL_DOCKER_NETWORK is set, the agent and kind
@@ -510,6 +534,19 @@ func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {
 		}
 	}
 	return false
+}
+
+func (a *Agent) isManaged(name string) bool {
+	_, ok := a.managed.Load(name)
+	return ok
+}
+
+func (a *Agent) markManaged(name string) {
+	a.managed.Store(name, struct{}{})
+}
+
+func (a *Agent) unmarkManaged(name string) {
+	a.managed.Delete(name)
 }
 
 // clusterExistsErr returns whether the named cluster exists,
