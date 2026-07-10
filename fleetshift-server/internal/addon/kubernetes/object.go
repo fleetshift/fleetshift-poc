@@ -12,18 +12,15 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// AddonID is the [domain.AddonID] for the Kubernetes addon. It also
-// doubles as the service-name prefix every resource type the addon
-// owns must start with, per the platform's addon-ownership rule.
-const AddonID domain.AddonID = "kubernetes.fleetshift.io"
-
 // ObjectResourceType is the single [domain.ResourceType] used to
 // report every watched Kubernetes object, regardless of GVR or kind.
 // One generic type means new CRDs and API versions never require
 // registering a new FleetShift resource type; GVR, kind, namespace,
 // and name are instead carried in the object's resource name, labels,
-// and observation payload.
-const ObjectResourceType domain.ResourceType = "kubernetes.fleetshift.io/Object"
+// and observation payload. Built from [AddonID] rather than a
+// separate literal, so its service-name prefix can never drift from
+// the addon-ownership rule the platform validates against.
+const ObjectResourceType domain.ResourceType = domain.ResourceType(AddonID) + "/Object"
 
 // KubernetesObjectIdentity carries the fields needed to compute a
 // watched Kubernetes object's [domain.ResourceName], query labels, and
