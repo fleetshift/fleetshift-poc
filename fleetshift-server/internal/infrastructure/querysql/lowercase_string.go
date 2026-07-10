@@ -6,11 +6,11 @@ import (
 )
 
 // LowercaseStringCompare returns a [SQLExpr.Compare] hook that binds
-// string equality/inequality literals lowercased. Used for fields
-// whose stored values are lowercase (e.g. fulfillment state) while
-// API responses may expose uppercase spellings (e.g. proto enums).
-// Non-string literals and ordered comparisons fall back to the
-// generic path.
+// string equality/inequality literals lowercased. Use for fields
+// whose domain treats the value as case-insensitive or stores a
+// normalized lowercase form (e.g. fulfillment state), so filter
+// literals match regardless of API spelling case. Non-string
+// literals and ordered comparisons fall back to the generic path.
 func LowercaseStringCompare(column string) func(op ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
 	return func(op ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
 		if op != OpEqual && op != OpNotEqual {
@@ -45,9 +45,9 @@ func LowercaseStringIn(column string) func(values []any, bind func(any) string) 
 }
 
 // LowercaseStringStartsWith returns a [SQLExpr.StartsWith] hook that
-// binds a lowercased, LIKE-escaped prefix pattern. Matches
-// [LowercaseStringCompare] for fields whose stored values are
-// lowercase while API spellings may be uppercase.
+// binds a lowercased, LIKE-escaped prefix pattern. Same domain rule
+// as [LowercaseStringCompare]: case-fold filter literals for fields
+// that are not case-sensitive in the domain.
 func LowercaseStringStartsWith(column string) func(prefix string, bind func(any) string) (string, bool, error) {
 	return func(prefix string, bind func(any) string) (string, bool, error) {
 		pattern := escapeLikePattern(strings.ToLower(prefix)) + "%"

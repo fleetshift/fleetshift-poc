@@ -39,15 +39,18 @@ type QueryResourcesRequest struct {
 	// local_update_time/index_update_time, and guarded
 	// spec/observation). Top-level identity components
 	// (service_name, collection_name, resource_id, and similar) are
-	// not filter fields; use name / resource_type instead. Nested
-	// resource.inventory.* paths are not supported — observed state
-	// is filtered via the inlined resource.* fields above.
+	// not filter fields; use name / resource_type instead. Other
+	// resource.* paths are rejected as unsupported.
 	//
-	// Ordinary string fields (== and startsWith) are case-sensitive
-	// on every backend. resource.state is the exception: comparisons
-	// and startsWith lowercase string literals so API enum spellings
-	// from Get/List ("ACTIVE") match the lowercase values stored on
-	// fulfillments.state ("active").
+	// String filter matching follows the field's domain case
+	// semantics: case-sensitive when the value is normally treated
+	// that way (e.g. names, labels), and case-folded when the domain
+	// normalizes or constrains the value to a case-insensitive form.
+	// resource.state is one such field today — storage is lowercase
+	// while Get/List may expose uppercase API enum spellings
+	// ("ACTIVE") — so == / != / in / startsWith lowercase string
+	// literals to match. Other fields with the same domain rule
+	// should get the same treatment.
 	//
 	// When a [QuerySchemaProvider] is configured, results are limited
 	// to types it lists (see [ResolveQueryResourceTypeScope]). Named

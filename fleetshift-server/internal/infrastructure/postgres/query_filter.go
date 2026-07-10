@@ -119,9 +119,9 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		}
 	case "state":
 		if len(rest) == 0 {
-			// fulfillments.state is stored lowercase; lowercase string
-			// literals so API enum spellings ("ACTIVE") match for
-			// == / != / in / startsWith.
+			// Domain value is case-insensitive / stored lowercase;
+			// fold filter literals so API enum spellings ("ACTIVE")
+			// match for == / != / in / startsWith.
 			return querysql.SQLExpr{
 				SQL:        "f.state",
 				Compare:    querysql.LowercaseStringCompare("f.state"),
@@ -185,13 +185,6 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 		if len(rest) == 0 {
 			return querysql.SQLExpr{SQL: "inv.updated_at"}, nil
 		}
-	case "inventory":
-		// Observed state is filtered via inlined resource.* fields
-		// (local_labels, conditions, observation, ...), not nested
-		// under resource.inventory.
-		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.inventory\"", domain.ErrInvalidArgument)
-	case "effective_labels", "nxt", "aliases", "relationships":
-		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
 }

@@ -300,10 +300,11 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 }
 
 // runCaseSensitivityFilterTests locks the cross-backend case contract:
-// ordinary string fields (== and startsWith) are case-sensitive, while
-// resource.state folds API enum spellings to the lowercase storage form
-// for == / startsWith. SQLite's default LIKE is ASCII-case-insensitive,
-// so these cases catch a backend that forgot case_sensitive_like.
+// filter matching follows each field's domain case semantics —
+// case-sensitive for ordinary identity strings (name), case-folded
+// for domain-normalized values such as resource.state (== /
+// startsWith). SQLite's default LIKE is ASCII-case-insensitive, so
+// these cases catch a backend that forgot case_sensitive_like.
 func runCaseSensitivityFilterTests(t *testing.T, factory Factory) {
 	t.Run("NameEqualityIsCaseSensitive", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
