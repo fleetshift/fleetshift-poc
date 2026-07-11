@@ -263,12 +263,22 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- kubernetes in-process index controller ---
 	//
 	// Constructed before orchestration registration so target lifecycle
-	// hooks can wake/stop the controller. Startup recovery is the
+	// hooks can wake/stop the controller. The child context scopes cancellation
+	// for both the controller and its hosted indexers. Startup recovery is the
 	// controller's own initial reconcile.
 	var targetOutputHooks domain.TargetOutputHooks = domain.NoOpTargetOutputHooks{}
 	var kubeIndexController *kubernetesaddon.InProcessIndexController
+	var kubeIndexControllerCtx context.Context
+	var kubeIndexControllerCancel context.CancelFunc
 	if enabledAddons["kubernetes"] {
-		targetOutputHooks, kubeIndexController = newKubernetesInProcessIndexing(ctx, store, vault, logger)
+		kubeIndexControllerCtx, kubeIndexControllerCancel = context.WithCancel(ctx)
+		defer kubeIndexControllerCancel()
+		targetOutputHooks, kubeIndexController = newKubernetesInProcessIndexing(
+			kubeIndexControllerCtx,
+			store,
+			vault,
+			logger,
+		)
 	}
 
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
@@ -689,10 +699,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}); err != nil {
 			return fmt.Errorf("connect kubernetes addon: %w", err)
 		}
-		if kubeIndexController != nil {
-			go kubeIndexController.Run(ctx)
-			logger.Info("kubernetes in-process index controller started")
-		}
 	}
 
 	if enabledAddons["gcphcp"] {
@@ -718,6 +724,17 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				logger.Error("gcphcp: failed to recover active deliveries", "error", err)
 			}
 		}
+	}
+
+	// All addons are now connected and recovery has been attempted. Track the
+	// controller so every later return cancels and joins it before db.Close.
+	if kubeIndexController != nil {
+		controllerDone := startKubernetesIndexController(
+			kubeIndexControllerCtx,
+			kubeIndexController.Run,
+		)
+		defer stopKubernetesIndexController(kubeIndexControllerCancel, controllerDone)
+		logger.Info("kubernetes in-process index controller started")
 	}
 
 	// --- shutdown ---

@@ -34,6 +34,57 @@ func seedKubernetesObjectType(t *testing.T, store domain.Store) {
 	}
 }
 
+func TestKubernetesIndexControllerLifecycle_CancelsAndJoins(t *testing.T) {
+	controllerCtx, cancelController := context.WithCancel(context.Background())
+	started := make(chan struct{})
+	canceled := make(chan struct{})
+	release := make(chan struct{}, 1)
+	t.Cleanup(func() {
+		cancelController()
+		select {
+		case release <- struct{}{}:
+		default:
+		}
+	})
+
+	done := startKubernetesIndexController(controllerCtx, func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		close(canceled)
+		<-release
+	})
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for controller start")
+	}
+
+	stopReturned := make(chan struct{})
+	go func() {
+		stopKubernetesIndexController(cancelController, done)
+		close(stopReturned)
+	}()
+
+	select {
+	case <-canceled:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for controller cancellation")
+	}
+	select {
+	case <-stopReturned:
+		t.Fatal("stop returned before controller shutdown completed")
+	default:
+	}
+
+	release <- struct{}{}
+	select {
+	case <-stopReturned:
+	case <-time.After(time.Second):
+		t.Fatal("timed out waiting for controller join")
+	}
+}
+
 func TestStoreBackedTargetLister_ListsFromStore(t *testing.T) {
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
@@ -198,16 +249,10 @@ func TestNewKubernetesInProcessIndexing_WiresHooksAndController(t *testing.T) {
 		t.Fatal("expected non-nil controller")
 	}
 
-	// Mirror serve.go: start the controller under the process context.
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		controller.Run(runCtx)
-	}()
-	defer func() {
-		cancelRun()
-		<-done
-	}()
+	// Mirror serve.go: start the controller under its owned child context and
+	// join it before the backing store is closed.
+	done := startKubernetesIndexController(runCtx, controller.Run)
+	defer stopKubernetesIndexController(cancelRun, done)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:   "prod",

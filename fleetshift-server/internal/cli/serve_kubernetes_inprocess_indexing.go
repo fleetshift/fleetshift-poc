@@ -10,6 +10,24 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+// startKubernetesIndexController runs the controller and returns a channel
+// that closes after the controller loop returns.
+func startKubernetesIndexController(ctx context.Context, run func(context.Context)) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		run(ctx)
+	}()
+	return done
+}
+
+// stopKubernetesIndexController cancels the controller and waits for its loop
+// to return after its bounded hosted-indexer shutdown attempt.
+func stopKubernetesIndexController(cancel context.CancelFunc, done <-chan struct{}) {
+	cancel()
+	<-done
+}
+
 // newKubernetesInProcessIndexing wires the Kubernetes in-process index
 // controller, inventory reporter, and target indexed-inventory cleaner
 // for server composition. The returned hooks implement
