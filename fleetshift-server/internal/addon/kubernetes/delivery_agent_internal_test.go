@@ -158,6 +158,9 @@ func TestBuildPlatformRESTConfig(t *testing.T) {
 		if string(cfg.TLSClientConfig.CAData) != "pem-bytes" {
 			t.Fatalf("CAData = %q", cfg.TLSClientConfig.CAData)
 		}
+		if cfg.Timeout != defaultDeliveryClientTimeout {
+			t.Fatalf("Timeout = %v, want %v", cfg.Timeout, defaultDeliveryClientTimeout)
+		}
 	})
 
 	t.Run("missing api server", func(t *testing.T) {
@@ -208,6 +211,9 @@ func TestBuildCallerRESTConfig_IncludesCA(t *testing.T) {
 	}
 	if string(cfg.TLSClientConfig.CAData) != "ca-pem" {
 		t.Fatalf("CAData = %q", cfg.TLSClientConfig.CAData)
+	}
+	if cfg.Timeout != defaultDeliveryClientTimeout {
+		t.Fatalf("Timeout = %v, want %v", cfg.Timeout, defaultDeliveryClientTimeout)
 	}
 }
 

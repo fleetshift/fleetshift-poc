@@ -25,9 +25,8 @@ const (
 	PropServiceAccountTokenRef = "service_account_token_ref"
 )
 
-// defaultKubernetesClientTimeout bounds individual Kubernetes HTTP requests
-// (including discovery ServerPreferredResources, which has no context API).
-const defaultKubernetesClientTimeout = 30 * time.Second
+// defaultDeliveryClientTimeout bounds short-lived delivery apply/delete RPCs.
+const defaultDeliveryClientTimeout = 30 * time.Second
 
 // BuildTargetRESTConfig constructs a [rest.Config] from the target's
 // properties and optional vault-backed service account token. The
@@ -35,8 +34,9 @@ const defaultKubernetesClientTimeout = 30 * time.Second
 // PropServiceAccountTokenRef is set, BearerToken is left empty. Used by
 // in-process indexing, which may start before credentials are present.
 //
-// Timeout is set so discovery and list/watch requests cannot hang forever
-// when the API server is unresponsive.
+// Timeout stays 0 so long-lived watches are not killed by http.Client.Timeout.
+// Discovery applies its own default when Timeout is 0; delivery builders set
+// Timeout separately.
 func BuildTargetRESTConfig(ctx context.Context, vault domain.Vault, target domain.TargetInfo) (*rest.Config, error) {
 	props := target.Properties()
 	host := props[PropAPIServer]
@@ -44,10 +44,7 @@ func BuildTargetRESTConfig(ctx context.Context, vault domain.Vault, target domai
 		return nil, fmt.Errorf("target %q missing property %q", target.ID(), PropAPIServer)
 	}
 
-	cfg := &rest.Config{
-		Host:    host,
-		Timeout: defaultKubernetesClientTimeout,
-	}
+	cfg := &rest.Config{Host: host}
 	if ca := props[PropCACert]; ca != "" {
 		cfg.TLSClientConfig = rest.TLSClientConfig{CAData: []byte(ca)}
 	}
@@ -72,6 +69,7 @@ func BuildPlatformRESTConfig(ctx context.Context, vault domain.Vault, target dom
 		return nil, fmt.Errorf("target %q missing %s or %s for platform delivery",
 			target.ID(), PropServiceAccountToken, PropServiceAccountTokenRef)
 	}
+	cfg.Timeout = defaultDeliveryClientTimeout
 	return cfg, nil
 }
 
@@ -85,6 +83,7 @@ func buildCallerRESTConfig(target domain.TargetInfo, token domain.RawToken) (*re
 	cfg := &rest.Config{
 		Host:        apiServer,
 		BearerToken: string(token),
+		Timeout:     defaultDeliveryClientTimeout,
 	}
 	if ca := target.Properties()[PropCACert]; ca != "" {
 		cfg.TLSClientConfig.CAData = []byte(ca)

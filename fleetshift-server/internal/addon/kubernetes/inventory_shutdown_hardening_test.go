@@ -20,15 +20,15 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-func TestBuildTargetRESTConfig_SetsRequestTimeout(t *testing.T) {
+func TestBuildTargetRESTConfig_NoGlobalTimeout(t *testing.T) {
 	cfg, err := BuildTargetRESTConfig(context.Background(), nil, readyKubeTarget("t1", map[string]string{
 		PropAPIServer: "https://cluster.example:6443",
 	}))
 	if err != nil {
 		t.Fatalf("BuildTargetRESTConfig: %v", err)
 	}
-	if cfg.Timeout != defaultKubernetesClientTimeout {
-		t.Fatalf("Timeout = %v, want %v", cfg.Timeout, defaultKubernetesClientTimeout)
+	if cfg.Timeout != 0 {
+		t.Fatalf("Timeout = %v, want 0 (watches share this config)", cfg.Timeout)
 	}
 }
 
