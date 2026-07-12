@@ -8,10 +8,12 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+// jsonOpts follows the proto3 / AIP JSON mapping (camelCase field names).
+// UseProtoNames must stay false: true would emit proto snake_case names
+// (create_time) instead of the wire JSON names (createTime).
 var jsonOpts = protojson.MarshalOptions{
 	Multiline:         true,
 	Indent:            "  ",
-	UseProtoNames:     true,
 	EmitDefaultValues: true,
 }
 

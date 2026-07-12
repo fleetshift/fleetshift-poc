@@ -70,6 +70,13 @@ func TestPrintResource_JSON(t *testing.T) {
 	if !strings.Contains(got, `"STATE_ACTIVE"`) {
 		t.Errorf("expected state in JSON output: %s", got)
 	}
+	// AIP / proto3 JSON uses camelCase, not proto snake_case field names.
+	if !strings.Contains(got, `"manifestStrategy"`) {
+		t.Errorf("expected camelCase JSON name manifestStrategy: %s", got)
+	}
+	if strings.Contains(got, `"manifest_strategy"`) {
+		t.Errorf("JSON output must not use proto field name manifest_strategy: %s", got)
+	}
 }
 
 func TestPrintResourceList_Table(t *testing.T) {
