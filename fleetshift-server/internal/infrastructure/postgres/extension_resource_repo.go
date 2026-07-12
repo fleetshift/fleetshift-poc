@@ -1070,6 +1070,9 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 // shape as ReplaceInventory), not per-key loops. Incremental
 // UpsertLabels/DeleteLabels and UpsertConditions/DeleteConditions keep
 // the jsonb `-`/`||` path when the corresponding replace is absent.
+// Deletion-only and upsert-only deltas short-circuit the empty side
+// (`|| '{}'` / `- ARRAY[]`) so a one-sided merge does not pay for a
+// no-op JSONB concat or key subtraction on every row.
 //
 // new_inv's INSERT covers resources with no inventory row yet
 // (deleting from an empty `{}` is a no-op; replace uses the provided
@@ -1137,6 +1140,8 @@ updated_inv_labels AS (
 		observation = COALESCE(e.observation, inv.observation),
 		labels = CASE
 			WHEN e.replace_labels IS NOT NULL THEN e.replace_labels
+			WHEN e.upsert_labels = '{}'::jsonb THEN inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))
+			WHEN e.delete_labels = '[]'::jsonb THEN inv.labels || e.upsert_labels
 			ELSE (inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))) || e.upsert_labels
 		END,
 		observed_at = e.observed_at,
@@ -1153,6 +1158,8 @@ updated_inv_conditions AS (
 		observation = COALESCE(e.observation, inv.observation),
 		conditions = CASE
 			WHEN e.replace_conditions IS NOT NULL THEN e.replace_conditions
+			WHEN e.upsert_conditions = '{}'::jsonb THEN inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))
+			WHEN e.delete_conditions = '[]'::jsonb THEN inv.conditions || e.upsert_conditions
 			ELSE (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions
 		END,
 		observed_at = e.observed_at,
@@ -1169,10 +1176,14 @@ updated_inv_labels_conditions AS (
 		observation = COALESCE(e.observation, inv.observation),
 		labels = CASE
 			WHEN e.replace_labels IS NOT NULL THEN e.replace_labels
+			WHEN e.upsert_labels = '{}'::jsonb THEN inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))
+			WHEN e.delete_labels = '[]'::jsonb THEN inv.labels || e.upsert_labels
 			ELSE (inv.labels - ARRAY(SELECT jsonb_array_elements_text(e.delete_labels))) || e.upsert_labels
 		END,
 		conditions = CASE
 			WHEN e.replace_conditions IS NOT NULL THEN e.replace_conditions
+			WHEN e.upsert_conditions = '{}'::jsonb THEN inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))
+			WHEN e.delete_conditions = '[]'::jsonb THEN inv.conditions || e.upsert_conditions
 			ELSE (inv.conditions - ARRAY(SELECT jsonb_array_elements_text(e.delete_conditions))) || e.upsert_conditions
 		END,
 		observed_at = e.observed_at,
@@ -1205,6 +1216,12 @@ new_inv AS (
 		labels = CASE
 			WHEN (SELECT e2.replace_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid) IS NOT NULL
 				THEN (SELECT e2.replace_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid)
+			WHEN (SELECT e2.upsert_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid) = '{}'::jsonb
+				THEN extension_resource_inventory.labels - ARRAY(
+					SELECT jsonb_array_elements_text(e2.delete_labels) FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid
+				)
+			WHEN (SELECT e2.delete_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid) = '[]'::jsonb
+				THEN extension_resource_inventory.labels || (SELECT e2.upsert_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid)
 			ELSE (extension_resource_inventory.labels - ARRAY(
 				SELECT jsonb_array_elements_text(e2.delete_labels) FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid
 			)) || (SELECT e2.upsert_labels FROM er e2 WHERE e2.uid = EXCLUDED.extension_resource_uid)
@@ -1212,6 +1229,12 @@ new_inv AS (
 		conditions = CASE
 			WHEN (SELECT e3.replace_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid) IS NOT NULL
 				THEN (SELECT e3.replace_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid)
+			WHEN (SELECT e3.upsert_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid) = '{}'::jsonb
+				THEN extension_resource_inventory.conditions - ARRAY(
+					SELECT jsonb_array_elements_text(e3.delete_conditions) FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid
+				)
+			WHEN (SELECT e3.delete_conditions FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid) = '[]'::jsonb
+				THEN extension_resource_inventory.conditions || EXCLUDED.conditions
 			ELSE (extension_resource_inventory.conditions - ARRAY(
 				SELECT jsonb_array_elements_text(e3.delete_conditions) FROM er e3 WHERE e3.uid = EXCLUDED.extension_resource_uid
 			)) || EXCLUDED.conditions

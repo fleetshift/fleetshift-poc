@@ -35,7 +35,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	reporter := buildReporter(store, reg)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()))
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
@@ -138,8 +138,8 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("dev-cluster") {
-		t.Error("expected kind cluster 'dev-cluster' to be created by the provider")
+	if !provider.hasCluster("fs--dev-cluster") {
+		t.Error("expected kind cluster 'fs--dev-cluster' to be created by the provider")
 	}
 }
 
@@ -165,7 +165,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	reporter := buildReporter(store, reg)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()))
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
@@ -200,7 +200,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 			ID:                    "kind-local",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Local Kind Provider",
-			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
+			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType, kindaddon.ManagedClusterManifestType},
 		}))
 		_ = tx.Commit()
 	}
@@ -211,7 +211,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Management: &application.CreateExtensionTypeManagementInput{
-			Relation: domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
+			Relation: domain.NewRegisteredSelfTarget("kind-local", kindaddon.ManagedClusterManifestType),
 			Signature: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
 				ContentHash:    []byte("hash"),
@@ -241,11 +241,11 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	awaitFulfillment(ctx, t, store, view.Fulfillment.ID(), domain.FulfillmentStateActive)
 
 	<-provider.created
-	// The kind cluster/container name must be the bare resource ID
-	// ("mr-cluster"), not the full resource name ("clusters/mr-cluster")
+	// The kind/docker cluster name is ownership-encoded as fs--{resourceID}
+	// ("fs--mr-cluster"), not the full resource name ("clusters/mr-cluster")
 	// -- docker/podman reject "/" in container names.
-	if !provider.hasCluster("mr-cluster") {
-		t.Error("expected kind cluster 'mr-cluster' to be created by the provider")
+	if !provider.hasCluster("fs--mr-cluster") {
+		t.Error("expected kind cluster 'fs--mr-cluster' to be created by the provider")
 	}
 }
 

@@ -47,10 +47,15 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 		t.Skipf("container runtime not available: %v", err)
 	}
 
-	const clusterName = "fleetshift-k8s-agent"
+	const resourceID = "fleetshift-k8s-agent"
+	kindName := encodedKindName(resourceID)
 
-	t.Cleanup(func() { _ = checker.Delete(clusterName, "") })
-	_ = checker.Delete(clusterName, "")
+	t.Cleanup(func() {
+		_ = checker.Delete(kindName, "")
+		_ = checker.Delete(resourceID, "")
+	})
+	_ = checker.Delete(kindName, "")
+	_ = checker.Delete(resourceID, "")
 
 	kindReporter := newChannelReporter()
 	kindAgent := kindaddon.NewAgent(kindReporter, func(logger log.Logger) kindaddon.ClusterProvider {
@@ -63,7 +68,7 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "kind-k8s-agent", Type: kindaddon.TargetType})
 	manifests := []domain.Manifest{{
 		ManifestType: kindaddon.ClusterManifestType,
-		Raw:          json.RawMessage(`{"name":"` + clusterName + `"}`),
+		Raw:          json.RawMessage(`{"name":"` + resourceID + `"}`),
 	}}
 
 	err := kindAgent.Deliver(ctx, target, "setup", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -81,7 +86,7 @@ func setupKindCluster(t *testing.T) *kindClusterFixture {
 		t.Fatal("timed out waiting for kind cluster creation")
 	}
 
-	kubeconfig, err := checker.KubeConfig(clusterName, false)
+	kubeconfig, err := checker.KubeConfig(kindName, false)
 	if err != nil {
 		t.Fatalf("KubeConfig: %v", err)
 	}

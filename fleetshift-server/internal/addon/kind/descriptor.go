@@ -51,7 +51,7 @@ func Schema() domain.ExtensionResourceSchema {
 		EntryFile: specProtoPath,
 		Management: &domain.ManagementSchema{
 			SpecMessage: "addons.kind.v1.KindClusterSpec",
-			Relation:    domain.NewRegisteredSelfTarget("kind-local", ClusterManifestType),
+			Relation:    domain.NewRegisteredSelfTarget("kind-local", ManagedClusterManifestType),
 		},
 		Inventory: &domain.InventorySchema{},
 	}

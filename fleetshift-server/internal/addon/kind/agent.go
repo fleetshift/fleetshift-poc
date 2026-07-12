@@ -2,6 +2,28 @@
 // (Kubernetes-in-Docker) clusters. Manifests are interpreted as kind
 // cluster specifications; delivery creates or updates clusters, and
 // removal deletes them.
+//
+// Ownership is encoded in the kind/docker cluster name as fs--{resourceID}
+// so provider.List recovers ownership across agent restarts (including
+// create-then-crash before the generation ConfigMap is written). The
+// last-accepted delivery generation is stored in a ConfigMap inside the
+// cluster and fenced with Get + CheckAndAdvance. Same-generation
+// deliveries ensure without recreate; higher generations delete and
+// recreate, then establish generation on the replacement. A missing
+// ownership ConfigMap on an owned cluster means configuration is
+// unknown: delete without advancing, clear local generation state,
+// stop inventory watch, recreate from the proposed spec, persist
+// generation on the replacement, then ensure. Lower generations
+// (deliver and remove) are rejected as stale. List and KubeConfig
+// errors are terminal (do not treat as absent / succeed). Every
+// CheckAndAdvance that returns GenerationStale fails the delivery.
+//
+// Intentional toy limitations: fs-- is convention not proof of
+// ownership; create-crash before ConfigMap write and tombstone gaps
+// after remove/failed recreation need an external journal; peek-then-
+// recreate has a concurrency gap; higher gen always recreates;
+// persistence failure after recreate leaves a cluster without a
+// ConfigMap, so the next retry recreates again.
 package kind
 
 import (
@@ -9,7 +31,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"slices"
 	"sync"
 	"time"
 
@@ -26,9 +47,16 @@ const TargetType domain.TargetType = "kind"
 // specifications (used in the managed resource system).
 const ClusterResourceType domain.ResourceType = "kind.fleetshift.io/Cluster"
 
-// ClusterManifestType is the [domain.ManifestType] for kind cluster
-// manifests delivered to the kind agent.
+// ClusterManifestType is the [domain.ManifestType] for a bare kind
+// [ClusterSpec] delivered directly to the kind agent (non-managed
+// target deliveries).
 const ClusterManifestType domain.ManifestType = "api.kind.cluster"
+
+// ManagedClusterManifestType is the [domain.ManifestType] for a
+// managed-resource delivery of a kind cluster. The payload is a
+// [domain.ManagedResourceSpecManifest] envelope, not a bare
+// [ClusterSpec].
+const ManagedClusterManifestType domain.ManifestType = "managed.api.kind.cluster"
 
 // ClusterSpec is the canonical spec for a kind cluster resource. It
 // mirrors the proto KindClusterSpec message and is used by both the
@@ -37,10 +65,13 @@ const ClusterManifestType domain.ManifestType = "api.kind.cluster"
 type ClusterSpec struct {
 	// TODO: consider kube go-to-protobuf for addons to define this shape once if they want to support a struct + proto
 	// Or should tooling allow them to go the other way?
+
+	// Name is the platform resource ID (e.g. "demo" for clusters/demo).
+	// The kind/docker cluster name is the ownership-encoded form
+	// fs--{Name}; see encodeKindClusterName.
 	Name string `json:"name"`
 	// ResourceName is the full platform resource name (e.g.
-	// "clusters/foo"). Kind/docker still use [ClusterSpec.Name] (the
-	// bare ID) as the container name.
+	// "clusters/foo"). Used for inventory reporting and display.
 	ResourceName domain.ResourceName `json:"-"`
 	Nodes        []NodeSpec          `json:"nodes,omitempty"`
 	Networking   *NetworkSpec        `json:"networking,omitempty"`
@@ -62,6 +93,14 @@ type NetworkSpec struct {
 
 func (s ClusterSpec) hasClusterConfig() bool {
 	return len(s.Nodes) > 0 || s.Networking != nil
+}
+
+// resourceID returns the platform resource ID used for ownership encoding.
+func (s ClusterSpec) resourceID() domain.ResourceID {
+	if s.ResourceName != "" {
+		return s.ResourceName.ID()
+	}
+	return domain.ResourceID(s.Name)
 }
 
 // ClusterProvider abstracts the kind cluster operations needed by the
@@ -88,6 +127,7 @@ type Agent struct {
 	tokenVerifier   domain.OIDCTokenVerifier
 	oidcConfig      *domain.OIDCConfig
 	inventory       *InventoryWatcher
+	generations     GenerationStore
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -96,15 +136,6 @@ type Agent struct {
 	// The platform provides at-least-once delivery; a retry for a
 	// delivery that is already being processed is safely skipped.
 	inflight sync.Map // map[domain.DeliveryID]struct{}
-
-	// managed tracks kind cluster names this agent process has
-	// successfully created (or adopted via a prior deliver). Used so
-	// at-least-once retries skip create instead of failing on the
-	// cluster left by a prior attempt. An existing local cluster that
-	// is not in this set is treated as foreign and rejected rather
-	// than delete+recreated. The set is process-local: after a serve
-	// restart it is empty again (same lifetime as inventory watches).
-	managed sync.Map // map[string]struct{} keyed by kind cluster name
 }
 
 // AgentOption configures an [Agent].
@@ -141,10 +172,17 @@ func WithInventoryWatcher(w *InventoryWatcher) AgentOption {
 	return func(a *Agent) { a.inventory = w }
 }
 
+// WithGenerationStore overrides the generation high-water store.
+// Tests inject a [MemoryGenerationStore]; production defaults to the
+// Kubernetes ConfigMap implementation.
+func WithGenerationStore(s GenerationStore) AgentOption {
+	return func(a *Agent) { a.generations = s }
+}
+
 // NewAgent returns an Agent. The reporter is the addon's client
 // interface for communicating delivery updates back to the platform.
 func NewAgent(reporter domain.DeliveryReporter, factory ClusterProviderFactory, opts ...AgentOption) *Agent {
-	a := &Agent{reporter: reporter, providerFactory: factory}
+	a := &Agent{reporter: reporter, providerFactory: factory, generations: newKubeGenerationStore()}
 	for _, o := range opts {
 		o(a)
 	}
@@ -156,6 +194,13 @@ func (a *Agent) agentObserver() AgentObserver {
 		return a.observer
 	}
 	return NoOpAgentObserver{}
+}
+
+func (a *Agent) generationStore() GenerationStore {
+	if a.generations != nil {
+		return a.generations
+	}
+	return newKubeGenerationStore()
 }
 
 // Deliver dispatches on manifest resource type. Trust-bundle manifests
@@ -179,8 +224,15 @@ func (a *Agent) Deliver(ctx context.Context, _ domain.TargetInfo, deliveryID dom
 				})
 				return nil
 			}
-		default:
+		case ClusterManifestType, ManagedClusterManifestType:
 			clusterManifests = append(clusterManifests, m)
+		default:
+			a.inflight.Delete(deliveryID)
+			_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				State:   domain.DeliveryStateFailed,
+				Message: fmt.Sprintf("unsupported manifest type %q", m.ManifestType),
+			})
+			return nil
 		}
 	}
 
@@ -259,8 +311,9 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 
 // Remove deletes kind clusters described by the manifests.
 // Clusters that are already gone are silently skipped.
-// Like Deliver, the work runs asynchronously and reports via
-// [domain.DeliveryReporter.ReportResult].
+// Lower-generation removals are rejected when the ownership ConfigMap
+// records a higher generation. Like Deliver, the work runs
+// asynchronously and reports via [domain.DeliveryReporter.ReportResult].
 func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
@@ -273,32 +326,70 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 
 	go func() {
 		defer a.inflight.Delete(deliveryID)
+		ctx := context.Background()
 
 		provider := a.providerFactory(nil)
 		for _, spec := range specs {
-			if a.inventory != nil {
-				a.inventory.Unwatch(spec.ResourceName)
-			}
-			exists, err := a.clusterExistsErr(provider, spec.Name)
+			kindName, err := encodeKindClusterName(spec.resourceID())
 			if err != nil {
-				_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
-					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("check cluster %q existence: %v", spec.Name, err),
-				})
-				return
-			}
-			if !exists {
-				a.unmarkManaged(spec.Name)
-				continue
-			}
-			if err := provider.Delete(spec.Name, ""); err != nil {
-				_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: err.Error(),
 				})
 				return
 			}
-			a.unmarkManaged(spec.Name)
+			listed, err := provider.List()
+			if err != nil {
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("list kind clusters: %v", err),
+				})
+				return
+			}
+			owned, found := findOwnedCluster(listed, spec.resourceID())
+			if !found {
+				// Cluster already gone: drop local generation state and
+				// stop inventory observation if any.
+				a.generationStore().Forget(kindName)
+				if a.inventory != nil {
+					a.inventory.Unwatch(spec.ResourceName)
+				}
+				continue
+			}
+			useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
+			kc, err := provider.KubeConfig(owned, useInternal)
+			if err != nil {
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("get kubeconfig for %q: %v", owned, err),
+				})
+				return
+			}
+			recorded, hasGen, err := a.generationStore().Get(ctx, owned, []byte(kc))
+			if err != nil {
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("read ownership generation for %q: %v", owned, err),
+				})
+				return
+			}
+			if hasGen && generation < recorded {
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+					State:   domain.DeliveryStateFailed,
+					Message: fmt.Sprintf("stale generation %d for kind cluster %q (recorded %d)", generation, owned, recorded),
+				})
+				return
+			}
+			if err := provider.Delete(owned, ""); err != nil {
+				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+					State: domain.DeliveryStateFailed, Message: err.Error(),
+				})
+				return
+			}
+			a.generationStore().Forget(owned)
+			// Unwatch only after confirmed deletion so a stale or failed
+			// remove cannot stop observing a still-running cluster.
+			if a.inventory != nil {
+				a.inventory.Unwatch(spec.ResourceName)
+			}
 		}
-		_ = a.reporter.ReportResult(context.Background(), deliveryID, generation, domain.DeliveryResult{
+		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
 			State: domain.DeliveryStateDelivered,
 		})
 	}()
@@ -308,8 +399,11 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 func (a *Agent) validateManifests(manifests []domain.Manifest) ([]ClusterSpec, error) {
 	specs := make([]ClusterSpec, len(manifests))
 	for i, m := range manifests {
-		spec, err := parseClusterManifest(m.Raw)
+		spec, err := normalizeClusterManifest(m)
 		if err != nil {
+			return nil, err
+		}
+		if _, err := encodeKindClusterName(spec.resourceID()); err != nil {
 			return nil, err
 		}
 		specs[i] = spec
@@ -343,95 +437,255 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 // deliverCluster handles a single cluster spec. Returns the output on
 // success and true to continue, or nil and false if the delivery failed
 // (reporter.ReportResult already called).
-//
-// Create is idempotent for clusters this agent already manages: a
-// retry after a successful (or partially successful) prior attempt
-// skips create and continues the ensure path so provisioned targets
-// can be re-emitted. An existing local cluster that this agent does
-// not manage is rejected — we do not delete+recreate foreign clusters.
 func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) (*ClusterOutput, bool) {
-	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, spec.Name)
+	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, string(spec.resourceID()))
 	defer probe.End()
 
-	if a.clusterExists(provider, spec.Name) {
-		if !a.isManaged(spec.Name) {
-			probe.Error(fmt.Errorf("kind cluster %q already exists and is not managed by this agent", spec.Name))
-			failDelivery(ctx, a.reporter, deliveryID, generation, "kind cluster %q already exists and is not managed by this agent", spec.Name)
+	kindName, err := encodeKindClusterName(spec.resourceID())
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "%v", err)
+		return nil, false
+	}
+
+	listed, err := provider.List()
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "list kind clusters: %v", err)
+		return nil, false
+	}
+
+	owned, found := findOwnedCluster(listed, spec.resourceID())
+	useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
+
+	if !found {
+		if foreignClusterConflict(listed, spec.resourceID()) {
+			probe.Error(fmt.Errorf("kind cluster %q already exists and is not managed by this agent", spec.resourceID()))
+			failDelivery(ctx, a.reporter, deliveryID, generation, "kind cluster %q already exists and is not managed by this agent", spec.resourceID())
 			return nil, false
 		}
+		if !a.createKindCluster(ctx, provider, probe, spec, auth, kindName, deliveryID, generation) {
+			return nil, false
+		}
+		owned = kindName
+		kc, ok := a.requireKubeconfig(ctx, provider, owned, useInternal, deliveryID, generation, probe)
+		if !ok {
+			return nil, false
+		}
+		if !a.advanceOrFail(ctx, owned, kc, generation, deliveryID, probe) {
+			return nil, false
+		}
+		return a.ensureCluster(ctx, provider, spec, auth, owned, kc, deliveryID, generation, probe)
+	}
+
+	kc, ok := a.requireKubeconfig(ctx, provider, owned, useInternal, deliveryID, generation, probe)
+	if !ok {
+		return nil, false
+	}
+
+	recorded, hasGen, err := a.generationStore().Get(ctx, owned, kc)
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "read ownership generation for %q: %v", owned, err)
+		return nil, false
+	}
+
+	if !hasGen {
+		// Missing ConfigMap: configuration is unknown. Recreate without
+		// advancing on the existing cluster (there is nothing to advance).
 		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
-			Message: fmt.Sprintf("Kind cluster %q already managed; skipping create", spec.Name),
+			Message: fmt.Sprintf("Kind cluster %q owned without generation record; configuration unknown, recreating for generation %d", owned, generation),
 		})
-	} else {
-		rawConfig, source, err := a.resolveConfig(spec, auth)
-		if err != nil {
-			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, generation, "resolve config for kind cluster %q: %v", spec.Name, err)
-			return nil, false
-		}
-
-		var issuer domain.IssuerURL
-		var aud domain.Audience
-		if source == ConfigSourceOIDC {
-			issuer = auth.Caller.Issuer
-			aud = auth.Audience[0]
-		}
-		probe.ConfigResolved(source, issuer, aud)
-
-		var opts []cluster.CreateOption
-		if rawConfig != nil {
-			opts = append(opts, cluster.CreateWithRawConfig(rawConfig))
-		}
-
-		if err := provider.Create(spec.Name, opts...); err != nil {
-			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, generation, "create kind cluster %q: %v", spec.Name, err)
-			return nil, false
-		}
-		a.markManaged(spec.Name)
+		return a.recreateOwnedCluster(ctx, provider, probe, spec, auth, owned, kindName, useInternal, deliveryID, generation)
 	}
 
-	// When KIND_EXPERIMENTAL_DOCKER_NETWORK is set, the agent and kind
-	// clusters share a named Docker network — use the internal kubeconfig
-	// (container hostname:6443) for bootstrap ops and stored connection
-	// info. Otherwise, use the external kubeconfig (127.0.0.1:<nodePort>)
-	// which is reachable from the host.
-	useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
-	kc, err := provider.KubeConfig(spec.Name, useInternal)
-	if err != nil {
+	if generation < recorded {
+		probe.Error(fmt.Errorf("stale generation %d for kind cluster %q (recorded %d)", generation, owned, recorded))
+		failDelivery(ctx, a.reporter, deliveryID, generation, "stale generation %d for kind cluster %q (recorded %d)", generation, owned, recorded)
+		return nil, false
+	}
+
+	if generation == recorded {
 		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventWarning,
-			Message: fmt.Sprintf("get kubeconfig for %q: %v", spec.Name, err),
+			Kind:    domain.DeliveryEventProgress,
+			Message: fmt.Sprintf("Kind cluster %q already at generation %d; skipping create", owned, generation),
 		})
-		return nil, true
+		return a.ensureCluster(ctx, provider, spec, auth, owned, kc, deliveryID, generation, probe)
 	}
 
+	// Higher generation: recreate without advancing the old ConfigMap.
+	_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
+		Kind:    domain.DeliveryEventProgress,
+		Message: fmt.Sprintf("Recreating kind cluster %q for generation %d (was %d)", owned, generation, recorded),
+	})
+	return a.recreateOwnedCluster(ctx, provider, probe, spec, auth, owned, kindName, useInternal, deliveryID, generation)
+}
+
+// recreateOwnedCluster deletes an owned cluster without advancing its
+// generation ConfigMap, clears local generation state, stops inventory
+// watch, creates a replacement from the proposed spec, persists the
+// proposed generation on the replacement, then runs ensureCluster.
+// Used for both higher-generation and missing-ConfigMap paths.
+// Failed deletion leaves the existing cluster and inventory watch intact.
+// Create configuration is prepared before deletion so invalid OIDC input,
+// CA-file failure, or config construction failure cannot destroy the
+// existing cluster.
+func (a *Agent) recreateOwnedCluster(
+	ctx context.Context,
+	provider ClusterProvider,
+	probe ClusterDeliverProbe,
+	spec ClusterSpec,
+	auth domain.DeliveryAuth,
+	owned, kindName string,
+	useInternal bool,
+	deliveryID domain.DeliveryID,
+	generation domain.Generation,
+) (*ClusterOutput, bool) {
+	prep, ok := a.prepareKindCreate(ctx, probe, spec, auth, kindName, deliveryID, generation)
+	if !ok {
+		return nil, false
+	}
+
+	if err := provider.Delete(owned, ""); err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "delete kind cluster %q for recreate: %v", owned, err)
+		return nil, false
+	}
+	a.generationStore().Forget(owned)
+	// Drop the old informer so ensureCluster can Watch the replacement
+	// (Watch is a no-op while a watch for the resource name exists).
+	if a.inventory != nil {
+		a.inventory.Unwatch(spec.ResourceName)
+	}
+
+	if !a.createPreparedKindCluster(ctx, provider, probe, kindName, prep, deliveryID, generation) {
+		return nil, false
+	}
+	kc, ok := a.requireKubeconfig(ctx, provider, kindName, useInternal, deliveryID, generation, probe)
+	if !ok {
+		return nil, false
+	}
+	if !a.advanceOrFail(ctx, kindName, kc, generation, deliveryID, probe) {
+		return nil, false
+	}
+	return a.ensureCluster(ctx, provider, spec, auth, kindName, kc, deliveryID, generation, probe)
+}
+
+// preparedKindCreate holds create options resolved before any destructive
+// recreate step.
+type preparedKindCreate struct {
+	opts []cluster.CreateOption
+}
+
+func (a *Agent) prepareKindCreate(
+	ctx context.Context,
+	probe ClusterDeliverProbe,
+	spec ClusterSpec,
+	auth domain.DeliveryAuth,
+	kindName string,
+	deliveryID domain.DeliveryID,
+	generation domain.Generation,
+) (preparedKindCreate, bool) {
+	rawConfig, source, err := a.resolveConfig(spec, auth)
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "resolve config for kind cluster %q: %v", kindName, err)
+		return preparedKindCreate{}, false
+	}
+
+	var issuer domain.IssuerURL
+	var aud domain.Audience
+	if source == ConfigSourceOIDC {
+		issuer = auth.Caller.Issuer
+		aud = auth.Audience[0]
+	}
+	probe.ConfigResolved(source, issuer, aud)
+
+	var opts []cluster.CreateOption
+	if rawConfig != nil {
+		opts = append(opts, cluster.CreateWithRawConfig(rawConfig))
+	}
+	return preparedKindCreate{opts: opts}, true
+}
+
+func (a *Agent) createPreparedKindCluster(
+	ctx context.Context,
+	provider ClusterProvider,
+	probe ClusterDeliverProbe,
+	kindName string,
+	prep preparedKindCreate,
+	deliveryID domain.DeliveryID,
+	generation domain.Generation,
+) bool {
+	if err := provider.Create(kindName, prep.opts...); err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "create kind cluster %q: %v", kindName, err)
+		return false
+	}
+	return true
+}
+
+func (a *Agent) createKindCluster(ctx context.Context, provider ClusterProvider, probe ClusterDeliverProbe, spec ClusterSpec, auth domain.DeliveryAuth, kindName string, deliveryID domain.DeliveryID, generation domain.Generation) bool {
+	prep, ok := a.prepareKindCreate(ctx, probe, spec, auth, kindName, deliveryID, generation)
+	if !ok {
+		return false
+	}
+	return a.createPreparedKindCluster(ctx, provider, probe, kindName, prep, deliveryID, generation)
+}
+
+func (a *Agent) requireKubeconfig(ctx context.Context, provider ClusterProvider, kindName string, useInternal bool, deliveryID domain.DeliveryID, generation domain.Generation, probe ClusterDeliverProbe) ([]byte, bool) {
+	kc, err := provider.KubeConfig(kindName, useInternal)
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "get kubeconfig for %q: %v", kindName, err)
+		return nil, false
+	}
+	return []byte(kc), true
+}
+
+func (a *Agent) advanceOrFail(ctx context.Context, kindName string, kc []byte, generation domain.Generation, deliveryID domain.DeliveryID, probe ClusterDeliverProbe) bool {
+	disp, recorded, err := a.generationStore().CheckAndAdvance(ctx, kindName, kc, generation)
+	if err != nil {
+		probe.Error(err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "advance ownership generation for %q: %v", kindName, err)
+		return false
+	}
+	if disp == GenerationStale {
+		probe.Error(fmt.Errorf("stale generation %d for kind cluster %q (recorded %d)", generation, kindName, recorded))
+		failDelivery(ctx, a.reporter, deliveryID, generation, "stale generation %d for kind cluster %q (recorded %d)", generation, kindName, recorded)
+		return false
+	}
+	return true
+}
+
+func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, kindName string, kc []byte, deliveryID domain.DeliveryID, generation domain.Generation, probe ClusterDeliverProbe) (*ClusterOutput, bool) {
 	if auth.Caller != nil {
 		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventProgress,
-			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.Subject, spec.Name),
+			Message: fmt.Sprintf("Bootstrapping RBAC for %s on %q", auth.Caller.Subject, kindName),
 		})
 		username := string(auth.Caller.Issuer) + "#" + string(auth.Caller.Subject)
-		if err := bootstrapRBAC(ctx, []byte(kc), auth.Caller.Issuer, auth.Caller); err != nil {
+		if err := bootstrapRBAC(ctx, kc, auth.Caller.Issuer, auth.Caller); err != nil {
 			probe.Error(err)
-			failDelivery(ctx, a.reporter, deliveryID, generation, "bootstrap RBAC on %q: %v", spec.Name, err)
+			failDelivery(ctx, a.reporter, deliveryID, generation, "bootstrap RBAC on %q: %v", kindName, err)
 			return nil, false
 		}
 		probe.RBACBootstrapped(auth.Caller.Subject, username)
 	}
 
-	apiServer, caCert, err := ExtractClusterConnInfo([]byte(kc))
+	apiServer, caCert, err := ExtractClusterConnInfo(kc)
 	if err != nil {
 		probe.Error(err)
-		failDelivery(ctx, a.reporter, deliveryID, generation, "extract connection info for %q: %v", spec.Name, err)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "extract connection info for %q: %v", kindName, err)
 		return nil, false
 	}
 
-	targetID := domain.TargetID("k8s-" + spec.Name)
+	platformID := string(spec.resourceID())
+	targetID := domain.TargetID("k8s-" + platformID)
 	out := ClusterOutput{
 		TargetID:     targetID,
-		Name:         spec.Name,
+		Name:         platformID,
 		APIServer:    apiServer,
 		CACert:       caCert,
 		TrustBundles: a.TrustBundles(),
@@ -439,13 +693,13 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 
 	_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventProgress,
-		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", spec.Name),
+		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", kindName),
 	})
-	ref, token, saErr := bootstrapPlatformSA(ctx, []byte(kc), targetID)
+	ref, token, saErr := bootstrapPlatformSA(ctx, kc, targetID)
 	if saErr != nil {
 		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 			Kind:    domain.DeliveryEventWarning,
-			Message: fmt.Sprintf("platform SA bootstrap on %q: %v (attested delivery will not work)", spec.Name, saErr),
+			Message: fmt.Sprintf("platform SA bootstrap on %q: %v (attested delivery will not work)", kindName, saErr),
 		})
 	} else {
 		out.SATokenRef = ref
@@ -453,7 +707,7 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 	}
 
 	if a.inventory != nil {
-		if err := a.inventory.Watch(spec.ResourceName, []byte(kc)); err != nil {
+		if err := a.inventory.Watch(spec.ResourceName, kc); err != nil {
 			_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 				Kind:    domain.DeliveryEventWarning,
 				Message: fmt.Sprintf("start inventory watch for %q: %v", spec.ResourceName, err),
@@ -521,43 +775,4 @@ func (a *Agent) resolveConfig(spec ClusterSpec, auth domain.DeliveryAuth) ([]byt
 		return cfg, ConfigSourceCustom, nil
 	}
 	return nil, ConfigSourceDefault, nil
-}
-
-func (a *Agent) clusterExists(provider ClusterProvider, name string) bool {
-	clusters, err := provider.List()
-	if err != nil {
-		return false
-	}
-	for _, c := range clusters {
-		if c == name {
-			return true
-		}
-	}
-	return false
-}
-
-func (a *Agent) isManaged(name string) bool {
-	_, ok := a.managed.Load(name)
-	return ok
-}
-
-func (a *Agent) markManaged(name string) {
-	a.managed.Store(name, struct{}{})
-}
-
-func (a *Agent) unmarkManaged(name string) {
-	a.managed.Delete(name)
-}
-
-// clusterExistsErr returns whether the named cluster exists,
-// surfacing any discovery error rather than swallowing it.
-func (a *Agent) clusterExistsErr(provider ClusterProvider, name string) (bool, error) {
-	clusters, err := provider.List()
-	if err != nil {
-		return false, err
-	}
-	if slices.Contains(clusters, name) {
-		return true, nil
-	}
-	return false, nil
 }

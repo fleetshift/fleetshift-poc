@@ -16,7 +16,7 @@ import (
 // proto (the schema used to validate managed resource creation
 // requests) does not require a "name" field. For managed resources,
 // the cluster name always comes from the resource's own identity (see
-// parseClusterManifest); a "name" in the spec body would be silently
+// parseManagedClusterSpec); a "name" in the spec body would be silently
 // ignored, so callers must not be forced to supply one.
 func TestKindClusterSpec_NameNotRequired(t *testing.T) {
 	schema := kindaddon.Schema()
@@ -73,6 +73,23 @@ func TestSchema_IncludesInventory(t *testing.T) {
 	}
 	if s.Management == nil {
 		t.Fatal("Schema().Management is nil")
+	}
+}
+
+func TestSchema_UsesManagedClusterManifestType(t *testing.T) {
+	s := kindaddon.Schema()
+	if s.Management == nil {
+		t.Fatal("Schema().Management is nil")
+	}
+	rst, ok := s.Management.Relation.(domain.RegisteredSelfTarget)
+	if !ok {
+		t.Fatalf("Relation type = %T, want RegisteredSelfTarget", s.Management.Relation)
+	}
+	if rst.ManifestType() != kindaddon.ManagedClusterManifestType {
+		t.Errorf("ManifestType() = %q, want %q", rst.ManifestType(), kindaddon.ManagedClusterManifestType)
+	}
+	if rst.ManifestType() == kindaddon.ClusterManifestType {
+		t.Fatal("managed self-target must not reuse the bare ClusterSpec manifest type")
 	}
 }
 

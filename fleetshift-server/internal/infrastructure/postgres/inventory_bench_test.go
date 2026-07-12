@@ -522,6 +522,13 @@ type ipbScenarioState struct {
 	changedAliasPos int
 	newPos          int
 
+	// Label-delta scenarios share the no-alias corpus (they do not
+	// touch reported_aliases) but keep independent cursors so each
+	// scenario's rounds cycle the pool on its own schedule.
+	labelDeletePos   int
+	labelUpsertPos   int
+	labelCombinedPos int
+
 	acmUpdatePos int
 	acmNewPos    int
 }
@@ -688,6 +695,75 @@ func (s *ipbScenarioState) buildSteadyChangedAliasDelta(round, n int) []domain.I
 			Observation:   &obs,
 			ObservedAt:    fixedIPBTime,
 			ReceivedAt:    fixedIPBTime,
+		}
+	}
+	return deltas
+}
+
+// buildSteadyDeleteLabelsDelta measures ApplyInventoryDeltas's
+// deletion-only label path: every delta removes one seeded key and
+// leaves UpsertLabels empty. This is the shape that previously paid
+// for a no-op `|| '{}'::jsonb` on every row (see applyInventoryDeltasSQL).
+func (s *ipbScenarioState) buildSteadyDeleteLabelsDelta(round, n int) []domain.InventoryDelta {
+	indices := ipbCycle(ipbNoAliasStart, ipbPoolSize, &s.labelDeletePos, n)
+	deltas := make([]domain.InventoryDelta, n)
+	for i, idx := range indices {
+		obs := ipbObservationJSON(int64(round + 1))
+		deltas[i] = domain.InventoryDelta{
+			ResourceType: ipbResourceType,
+			Name:         ipbResourceName(idx),
+			CandidateUID: domain.NewExtensionResourceUID(),
+			DeleteLabels: []string{"label-0"},
+			Observation:  &obs,
+			ObservedAt:   fixedIPBTime,
+			ReceivedAt:   fixedIPBTime,
+		}
+	}
+	return deltas
+}
+
+// buildSteadyUpsertLabelsDelta measures ApplyInventoryDeltas's
+// upsert-only label path: every delta writes a changed value for one
+// seeded key and leaves DeleteLabels empty.
+func (s *ipbScenarioState) buildSteadyUpsertLabelsDelta(round, n int) []domain.InventoryDelta {
+	indices := ipbCycle(ipbNoAliasStart, ipbPoolSize, &s.labelUpsertPos, n)
+	deltas := make([]domain.InventoryDelta, n)
+	for i, idx := range indices {
+		obs := ipbObservationJSON(int64(round + 1))
+		deltas[i] = domain.InventoryDelta{
+			ResourceType: ipbResourceType,
+			Name:         ipbResourceName(idx),
+			CandidateUID: domain.NewExtensionResourceUID(),
+			UpsertLabels: map[string]string{
+				"label-0": fmt.Sprintf("v-%d", (int64(idx)+int64(round)+1)%97),
+			},
+			Observation: &obs,
+			ObservedAt:  fixedIPBTime,
+			ReceivedAt:  fixedIPBTime,
+		}
+	}
+	return deltas
+}
+
+// buildSteadyCombinedLabelsDelta measures ApplyInventoryDeltas's
+// combined incremental label path: delete one key and upsert another
+// in the same delta (disjoint keys, as ValidateInventoryDelta requires).
+func (s *ipbScenarioState) buildSteadyCombinedLabelsDelta(round, n int) []domain.InventoryDelta {
+	indices := ipbCycle(ipbNoAliasStart, ipbPoolSize, &s.labelCombinedPos, n)
+	deltas := make([]domain.InventoryDelta, n)
+	for i, idx := range indices {
+		obs := ipbObservationJSON(int64(round + 1))
+		deltas[i] = domain.InventoryDelta{
+			ResourceType: ipbResourceType,
+			Name:         ipbResourceName(idx),
+			CandidateUID: domain.NewExtensionResourceUID(),
+			DeleteLabels: []string{"label-1"},
+			UpsertLabels: map[string]string{
+				"label-0": fmt.Sprintf("v-%d", (int64(idx)+int64(round)+1)%97),
+			},
+			Observation: &obs,
+			ObservedAt:  fixedIPBTime,
+			ReceivedAt:  fixedIPBTime,
 		}
 	}
 	return deltas
@@ -929,6 +1005,9 @@ func TestInventoryWritePathBenchmark(t *testing.T) {
 		{"steady/heartbeat-delta (observation only)", state.buildSteadyHeartbeatDelta},
 		{"steady/same-alias-delta (payload skip)", state.buildSteadySameAliasDelta},
 		{"steady/changed-alias-delta (payload rewrite)", state.buildSteadyChangedAliasDelta},
+		{"steady/delete-labels-delta (deletion only)", state.buildSteadyDeleteLabelsDelta},
+		{"steady/upsert-labels-delta (upsert only)", state.buildSteadyUpsertLabelsDelta},
+		{"steady/combined-labels-delta (delete+upsert)", state.buildSteadyCombinedLabelsDelta},
 	}
 	deltaResults := make(map[string]map[int]ipbTimings, len(deltaScenarios))
 	for _, sc := range deltaScenarios {

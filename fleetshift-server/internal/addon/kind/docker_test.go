@@ -31,13 +31,17 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const clusterName = "fleetshift-test"
+	const resourceID = "fleetshift-test"
+	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
-		_ = checker.Delete(clusterName, "")
+		_ = checker.Delete(kindName, "")
+		// Also remove a pre-ownership bare name left by older test runs.
+		_ = checker.Delete(resourceID, "")
 	})
 	// Pre-clean in case a previous run left a stale cluster.
-	_ = checker.Delete(clusterName, "")
+	_ = checker.Delete(kindName, "")
+	_ = checker.Delete(resourceID, "")
 
 	db := sqlite.OpenTestDB(t)
 	store := &sqlite.Store{DB: db}
@@ -112,7 +116,7 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		t.Fatalf("Register target: %v", err)
 	}
 
-	spec := kindaddon.ClusterSpec{Name: clusterName}
+	spec := kindaddon.ClusterSpec{Name: resourceID}
 	specBytes, err := json.Marshal(spec)
 	if err != nil {
 		t.Fatalf("marshal spec: %v", err)
@@ -147,13 +151,19 @@ func TestKindAddon_RealDocker(t *testing.T) {
 		if err != nil {
 			t.Fatalf("provider.List: %v", err)
 		}
-		if slices.Contains(clusters, clusterName) {
+		if slices.Contains(clusters, kindName) {
 			break
 		}
 		select {
 		case <-ctx.Done():
-			t.Fatalf("timed out waiting for kind cluster %q to be created", clusterName)
+			t.Fatalf("timed out waiting for kind cluster %q to be created", kindName)
 		case <-time.After(5 * time.Second):
 		}
 	}
+}
+
+// encodedKindName is the ownership-encoded kind/docker name for a
+// platform resource ID (fs--{id}).
+func encodedKindName(resourceID string) string {
+	return "fs--" + resourceID
 }

@@ -119,7 +119,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *extensionresource.Registered
 	targetSvc := &application.TargetService{Store: store}
 	if err := targetSvc.Register(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID: "kind-local", Type: clusterTargetType, Name: "Kind Cluster Addon",
-		AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
+		AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType, kindaddon.ManagedClusterManifestType},
 	})); err != nil {
 		t.Fatalf("register target: %v", err)
 	}
@@ -130,7 +130,7 @@ func buildFullClusterServiceN(t *testing.T, n int) *extensionresource.Registered
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Management: &application.CreateExtensionTypeManagementInput{
-			Relation:  domain.NewRegisteredSelfTarget("kind-local", kindaddon.ClusterManifestType),
+			Relation:  domain.NewRegisteredSelfTarget("kind-local", kindaddon.ManagedClusterManifestType),
 			Signature: domain.Signature{},
 		},
 	}); err != nil {

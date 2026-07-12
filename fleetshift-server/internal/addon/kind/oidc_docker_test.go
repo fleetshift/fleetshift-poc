@@ -57,7 +57,9 @@ type oidcClusterResult struct {
 // createOIDCCluster creates a kind cluster with OIDC trust derived from
 // the caller's identity. It starts a fake OIDC provider, delivers the
 // cluster via the kind agent, and returns the kubeconfig and provider.
-func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAuth) oidcClusterResult {
+// resourceID is the platform resource ID; the kind/docker name is
+// ownership-encoded as fs--{resourceID}.
+func createOIDCCluster(t *testing.T, resourceID string, auth domain.DeliveryAuth) oidcClusterResult {
 	t.Helper()
 
 	checker := cluster.NewProvider()
@@ -65,8 +67,13 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 		t.Skipf("container runtime not available: %v", err)
 	}
 
-	t.Cleanup(func() { _ = checker.Delete(clusterName, "") })
-	_ = checker.Delete(clusterName, "")
+	kindName := encodedKindName(resourceID)
+	t.Cleanup(func() {
+		_ = checker.Delete(kindName, "")
+		_ = checker.Delete(resourceID, "")
+	})
+	_ = checker.Delete(kindName, "")
+	_ = checker.Delete(resourceID, "")
 
 	hostAddr, extraSANIPs := containerHostAddr(t)
 
@@ -89,7 +96,7 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 	)
 
 	spec := kindaddon.ClusterSpec{
-		Name: clusterName,
+		Name: resourceID,
 	}
 	specBytes, err := json.Marshal(spec)
 	if err != nil {
@@ -119,13 +126,13 @@ func createOIDCCluster(t *testing.T, clusterName string, auth domain.DeliveryAut
 		t.Fatal("timed out waiting for delivery to complete")
 	}
 
-	kcStr, err := checker.KubeConfig(clusterName, false)
+	kcStr, err := checker.KubeConfig(kindName, false)
 	if err != nil {
 		t.Fatalf("KubeConfig: %v", err)
 	}
 
 	return oidcClusterResult{
-		ClusterName: clusterName,
+		ClusterName: resourceID,
 		IDP:         idp,
 		IssuerURL:   dockerIssuer,
 		Kubeconfig:  kcStr,
@@ -372,12 +379,15 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		t.Skipf("Docker not available: %v", err)
 	}
 
-	const clusterName = "fleetshift-mr-oidc"
+	const resourceID = "fleetshift-mr-oidc"
+	kindName := encodedKindName(resourceID)
 
 	t.Cleanup(func() {
-		_ = checker.Delete(clusterName, "")
+		_ = checker.Delete(kindName, "")
+		_ = checker.Delete(resourceID, "")
 	})
-	_ = checker.Delete(clusterName, "")
+	_ = checker.Delete(kindName, "")
+	_ = checker.Delete(resourceID, "")
 
 	// --- Start fake OIDC provider ---
 	hostAddr, extraSANIPs := containerHostAddr(t)
@@ -435,7 +445,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 			ID:                    "kind-mr-oidc",
 			Type:                  kindaddon.TargetType,
 			Name:                  "Docker Kind Provider (MR OIDC)",
-			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType},
+			AcceptedManifestTypes: []domain.ManifestType{kindaddon.ClusterManifestType, kindaddon.ManagedClusterManifestType},
 		}))
 		_ = tx.Commit()
 	}
@@ -446,7 +456,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		APIVersion:   "v1",
 		CollectionID: "clusters",
 		Management: &application.CreateExtensionTypeManagementInput{
-			Relation: domain.NewRegisteredSelfTarget("kind-mr-oidc", kindaddon.ClusterManifestType),
+			Relation: domain.NewRegisteredSelfTarget("kind-mr-oidc", kindaddon.ManagedClusterManifestType),
 			Signature: domain.Signature{
 				Signer:         domain.FederatedIdentity{Subject: "kind-addon", Issuer: "https://kind.test"},
 				ContentHash:    []byte("hash"),
@@ -476,7 +486,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 
 	view, err := resourceSvc.Create(authCtx, application.CreateExtensionResourceInput{
 		ResourceType: kindaddon.ClusterResourceType,
-		Name:         domain.ResourceName("clusters/" + clusterName),
+		Name:         domain.ResourceName("clusters/" + resourceID),
 		Spec:         spec,
 	})
 	if err != nil {
@@ -492,7 +502,7 @@ func TestKindAddon_ManagedResource_OIDCAuth(t *testing.T) {
 		Groups:  []string{"developers"},
 	})
 
-	kc, err := checker.KubeConfig(clusterName, false)
+	kc, err := checker.KubeConfig(kindName, false)
 	if err != nil {
 		t.Fatalf("KubeConfig: %v", err)
 	}

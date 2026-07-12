@@ -7,7 +7,7 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-func TestParseClusterManifest(t *testing.T) {
+func TestParseBareClusterSpec(t *testing.T) {
 	tests := []struct {
 		name    string
 		raw     string
@@ -80,9 +80,9 @@ func TestParseClusterManifest(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseClusterManifest(json.RawMessage(tt.raw))
+			got, err := parseBareClusterSpec(json.RawMessage(tt.raw))
 			if (err != nil) != tt.wantErr {
-				t.Fatalf("parseClusterManifest() error = %v, wantErr %v", err, tt.wantErr)
+				t.Fatalf("parseBareClusterSpec() error = %v, wantErr %v", err, tt.wantErr)
 			}
 			if tt.wantErr {
 				return
@@ -118,15 +118,20 @@ func TestParseClusterManifest(t *testing.T) {
 	}
 }
 
-// TestParseClusterManifest_ManagedResourceWrapper verifies that a
-// manifest wrapped by [domain.WrapManagedResourceSpec] (the shape used
-// by managed-resource deliveries) is unwrapped correctly: the bare
-// resource ID from the envelope's name -- not the inner spec's own
-// "name" field, if any -- becomes the cluster name. Regression test
-// for the resource name's collection prefix (e.g. "clusters/foo")
-// otherwise leaking into the kind cluster/container name, which
-// docker/podman reject.
-func TestParseClusterManifest_ManagedResourceWrapper(t *testing.T) {
+func TestNormalizeClusterManifest_UnsupportedType(t *testing.T) {
+	_, err := normalizeClusterManifest(domain.Manifest{
+		ManifestType: "something.else",
+		Raw:          json.RawMessage(`{"name":"demo"}`),
+	})
+	if err == nil {
+		t.Fatal("expected error for unsupported manifest type")
+	}
+}
+
+// TestParseManagedClusterSpec verifies that a managed.api.kind.cluster
+// payload is unwrapped, the inner spec is decoded via the shared
+// decoder, and identity comes from the envelope name.
+func TestParseManagedClusterSpec(t *testing.T) {
 	resourceName, err := domain.NewResourceName("clusters", domain.ResourceID("foo"))
 	if err != nil {
 		t.Fatalf("NewResourceName: %v", err)
@@ -137,9 +142,9 @@ func TestParseClusterManifest_ManagedResourceWrapper(t *testing.T) {
 		t.Fatalf("WrapManagedResourceSpec: %v", err)
 	}
 
-	got, err := parseClusterManifest(raw)
+	got, err := parseManagedClusterSpec(raw)
 	if err != nil {
-		t.Fatalf("parseClusterManifest() error = %v", err)
+		t.Fatalf("parseManagedClusterSpec() error = %v", err)
 	}
 	if got.Name != "foo" {
 		t.Errorf("Name = %q, want %q", got.Name, "foo")
@@ -149,6 +154,62 @@ func TestParseClusterManifest_ManagedResourceWrapper(t *testing.T) {
 	}
 	if len(got.Nodes) != 1 || got.Nodes[0].Role != "control-plane" {
 		t.Errorf("Nodes = %+v, want a single control-plane node", got.Nodes)
+	}
+}
+
+func TestParseBareClusterSpec_RejectsEnvelope(t *testing.T) {
+	resourceName, err := domain.NewResourceName("clusters", domain.ResourceID("foo"))
+	if err != nil {
+		t.Fatalf("NewResourceName: %v", err)
+	}
+	raw, err := domain.WrapManagedResourceSpec(resourceName, domain.NewExtensionResourceUID(),
+		json.RawMessage(`{"nodes":[{"role":"control-plane"}]}`))
+	if err != nil {
+		t.Fatalf("WrapManagedResourceSpec: %v", err)
+	}
+	_, err = parseBareClusterSpec(raw)
+	if err == nil {
+		t.Fatal("bare ClusterManifestType must not accept managed-resource envelope")
+	}
+}
+
+func TestParseManagedClusterSpec_RequiresEnvelope(t *testing.T) {
+	_, err := parseManagedClusterSpec(json.RawMessage(`{"name":"foo"}`))
+	if err == nil {
+		t.Fatal("ManagedClusterManifestType must require the managed-resource envelope")
+	}
+}
+
+func TestNormalizeClusterManifest_RoutesByType(t *testing.T) {
+	bare, err := normalizeClusterManifest(domain.Manifest{
+		ManifestType: ClusterManifestType,
+		Raw:          json.RawMessage(`{"name":"bare"}`),
+	})
+	if err != nil {
+		t.Fatalf("bare: %v", err)
+	}
+	if bare.Name != "bare" {
+		t.Fatalf("bare Name = %q", bare.Name)
+	}
+
+	rn, err := domain.NewResourceName("clusters", domain.ResourceID("managed"))
+	if err != nil {
+		t.Fatalf("NewResourceName: %v", err)
+	}
+	wrapped, err := domain.WrapManagedResourceSpec(rn, domain.NewExtensionResourceUID(),
+		json.RawMessage(`{"nodes":[{"role":"worker"}]}`))
+	if err != nil {
+		t.Fatalf("Wrap: %v", err)
+	}
+	managed, err := normalizeClusterManifest(domain.Manifest{
+		ManifestType: ManagedClusterManifestType,
+		Raw:          wrapped,
+	})
+	if err != nil {
+		t.Fatalf("managed: %v", err)
+	}
+	if managed.Name != "managed" || len(managed.Nodes) != 1 || managed.Nodes[0].Role != "worker" {
+		t.Fatalf("managed = %+v", managed)
 	}
 }
 

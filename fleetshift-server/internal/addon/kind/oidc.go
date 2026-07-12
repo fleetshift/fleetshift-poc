@@ -39,9 +39,9 @@ func (s *OIDCSpec) groupsClaim() string {
 
 const oidcCACertContainerPath = "/etc/kubernetes/pki/oidc-ca.pem"
 
-// bootstrapRBAC creates a ClusterRoleBinding granting the caller
-// cluster-admin on the newly created kind cluster. This uses the
-// admin kubeconfig the kind agent already has in hand.
+// bootstrapRBAC grants the caller cluster-admin on the kind cluster.
+// Same-generation retries are idempotent: an existing binding is
+// verified and reconciled rather than treated as failure.
 func bootstrapRBAC(ctx context.Context, kubeconfig []byte, issuerURL domain.IssuerURL, caller *domain.SubjectClaims) error {
 	cfg, err := clientcmd.RESTConfigFromKubeConfig(kubeconfig)
 	if err != nil {
@@ -51,11 +51,16 @@ func bootstrapRBAC(ctx context.Context, kubeconfig []byte, issuerURL domain.Issu
 	if err != nil {
 		return fmt.Errorf("create kubernetes client: %w", err)
 	}
+	return ensureCallerAdminBinding(ctx, client, issuerURL, caller)
+}
 
+// ensureCallerAdminBinding creates or reconciles the caller's
+// cluster-admin ClusterRoleBinding.
+func ensureCallerAdminBinding(ctx context.Context, client kubernetes.Interface, issuerURL domain.IssuerURL, caller *domain.SubjectClaims) error {
 	// K8s OIDC authentication formats the username as "issuer#sub".
 	username := string(issuerURL) + "#" + string(caller.Subject)
 
-	binding := &rbacv1.ClusterRoleBinding{
+	desired := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "fleetshift-admin-" + string(caller.Subject),
 		},
@@ -70,10 +75,8 @@ func bootstrapRBAC(ctx context.Context, kubeconfig []byte, issuerURL domain.Issu
 			APIGroup: "rbac.authorization.k8s.io",
 		},
 	}
-
-	_, err = client.RbacV1().ClusterRoleBindings().Create(ctx, binding, metav1.CreateOptions{})
-	if err != nil {
-		return fmt.Errorf("create ClusterRoleBinding for %q: %w", username, err)
+	if err := ensureClusterRoleBinding(ctx, client, desired); err != nil {
+		return fmt.Errorf("ensure ClusterRoleBinding for %q: %w", username, err)
 	}
 	return nil
 }

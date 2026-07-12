@@ -38,13 +38,16 @@ func awaitDone(t *testing.T, ch <-chan domain.DeliveryResult) domain.DeliveryRes
 // Create call (success or failure), enabling deterministic waits for
 // the async delivery goroutine.
 type fakeProvider struct {
-	mu          sync.Mutex
-	clusters    map[string][]byte // name → raw config
-	createErr   error
-	logger      log.Logger
-	created     chan string // receives cluster name after each Create; buffered
-	deleted     []string    // tracks deleted cluster names
-	createCalls int
+	mu            sync.Mutex
+	clusters      map[string][]byte // name → raw config
+	createErr     error
+	deleteErr     error
+	listErr       error
+	kubeconfigErr error
+	logger        log.Logger
+	created       chan string // receives cluster name after each Create; buffered
+	deleted       []string    // tracks deleted cluster names
+	createCalls   int
 }
 
 func newFakeProvider() *fakeProvider {
@@ -73,15 +76,21 @@ func (p *fakeProvider) Create(name string, opts ...cluster.CreateOption) error {
 
 func (p *fakeProvider) Delete(name, _ string) error {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.deleteErr != nil {
+		return p.deleteErr
+	}
 	delete(p.clusters, name)
 	p.deleted = append(p.deleted, name)
-	p.mu.Unlock()
 	return nil
 }
 
 func (p *fakeProvider) List() ([]string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.listErr != nil {
+		return nil, p.listErr
+	}
 	out := make([]string, 0, len(p.clusters))
 	for n := range p.clusters {
 		out = append(out, n)
@@ -92,6 +101,9 @@ func (p *fakeProvider) List() ([]string, error) {
 func (p *fakeProvider) KubeConfig(name string, _ bool) (string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if p.kubeconfigErr != nil {
+		return "", p.kubeconfigErr
+	}
 	if _, ok := p.clusters[name]; !ok {
 		return "", fmt.Errorf("cluster %q not found", name)
 	}
@@ -142,7 +154,7 @@ type channelReporter struct {
 func newChannelReporter() *channelReporter {
 	return &channelReporter{
 		ch:   make(chan domain.DeliveryEvent, 100),
-		done: make(chan domain.DeliveryResult, 1),
+		done: make(chan domain.DeliveryResult, 10),
 	}
 }
 
@@ -163,6 +175,12 @@ func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.Tar
 	return nil, nil
 }
 
+func newTestAgent(reporter domain.DeliveryReporter, p *fakeProvider, opts ...kind.AgentOption) (*kind.Agent, *kind.MemoryGenerationStore) {
+	store := kind.NewMemoryGenerationStore()
+	all := append([]kind.AgentOption{kind.WithGenerationStore(store)}, opts...)
+	return kind.NewAgent(reporter, fakeFactory(p), all...), store
+}
+
 type nopReporter struct{}
 
 func (nopReporter) ReportEvent(context.Context, domain.DeliveryID, domain.Generation, domain.DeliveryEvent) error {
@@ -177,7 +195,7 @@ func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]d
 
 func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	agent, _ := newTestAgent(nopReporter{}, provider)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -191,8 +209,8 @@ func TestAgent_Deliver_CreatesCluster(t *testing.T) {
 	}
 
 	<-provider.created
-	if !provider.hasCluster("dev-cluster") {
-		t.Error("expected cluster 'dev-cluster' to exist")
+	if !provider.hasCluster("fs--dev-cluster") {
+		t.Error("expected cluster 'fs--dev-cluster' to exist")
 	}
 }
 
@@ -200,7 +218,7 @@ func TestAgent_Deliver_RejectsUnmanagedExistingCluster(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["dev-cluster"] = nil
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent, _ := newTestAgent(reporter, provider)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -228,10 +246,10 @@ func TestAgent_Deliver_RejectsUnmanagedExistingCluster(t *testing.T) {
 	}
 }
 
-func TestAgent_Deliver_ExistingManagedClusterSkipsCreate(t *testing.T) {
+func TestAgent_Deliver_SameGenerationRetrySkipsCreate(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent, store := newTestAgent(reporter, provider)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -249,11 +267,12 @@ func TestAgent_Deliver_ExistingManagedClusterSkipsCreate(t *testing.T) {
 	if got := provider.createCount(); got != 1 {
 		t.Fatalf("Create called %d times after first deliver, want 1", got)
 	}
+	if g, found, _ := store.Get(context.Background(), "fs--dev-cluster", nil); !found || g != 1 {
+		t.Fatalf("store gen=%d found=%v, want 1 true", g, found)
+	}
 
-	// At-least-once retry after inflight is cleared: cluster exists but
-	// we already manage it, so create must be skipped and delivery
-	// must still succeed (re-emitting provisioned targets).
-	if err := agent.Deliver(context.Background(), target, "d2:k1", manifests, domain.DeliveryAuth{}, nil, 2); err != nil {
+	// Same delivery ID + generation: at-least-once retry.
+	if err := agent.Deliver(context.Background(), target, "d1:k1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
 		t.Fatalf("second Deliver: %v", err)
 	}
 	second := awaitDone(t, reporter.done)
@@ -274,7 +293,7 @@ func TestAgent_Deliver_ExistingManagedClusterSkipsCreate(t *testing.T) {
 func TestAgent_Deliver_MissingNameReturnsFailedResult(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent, _ := newTestAgent(reporter, provider)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -296,7 +315,7 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 	provider := newFakeProvider()
 	provider.createErr = errors.New("docker not available")
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent, _ := newTestAgent(reporter, provider)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -324,12 +343,14 @@ func TestAgent_Deliver_CreateFailureEmitsError(t *testing.T) {
 
 func TestAgent_Remove_DeletesCluster(t *testing.T) {
 	provider := newFakeProvider()
-	provider.clusters["my-cluster"] = nil
+	provider.clusters["fs--my-cluster"] = nil
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent, store := newTestAgent(reporter, provider)
+	store.SetForTest("fs--my-cluster", 1)
 
 	manifests := []domain.Manifest{{
-		Raw: json.RawMessage(`{"name":"my-cluster"}`),
+		ManifestType: kind.ClusterManifestType,
+		Raw:          json.RawMessage(`{"name":"my-cluster"}`),
 	}}
 
 	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -342,8 +363,8 @@ func TestAgent_Remove_DeletesCluster(t *testing.T) {
 		t.Fatalf("result.State = %q, want %q", result.State, domain.DeliveryStateDelivered)
 	}
 
-	if len(provider.deleted) != 1 || provider.deleted[0] != "my-cluster" {
-		t.Errorf("deleted = %v, want [my-cluster]", provider.deleted)
+	if len(provider.deleted) != 1 || provider.deleted[0] != "fs--my-cluster" {
+		t.Errorf("deleted = %v, want [fs--my-cluster]", provider.deleted)
 	}
 }
 
@@ -351,10 +372,11 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 	provider := newFakeProvider()
 	// cluster doesn't exist
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	manifests := []domain.Manifest{{
-		Raw: json.RawMessage(`{"name":"gone-cluster"}`),
+		ManifestType: kind.ClusterManifestType,
+		Raw:          json.RawMessage(`{"name":"gone-cluster"}`),
 	}}
 
 	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -374,7 +396,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 
 func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
@@ -397,7 +419,7 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -421,7 +443,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -465,7 +487,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
@@ -553,7 +575,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -589,7 +611,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -640,7 +662,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "valid-token",
@@ -672,7 +694,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "expired-token",
@@ -717,7 +739,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -740,7 +762,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{
 		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "a"}`)},
@@ -770,7 +792,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	fp := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(fp))
+	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -816,7 +838,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 	fp := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(fp))
+	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -905,7 +927,7 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
 		bp.fakeProvider.logger = logger
 		return bp
-	})
+	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -940,8 +962,10 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 
 func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 	fp := newFakeProvider()
-	fp.clusters["rm-cluster"] = nil
+	fp.clusters["fs--rm-cluster"] = nil
 	reporter := newChannelReporter()
+	store := kind.NewMemoryGenerationStore()
+	store.SetForTest("fs--rm-cluster", 1)
 
 	bdp := &blockingDeleteProvider{
 		fakeProvider: fp,
@@ -951,10 +975,11 @@ func TestAgent_Remove_RetryWhileInFlight_Skipped(t *testing.T) {
 	}
 	agent := kind.NewAgent(reporter, func(_ log.Logger) kind.ClusterProvider {
 		return bdp
-	})
+	}, kind.WithGenerationStore(store))
 
 	manifests := []domain.Manifest{{
-		Raw: json.RawMessage(`{"name":"rm-cluster"}`),
+		ManifestType: kind.ClusterManifestType,
+		Raw:          json.RawMessage(`{"name":"rm-cluster"}`),
 	}}
 
 	err := agent.Remove(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d-rm:t1", manifests, domain.DeliveryAuth{}, nil, 1)
@@ -986,7 +1011,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
 		bp.fakeProvider.logger = logger
 		return bp
-	})
+	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",

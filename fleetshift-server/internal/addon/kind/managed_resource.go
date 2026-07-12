@@ -1,6 +1,7 @@
 package kind
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -8,51 +9,73 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// parseClusterManifest unmarshals a kind cluster manifest payload into
-// the canonical [ClusterSpec]. The JSON shape matches the proto
-// KindClusterSpec message (protojson encoding).
+// normalizeClusterManifest turns a kind cluster delivery manifest into
+// the canonical [ClusterSpec]. The two manifest types use different
+// envelopes and are handled on separate switch arms; once normalized,
+// delivery and removal share one ClusterSpec code path.
 //
-// raw may be either a bare [ClusterSpec] (used by direct, non-managed
-// target deliveries) or a [domain.ManagedResourceSpecManifest] wrapper
-// (used by managed-resource deliveries, see
-// [domain.WrapManagedResourceSpec]). We try to unwrap first; a bare
-// ClusterSpec never has a "spec" field, so unwrapping fails cleanly
-// and we fall back to parsing raw directly. When the manifest is
-// wrapped, the resource's bare ID -- not the inner spec's own "name"
-// field, if any -- becomes the cluster name, mirroring the gcphcp
-// addon's handling of managed-resource manifests. Using the full
-// resource name (which includes its collection prefix, e.g.
-// "clusters/foo") verbatim as the cluster name would produce an
-// invalid docker/podman container name. The full [domain.ResourceName]
-// is retained on [ClusterSpec.ResourceName] for inventory reporting.
-func parseClusterManifest(raw json.RawMessage) (ClusterSpec, error) {
-	innerRaw := raw
-	var name string
-	var resourceName domain.ResourceName
-	if mrs, err := domain.UnwrapManagedResourceSpec(raw); err == nil {
-		innerRaw = mrs.Spec
-		name = string(mrs.Name.ID())
-		resourceName = mrs.Name
+//   - [ClusterManifestType]: bare [ClusterSpec] JSON
+//   - [ManagedClusterManifestType]: [domain.ManagedResourceSpecManifest]
+//     envelope; unwrap, decode the inner spec with the same decoder as
+//     the bare path, then set identity from the envelope name
+func normalizeClusterManifest(m domain.Manifest) (ClusterSpec, error) {
+	switch m.ManifestType {
+	case ClusterManifestType:
+		return parseBareClusterSpec(m.Raw)
+	case ManagedClusterManifestType:
+		return parseManagedClusterSpec(m.Raw)
+	default:
+		return ClusterSpec{}, fmt.Errorf("%w: unsupported kind cluster manifest type %q", domain.ErrInvalidArgument, m.ManifestType)
 	}
+}
 
-	var spec ClusterSpec
-	if err := json.Unmarshal(innerRaw, &spec); err != nil {
-		return ClusterSpec{}, fmt.Errorf("%w: unmarshal kind cluster spec: %v", domain.ErrInvalidArgument, err)
-	}
-	if name != "" {
-		spec.Name = name
+// parseBareClusterSpec decodes a bare [ClusterSpec] payload
+// ([ClusterManifestType]). Unknown JSON fields are rejected so a
+// managed-resource envelope cannot be silently misread as a bare spec.
+func parseBareClusterSpec(raw json.RawMessage) (ClusterSpec, error) {
+	spec, err := decodeClusterSpec(raw)
+	if err != nil {
+		return ClusterSpec{}, err
 	}
 	if err := validateClusterSpec(spec); err != nil {
 		return ClusterSpec{}, err
 	}
-	if resourceName != "" {
-		spec.ResourceName = resourceName
-	} else {
-		rn, err := domain.NewResourceName("clusters", domain.ResourceID(spec.Name))
-		if err != nil {
-			return ClusterSpec{}, fmt.Errorf("%w: cluster resource name: %v", domain.ErrInvalidArgument, err)
-		}
-		spec.ResourceName = rn
+	rn, err := domain.NewResourceName("clusters", domain.ResourceID(spec.Name))
+	if err != nil {
+		return ClusterSpec{}, fmt.Errorf("%w: cluster resource name: %v", domain.ErrInvalidArgument, err)
+	}
+	spec.ResourceName = rn
+	return spec, nil
+}
+
+// parseManagedClusterSpec unwraps a [domain.ManagedResourceSpecManifest]
+// ([ManagedClusterManifestType]), decodes the inner spec with the same
+// decoder as the bare path, then overlays cluster identity from the
+// envelope resource name (the inner "name", if any, is ignored).
+func parseManagedClusterSpec(raw json.RawMessage) (ClusterSpec, error) {
+	mrs, err := domain.UnwrapManagedResourceSpec(raw)
+	if err != nil {
+		return ClusterSpec{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
+	}
+
+	spec, err := decodeClusterSpec(mrs.Spec)
+	if err != nil {
+		return ClusterSpec{}, err
+	}
+	spec.Name = string(mrs.Name.ID())
+	spec.ResourceName = mrs.Name
+	if err := validateClusterSpec(spec); err != nil {
+		return ClusterSpec{}, err
+	}
+	return spec, nil
+}
+
+func decodeClusterSpec(raw json.RawMessage) (ClusterSpec, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	dec.DisallowUnknownFields()
+	var spec ClusterSpec
+	if err := dec.Decode(&spec); err != nil {
+		return ClusterSpec{}, fmt.Errorf("%w: unmarshal kind cluster spec: %v", domain.ErrInvalidArgument, err)
 	}
 	return spec, nil
 }

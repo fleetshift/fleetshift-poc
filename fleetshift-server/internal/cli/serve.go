@@ -348,6 +348,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 		pool.AppendCertsFromPEM(oidcCABundle)
 		oidcHTTPClient = &http.Client{
+			Timeout: 5 * time.Second,
 			Transport: &http.Transport{
 				TLSClientConfig: &tls.Config{RootCAs: pool},
 			},
@@ -661,7 +662,7 @@ func runServe(ctx context.Context, f *serveFlags) error {
 				domain.TargetStateReady,
 				nil,
 				nil,
-				[]domain.ManifestType{kindaddon.ClusterManifestType, domain.TrustBundleManifestType},
+				[]domain.ManifestType{kindaddon.ClusterManifestType, kindaddon.ManagedClusterManifestType, domain.TrustBundleManifestType},
 			)},
 			Schemas: []domain.ExtensionResourceSchema{kindaddon.Schema(), kindaddon.NodeSchema()},
 		}); err != nil {

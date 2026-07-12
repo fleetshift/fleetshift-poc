@@ -202,6 +202,18 @@ func (w *InventoryWatcher) Unwatch(clusterName domain.ResourceName) {
 	}
 }
 
+// IsWatchingForTest reports whether a Node informer is registered for
+// clusterName. Intended for tests.
+func (w *InventoryWatcher) IsWatchingForTest(clusterName domain.ResourceName) bool {
+	if w == nil {
+		return false
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	_, ok := w.watches[string(clusterName)]
+	return ok
+}
+
 // FlushForTest forces an immediate flush of pending deltas. Intended
 // for tests that set debounce to zero or need deterministic timing.
 func (w *InventoryWatcher) FlushForTest(ctx context.Context) error {
