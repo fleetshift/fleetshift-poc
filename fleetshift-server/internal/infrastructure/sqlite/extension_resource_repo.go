@@ -1087,26 +1087,40 @@ func (r *ExtensionResourceRepo) deleteOrphanedClaims(ctx context.Context, claimI
 }
 
 // ReplaceInventory implements [domain.ExtensionResourceRepository.ReplaceInventory]
-// as a fixed number of round trips for the whole batch: it resolves-
-// or-creates every replacement's extension_resources row by natural
-// key (resolveOrCreateExtensionResources, seeding a brand-new row's
-// reported_aliases directly from that same replacement), writes every
+// as a fixed number of round trips for the whole batch. IsDelete entries
+// are validated and hard-deleted first (never resolve-or-create);
+// replacements then resolve-or-create every remaining row by natural key
+// (resolveOrCreateExtensionResources, seeding a brand-new row's
+// reported_aliases directly from that same replacement), write every
 // resource's complete latest labels/conditions/observation in one
-// upsert, then writes only the pending alias payload for resources
+// upsert, then write only the pending alias payload for resources
 // whose canonical payload has actually changed since the last
 // successful write.
 func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacements []domain.InventoryReplacement) error {
 	if len(replacements) == 0 {
 		return nil
 	}
+	if err := domain.ValidateInventoryReplacements(replacements); err != nil {
+		return err
+	}
 
-	n := len(replacements)
+	deletes, upserts := partitionInventoryReplacements(replacements)
+	if len(deletes) > 0 {
+		if err := r.deleteInventoryReplacements(ctx, deletes); err != nil {
+			return fmt.Errorf("replace inventory: %w", err)
+		}
+	}
+	if len(upserts) == 0 {
+		return nil
+	}
+
+	n := len(upserts)
 	resourceTypes := make([]domain.ResourceType, n)
 	names := make([]domain.ResourceName, n)
 	candidateUIDs := make([]domain.ExtensionResourceUID, n)
 	receivedAts := make([]time.Time, n)
 	reportedAliasPayloads := make([]string, n)
-	for i, rep := range replacements {
+	for i, rep := range upserts {
 		resourceTypes[i] = rep.ResourceType
 		names[i] = rep.Name
 		candidateUIDs[i] = rep.CandidateUID
@@ -1124,7 +1138,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	}
 
 	invItems := make([]inventoryRowInput, n)
-	for i, rep := range replacements {
+	for i, rep := range upserts {
 		labelsJSON, err := json.Marshal(nonNilLabels(rep.Labels))
 		if err != nil {
 			return fmt.Errorf("marshal labels: %w", err)
@@ -1153,7 +1167,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	// resolveOrCreateExtensionResources's own INSERT (see that
 	// method's doc comment), so it naturally compares equal here and
 	// is skipped -- no separate exclusion needed.
-	for i := range replacements {
+	for i := range upserts {
 		if reportedAliasPayloads[i] == storedAliasPayloads[i] {
 			continue
 		}
@@ -1165,6 +1179,20 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		}
 	}
 	return nil
+}
+
+// partitionInventoryReplacements splits a validated mixed batch into
+// IsDelete entries and upserts, preserving relative order within each
+// partition.
+func partitionInventoryReplacements(replacements []domain.InventoryReplacement) (deletes, upserts []domain.InventoryReplacement) {
+	for _, rep := range replacements {
+		if rep.IsDelete {
+			deletes = append(deletes, rep)
+			continue
+		}
+		upserts = append(upserts, rep)
+	}
+	return deletes, upserts
 }
 
 // ApplyInventoryDeltas implements [domain.ExtensionResourceRepository.ApplyInventoryDeltas]
@@ -1401,19 +1429,17 @@ func (r *ExtensionResourceRepo) batchReadCurrentReportedAliases(ctx context.Cont
 }
 
 // ---------------------------------------------------------------------------
-// Inventory delete/prune
+// Inventory hard-delete (IsDelete replacements)
 // ---------------------------------------------------------------------------
 
 // deleteInventoryResourcesByPredicate deletes extension_resources rows
 // matching whereSQL/args, running the same orphaned-alias-claim cleanup
 // [ExtensionResourceRepo.Delete] does, but treating zero matching rows
-// as success rather than [domain.ErrNotFound]. This is the shared
-// shape [ExtensionResourceRepo.DeleteInventoryResources],
-// [ExtensionResourceRepo.PruneInventoryCollection], and
-// [ExtensionResourceRepo.DeleteInventorySubtree] all need: source-
-// driven deletes, where a duplicate or already-absent delete must not
-// fail. whereSQL must reference extension_resources columns
-// unqualified, since it is reused verbatim against both the
+// as success rather than [domain.ErrNotFound]. This is the shared hard-
+// delete shape [ExtensionResourceRepo.deleteInventoryReplacements]
+// needs for source-driven deletes, where a duplicate or already-absent
+// delete must not fail. whereSQL must reference extension_resources
+// columns unqualified, since it is reused verbatim against both the
 // unaliased DELETE and the alias-claim lookup JOIN below.
 func (r *ExtensionResourceRepo) deleteInventoryResourcesByPredicate(ctx context.Context, whereSQL string, args []any) error {
 	rows, err := r.DB.QueryContext(ctx,
@@ -1448,54 +1474,25 @@ func (r *ExtensionResourceRepo) deleteInventoryResourcesByPredicate(ctx context.
 	return nil
 }
 
-// DeleteInventoryResources implements
-// [domain.ExtensionResourceRepository.DeleteInventoryResources] with a
-// single row-value IN match across every ref's natural key.
-func (r *ExtensionResourceRepo) DeleteInventoryResources(ctx context.Context, refs []domain.InventoryResourceRef) error {
-	if len(refs) == 0 {
+// deleteInventoryReplacements hard-deletes every IsDelete replacement
+// by full resource type (service_name + type_name) and name. Missing
+// rows are success; CandidateUID is never consulted.
+func (r *ExtensionResourceRepo) deleteInventoryReplacements(ctx context.Context, deletes []domain.InventoryReplacement) error {
+	if len(deletes) == 0 {
 		return nil
 	}
-	placeholders := make([]string, len(refs))
-	args := make([]any, 0, len(refs)*3)
-	for i, ref := range refs {
-		placeholders[i] = "(?, ?, ?)"
-		args = append(args, string(ref.ResourceType.ServiceName()), string(ref.Name.Collection()), string(ref.Name.ID()))
+	placeholders := make([]string, len(deletes))
+	args := make([]any, 0, len(deletes)*4)
+	for i, rep := range deletes {
+		placeholders[i] = "(?, ?, ?, ?)"
+		args = append(args,
+			string(rep.ResourceType.ServiceName()),
+			rep.ResourceType.TypeName(),
+			string(rep.Name.Collection()),
+			string(rep.Name.ID()),
+		)
 	}
-	whereSQL := fmt.Sprintf("(service_name, collection_name, resource_id) IN (%s)", strings.Join(placeholders, ", "))
-	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
-}
-
-// PruneInventoryCollection implements
-// [domain.ExtensionResourceRepository.PruneInventoryCollection]. A nil
-// keepIDs is rejected before any SQL runs; a non-nil empty keepIDs
-// omits the NOT IN clause entirely, deleting every row in the exact
-// collection.
-func (r *ExtensionResourceRepo) PruneInventoryCollection(ctx context.Context, scope domain.InventoryCollectionRef, keepIDs []domain.ResourceID) error {
-	if keepIDs == nil {
-		return fmt.Errorf("%w: keepIDs must not be nil", domain.ErrInvalidArgument)
-	}
-	whereSQL := "service_name = ? AND type_name = ? AND collection_name = ?"
-	args := []any{string(scope.ResourceType.ServiceName()), scope.ResourceType.TypeName(), string(scope.Collection)}
-	if len(keepIDs) > 0 {
-		placeholders := make([]string, len(keepIDs))
-		for i, id := range keepIDs {
-			placeholders[i] = "?"
-			args = append(args, string(id))
-		}
-		whereSQL += fmt.Sprintf(" AND resource_id NOT IN (%s)", strings.Join(placeholders, ", "))
-	}
-	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
-}
-
-// DeleteInventorySubtree implements
-// [domain.ExtensionResourceRepository.DeleteInventorySubtree] using a
-// length-bounded substr comparison rather than LIKE, so a parent
-// segment containing '%' or '_' can never be misinterpreted as a
-// wildcard.
-func (r *ExtensionResourceRepo) DeleteInventorySubtree(ctx context.Context, ref domain.InventorySubtreeRef) error {
-	prefix := string(ref.Parent) + "/"
-	whereSQL := "service_name = ? AND type_name = ? AND (collection_name = ? OR substr(collection_name, 1, ?) = ?)"
-	args := []any{string(ref.ResourceType.ServiceName()), ref.ResourceType.TypeName(), string(ref.Parent), len(prefix), prefix}
+	whereSQL := fmt.Sprintf("(service_name, type_name, collection_name, resource_id) IN (%s)", strings.Join(placeholders, ", "))
 	return r.deleteInventoryResourcesByPredicate(ctx, whereSQL, args)
 }
 

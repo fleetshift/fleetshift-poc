@@ -119,70 +119,41 @@ type ExtensionResourceRepository interface {
 	// methods (not a general Save). Unlike the rest of this
 	// interface, these resolve-or-create the extension_resources row
 	// themselves (see [InventoryReplacement]/[InventoryDelta]'s natural
-	// key doc) rather than requiring the row to already exist.
+	// key doc) rather than requiring the row to already exist -- except
+	// for [InventoryReplacement.IsDelete] entries, which never
+	// resolve-or-create (see that field's doc and
+	// [ValidateInventoryReplacements]).
 	//
 	// TODO: Consider requiring that these validate the type(s) actually
 	// have inventory capabilities in their specs. This MUST be doable
 	// with at most one additional DB lookup for the whole batch,
 	// in that case.
 	//
-	// ReplaceInventory treats each [InventoryReplacement] as the
-	// complete latest inventory state for its resource: fields absent
-	// from the replacement are cleared/deleted from latest state, with
-	// the exception of Observation -- see its field doc. Aliases are
-	// stored as a pending, unreconciled payload -- see
+	// ReplaceInventory accepts a mixed batch of replacements and
+	// exact-name deletes ([InventoryReplacement.IsDelete]). Non-delete
+	// replacements are each treated as the complete latest inventory
+	// state for their resource: fields absent from the replacement are
+	// cleared/deleted from latest state, with the exception of
+	// Observation -- see its field doc. Aliases on non-delete
+	// replacements are stored as a pending, unreconciled payload -- see
 	// [InventoryReplacement.Aliases]'s doc -- so this never fails or
-	// reports a conflict on account of Aliases; the only errors are
-	// the usual infrastructure/argument-validation ones.
+	// reports a conflict on account of Aliases. Deletes hard-delete the
+	// matching extension_resources row (full resource type including
+	// type_name, never alias-resolved), treat a missing row as success,
+	// and run the same cascade / orphaned alias-claim cleanup as
+	// [Delete]. The whole mixed slice is applied together: callers that
+	// wrap this call in a transaction get one atomic commit or
+	// rollback. Validation errors from
+	// [ValidateInventoryReplacements] fail before any write.
 	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) error
 
 	// ApplyInventoryDeltas applies incremental, field-level changes:
 	// fields absent from an [InventoryDelta] are left unchanged. Like
 	// ReplaceInventory, alias-bearing fields never cause a conflict
 	// error -- see [InventoryDelta.UpsertAliases]'s doc.
+	// Whole-resource deletion is not expressible here; use
+	// [InventoryReplacement.IsDelete] via ReplaceInventory instead.
 	ApplyInventoryDeltas(ctx context.Context, deltas []InventoryDelta) error
-
-	// DeleteInventoryResources hard-deletes the extension resources
-	// named by refs. This cascades latest inventory, observation and
-	// condition history, intents, and alias contributions through the
-	// same foreign keys [Delete] relies on, and cleans up any
-	// orphaned resource_alias_claims rows the same way [Delete] does.
-	// Unlike [Delete], a name with no matching row -- and an empty
-	// refs slice -- is a no-op, not [ErrNotFound]: this method exists
-	// for source-driven delete events (e.g. a watch delete from an
-	// addon's live source), where a duplicate delete or a delete
-	// racing a resync must not fail. Deletes are exact-name addressed;
-	// refs is never resolved through aliases -- see
-	// [InventoryReplacement.Aliases]'s doc for why reported aliases
-	// aren't trusted for resolution.
-	DeleteInventoryResources(ctx context.Context, refs []InventoryResourceRef) error
-
-	// PruneInventoryCollection deletes every extension resource of
-	// scope.ResourceType whose collection is exactly scope.Collection
-	// and whose resource ID is not in keepIDs. This is the resync-prune
-	// primitive: a caller that has just LISTed the complete contents of
-	// one source collection passes every resource ID from that LIST as
-	// keepIDs, and anything else stored under the collection -- proven
-	// absent from the source -- is deleted.
-	//
-	// keepIDs must be non-nil: nil almost always means the caller
-	// failed to construct the keep set, so it is rejected outright with
-	// [ErrInvalidArgument] rather than silently deleting the entire
-	// collection. A non-nil, empty keepIDs is different and meaningful:
-	// it asserts "the source collection is known to be completely
-	// empty," and deletes every row in the exact collection. A
-	// collection with no matching rows to begin with is a no-op.
-	PruneInventoryCollection(ctx context.Context, scope InventoryCollectionRef, keepIDs []ResourceID) error
-
-	// DeleteInventorySubtree deletes every extension resource of
-	// ref.ResourceType whose collection lies under the resource-name
-	// subtree rooted at ref.Parent -- for example, every object
-	// collection reported under "targets/{target}" when a target is
-	// torn down. Matching uses resource-name segment boundaries: a
-	// parent of "targets/prod" must not match a sibling collection
-	// under "targets/prod-old". A subtree with no matching rows is a
-	// no-op.
-	DeleteInventorySubtree(ctx context.Context, ref InventorySubtreeRef) error
 
 	// Observation history (append-only). Neither ReplaceInventory nor
 	// ApplyInventoryDeltas populates this synchronously today -- see
@@ -202,10 +173,14 @@ type ExtensionResourceRepository interface {
 }
 
 // InventoryReplacement is a command DTO -- not a domain object --
-// describing the complete latest inventory state for a single
-// extension resource, identified by its natural key (ResourceType,
-// Name) rather than an [ExtensionResourceUID] resolved ahead of time
-// by the caller. See [ExtensionResourceRepository.ReplaceInventory].
+// describing either the complete latest inventory state for a single
+// extension resource, or an exact-name whole-resource delete, identified
+// by its natural key (ResourceType, Name) rather than an
+// [ExtensionResourceUID] resolved ahead of time by the caller. See
+// [ExtensionResourceRepository.ReplaceInventory].
+//
+// When IsDelete is false, the fields below describe the complete latest
+// inventory state for the named resource.
 //
 // CandidateUID is generated by the caller (see
 // [NewExtensionResourceUID]) and used only if this natural key has no
@@ -257,9 +232,23 @@ type ExtensionResourceRepository interface {
 // no "clear the observation" operation. Any other non-nil value
 // replaces the latest observation. Neither case appends a history
 // row today; see [ExtensionResourceRepository.ListObservations]'s doc.
+//
+// When IsDelete is true, this command hard-deletes the matching
+// extension_resources row by exact ResourceType (including type_name)
+// and Name. Deletes never resolve through aliases, never allocate or
+// consume CandidateUID, and never create a missing row: a missing
+// match is an idempotent success. Payload fields other than
+// ResourceType and Name must be empty -- see
+// [ValidateInventoryReplacements]. Inventory-only type policy (has
+// inventory metadata, no management metadata) is enforced at the
+// application layer when type metadata is available there, not by the
+// repository.
 type InventoryReplacement struct {
 	ResourceType ResourceType
 	Name         ResourceName
+	// IsDelete marks this entry as a whole-resource hard delete rather
+	// than an inventory replacement. See this type's doc.
+	IsDelete     bool
 	CandidateUID ExtensionResourceUID
 	Aliases      AliasSet
 
@@ -392,6 +381,75 @@ type InventoryCollectionRef struct {
 type InventorySubtreeRef struct {
 	ResourceType ResourceType
 	Parent       ResourceName
+}
+
+// ValidateInventoryReplacements validates a mixed
+// [InventoryReplacement] batch before any repository write:
+//
+//   - every entry must set ResourceType and Name;
+//   - IsDelete entries must not set Aliases, Labels, Observation,
+//     Conditions, ObservedAt, ReceivedAt, or CandidateUID;
+//   - the same natural key (ResourceType + Name) must not appear more
+//     than once as a delete, more than once as a replacement, or as
+//     both a delete and a replacement in the same batch.
+//
+// Both [ExtensionResourceRepository.ReplaceInventory] implementations
+// call this for the full slice before partitioning deletes from
+// upserts, so contradictory or unsafe shapes never partially apply.
+func ValidateInventoryReplacements(replacements []InventoryReplacement) error {
+	type keyFate int
+	const (
+		fateUpsert keyFate = 1 << iota
+		fateDelete
+	)
+	seen := make(map[FullResourceName]keyFate, len(replacements))
+	for i, rep := range replacements {
+		if rep.ResourceType == "" {
+			return fmt.Errorf("%w: replacement %d: ResourceType is required", ErrInvalidArgument, i)
+		}
+		if rep.Name == "" {
+			return fmt.Errorf("%w: replacement %d: Name is required", ErrInvalidArgument, i)
+		}
+		if rep.IsDelete {
+			if rep.Aliases.Len() > 0 {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects non-empty Aliases", ErrInvalidArgument, i)
+			}
+			if len(rep.Labels) > 0 {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects non-empty Labels", ErrInvalidArgument, i)
+			}
+			if rep.Observation != nil {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects Observation", ErrInvalidArgument, i)
+			}
+			if len(rep.Conditions) > 0 {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects non-empty Conditions", ErrInvalidArgument, i)
+			}
+			if !rep.ObservedAt.IsZero() || !rep.ReceivedAt.IsZero() {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects ObservedAt/ReceivedAt", ErrInvalidArgument, i)
+			}
+			if !rep.CandidateUID.IsZero() {
+				return fmt.Errorf("%w: replacement %d: IsDelete rejects CandidateUID", ErrInvalidArgument, i)
+			}
+		}
+		full := rep.ResourceType.FullName(rep.Name)
+		fate := fateUpsert
+		if rep.IsDelete {
+			fate = fateDelete
+		}
+		prev, ok := seen[full]
+		if !ok {
+			seen[full] = fate
+			continue
+		}
+		if prev&fate != 0 {
+			kind := "replacement"
+			if fate == fateDelete {
+				kind = "delete"
+			}
+			return fmt.Errorf("%w: resource %s appears more than once as a %s in this batch", ErrInvalidArgument, full, kind)
+		}
+		return fmt.Errorf("%w: resource %s has both a replacement and a delete in this batch", ErrInvalidArgument, full)
+	}
+	return nil
 }
 
 // ValidateInventoryDelta rejects a delta whose label or condition ops

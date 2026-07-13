@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -165,5 +166,69 @@ func TestValidateInventoryDelta(t *testing.T) {
 				t.Fatalf("ValidateInventoryDelta() = %v, want %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestValidateInventoryReplacements_RejectsDeletePayloadAndDuplicates(t *testing.T) {
+	name := ResourceName("nodes/n1")
+	obs := json.RawMessage(`{"k":"v"}`)
+	now := time.Unix(1, 0).UTC()
+	alias, err := NewAlias("ns", "k", "v")
+	if err != nil {
+		t.Fatalf("NewAlias: %v", err)
+	}
+
+	cases := []struct {
+		name string
+		in   []InventoryReplacement
+	}{
+		{"missing type", []InventoryReplacement{{Name: name, IsDelete: true}}},
+		{"missing name", []InventoryReplacement{{ResourceType: "inv.fleetshift.io/Node", IsDelete: true}}},
+		{"aliases", []InventoryReplacement{{
+			ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+			Aliases: NewAliasSet([]Alias{alias}),
+		}}},
+		{"labels", []InventoryReplacement{{
+			ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+			Labels: map[string]string{"k": "v"},
+		}}},
+		{"observation", []InventoryReplacement{{
+			ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+			Observation: &obs,
+		}}},
+		{"candidate uid", []InventoryReplacement{{
+			ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+			CandidateUID: NewExtensionResourceUID(),
+		}}},
+		{"timestamps", []InventoryReplacement{{
+			ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true,
+			ObservedAt: now, ReceivedAt: now,
+		}}},
+		{"duplicate deletes", []InventoryReplacement{
+			{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
+			{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
+		}},
+		{"contradictory", []InventoryReplacement{
+			{ResourceType: "inv.fleetshift.io/Node", Name: name, IsDelete: true},
+			{ResourceType: "inv.fleetshift.io/Node", Name: name, CandidateUID: NewExtensionResourceUID(), ObservedAt: now, ReceivedAt: now},
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ValidateInventoryReplacements(tc.in); !errors.Is(err, ErrInvalidArgument) {
+				t.Fatalf("err = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
+func TestValidateInventoryReplacements_AcceptsMixedDistinctKeys(t *testing.T) {
+	now := time.Unix(1, 0).UTC()
+	err := ValidateInventoryReplacements([]InventoryReplacement{
+		{ResourceType: "inv.fleetshift.io/Node", Name: "nodes/a", IsDelete: true},
+		{ResourceType: "inv.fleetshift.io/Node", Name: "nodes/b", CandidateUID: NewExtensionResourceUID(), ObservedAt: now, ReceivedAt: now},
+	})
+	if err != nil {
+		t.Fatalf("ValidateInventoryReplacements: %v", err)
 	}
 }

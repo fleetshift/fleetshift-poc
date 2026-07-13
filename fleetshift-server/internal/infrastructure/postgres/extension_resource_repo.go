@@ -975,8 +975,21 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	if len(replacements) == 0 {
 		return nil
 	}
+	if err := domain.ValidateInventoryReplacements(replacements); err != nil {
+		return err
+	}
 
-	n := len(replacements)
+	deletes, upserts := partitionInventoryReplacements(replacements)
+	if len(deletes) > 0 {
+		if err := r.deleteInventoryReplacements(ctx, deletes); err != nil {
+			return fmt.Errorf("replace inventory: %w", err)
+		}
+	}
+	if len(upserts) == 0 {
+		return nil
+	}
+
+	n := len(upserts)
 	idx := make([]int32, n)
 	serviceNames := make([]string, n)
 	typeNames := make([]string, n)
@@ -990,7 +1003,7 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 	receivedAts := make([]time.Time, n)
 	reportedAliases := make([]string, n)
 
-	for i, rep := range replacements {
+	for i, rep := range upserts {
 		idx[i] = int32(i)
 		serviceNames[i] = string(rep.ResourceType.ServiceName())
 		typeNames[i] = rep.ResourceType.TypeName()
@@ -1029,6 +1042,20 @@ func (r *ExtensionResourceRepo) ReplaceInventory(ctx context.Context, replacemen
 		return fmt.Errorf("replace inventory: %w", err)
 	}
 	return nil
+}
+
+// partitionInventoryReplacements splits a validated mixed batch into
+// IsDelete entries and upserts, preserving relative order within each
+// partition.
+func partitionInventoryReplacements(replacements []domain.InventoryReplacement) (deletes, upserts []domain.InventoryReplacement) {
+	for _, rep := range replacements {
+		if rep.IsDelete {
+			deletes = append(deletes, rep)
+			continue
+		}
+		upserts = append(upserts, rep)
+	}
+	return deletes, upserts
 }
 
 // applyInventoryDeltasSQL implements the field-level counterpart of
@@ -1376,7 +1403,7 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 }
 
 // ---------------------------------------------------------------------------
-// Inventory delete/prune
+// Inventory hard-delete (IsDelete replacements)
 // ---------------------------------------------------------------------------
 
 // inventoryDeleteWithAliasCleanupSQLTemplate is the shared CTE tail
@@ -1388,11 +1415,8 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 // remaining_refs rather than a simpler DELETE ... RETURNING, and why
 // the ordering-forcing "(SELECT count(*) FROM deleted_extension_resource) >= 0"
 // clause exists. Unlike that const, target_er here selects only uid --
-// [ExtensionResourceRepo.DeleteInventoryResources],
-// [ExtensionResourceRepo.PruneInventoryCollection], and
-// [ExtensionResourceRepo.DeleteInventorySubtree] each supply their own
+// [ExtensionResourceRepo.deleteInventoryReplacements] supplies the
 // selection predicate instead of sharing one exact-name match, and
-// none of them need the final row count: unlike single-row [Delete],
 // zero matching rows is success, not [domain.ErrNotFound].
 const inventoryDeleteWithAliasCleanupSQLTemplate = `
 WITH target_er AS (
@@ -1443,73 +1467,32 @@ deleted_orphan_claims AS (
 )
 SELECT (SELECT count(*) FROM deleted_extension_resource)`
 
-// DeleteInventoryResources implements
-// [domain.ExtensionResourceRepository.DeleteInventoryResources] by
-// joining extension_resources against every ref's natural key in one
-// UNNEST, following the same batch-arg shape as [replaceInventorySQL].
-func (r *ExtensionResourceRepo) DeleteInventoryResources(ctx context.Context, refs []domain.InventoryResourceRef) error {
-	if len(refs) == 0 {
+// deleteInventoryReplacements hard-deletes every IsDelete replacement
+// by full resource type (service_name + type_name) and name. Missing
+// rows are success; CandidateUID is never consulted.
+func (r *ExtensionResourceRepo) deleteInventoryReplacements(ctx context.Context, deletes []domain.InventoryReplacement) error {
+	if len(deletes) == 0 {
 		return nil
 	}
-	n := len(refs)
+	n := len(deletes)
 	serviceNames := make([]string, n)
+	typeNames := make([]string, n)
 	collectionNames := make([]string, n)
 	resourceIDs := make([]string, n)
-	for i, ref := range refs {
-		serviceNames[i] = string(ref.ResourceType.ServiceName())
-		collectionNames[i] = string(ref.Name.Collection())
-		resourceIDs[i] = string(ref.Name.ID())
+	for i, rep := range deletes {
+		serviceNames[i] = string(rep.ResourceType.ServiceName())
+		typeNames[i] = rep.ResourceType.TypeName()
+		collectionNames[i] = string(rep.Name.Collection())
+		resourceIDs[i] = string(rep.Name.ID())
 	}
 	targetEr := `SELECT er.uid
 		FROM extension_resources er
-		JOIN (SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[]) AS t(service_name, collection_name, resource_id)) t
-		  ON er.service_name = t.service_name AND er.collection_name = t.collection_name AND er.resource_id = t.resource_id`
+		JOIN (SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[]) AS t(service_name, type_name, collection_name, resource_id)) t
+		  ON er.service_name = t.service_name AND er.type_name = t.type_name AND er.collection_name = t.collection_name AND er.resource_id = t.resource_id`
 	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
-	_, err := r.DB.ExecContext(ctx, query, serviceNames, collectionNames, resourceIDs)
+	_, err := r.DB.ExecContext(ctx, query, serviceNames, typeNames, collectionNames, resourceIDs)
 	if err != nil {
-		return fmt.Errorf("delete inventory resources: %w", err)
-	}
-	return nil
-}
-
-// PruneInventoryCollection implements
-// [domain.ExtensionResourceRepository.PruneInventoryCollection]. A nil
-// keepIDs is rejected before any SQL runs; a non-nil empty keepIDs
-// passes an empty array to "<> ALL(...)", which is vacuously true for
-// every row and so deletes every row in the exact collection.
-func (r *ExtensionResourceRepo) PruneInventoryCollection(ctx context.Context, scope domain.InventoryCollectionRef, keepIDs []domain.ResourceID) error {
-	if keepIDs == nil {
-		return fmt.Errorf("%w: keepIDs must not be nil", domain.ErrInvalidArgument)
-	}
-	keep := make([]string, len(keepIDs))
-	for i, id := range keepIDs {
-		keep[i] = string(id)
-	}
-	targetEr := `SELECT uid FROM extension_resources
-		WHERE service_name = $1 AND type_name = $2 AND collection_name = $3 AND resource_id <> ALL($4::text[])`
-	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
-	_, err := r.DB.ExecContext(ctx, query,
-		string(scope.ResourceType.ServiceName()), scope.ResourceType.TypeName(), string(scope.Collection), keep)
-	if err != nil {
-		return fmt.Errorf("prune inventory collection: %w", err)
-	}
-	return nil
-}
-
-// DeleteInventorySubtree implements
-// [domain.ExtensionResourceRepository.DeleteInventorySubtree] using a
-// length-bounded left() comparison rather than LIKE, so a parent
-// segment containing '%' or '_' can never be misinterpreted as a
-// wildcard.
-func (r *ExtensionResourceRepo) DeleteInventorySubtree(ctx context.Context, ref domain.InventorySubtreeRef) error {
-	prefix := string(ref.Parent) + "/"
-	targetEr := `SELECT uid FROM extension_resources
-		WHERE service_name = $1 AND type_name = $2 AND (collection_name = $3 OR left(collection_name, length($4)) = $4)`
-	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
-	_, err := r.DB.ExecContext(ctx, query,
-		string(ref.ResourceType.ServiceName()), ref.ResourceType.TypeName(), string(ref.Parent), prefix)
-	if err != nil {
-		return fmt.Errorf("delete inventory subtree: %w", err)
+		return fmt.Errorf("delete inventory replacements: %w", err)
 	}
 	return nil
 }
