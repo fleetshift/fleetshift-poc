@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -20,6 +21,14 @@ const (
 	ownershipConfigMapNamespace = "kube-system"
 	ownershipGenerationKey      = "generation"
 )
+
+// ownershipConfigMapTimeout bounds ConfigMap Get/Create/Update in
+// [kubeGenerationStore]. Deliver's async path uses
+// [context.WithoutCancel], and Remove uses [context.Background], so
+// without a local deadline those calls can hang indefinitely if the
+// cluster API stalls. Parent cancellation and tighter deadlines are
+// preserved via [context.WithTimeout]. Overridable in tests.
+var ownershipConfigMapTimeout = 30 * time.Second
 
 // GenerationDisposition is the result of [GenerationStore.CheckAndAdvance].
 type GenerationDisposition int
@@ -148,6 +157,9 @@ func clientFromKubeconfig(kubeconfig []byte) (kubernetes.Interface, error) {
 func (s *kubeGenerationStore) Forget(string) {}
 
 func (s *kubeGenerationStore) Get(ctx context.Context, _ string, kubeconfig []byte) (domain.Generation, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, ownershipConfigMapTimeout)
+	defer cancel()
+
 	client, err := s.newClient(kubeconfig)
 	if err != nil {
 		return 0, false, err
@@ -167,6 +179,11 @@ func (s *kubeGenerationStore) Get(ctx context.Context, _ string, kubeconfig []by
 }
 
 func (s *kubeGenerationStore) CheckAndAdvance(ctx context.Context, _ string, kubeconfig []byte, proposed domain.Generation) (GenerationDisposition, domain.Generation, error) {
+	// One timeout covers Get/Create/Update and conflict retries so a
+	// stalled API cannot hang past the budget while retries still share it.
+	ctx, cancel := context.WithTimeout(ctx, ownershipConfigMapTimeout)
+	defer cancel()
+
 	client, err := s.newClient(kubeconfig)
 	if err != nil {
 		return 0, 0, err
