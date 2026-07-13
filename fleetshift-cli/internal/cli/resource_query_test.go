@@ -123,7 +123,7 @@ func TestResourceQuery_JSON(t *testing.T) {
 		"--filter", `resource.state == "ACTIVE"`,
 	)
 
-	for _, want := range []string{`"resources"`, `"next_page_token"`, `"next-page-token"`, `"kind.fleetshift.io/Cluster"`, `"clusters/alpha"`} {
+	for _, want := range []string{`"resources"`, `"nextPageToken"`, `"next-page-token"`, `"kind.fleetshift.io/Cluster"`, `"clusters/alpha"`} {
 		if !strings.Contains(out, want) {
 			t.Errorf("json output missing %q; got:\n%s", want, out)
 		}

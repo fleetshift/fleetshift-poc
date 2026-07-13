@@ -66,7 +66,7 @@ In v0, --scope must be "-" (whole platform).`,
 			}
 
 			if output.Format(ctx.flags.outputFormat) == output.FormatJSON {
-				// Full response so callers retain next_page_token.
+				// Full response so callers retain nextPageToken.
 				return ctx.printer.PrintResource(resp, nil)
 			}
 
