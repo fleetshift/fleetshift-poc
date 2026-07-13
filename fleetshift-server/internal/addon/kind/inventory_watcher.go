@@ -278,7 +278,20 @@ func (w *InventoryWatcher) flush(ctx context.Context) error {
 	if reporter == nil {
 		return nil
 	}
-	return reporter.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{Reports: reports})
+	err := reporter.ApplyDeltaBatch(ctx, domain.InventoryDeltaBatch{Reports: reports})
+	if err != nil {
+		// Re-enqueue drained reports so a failed batch is not lost.
+		// Do not overwrite entries that arrived while ApplyDeltaBatch ran.
+		w.mu.Lock()
+		for _, r := range reports {
+			if _, exists := w.pending[r.Name]; !exists {
+				w.pending[r.Name] = r
+			}
+		}
+		w.mu.Unlock()
+		return err
+	}
+	return nil
 }
 
 func nodeResourceName(nodeName string) domain.ResourceName {

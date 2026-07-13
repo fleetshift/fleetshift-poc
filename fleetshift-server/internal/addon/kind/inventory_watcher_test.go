@@ -3,6 +3,7 @@ package kind
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -16,9 +17,23 @@ import (
 type recordingInventoryReporter struct {
 	mu      sync.Mutex
 	batches []domain.InventoryDeltaBatch
+	err     error  // returned from ApplyDeltaBatch when set
+	before  func() // optional hook invoked before applying (outside reporter lock)
 }
 
 func (r *recordingInventoryReporter) ApplyDeltaBatch(_ context.Context, batch domain.InventoryDeltaBatch) error {
+	r.mu.Lock()
+	before := r.before
+	err := r.err
+	r.mu.Unlock()
+
+	if before != nil {
+		before()
+	}
+	if err != nil {
+		return err
+	}
+
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	cp := domain.InventoryDeltaBatch{Reports: append([]domain.InventoryDeltaReport(nil), batch.Reports...)}
@@ -99,6 +114,70 @@ func TestInventoryWatcher_CoalescesPendingIntoOneBatch(t *testing.T) {
 	}
 	if _, ok := byName[clusterName]; !ok {
 		t.Fatal("missing cluster report")
+	}
+}
+
+func TestInventoryWatcher_FlushRequeuesOnBatchFailure(t *testing.T) {
+	fixed := time.Date(2026, 7, 10, 12, 0, 0, 0, time.UTC)
+	clusterName := domain.ResourceName("clusters/demo")
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:   "n1",
+			Labels: map[string]string{"v": "1"},
+		},
+	}
+
+	var w *InventoryWatcher
+	reporter := &recordingInventoryReporter{
+		err: errors.New("batch failed"),
+		before: func() {
+			// Newer delta arrives while ApplyDeltaBatch is in flight.
+			node.Labels["v"] = "2"
+			w.enqueueNode(clusterName, node)
+		},
+	}
+	w = NewInventoryWatcher(reporter,
+		WithInventoryDebounce(0),
+		WithInventoryClock(func() time.Time { return fixed }),
+	)
+
+	w.enqueueNode(clusterName, node)
+	w.enqueueCluster(clusterName, true)
+
+	if err := w.flush(context.Background()); err == nil {
+		t.Fatal("flush: want error from ApplyDeltaBatch")
+	}
+
+	reporter.mu.Lock()
+	reporter.err = nil
+	reporter.before = nil
+	reporter.mu.Unlock()
+
+	if err := w.flush(context.Background()); err != nil {
+		t.Fatalf("flush after recovery: %v", err)
+	}
+
+	reporter.mu.Lock()
+	defer reporter.mu.Unlock()
+	if len(reporter.batches) != 1 {
+		t.Fatalf("batches = %d, want 1 after successful retry", len(reporter.batches))
+	}
+	byName := map[domain.ResourceName]domain.InventoryDeltaReport{}
+	for _, r := range reporter.batches[0].Reports {
+		byName[r.Name] = r
+	}
+	if len(byName) != 2 {
+		t.Fatalf("reports = %d, want 2 (requeued cluster + newer node)", len(byName))
+	}
+	nodeReport, ok := byName[domain.ResourceName("nodes/n1")]
+	if !ok {
+		t.Fatal("missing node report after requeue")
+	}
+	if nodeReport.ReplaceLabels["v"] != "2" {
+		t.Errorf("ReplaceLabels[v] = %q, want 2 (newer pending must win)", nodeReport.ReplaceLabels["v"])
+	}
+	if _, ok := byName[clusterName]; !ok {
+		t.Fatal("missing cluster report after requeue")
 	}
 }
 
