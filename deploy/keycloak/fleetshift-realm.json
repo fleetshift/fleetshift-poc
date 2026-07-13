@@ -68,7 +68,8 @@
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
-        "http://localhost:8085/*"
+        "http://localhost:8085/*",
+        "http://localhost:8888/*"
       ],
       "webOrigins": [
         "http://localhost:8085"
@@ -111,9 +112,9 @@
       "publicClient": true,
       "fullScopeAllowed": false,
       "redirectUris": [
-        "http://localhost:8888/callback",
         "http://127.0.0.1/callback",
-        "http://localhost:8080/*"
+        "http://localhost:8080/*",
+        "http://localhost:8888/*"
       ],
       "webOrigins": [
         "http://localhost:8888",
