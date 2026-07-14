@@ -1,14 +1,10 @@
-// This file tests queryFieldResolver -- this package's
-// [querysql.FieldResolver] implementation, i.e. the actual
-// FleetShift/Postgres row shape a filter's field paths resolve to
-// (column names, JSONB extraction, label/condition map keys, safe
-// numeric/boolean casts, GIN containment rewrites, and schema-backed
-// path validation). It is an internal (package postgres) test file,
-// rather than package postgres_test like this package's other tests,
-// purely so it can construct queryFieldResolver directly without a
-// database -- see querysql's package doc for why this split exists.
-// End-to-end coverage against a real Postgres/SQLite database lives
-// in queryrepotest.
+// This file tests queryFieldResolver SQL generation only: column
+// names, JSONB extraction, GIN containment rewrites, cel_ts_* usage,
+// COLLATE "C", and SchemaProvider-backed path validation. Cross-backend
+// CEL filter meaning lives in queryrepotest.SemanticFilterMatrix —
+// do not restate those outcomes here. Package postgres (not
+// postgres_test) so queryFieldResolver can be constructed without a
+// database.
 package postgres
 
 import (
@@ -807,16 +803,9 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 		t.Errorf("SQL = %q, want false for incompatible membership", pred.SQL)
 	}
 
-	// Snake_case message spellings are not aliases.
-	for _, filter := range []string{
-		`resource.intent_version == "1"`,
-		`resource.pause_reason == "manual"`,
-	} {
-		err := compileErr(t, filter)
-		if !errors.Is(err, domain.ErrInvalidArgument) {
-			t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
-		}
-	}
+	// Snake_case message rejection and heterogeneous match outcomes are
+	// covered by queryrepotest.SemanticFilterMatrix. Below: SQL-shape
+	// only (literal binding / LIKE over the API enum projection).
 
 	// Storage spelling is not an alias for the API enum name.
 	pred = compile(t, `resource.state == "active"`)

@@ -1,8 +1,9 @@
-// This file tests queryFieldResolver -- this package's
-// [querysql.FieldResolver] implementation for SQLite (json_extract /
-// ->>, numbered QuestionParams ?N, safe numeric/boolean casts via
-// json_valid/json_type without pg_input_is_valid). End-to-end
-// coverage against a real SQLite database lives in queryrepotest.
+// This file tests queryFieldResolver SQL generation only: json_extract
+// / ->>, numbered QuestionParams ?N, safe casts via json_valid /
+// json_type, norm-sibling paths, and SchemaProvider-backed path
+// validation. Cross-backend CEL filter meaning lives in
+// queryrepotest.SemanticFilterMatrix — do not restate those outcomes
+// here.
 package sqlite
 
 import (
@@ -302,7 +303,7 @@ func TestQueryFieldResolver_NumericJSONPreservesJSONTypes(t *testing.T) {
 			t.Fatal(err)
 		}
 		pred := compile(t, `resource.spec.n > 4`)
-		sql := rewriteConformanceSQL(strings.ReplaceAll(pred.SQL, "ri.spec", "t.j"))
+		sql := strings.ReplaceAll(pred.SQL, "ri.spec", "t.j")
 		// Drop resourceType guard pieces if present — this filter has none.
 		rows, err := db.Query(`SELECT 1 FROM t WHERE `+sql, pred.Args...)
 		if err != nil {

@@ -38,12 +38,18 @@ func RunUnimplemented(t *testing.T, factory Factory) {
 // Run exercises the full [domain.QueryRepository] contract for a
 // backend that implements CEL filtering over extension resources.
 // Platform aggregate rows are out of scope for QueryResources today.
+//
+// SemanticFilterMatrix is the primary cross-backend correctness suite
+// for CEL filter meaning (ProtoJSON names, map keys, timestamps,
+// heterogeneous JSON). Backend-local tests should cover only SQL
+// generation / index shape that cannot be expressed at this interface.
 func Run(t *testing.T, factory Factory) {
 	t.Run("EmptyFilter", func(t *testing.T) { runEmptyFilterTests(t, factory) })
 	t.Run("HydrationEquivalence", func(t *testing.T) { runHydrationEquivalenceTests(t, factory) })
 	t.Run("Pagination", func(t *testing.T) { runPaginationTests(t, factory) })
 	t.Run("EnvelopeFieldFilters", func(t *testing.T) { runEnvelopeFieldFilterTests(t, factory) })
 	t.Run("ResourceFieldFilters", func(t *testing.T) { runResourceFieldFilterTests(t, factory) })
+	t.Run("SemanticFilterMatrix", func(t *testing.T) { runSemanticFilterTests(t, factory) })
 	t.Run("ResourceTypesConstraint", func(t *testing.T) { runNilSchemaProviderTypeScopeTests(t, factory) })
 	t.Run("CaseSensitivity", func(t *testing.T) { runCaseSensitivityFilterTests(t, factory) })
 	t.Run("InvalidFilters", func(t *testing.T) { runInvalidFilterTests(t, factory) })

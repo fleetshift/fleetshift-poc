@@ -10,7 +10,8 @@ import (
 )
 
 // TestQueryRepo exercises the full QueryRepository contract against
-// the real SQLite implementation -- see queryrepotest.Run's doc.
+// the real SQLite implementation, including SemanticFilterMatrix
+// (see queryrepotest.Run).
 func TestQueryRepo(t *testing.T) {
 	t.Parallel()
 	queryrepotest.Run(t, func(t *testing.T) domain.Tx {
