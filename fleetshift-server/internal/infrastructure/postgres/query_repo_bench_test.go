@@ -437,6 +437,16 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 		fmt.Sprintf(`resourceType == "%s/%s" && timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2099-01-01T00:00:00Z")`,
 			qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
+	// Direct ProtoJSON string equality on native TIMESTAMPTZ wraps
+	// with cel_ts_protojson_tstz (response-copy filters).
+	explainQueryResources(t, db, "direct native timestamp string matching",
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.localUpdateTime == "2026-06-01T12:00:00Z"`,
+			qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "direct native timestamp string non-matching",
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.localUpdateTime == "2099-01-01T00:00:00Z"`,
+			qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -542,8 +552,9 @@ func seedQRBCorpus(t *testing.T, db *sql.DB) {
 // worst-case non-matching JSON paths (spec / observation) that must
 // scan every typed candidate before returning empty, plus timestamp()
 // conversion scenarios for native inventory columns and dynamic
-// condition strings — matching-page benches alone can stop early and
-// hide that cost.
+// condition strings, and direct ProtoJSON string equality on native
+// localUpdateTime (cel_ts_protojson_tstz) — matching-page benches
+// alone can stop early and hide that cost.
 func TestQueryResourcesBenchmark(t *testing.T) {
 	if os.Getenv("FLEETSHIFT_QUERY_BENCH") == "" {
 		t.Skip("set FLEETSHIFT_QUERY_BENCH=1 to run (spins up a dedicated Postgres container and seeds a realistic-scale corpus)")
@@ -620,6 +631,19 @@ func TestQueryResourcesBenchmark(t *testing.T) {
 		{"timestamp conversion condition non-matching", domain.QueryResourcesRequest{
 			Filter: fmt.Sprintf(
 				`resourceType == "%s/%s" && timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2099-01-01T00:00:00Z")`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		// Direct ProtoJSON string equality wraps cel_ts_protojson_tstz.
+		{"direct native timestamp string matching", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(
+				`resourceType == "%s/%s" && resource.localUpdateTime == "2026-06-01T12:00:00Z"`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"direct native timestamp string non-matching", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(
+				`resourceType == "%s/%s" && resource.localUpdateTime == "2099-01-01T00:00:00Z"`,
 				qrbNodeService, qrbNodeType),
 			PageSize: int32(defaultQueryPageSize),
 		}, true},

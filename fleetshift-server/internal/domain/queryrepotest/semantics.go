@@ -240,6 +240,36 @@ func runSemanticFilterTests(t *testing.T, factory Factory) {
 		if len(results) != 0 {
 			t.Fatalf("different instant: len = %d, want 0", len(results))
 		}
+
+		// != and in are core operators on the write-time norm sibling
+		// (condition lastTransitionTime) and native timestamp columns.
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.conditions["Ready"].lastTransitionTime) != timestamp("2026-06-01T12:00:00Z")`)
+		assertResultNames(t, results, wantName)
+
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.conditions["Ready"].lastTransitionTime) != timestamp("2026-06-01T12:00:00.500Z")`)
+		if len(results) != 0 {
+			t.Fatalf("!= same instant: len = %d, want 0", len(results))
+		}
+
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.conditions["Ready"].lastTransitionTime) in [timestamp("2026-06-01T08:00:00.5-04:00"), timestamp("2099-01-01T00:00:00Z")]`)
+		assertResultNames(t, results, wantName)
+
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.conditions["Ready"].lastTransitionTime) in [timestamp("2026-06-01T12:00:00Z")]`)
+		if len(results) != 0 {
+			t.Fatalf("in different instant only: len = %d, want 0", len(results))
+		}
+
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.localUpdateTime) != timestamp("2099-01-01T00:00:00Z")`)
+		assertResultNames(t, results, wantName)
+
+		results = queryAll(t, tx, typeScope+
+			`timestamp(resource.localUpdateTime) in [timestamp("2026-06-01T08:00:00-04:00")]`)
+		assertResultNames(t, results, wantName)
 	})
 
 	t.Run("TimestampMissingInvalidAndNonString", func(t *testing.T) {
@@ -336,16 +366,16 @@ func runSemanticFilterTests(t *testing.T, factory Factory) {
 
 func assertResultNames(t *testing.T, results []domain.QueryResourceResult, want ...string) {
 	t.Helper()
-	got := make(map[string]struct{}, len(results))
-	for _, r := range results {
-		got[r.Name] = struct{}{}
-	}
-	if len(got) != len(want) {
+	if len(results) != len(want) {
 		names := make([]string, len(results))
 		for i, r := range results {
 			names[i] = r.Name
 		}
 		t.Fatalf("result names = %v, want %v", names, want)
+	}
+	got := make(map[string]struct{}, len(results))
+	for _, r := range results {
+		got[r.Name] = struct{}{}
 	}
 	for _, name := range want {
 		if _, ok := got[name]; !ok {
