@@ -9,6 +9,7 @@ const (
 	TargetStateDiscovered   TargetState = "discovered"
 	TargetStateInitializing TargetState = "initializing"
 	TargetStateReady        TargetState = "ready"
+	TargetStateDraining     TargetState = "draining"
 	TargetStateTerminated   TargetState = "terminated"
 )
 
