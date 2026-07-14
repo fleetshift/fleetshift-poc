@@ -119,7 +119,8 @@ CREATE_RESP=$(curl -sk -w '\n%{http_code}' -X POST \
     "${KC_URL}/admin/realms/${REALM}/users" \
     -H "Authorization: Bearer ${ADMIN_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d "$USER_JSON")
+    -d "$USER_JSON") \
+    || error "Failed to reach Keycloak at ${KC_URL} (curl transport error)"
 HTTP_CODE=$(printf '%s\n' "$CREATE_RESP" | tail -n1)
 CREATE_BODY=$(printf '%s\n' "$CREATE_RESP" | sed '$d')
 
