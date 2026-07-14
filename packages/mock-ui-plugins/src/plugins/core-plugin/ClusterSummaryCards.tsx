@@ -7,7 +7,11 @@ import {
   Title,
 } from "@patternfly/react-core";
 
-import type { GcpHcpClusterRow } from "../gcphcp-plugin/gcpHcpUtils";
+import {
+  type ClusterRow,
+  isFailureState,
+  isHealthyState,
+} from "./clusterTypes";
 
 interface SummaryCard {
   label: string;
@@ -15,12 +19,12 @@ interface SummaryCard {
   color?: string;
 }
 
-const FAILURE_STATES = ["ERROR", "DEGRADED", "FAILED"];
-
-function buildSummary(rows: GcpHcpClusterRow[]): SummaryCard[] {
-  const healthy = rows.filter((r) => r.cluster.state === "ACTIVE").length;
+function buildSummary(rows: ClusterRow[]): SummaryCard[] {
+  const healthy = rows.filter((r) =>
+    isHealthyState(r.result.resource.state),
+  ).length;
   const needsAttention = rows.filter((r) =>
-    FAILURE_STATES.includes(r.cluster.state),
+    isFailureState(r.result.resource.state),
   ).length;
   const totalNodePools = rows.reduce((sum, r) => sum + r.nodePoolCount, 0);
 
@@ -43,11 +47,7 @@ function buildSummary(rows: GcpHcpClusterRow[]): SummaryCard[] {
   ];
 }
 
-export default function ClusterSummaryCards({
-  rows,
-}: {
-  rows: GcpHcpClusterRow[];
-}) {
+export default function ClusterSummaryCards({ rows }: { rows: ClusterRow[] }) {
   const cards = buildSummary(rows);
 
   return (

@@ -1,6 +1,10 @@
 import "./ClustersPage.css";
 
-import { PluginLink } from "@fleetshift/common";
+import {
+  createApiClient,
+  createResourceApi,
+  PluginLink,
+} from "@fleetshift/common";
 import {
   SkeletonTableBody,
   SkeletonTableHead,
@@ -40,20 +44,21 @@ import {
 } from "@patternfly/react-data-view/dist/dynamic/Hooks";
 import { CubesIcon } from "@patternfly/react-icons";
 import { ActionsColumn, Tbody, Td, Tr } from "@patternfly/react-table";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 
-import {
-  deleteGcpHcpCluster,
-  extractClusterId,
-  listGcpHcpClusters,
-} from "../gcphcp-plugin/api";
-import {
-  formatTime,
-  type GcpHcpClusterRow,
-  stateLabel,
-} from "../gcphcp-plugin/gcpHcpUtils";
 import ClusterSummaryCards from "./ClusterSummaryCards";
+import {
+  buildAddonBasePath,
+  type ClusterResource,
+  type ClusterRow,
+  extractClusterId,
+  extractService,
+  formatTime,
+  isTransientState,
+  serviceLabel,
+  stateLabel,
+} from "./clusterTypes";
 import CreateClusterModal from "./CreateClusterModal";
 
 interface ClusterFilters {
@@ -62,6 +67,7 @@ interface ClusterFilters {
 
 const columns: DataViewTh[] = [
   "Name",
+  "Provider",
   "Status",
   "Version",
   "Node Pools",
@@ -75,12 +81,14 @@ const PER_PAGE_OPTIONS = [
   { title: "50", value: 50 },
 ];
 
+const clusterApi = createResourceApi<ClusterResource>("-");
+
 export default function ClustersPage() {
-  const [rows, setRows] = useState<GcpHcpClusterRow[]>([]);
+  const [rows, setRows] = useState<ClusterRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
-  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ClusterRow | null>(null);
   const [silentFailCount, setSilentFailCount] = useState(0);
 
   const [searchParams, setSearchParams] = useSearchParams();
@@ -114,12 +122,17 @@ export default function ClustersPage() {
   const fetchClusters = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const clusters = await listGcpHcpClusters();
+      const results = await clusterApi.searchAll({
+        filter: 'resource.name.startsWith("clusters/")',
+      });
       setRows(
-        clusters.map((c) => ({
-          cluster: c,
-          id: extractClusterId(c.name),
-          nodePoolCount: c.spec.nodepools?.length ?? 0,
+        results.map((r) => ({
+          result: r,
+          id: extractClusterId(r.resource.name),
+          service: extractService(r.name),
+          nodePoolCount: Array.isArray(r.resource.spec?.nodepools)
+            ? r.resource.spec.nodepools.length
+            : 0,
         })),
       );
       setError(null);
@@ -149,9 +162,8 @@ export default function ClustersPage() {
 
   const hasTransient = rows.some(
     (r) =>
-      r.cluster.state === "CREATING" ||
-      r.cluster.state === "DELETING" ||
-      r.cluster.reconciling,
+      isTransientState(r.result.resource.state) ||
+      r.result.resource.reconciling,
   );
   useEffect(() => {
     if (!hasTransient || silentFailCount >= 3) return;
@@ -169,12 +181,17 @@ export default function ClustersPage() {
     [rows, filters],
   );
 
+  const deleteTargetRef = useRef(deleteTarget);
+  deleteTargetRef.current = deleteTarget;
+
   const handleDelete = async () => {
-    if (!deleteTarget) return;
-    setDeleting(deleteTarget);
+    const target = deleteTargetRef.current;
+    if (!target) return;
+    setDeleting(target.id);
     setDeleteTarget(null);
     try {
-      await deleteGcpHcpCluster(deleteTarget);
+      const client = createApiClient(buildAddonBasePath(target.service));
+      await client.delete(`/clusters/${target.id}`);
       await fetchClusters();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
@@ -188,7 +205,7 @@ export default function ClustersPage() {
       filtered
         .slice((page - 1) * perPage, (page - 1) * perPage + perPage)
         .map((r) => {
-          const sl = stateLabel(r.cluster.state);
+          const sl = stateLabel(r.result.resource.state);
           const isDeleting = deleting === r.id;
           return [
             {
@@ -204,23 +221,30 @@ export default function ClustersPage() {
             },
             {
               cell: (
-                <Label color={sl.color} isCompact>
-                  {sl.text}
-                  {r.cluster.reconciling ? " (reconciling)" : ""}
+                <Label color="blue" isCompact>
+                  {serviceLabel(r.service)}
                 </Label>
               ),
             },
-            r.cluster.spec.releaseVersion || "—",
+            {
+              cell: (
+                <Label color={sl.color} isCompact>
+                  {sl.text}
+                  {r.result.resource.reconciling ? " (reconciling)" : ""}
+                </Label>
+              ),
+            },
+            r.result.resource.spec?.releaseVersion || "—",
             r.nodePoolCount,
-            formatTime(r.cluster.createTime),
+            formatTime(r.result.resource.createTime),
             {
               cell:
-                r.cluster.state !== "DELETING" ? (
+                r.result.resource.state !== "DELETING" ? (
                   <ActionsColumn
                     items={[
                       {
                         title: isDeleting ? "Deleting..." : "Delete",
-                        onClick: () => setDeleteTarget(r.id),
+                        onClick: () => setDeleteTarget(r),
                         isDisabled: isDeleting,
                       },
                     ]}
@@ -375,7 +399,7 @@ export default function ClustersPage() {
       >
         <ModalHeader
           title="Delete cluster"
-          description={`Are you sure you want to delete "${deleteTarget}"? This will terminate the provisioned cluster.`}
+          description={`Are you sure you want to delete "${deleteTarget?.id}"? This will terminate the provisioned cluster.`}
         />
         <ModalBody />
         <ModalFooter>

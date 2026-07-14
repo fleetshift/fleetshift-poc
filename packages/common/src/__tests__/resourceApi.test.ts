@@ -1,9 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type {
-  ResourceSearchResult,
-  SearchResourcesResponse,
-} from "../resourceApi";
+import type { QueryResourcesResponse, ResourceResult } from "../resourceApi";
 import {
   createApiClient,
   createResourceApi,
@@ -19,19 +16,20 @@ interface TestProps {
 }
 
 function makeResult(
-  overrides: Partial<ResourceSearchResult<TestProps>> = {},
-): ResourceSearchResult<TestProps> {
+  overrides: Partial<ResourceResult<TestProps>> = {},
+): ResourceResult<TestProps> {
   return {
     name: "//kind.fleetshift.io/clusters/prod",
-    platformResource: "clusters/prod",
-    service: "kind.fleetshift.io",
-    collection: "clusters",
-    labels: {},
-    conditions: [],
-    properties: { apiUrl: "https://prod.example.com" },
-    observations: {},
-    createTime: "2026-01-01T00:00:00Z",
-    updateTime: "2026-01-01T00:00:00Z",
+    resourceType: "kind.fleetshift.io/Cluster",
+    resource: {
+      name: "clusters/prod",
+      uid: "550e8400-e29b-41d4-a716-446655440000",
+      labels: {},
+      createTime: "2026-01-01T00:00:00Z",
+      updateTime: "2026-01-01T00:00:00Z",
+      etag: 'W/"abc"',
+      apiUrl: "https://prod.example.com",
+    },
     ...overrides,
   };
 }
@@ -63,8 +61,8 @@ afterEach(() => {
 describe("createResourceApi", () => {
   describe("search", () => {
     it("calls the correct URL with no params", async () => {
-      const response: SearchResourcesResponse<TestProps> = {
-        results: [makeResult()],
+      const response: QueryResourcesResponse<TestProps> = {
+        resources: [makeResult()],
         nextPageToken: "",
       };
       const spy = mockFetch(response);
@@ -72,39 +70,51 @@ describe("createResourceApi", () => {
 
       const res = await api.search();
 
-      expect(res.results).toHaveLength(1);
-      expect(res.results[0].properties.apiUrl).toBe("https://prod.example.com");
+      expect(res.resources).toHaveLength(1);
+      expect(res.resources[0].resource.apiUrl).toBe("https://prod.example.com");
 
       const calledUrl = spy.mock.calls[0][0] as string;
-      expect(calledUrl).toBe("/apis/fleetshift.io/v1/-:searchResources");
+      expect(calledUrl).toBe("/apis/fleetshift.io/v1/-:queryResources");
     });
 
     it("passes filter, pageSize, and pageToken as query params", async () => {
-      const spy = mockFetch({ results: [], nextPageToken: "" });
+      const spy = mockFetch({ resources: [], nextPageToken: "" });
       const api = createResourceApi("-");
 
       await api.search({
-        filter: 'collection == "clusters"',
+        filter: 'resource_type == "kind.fleetshift.io/Cluster"',
         pageSize: 25,
         pageToken: "tok123",
       });
 
       const { path, params } = parseRelativeUrl(spy.mock.calls[0][0] as string);
-      expect(path).toBe("/apis/fleetshift.io/v1/-:searchResources");
-      expect(params.get("filter")).toBe('collection == "clusters"');
+      expect(path).toBe("/apis/fleetshift.io/v1/-:queryResources");
+      expect(params.get("filter")).toBe(
+        'resource_type == "kind.fleetshift.io/Cluster"',
+      );
       expect(params.get("pageSize")).toBe("25");
       expect(params.get("pageToken")).toBe("tok123");
     });
 
+    it("passes orderBy as query param", async () => {
+      const spy = mockFetch({ resources: [], nextPageToken: "" });
+      const api = createResourceApi("-");
+
+      await api.search({ orderBy: "resource_type,name" });
+
+      const { params } = parseRelativeUrl(spy.mock.calls[0][0] as string);
+      expect(params.get("orderBy")).toBe("resource_type,name");
+    });
+
     it("encodes the scope in the URL", async () => {
-      const spy = mockFetch({ results: [], nextPageToken: "" });
+      const spy = mockFetch({ resources: [], nextPageToken: "" });
       const api = createResourceApi("workspace/foo");
 
       await api.search();
 
       const calledUrl = spy.mock.calls[0][0] as string;
       expect(calledUrl).toBe(
-        "/apis/fleetshift.io/v1/workspace%2Ffoo:searchResources",
+        "/apis/fleetshift.io/v1/workspace%2Ffoo:queryResources",
       );
     });
 
@@ -138,12 +148,15 @@ describe("createResourceApi", () => {
 
   describe("list", () => {
     it("calls search without a filter", async () => {
-      const spy = mockFetch({ results: [makeResult()], nextPageToken: "" });
+      const spy = mockFetch({
+        resources: [makeResult()],
+        nextPageToken: "",
+      });
       const api = createResourceApi<TestProps>("-");
 
       const res = await api.list({ pageSize: 10 });
 
-      expect(res.results).toHaveLength(1);
+      expect(res.resources).toHaveLength(1);
       const { params } = parseRelativeUrl(spy.mock.calls[0][0] as string);
       expect(params.has("filter")).toBe(false);
       expect(params.get("pageSize")).toBe("10");
@@ -153,7 +166,7 @@ describe("createResourceApi", () => {
   describe("get", () => {
     it("returns the first matching result", async () => {
       const result = makeResult();
-      mockFetch({ results: [result], nextPageToken: "" });
+      mockFetch({ resources: [result], nextPageToken: "" });
       const api = createResourceApi<TestProps>("-");
 
       const found = await api.get("//kind.fleetshift.io/clusters/prod");
@@ -162,7 +175,7 @@ describe("createResourceApi", () => {
     });
 
     it("returns undefined when no match", async () => {
-      mockFetch({ results: [], nextPageToken: "" });
+      mockFetch({ resources: [], nextPageToken: "" });
       const api = createResourceApi("-");
 
       const found = await api.get("//nonexistent");
@@ -171,7 +184,7 @@ describe("createResourceApi", () => {
     });
 
     it("uses name filter and pageSize 1", async () => {
-      const spy = mockFetch({ results: [], nextPageToken: "" });
+      const spy = mockFetch({ resources: [], nextPageToken: "" });
       const api = createResourceApi("-");
 
       await api.get("//svc/res/id");
@@ -182,7 +195,7 @@ describe("createResourceApi", () => {
     });
 
     it("escapes quotes and backslashes in resource name", async () => {
-      const spy = mockFetch({ results: [], nextPageToken: "" });
+      const spy = mockFetch({ resources: [], nextPageToken: "" });
       const api = createResourceApi("-");
 
       await api.get('//svc/res/"tricky\\name"');
@@ -196,12 +209,12 @@ describe("createResourceApi", () => {
 
   describe("searchAll", () => {
     it("returns flat array following nextPageToken across pages", async () => {
-      const page1: SearchResourcesResponse<TestProps> = {
-        results: [makeResult({ name: "//a" })],
+      const page1: QueryResourcesResponse<TestProps> = {
+        resources: [makeResult({ name: "//a" })],
         nextPageToken: "page2",
       };
-      const page2: SearchResourcesResponse<TestProps> = {
-        results: [makeResult({ name: "//b" })],
+      const page2: QueryResourcesResponse<TestProps> = {
+        resources: [makeResult({ name: "//b" })],
         nextPageToken: "",
       };
 
@@ -221,7 +234,9 @@ describe("createResourceApi", () => {
         } as Response);
 
       const api = createResourceApi<TestProps>("-");
-      const results = await api.searchAll({ filter: 'collection == "x"' });
+      const results = await api.searchAll({
+        filter: 'resource_type == "kind.fleetshift.io/Cluster"',
+      });
 
       expect(results).toHaveLength(2);
       expect(results[0].name).toBe("//a");
@@ -233,7 +248,7 @@ describe("createResourceApi", () => {
     });
 
     it("returns results from a single page when nextPageToken is empty", async () => {
-      mockFetch({ results: [makeResult()], nextPageToken: "" });
+      mockFetch({ resources: [makeResult()], nextPageToken: "" });
       const api = createResourceApi("-");
 
       const results = await api.searchAll();
@@ -242,8 +257,8 @@ describe("createResourceApi", () => {
     });
 
     it("throws on repeated nextPageToken to prevent infinite loop", async () => {
-      const page: SearchResourcesResponse<TestProps> = {
-        results: [makeResult({ name: "//a" })],
+      const page: QueryResourcesResponse<TestProps> = {
+        resources: [makeResult({ name: "//a" })],
         nextPageToken: "same-token",
       };
 

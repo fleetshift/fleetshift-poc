@@ -1,52 +1,46 @@
 /**
- * Base URL for the resource search API.
- * Matches the OpenAPI spec: `/apis/fleetshift.io/v1/{scope}:searchResources`
+ * Base URL for the resource query API.
+ * Matches the proto: `/apis/fleetshift.io/v1/{scope}:queryResources`
  */
-const SEARCH_BASE = "/apis/fleetshift.io/v1";
+const QUERY_BASE = "/apis/fleetshift.io/v1";
 
 // ---------------------------------------------------------------------------
-// Response / result types (from OpenAPI spec: fleetshift/v1/manifest.proto)
+// Response / result types (from proto: fleetshift/v1/resource_result.proto)
 // ---------------------------------------------------------------------------
 
-/** Health or progress condition reported by a delivery agent. */
-export interface Condition {
-  type: string;
-  status: string;
-  reason: string;
-  message: string;
-  lastTransitionTime: string;
+/**
+ * Common envelope fields always present inside the `resource` Struct,
+ * regardless of which capabilities the addon declares.
+ */
+export interface ResourceCommon {
+  name: string;
+  uid: string;
+  labels: Record<string, string>;
+  createTime: string;
+  updateTime: string;
+  etag: string;
 }
 
 /**
- * A single resource returned by SearchResources.
+ * A single resource returned by QueryResources.
  *
- * The generic `Props` parameter types the `properties` bag so
- * callers can access addon-defined fields without casting.
+ * The generic `Props` parameter types the addon-specific fields inside
+ * the `resource` Struct (spec, state, etc.). The `resource` body always
+ * includes {@link ResourceCommon} fields plus whatever the addon schema
+ * defines.
  */
-export interface ResourceSearchResult<Props = Record<string, unknown>> {
-  /** Full resource name, e.g. `"//kind.fleetshift.io/clusters/prod"`. */
+export interface ResourceResult<Props = Record<string, unknown>> {
+  /** Canonical full resource name, e.g. `"//gcphcp.fleetshift.io/clusters/prod"`. */
   name: string;
-  /** Relative platform resource name, e.g. `"clusters/prod"`. */
-  platformResource: string;
-  /** Owning extension service, e.g. `"kind.fleetshift.io"`. */
-  service: string;
-  /** Collection within the service, e.g. `"clusters"`. */
-  collection: string;
-  /** Effective labels (platform + extension). */
-  labels: Record<string, string>;
-  /** Latest reported conditions. */
-  conditions: Condition[];
-  /** Stable, addon-defined properties. */
-  properties: Props;
-  /** Latest observation payload (opaque). */
-  observations: Record<string, unknown>;
-  createTime: string;
-  updateTime: string;
+  /** Stable type identity, e.g. `"gcphcp.fleetshift.io/Cluster"`. */
+  resourceType: string;
+  /** Dynamic resource body (protojson-encoded Struct). */
+  resource: ResourceCommon & Props;
 }
 
-/** Paginated response from SearchResources. */
-export interface SearchResourcesResponse<Props = Record<string, unknown>> {
-  results: ResourceSearchResult<Props>[];
+/** Paginated response from QueryResources. */
+export interface QueryResourcesResponse<Props = Record<string, unknown>> {
+  resources: ResourceResult<Props>[];
   /** Empty string when there are no more pages. */
   nextPageToken: string;
 }
@@ -56,13 +50,15 @@ export interface SearchResourcesResponse<Props = Record<string, unknown>> {
 // ---------------------------------------------------------------------------
 
 /** Parameters accepted by {@link ResourceApi.search}. */
-export interface SearchResourcesParams {
+export interface QueryResourcesParams {
   /** CEL filter expression. Empty matches everything. */
   filter?: string;
-  /** Max results per page (server default 50, max 1000). */
+  /** Max results per page (server default applies if unset). */
   pageSize?: number;
   /** Token from a previous response to fetch the next page. */
   pageToken?: string;
+  /** Ordering. Empty for server default. v0 supports `"resource_type,name"`. */
+  orderBy?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -76,13 +72,13 @@ export interface RpcStatus {
   details?: unknown[];
 }
 
-/** Error thrown when the search API returns a non-OK response. */
+/** Error thrown when the query API returns a non-OK response. */
 export class ResourceApiError extends Error {
   constructor(
     public readonly status: number,
     public readonly rpcStatus: RpcStatus | null,
   ) {
-    super(rpcStatus?.message ?? `Search API error ${status}`);
+    super(rpcStatus?.message ?? `Query API error ${status}`);
     this.name = "ResourceApiError";
   }
 }
@@ -91,13 +87,14 @@ export class ResourceApiError extends Error {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-function buildSearchUrl(scope: string, params?: SearchResourcesParams): string {
+function buildQueryUrl(scope: string, params?: QueryResourcesParams): string {
   const qp = new URLSearchParams();
   if (params?.filter) qp.set("filter", params.filter);
   if (params?.pageSize != null) qp.set("pageSize", String(params.pageSize));
   if (params?.pageToken) qp.set("pageToken", params.pageToken);
+  if (params?.orderBy) qp.set("orderBy", params.orderBy);
   const qs = qp.toString();
-  const path = `${SEARCH_BASE}/${encodeURIComponent(scope)}:searchResources`;
+  const path = `${QUERY_BASE}/${encodeURIComponent(scope)}:queryResources`;
   return qs ? `${path}?${qs}` : path;
 }
 
@@ -106,17 +103,17 @@ function escapeCelString(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
-async function searchRequest<Props>(
+async function queryRequest<Props>(
   scope: string,
-  params?: SearchResourcesParams,
-): Promise<SearchResourcesResponse<Props>> {
-  const url = buildSearchUrl(scope, params);
+  params?: QueryResourcesParams,
+): Promise<QueryResourcesResponse<Props>> {
+  const url = buildQueryUrl(scope, params);
   const res = await fetch(url);
   if (!res.ok) {
     const rpcStatus = (await res.json().catch(() => null)) as RpcStatus | null;
     throw new ResourceApiError(res.status, rpcStatus);
   }
-  return res.json() as Promise<SearchResourcesResponse<Props>>;
+  return res.json() as Promise<QueryResourcesResponse<Props>>;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,20 +123,18 @@ async function searchRequest<Props>(
 /** Typed client returned by {@link createResourceApi}. */
 export interface ResourceApi<Props = Record<string, unknown>> {
   /**
-   * Search resources with an optional CEL filter and pagination.
-   * Maps directly to `SearchService.SearchResources`.
+   * Query resources with an optional CEL filter and pagination.
+   * Maps directly to `ResourceQueryService.QueryResources`.
    */
-  search(
-    params?: SearchResourcesParams,
-  ): Promise<SearchResourcesResponse<Props>>;
+  search(params?: QueryResourcesParams): Promise<QueryResourcesResponse<Props>>;
 
   /**
    * List all resources (no filter). Convenience wrapper around
    * {@link search} with only pagination parameters.
    */
   list(
-    params?: Pick<SearchResourcesParams, "pageSize" | "pageToken">,
-  ): Promise<SearchResourcesResponse<Props>>;
+    params?: Pick<QueryResourcesParams, "pageSize" | "pageToken">,
+  ): Promise<QueryResourcesResponse<Props>>;
 
   /**
    * Fetch a single resource by its full resource name.
@@ -147,40 +142,81 @@ export interface ResourceApi<Props = Record<string, unknown>> {
    * Uses a CEL filter `name == "{resourceName}"` under the hood.
    * Returns `undefined` when no match is found.
    */
-  get(resourceName: string): Promise<ResourceSearchResult<Props> | undefined>;
+  get(resourceName: string): Promise<ResourceResult<Props> | undefined>;
 
   /**
    * Fetch all pages of results and return a flat array.
    * Automatically follows `nextPageToken` until exhausted.
    */
   searchAll(
-    params?: Omit<SearchResourcesParams, "pageToken">,
-  ): Promise<ResourceSearchResult<Props>[]>;
+    params?: Omit<QueryResourcesParams, "pageToken">,
+  ): Promise<ResourceResult<Props>[]>;
 }
 
 /**
- * Create a typed resource-search API client scoped to a resource
+ * Create a typed resource-query API client scoped to a resource
  * hierarchy location.
  *
  * @example
  * ```ts
- * interface ClusterProps { apiUrl: string; version: string }
- * const clusterApi = createResourceApi<ClusterProps>("-");
+ * interface ClusterResource { spec: { releaseVersion: string } }
+ * const clusterApi = createResourceApi<ClusterResource>("-");
  *
- * // search with a CEL filter
- * const { results } = await clusterApi.search({
- *   filter: 'collection == "clusters"',
+ * // query with a CEL filter
+ * const { resources } = await clusterApi.search({
+ *   filter: 'resource_type == "gcphcp.fleetshift.io/Cluster"',
  *   pageSize: 20,
  * });
  *
  * // auto-paginate
- * for await (const page of clusterApi.searchAll()) {
- *   console.log(page);
- * }
+ * const all = await clusterApi.searchAll();
  * ```
  *
  * @param scope - Scope to search within (use `"-"` for global).
  */
+export function createResourceApi<Props = Record<string, unknown>>(
+  scope: string,
+): ResourceApi<Props> {
+  return {
+    search(params) {
+      return queryRequest<Props>(scope, params);
+    },
+
+    list(params) {
+      return queryRequest<Props>(scope, params);
+    },
+
+    async get(resourceName) {
+      const { resources } = await queryRequest<Props>(scope, {
+        filter: `name == "${escapeCelString(resourceName)}"`,
+        pageSize: 1,
+      });
+      return resources[0];
+    },
+
+    async searchAll(params) {
+      const allResults: ResourceResult<Props>[] = [];
+      let pageToken: string | undefined;
+      const seenTokens = new Set<string>();
+      do {
+        const response = await queryRequest<Props>(scope, {
+          ...params,
+          pageToken,
+        });
+        allResults.push(...response.resources);
+        pageToken = response.nextPageToken || undefined;
+        if (pageToken && seenTokens.has(pageToken)) {
+          throw new Error(
+            `Cyclic pagination detected: repeated nextPageToken "${pageToken}"`,
+          );
+        }
+        if (pageToken) seenTokens.add(pageToken);
+      } while (pageToken);
+      return allResults;
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Generic REST API client
 // ---------------------------------------------------------------------------
@@ -190,7 +226,7 @@ export interface ResourceApi<Props = Record<string, unknown>> {
  *
  * Replaces per-plugin `makeRequest` / `mgmtFetch` wrappers with a shared,
  * typed client that uses the same structured {@link ResourceApiError} error
- * handling as the search client.
+ * handling as the query client.
  */
 export interface ApiClient {
   /** GET `basePath + path` with optional query params. */
@@ -265,48 +301,25 @@ export function createApiClient(basePath: string): ApiClient {
 }
 
 // ---------------------------------------------------------------------------
-// Resource search API client
+// Backward-compat type aliases (PR #39 names)
 // ---------------------------------------------------------------------------
 
-export function createResourceApi<Props = Record<string, unknown>>(
-  scope: string,
-): ResourceApi<Props> {
-  return {
-    search(params) {
-      return searchRequest<Props>(scope, params);
-    },
+/** @deprecated Use {@link ResourceResult} instead. */
+export type ResourceSearchResult<Props = Record<string, unknown>> =
+  ResourceResult<Props>;
 
-    list(params) {
-      return searchRequest<Props>(scope, params);
-    },
+/** @deprecated Use {@link QueryResourcesResponse} instead. */
+export type SearchResourcesResponse<Props = Record<string, unknown>> =
+  QueryResourcesResponse<Props>;
 
-    async get(resourceName) {
-      const { results } = await searchRequest<Props>(scope, {
-        filter: `name == "${escapeCelString(resourceName)}"`,
-        pageSize: 1,
-      });
-      return results[0];
-    },
+/** @deprecated Use {@link QueryResourcesParams} instead. */
+export type SearchResourcesParams = QueryResourcesParams;
 
-    async searchAll(params) {
-      const allResults: ResourceSearchResult<Props>[] = [];
-      let pageToken: string | undefined;
-      const seenTokens = new Set<string>();
-      do {
-        const response = await searchRequest<Props>(scope, {
-          ...params,
-          pageToken,
-        });
-        allResults.push(...response.results);
-        pageToken = response.nextPageToken || undefined;
-        if (pageToken && seenTokens.has(pageToken)) {
-          throw new Error(
-            `Cyclic pagination detected: repeated nextPageToken "${pageToken}"`,
-          );
-        }
-        if (pageToken) seenTokens.add(pageToken);
-      } while (pageToken);
-      return allResults;
-    },
-  };
-}
+/** @deprecated Use {@link ResourceCommon} instead. */
+export type Condition = {
+  type: string;
+  status: string;
+  reason: string;
+  message: string;
+  lastTransitionTime: string;
+};
