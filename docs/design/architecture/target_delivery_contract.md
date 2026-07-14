@@ -74,6 +74,13 @@ Delivery lifecycle reporting is separate from inventory reporting. `ReportEvent`
 
 Fulfillments are guaranteed by virtue of durable workflows, idempotent delivery, and acknowledgements. Even if a delivery target restarts, it will keep getting fulfillment deliveries until it acks them. "Ack" must mean enough work is done that it can guarantee the work can finish with the information and APIs it has available.
 
+More precisely, the protocol needs two distinct completion points:
+
+1. **Accepted** means the target has durably persisted the generation, full desired intent, and enough recovery state to finish after process loss. The platform may stop transport retries after this point.
+2. **Delivered** means the target has observed reality converged to that intent and may report a terminal result.
+
+An implementation may collapse these into one response by waiting for convergence, but a prompt acknowledgment cannot safely mean only "held in process memory." If the target acknowledges before apply completes, its own durable reconciliation loop becomes responsible for finishing the accepted level.
+
 This is in contrast to a kube controller, like in OCM, which cannot guarantee reliably deliver of removal events from the hub. When its watch is not connected, it may miss them. Thus OCM must sync both ways: from work it knows it has locally, and from work it knows the hub has. In fleetshift this is unnecessary because the server ensures any changes are delivered reliably. So the targets never miss work add or removal.
 
 #### Base protocol for reliable fulfillment
@@ -81,7 +88,7 @@ This is in contrast to a kube controller, like in OCM, which cannot guarantee re
 When an addon starts up, it should:
 
 1. Connect to the fleetshift (in process or through a to-be-built fleetlet)
-2. Wait, asynchronously, for delivery requests and ONLY "ack" once enough there is just enough state, and no more, to guarantee progress (see next steps). The quicker the ack the more responsive progression will be. Acks should generally be quick (i.e. within a typical response time of a single synchronous RPC).
+2. Wait asynchronously for delivery requests and report `accepted` only after durably persisting the minimal state needed to guarantee progress (see next steps). The quicker the acceptance, the more responsive rollout progression will be. Acceptance should generally be quick (within a typical synchronous RPC response time); terminal `delivered` reporting may take longer.
 3. Ask for what fulfillments are in progress ("deliveries" not yet terminal)
   - The platform returns `ActiveDelivery` values: the delivery record enriched with full `TargetInfo`, caller `DeliveryAuth`, and (when signed) a re-assembled `Attestation`. This gives the addon everything `Deliver` would have provided.
   - Stale deliveries — where the fulfillment's generation has advanced past the delivery's — are excluded from the response. Their auth and attestation cannot be correctly reconstructed. The orchestration will re-dispatch with the current generation.
@@ -95,24 +102,24 @@ Generation is a **first-class delivery protocol field** — every `DeliveryReque
 
 When attestation *is* present, the platform's verification step asserts that the delivery-level generation matches the signed `expected_generation` in the attestation. This is a consistency gate: attestation does not introduce a second generation value; it validates the one carried by the protocol. The addon never chooses between two values — attestation either passes or rejects the whole delivery.
 
-The addon must never apply a delivery whose generation is older than one it has already acked. This is a safety property, not just a consistency mechanism: a stale delivery can visibly regress a customer's environment (e.g. reverting a cluster upgrade).
+The addon must never apply a delivery whose generation is older than one it has already accepted or applied. This is a safety property, not just a consistency mechanism: a stale delivery can visibly regress a customer's environment (e.g. reverting a cluster upgrade).
 
 The platform enforces a concurrency limit of one in-flight delivery per fulfillment. Under normal operation, the addon never sees two deliveries for the same fulfillment at once. However, there is an edge case: a platform process may lose its orchestration lock (crash, partition, workflow task timeout) without knowing it. A second process acquires the lock and dispatches a newer generation. The stale process's delivery may still arrive at the addon after the newer one.
 
 This decomposes into two independent subproblems:
 
 1. **Platform-side stale delivery.** The addon receives a delivery with an older generation than one it has already processed for the same fulfillment. Solutions:
-  - **Resource metadata.** Store the generation as target-side metadata (Kubernetes annotation, cloud resource tag, etc.). Before applying, check the stored generation; skip if the delivery's generation is not newer.
-  - **Platform-provided journal.** If the addon uses the platform journal (see [Journaling](#journaling) below), the journal write enforces generation ordering: the platform rejects a journal entry for an older generation when a newer one is already recorded. The journal becomes the generation fence — the addon writes before acting, and the write itself is the high-water mark check. The platform also discards stale acks (the workflow eventually realizes its lock is lost.)
+  - **Resource metadata.** Store the generation as target-side metadata (Kubernetes annotation, cloud resource tag, etc.). Each apply must atomically compare the stored generation and mutate the resource, for example with a target-native compare-and-swap. A separate read-check followed by an unconditional write is not a fence.
+  - **Platform-provided journal.** If the addon uses the platform journal (see [Journaling](#journaling) below), the journal write enforces acceptance ordering: the platform rejects an entry for an older generation when a newer one is already recorded. The addon must revalidate that high-water mark before each externally visible effect, or combine the journal with a strict at-most-one processor guarantee. A journal check only at the start cannot stop an already-running old worker after a newer worker advances the journal. The platform also discards stale acks.
 2. **Addon-side concurrency.** The addon itself may have concurrent processes (e.g. one still alive when another connects), causing read-modify-write races against the target. Solutions:
-  - **At-most-one leaseholder per target.** A Kubernetes `Lease` or equivalent ensures only one active process per target. This is the same pattern Kubernetes controllers use via leader election.
+  - **Strict at-most-one processor per target.** Only one process may be able to produce target effects at a time. An expiring lease alone does not provide this under pause or partition if the old holder can continue writing after expiry. The target must either make the old holder unable to continue or validate a monotonically increasing fencing token on every effect.
   - **Optimistic concurrency.** Use the target's native concurrency control (Kubernetes `resourceVersion`, Azure ARM etags) to detect and retry conflicting writes.
 
 > NOTE: "The workflow eventually realizes its lock is lost" – we should be careful that within an activity, these races are detected. For example, we don't want an old ack to overwrite a more recent one.
 
-These compose naturally: pick one approach from each. In practice, Kubernetes targets often merge both into a single read-check-write: read the resource (getting `resourceVersion`), check the generation annotation, and apply with the `resourceVersion` for atomic compare-and-swap. For targets without native optimistic concurrency (e.g. AWS EKS), at-most-one process per target is the practical choice.
+These compose naturally: use a durable generation high-water mark plus either strict at-most-one processing or a target-enforced fence on every effect. In practice, Kubernetes targets often merge generation and optimistic concurrency into a single read-check-write: read the resource (getting `resourceVersion`), check the generation annotation, and apply with the `resourceVersion` for atomic compare-and-swap. For targets without native optimistic concurrency, strict at-most-one processing is the practical choice; ordinary unfenced leader election is not sufficient by itself.
 
-This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. The FleetShift addon skips most of that (no informers, no requeue timers, no orphan detection) and adds one integer comparison for generation ordering.
+This is not more complex than what a Kubernetes controller already handles. A standard spoke controller must manage informer caches, leader election, periodic requeues, orphan detection, and `resourceVersion`-based conflict resolution. The FleetShift addon can use a smaller level-based loop because platform-side desired changes are durably delivered; an addon claiming continuous drift reconciliation still needs watch-gap recovery and a periodic rescan or equivalent completeness mechanism.
 
 #### Delivery authorization
 
@@ -122,7 +129,7 @@ Delivery authorization and attestation verification apply as defined in [core_mo
 
 #### Idempotent removal
 
-`Remove` must be idempotent. If a removal partially completes (3 of 5 resources deleted) and the addon crashes before acking, the platform retries the full removal. (This assumes the target only acks after doing the deleting work, which it doesn't have to.) The addon must handle "delete something already gone" as a no-op. For Kubernetes targets, delete of a missing resource returns 404 which is treated as success. For cloud provider APIs, the same pattern applies (delete of a nonexistent resource returns success or a "not found" error that is safe to ignore).
+`Remove` must be idempotent. If a removal partially completes (3 of 5 resources deleted) and the addon crashes, either the platform retries because acceptance was not durable or the target resumes from its durable accepted intent. In either case, the addon must handle "delete something already gone" as a no-op. For Kubernetes targets, delete of a missing resource returns 404 which is treated as success. For cloud provider APIs, the same pattern applies (delete of a nonexistent resource returns success or a "not found" error that is safe to ignore).
 
 #### Journaling
 
@@ -150,7 +157,7 @@ Spec shrink refers to the need to act on now-missing information. There are two 
 
 It is possible the platform could eliminate the need for addon journaling due to spec shrink if delivery includes the previously ack'd manifests for that target. Then, a target can detect the absence in both cases.
 
-> TODO: Revisit the journal contract – something has to write to it BEFORE doing work as if it waits until after, it can crash before writing. It is essentially just saga / durable worfklow / event sourcing over again.
+The journal must be a write-ahead recovery record rather than only a post-apply inventory snapshot. For a non-atomic multi-resource apply it needs to retain the previous committed inventory, the new desired inventory, generation/fencing information, and in-progress phase (or equivalent per-operation records) until apply and cleanup complete. Overwriting the old inventory with the new inventory before acting can itself lose cleanup information if the addon then crashes. This is a small target-side saga or durable reconciliation state machine.
 
 **IMPORTANT:** If we do provide a Journal service, solving these use cases requires addon-signed entries. Likewise, including previously ack'd manifests can only be trusted if we provide the attestation chain for those manifests. Alternatively, perhaps we could consider giving the fleetlet its own storage.
 
@@ -167,7 +174,7 @@ After fulfilling, there is work to do to consider what's happened since. This is
 
 None of these are strictly required. They are just very useful. Still, trivially simplistic addons may forego them.
 
-Detecting drift means detecting changes for objects still managed by the platform. Detecting drift is not necessarily required, but it is a common feature of management products. If we detect drift, we have to detect changes, somehow, on any resources still managed.
+Detecting drift is not required for a delivery-only target. It is required for a target that claims reliable continuous reconciliation. For that guarantee, target-side events are latency hints rather than the source of correctness: the addon must also rescan the current level after startup, reconnect, and detected watch gaps, with a periodic safety net or an equivalent complete watch/relist protocol. A purely edge-triggered watcher can miss one event and remain divergent forever.
 
 Then, something has to know how to diff the observations it has against the platform intents.
 
@@ -181,11 +188,15 @@ These should all be achievable, generally, by adding two more steps to the proto
   - How this is done is implementation dependent. A target may have native, efficient change detection. Or, it may just poll.
   - The scope of what is reported may vary based on configuration TBD. For example, it is unlikely we'd index all state about all resources in a managed kubernetes clusters, but some subset.
 
+## Formal model
+
+The executable Quint model in [`poc/fulfillment-delivery/`](../../../poc/fulfillment-delivery/) checks generation fencing, strict at-most-one processing, durable acceptance, spec-shrink inventory, missed drift edges, and eventual convergence. Its README records the assumptions, verified configurations, counterexamples, and target-author obligations. Attestation is intentionally outside that model.
+
 ## Open questions / notes
 
 ### Delivery lifecycle state mapping
 
-The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. This document's protocol uses "ack" without mapping it to those states. The mapping between the protocol concepts (ack, auth failure, partial apply) and the delivery entity states needs to be defined. Similarly, `DeliveryResult` carries structured result fields (`ProvisionedTargets`, `ProducedSecrets`); the remaining question is which of those stay delivery-local and which should be projected into inventory as properties.
+The codebase models deliveries with explicit lifecycle states: `pending`, `accepted`, `progressing`, `delivered`, `failed`, `partial`, and `auth_failed`. The reliability boundary is now defined: `accepted` is the durable target-side replay checkpoint that permits platform transport retries to stop, while `delivered` is terminal observed convergence. `progressing` covers effects between those points. The remaining mapping work is the retry/terminal meaning of `failed` and `partial`, plus which structured `DeliveryResult` fields (`ProvisionedTargets`, `ProducedSecrets`) stay delivery-local and which are projected into inventory as properties.
 
 ### Should manifests be able to opt out of drift repair?
 
