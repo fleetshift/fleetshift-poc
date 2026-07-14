@@ -31,11 +31,12 @@ type TargetLister interface {
 	ListTargets(ctx context.Context) ([]domain.TargetInfo, error)
 }
 
-// ReplayPersistedIndexers is a best-effort one-shot recovery pass: list
-// targets, resolve indexing credentials, and EnsureIndexer for each
-// applicable Kubernetes target. Per-target failures are logged and
-// skipped; this is not a periodic reconciler. Callers that must not
-// block listen should invoke it from a goroutine.
+// ReplayPersistedIndexers lists persisted targets once, resolves each
+// applicable Kubernetes target's indexing credential, and calls
+// EnsureIndexer. Per-target failures are logged and skipped. It does not
+// poll or re-list afterward; targets that appear only after the list
+// returns are not started by this call. Callers that must not block
+// listen should invoke it from a goroutine.
 func ReplayPersistedIndexers(
 	ctx context.Context,
 	lister TargetLister,

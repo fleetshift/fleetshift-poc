@@ -96,11 +96,9 @@ func (nopReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]d
 	return nil, nil
 }
 
-// TestAgent_Deliver_SucceedsWhenIndexerAbsent asserts that delivery
-// routing does not require an in-process indexer. The delivery Agent is
-// constructed with no index host or controller; Deliver must still
-// accept a valid request and report success. Indexing being down must
-// not fail delivery.
+// TestAgent_Deliver_SucceedsWhenIndexerAbsent asserts that the Kubernetes
+// DeliveryAgent does not consult IndexingRuntime. Deliver still accepts a
+// valid request and reports success when no indexer is running.
 func TestAgent_Deliver_SucceedsWhenIndexerAbsent(t *testing.T) {
 	reporter := newChannelReporter()
 	agent := kubernetes.NewDeliveryAgent(reporter)

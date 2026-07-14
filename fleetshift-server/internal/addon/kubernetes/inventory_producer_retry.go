@@ -87,7 +87,7 @@ func RetryLocalEnvelope(ctx context.Context, deadline time.Duration, fn func(con
 			return deadlineCtx.Err()
 		case <-timer.C:
 		}
-		next := min(time.Duration(float64(backoff) * localEnsureBackoffFactor), localEnsureBackoffCap)
+		next := min(time.Duration(float64(backoff)*localEnsureBackoffFactor), localEnsureBackoffCap)
 		backoff = next
 	}
 }

@@ -20,8 +20,8 @@ type kubernetesInProcessIndexing struct {
 
 // newKubernetesInProcessIndexing wires the Kubernetes indexing runtime
 // and inventory reporter for server composition. Callers inject Runtime
-// into Kind/GCP HCP agents, run one-shot startup replay, and StopAll on
-// shutdown.
+// into Kind and GCP HCP agents, run ReplayPersistedIndexers after addon
+// connect, and call StopAll on shutdown.
 func newKubernetesInProcessIndexing(
 	ctx context.Context,
 	store domain.Store,

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -91,6 +92,36 @@ func TestIndexingRuntime_EnsureIndexerReadinessAndIdempotent(t *testing.T) {
 	}
 	if h.HasIndexer("pm-1") {
 		t.Fatal("expected stopped")
+	}
+}
+
+// TestManagedIndexer_DoesNotRetainCredentialBytes locks the registry entry
+// shape: handoff credential bytes must not be stored on managedIndexer.
+func TestManagedIndexer_DoesNotRetainCredentialBytes(t *testing.T) {
+	typ := reflect.TypeOf(managedIndexer{})
+	for i := 0; i < typ.NumField(); i++ {
+		f := typ.Field(i)
+		if f.Type.Kind() == reflect.Slice && f.Type.Elem().Kind() == reflect.Uint8 {
+			t.Errorf("managedIndexer must not retain credential bytes; found []byte field %q", f.Name)
+		}
+	}
+
+	h := testIndexingRuntime(t)
+	cred := []byte("must-not-be-retained")
+	if err := h.EnsureIndexer(context.Background(), testIndexInput("pm-noretain", 1, string(cred))); err != nil {
+		t.Fatalf("EnsureIndexer: %v", err)
+	}
+	h.mu.Lock()
+	entry := h.entries["pm-noretain"]
+	h.mu.Unlock()
+	if entry == nil {
+		t.Fatal("expected registry entry")
+	}
+	if entry.secretRef != "" {
+		t.Fatalf("secretRef = %q, want empty when start used handoff bytes only", entry.secretRef)
+	}
+	if entry.fingerprint == string(cred) {
+		t.Fatal("fingerprint must not equal raw credential bytes")
 	}
 }
 
@@ -290,7 +321,8 @@ func TestIndexingRuntime_IntentionalStopNoRestart(t *testing.T) {
 }
 
 // TestIndexingRuntime_UnexpectedExitWithoutSecretRefDoesNotRestart verifies
-// an unexpected exit without SecretRef does not restart the indexer.
+// that an unexpected indexer exit with no SecretRef on the start input does
+// not restart the indexer. Restart requires a vault-resolvable SecretRef.
 func TestIndexingRuntime_UnexpectedExitWithoutSecretRefDoesNotRestart(t *testing.T) {
 	hostCtx, cancel := context.WithCancel(context.Background())
 	h := NewKubernetesInProcessIndexHost(

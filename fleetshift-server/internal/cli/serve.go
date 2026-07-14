@@ -207,9 +207,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 
 	// --- kubernetes indexing runtime ---
 	//
-	// Built before Kind/GCP agents so they can call EnsureIndexer /
-	// StopIndexer. Indexing starts from producers and one-shot startup
-	// replay, not from orchestration target registration.
+	// Built before Kind/GCP agents so those agents can receive an
+	// IndexingRuntime and call EnsureIndexer / StopIndexer. With that
+	// runtime injected, indexers start from those agents before Delivered
+	// and from a one-shot startup replay after addon connect.
+	// Orchestration does not start or stop indexers.
 	var kubeIndexing *kubernetesInProcessIndexing
 	var kubeIndexCtx context.Context
 	var kubeIndexCancel context.CancelFunc

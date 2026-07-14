@@ -358,3 +358,111 @@ func TestAgent_Remove_StopIndexer(t *testing.T) {
 		t.Fatalf("StopIndexer calls = %v, want [%s]", stops, GuestTargetID("stop-cls"))
 	}
 }
+
+// TestAgent_RecoverActiveDelete_StopIndexer verifies crash-recovery delete
+// calls StopIndexer at the start of teardown.
+func TestAgent_RecoverActiveDelete_StopIndexer(t *testing.T) {
+	withAgentHooksStubbed(t)
+
+	buildDestroyWorkspaceWithTokenURL = func(_ string, _ TargetConfig, _ string, _ ...func() error) (*HypershiftWorkspace, error) {
+		dir, err := os.MkdirTemp("", "agent-recover-stop-*")
+		if err != nil {
+			return nil, err
+		}
+		return &HypershiftWorkspace{
+			Env:     []string{"PATH=/usr/bin"},
+			tempDir: dir,
+		}, nil
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters":
+			fmt.Fprint(w, `{"clusters":[{"id":"c-rec","name":"recover-del"}]}`)
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/clusters/c-rec":
+			w.WriteHeader(http.StatusNoContent)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/clusters/c-rec":
+			w.WriteHeader(http.StatusNotFound)
+			fmt.Fprint(w, `{"error":"not found"}`)
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
+			http.Error(w, "unexpected", http.StatusInternalServerError)
+		}
+	}))
+	defer server.Close()
+
+	spec := json.RawMessage(`{
+		"endpointAccess":"PublicAndPrivate","releaseVersion":"4.22.0","channelGroup":"stable",
+		"nodepools":[{"id":"w","replicas":2,"instanceType":"n1-standard-4",
+		"rootVolumeSize":128,"rootVolumeType":"pd-standard","autoRepair":true,"upgradeType":"Replace"}]
+	}`)
+	ad := domain.ActiveDelivery{
+		Delivery: domain.DeliveryFromSnapshot(domain.DeliverySnapshot{
+			ID:         domain.DeliveryID("recovery-del-idx"),
+			Generation: 2,
+			State:      domain.DeliveryStateProgressing,
+			Operation:  domain.DeliveryOperationRemove,
+			Manifests: []domain.Manifest{{
+				ManifestType: ClusterManifestType,
+				ManifestID:   "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+				Raw:          managedResourceRaw("clusters/recover-del", spec),
+			}},
+		}),
+		Target: domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
+			ID: "target-1",
+			Properties: map[string]string{
+				"id": "target-1", "gcp_project": "proj", "region": "us-central1",
+				"workforce_pool": "pool", "workforce_provider": "prov",
+				"broker_sa_email": "broker@example.com",
+			},
+		}),
+		Auth: domain.DeliveryAuth{Token: "caller-token"},
+	}
+
+	reporter := &indexingRecoveryReporter{
+		agentTestReporter: newAgentTestReporter(),
+		active:            []domain.ActiveDelivery{ad},
+	}
+	runtime := &recordingIndexingRuntime{}
+	infra := &fakeCleanupInfra{}
+	agent := &Agent{
+		reconciler: &Reconciler{
+			gateway: GatewayConfig{URL: server.URL, Audience: "test-audience"},
+			infra:   infra,
+		},
+		observer:        noopObserver{},
+		reporter:        reporter,
+		indexingRuntime: runtime,
+		trustMap:        make(map[domain.IssuerURL]domain.TrustBundleEntry),
+		clusterGen:      make(map[string]domain.Generation),
+	}
+
+	if err := agent.RecoverActiveDeliveries(context.Background(), []domain.TargetID{"target-1"}); err != nil {
+		t.Fatalf("RecoverActiveDeliveries: %v", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		if result.State == "" {
+			t.Fatal("expected non-empty delivery state from recovered delete")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timeout waiting for recovered delete result")
+	}
+
+	stops := runtime.stopIDs()
+	if len(stops) != 1 || stops[0] != GuestTargetID("recover-del") {
+		t.Fatalf("StopIndexer calls = %v, want [%s]", stops, GuestTargetID("recover-del"))
+	}
+}
+
+// indexingRecoveryReporter lists fixed active deliveries for recovery tests.
+type indexingRecoveryReporter struct {
+	*agentTestReporter
+	active []domain.ActiveDelivery
+}
+
+// ListActiveDeliveries returns the configured active deliveries.
+func (r *indexingRecoveryReporter) ListActiveDeliveries(context.Context, []domain.TargetID) ([]domain.ActiveDelivery, error) {
+	return r.active, nil
+}

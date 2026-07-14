@@ -227,8 +227,8 @@ func ensureCompositionIndexer(t *testing.T, host *KubernetesInProcessIndexHost, 
 	}
 }
 
-// TestStopIndexer_LeavesInventory proves that StopIndexer stops the
-// indexer without deleting source-owned indexed inventory.
+// TestStopIndexer_LeavesInventory verifies StopIndexer stops the indexer
+// and leaves previously written Object inventory rows in the store.
 func TestStopIndexer_LeavesInventory(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)

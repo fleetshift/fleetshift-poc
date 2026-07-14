@@ -18,10 +18,10 @@ var reconcileTimeout = defaultReconcileTimeout
 
 // AgentDeps holds dependencies for creating an Agent.
 type AgentDeps struct {
-	Gateway         GatewayConfig
-	Infra           *InfraRunner
-	Observer        AgentObserver
-	Reporter        domain.DeliveryReporter
+	Gateway  GatewayConfig
+	Infra    *InfraRunner
+	Observer AgentObserver
+	Reporter domain.DeliveryReporter
 	// IndexingRuntime is optional. When set, deliverAsync calls EnsureIndexer
 	// before Delivered and Remove/deleteAsync call StopIndexer at teardown.
 	IndexingRuntime kubernetes.IndexingRuntime
