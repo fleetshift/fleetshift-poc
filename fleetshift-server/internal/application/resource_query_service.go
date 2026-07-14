@@ -59,7 +59,7 @@ func NewResourceQueryService(store domain.Store) *ResourceQueryService {
 //
 // Type scoping is owned by the query repository via its
 // [domain.QuerySchemaProvider]: empty filters are limited to activated
-// types, and named resource_type constraints must refer to activated
+// types, and named resourceType constraints must refer to activated
 // types.
 func (s *ResourceQueryService) QueryResources(ctx context.Context, in QueryResourcesInput) (domain.QueryResourcesPage, error) {
 	if in.Scope != WholePlatformScope {

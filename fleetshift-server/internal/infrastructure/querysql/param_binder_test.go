@@ -90,7 +90,7 @@ func TestCompileFilter_ParamBinderControlsPlaceholders(t *testing.T) {
 	t.Run("nil defaults to dollar", func(t *testing.T) {
 		c := querysql.Compiler{Fields: stubResolver{}}
 		pred, err := c.CompileFilter(context.Background(), querysql.CompileFilterInput{
-			Filter: `resource_type == "kind.fleetshift.io/Cluster"`,
+			Filter: `resourceType == "kind.fleetshift.io/Cluster"`,
 		})
 		if err != nil {
 			t.Fatalf("CompileFilter: %v", err)

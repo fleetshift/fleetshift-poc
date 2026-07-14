@@ -90,7 +90,7 @@ func runPaginationTests(t *testing.T, factory Factory) {
 		ctx := context.Background()
 
 		page, err := tx.Queries().QueryResources(ctx, domain.QueryResourcesRequest{
-			Filter:   fmt.Sprintf("resource_type == %q", string(fx.ManagedType)),
+			Filter:   fmt.Sprintf("resourceType == %q", string(fx.ManagedType)),
 			PageSize: 1,
 		})
 		if err != nil {
@@ -107,13 +107,13 @@ func runPaginationTests(t *testing.T, factory Factory) {
 				t.Fatalf("NextPageToken is empty, want non-empty")
 			}
 			_, err = tx.Queries().QueryResources(ctx, domain.QueryResourcesRequest{
-				Filter:    fmt.Sprintf("resource_type == %q", string(fx.ManagedType)),
+				Filter:    fmt.Sprintf("resourceType == %q", string(fx.ManagedType)),
 				PageSize:  1,
 				PageToken: page.NextPageToken,
 			})
 		} else {
 			_, err = tx.Queries().QueryResources(ctx, domain.QueryResourcesRequest{
-				Filter:    fmt.Sprintf("resource_type == %q", string(fx.InventoryType)),
+				Filter:    fmt.Sprintf("resourceType == %q", string(fx.InventoryType)),
 				PageSize:  1,
 				PageToken: page.NextPageToken,
 			})

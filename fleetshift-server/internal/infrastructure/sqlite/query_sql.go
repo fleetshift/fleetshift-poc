@@ -33,7 +33,7 @@ import "fmt"
 // Default empty-filter pagination seeks through
 // idx_extension_resources_query_order. The resource_type,name order
 // mode seeks through idx_extension_resources_type_query_order.
-// resource_type == "service/Type" and resource_type in [...] compile
+// resourceType == "service/Type" and resourceType in [...] compile
 // to constituent service_name/type_name predicates (see
 // query_filter.go), so those filters can use the type-scoped
 // composite index.

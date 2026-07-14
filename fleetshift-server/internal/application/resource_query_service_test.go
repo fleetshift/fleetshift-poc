@@ -145,7 +145,7 @@ func TestResourceQueryService_PassesFilterThrough(t *testing.T) {
 
 	page, err := svc.QueryResources(ctx, application.QueryResourcesInput{
 		Scope:    "-",
-		Filter:   `resource_type == "` + string(fx.ManagedType) + `"`,
+		Filter:   `resourceType == "` + string(fx.ManagedType) + `"`,
 		PageSize: 50,
 	})
 	if err != nil {
@@ -258,7 +258,7 @@ func TestResourceQueryService_RejectsInactiveResourceTypeFilter(t *testing.T) {
 
 	_, err := svc.QueryResources(ctx, application.QueryResourcesInput{
 		Scope:  "-",
-		Filter: `resource_type == "` + string(fx.InventoryType) + `"`,
+		Filter: `resourceType == "` + string(fx.InventoryType) + `"`,
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("QueryResources(inactive type): err = %v, want ErrInvalidArgument", err)
@@ -310,7 +310,7 @@ func TestResourceQueryService_ResourceTypeInListValidated(t *testing.T) {
 
 	_, err := svc.QueryResources(ctx, application.QueryResourcesInput{
 		Scope:  "-",
-		Filter: `resource_type in ["` + string(fx.ManagedType) + `", "` + string(fx.InventoryType) + `"]`,
+		Filter: `resourceType in ["` + string(fx.ManagedType) + `", "` + string(fx.InventoryType) + `"]`,
 	})
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("QueryResources(in with inactive): err = %v, want ErrInvalidArgument", err)
@@ -318,7 +318,7 @@ func TestResourceQueryService_ResourceTypeInListValidated(t *testing.T) {
 
 	page, err := svc.QueryResources(ctx, application.QueryResourcesInput{
 		Scope:    "-",
-		Filter:   `resource_type in ["` + string(fx.ManagedType) + `"]`,
+		Filter:   `resourceType in ["` + string(fx.ManagedType) + `"]`,
 		PageSize: 50,
 	})
 	if err != nil {

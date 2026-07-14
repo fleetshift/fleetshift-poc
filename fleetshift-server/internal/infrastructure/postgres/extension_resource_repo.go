@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 var _ domain.ExtensionResourceRepository = (*ExtensionResourceRepo)(nil)
@@ -677,14 +678,30 @@ func extensionResourceViewFromColumns(
 // ConditionJSON is the JSON shape of a single entry within
 // extension_resource_inventory.conditions, which stores a *map* of
 // these keyed by condition type rather than an array -- see that
-// column's migration doc comment for why. LastTransitionTime
-// round-trips through Postgres's timestamptz column and
-// encoding/json's default RFC3339Nano time.Time marshaling.
+// column's migration doc comment for why.
+//
+// LastTransitionTime is ProtoJSON (Z-normalized; 0/3/6/9 fractional
+// digits) so direct CEL string filters match the QueryResources
+// response spelling and GIN containment can participate.
+// LastTransitionTimeNorm is the fixed-width UTC sibling used only by
+// timestamp() filters; it is derived from the same time.Time on write
+// and must not appear in API responses.
 type ConditionJSON struct {
-	Status             domain.ConditionStatus `json:"status"`
-	Reason             string                 `json:"reason"`
-	Message            string                 `json:"message"`
-	LastTransitionTime time.Time              `json:"lastTransitionTime"`
+	Status                 domain.ConditionStatus      `json:"status"`
+	Reason                 string                      `json:"reason"`
+	Message                string                      `json:"message"`
+	LastTransitionTime     querysql.ProtoJSONTimestamp `json:"lastTransitionTime"`
+	LastTransitionTimeNorm string                      `json:"_lastTransitionTimeNorm"`
+}
+
+func newConditionJSON(status domain.ConditionStatus, reason, message string, t time.Time) ConditionJSON {
+	return ConditionJSON{
+		Status:                 status,
+		Reason:                 reason,
+		Message:                message,
+		LastTransitionTime:     querysql.ProtoJSONTimestamp(t),
+		LastTransitionTimeNorm: querysql.FormatTimestampNorm(t),
+	}
 }
 
 // conditionsToJSON marshals conds into the JSON object -- keyed by
@@ -694,12 +711,7 @@ type ConditionJSON struct {
 func conditionsToJSON(conds []domain.Condition) ([]byte, error) {
 	byType := make(map[string]ConditionJSON, len(conds))
 	for _, c := range conds {
-		byType[string(c.Type())] = ConditionJSON{
-			Status:             c.Status(),
-			Reason:             c.Reason(),
-			Message:            c.Message(),
-			LastTransitionTime: c.LastTransitionTime(),
-		}
+		byType[string(c.Type())] = newConditionJSON(c.Status(), c.Reason(), c.Message(), c.LastTransitionTime())
 	}
 	return json.Marshal(byType)
 }
@@ -712,12 +724,7 @@ func conditionsToJSON(conds []domain.Condition) ([]byte, error) {
 func conditionSnapshotsToJSON(conds []domain.ConditionSnapshot) ([]byte, error) {
 	byType := make(map[string]ConditionJSON, len(conds))
 	for _, c := range conds {
-		byType[string(c.Type)] = ConditionJSON{
-			Status:             c.Status,
-			Reason:             c.Reason,
-			Message:            c.Message,
-			LastTransitionTime: c.LastTransitionTime,
-		}
+		byType[string(c.Type)] = newConditionJSON(c.Status, c.Reason, c.Message, c.LastTransitionTime)
 	}
 	return json.Marshal(byType)
 }
@@ -738,7 +745,7 @@ func unmarshalConditionSnapshots(data []byte) ([]domain.ConditionSnapshot, error
 			Status:             c.Status,
 			Reason:             c.Reason,
 			Message:            c.Message,
-			LastTransitionTime: c.LastTransitionTime.UTC(),
+			LastTransitionTime: c.LastTransitionTime.Time(),
 		})
 	}
 	sort.Slice(snaps, func(i, j int) bool { return snaps[i].Type < snaps[j].Type })

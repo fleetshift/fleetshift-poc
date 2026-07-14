@@ -2,6 +2,23 @@
 // QueryResources' result envelope, into a parameterized SQL
 // predicate.
 //
+// # Canonical ProtoJSON-shaped input
+//
+// QueryResources filters are a strict subset of CEL over the
+// canonical ProtoJSON-shaped query result:
+//
+//   - Message fields are exposed by their canonical JSON name only
+//     (normally lowerCamelCase, or an explicit json_name).
+//   - Map and google.protobuf.Struct keys are exact, case-sensitive
+//     data keys.
+//   - Filter input is never case-normalized and has no
+//     proto-name/JSON-name aliases.
+//   - Select and string-index syntax with the same raw key are
+//     equivalent (standard CEL map semantics).
+//
+// Authors should copy field names from the JSON response. Use
+// brackets when an exact map key is not a legal CEL selector.
+//
 // # Why not github.com/spandigital/cel2sql/v3
 //
 // github.com/spandigital/cel2sql/v3 (v3.8.8 at evaluation time) is the
@@ -16,7 +33,7 @@
 //
 //  1. Map-keyed JSONB access nested under a dynamically-typed parent
 //     -- exactly this package's resource.labels["team"],
-//     resource.local_labels[...], and
+//     resource.localLabels[...], and
 //     resource.conditions["Ready"].status shapes -- does
 //     not compile to a keyed lookup. `resource.labels["team"] ==
 //     "platform"` compiled (across every schema declaration style
@@ -34,7 +51,7 @@
 //     no per-row discriminator concept. This package's
 //     resource.spec.*/resource.observation.* fields are
 //     read from a JSON column whose *shape differs by
-//     resource_type*, resolved only once resource_type == "..." is
+//     resourceType*, resolved only once resourceType == "..." is
 //     known (see hasResourceTypeGuard), across a single query
 //     spanning every extension resource type. A library built
 //     around one static schema per Convert call has no hook for that.
@@ -49,7 +66,7 @@
 //
 // This package owns only CEL AST lowering: boolean/logical structure,
 // comparison, "in", and startsWith handling, literal binding, and
-// resource_type guard detection (compiler.go). It does not know what
+// resourceType guard detection (compiler.go). It does not know what
 // field paths actually mean -- column names, JSON extraction,
 // label/condition map keys, or schema-backed path validation are all
 // the concern of whatever [FieldResolver] the caller supplies (see
@@ -65,12 +82,16 @@
 // defaults to [DollarParams] (Postgres $N) when Params is nil.
 //
 // Supported filter shape: see compiler.go for the supported operators
-// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith) and field-path
-// syntax (identifiers, dotted selects, and string-keyed index
-// expressions). Anything else -- unsupported operators, arithmetic,
-// regex, endsWith/contains/matches, and exists/all/map/filter/has
-// macros -- fails closed with [domain.ErrInvalidArgument], as does any
-// field path a configured [FieldResolver] doesn't recognize.
+// (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, timestamp) and
+// field-path syntax (identifiers, dotted selects, and string-keyed
+// index expressions). Timestamp response fields remain ProtoJSON
+// strings (direct comparison uses the canonical spelling);
+// chronological / instant comparisons use timestamp() on both sides
+// and may wrap any string-valued path. Anything else -- unsupported
+// operators, arithmetic, regex, endsWith/contains/matches, and
+// exists/all/map/filter/has macros -- fails closed with
+// [domain.ErrInvalidArgument], as does any field path a configured
+// [FieldResolver] doesn't recognize.
 package querysql
 
 import (
@@ -203,14 +224,15 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 // forces checker init at construction so concurrent Compile calls on
 // the shared Env do not race on lazy checker setup.
 func newCELEnv() (*cel.Env, error) {
-	// Top-level CEL variables are name and resource_type. Identity
-	// components are not declared as top-level variables so CEL
-	// rejects them before the field resolver runs; resource.*
-	// validation remains the resolver's job.
+	// Top-level CEL variables are name and resourceType (canonical
+	// ProtoJSON envelope names). Identity components are not declared
+	// as top-level variables so CEL rejects them before the field
+	// resolver runs; resource.* validation remains the resolver's job.
 	return cel.NewEnv(
 		cel.EagerlyValidateDeclarations(true),
+		cel.ASTValidators(cel.ValidateTimestampLiterals()),
 		cel.Variable("name", cel.StringType),
-		cel.Variable("resource_type", cel.StringType),
+		cel.Variable("resourceType", cel.StringType),
 		cel.Variable("resource", cel.DynType),
 	)
 }
@@ -238,8 +260,8 @@ func (b *builder) bind(v any) string {
 type state struct {
 	ctx    context.Context
 	fields FieldResolver
-	// guard is the resource_type literal from a top-level `&&`
-	// conjunct `resource_type == "..."`, or nil if there is none. See
+	// guard is the resourceType literal from a top-level `&&`
+	// conjunct `resourceType == "..."`, or nil if there is none. See
 	// hasResourceTypeGuard.
 	guard *domain.ResourceType
 	b     *builder

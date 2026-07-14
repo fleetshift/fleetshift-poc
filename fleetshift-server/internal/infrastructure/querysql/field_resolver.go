@@ -8,9 +8,11 @@ import (
 )
 
 // FieldPath is a CEL field-select/index chain flattened to its
-// segment names, outermost-first -- e.g. resource.labels["team"]
-// becomes ["resource", "labels", "team"]; a bare envelope identifier
-// like name becomes ["name"]. See fieldPathFromExpr for how a CEL AST
+// segment names, outermost-first -- e.g. resource.labels["team"] and
+// resource.labels.team both become ["resource", "labels", "team"]; a
+// bare envelope identifier like name becomes ["name"]. Select and
+// string-index syntax with the same raw key are equivalent; segment
+// kind is not retained. See fieldPathFromExpr for how a CEL AST
 // expression becomes a FieldPath.
 type FieldPath struct {
 	Segments []string
@@ -35,6 +37,9 @@ const (
 	TypeHintString
 	TypeHintBool
 	TypeHintNumber
+	// TypeHintTimestamp is used when both sides of a comparison are
+	// timestamp() conversions (CEL timestamps), not ProtoJSON strings.
+	TypeHintTimestamp
 )
 
 // ComparisonOperator is the named comparison the compiler asks a
@@ -58,11 +63,11 @@ const (
 // "SQL op <bound literal>" compilation for a specific comparison.
 // Returning handled=false falls back to the generic path. This is how
 // a Postgres resolver turns resource.labels["k"] == "v" into a
-// GIN-friendly JSONB containment predicate, and how name/resource_type
+// GIN-friendly JSONB containment predicate, and how name/resourceType
 // equality can special-case to constituent-column predicates.
 //
 // In, when non-nil, likewise overrides the generic "SQL IN (...)"
-// path -- e.g. a Postgres resolver may rewrite resource_type in
+// path -- e.g. a Postgres resolver may rewrite resourceType in
 // ["a/T", "b/U"] to (er.service_name, er.type_name) IN (...).
 //
 // StartsWith, when non-nil, overrides the generic
@@ -88,8 +93,8 @@ type ResolveContext struct {
 	// path).
 	Context context.Context
 
-	// GuardedResourceType is the resource_type literal from the
-	// filter's top-level `resource_type == "..."` conjunct (see
+	// GuardedResourceType is the resourceType literal from the
+	// filter's top-level `resourceType == "..."` conjunct (see
 	// hasResourceTypeGuard's doc), or nil if the filter has none.
 	// When non-nil, resolvers may optionally validate type-shaped
 	// paths (resource.spec.*/resource.observation.*) against that
@@ -109,7 +114,7 @@ type ResolveContext struct {
 // FieldResolver maps a CEL field path to a SQL expression. This
 // package's compiler owns CEL AST lowering -- boolean/comparison
 // structure, literals, in, startsWith, parameter binding,
-// resource_type guard detection -- and knows about field paths only
+// resourceType guard detection -- and knows about field paths only
 // generically; a FieldResolver owns the actual row shape a path reads
 // from (column names, JSON extraction, schema-backed path
 // validation). See the postgres package's query field resolver for

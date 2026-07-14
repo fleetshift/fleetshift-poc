@@ -29,7 +29,7 @@ func TestResolveQueryResourceTypeScope_NilProvider(t *testing.T) {
 		t.Fatalf("nil provider: scope=%+v err=%v", scope, err)
 	}
 
-	scope, err = domain.ResolveQueryResourceTypeScope(context.Background(), nil, `resource_type == "a/T"`)
+	scope, err = domain.ResolveQueryResourceTypeScope(context.Background(), nil, `resourceType == "a/T"`)
 	if err != nil || scope.Empty || scope.Types != nil {
 		t.Fatalf("nil provider with type filter: scope=%+v err=%v", scope, err)
 	}
@@ -42,7 +42,7 @@ func TestResolveQueryResourceTypeScope_EmptyActivated(t *testing.T) {
 	}
 
 	_, err = domain.ResolveQueryResourceTypeScope(
-		context.Background(), staticQuerySchemas{}, `resource_type == "a/T"`)
+		context.Background(), staticQuerySchemas{}, `resourceType == "a/T"`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("empty activated + named type: err=%v, want ErrInvalidArgument", err)
 	}
@@ -65,13 +65,13 @@ func TestResolveQueryResourceTypeScope_DefaultsToActivated(t *testing.T) {
 func TestResolveQueryResourceTypeScope_RejectsInactive(t *testing.T) {
 	provider := staticQuerySchemas{"a/T": {ResourceType: "a/T"}}
 	_, err := domain.ResolveQueryResourceTypeScope(
-		context.Background(), provider, `resource_type == "b/U"`)
+		context.Background(), provider, `resourceType == "b/U"`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("err=%v, want ErrInvalidArgument", err)
 	}
 
 	_, err = domain.ResolveQueryResourceTypeScope(
-		context.Background(), provider, `resource_type in ["a/T", "b/U"]`)
+		context.Background(), provider, `resourceType in ["a/T", "b/U"]`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("in with inactive: err=%v, want ErrInvalidArgument", err)
 	}
@@ -80,7 +80,7 @@ func TestResolveQueryResourceTypeScope_RejectsInactive(t *testing.T) {
 func TestResolveQueryResourceTypeScope_EmptyInList(t *testing.T) {
 	provider := staticQuerySchemas{"a/T": {ResourceType: "a/T"}}
 	scope, err := domain.ResolveQueryResourceTypeScope(
-		context.Background(), provider, `resource_type in []`)
+		context.Background(), provider, `resourceType in []`)
 	if err != nil || !scope.Empty {
 		t.Fatalf("scope=%+v err=%v", scope, err)
 	}
@@ -92,7 +92,7 @@ func TestResolveQueryResourceTypeScope_AcceptsActivatedNamed(t *testing.T) {
 		"b/U": {ResourceType: "b/U"},
 	}
 	scope, err := domain.ResolveQueryResourceTypeScope(
-		context.Background(), provider, `resource_type == "a/T"`)
+		context.Background(), provider, `resourceType == "a/T"`)
 	if err != nil || scope.Empty {
 		t.Fatalf("scope=%+v err=%v", scope, err)
 	}
@@ -103,7 +103,7 @@ func TestResolveQueryResourceTypeScope_AcceptsActivatedNamed(t *testing.T) {
 	}
 
 	scope, err = domain.ResolveQueryResourceTypeScope(
-		context.Background(), provider, `resource_type in ["b/U", "a/T"]`)
+		context.Background(), provider, `resourceType in ["b/U", "a/T"]`)
 	if err != nil || scope.Empty {
 		t.Fatalf("in scope=%+v err=%v", scope, err)
 	}

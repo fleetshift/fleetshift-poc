@@ -27,10 +27,12 @@ import (
 // return), not an error. Field resolvers treat "no schema registered
 // for this type" and "schema registered but its descriptor is nil"
 // both as "validate this path structurally only" (any well-formed
-// dotted JSON path is accepted), rather than failing closed -- types
-// without a SpecDescriptor (including inventory-only activations)
-// validate structurally only. Only a resolvable schema *with* a
-// descriptor triggers field-name validation.
+// path is accepted with exact segment keys preserved — no case
+// conversion), rather than failing closed -- types without a
+// SpecDescriptor (including inventory-only activations) validate
+// structurally only. Only a resolvable schema *with* a descriptor
+// triggers JSON-name field validation (ByJSONName only; no
+// proto-name aliases).
 //
 // Platform resource schema lookup is omitted: platform resources have
 // no query schema story yet, and QueryResources does not emit
@@ -62,8 +64,10 @@ type ResourceQuerySchema struct {
 	// message, when the type is managed and its schema has been
 	// activated (see extensionresource.DynamicSchemaActivator.Activate,
 	// which already compiles this exact descriptor). Query-time field
-	// resolution walks it to validate resource.spec.<path> segments;
-	// nil means "validate this type's spec paths structurally only".
+	// resolution walks it to validate resource.spec.<path> segments
+	// against canonical ProtoJSON field names (FieldDescriptor.JSONName);
+	// nil means "validate this type's spec paths structurally only"
+	// with exact keys preserved.
 	SpecDescriptor protoreflect.MessageDescriptor
 
 	// InventoryObservationDescriptor describes a typed observation

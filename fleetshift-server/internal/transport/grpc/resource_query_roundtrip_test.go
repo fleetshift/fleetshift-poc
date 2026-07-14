@@ -189,12 +189,9 @@ func celEq(field string, v *structpb.Value) (string, error) {
 	}
 	switch k := v.Kind.(type) {
 	case *structpb.Value_StringValue:
-		// protojson encodes int64 as a decimal string; emit a CEL int
-		// literal so the value still comes from the API while matching
-		// integer SQL columns (intent_version, generation).
-		if i, err := strconv.ParseInt(k.StringValue, 10, 64); err == nil {
-			return fmt.Sprintf(`%s == %d`, field, i), nil
-		}
+		// ProtoJSON encodes int64 as a decimal string; keep that
+		// spelling in the filter so round-trips match CEL over the
+		// documented response (resource.intentVersion == "1").
 		return fmt.Sprintf(`%s == %q`, field, k.StringValue), nil
 	case *structpb.Value_NumberValue:
 		// Emit an integer literal when the value is integral so CEL
@@ -247,7 +244,7 @@ func queryCount(t *testing.T, h *resourceQueryHarness, filter string) int {
 
 // responseEnvelopeFields are the top-level ResourceResult fields
 // returned by QueryResources today (proto ResourceResult).
-var responseEnvelopeFields = []string{"name", "resource_type", "resource"}
+var responseEnvelopeFields = []string{"name", "resourceType", "resource"}
 
 // responseBodyKeys are every field the managed-resource Get/List
 // message (and thus ResourceResult.resource Struct bodies) may carry
@@ -293,7 +290,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 
 	all, err := h.client.QueryResources(ctx, &pb.QueryResourcesRequest{
 		Scope:    "-",
-		Filter:   `resource_type == "kind.fleetshift.io/Cluster"`,
+		Filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
 		PageSize: 50,
 		OrderBy:  "resource_type,name",
 	})
@@ -331,7 +328,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		}
 	}
 
-	// --- envelope fields (ResourceResult.name / resource_type) ---
+	// --- envelope fields (ResourceResult.name / resourceType) ---
 	// Round-trip every hit so casing/format mismatches cannot hide on
 	// a single fixture row.
 	t.Run("envelope_name", func(t *testing.T) {
@@ -349,30 +346,30 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 			}
 		}
 	})
-	t.Run("envelope_resource_type", func(t *testing.T) {
+	t.Run("envelope_resourceType", func(t *testing.T) {
 		for _, r := range all.Resources {
 			if r.ResourceType == "" {
-				t.Fatal("empty resource_type")
+				t.Fatal("empty resourceType")
 			}
 			// Disambiguate among same-type siblings with the envelope name.
-			filter := mustCelEq(t, "resource_type", structpb.NewStringValue(r.ResourceType)) +
+			filter := mustCelEq(t, "resourceType", structpb.NewStringValue(r.ResourceType)) +
 				" && " + mustCelEq(t, "name", structpb.NewStringValue(r.Name))
 			got := queryOne(t, h, filter)
 			if got.ResourceType != r.ResourceType {
-				t.Errorf("resource_type round-trip: got %q, want %q", got.ResourceType, r.ResourceType)
+				t.Errorf("resourceType round-trip: got %q, want %q", got.ResourceType, r.ResourceType)
 			}
 			if got.Name != r.Name {
-				t.Errorf("resource_type+name round-trip: got name %q, want %q", got.Name, r.Name)
+				t.Errorf("resourceType+name round-trip: got name %q, want %q", got.Name, r.Name)
 			}
 		}
 		// Type alone should return the full same-type page.
-		typeFilter := mustCelEq(t, "resource_type", structpb.NewStringValue(rich.ResourceType))
+		typeFilter := mustCelEq(t, "resourceType", structpb.NewStringValue(rich.ResourceType))
 		if n := queryCount(t, h, typeFilter); n != len(seeds) {
 			t.Fatalf("%s: got %d, want %d", typeFilter, n, len(seeds))
 		}
 	})
-	t.Run("envelope_resource_type_in", func(t *testing.T) {
-		filter := fmt.Sprintf(`resource_type in [%q]`, rich.ResourceType)
+	t.Run("envelope_resourceType_in", func(t *testing.T) {
+		filter := fmt.Sprintf(`resourceType in [%q]`, rich.ResourceType)
 		if n := queryCount(t, h, filter); n != len(seeds) {
 			t.Fatalf("%s: got %d, want %d", filter, n, len(seeds))
 		}
@@ -380,7 +377,7 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		// return an empty page that looks like "no matches."
 		_, err := h.client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
 			Scope:  "-",
-			Filter: `resource_type in ["other.fleetshift.io/Widget"]`,
+			Filter: `resourceType in ["other.fleetshift.io/Widget"]`,
 		})
 		if status.Code(err) != codes.InvalidArgument {
 			t.Fatalf("inactive type in-list: err = %v, want InvalidArgument", err)
@@ -438,23 +435,23 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 			t.Fatalf("%s: got %d, want 2", filter, n)
 		}
 	})
-	t.Run("resource.pause_reason", func(t *testing.T) {
+	t.Run("resource.pauseReason", func(t *testing.T) {
 		v := structField(body, "pauseReason")
 		if v == nil || v.GetStringValue() == "" {
 			t.Fatal("pauseReason missing from body")
 		}
-		got := queryOne(t, h, mustCelEq(t, "resource.pause_reason", v))
+		got := queryOne(t, h, mustCelEq(t, "resource.pauseReason", v))
 		if structFieldString(got.Resource, "pauseReason") != v.GetStringValue() {
 			t.Errorf("pauseReason mismatch after round-trip")
 		}
 	})
-	t.Run("resource.intent_version", func(t *testing.T) {
+	t.Run("resource.intentVersion", func(t *testing.T) {
 		v := structField(body, "intentVersion")
 		if v == nil {
 			t.Fatal("intentVersion missing from body")
 		}
 		// protojson may encode int64 as a string; use that kind verbatim.
-		got := queryOne(t, h, mustCelEq(t, "resource.intent_version", v)+
+		got := queryOne(t, h, mustCelEq(t, "resource.intentVersion", v)+
 			` && resource.name == "clusters/rich"`)
 		if !structValuesEqual(structField(got.Resource, "intentVersion"), v) {
 			t.Errorf("intentVersion mismatch: got %#v, want %#v",
@@ -481,8 +478,8 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		if specName == nil {
 			t.Fatal("spec.name missing")
 		}
-		// Type-specific paths require a resource_type guard.
-		filter := `resource_type == "kind.fleetshift.io/Cluster" && ` +
+		// Type-specific paths require a resourceType guard.
+		filter := `resourceType == "kind.fleetshift.io/Cluster" && ` +
 			mustCelEq(t, "resource.spec.name", specName)
 		got := queryOne(t, h, filter)
 		gotSpec := structField(got.Resource, "spec").GetStructValue()
@@ -535,21 +532,21 @@ func TestResourceQuery_RoundTripAllResponseFields(t *testing.T) {
 		if v == nil || v.GetStringValue() == "" {
 			t.Fatal("createTime missing from body")
 		}
-		assertFilterUnsupported(t, h, fmt.Sprintf(`resource.create_time == %q`, v.GetStringValue()))
+		assertFilterUnsupported(t, h, fmt.Sprintf(`resource.createTime == %q`, v.GetStringValue()))
 	})
 	t.Run("non_filterable_update_time", func(t *testing.T) {
 		v := structField(body, "updateTime")
 		if v == nil || v.GetStringValue() == "" {
 			t.Fatal("updateTime missing from body")
 		}
-		assertFilterUnsupported(t, h, fmt.Sprintf(`resource.update_time == %q`, v.GetStringValue()))
+		assertFilterUnsupported(t, h, fmt.Sprintf(`resource.updateTime == %q`, v.GetStringValue()))
 	})
 	t.Run("non_filterable_delete_time", func(t *testing.T) {
 		// Soft-delete unset on this fixture: field may be absent or empty.
 		if v := structField(body, "deleteTime"); v != nil && v.GetStringValue() != "" {
 			t.Errorf("deleteTime unexpectedly set: %q", v.GetStringValue())
 		}
-		assertFilterUnsupported(t, h, `resource.delete_time == "2026-01-01T00:00:00Z"`)
+		assertFilterUnsupported(t, h, `resource.deleteTime == "2026-01-01T00:00:00Z"`)
 	})
 	t.Run("non_filterable_etag", func(t *testing.T) {
 		v := structField(body, "etag")

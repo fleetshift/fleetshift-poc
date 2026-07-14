@@ -2,7 +2,9 @@ package sqlite
 
 // Comparable QueryResources bench to postgres/query_repo_bench_test.go:
 // same corpus shape (20k clusters + 20k nodes + 5k platform-only),
-// same scenarios, same warmup/round counts, same mean/p50/p95 reporting.
+// same scenarios (including worst-case non-matching JSON paths and
+// timestamp() conversion), same warmup/round counts, same
+// mean/p50/p95 reporting.
 //
 // SQLite differences:
 //   - file-backed temp DB (no container); WAL + busy_timeout via Open
@@ -225,7 +227,7 @@ func seedQRBNodes(t *testing.T, db *sql.DB) {
 				ready = "False"
 			}
 			conditions[i] = fmt.Sprintf(
-				`{"Ready":{"status":%q,"reason":"Probe","message":"steady","lastTransitionTime":"2026-06-01T12:00:00Z"}}`, ready)
+				`{"Ready":{"status":%q,"reason":"Probe","message":"steady","lastTransitionTime":"2026-06-01T12:00:00Z","_lastTransitionTimeNorm":"2026-06-01T12:00:00.000000000Z"}}`, ready)
 		}
 
 		{
@@ -391,22 +393,44 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 		ServiceName:    qrbClusterService,
 		TypeName:       qrbClusterType,
 	})
-	explainQueryResources(t, db, "resource_type,name order first page", "", "resource_type,name", defaultQueryPageSize, nil)
-	explainQueryResources(t, db, "selective resource_type equality (constituent columns)",
-		fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType), "", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "resourceType,name order first page", "", "resource_type,name", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "selective resourceType equality (constituent columns)",
+		fmt.Sprintf(`resourceType == "%s/%s"`, qrbClusterService, qrbClusterType), "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "extension label equality (json_extract)",
 		`resource.labels["team"] == "platform"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "guarded spec filter",
-		fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`, qrbClusterService, qrbClusterType),
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.spec.provider == "aws"`, qrbClusterService, qrbClusterType),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "inventory label equality (json_extract)",
-		`resource.local_labels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
+		`resource.localLabels["node-role"] == "worker"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "inventory condition equality (json_extract)",
 		`resource.conditions["Ready"].status == "True"`, "", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "guarded numeric observation filter (safeJSONNumberCast)",
-		fmt.Sprintf(`resource_type == "%s/%s" && resource.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 32`, qrbNodeService, qrbNodeType),
 		"", defaultQueryPageSize, nil)
 	explainQueryResources(t, db, "max page size (500), empty filter", "", "", maxQueryPageSize, nil)
+	// Worst-case non-matching JSON paths force a full typed scan
+	// (matching pages can stop at LIMIT once enough rows qualify).
+	explainQueryResources(t, db, "worst-case non-matching guarded spec",
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.spec.provider == "oracle"`, qrbClusterService, qrbClusterType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "worst-case non-matching guarded observation",
+		fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 100`, qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	// timestamp() conversion: native TEXT columns and dual-stored
+	// condition lastTransitionTime (ProtoJSON + fixed-width norm).
+	explainQueryResources(t, db, "timestamp conversion native matching",
+		fmt.Sprintf(`resourceType == "%s/%s" && timestamp(resource.localUpdateTime) == timestamp("2026-06-01T08:00:00-04:00")`,
+			qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "timestamp conversion native non-matching",
+		fmt.Sprintf(`resourceType == "%s/%s" && timestamp(resource.localUpdateTime) == timestamp("2099-01-01T00:00:00Z")`,
+			qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
+	explainQueryResources(t, db, "timestamp conversion condition non-matching",
+		fmt.Sprintf(`resourceType == "%s/%s" && timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2099-01-01T00:00:00Z")`,
+			qrbNodeService, qrbNodeType),
+		"", defaultQueryPageSize, nil)
 }
 
 // ---------------------------------------------------------------------------
@@ -416,6 +440,7 @@ func TestQueryResourcesExplainPlan(t *testing.T) {
 type qrbTimings struct {
 	scenario  string
 	pageSize  int
+	rows      int
 	durations []time.Duration
 }
 
@@ -471,8 +496,8 @@ func timeQueryResources(t *testing.T, db *sql.DB, scenario string, req domain.Qu
 	}
 	t.Logf("%s  page_size=%d  rows=%d  next_token=%v  %s",
 		scenario, req.PageSize, len(lastPage.Resources), lastPage.NextPageToken != "",
-		qrbTimings{scenario: scenario, pageSize: int(req.PageSize), durations: durs})
-	return qrbTimings{scenario: scenario, pageSize: int(req.PageSize), durations: durs}
+		qrbTimings{scenario: scenario, pageSize: int(req.PageSize), rows: len(lastPage.Resources), durations: durs})
+	return qrbTimings{scenario: scenario, pageSize: int(req.PageSize), rows: len(lastPage.Resources), durations: durs}
 }
 
 func TestQueryResourcesBenchmark(t *testing.T) {
@@ -485,46 +510,86 @@ func TestQueryResourcesBenchmark(t *testing.T) {
 
 	t.Log("=== QueryResources absolute timings (warmup discarded) ===")
 	scenarios := []struct {
-		name string
-		req  domain.QueryResourcesRequest
+		name      string
+		req       domain.QueryResourcesRequest
+		wantEmpty bool
 	}{
-		{"empty filter (default first page)", domain.QueryResourcesRequest{PageSize: int32(defaultQueryPageSize)}},
-		{"resource_type,name order first page", domain.QueryResourcesRequest{
+		{"empty filter (default first page)", domain.QueryResourcesRequest{PageSize: int32(defaultQueryPageSize)}, false},
+		{"resourceType,name order first page", domain.QueryResourcesRequest{
 			PageSize: int32(defaultQueryPageSize),
 			OrderBy:  "resource_type,name",
-		}},
-		{"selective resource_type equality", domain.QueryResourcesRequest{
-			Filter:   fmt.Sprintf(`resource_type == "%s/%s"`, qrbClusterService, qrbClusterType),
+		}, false},
+		{"selective resourceType equality", domain.QueryResourcesRequest{
+			Filter:   fmt.Sprintf(`resourceType == "%s/%s"`, qrbClusterService, qrbClusterType),
 			PageSize: int32(defaultQueryPageSize),
-		}},
+		}, false},
 		{"extension label equality", domain.QueryResourcesRequest{
 			Filter:   `resource.labels["team"] == "platform"`,
 			PageSize: int32(defaultQueryPageSize),
-		}},
+		}, false},
 		{"guarded spec filter", domain.QueryResourcesRequest{
-			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.spec.provider == "aws"`,
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && resource.spec.provider == "aws"`,
 				qrbClusterService, qrbClusterType),
 			PageSize: int32(defaultQueryPageSize),
-		}},
+		}, false},
 		{"inventory label equality", domain.QueryResourcesRequest{
-			Filter:   `resource.local_labels["node-role"] == "worker"`,
+			Filter:   `resource.localLabels["node-role"] == "worker"`,
 			PageSize: int32(defaultQueryPageSize),
-		}},
+		}, false},
 		{"inventory condition equality", domain.QueryResourcesRequest{
 			Filter:   `resource.conditions["Ready"].status == "True"`,
 			PageSize: int32(defaultQueryPageSize),
-		}},
+		}, false},
 		{"guarded numeric observation filter", domain.QueryResourcesRequest{
-			Filter: fmt.Sprintf(`resource_type == "%s/%s" && resource.observation.capacity.cpu > 32`,
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 32`,
 				qrbNodeService, qrbNodeType),
 			PageSize: int32(defaultQueryPageSize),
-		}},
-		{"max page size (500), empty filter", domain.QueryResourcesRequest{PageSize: int32(maxQueryPageSize)}},
+		}, false},
+		{"max page size (500), empty filter", domain.QueryResourcesRequest{PageSize: int32(maxQueryPageSize)}, false},
+		// Worst-case non-matching JSON paths: no row matches, so the
+		// engine cannot stop at pageSize and must evaluate the path
+		// across every typed candidate.
+		{"worst-case non-matching guarded spec", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && resource.spec.provider == "oracle"`,
+				qrbClusterService, qrbClusterType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		{"worst-case non-matching guarded observation", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(`resourceType == "%s/%s" && resource.observation.capacity.cpu > 100`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		// timestamp() conversion: native TEXT (localUpdateTime) and
+		// dual-stored condition lastTransitionTime.
+		{"timestamp conversion native matching", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(
+				`resourceType == "%s/%s" && timestamp(resource.localUpdateTime) == timestamp("2026-06-01T08:00:00-04:00")`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, false},
+		{"timestamp conversion native non-matching", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(
+				`resourceType == "%s/%s" && timestamp(resource.localUpdateTime) == timestamp("2099-01-01T00:00:00Z")`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
+		{"timestamp conversion condition non-matching", domain.QueryResourcesRequest{
+			Filter: fmt.Sprintf(
+				`resourceType == "%s/%s" && timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2099-01-01T00:00:00Z")`,
+				qrbNodeService, qrbNodeType),
+			PageSize: int32(defaultQueryPageSize),
+		}, true},
 	}
 
 	for _, sc := range scenarios {
 		t.Run(sc.name, func(t *testing.T) {
-			timeQueryResources(t, db, sc.name, sc.req)
+			got := timeQueryResources(t, db, sc.name, sc.req)
+			if sc.wantEmpty && got.rows != 0 {
+				t.Fatalf("%s: expected empty result (full candidate scan), got %d rows", sc.name, got.rows)
+			}
+			if !sc.wantEmpty && got.rows == 0 {
+				t.Fatalf("%s: expected matching rows, got 0", sc.name)
+			}
 		})
 	}
 
