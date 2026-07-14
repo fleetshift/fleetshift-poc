@@ -1,6 +1,11 @@
 import chalk from "chalk";
 
 import {
+  RENDER_SEARCH_TYPE,
+  type SearchResultRendererProperties,
+  validateSearchResultRendererProperties,
+} from "./searchResultRenderer";
+import {
   type BaseExtensionProperties,
   type ClusterProviderProperties,
   type EncodedCodeRef,
@@ -168,6 +173,13 @@ function validateSingleExtension(ext: FleetshiftExtension): string[] {
     return [`${ext.type}: "properties" must be an object`];
   }
   switch (ext.type) {
+    case RENDER_SEARCH_TYPE: {
+      const id = typeof props.id === "string" ? props.id : "(no id)";
+      return validateSearchResultRendererProperties(
+        props as unknown as SearchResultRendererProperties,
+        `${RENDER_SEARCH_TYPE} "${id}"`,
+      );
+    }
     case "fleetshift.module-group":
       return validateModuleGroupProperties(
         props as unknown as ModuleGroupProperties,

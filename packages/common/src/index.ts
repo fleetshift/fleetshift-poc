@@ -63,6 +63,11 @@ export { default as PluginLink } from "./PluginLink.js";
 export * from "./resourceApi.js";
 export type { FleetShiftApi, NavPage } from "./scalprum.js";
 export type {
+  InventoryResource,
+  SearchResultRender,
+  SearchResultResolve,
+} from "./searchResultRenderer.js";
+export type {
   ClusterProviderCardProps,
   ClusterProviderWizardProps,
   OnboardingActionCardProps,

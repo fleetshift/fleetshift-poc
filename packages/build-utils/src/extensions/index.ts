@@ -8,6 +8,16 @@ export {
 export type { FleetshiftPluginOptions } from "./FleetshiftPlugin";
 export { FleetshiftPlugin } from "./FleetshiftPlugin";
 export type {
+  SearchResultRendererExtras,
+  SearchResultRendererInput,
+  SearchResultRendererProperties,
+} from "./searchResultRenderer";
+export {
+  createSearchResultRenderer,
+  RENDER_SEARCH_TYPE,
+  validateSearchResultRendererProperties,
+} from "./searchResultRenderer";
+export type {
   BaseExtensionProperties,
   ClusterProviderExtras,
   ClusterProviderProperties,

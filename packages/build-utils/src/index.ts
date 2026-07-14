@@ -11,6 +11,9 @@ export type {
   ModuleGroupProperties,
   ModuleProperties,
   OnboardingActionProperties,
+  SearchResultRendererExtras,
+  SearchResultRendererInput,
+  SearchResultRendererProperties,
   SetupProperties,
 } from "./extensions";
 export {
@@ -18,7 +21,9 @@ export {
   createModule,
   createModuleGroup,
   createOnboardingAction,
+  createSearchResultRenderer,
   createSetup,
   FleetshiftPlugin,
+  RENDER_SEARCH_TYPE,
 } from "./extensions";
 export { default as getDynamicModules } from "./getDynamicModules";
