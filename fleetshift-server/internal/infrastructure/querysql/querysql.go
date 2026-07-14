@@ -65,21 +65,23 @@
 // # Package split
 //
 // This package owns only CEL AST lowering: boolean/logical structure,
-// comparison, "in", and startsWith handling, literal binding, and
+// comparison, "in", and startsWith handling, literal binding
+// (including [ParseCELTimestamp] for timestamp() string literals), and
 // resourceType guard detection (compiler.go). It does not know what
-// field paths actually mean -- column names, JSON extraction,
-// label/condition map keys, or schema-backed path validation are all
+// field paths actually mean — column names, JSON extraction,
+// label/condition map keys, schema-backed path validation, dialect
+// boolean/collation spelling, or timestamp/JSON SQL rendering are all
 // the concern of whatever [FieldResolver] the caller supplies (see
-// field_resolver.go for that contract and the postgres package's
-// query_filter.go for this project's Postgres/FleetShift
-// implementation). This split exists because querysql's supported CEL
-// subset is a QueryResources-wide contract -- any storage backend
-// would parse and validate filters the same way -- while the row
-// shape a field path resolves to is backend-specific.
+// field_resolver.go for that contract and the postgres/sqlite
+// packages' query_filter.go + query_expr_*.go for this project's
+// backend implementations). This split exists because querysql's
+// supported CEL subset is a QueryResources-wide contract — any storage
+// backend would parse and validate filters the same way — while the
+// row shape a field path resolves to is backend-specific.
 //
 // Parameter placeholder style is likewise a dialect concern, owned
-// by the caller's [ParamBinder] (see param_binder.go). The compiler
-// defaults to [DollarParams] (Postgres $N) when Params is nil.
+// by the caller's [ParamBinder] (see param_binder.go). [Compiler.Params]
+// is required; there is no default binder.
 //
 // Supported filter shape: see compiler.go for the supported operators
 // (&&, ||, !, ==, !=, <, <=, >, >=, in, startsWith, timestamp) and
@@ -151,8 +153,9 @@ type Compiler struct {
 	Fields FieldResolver
 
 	// Params formats bind-parameter placeholders in the generated
-	// SQL. Nil defaults to [DollarParams] (Postgres $N). SQLite
-	// callers should set [QuestionParams] (?N).
+	// SQL. Required: a nil Params fails CompileFilter with a
+	// descriptive error. Each storage backend supplies its own
+	// ParamBinder (Postgres $N, SQLite ?N).
 	Params ParamBinder
 }
 
@@ -193,7 +196,7 @@ func (c Compiler) CompileFilter(ctx context.Context, in CompileFilterInput) (SQL
 
 	params := c.Params
 	if params == nil {
-		params = DollarParams{}
+		return SQLPredicate{}, fmt.Errorf("filter: Compiler.Params is required")
 	}
 
 	root := checked.NativeRep().Expr()

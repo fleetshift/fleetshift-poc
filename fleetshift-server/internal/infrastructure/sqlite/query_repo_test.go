@@ -26,7 +26,7 @@ func TestQueryRepo(t *testing.T) {
 }
 
 // TestQueryRepo_StringLabelFilterReusesNumberedBinds covers the
-// json_type/json_extract + QuestionParams interaction: the path key
+// json_type/json_extract + questionParams interaction: the path key
 // parameter is repeated, so bare "?" would mis-bind. Numbered ?N
 // keeps the key bound once. Labels are ProtoJSON strings, so the
 // filter compares as a string (numeric coercion is intentionally gone).

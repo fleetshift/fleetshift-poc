@@ -61,12 +61,12 @@ func compileWithResolverErr(t *testing.T, c querysql.Compiler, filter string) er
 
 func compile(t *testing.T, filter string) querysql.SQLPredicate {
 	t.Helper()
-	return compileWithResolver(t, querysql.Compiler{Fields: queryFieldResolver{}}, filter)
+	return compileWithResolver(t, querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}}, filter)
 }
 
 func compileErr(t *testing.T, filter string) error {
 	t.Helper()
-	return compileWithResolverErr(t, querysql.Compiler{Fields: queryFieldResolver{}}, filter)
+	return compileWithResolverErr(t, querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}}, filter)
 }
 
 func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
@@ -317,15 +317,15 @@ func TestQueryFieldResolver_InventoryConditionsContainment(t *testing.T) {
 }
 
 func TestQueryFieldResolver_TimestampOnConditionLastTransitionTime(t *testing.T) {
-	norm500 := querysql.FormatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 500_000_000, time.UTC))
-	normNoon := querysql.FormatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
+	norm500 := formatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 500_000_000, time.UTC))
+	normNoon := formatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
 
 	// Equality: fixed-width norm sibling + GIN containment (no cel_ts_norm).
 	pred := compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2026-06-01T12:00:00.500Z")`)
 	if !strings.Contains(pred.SQL, "inv.conditions @> jsonb_build_object(") {
 		t.Errorf("SQL = %q, want GIN-friendly containment rewrite", pred.SQL)
 	}
-	if !argsContain(pred.Args, querysql.ConditionLastTransitionTimeNormJSONKey) {
+	if !argsContain(pred.Args, conditionLastTransitionTimeNormJSONKey) {
 		t.Errorf("Args = %v, want norm JSON key", pred.Args)
 	}
 	if !argsContain(pred.Args, norm500) {
@@ -347,7 +347,7 @@ func TestQueryFieldResolver_TimestampOnConditionLastTransitionTime(t *testing.T)
 	if strings.Contains(pred.SQL, "@>") {
 		t.Errorf("SQL = %q, != must not use containment", pred.SQL)
 	}
-	if !strings.Contains(pred.SQL, querysql.ConditionLastTransitionTimeNormJSONKey) {
+	if !strings.Contains(pred.SQL, conditionLastTransitionTimeNormJSONKey) {
 		t.Errorf("SQL = %q, want extract of norm sibling", pred.SQL)
 	}
 
@@ -364,7 +364,7 @@ func TestQueryFieldResolver_TimestampOnConditionLastTransitionTime(t *testing.T)
 	if strings.Contains(pred.SQL, "cel_ts_norm") {
 		t.Errorf("SQL = %q, ordered timestamp() must not use cel_ts_norm", pred.SQL)
 	}
-	if !strings.Contains(pred.SQL, querysql.ConditionLastTransitionTimeNormJSONKey) {
+	if !strings.Contains(pred.SQL, conditionLastTransitionTimeNormJSONKey) {
 		t.Errorf("SQL = %q, want norm sibling extract", pred.SQL)
 	}
 	if !strings.Contains(pred.SQL, `COLLATE "C"`) {
@@ -478,7 +478,7 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
 	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
 	// nested protobuf fields like seconds must be rejected.
@@ -499,7 +499,7 @@ func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
 	schemas := staticQuerySchemas{
 		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
@@ -560,7 +560,7 @@ func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 			SpecDescriptor: specTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
 	t.Run("JSON camelCase accepted", func(t *testing.T) {
 		for _, filter := range []string{
@@ -646,7 +646,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 			SpecDescriptor: nestedSpecTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
 	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
@@ -687,7 +687,7 @@ func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 }
 
 func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}, Params: dollarParams{}}
 	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
 	if !argsContain(pred.Args, "api_server_port") {
 		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)

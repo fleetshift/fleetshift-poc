@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 var _ domain.ExtensionResourceRepository = (*ExtensionResourceRepo)(nil)
@@ -787,11 +786,11 @@ func extensionResourceViewFromColumns(
 // the QueryResources response. LastTransitionTimeNorm is the
 // fixed-width UTC sibling for timestamp() filters only.
 type ConditionJSON struct {
-	Status                 domain.ConditionStatus      `json:"status"`
-	Reason                 string                      `json:"reason"`
-	Message                string                      `json:"message"`
-	LastTransitionTime     querysql.ProtoJSONTimestamp `json:"lastTransitionTime"`
-	LastTransitionTimeNorm string                      `json:"_lastTransitionTimeNorm"`
+	Status                 domain.ConditionStatus `json:"status"`
+	Reason                 string                 `json:"reason"`
+	Message                string                 `json:"message"`
+	LastTransitionTime     protoJSONTimestamp     `json:"lastTransitionTime"`
+	LastTransitionTimeNorm string                 `json:"_lastTransitionTimeNorm"`
 }
 
 func newConditionJSON(status domain.ConditionStatus, reason, message string, t time.Time) ConditionJSON {
@@ -799,8 +798,8 @@ func newConditionJSON(status domain.ConditionStatus, reason, message string, t t
 		Status:                 status,
 		Reason:                 reason,
 		Message:                message,
-		LastTransitionTime:     querysql.ProtoJSONTimestamp(t),
-		LastTransitionTimeNorm: querysql.FormatTimestampNorm(t),
+		LastTransitionTime:     protoJSONTimestamp(t),
+		LastTransitionTimeNorm: formatTimestampNorm(t),
 	}
 }
 

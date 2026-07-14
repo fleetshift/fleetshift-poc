@@ -30,6 +30,6 @@ func TestBuildQueryResourcesSQL_HydratesFromMaterializedPageWindow(t *testing.T)
 		t.Errorf("SQL missing LIMIT ?1 numbered placeholder:\n%s", sql)
 	}
 	if strings.Contains(sql, "LIMIT $") {
-		t.Errorf("SQL uses DollarParams LIMIT; want QuestionParams:\n%s", sql)
+		t.Errorf("SQL uses dollarParams LIMIT; want questionParams:\n%s", sql)
 	}
 }

@@ -24,7 +24,7 @@ func init() {
 			if err != nil {
 				return nil, nil
 			}
-			return querysql.FormatTimestampNorm(t), nil
+			return formatTimestampNorm(t), nil
 		},
 	})
 
@@ -42,7 +42,7 @@ func init() {
 			if err != nil {
 				return nil, nil
 			}
-			return querysql.FormatProtoJSONTimestamp(t), nil
+			return formatProtoJSONTimestamp(t), nil
 		},
 	})
 }

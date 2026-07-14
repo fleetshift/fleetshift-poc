@@ -71,7 +71,7 @@ func (r queryFieldResolver) resolveEnvelopeField(name string, want querysql.Type
 	case "name":
 		sql := "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id"
 		if want == querysql.TypeHintTimestamp {
-			return querysql.SQLiteKnownTimestamp(sql), nil
+			return knownTimestamp(sql), nil
 		}
 		// Canonical full name. Equality / IN against well-formed
 		// "//service/collection/id" literals special-case to
@@ -85,7 +85,7 @@ func (r queryFieldResolver) resolveEnvelopeField(name string, want querysql.Type
 	case "resourceType":
 		sql := "er.service_name || '/' || er.type_name"
 		if want == querysql.TypeHintTimestamp {
-			return querysql.SQLiteKnownTimestamp(sql), nil
+			return knownTimestamp(sql), nil
 		}
 		// Equality / IN against well-formed "service/Type" literals
 		// special-case to service_name/type_name predicates so
@@ -166,15 +166,15 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 					// Non-timestamp subfields error at conversion time
 					// per row when non-RFC3339.
 					path := fmt.Sprintf(`%s || '.%s'`, jsonQuotedPathExpr(keyPlaceholder), subfield)
-					return querysql.SQLiteDynamicTimestamp("inv.conditions", path), nil
+					return dynamicTimestamp("inv.conditions", path), nil
 				}
 				// timestamp() reads the fixed-width storage sibling.
 				normExtract := jsonExtractKeySubfield(
-					"inv.conditions", keyPlaceholder, querysql.ConditionLastTransitionTimeNormJSONKey,
+					"inv.conditions", keyPlaceholder, conditionLastTransitionTimeNormJSONKey,
 				)
-				return querysql.CanonicalTimestampText(normExtract), nil
+				return canonicalTimestampText(normExtract), nil
 			}
-			return querysql.KnownStringField(extract, querysql.SQLiteBool), nil
+			return knownStringField(extract), nil
 		}
 	case "observation":
 		if len(rest) > 0 {
@@ -187,16 +187,16 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 	case "localUpdateTime":
 		if len(rest) == 0 {
 			if want == querysql.TypeHintTimestamp {
-				return querysql.SQLiteKnownTimestamp("inv.observed_at"), nil
+				return knownTimestamp("inv.observed_at"), nil
 			}
-			return querysql.SQLiteKnownTimestampString("inv.observed_at"), nil
+			return knownTimestampString("inv.observed_at"), nil
 		}
 	case "indexUpdateTime":
 		if len(rest) == 0 {
 			if want == querysql.TypeHintTimestamp {
-				return querysql.SQLiteKnownTimestamp("inv.updated_at"), nil
+				return knownTimestamp("inv.updated_at"), nil
 			}
-			return querysql.SQLiteKnownTimestampString("inv.updated_at"), nil
+			return knownTimestampString("inv.updated_at"), nil
 		}
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
@@ -208,9 +208,9 @@ const apiStateSQL = `(CASE f.state WHEN 'creating' THEN 'CREATING' WHEN 'active'
 
 func stringOrTimestamp(want querysql.TypeHint, textSQL string) querysql.SQLExpr {
 	if want == querysql.TypeHintTimestamp {
-		return querysql.SQLiteKnownTimestamp(textSQL)
+		return knownTimestamp(textSQL)
 	}
-	return querysql.KnownStringField(textSQL, querysql.SQLiteBool)
+	return knownStringField(textSQL)
 }
 
 // labelField handles the common json_extract(<column>, '$."<key>")
@@ -222,9 +222,9 @@ func labelField(column, key string, want querysql.TypeHint, bind func(any) strin
 	keyPlaceholder := bind(key)
 	extract := jsonExtractKey(column, keyPlaceholder)
 	if want == querysql.TypeHintTimestamp {
-		return querysql.SQLiteKnownTimestamp(extract)
+		return knownTimestamp(extract)
 	}
-	return querysql.KnownStringField(extract, querysql.SQLiteBool)
+	return knownStringField(extract)
 }
 
 // jsonExtractKey builds json_extract(column, '$."<bound-key>") with
@@ -349,9 +349,9 @@ func inFullName(values []any, bind func(any) string) (string, bool, error) {
 func jsonTextField(column string, names []string, want querysql.TypeHint, bind func(any) string) querysql.SQLExpr {
 	path := jsonQuotedPathChain(names, bind)
 	if want == querysql.TypeHintTimestamp {
-		return querysql.SQLiteDynamicTimestamp(column, path)
+		return dynamicTimestamp(column, path)
 	}
-	return querysql.SQLiteDynamicJSON(column, path)
+	return dynamicJSON(column, path)
 }
 
 // jsonQuotedPathChain builds `$."a"."b"` as a SQL expression over

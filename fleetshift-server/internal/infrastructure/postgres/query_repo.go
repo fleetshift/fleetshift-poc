@@ -27,11 +27,10 @@ type QueryRepo struct {
 	DB *sql.Tx
 
 	// Compiler defaults to querysql.Compiler with this package's
-	// queryFieldResolver and [querysql.DollarParams] when nil (see
-	// compiler()). Overridable for tests that need to exercise
-	// QueryResources against a stub compiler; in that case
-	// SchemaProvider is ignored since the override owns its own field
-	// resolution, if any.
+	// queryFieldResolver and dollarParams when nil (see compiler()).
+	// Overridable for tests that need to exercise QueryResources
+	// against a stub compiler; in that case SchemaProvider is ignored
+	// since the override owns its own field resolution, if any.
 	Compiler querysql.CELSQLCompiler
 
 	// SchemaProvider is threaded into the default compiler's field
@@ -49,7 +48,7 @@ func (r *QueryRepo) compiler() querysql.CELSQLCompiler {
 	}
 	return querysql.Compiler{
 		Fields: queryFieldResolver{SchemaProvider: r.SchemaProvider},
-		Params: querysql.DollarParams{},
+		Params: dollarParams{},
 	}
 }
 

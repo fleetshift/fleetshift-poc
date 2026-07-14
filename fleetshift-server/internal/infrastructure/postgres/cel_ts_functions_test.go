@@ -14,13 +14,13 @@ func TestCelTsNorm_MatchesGoFormatter(t *testing.T) {
 		in   string
 		want string // empty means SQL NULL
 	}{
-		{"2026-06-01T12:00:00Z", querysql.FormatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00Z"))},
-		{"2026-06-01T08:00:00-04:00", querysql.FormatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00Z"))},
-		{"2026-06-01T12:00:00.123456789Z", querysql.FormatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00.123456789Z"))},
-		{"2026-06-01T12:00:00,123456789Z", querysql.FormatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00,123456789Z"))},
-		{"2026-06-01T12:00:00.123456789012Z", querysql.FormatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00.123456789012Z"))},
-		{"0001-01-01T00:00:00Z", querysql.FormatTimestampNorm(mustParseTS(t, "0001-01-01T00:00:00Z"))},
-		{"9999-12-31T23:59:59.999999999Z", querysql.FormatTimestampNorm(mustParseTS(t, "9999-12-31T23:59:59.999999999Z"))},
+		{"2026-06-01T12:00:00Z", formatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00Z"))},
+		{"2026-06-01T08:00:00-04:00", formatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00Z"))},
+		{"2026-06-01T12:00:00.123456789Z", formatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00.123456789Z"))},
+		{"2026-06-01T12:00:00,123456789Z", formatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00,123456789Z"))},
+		{"2026-06-01T12:00:00.123456789012Z", formatTimestampNorm(mustParseTS(t, "2026-06-01T12:00:00.123456789012Z"))},
+		{"0001-01-01T00:00:00Z", formatTimestampNorm(mustParseTS(t, "0001-01-01T00:00:00Z"))},
+		{"9999-12-31T23:59:59.999999999Z", formatTimestampNorm(mustParseTS(t, "9999-12-31T23:59:59.999999999Z"))},
 		{"2026-06-01", ""},             // date-only
 		{"infinity", ""},               // Postgres special
 		{"2026-06-01 12:00:00+00", ""}, // missing T
@@ -78,7 +78,7 @@ func TestCelTsProtojsonTstz(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := querysql.FormatProtoJSONTimestamp(mustParseTS(t, "2026-06-01T12:00:00.5Z"))
+	want := formatProtoJSONTimestamp(mustParseTS(t, "2026-06-01T12:00:00.5Z"))
 	if got != want {
 		t.Errorf("cel_ts_protojson_tstz = %q, want %q", got, want)
 	}

@@ -24,7 +24,7 @@ import "fmt"
 //
 // predicateSQL and keysetSQL are trusted, pre-built SQL fragments
 // (parameterized with ?N placeholders only; QueryRepo wires
-// querysql.QuestionParams, and user input never reaches this function
+// questionParams, and user input never reaches this function
 // as raw text). order is a supported order from resolveQueryOrder.
 // limitPlaceholder is the ?N index bound to the page's row limit.
 //

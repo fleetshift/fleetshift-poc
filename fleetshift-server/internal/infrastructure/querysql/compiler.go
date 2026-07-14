@@ -21,7 +21,7 @@ var comparisonOperators = map[string]struct {
 	op  ComparisonOperator
 }{
 	operators.Equals:        {"=", OpEqual},
-	operators.NotEquals:     {"!=", OpNotEqual},
+	operators.NotEquals:     {"<>", OpNotEqual},
 	operators.Less:          {"<", OpLess},
 	operators.LessEquals:    {"<=", OpLessEqual},
 	operators.Greater:       {">", OpGreater},

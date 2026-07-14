@@ -117,9 +117,8 @@ type ResolveContext struct {
 // resourceType guard detection -- and knows about field paths only
 // generically; a FieldResolver owns the actual row shape a path reads
 // from (column names, JSON extraction, schema-backed path
-// validation). See the postgres package's query field resolver for
-// this project's current implementation; a future SQLite QueryRepo
-// would supply its own.
+// validation). The postgres and sqlite packages each supply a
+// QueryResources FieldResolver for their row shapes.
 type FieldResolver interface {
 	Resolve(path FieldPath, hint TypeHint, ctx ResolveContext) (SQLExpr, error)
 }

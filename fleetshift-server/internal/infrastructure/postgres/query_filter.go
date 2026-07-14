@@ -62,14 +62,14 @@ func (r queryFieldResolver) resolveEnvelopeField(name string, want querysql.Type
 	case "name":
 		sql := "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id"
 		if want == querysql.TypeHintTimestamp {
-			return querysql.PostgresTextTimestamp(sql), nil
+			return textTimestamp(sql), nil
 		}
 		// Canonical full name. Equality / IN against well-formed
 		// "//service/collection/id" literals special-case to
 		// constituent-column predicates so the default-order index
 		// can seek; other comparisons fall back to KnownStringField
 		// (COLLATE "C" for CEL lexical order).
-		base := querysql.KnownStringField(sql, querysql.PostgresBool, querysql.WithCollate(`"C"`))
+		base := knownStringField(sql)
 		return querysql.SQLExpr{
 			SQL: sql,
 			Compare: func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
@@ -89,12 +89,12 @@ func (r queryFieldResolver) resolveEnvelopeField(name string, want querysql.Type
 	case "resourceType":
 		sql := "er.service_name || '/' || er.type_name"
 		if want == querysql.TypeHintTimestamp {
-			return querysql.PostgresTextTimestamp(sql), nil
+			return textTimestamp(sql), nil
 		}
 		// Equality / IN against well-formed "service/Type" literals
 		// special-case to service_name/type_name predicates so
 		// idx_extension_resources_type_query_order can participate.
-		base := querysql.KnownStringField(sql, querysql.PostgresBool, querysql.WithCollate(`"C"`))
+		base := knownStringField(sql)
 		return querysql.SQLExpr{
 			SQL: sql,
 			Compare: func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
@@ -177,20 +177,20 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			jsonb := fmt.Sprintf("inv.conditions -> %s -> '%s'", keyPlaceholder, subfield)
 			if want == querysql.TypeHintTimestamp {
 				if subfield != "lastTransitionTime" {
-					return querysql.PostgresDynamicTimestamp(jsonb), nil
+					return dynamicTimestamp(jsonb), nil
 				}
 				// timestamp() reads the fixed-width storage sibling.
 				// Equality uses GIN containment; ordered/!=/IN compare
 				// the norm text directly (no cel_ts_norm).
-				normKey := querysql.ConditionLastTransitionTimeNormJSONKey
+				normKey := conditionLastTransitionTimeNormJSONKey
 				text := fmt.Sprintf("inv.conditions -> %s ->> '%s'", keyPlaceholder, normKey)
-				expr := querysql.CanonicalTimestampText(text, querysql.WithCollate(`"C"`))
+				expr := canonicalTimestampText(text)
 				baseCompare := expr.Compare
 				ginEqual := conditionStringCompare(keyPlaceholder, normKey, text)
 				expr.Compare = func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
 					if op == querysql.OpEqual {
 						if t, ok := lit.(time.Time); ok {
-							return ginEqual(op, querysql.FormatTimestampNorm(t), bind)
+							return ginEqual(op, formatTimestampNorm(t), bind)
 						}
 					}
 					return baseCompare(op, lit, bind)
@@ -198,7 +198,7 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 				return expr, nil
 			}
 			text := fmt.Sprintf("inv.conditions -> %s ->> '%s'", keyPlaceholder, subfield)
-			expr := querysql.KnownStringField(text, querysql.PostgresBool, querysql.WithCollate(`"C"`))
+			expr := knownStringField(text)
 			expr.Compare = conditionStringCompare(keyPlaceholder, subfield, text)
 			return expr, nil
 		}
@@ -213,16 +213,16 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 	case "localUpdateTime":
 		if len(rest) == 0 {
 			if want == querysql.TypeHintTimestamp {
-				return querysql.PostgresKnownTimestamp("inv.observed_at"), nil
+				return knownTimestamp("inv.observed_at"), nil
 			}
-			return querysql.PostgresKnownTimestampString("inv.observed_at"), nil
+			return knownTimestampString("inv.observed_at"), nil
 		}
 	case "indexUpdateTime":
 		if len(rest) == 0 {
 			if want == querysql.TypeHintTimestamp {
-				return querysql.PostgresKnownTimestamp("inv.updated_at"), nil
+				return knownTimestamp("inv.updated_at"), nil
 			}
-			return querysql.PostgresKnownTimestampString("inv.updated_at"), nil
+			return knownTimestampString("inv.updated_at"), nil
 		}
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
@@ -234,9 +234,9 @@ const apiStateSQL = `(CASE f.state WHEN 'creating' THEN 'CREATING' WHEN 'active'
 
 func stringOrTimestamp(want querysql.TypeHint, textSQL string) querysql.SQLExpr {
 	if want == querysql.TypeHintTimestamp {
-		return querysql.PostgresTextTimestamp(textSQL)
+		return textTimestamp(textSQL)
 	}
-	return querysql.KnownStringField(textSQL, querysql.PostgresBool, querysql.WithCollate(`"C"`))
+	return knownStringField(textSQL)
 }
 
 // labelField handles the common `<column> -> <key>` JSONB shape shared
@@ -249,15 +249,15 @@ func labelField(column, key string, want querysql.TypeHint, bind func(any) strin
 	keyPlaceholder := bind(key)
 	text := fmt.Sprintf("(%s ->> %s)", column, keyPlaceholder)
 	if want == querysql.TypeHintTimestamp {
-		return querysql.PostgresTextTimestamp(text)
+		return textTimestamp(text)
 	}
-	expr := querysql.KnownStringField(text, querysql.PostgresBool, querysql.WithCollate(`"C"`))
+	expr := knownStringField(text)
 	expr.Compare = labelStringCompare(column, keyPlaceholder, text)
 	return expr
 }
 
 func labelStringCompare(column, keyPlaceholder, textSQL string) func(querysql.ComparisonOperator, any, func(any) string) (string, bool, error) {
-	base := querysql.KnownStringField(textSQL, querysql.PostgresBool, querysql.WithCollate(`"C"`)).Compare
+	base := knownStringField(textSQL).Compare
 	return func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
 		if op == querysql.OpEqual {
 			if value, ok := lit.(string); ok {
@@ -270,7 +270,7 @@ func labelStringCompare(column, keyPlaceholder, textSQL string) func(querysql.Co
 }
 
 func conditionStringCompare(typePlaceholder, subfield, textSQL string) func(querysql.ComparisonOperator, any, func(any) string) (string, bool, error) {
-	base := querysql.KnownStringField(textSQL, querysql.PostgresBool, querysql.WithCollate(`"C"`)).Compare
+	base := knownStringField(textSQL).Compare
 	return func(op querysql.ComparisonOperator, lit any, bind func(any) string) (string, bool, error) {
 		if op == querysql.OpEqual {
 			if value, ok := lit.(string); ok {
@@ -381,9 +381,9 @@ func jsonTextField(column string, names []string, want querysql.TypeHint, bind f
 		fmt.Fprintf(&sb, " -> %s", bind(n))
 	}
 	if want == querysql.TypeHintTimestamp {
-		return querysql.PostgresDynamicTimestamp(sb.String())
+		return dynamicTimestamp(sb.String())
 	}
-	return querysql.PostgresDynamicJSONB(sb.String())
+	return dynamicJSONB(sb.String())
 }
 
 // safeJSONCast is retained for documentation of the historic

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
-	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/querysql"
 )
 
 func TestConditionsToJSON_DualLastTransitionTimeRepresentations(t *testing.T) {
@@ -23,7 +22,7 @@ func TestConditionsToJSON_DualLastTransitionTimeRepresentations(t *testing.T) {
 	if !strings.Contains(string(b), `"lastTransitionTime":"2026-06-01T12:00:00.500Z"`) {
 		t.Fatalf("conditions JSON = %s, want ProtoJSON .500Z", b)
 	}
-	wantNorm := querysql.FormatTimestampNorm(tm)
+	wantNorm := formatTimestampNorm(tm)
 	if !strings.Contains(string(b), `"_lastTransitionTimeNorm":"`+wantNorm+`"`) {
 		t.Fatalf("conditions JSON = %s, want fixed-width norm %q", b, wantNorm)
 	}
@@ -49,7 +48,7 @@ func TestConditionsToJSON_DualLastTransitionTimeRepresentations(t *testing.T) {
 	if string(raw) != `"2026-06-01T12:00:00.500Z"` {
 		t.Fatalf("re-marshaled lastTransitionTime = %s, want .500Z", raw)
 	}
-	if c.LastTransitionTimeNorm != querysql.FormatTimestampNorm(c.LastTransitionTime.Time()) {
+	if c.LastTransitionTimeNorm != formatTimestampNorm(c.LastTransitionTime.Time()) {
 		t.Fatalf("norm = %q, want derived from ProtoJSON instant", c.LastTransitionTimeNorm)
 	}
 }

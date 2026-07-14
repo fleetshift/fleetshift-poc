@@ -32,7 +32,7 @@ import "fmt"
 //
 // predicateSQL and keysetSQL are trusted, pre-built SQL fragments
 // (parameterized with $N placeholders only; QueryRepo wires
-// querysql.DollarParams, and user input never reaches this function
+// dollarParams, and user input never reaches this function
 // as raw text). order is a supported order from resolveQueryOrder.
 // limitPlaceholder is the $N placeholder index bound to the page's
 // row limit.

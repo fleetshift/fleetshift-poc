@@ -344,7 +344,7 @@ func explainQueryResources(t *testing.T, db *sql.DB, label, filter, orderBy stri
 	if err != nil {
 		t.Fatalf("%s: resolve order %q: %v", label, orderBy, err)
 	}
-	compiler := querysql.Compiler{Fields: queryFieldResolver{}, Params: querysql.QuestionParams{}}
+	compiler := querysql.Compiler{Fields: queryFieldResolver{}, Params: questionParams{}}
 	predicate, err := compiler.CompileFilter(context.Background(), querysql.CompileFilterInput{Filter: filter})
 	if err != nil {
 		t.Fatalf("%s: compile filter %q: %v", label, filter, err)
