@@ -143,6 +143,54 @@ func runSemanticFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
+	t.Run("DoubleQuoteMapKeysMatch", func(t *testing.T) {
+		// Map keys may contain `"` (and other special characters).
+		// Filters must address those keys as exact literals and match
+		// the stored entry — including on SQLite, where labels /
+		// conditions / open JSON paths use quoted json_extract members.
+		tx, fx := newFixtureTx(t, factory)
+		defer tx.Rollback()
+		ctx := context.Background()
+
+		const key = `has"quote`
+		quotedUID := domain.NewExtensionResourceUID()
+		quotedName := domain.ResourceName("nodes/quoted-key")
+		if err := tx.ExtensionResources().Create(ctx, domain.NewExtensionResource(
+			quotedUID, fx.InventoryType, quotedName, fixedTime,
+			domain.WithExtensionLabels(map[string]string{key: "lab"}),
+		)); err != nil {
+			t.Fatalf("seed quoted-key extension labels: %v", err)
+		}
+
+		cond, err := domain.NewCondition(key, domain.ConditionTrue, "OK", "ready", fixedTime)
+		if err != nil {
+			t.Fatalf("build quoted-key condition: %v", err)
+		}
+		obs := json.RawMessage(`{"has\"quote":"obs"}`)
+		if err := tx.ExtensionResources().ReplaceInventory(ctx, []domain.InventoryReplacement{{
+			ResourceType: fx.InventoryType,
+			Name:         quotedName,
+			CandidateUID: quotedUID,
+			Labels:       map[string]string{key: "loc"},
+			Conditions:   []domain.Condition{cond},
+			Observation:  &obs,
+			ObservedAt:   fixedTime,
+			ReceivedAt:   fixedTime,
+		}}); err != nil {
+			t.Fatalf("seed quoted-key inventory: %v", err)
+		}
+
+		wantName := extensionEnvelopeName(fx.InventoryType, quotedName)
+		for _, filter := range []string{
+			`resource.labels["has\"quote"] == "lab"`,
+			`resource.localLabels["has\"quote"] == "loc"`,
+			`resource.conditions["has\"quote"].status == "True"`,
+			fmt.Sprintf(`resourceType == %q && resource.observation["has\"quote"] == "obs"`, string(fx.InventoryType)),
+		} {
+			assertResultNames(t, queryAll(t, tx, filter), wantName)
+		}
+	})
+
 	t.Run("DirectTimestampStringsMatchResponseSpelling", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
