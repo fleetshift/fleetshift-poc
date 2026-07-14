@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -17,23 +18,27 @@ var reconcileTimeout = defaultReconcileTimeout
 
 // AgentDeps holds dependencies for creating an Agent.
 type AgentDeps struct {
-	Gateway  GatewayConfig
-	Infra    *InfraRunner
-	Observer AgentObserver
-	Reporter domain.DeliveryReporter
+	Gateway         GatewayConfig
+	Infra           *InfraRunner
+	Observer        AgentObserver
+	Reporter        domain.DeliveryReporter
+	// IndexingRuntime is optional. When set, deliverAsync calls EnsureIndexer
+	// before Delivered and Remove/deleteAsync call StopIndexer at teardown.
+	IndexingRuntime kubernetes.IndexingRuntime
 }
 
 // Agent implements the domain.DeliveryAgent interface for the GCP HCP addon.
 // It coordinates cluster provisioning and deletion through the Reconciler.
 type Agent struct {
-	reconciler    *Reconciler
-	observer      AgentObserver
-	reporter      domain.DeliveryReporter
-	trustMu       sync.RWMutex
-	trustMap      map[domain.IssuerURL]domain.TrustBundleEntry
-	clusterMu     sync.Mutex
-	clusterGen    map[string]domain.Generation
-	deliveryLocks sync.Map
+	reconciler      *Reconciler
+	observer        AgentObserver
+	reporter        domain.DeliveryReporter
+	indexingRuntime kubernetes.IndexingRuntime
+	trustMu         sync.RWMutex
+	trustMap        map[domain.IssuerURL]domain.TrustBundleEntry
+	clusterMu       sync.Mutex
+	clusterGen      map[string]domain.Generation
+	deliveryLocks   sync.Map
 }
 
 // NewAgent creates a new Agent with the given dependencies.
@@ -53,11 +58,12 @@ func NewAgent(deps AgentDeps) *Agent {
 	reconciler := NewReconciler(deps.Gateway, infra)
 
 	return &Agent{
-		reconciler: reconciler,
-		observer:   observer,
-		reporter:   deps.Reporter,
-		trustMap:   make(map[domain.IssuerURL]domain.TrustBundleEntry),
-		clusterGen: make(map[string]domain.Generation),
+		reconciler:      reconciler,
+		observer:        observer,
+		reporter:        deps.Reporter,
+		indexingRuntime: deps.IndexingRuntime,
+		trustMap:        make(map[domain.IssuerURL]domain.TrustBundleEntry),
+		clusterGen:      make(map[string]domain.Generation),
 	}
 }
 
@@ -92,6 +98,7 @@ func (a *Agent) acceptGeneration(clusterName string, gen domain.Generation) bool
 	return true
 }
 
+// clusterLock returns the per-cluster mutex used to serialize deliver/remove.
 func (a *Agent) clusterLock(name string) *sync.Mutex {
 	val, _ := a.deliveryLocks.LoadOrStore(name, &sync.Mutex{})
 	return val.(*sync.Mutex)
@@ -277,6 +284,7 @@ func (a *Agent) Deliver(
 	return nil
 }
 
+// failDelivery reports a terminal failure via progress.Complete.
 func (a *Agent) failDelivery(ctx context.Context, progress *deliveryProgress, state domain.DeliveryState, msg string) {
 	a.observer.Error(msg)
 	reportCtx := context.WithoutCancel(ctx)
@@ -285,12 +293,15 @@ func (a *Agent) failDelivery(ctx context.Context, progress *deliveryProgress, st
 	}
 }
 
+// newReconcileContext returns a child context bounded by reconcileTimeout.
 func newReconcileContext(parent context.Context) (context.Context, context.CancelFunc) {
 	return context.WithTimeout(parent, reconcileTimeout)
 }
 
-// deliverAsync performs the asynchronous cluster provisioning.
-// It calls the reconciler and reports completion through the reporter.
+// deliverAsync performs asynchronous cluster provisioning: Ensure the
+// cluster, then EnsureIndexer before reporting Delivered. EnsureIndexer
+// failure fails the delivery. Completion uses [deliveryProgress.Complete]
+// (brief ReportResult retry).
 func (a *Agent) deliverAsync(
 	ctx context.Context,
 	spec ClusterSpec,
@@ -311,6 +322,17 @@ func (a *Agent) deliverAsync(
 	}
 	output.TrustBundles = a.TrustBundles()
 
+	if err := a.ensureIndexerReady(ctx, output, progress.Generation()); err != nil {
+		a.observer.Error("ensure indexer failed", "error", err, "cluster", spec.Name)
+		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
+			State:   domain.DeliveryStateFailed,
+			Message: fmt.Sprintf("ensure indexer for %s: %v", spec.Name, err),
+		}); reportErr != nil {
+			a.observer.Error("failed to report indexer failure", "error", reportErr, "cluster", spec.Name)
+		}
+		return
+	}
+
 	// Build delivery result from cluster output
 	result := domain.DeliveryResult{
 		State:              domain.DeliveryStateDelivered,
@@ -325,7 +347,8 @@ func (a *Agent) deliverAsync(
 }
 
 // deleteAsync performs asynchronous cluster deletion for crash recovery.
-// It mirrors deliverAsync but calls reconciler.Delete instead of Reconcile.
+// It mirrors deliverAsync but calls reconciler.Delete instead of Ensure,
+// and StopIndexer runs at the start of teardown.
 func (a *Agent) deleteAsync(
 	ctx context.Context,
 	spec ClusterSpec,
@@ -337,6 +360,7 @@ func (a *Agent) deleteAsync(
 	defer cancel()
 
 	a.observer.Info("deleting cluster", "cluster", spec.Name)
+	a.stopIndexer(ctx, GuestTargetID(spec.Name))
 	if err := a.reconciler.Delete(runCtx, spec, target, callerToken, progress); err != nil {
 		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
 		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
@@ -356,10 +380,11 @@ func (a *Agent) deleteAsync(
 }
 
 // Remove implements domain.DeliveryAgent.Remove.
-// It deletes clusters specified in the manifests. All outcomes
-// (success, auth failure, reconciler error) are reported via the
-// DeliveryReporter; the return value is reserved for infrastructure
-// failures (e.g. unparseable manifests).
+// It deletes clusters specified in the manifests. StopIndexer runs at
+// the start of each cluster teardown. All outcomes (success, auth
+// failure, reconciler error) are reported via the DeliveryReporter; the
+// return value is reserved for infrastructure failures (e.g. unparseable
+// manifests).
 func (a *Agent) Remove(
 	ctx context.Context,
 	target domain.TargetInfo,
@@ -411,6 +436,7 @@ func (a *Agent) Remove(
 
 		// Delete the cluster
 		a.observer.Info("deleting cluster", "cluster", spec.Name)
+		a.stopIndexer(ctx, GuestTargetID(spec.Name))
 		if err := a.reconciler.Delete(ctx, spec, targetCfg, string(auth.Token), progress); err != nil {
 			lock.Unlock()
 			a.observer.Error("failed to delete cluster", "error", err, "cluster", spec.Name)
@@ -441,6 +467,7 @@ func (a *Agent) Remove(
 	return nil
 }
 
+// storeTrustBundle unmarshals and stores a trust-bundle manifest entry.
 func (a *Agent) storeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, error) {
 	entry, err := parseTrustBundleManifest(m)
 	if err != nil {
@@ -453,6 +480,7 @@ func (a *Agent) storeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, er
 	return entry, nil
 }
 
+// removeTrustBundle unmarshals a trust-bundle manifest and drops its issuer.
 func (a *Agent) removeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, error) {
 	entry, err := parseTrustBundleManifest(m)
 	if err != nil {
@@ -465,10 +493,44 @@ func (a *Agent) removeTrustBundle(m domain.Manifest) (domain.TrustBundleEntry, e
 	return entry, nil
 }
 
+// parseTrustBundleManifest unmarshals a trust-bundle manifest payload.
 func parseTrustBundleManifest(m domain.Manifest) (domain.TrustBundleEntry, error) {
 	var entry domain.TrustBundleEntry
 	if err := json.Unmarshal(m.Raw, &entry); err != nil {
 		return domain.TrustBundleEntry{}, err
 	}
 	return entry, nil
+}
+
+// ensureIndexerReady calls EnsureIndexer when an IndexingRuntime is
+// configured. Missing credential or API server is a permanent error.
+// Nil runtime is a no-op.
+func (a *Agent) ensureIndexerReady(ctx context.Context, out *ClusterOutput, generation domain.Generation) error {
+	if a.indexingRuntime == nil || out == nil {
+		return nil
+	}
+	if len(out.SAToken) == 0 || out.APIServer == "" {
+		return fmt.Errorf("%w: missing indexing credential or api server for %s", domain.ErrInvalidArgument, out.TargetID)
+	}
+	input := kubernetes.IndexRuntimeInput{
+		TargetID:    out.TargetID,
+		APIServer:   out.APIServer,
+		CACert:      string(out.CACert),
+		Credential:  out.SAToken,
+		SecretRef:   out.SATokenRef,
+		Generation:  generation,
+		IndexConfig: kubernetes.DefaultIndexConfig(),
+	}
+	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.LocalEnsureRetryDeadline, func(attemptCtx context.Context) error {
+		return a.indexingRuntime.EnsureIndexer(attemptCtx, input)
+	})
+}
+
+// stopIndexer stops the indexer for targetID when an IndexingRuntime is
+// configured. Errors are discarded so teardown is not blocked by a stuck stop.
+func (a *Agent) stopIndexer(ctx context.Context, targetID domain.TargetID) {
+	if a.indexingRuntime == nil {
+		return
+	}
+	_ = a.indexingRuntime.StopIndexer(ctx, targetID)
 }

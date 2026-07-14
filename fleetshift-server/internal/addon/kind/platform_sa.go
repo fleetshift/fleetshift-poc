@@ -20,14 +20,15 @@ import (
 const (
 	platformSAName      = "fleetshift-platform"
 	platformSANamespace = "kube-system"
-	// 24 hours — short-lived for the prototype; a fleetlet would rotate.
-	platformTokenExpirySeconds = 24 * 3600
+	// TokenRequest lifetime (30 days). Credentials are not rotated automatically.
+	platformTokenExpirySeconds = 30 * 24 * 3600
 )
 
-// bootstrapPlatformSA creates or reuses a ServiceAccount with cluster-admin
-// RBAC on the cluster and returns a fresh bearer token for it. This
-// simulates the credential provisioning that a real fleetlet agent
-// would perform by mounting its own ServiceAccount token securely.
+// bootstrapPlatformSA ensures a ServiceAccount with cluster-admin RBAC
+// on the cluster and returns a fresh bearer token for it. SA and CRB
+// creation is upsert-safe (get-or-create); TokenRequest is always minted
+// fresh. This simulates the credential provisioning that a real fleetlet
+// agent would perform by mounting its own ServiceAccount token securely.
 //
 // Existing SA/RBAC resources are reused (AlreadyExists is not a failure);
 // drifted bindings are reconciled. A new TokenRequest is always issued
@@ -52,7 +53,7 @@ func bootstrapPlatformSAWithClient(ctx context.Context, client kubernetes.Interf
 	if err := ensurePlatformSA(ctx, client); err != nil {
 		return "", nil, err
 	}
-	if err := ensurePlatformSARBAC(ctx, client); err != nil {
+	if err := ensurePlatformRBAC(ctx, client); err != nil {
 		return "", nil, err
 	}
 	return requestPlatformSAToken(ctx, client, targetID)
@@ -68,7 +69,10 @@ func ensurePlatformSA(ctx context.Context, client kubernetes.Interface) error {
 	return nil
 }
 
-func ensurePlatformSARBAC(ctx context.Context, client kubernetes.Interface) error {
+// ensurePlatformRBAC ensures a ClusterRoleBinding granting cluster-admin
+// to the platform ServiceAccount. On AlreadyExists it reconciles RoleRef
+// and Subjects to the desired binding.
+func ensurePlatformRBAC(ctx context.Context, client kubernetes.Interface) error {
 	desired := &rbacv1.ClusterRoleBinding{
 		ObjectMeta: metav1.ObjectMeta{Name: platformSAName + "-cluster-admin"},
 		RoleRef: rbacv1.RoleRef{

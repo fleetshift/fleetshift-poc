@@ -16,29 +16,44 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// testProcessManager builds a host with fake clients suitable for EnsureIndexer
-// unit tests. Additional opts override the defaults.
-func testProcessManager(t *testing.T, opts ...KubernetesInProcessIndexHostOption) *KubernetesInProcessIndexHost {
+type fakeIndexerClients struct {
+	dynamic   func(*rest.Config) (dynamic.Interface, error)
+	discovery func(*rest.Config) (discovery.DiscoveryInterface, error)
+}
+
+func (f fakeIndexerClients) Dynamic(cfg *rest.Config) (dynamic.Interface, error) {
+	if f.dynamic != nil {
+		return f.dynamic(cfg)
+	}
+	return newFakeDynamicClient(podsGVR(), crdGVR), nil
+}
+
+func (f fakeIndexerClients) Discovery(cfg *rest.Config) (discovery.DiscoveryInterface, error) {
+	if f.discovery != nil {
+		return f.discovery(cfg)
+	}
+	return newFakeDiscovery([]*metav1.APIResourceList{{
+		GroupVersion: "v1",
+		APIResources: []metav1.APIResource{
+			{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+		},
+	}}), nil
+}
+
+// testIndexingRuntime builds a host with fake clients suitable for EnsureIndexer
+// unit tests.
+func testIndexingRuntime(t *testing.T, clients ...IndexerClients) *KubernetesInProcessIndexHost {
 	t.Helper()
-	base := []KubernetesInProcessIndexHostOption{
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
+	var c IndexerClients = fakeIndexerClients{}
+	if len(clients) > 0 && clients[0] != nil {
+		c = clients[0]
 	}
 	return NewKubernetesInProcessIndexHost(
 		context.Background(),
 		nil,
 		&recordingReporter{},
+		c,
 		slog.New(slog.DiscardHandler),
-		append(base, opts...)...,
 	)
 }
 
@@ -55,10 +70,10 @@ func testIndexInput(id string, gen domain.Generation, cred string) IndexRuntimeI
 	}
 }
 
-// TestIndexProcessManager_EnsureIndexerReadinessAndIdempotent verifies ready
+// TestIndexingRuntime_EnsureIndexerReadinessAndIdempotent verifies ready
 // EnsureIndexer succeeds and repeats are no-ops until StopIndexer.
-func TestIndexProcessManager_EnsureIndexerReadinessAndIdempotent(t *testing.T) {
-	h := testProcessManager(t)
+func TestIndexingRuntime_EnsureIndexerReadinessAndIdempotent(t *testing.T) {
+	h := testIndexingRuntime(t)
 	input := testIndexInput("pm-1", 1, "tok-a")
 
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
@@ -79,10 +94,10 @@ func TestIndexProcessManager_EnsureIndexerReadinessAndIdempotent(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_GenerationFence rejects a lower producer generation
+// TestIndexingRuntime_GenerationFence rejects a lower producer generation
 // without replacing the newer process.
-func TestIndexProcessManager_GenerationFence(t *testing.T) {
-	h := testProcessManager(t)
+func TestIndexingRuntime_GenerationFence(t *testing.T) {
+	h := testIndexingRuntime(t)
 	if err := h.EnsureIndexer(context.Background(), testIndexInput("pm-gen", 2, "tok")); err != nil {
 		t.Fatalf("EnsureIndexer gen=2: %v", err)
 	}
@@ -95,12 +110,12 @@ func TestIndexProcessManager_GenerationFence(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_FingerprintReplace stop-and-replaces when the same
+// TestIndexingRuntime_FingerprintReplace stop-and-replaces when the same
 // generation presents a different runtime fingerprint.
-func TestIndexProcessManager_FingerprintReplace(t *testing.T) {
+func TestIndexingRuntime_FingerprintReplace(t *testing.T) {
 	var discClients atomic.Int32
-	h := testProcessManager(t,
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
+	h := testIndexingRuntime(t, fakeIndexerClients{
+		discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
 			discClients.Add(1)
 			return newFakeDiscovery([]*metav1.APIResourceList{{
 				GroupVersion: "v1",
@@ -108,8 +123,8 @@ func TestIndexProcessManager_FingerprintReplace(t *testing.T) {
 					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
 				},
 			}}), nil
-		}),
-	)
+		},
+	})
 
 	if err := h.EnsureIndexer(context.Background(), testIndexInput("pm-fp", 1, "tok-a")); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -125,10 +140,10 @@ func TestIndexProcessManager_FingerprintReplace(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_AllowListEmptyFailFast treats an explicit allow-list
+// TestIndexingRuntime_AllowListEmptyFailFast treats an explicit allow-list
 // that matches nothing as a permanent validation error.
-func TestIndexProcessManager_AllowListEmptyFailFast(t *testing.T) {
-	h := testProcessManager(t)
+func TestIndexingRuntime_AllowListEmptyFailFast(t *testing.T) {
+	h := testIndexingRuntime(t)
 	input := testIndexInput("pm-allow", 1, "tok")
 	input.IndexConfig.AllowList = []Resource{{
 		ApiGroups: []string{"example.com"},
@@ -143,10 +158,10 @@ func TestIndexProcessManager_AllowListEmptyFailFast(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_EmptyCredentialFailFast rejects EnsureIndexer input
+// TestIndexingRuntime_EmptyCredentialFailFast rejects EnsureIndexer input
 // with an empty indexing credential.
-func TestIndexProcessManager_EmptyCredentialFailFast(t *testing.T) {
-	h := testProcessManager(t)
+func TestIndexingRuntime_EmptyCredentialFailFast(t *testing.T) {
+	h := testIndexingRuntime(t)
 	err := h.EnsureIndexer(context.Background(), IndexRuntimeInput{
 		TargetID:   "pm-cred",
 		APIServer:  "https://example",
@@ -158,9 +173,9 @@ func TestIndexProcessManager_EmptyCredentialFailFast(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_StopAllSuppressesRestart ensures StopAll does not
+// TestIndexingRuntime_StopAllSuppressesRestart ensures StopAll does not
 // leave a restarted indexer after a stuck runner is canceled.
-func TestIndexProcessManager_StopAllSuppressesRestart(t *testing.T) {
+func TestIndexingRuntime_StopAllSuppressesRestart(t *testing.T) {
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{
 		"targets/pm-stopall/token": []byte("vault-token"),
 	}}
@@ -171,22 +186,24 @@ func TestIndexProcessManager_StopAllSuppressesRestart(t *testing.T) {
 		context.Background(),
 		vault,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR()), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return &readyThenBlockDiscovery{
+					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
+						GroupVersion: "v1",
+						APIResources: []metav1.APIResource{
+							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						},
+					}}),
+					unblock: unblock,
+					onBlock: func() { blocked.Store(true) },
+				}, nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR()), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return &readyThenBlockDiscovery{
-				fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
-					GroupVersion: "v1",
-					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-					},
-				}}),
-				unblock: unblock,
-				onBlock: func() { blocked.Store(true) },
-			}, nil
-		}),
 	)
 
 	input := IndexRuntimeInput{
@@ -224,9 +241,9 @@ func TestIndexProcessManager_StopAllSuppressesRestart(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_IntentionalStopNoRestart verifies StopIndexer does
+// TestIndexingRuntime_IntentionalStopNoRestart verifies StopIndexer does
 // not schedule a local restart even when a SecretRef is present.
-func TestIndexProcessManager_IntentionalStopNoRestart(t *testing.T) {
+func TestIndexingRuntime_IntentionalStopNoRestart(t *testing.T) {
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{
 		"targets/pm-stop/token": []byte("vault-token"),
 	}}
@@ -234,18 +251,20 @@ func TestIndexProcessManager_IntentionalStopNoRestart(t *testing.T) {
 		context.Background(),
 		vault,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return newFakeDiscovery([]*metav1.APIResourceList{{
+					GroupVersion: "v1",
+					APIResources: []metav1.APIResource{
+						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					},
+				}}), nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
 	)
 
 	input := IndexRuntimeInput{
@@ -270,26 +289,28 @@ func TestIndexProcessManager_IntentionalStopNoRestart(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_UnexpectedExitWithoutSecretRefDoesNotRestart verifies
+// TestIndexingRuntime_UnexpectedExitWithoutSecretRefDoesNotRestart verifies
 // an unexpected exit without SecretRef does not restart the indexer.
-func TestIndexProcessManager_UnexpectedExitWithoutSecretRefDoesNotRestart(t *testing.T) {
+func TestIndexingRuntime_UnexpectedExitWithoutSecretRefDoesNotRestart(t *testing.T) {
 	hostCtx, cancel := context.WithCancel(context.Background())
 	h := NewKubernetesInProcessIndexHost(
 		hostCtx,
 		&indexHostTestVault{secrets: map[domain.SecretRef][]byte{}},
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return newFakeDiscovery([]*metav1.APIResourceList{{
+					GroupVersion: "v1",
+					APIResources: []metav1.APIResource{
+						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					},
+				}}), nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
 	)
 
 	if err := h.EnsureIndexer(context.Background(), testIndexInput("pm-nosecret", 1, "handoff-token")); err != nil {
@@ -347,9 +368,9 @@ func awaitHasIndexer(t *testing.T, h *KubernetesInProcessIndexHost, id domain.Ta
 	}
 }
 
-// TestIndexProcessManager_UnexpectedExitRestartsFromVault covers the successful
+// TestIndexingRuntime_UnexpectedExitRestartsFromVault covers the successful
 // unexpected-exit path: resolveSecret + EnsureIndexer restart.
-func TestIndexProcessManager_UnexpectedExitRestartsFromVault(t *testing.T) {
+func TestIndexingRuntime_UnexpectedExitRestartsFromVault(t *testing.T) {
 	withShortRestartBackoff(t)
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{
 		"targets/pm-restart/token": []byte("vault-token"),
@@ -359,19 +380,21 @@ func TestIndexProcessManager_UnexpectedExitRestartsFromVault(t *testing.T) {
 		context.Background(),
 		vault,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				ensureDiscCalls.Add(1)
+				return newFakeDiscovery([]*metav1.APIResourceList{{
+					GroupVersion: "v1",
+					APIResources: []metav1.APIResource{
+						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					},
+				}}), nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			ensureDiscCalls.Add(1)
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
 	)
 
 	input := IndexRuntimeInput{
@@ -417,27 +440,29 @@ func TestIndexProcessManager_UnexpectedExitRestartsFromVault(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_UnexpectedExitSkipsRestartWhenVaultMissing covers
+// TestIndexingRuntime_UnexpectedExitSkipsRestartWhenVaultMissing covers
 // resolveSecret failure during unexpected-exit restart.
-func TestIndexProcessManager_UnexpectedExitSkipsRestartWhenVaultMissing(t *testing.T) {
+func TestIndexingRuntime_UnexpectedExitSkipsRestartWhenVaultMissing(t *testing.T) {
 	withShortRestartBackoff(t)
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{}}
 	h := NewKubernetesInProcessIndexHost(
 		context.Background(),
 		vault,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return newFakeDiscovery([]*metav1.APIResourceList{{
+					GroupVersion: "v1",
+					APIResources: []metav1.APIResource{
+						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					},
+				}}), nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
 	)
 
 	input := IndexRuntimeInput{
@@ -461,9 +486,9 @@ func TestIndexProcessManager_UnexpectedExitSkipsRestartWhenVaultMissing(t *testi
 	}
 }
 
-// TestIndexProcessManager_UnexpectedExitRestartBudgetExhausted verifies local
+// TestIndexingRuntime_UnexpectedExitRestartBudgetExhausted verifies local
 // restart gives up after maxUnexpectedRestartAttempts successful restarts.
-func TestIndexProcessManager_UnexpectedExitRestartBudgetExhausted(t *testing.T) {
+func TestIndexingRuntime_UnexpectedExitRestartBudgetExhausted(t *testing.T) {
 	withShortRestartBackoff(t)
 	vault := &indexHostTestVault{secrets: map[domain.SecretRef][]byte{
 		"targets/pm-budget/token": []byte("vault-token"),
@@ -472,18 +497,20 @@ func TestIndexProcessManager_UnexpectedExitRestartBudgetExhausted(t *testing.T) 
 		context.Background(),
 		vault,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return newFakeDiscovery([]*metav1.APIResourceList{{
+					GroupVersion: "v1",
+					APIResources: []metav1.APIResource{
+						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+					},
+				}}), nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return newFakeDiscovery([]*metav1.APIResourceList{{
-				GroupVersion: "v1",
-				APIResources: []metav1.APIResource{
-					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-				},
-			}}), nil
-		}),
 	)
 
 	input := IndexRuntimeInput{
@@ -539,13 +566,13 @@ func TestIndexProcessManager_UnexpectedExitRestartBudgetExhausted(t *testing.T) 
 // TestResolveSecret exercises resolveSecret success and failure paths.
 func TestResolveSecret(t *testing.T) {
 	t.Run("empty ref", func(t *testing.T) {
-		h := testProcessManager(t)
+		h := testIndexingRuntime(t)
 		if _, err := h.resolveSecret(context.Background(), ""); err == nil {
 			t.Fatal("expected missing secret ref error")
 		}
 	})
 	t.Run("nil vault", func(t *testing.T) {
-		h := testProcessManager(t)
+		h := testIndexingRuntime(t)
 		if _, err := h.resolveSecret(context.Background(), "targets/x"); err == nil {
 			t.Fatal("expected no vault configured error")
 		}
@@ -555,13 +582,15 @@ func TestResolveSecret(t *testing.T) {
 			context.Background(),
 			&indexHostTestVault{secrets: map[domain.SecretRef][]byte{}},
 			&recordingReporter{},
+			fakeIndexerClients{
+				dynamic: func(*rest.Config) (dynamic.Interface, error) {
+					return newFakeDynamicClient(podsGVR()), nil
+				},
+				discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+					return newFakeDiscovery(nil), nil
+				},
+			},
 			nil,
-			WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-				return newFakeDynamicClient(podsGVR()), nil
-			}),
-			WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-				return newFakeDiscovery(nil), nil
-			}),
 		)
 		if _, err := h.resolveSecret(context.Background(), "missing"); err == nil {
 			t.Fatal("expected vault get error")
@@ -572,13 +601,15 @@ func TestResolveSecret(t *testing.T) {
 			context.Background(),
 			&indexHostTestVault{secrets: map[domain.SecretRef][]byte{"empty": {}}},
 			&recordingReporter{},
+			fakeIndexerClients{
+				dynamic: func(*rest.Config) (dynamic.Interface, error) {
+					return newFakeDynamicClient(podsGVR()), nil
+				},
+				discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+					return newFakeDiscovery(nil), nil
+				},
+			},
 			nil,
-			WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-				return newFakeDynamicClient(podsGVR()), nil
-			}),
-			WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-				return newFakeDiscovery(nil), nil
-			}),
 		)
 		if _, err := h.resolveSecret(context.Background(), "empty"); err == nil {
 			t.Fatal("expected empty vault secret error")
@@ -589,13 +620,15 @@ func TestResolveSecret(t *testing.T) {
 			context.Background(),
 			&indexHostTestVault{secrets: map[domain.SecretRef][]byte{"ok": []byte("tok")}},
 			&recordingReporter{},
+			fakeIndexerClients{
+				dynamic: func(*rest.Config) (dynamic.Interface, error) {
+					return newFakeDynamicClient(podsGVR()), nil
+				},
+				discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+					return newFakeDiscovery(nil), nil
+				},
+			},
 			nil,
-			WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-				return newFakeDynamicClient(podsGVR()), nil
-			}),
-			WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-				return newFakeDiscovery(nil), nil
-			}),
 		)
 		got, err := h.resolveSecret(context.Background(), "ok")
 		if err != nil {
@@ -609,7 +642,7 @@ func TestResolveSecret(t *testing.T) {
 
 // TestValidateIndexRuntimeInput_MissingFields covers permanent validation errors.
 func TestValidateIndexRuntimeInput_MissingFields(t *testing.T) {
-	h := testProcessManager(t)
+	h := testIndexingRuntime(t)
 	if err := h.EnsureIndexer(context.Background(), IndexRuntimeInput{
 		APIServer:  "https://example",
 		Credential: []byte("tok"),
@@ -656,31 +689,33 @@ func TestCheckDiscoveryReadiness_HardErrorAndEmptyFilter(t *testing.T) {
 	})
 }
 
-// TestIndexProcessManager_StopDuringReadiness verifies StopIndexer can cancel
+// TestIndexingRuntime_StopDuringReadiness verifies StopIndexer can cancel
 // an EnsureIndexer attempt that is blocked in discovery readiness.
-func TestIndexProcessManager_StopDuringReadiness(t *testing.T) {
+func TestIndexingRuntime_StopDuringReadiness(t *testing.T) {
 	unblock := make(chan struct{})
 	var blocked atomic.Bool
 	h := NewKubernetesInProcessIndexHost(
 		context.Background(),
 		nil,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR()), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return &blockingDiscovery{
+					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
+						GroupVersion: "v1",
+						APIResources: []metav1.APIResource{
+							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						},
+					}}),
+					unblock: unblock,
+					onBlock: func() { blocked.Store(true) },
+				}, nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR()), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return &blockingDiscovery{
-				fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
-					GroupVersion: "v1",
-					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-					},
-				}}),
-				unblock: unblock,
-				onBlock: func() { blocked.Store(true) },
-			}, nil
-		}),
 	)
 
 	ensureErr := make(chan error, 1)
@@ -709,31 +744,33 @@ func TestIndexProcessManager_StopDuringReadiness(t *testing.T) {
 	}
 }
 
-// TestIndexProcessManager_JoinInFlightEnsureIndexer verifies concurrent callers
+// TestIndexingRuntime_JoinInFlightEnsureIndexer verifies concurrent callers
 // with the same generation and fingerprint wait on one start attempt.
-func TestIndexProcessManager_JoinInFlightEnsureIndexer(t *testing.T) {
+func TestIndexingRuntime_JoinInFlightEnsureIndexer(t *testing.T) {
 	unblock := make(chan struct{})
 	var blocked atomic.Bool
 	h := NewKubernetesInProcessIndexHost(
 		context.Background(),
 		nil,
 		&recordingReporter{},
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return newFakeDynamicClient(podsGVR(), crdGVR), nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return &blockingDiscovery{
+					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
+						GroupVersion: "v1",
+						APIResources: []metav1.APIResource{
+							{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+						},
+					}}),
+					unblock: unblock,
+					onBlock: func() { blocked.Store(true) },
+				}, nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return newFakeDynamicClient(podsGVR(), crdGVR), nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return &blockingDiscovery{
-				fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
-					GroupVersion: "v1",
-					APIResources: []metav1.APIResource{
-						{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
-					},
-				}}),
-				unblock: unblock,
-				onBlock: func() { blocked.Store(true) },
-			}, nil
-		}),
 	)
 
 	input := testIndexInput("pm-join", 1, "tok")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -16,6 +17,7 @@ type deliveryProgress struct {
 	generation domain.Generation
 }
 
+// newDeliveryProgress constructs a per-delivery progress handle.
 func newDeliveryProgress(reporter domain.DeliveryReporter, id domain.DeliveryID, gen domain.Generation) *deliveryProgress {
 	return &deliveryProgress{reporter: reporter, deliveryID: id, generation: gen}
 }
@@ -50,10 +52,21 @@ func (p *deliveryProgress) Warn(ctx context.Context, message string) {
 
 // Complete reports a terminal delivery result and signals fulfillment
 // completion. Unlike Event, the error is returned so callers can log
-// or react when the platform fails to record the outcome.
+// or react when the platform fails to record the outcome. Transient
+// report failures are retried briefly.
 func (p *deliveryProgress) Complete(ctx context.Context, result domain.DeliveryResult) error {
 	if p == nil || p.reporter == nil {
 		return nil
 	}
-	return p.reporter.ReportResult(ctx, p.deliveryID, p.generation, result)
+	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.ReportResultRetryDeadline, func(attemptCtx context.Context) error {
+		return p.reporter.ReportResult(attemptCtx, p.deliveryID, p.generation, result)
+	})
+}
+
+// Generation returns the delivery generation for this progress handle.
+func (p *deliveryProgress) Generation() domain.Generation {
+	if p == nil {
+		return 0
+	}
+	return p.generation
 }

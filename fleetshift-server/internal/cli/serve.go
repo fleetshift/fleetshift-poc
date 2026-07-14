@@ -205,6 +205,27 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	inventoryReportService := application.NewInventoryReportService(store)
 	inventoryReporter := application.NewInventoryReporterAdapter(inventoryReportService)
 
+	// --- kubernetes indexing runtime ---
+	//
+	// Built before Kind/GCP agents so they can call EnsureIndexer /
+	// StopIndexer. Orchestration still receives NoOpTargetOutputHooks;
+	// indexing is not started from target lifecycle hooks.
+	var kubeIndexing *kubernetesInProcessIndexing
+	var kubeIndexCtx context.Context
+	var kubeIndexCancel context.CancelFunc
+	if enabledAddons["kubernetes"] {
+		kubeIndexCtx, kubeIndexCancel = context.WithCancel(ctx)
+		defer kubeIndexCancel()
+		kubeIndexing = newKubernetesInProcessIndexing(kubeIndexCtx, store, vault, logger)
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			if err := kubeIndexing.Runtime.StopAll(stopCtx); err != nil {
+				logger.Error("kubernetes index StopAll error", "error", err)
+			}
+		}()
+	}
+
 	// --- construct addon agents ---
 	//
 	// Agent construction stays here because agents have external
@@ -220,6 +241,9 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 		if oidcCABundle != nil {
 			kindOpts = append(kindOpts, kindaddon.WithOIDCCABundle(oidcCABundle))
+		}
+		if kubeIndexing != nil {
+			kindOpts = append(kindOpts, kindaddon.WithIndexingRuntime(kubeIndexing.Runtime))
 		}
 		kindAgent = kindaddon.NewAgent(
 			deliveryReporter,
@@ -248,11 +272,15 @@ func runServe(ctx context.Context, f *serveFlags) error {
 			if err != nil {
 				return fmt.Errorf("parse gcphcp config: %w", err)
 			}
-			gcphcpConcreteAgent = gcphcpaddon.NewAgent(gcphcpaddon.AgentDeps{
+			deps := gcphcpaddon.AgentDeps{
 				Gateway:  gcphcpCfg.Gateway,
 				Observer: gcphcpaddon.NewSlogAgentObserver(logger),
 				Reporter: deliveryReporter,
-			})
+			}
+			if kubeIndexing != nil {
+				deps.IndexingRuntime = kubeIndexing.Runtime
+			}
+			gcphcpConcreteAgent = gcphcpaddon.NewAgent(deps)
 			gcphcpAgent = gcphcpConcreteAgent
 		} else {
 			logger.Warn("gcphcp addon enabled but no config provided, skipping")
@@ -260,32 +288,11 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	// --- kubernetes in-process index controller ---
-	//
-	// Constructed before orchestration registration so target lifecycle
-	// hooks can wake/stop the controller. The child context scopes cancellation
-	// for both the controller and its hosted indexers. Startup recovery is the
-	// controller's own initial reconcile.
-	var targetOutputHooks domain.TargetOutputHooks = domain.NoOpTargetOutputHooks{}
-	var kubeIndexController *kubernetesaddon.InProcessIndexController
-	var kubeIndexControllerCtx context.Context
-	var kubeIndexControllerCancel context.CancelFunc
-	if enabledAddons["kubernetes"] {
-		kubeIndexControllerCtx, kubeIndexControllerCancel = context.WithCancel(ctx)
-		defer kubeIndexControllerCancel()
-		targetOutputHooks, kubeIndexController = newKubernetesInProcessIndexing(
-			kubeIndexControllerCtx,
-			store,
-			vault,
-			logger,
-		)
-	}
-
 	orchSpec := domain.NewOrchestrationWorkflowSpec(
 		store, router, domain.StrategyFactory{Store: store}, reg,
 		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
 		domain.WithVault(vault),
-		domain.WithTargetOutputHooks(targetOutputHooks),
+		domain.WithTargetOutputHooks(domain.NoOpTargetOutputHooks{}),
 	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {
@@ -726,15 +733,21 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		}
 	}
 
-	// All addons are now connected and recovery has been attempted. Track the
-	// controller so every later return cancels and joins it before db.Close.
-	if kubeIndexController != nil {
-		controllerDone := startKubernetesIndexController(
-			kubeIndexControllerCtx,
-			kubeIndexController.Run,
-		)
-		defer stopKubernetesIndexController(kubeIndexControllerCancel, controllerDone)
-		logger.Info("kubernetes in-process index controller started")
+	// All addons are now connected and recovery has been attempted. One-shot
+	// startup replay recovers persisted Kubernetes targets; it must not block
+	// listen. Join the replay goroutine before StopAll on shutdown.
+	if kubeIndexing != nil {
+		replayDone := startKubernetesIndexStartupReplay(kubeIndexCtx, func(replayCtx context.Context) {
+			kubernetesaddon.ReplayPersistedIndexers(
+				replayCtx,
+				storeTargetLister{store: store},
+				vault,
+				kubeIndexing.Runtime,
+				logger,
+			)
+		})
+		defer func() { <-replayDone }()
+		logger.Info("kubernetes index startup replay started")
 	}
 
 	// --- shutdown ---

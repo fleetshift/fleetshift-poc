@@ -35,7 +35,7 @@ func TestKindAddon_EndToEnd(t *testing.T) {
 	reporter := buildReporter(store, reg)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()), stubPlatformSA())
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 
@@ -165,7 +165,7 @@ func TestKindAddon_ManagedResource_EndToEnd(t *testing.T) {
 	reporter := buildReporter(store, reg)
 
 	provider := newFakeProvider()
-	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()))
+	kindAgent := kindaddon.NewAgent(reporter, fakeFactory(provider), kindaddon.WithGenerationStore(kindaddon.NewMemoryGenerationStore()), stubPlatformSA())
 	router := delivery.NewRoutingDeliveryService()
 	router.Register(kindaddon.TargetType, kindAgent)
 

@@ -12,15 +12,23 @@ import (
 	"time"
 
 	"k8s.io/client-go/discovery"
-	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// IndexProcessManager starts, replaces, and stops per-target in-process
-// Kubernetes indexers without deleting inventory.
-type IndexProcessManager interface {
+// defaultIndexConfigDigest is included in the runtime fingerprint so
+// changing DefaultIndexConfig construction invalidates running indexers.
+const defaultIndexConfigDigest = "default-kubernetes-schema"
+
+// defaultStopTimeout bounds indexer shutdown waits used by the indexing
+// runtime and per-target indexer final flush.
+const defaultStopTimeout = 5 * time.Second
+
+// IndexingRuntime ensures indexing is active for Kubernetes targets
+// (EnsureIndexer / StopIndexer / StopAll) without deleting inventory.
+// [KubernetesInProcessIndexHost] is the in-process implementation.
+type IndexingRuntime interface {
 	// EnsureIndexer starts or replaces an indexer and returns after the start
 	// attempt finishes: already-ready success, joined in-flight result,
 	// discovery readiness success, or failure. Caller ctx bounds only the
@@ -72,15 +80,13 @@ const maxUnexpectedRestartAttempts = 3
 var unexpectedRestartBackoff = []time.Duration{time.Second, 2 * time.Second, 5 * time.Second}
 
 // KubernetesInProcessIndexHost hosts in-process per-target Kubernetes indexers.
-// It implements [IndexProcessManager].
+// It implements [IndexingRuntime].
 type KubernetesInProcessIndexHost struct {
 	ctx      context.Context
 	vault    domain.Vault
 	reporter InventoryReporter
+	clients  IndexerClients
 	logger   *slog.Logger
-
-	newDynamic   func(*rest.Config) (dynamic.Interface, error)
-	newDiscovery func(*rest.Config) (discovery.DiscoveryInterface, error)
 
 	mu           sync.Mutex
 	entries      map[domain.TargetID]*managedIndexer
@@ -113,64 +119,36 @@ type managedIndexer struct {
 	restartAttempts int
 }
 
-// KubernetesInProcessIndexHostOption configures a [KubernetesInProcessIndexHost].
-type KubernetesInProcessIndexHostOption func(*KubernetesInProcessIndexHost)
-
-// WithInProcessIndexHostDynamicClientFactory overrides dynamic client construction.
-// Intended for tests.
-func WithInProcessIndexHostDynamicClientFactory(fn func(*rest.Config) (dynamic.Interface, error)) KubernetesInProcessIndexHostOption {
-	return func(h *KubernetesInProcessIndexHost) {
-		if fn != nil {
-			h.newDynamic = fn
-		}
-	}
-}
-
-// WithInProcessIndexHostDiscoveryClientFactory overrides discovery client
-// construction. Intended for tests.
-func WithInProcessIndexHostDiscoveryClientFactory(fn func(*rest.Config) (discovery.DiscoveryInterface, error)) KubernetesInProcessIndexHostOption {
-	return func(h *KubernetesInProcessIndexHost) {
-		if fn != nil {
-			h.newDiscovery = fn
-		}
-	}
-}
-
 // NewKubernetesInProcessIndexHost creates a host that implements
-// [IndexProcessManager]. ctx must outlive individual request contexts; it
-// governs every indexer the host starts. logger may be nil.
+// [IndexingRuntime]. ctx must outlive individual request contexts; it
+// governs every indexer the host starts. clients is required (use
+// [DefaultIndexerClients] in production). logger may be nil.
 func NewKubernetesInProcessIndexHost(
 	ctx context.Context,
 	vault domain.Vault,
 	reporter InventoryReporter,
+	clients IndexerClients,
 	logger *slog.Logger,
-	opts ...KubernetesInProcessIndexHostOption,
 ) *KubernetesInProcessIndexHost {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	h := &KubernetesInProcessIndexHost{
-		ctx:      ctx,
-		vault:    vault,
-		reporter: reporter,
-		logger:   logger.With("component", "kubernetes-index-process-manager"),
-		newDynamic: func(cfg *rest.Config) (dynamic.Interface, error) {
-			return dynamic.NewForConfig(cfg)
-		},
-		newDiscovery: func(cfg *rest.Config) (discovery.DiscoveryInterface, error) {
-			return discovery.NewDiscoveryClientForConfig(cfg)
-		},
+	if clients == nil {
+		clients = DefaultIndexerClients{}
+	}
+	return &KubernetesInProcessIndexHost{
+		ctx:       ctx,
+		vault:     vault,
+		reporter:  reporter,
+		clients:   clients,
+		logger:    logger.With("component", "kubernetes-indexing-runtime"),
 		entries:   make(map[domain.TargetID]*managedIndexer),
 		targetOps: make(map[domain.TargetID]*sync.Mutex),
 	}
-	for _, o := range opts {
-		o(h)
-	}
-	return h
 }
 
 // Compile-time check.
-var _ IndexProcessManager = (*KubernetesInProcessIndexHost)(nil)
+var _ IndexingRuntime = (*KubernetesInProcessIndexHost)(nil)
 
 // EnsureIndexer starts or replaces an indexer for input.TargetID.
 //
@@ -194,7 +172,7 @@ func (h *KubernetesInProcessIndexHost) EnsureIndexer(ctx context.Context, input 
 		if h.shuttingDown {
 			h.mu.Unlock()
 			op.Unlock()
-			return fmt.Errorf("index process manager is shutting down")
+			return fmt.Errorf("indexing runtime is shutting down")
 		}
 		entry := h.entries[id]
 
@@ -290,11 +268,11 @@ func (h *KubernetesInProcessIndexHost) startReady(
 	}
 
 	cfg := restConfigFromIndexInput(input)
-	dynClient, err := h.newDynamic(cfg)
+	dynClient, err := h.clients.Dynamic(cfg)
 	if err != nil {
 		return fmt.Errorf("create dynamic client for %s: %w", id, err)
 	}
-	discClient, err := h.newDiscovery(cfg)
+	discClient, err := h.clients.Discovery(cfg)
 	if err != nil {
 		return fmt.Errorf("create discovery client for %s: %w", id, err)
 	}

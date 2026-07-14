@@ -34,20 +34,20 @@ func seedKubernetesObjectType(t *testing.T, store domain.Store) {
 	}
 }
 
-func TestKubernetesIndexControllerLifecycle_CancelsAndJoins(t *testing.T) {
-	controllerCtx, cancelController := context.WithCancel(context.Background())
+func TestKubernetesIndexStartupReplay_CancelsAndJoins(t *testing.T) {
+	replayCtx, cancelReplay := context.WithCancel(context.Background())
 	started := make(chan struct{})
 	canceled := make(chan struct{})
 	release := make(chan struct{}, 1)
 	t.Cleanup(func() {
-		cancelController()
+		cancelReplay()
 		select {
 		case release <- struct{}{}:
 		default:
 		}
 	})
 
-	done := startKubernetesIndexController(controllerCtx, func(ctx context.Context) {
+	done := startKubernetesIndexStartupReplay(replayCtx, func(ctx context.Context) {
 		close(started)
 		<-ctx.Done()
 		close(canceled)
@@ -57,23 +57,24 @@ func TestKubernetesIndexControllerLifecycle_CancelsAndJoins(t *testing.T) {
 	select {
 	case <-started:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for controller start")
+		t.Fatal("timed out waiting for replay start")
 	}
 
 	stopReturned := make(chan struct{})
 	go func() {
-		stopKubernetesIndexController(cancelController, done)
+		cancelReplay()
+		<-done
 		close(stopReturned)
 	}()
 
 	select {
 	case <-canceled:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for controller cancellation")
+		t.Fatal("timed out waiting for replay cancellation")
 	}
 	select {
 	case <-stopReturned:
-		t.Fatal("stop returned before controller shutdown completed")
+		t.Fatal("join returned before replay release")
 	default:
 	}
 
@@ -81,7 +82,7 @@ func TestKubernetesIndexControllerLifecycle_CancelsAndJoins(t *testing.T) {
 	select {
 	case <-stopReturned:
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for controller join")
+		t.Fatal("timed out waiting for replay join")
 	}
 }
 
@@ -162,33 +163,12 @@ func TestDirectInventoryReportBackend_RoundTrip(t *testing.T) {
 		t.Fatalf("Get after ReplaceBatch delete err=%v, want ErrNotFound", err)
 	}
 	readTx.Rollback()
-
-	if err := backend.ReplaceBatch(ctx, kubernetesaddon.ObjectResourceType, []kubernetesaddon.InventoryObjectReport{{
-		Name: pod1, ObservedAt: now,
-	}}); err != nil {
-		t.Fatalf("re-upsert ReplaceBatch: %v", err)
-	}
-	if err := backend.ReplaceBatch(ctx, kubernetesaddon.ObjectResourceType, []kubernetesaddon.InventoryObjectReport{{
-		Name: pod1, IsDelete: true,
-	}}); err != nil {
-		t.Fatalf("second ReplaceBatch delete: %v", err)
-	}
-	readTx, err = store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("begin read: %v", err)
-	}
-	defer readTx.Rollback()
-	if _, err := readTx.ExtensionResources().Get(ctx, kubernetesaddon.ObjectResourceType.FullName(pod1)); !errors.Is(err, domain.ErrNotFound) {
-		t.Fatalf("Get after second ReplaceBatch delete err=%v, want ErrNotFound", err)
-	}
 }
 
-func TestNewKubernetesInProcessIndexing_WiresHooksAndController(t *testing.T) {
+func TestNewKubernetesInProcessIndexing_WiresIndexingRuntime(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedKubernetesObjectType(t, store)
 
-	// serve.go registers this schema on addon Connect; keep the wiring
-	// contract explicit here so a schema drift fails without a full serve.
 	sch := kubernetesaddon.InventorySchema()
 	if sch.ResourceType != kubernetesaddon.ObjectResourceType {
 		t.Fatalf("Schema.ResourceType = %q, want %q", sch.ResourceType, kubernetesaddon.ObjectResourceType)
@@ -200,57 +180,15 @@ func TestNewKubernetesInProcessIndexing_WiresHooksAndController(t *testing.T) {
 	runCtx, cancelRun := context.WithCancel(context.Background())
 	defer cancelRun()
 
-	ctx := context.Background()
-	now := time.Now()
-	reports := application.NewInventoryReportService(store)
-
-	podsGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
-	pod1, err := kubernetesaddon.ObjectResourceName(kubernetesaddon.KubernetesObjectIdentity{
-		TargetID: "prod", GVR: podsGVR, Namespace: "default", Name: "web-1", UID: "uid-pod-1",
-	})
-	if err != nil {
-		t.Fatalf("ObjectResourceName: %v", err)
-	}
-	if err := reports.ReplaceBatch(ctx, application.InventoryReplacementBatchInput{
-		Reports: []application.InventoryReplacementInput{{
-			ResourceType: kubernetesaddon.ObjectResourceType,
-			Name:         &pod1,
-			ObservedAt:   now,
-		}},
-	}); err != nil {
-		t.Fatalf("seed: %v", err)
+	indexing := newKubernetesInProcessIndexing(runCtx, store, nil, slog.New(slog.DiscardHandler))
+	if indexing == nil || indexing.Runtime == nil || indexing.Host == nil {
+		t.Fatal("expected wired indexing runtime")
 	}
 
-	hooks, controller := newKubernetesInProcessIndexing(runCtx, store, nil, slog.New(slog.DiscardHandler))
-	if hooks == nil {
-		t.Fatal("expected non-nil hooks")
-	}
-	if controller == nil {
-		t.Fatal("expected non-nil controller")
-	}
-
-	// Mirror serve.go: start the controller under its owned child context and
-	// join it before the backing store is closed.
-	done := startKubernetesIndexController(runCtx, controller.Run)
-	defer stopKubernetesIndexController(cancelRun, done)
-
-	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-		ID:   "prod",
-		Name: "prod",
-		Type: kubernetesaddon.TargetType,
-	})
-	hooks.AfterTargetRegistered(ctx, target)
-	if err := hooks.BeforeTargetDeleted(ctx, target); err != nil {
-		t.Fatalf("BeforeTargetDeleted: %v", err)
-	}
-
-	readTx, err := store.BeginReadOnly(ctx)
-	if err != nil {
-		t.Fatalf("begin read: %v", err)
-	}
-	defer readTx.Rollback()
-	if _, err := readTx.ExtensionResources().Get(ctx, kubernetesaddon.ObjectResourceType.FullName(pod1)); err != nil {
-		t.Fatalf("Get after BeforeTargetDeleted: %v", err)
+	stopCtx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	if err := indexing.Runtime.StopAll(stopCtx); err != nil {
+		t.Fatalf("StopAll: %v", err)
 	}
 }
 
@@ -329,7 +267,6 @@ func (listFailTargets) Delete(context.Context, domain.TargetID) error { panic("D
 
 func TestDirectInventoryReportBackend_PropagatesServiceErrors(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
-	// Intentionally do not seed Object type so report writes fail validation.
 	ctx := context.Background()
 	now := time.Now()
 	backend := newDirectInventoryReportBackend(application.NewInventoryReportService(store))

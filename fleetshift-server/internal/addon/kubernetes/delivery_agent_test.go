@@ -17,6 +17,8 @@ import (
 	"testing"
 	"time"
 
+	"k8s.io/client-go/discovery"
+	"k8s.io/client-go/dynamic"
 	"k8s.io/client-go/rest"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
@@ -126,20 +128,17 @@ func TestAgent_Deliver_SucceedsWhenIndexerAbsent(t *testing.T) {
 	}
 }
 
-// TestAgent_Deliver_SucceedsWhenIndexerStartFails asserts that a
-// failing in-process index host does not block delivery. Delivery and
-// indexing are separate types; StartIndexer failure on the host must not
-// affect Agent.Deliver.
-func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
+// TestAgent_Deliver_SucceedsWhenIndexerEnsureFails asserts that a
+// failing EnsureIndexer path does not block delivery. Delivery and
+// indexing are separate types for the Kubernetes delivery agent.
+func TestAgent_Deliver_SucceedsWhenIndexerEnsureFails(t *testing.T) {
 	ctx := context.Background()
 	host := kubernetes.NewKubernetesInProcessIndexHost(
 		ctx,
 		nil,
 		nil,
+		failingIndexerClients{},
 		nil,
-		kubernetes.WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return nil, errors.New("indexer intentionally down")
-		}),
 	)
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
@@ -151,13 +150,19 @@ func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
 			"service_account_token": "token",
 		},
 	})
-	if err := host.StartIndexer(ctx, target); err == nil {
-		t.Fatal("expected StartIndexer to fail when indexer is down")
+	err := host.EnsureIndexer(ctx, kubernetes.IndexRuntimeInput{
+		TargetID:   target.ID(),
+		APIServer:  "https://127.0.0.1:6443",
+		Credential: []byte("token"),
+		Generation: 1,
+	})
+	if err == nil {
+		t.Fatal("expected EnsureIndexer to fail when clients are down")
 	}
 
 	reporter := newChannelReporter()
 	agent := kubernetes.NewDeliveryAgent(reporter)
-	err := agent.Deliver(ctx, target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
+	err = agent.Deliver(ctx, target, "d1", nil, domain.DeliveryAuth{Token: "some-token"}, nil, 1)
 	if err != nil {
 		t.Fatalf("Deliver with failed indexer: %v", err)
 	}
@@ -166,6 +171,16 @@ func TestAgent_Deliver_SucceedsWhenIndexerStartFails(t *testing.T) {
 	if asyncResult.State != domain.DeliveryStateDelivered {
 		t.Errorf("async State = %q, want %q", asyncResult.State, domain.DeliveryStateDelivered)
 	}
+}
+
+type failingIndexerClients struct{}
+
+func (failingIndexerClients) Dynamic(*rest.Config) (dynamic.Interface, error) {
+	return nil, errors.New("indexer intentionally down")
+}
+
+func (failingIndexerClients) Discovery(*rest.Config) (discovery.DiscoveryInterface, error) {
+	return nil, errors.New("indexer intentionally down")
 }
 
 func TestAgent_Deliver_MissingAPIServer(t *testing.T) {

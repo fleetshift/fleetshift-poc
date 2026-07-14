@@ -26,7 +26,7 @@ func TestAgent_Deliver_OIDCWithCustomNodes(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithObserver(agentObs))
 
 	spec := kind.ClusterSpec{
 		Name: "multi-oidc",
@@ -67,7 +67,7 @@ func TestAgent_Deliver_OIDC_EmptyAudience_FailsDelivery(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	auth := domain.DeliveryAuth{
 		Caller: &domain.SubjectClaims{

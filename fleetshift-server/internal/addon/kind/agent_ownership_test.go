@@ -20,7 +20,7 @@ func TestAgent_Deliver_RestartRecoversOwnership(t *testing.T) {
 	reporter := newChannelReporter()
 	store := kind.NewMemoryGenerationStore()
 
-	agent1 := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store))
+	agent1 := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store), stubPlatformSA())
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name":"demo"}`),
@@ -36,7 +36,7 @@ func TestAgent_Deliver_RestartRecoversOwnership(t *testing.T) {
 	creates := provider.createCount()
 
 	// New agent process, same provider state + generation store (durable CM).
-	agent2 := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store))
+	agent2 := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store), stubPlatformSA())
 	if err := agent2.Deliver(context.Background(), target, "d1:t1", manifests, domain.DeliveryAuth{}, nil, 1); err != nil {
 		t.Fatalf("restart Deliver: %v", err)
 	}
@@ -90,7 +90,7 @@ func TestAgent_Deliver_HigherGenerationDeleteFailsThenRetryRecreates(t *testing.
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
 	store := kind.NewMemoryGenerationStore()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(store), stubPlatformSA())
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
 		Raw:          json.RawMessage(`{"name":"demo"}`),
@@ -223,7 +223,7 @@ func TestAgent_Deliver_MissingCMPersistFailThenRetryRecreates(t *testing.T) {
 	provider.clusters["fs--demo"] = nil
 	reporter := newChannelReporter()
 	inner := kind.NewMemoryGenerationStore()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&failAdvanceOnceStore{inner: inner}))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&failAdvanceOnceStore{inner: inner}), stubPlatformSA())
 
 	_ = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1",
 		[]domain.Manifest{{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name":"demo"}`)}},
@@ -336,7 +336,7 @@ func TestAgent_Deliver_GetGenerationErrorFailsWithoutDelete(t *testing.T) {
 	provider := newFakeProvider()
 	provider.clusters["fs--demo"] = nil
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&errGetStore{err: errors.New("api unavailable")}))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&errGetStore{err: errors.New("api unavailable")}), stubPlatformSA())
 
 	_ = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1",
 		[]domain.Manifest{{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name":"demo"}`)}},
@@ -435,7 +435,7 @@ func TestAgent_Deliver_CheckAndAdvanceStaleOnReplacementAfterMissingCM(t *testin
 	provider.clusters["fs--demo"] = nil
 	reporter := newChannelReporter()
 	inner := kind.NewMemoryGenerationStore()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&staleOnAdvanceStore{inner: inner, plant: 2}))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(&staleOnAdvanceStore{inner: inner, plant: 2}), stubPlatformSA())
 	_ = agent.Deliver(context.Background(), domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}), "d1:t1",
 		[]domain.Manifest{{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name":"demo"}`)}},
 		domain.DeliveryAuth{}, nil, 1)

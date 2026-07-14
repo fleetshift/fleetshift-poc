@@ -142,6 +142,12 @@ func fakeFactory(p *fakeProvider) kind.ClusterProviderFactory {
 	}
 }
 
+func stubPlatformSA() kind.AgentOption {
+	return kind.WithPlatformSABootstrap(func(_ context.Context, _ []byte, targetID domain.TargetID) (domain.SecretRef, []byte, error) {
+		return domain.SecretRef(fmt.Sprintf("targets/%s/sa-token", targetID)), []byte("test-sa-token"), nil
+	})
+}
+
 // channelReporter implements [domain.DeliveryReporter] for tests,
 // routing events and results to channels for deterministic waits.
 type channelReporter struct {
@@ -177,7 +183,7 @@ func (r *channelReporter) ListActiveDeliveries(_ context.Context, _ []domain.Tar
 
 func newTestAgent(reporter domain.DeliveryReporter, p *fakeProvider, opts ...kind.AgentOption) (*kind.Agent, *kind.MemoryGenerationStore) {
 	store := kind.NewMemoryGenerationStore()
-	all := append([]kind.AgentOption{kind.WithGenerationStore(store)}, opts...)
+	all := append([]kind.AgentOption{kind.WithGenerationStore(store), stubPlatformSA()}, opts...)
 	return kind.NewAgent(reporter, fakeFactory(p), all...), store
 }
 
@@ -372,7 +378,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 	provider := newFakeProvider()
 	// cluster doesn't exist
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -396,7 +402,7 @@ func TestAgent_Remove_ClusterAlreadyGone(t *testing.T) {
 
 func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 	provider := newFakeProvider()
-	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(nopReporter{}, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
@@ -419,7 +425,7 @@ func TestAgent_Deliver_MultipleManifests(t *testing.T) {
 func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -443,7 +449,7 @@ func TestAgent_Deliver_WiresObserverLogger(t *testing.T) {
 func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{{
@@ -464,8 +470,8 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	if len(result.ProvisionedTargets) != 1 {
 		t.Fatalf("ProvisionedTargets count = %d, want 1", len(result.ProvisionedTargets))
 	}
-	if len(result.ProducedSecrets) != 0 {
-		t.Fatalf("ProducedSecrets count = %d, want 0 (no stored credentials)", len(result.ProducedSecrets))
+	if len(result.ProducedSecrets) != 1 {
+		t.Fatalf("ProducedSecrets count = %d, want 1", len(result.ProducedSecrets))
 	}
 
 	pt := result.ProvisionedTargets[0]
@@ -487,7 +493,7 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	provider := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "k1", Type: kind.TargetType, Name: "local-kind"})
 	manifests := []domain.Manifest{
@@ -505,8 +511,8 @@ func TestAgent_Deliver_MultipleManifests_ProducesMultipleOutputs(t *testing.T) {
 	if len(result.ProvisionedTargets) != 2 {
 		t.Errorf("ProvisionedTargets count = %d, want 2", len(result.ProvisionedTargets))
 	}
-	if len(result.ProducedSecrets) != 0 {
-		t.Errorf("ProducedSecrets count = %d, want 0", len(result.ProducedSecrets))
+	if len(result.ProducedSecrets) != 2 {
+		t.Errorf("ProducedSecrets count = %d, want 2", len(result.ProducedSecrets))
 	}
 }
 
@@ -575,7 +581,7 @@ func TestAgent_Observer_DefaultConfig(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -611,7 +617,7 @@ func TestAgent_Observer_CustomConfig(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -662,7 +668,7 @@ func TestAgent_Deliver_WithTokenVerifier_ValidToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "valid-token",
@@ -694,7 +700,7 @@ func TestAgent_Deliver_WithTokenVerifier_ExpiredToken(t *testing.T) {
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
 
 	auth := domain.DeliveryAuth{
 		Token: "expired-token",
@@ -739,7 +745,7 @@ func TestAgent_Deliver_WithTokenVerifier_NoToken_SkipsVerification(t *testing.T)
 		Audience:  "fleetshift",
 	}
 
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithTokenVerifier(verifier, cfg))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithTokenVerifier(verifier, cfg))
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -762,7 +768,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 	reporter := newChannelReporter()
 
 	agentObs := &recordingAgentObserver{}
-	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), kind.WithObserver(agentObs))
+	agent := kind.NewAgent(reporter, fakeFactory(provider), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA(), kind.WithObserver(agentObs))
 
 	manifests := []domain.Manifest{
 		{ManifestType: kind.ClusterManifestType, Raw: json.RawMessage(`{"name": "a"}`)},
@@ -792,7 +798,7 @@ func TestAgent_Observer_MultipleSpecs(t *testing.T) {
 func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 	fp := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -838,7 +844,7 @@ func TestAgent_Deliver_TrustBundle_StoresAndCompletes(t *testing.T) {
 func TestAgent_Deliver_TrustBundle_IncludedInProvisionedTarget(t *testing.T) {
 	fp := newFakeProvider()
 	reporter := newChannelReporter()
-	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	agent := kind.NewAgent(reporter, fakeFactory(fp), kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",
@@ -927,7 +933,7 @@ func TestAgent_Deliver_RetryWhileInFlight_Skipped(t *testing.T) {
 	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
 		bp.fakeProvider.logger = logger
 		return bp
-	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	manifests := []domain.Manifest{{
 		ManifestType: kind.ClusterManifestType,
@@ -1011,7 +1017,7 @@ func TestAgent_Deliver_TrustBundle_RetryDoesNotDuplicate(t *testing.T) {
 	agent := kind.NewAgent(reporter, func(logger log.Logger) kind.ClusterProvider {
 		bp.fakeProvider.logger = logger
 		return bp
-	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()))
+	}, kind.WithGenerationStore(kind.NewMemoryGenerationStore()), stubPlatformSA())
 
 	trustEntry := domain.TrustBundleEntry{
 		IssuerURL:          "https://issuer.example.com",

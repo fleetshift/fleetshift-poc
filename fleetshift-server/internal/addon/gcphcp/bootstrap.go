@@ -26,7 +26,7 @@ import (
 const (
 	platformSAName                          = "fleetshift-platform"
 	platformSANamespace                     = "kube-system"
-	defaultPlatformTokenExpirySeconds int64 = 24 * 3600
+	defaultPlatformTokenExpirySeconds int64 = 30 * 24 * 3600
 	rootCAConfigMapName                     = "kube-root-ca.crt"
 )
 
@@ -54,19 +54,20 @@ func DeliverySecretRef(targetID domain.TargetID) domain.SecretRef {
 }
 
 // BootstrapGuestCluster creates a ServiceAccount with cluster-admin RBAC
-// on the guest cluster and returns a short-lived bearer token for it.
+// on the guest cluster and returns a bearer token for it (TokenRequest
+// expiry is defaultPlatformTokenExpirySeconds).
 //
-// Uses a three-phase connection strategy:
-//   - Phase 1: probe with system trust (handles publicly-trusted certs)
-//   - Phase 2: if x509 error, extract root CA from kube-root-ca.crt ConfigMap
-//     with leaf-cert pinning and CA-to-leaf chain validation
-//   - Phase 3: reconnect with extracted CA for all privileged operations
+// Connection strategy:
+//  1. probe with system trust (publicly trusted certs)
+//  2. on x509 error, extract root CA from kube-root-ca.crt with leaf-cert
+//     pinning and CA-to-leaf chain validation
+//  3. reconnect with the extracted CA for privileged operations
 func BootstrapGuestCluster(
 	ctx context.Context,
 	guestEndpoint, brokerToken string,
 	targetID domain.TargetID,
 ) (BootstrapResult, error) {
-	// Phase 1: try with system trust
+	// Step 1: try with system trust
 	client, leafDER, probeErr := probeWithSystemTrustFn(guestEndpoint, brokerToken)
 
 	var caCert []byte
@@ -75,14 +76,14 @@ func BootstrapGuestCluster(
 			return BootstrapResult{}, fmt.Errorf("probe guest cluster: %w", probeErr)
 		}
 
-		// Phase 2: extract CA from guest cluster
+		// Step 2: extract CA from guest cluster
 		var err error
 		caCert, err = extractCAFromGuestFn(ctx, guestEndpoint, brokerToken, leafDER)
 		if err != nil {
 			return BootstrapResult{}, fmt.Errorf("extract guest cluster CA: %w", err)
 		}
 
-		// Phase 3: reconnect with extracted CA
+		// Step 3: reconnect with extracted CA
 		cfg := buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken, caCert)
 		client, err = newKubernetesClientForConfig(cfg)
 		if err != nil {
@@ -110,6 +111,8 @@ func BootstrapGuestCluster(
 	}, nil
 }
 
+// buildGuestBootstrapRESTConfig builds a REST config for guest bootstrap
+// using the broker token and optional extracted CA PEM.
 func buildGuestBootstrapRESTConfig(guestEndpoint, brokerToken string, caCert []byte) *rest.Config {
 	cfg := &rest.Config{
 		Host:        guestEndpoint,
@@ -187,6 +190,9 @@ func createPlatformRBAC(ctx context.Context, client kubernetes.Interface) error 
 	return nil
 }
 
+// requestPlatformSAToken mints a TokenRequest for the platform SA and
+// returns the vault SecretRef plus token bytes. Expiry is
+// defaultPlatformTokenExpirySeconds.
 func requestPlatformSAToken(
 	ctx context.Context,
 	client kubernetes.Interface,
@@ -212,6 +218,8 @@ func requestPlatformSAToken(
 	return DeliverySecretRef(targetID), []byte(tokenReq.Status.Token), nil
 }
 
+// isCertVerificationError reports whether err is an x509 unknown-authority
+// failure that should trigger CA extraction fallback.
 func isCertVerificationError(err error) bool {
 	if err == nil {
 		return false
@@ -224,6 +232,8 @@ func isCertVerificationError(err error) bool {
 	return errors.As(err, &unknownAuthPtr)
 }
 
+// probeWithSystemTrust dials the guest API with system trust. On unknown-
+// authority failure it returns the captured leaf DER alongside the error.
 func probeWithSystemTrust(guestEndpoint, brokerToken string) (kubernetes.Interface, []byte, error) {
 	var capturedLeafDER []byte
 
@@ -249,11 +259,14 @@ func probeWithSystemTrust(guestEndpoint, brokerToken string) (kubernetes.Interfa
 	return client, nil, nil
 }
 
+// leafCaptureTransport wraps a RoundTripper and captures the peer leaf
+// certificate DER when the underlying trip fails (typically x509 verify).
 type leafCaptureTransport struct {
 	base    http.RoundTripper
 	capture *[]byte
 }
 
+// RoundTrip delegates to the base transport and, on error, probes the peer leaf cert.
 func (t *leafCaptureTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := t.base.RoundTrip(req)
 	if err != nil {
@@ -267,6 +280,7 @@ func (t *leafCaptureTransport) RoundTrip(req *http.Request) (*http.Response, err
 	return resp, err
 }
 
+// probeLeafCert dials addr insecurely and returns the peer leaf certificate DER.
 func probeLeafCert(addr string) []byte {
 	conn, err := tls.DialWithDialer(
 		&net.Dialer{Timeout: 5 * time.Second},
@@ -326,6 +340,8 @@ func extractCAFromGuest(
 	return []byte(caPEM), nil
 }
 
+// validateCASignsLeaf checks that caPEM cryptographically signs leafDER,
+// pinning verify time to the leaf's NotBefore to avoid clock-skew false negatives.
 func validateCASignsLeaf(caPEM, leafDER []byte) error {
 	roots := x509.NewCertPool()
 	if !roots.AppendCertsFromPEM(caPEM) {
@@ -340,7 +356,7 @@ func validateCASignsLeaf(caPEM, leafDER []byte) error {
 	// Pin to the leaf's own validity window so we only check the cryptographic
 	// signing relationship, not temporal validity. The cert was just served in a
 	// live TLS handshake; clock skew or short-lived OpenShift CAs could cause
-	// spurious rejections with time.Now(). Phase 3's TLS stack enforces expiry.
+	// spurious rejections with time.Now(). The reconnect TLS stack enforces expiry.
 	_, err = leaf.Verify(x509.VerifyOptions{
 		Roots:       roots,
 		CurrentTime: leaf.NotBefore.Add(time.Second),

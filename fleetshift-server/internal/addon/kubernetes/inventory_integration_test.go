@@ -410,7 +410,7 @@ func Test_DefaultDenyList(t *testing.T) {
 }
 
 // Test_StopIndexerLeavesInventory verifies StopIndexer stops watching
-// without deleting source-owned indexed inventory (cleanup is deferred).
+// without deleting source-owned indexed inventory.
 func Test_StopIndexerLeavesInventory(t *testing.T) {
 	f := setupE2E(t)
 
@@ -435,7 +435,7 @@ func Test_StopIndexerLeavesInventory(t *testing.T) {
 		}
 	}
 	if remaining == 0 {
-		t.Fatal("expected indexed inventory to remain after StopIndexer (cleanup deferred)")
+		t.Fatal("expected indexed inventory to remain after StopIndexer")
 	}
 }
 
@@ -454,8 +454,8 @@ func Test_DeliveryRemoval(t *testing.T) {
 	f.awaitObjectGoneByPrefix(t, "Pod", "e2e-removal-")
 }
 
-// Test_CRDDeletion verifies plan-1 CRD delete behavior while indexing
-// is running: deleting a custom resource removes it via watch DELETE /
+// Test_CRDDeletion verifies CRD delete behavior while indexing is
+// running: deleting a custom resource removes it via watch DELETE /
 // IsDelete. Deleting the CRD afterwards stops that GVR without a
 // synthesized collection wipe — other GVRs remain indexed.
 func Test_CRDDeletion(t *testing.T) {
@@ -662,11 +662,10 @@ func Test_LabelIndexing(t *testing.T) {
 	}
 }
 
-// Test_ControllerIndexesRegisteredTarget wires the serve-style
-// controller + hooks against the kind cluster and asserts
-// AfterTargetRegistered starts indexing Node inventory under the
-// canonical ObjectResourceName shape.
-func Test_ControllerIndexesRegisteredTarget(t *testing.T) {
+// Test_EnsureIndexerIndexesTarget wires EnsureIndexer against the kind
+// cluster and asserts Node inventory under the canonical
+// ObjectResourceName shape.
+func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 	if fixture == nil {
 		t.Fatal("kind fixture not initialized")
 	}
@@ -683,20 +682,15 @@ func Test_ControllerIndexesRegisteredTarget(t *testing.T) {
 		runCtx,
 		nil,
 		reporter,
+		kubeaddon.DefaultIndexerClients{},
 		slog.Default(),
-		kubeaddon.WithInProcessIndexHostIndexConfig(func(domain.TargetInfo) kubeaddon.IndexConfig {
-			return kubeaddon.IndexConfig{
-				Schema:        kubeaddon.DefaultKubernetesSchema(),
-				BatchInterval: 200 * time.Millisecond,
-			}
-		}),
 	)
 
-	targetID := domain.TargetID("k8s-controller-e2e")
+	targetID := domain.TargetID("k8s-ensure-e2e")
 	target := domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
 		ID:    targetID,
 		Type:  kubeaddon.TargetType,
-		Name:  "Controller E2E",
+		Name:  "EnsureIndexer E2E",
 		State: domain.TargetStateReady,
 		Properties: map[string]string{
 			kubeaddon.PropAPIServer:           fixture.apiServer,
@@ -716,30 +710,21 @@ func Test_ControllerIndexesRegisteredTarget(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	lister := storeTargetLister{store: store}
-	controller := kubeaddon.NewInProcessIndexController(
-		lister,
-		host,
-		kubeaddon.DefaultInProcessIndexPolicy{},
-		slog.Default(),
-		kubeaddon.WithReconcileInterval(200*time.Millisecond),
-	)
-	hooks := application.NewTargetOutputHookService(
-		store,
-		application.WithTargetRuntimeHooks(controller),
-	)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		controller.Run(runCtx)
-	}()
+	cfg := kubeaddon.DefaultIndexConfig()
+	cfg.BatchInterval = 200 * time.Millisecond
+	if err := host.EnsureIndexer(context.Background(), kubeaddon.IndexRuntimeInput{
+		TargetID:    target.ID(),
+		APIServer:   fixture.apiServer,
+		CACert:      fixture.caCert,
+		Credential:  []byte(fixture.saToken),
+		Generation:  1,
+		IndexConfig: cfg,
+	}); err != nil {
+		t.Fatalf("EnsureIndexer: %v", err)
+	}
 	t.Cleanup(func() {
-		cancelRun()
-		<-done
+		_ = host.StopIndexer(context.Background(), targetID)
 	})
-
-	hooks.AfterTargetRegistered(context.Background(), target)
 
 	objs := awaitInventoryMatch(t, store, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objs {
@@ -760,10 +745,10 @@ func Test_ControllerIndexesRegisteredTarget(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatal("expected Node inventory after controller ready notification")
+		t.Fatal("expected Node inventory after EnsureIndexer")
 	}
 	if !host.HasIndexer(targetID) {
-		t.Fatal("expected running indexer after AfterTargetRegistered")
+		t.Fatal("expected running indexer after EnsureIndexer")
 	}
 }
 
@@ -828,13 +813,8 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		runCtx,
 		nil,
 		reporter,
+		kubeaddon.DefaultIndexerClients{},
 		slog.Default(),
-		kubeaddon.WithInProcessIndexHostIndexConfig(func(domain.TargetInfo) kubeaddon.IndexConfig {
-			return kubeaddon.IndexConfig{
-				Schema:        kubeaddon.DefaultKubernetesSchema(),
-				BatchInterval: 200 * time.Millisecond,
-			}
-		}),
 	)
 
 	ctx := context.Background()
@@ -850,8 +830,17 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		},
 	})
 
-	if err := host.StartIndexer(ctx, target); err != nil {
-		t.Fatalf("StartIndexer: %v", err)
+	cfg := kubeaddon.DefaultIndexConfig()
+	cfg.BatchInterval = 200 * time.Millisecond
+	if err := host.EnsureIndexer(ctx, kubeaddon.IndexRuntimeInput{
+		TargetID:    target.ID(),
+		APIServer:   fixture.apiServer,
+		CACert:      fixture.caCert,
+		Credential:  []byte(fixture.saToken),
+		Generation:  1,
+		IndexConfig: cfg,
+	}); err != nil {
+		t.Fatalf("EnsureIndexer: %v", err)
 	}
 
 	ns := "e2e-" + strings.ToLower(strings.NewReplacer("/", "-", "_", "-").Replace(t.Name()))

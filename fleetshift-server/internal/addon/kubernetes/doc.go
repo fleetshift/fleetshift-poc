@@ -7,7 +7,7 @@
 //   - Inventory: in-process indexing watches cluster objects and
 //     reports them under [ObjectResourceType]. The inventory schema is
 //     registered at Connect; the indexer runtime is composed separately
-//     in server wiring (TargetOutputHooks / InProcessIndexController)
+//     in server wiring ([IndexingRuntime] + startup replay)
 //     and is not part of ConnectInput.
 //
 // Delivery and inventory share [TargetType] and the target property

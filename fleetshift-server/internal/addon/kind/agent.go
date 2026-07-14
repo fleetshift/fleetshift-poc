@@ -37,6 +37,7 @@ import (
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/log"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -128,6 +129,8 @@ type Agent struct {
 	oidcConfig      *domain.OIDCConfig
 	inventory       *InventoryWatcher
 	generations     GenerationStore
+	indexingRuntime kubernetes.IndexingRuntime
+	bootstrapSA     func(context.Context, []byte, domain.TargetID) (domain.SecretRef, []byte, error)
 
 	trustMu      sync.RWMutex
 	trustBundles []domain.TrustBundleEntry
@@ -179,10 +182,32 @@ func WithGenerationStore(s GenerationStore) AgentOption {
 	return func(a *Agent) { a.generations = s }
 }
 
+// WithIndexingRuntime injects the Kubernetes indexing runtime
+// used to EnsureIndexer before Delivered and StopIndexer at teardown.
+// Nil is allowed for unit tests that do not exercise indexing.
+func WithIndexingRuntime(m kubernetes.IndexingRuntime) AgentOption {
+	return func(a *Agent) { a.indexingRuntime = m }
+}
+
+// WithPlatformSABootstrap overrides platform ServiceAccount credential
+// provisioning. Intended for unit tests that cannot reach a real API server.
+func WithPlatformSABootstrap(fn func(context.Context, []byte, domain.TargetID) (domain.SecretRef, []byte, error)) AgentOption {
+	return func(a *Agent) {
+		if fn != nil {
+			a.bootstrapSA = fn
+		}
+	}
+}
+
 // NewAgent returns an Agent. The reporter is the addon's client
 // interface for communicating delivery updates back to the platform.
 func NewAgent(reporter domain.DeliveryReporter, factory ClusterProviderFactory, opts ...AgentOption) *Agent {
-	a := &Agent{reporter: reporter, providerFactory: factory, generations: newKubeGenerationStore()}
+	a := &Agent{
+		reporter:        reporter,
+		providerFactory: factory,
+		generations:     newKubeGenerationStore(),
+		bootstrapSA:     bootstrapPlatformSA,
+	}
 	for _, o := range opts {
 		o(a)
 	}
@@ -314,6 +339,9 @@ func (a *Agent) verifyToken(ctx context.Context, auth domain.DeliveryAuth) error
 // Lower-generation removals are rejected when the ownership ConfigMap
 // records a higher generation. Like Deliver, the work runs
 // asynchronously and reports via [domain.DeliveryReporter.ReportResult].
+// StopIndexer runs once teardown is committed (after the generation
+// fence), or when the cluster is already gone; it is not called on
+// stale rejects. Teardown continues if stop fails.
 func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain.DeliveryID, manifests []domain.Manifest, _ domain.DeliveryAuth, _ *domain.Attestation, generation domain.Generation) error {
 	specs, err := a.validateManifests(manifests)
 	if err != nil {
@@ -332,22 +360,25 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 		for _, spec := range specs {
 			kindName, err := encodeKindClusterName(spec.resourceID())
 			if err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: err.Error(),
 				})
 				return
 			}
+			targetID := domain.TargetID("k8s-" + string(spec.resourceID()))
+
 			listed, err := provider.List()
 			if err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("list kind clusters: %v", err),
 				})
 				return
 			}
 			owned, found := findOwnedCluster(listed, spec.resourceID())
 			if !found {
-				// Cluster already gone: drop local generation state and
-				// stop inventory observation if any.
+				// Cluster already gone: stop any leftover indexer, drop
+				// local generation state, and stop inventory observation.
+				a.stopIndexer(ctx, targetID)
 				a.generationStore().Forget(kindName)
 				if a.inventory != nil {
 					a.inventory.Unwatch(spec.ResourceName)
@@ -357,27 +388,30 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 			useInternal := os.Getenv("KIND_EXPERIMENTAL_DOCKER_NETWORK") != ""
 			kc, err := provider.KubeConfig(owned, useInternal)
 			if err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("get kubeconfig for %q: %v", owned, err),
 				})
 				return
 			}
 			recorded, hasGen, err := a.generationStore().Get(ctx, owned, []byte(kc))
 			if err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: fmt.Sprintf("read ownership generation for %q: %v", owned, err),
 				})
 				return
 			}
 			if hasGen && generation < recorded {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State:   domain.DeliveryStateFailed,
 					Message: fmt.Sprintf("stale generation %d for kind cluster %q (recorded %d)", generation, owned, recorded),
 				})
 				return
 			}
+			// Committed to teardown: stop the object indexer before delete.
+			// Inventory Unwatch stays after confirmed deletion (below).
+			a.stopIndexer(ctx, targetID)
 			if err := provider.Delete(owned, ""); err != nil {
-				_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+				_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 					State: domain.DeliveryStateFailed, Message: err.Error(),
 				})
 				return
@@ -389,7 +423,7 @@ func (a *Agent) Remove(_ context.Context, _ domain.TargetInfo, deliveryID domain
 				a.inventory.Unwatch(spec.ResourceName)
 			}
 		}
-		_ = a.reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+		_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, domain.DeliveryResult{
 			State: domain.DeliveryStateDelivered,
 		})
 	}()
@@ -426,17 +460,25 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 		}
 	}
 
+	for _, out := range outputs {
+		if err := a.ensureIndexerReady(ctx, out, generation); err != nil {
+			failDelivery(ctx, a.reporter, deliveryID, generation, "ensure indexer for %q: %v", out.Name, err)
+			return
+		}
+	}
+
 	result := domain.DeliveryResult{State: domain.DeliveryStateDelivered}
 	for _, out := range outputs {
 		result.ProvisionedTargets = append(result.ProvisionedTargets, out.Target())
 		result.ProducedSecrets = append(result.ProducedSecrets, out.Secrets()...)
 	}
-	_ = a.reporter.ReportResult(ctx, deliveryID, generation, result)
+	_ = reportResultWithRetry(ctx, a.reporter, deliveryID, generation, result)
 }
 
 // deliverCluster handles a single cluster spec. Returns the output on
 // success and true to continue, or nil and false if the delivery failed
-// (reporter.ReportResult already called).
+// (reporter.ReportResult already called). EnsureIndexer runs in
+// deliverAsync after all clusters succeed.
 func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, spec ClusterSpec, auth domain.DeliveryAuth, deliveryID domain.DeliveryID, generation domain.Generation) (*ClusterOutput, bool) {
 	ctx, probe := a.agentObserver().ClusterDeliverStarted(ctx, string(spec.resourceID()))
 	defer probe.End()
@@ -524,10 +566,11 @@ func (a *Agent) deliverCluster(ctx context.Context, provider ClusterProvider, sp
 
 // recreateOwnedCluster deletes an owned cluster without advancing its
 // generation ConfigMap, clears local generation state, stops inventory
-// watch, creates a replacement from the proposed spec, persists the
-// proposed generation on the replacement, then runs ensureCluster.
-// Used for both higher-generation and missing-ConfigMap paths.
-// Failed deletion leaves the existing cluster and inventory watch intact.
+// watch and the object indexer, creates a replacement from the proposed
+// spec, persists the proposed generation on the replacement, then runs
+// ensureCluster. Used for both higher-generation and missing-ConfigMap
+// paths. Failed deletion leaves the existing cluster and inventory watch
+// intact; StopIndexer may already have run after prep succeeded.
 // Create configuration is prepared before deletion so invalid OIDC input,
 // CA-file failure, or config construction failure cannot destroy the
 // existing cluster.
@@ -546,6 +589,9 @@ func (a *Agent) recreateOwnedCluster(
 	if !ok {
 		return nil, false
 	}
+
+	targetID := domain.TargetID("k8s-" + string(spec.resourceID()))
+	a.stopIndexer(ctx, targetID)
 
 	if err := provider.Delete(owned, ""); err != nil {
 		probe.Error(err)
@@ -695,16 +741,14 @@ func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec Clust
 		Kind:    domain.DeliveryEventProgress,
 		Message: fmt.Sprintf("Bootstrapping platform ServiceAccount on %q", kindName),
 	})
-	ref, token, saErr := bootstrapPlatformSA(ctx, kc, targetID)
+	ref, token, saErr := a.bootstrapSA(ctx, kc, targetID)
 	if saErr != nil {
-		_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
-			Kind:    domain.DeliveryEventWarning,
-			Message: fmt.Sprintf("platform SA bootstrap on %q: %v (attested delivery will not work)", kindName, saErr),
-		})
-	} else {
-		out.SATokenRef = ref
-		out.SAToken = token
+		probe.Error(saErr)
+		failDelivery(ctx, a.reporter, deliveryID, generation, "platform SA bootstrap on %q: %v", kindName, saErr)
+		return nil, false
 	}
+	out.SATokenRef = ref
+	out.SAToken = token
 
 	if a.inventory != nil {
 		if err := a.inventory.Watch(spec.ResourceName, kc); err != nil {
@@ -718,15 +762,62 @@ func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec Clust
 	return &out, true
 }
 
+// ensureIndexerReady calls EnsureIndexer when an IndexingRuntime is
+// configured. Missing credential or API server is a permanent error.
+// Nil runtime is a no-op (unit tests without indexing).
+func (a *Agent) ensureIndexerReady(ctx context.Context, out ClusterOutput, generation domain.Generation) error {
+	if a.indexingRuntime == nil {
+		return nil
+	}
+	if len(out.SAToken) == 0 || out.APIServer == "" {
+		return fmt.Errorf("%w: missing indexing credential or api server for %s", domain.ErrInvalidArgument, out.TargetID)
+	}
+	input := kubernetes.IndexRuntimeInput{
+		TargetID:    out.TargetID,
+		APIServer:   out.APIServer,
+		CACert:      string(out.CACert),
+		Credential:  out.SAToken,
+		SecretRef:   out.SATokenRef,
+		Generation:  generation,
+		IndexConfig: kubernetes.DefaultIndexConfig(),
+	}
+	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.LocalEnsureRetryDeadline, func(attemptCtx context.Context) error {
+		return a.indexingRuntime.EnsureIndexer(attemptCtx, input)
+	})
+}
+
+// stopIndexer stops the indexer for targetID when an IndexingRuntime is
+// configured. Errors are discarded so teardown is not blocked by a stuck stop.
+func (a *Agent) stopIndexer(ctx context.Context, targetID domain.TargetID) {
+	if a.indexingRuntime == nil {
+		return
+	}
+	_ = a.indexingRuntime.StopIndexer(ctx, targetID)
+}
+
 func failDelivery(ctx context.Context, reporter domain.DeliveryReporter, deliveryID domain.DeliveryID, generation domain.Generation, format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	_ = reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
 		Kind:    domain.DeliveryEventError,
 		Message: msg,
 	})
-	_ = reporter.ReportResult(ctx, deliveryID, generation, domain.DeliveryResult{
+	_ = reportResultWithRetry(ctx, reporter, deliveryID, generation, domain.DeliveryResult{
 		State:   domain.DeliveryStateFailed,
 		Message: msg,
+	})
+}
+
+// reportResultWithRetry calls ReportResult under [kubernetes.RetryLocalEnvelope]
+// with [kubernetes.ReportResultRetryDeadline].
+func reportResultWithRetry(
+	ctx context.Context,
+	reporter domain.DeliveryReporter,
+	deliveryID domain.DeliveryID,
+	generation domain.Generation,
+	result domain.DeliveryResult,
+) error {
+	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.ReportResultRetryDeadline, func(attemptCtx context.Context) error {
+		return reporter.ReportResult(attemptCtx, deliveryID, generation, result)
 	})
 }
 

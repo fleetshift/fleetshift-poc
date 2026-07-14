@@ -19,10 +19,10 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/infrastructure/sqlite"
 )
 
-// Composition tests exercise the in-process host, controller, hooks, and
-// writer against a real SQLite extension-resource store with fake
-// Kubernetes clients. They close gaps that unit tests (recording
-// reporters) and kind e2e (host-only, label presence) leave open.
+// Composition tests exercise the in-process indexing host and writer
+// against a real SQLite extension-resource store with fake Kubernetes
+// clients. They close gaps that unit tests (recording reporters) and
+// kind e2e (host-only, label presence) leave open.
 
 func configmapsGVR() schema.GroupVersionResource {
 	return schema.GroupVersionResource{Group: "", Version: "v1", Resource: "configmaps"}
@@ -149,21 +149,17 @@ func assertResourceName(t *testing.T, obj *domain.ExtensionResource, want domain
 	}
 }
 
-func compositionTarget(id domain.TargetID, mode InventoryMode) domain.TargetInfo {
-	props := map[string]string{
-		PropAPIServer:           "https://composition.example",
-		PropCACert:              "unused",
-		PropServiceAccountToken: "unused",
-	}
-	if mode != "" {
-		props[PropInventoryMode] = string(mode)
-	}
+func compositionTarget(id domain.TargetID) domain.TargetInfo {
 	return domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{
-		ID:         id,
-		Type:       TargetType,
-		Name:       string(id),
-		State:      domain.TargetStateReady,
-		Properties: props,
+		ID:    id,
+		Type:  TargetType,
+		Name:  string(id),
+		State: domain.TargetStateReady,
+		Properties: map[string]string{
+			PropAPIServer:           "https://composition.example",
+			PropCACert:              "unused",
+			PropServiceAccountToken: "unused",
+		},
 	})
 }
 
@@ -197,55 +193,43 @@ func newCompositionHost(
 	disc discovery.DiscoveryInterface,
 	indexCfg IndexConfig,
 ) *KubernetesInProcessIndexHost {
+	_ = indexCfg // applied via EnsureIndexer IndexRuntimeInput
 	reporter := newStoreBackedReporter(store)
 	return NewKubernetesInProcessIndexHost(
 		ctx,
 		nil,
 		reporter,
+		fakeIndexerClients{
+			dynamic: func(*rest.Config) (dynamic.Interface, error) {
+				return dyn, nil
+			},
+			discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+				return disc, nil
+			},
+		},
 		slog.New(slog.DiscardHandler),
-		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://composition.example", BearerToken: "test-token"}, nil
-		}),
-		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
-			return dyn, nil
-		}),
-		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return disc, nil
-		}),
-		WithInProcessIndexHostIndexConfig(func(domain.TargetInfo) IndexConfig {
-			return indexCfg
-		}),
 	)
 }
 
-type mutableTargetLister struct {
-	targets []domain.TargetInfo
-}
-
-func (l *mutableTargetLister) ListTargets(context.Context) ([]domain.TargetInfo, error) {
-	out := make([]domain.TargetInfo, len(l.targets))
-	copy(out, l.targets)
-	return out, nil
-}
-
-// storeTargetListerForTest mirrors cli.storeTargetLister without importing cli.
-type storeTargetListerForTest struct {
-	store domain.Store
-}
-
-func (l storeTargetListerForTest) ListTargets(ctx context.Context) ([]domain.TargetInfo, error) {
-	tx, err := l.store.BeginReadOnly(ctx)
-	if err != nil {
-		return nil, err
+func ensureCompositionIndexer(t *testing.T, host *KubernetesInProcessIndexHost, target domain.TargetInfo, cfg IndexConfig) {
+	t.Helper()
+	props := target.Properties()
+	input := IndexRuntimeInput{
+		TargetID:    target.ID(),
+		APIServer:   props[PropAPIServer],
+		CACert:      props[PropCACert],
+		Credential:  []byte(props[PropServiceAccountToken]),
+		Generation:  1,
+		IndexConfig: cfg,
 	}
-	defer tx.Rollback()
-	return tx.Targets().List(ctx)
+	if err := host.EnsureIndexer(context.Background(), input); err != nil {
+		t.Fatalf("EnsureIndexer: %v", err)
+	}
 }
 
-// TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory proves that
-// BeforeTargetDeleted drains and stops the indexer without deleting
-// source-owned indexed inventory (cleanup is deferred).
-func TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory(t *testing.T) {
+// TestStopIndexer_LeavesInventory proves that StopIndexer stops the
+// indexer without deleting source-owned indexed inventory.
+func TestStopIndexer_LeavesInventory(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)
 
@@ -264,19 +248,8 @@ func TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory(t *testing.T) {
 		BatchInterval: 50 * time.Millisecond,
 	}
 	host := newCompositionHost(runCtx, store, dyn, disc, cfg)
-	controller := NewInProcessIndexController(
-		&mutableTargetLister{},
-		host,
-		DefaultInProcessIndexPolicy{},
-		slog.New(slog.DiscardHandler),
-		WithStopTimeout(2*time.Second),
-	)
-	hooks := application.NewTargetOutputHookService(
-		store,
-		application.WithTargetRuntimeHooks(controller),
-	)
 
-	target := compositionTarget("prod", InventoryModeInProcess)
+	target := compositionTarget("prod")
 	tx, err := store.Begin(context.Background())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -288,9 +261,7 @@ func TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory(t *testing.T) {
 		t.Fatalf("commit target: %v", err)
 	}
 
-	if err := host.StartIndexer(context.Background(), target); err != nil {
-		t.Fatalf("StartIndexer: %v", err)
-	}
+	ensureCompositionIndexer(t, host, target, cfg)
 	wantName := mustNamedObjectName(t, "prod", pods, "default", "web", "uid-web")
 	awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objectsForTarget(objs, "prod") {
@@ -301,29 +272,16 @@ func TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory(t *testing.T) {
 		return false
 	})
 
-	if err := hooks.BeforeTargetDeleted(context.Background(), target); err != nil {
-		t.Fatalf("BeforeTargetDeleted: %v", err)
+	if err := host.StopIndexer(context.Background(), target.ID()); err != nil {
+		t.Fatalf("StopIndexer: %v", err)
 	}
 	if host.HasIndexer("prod") {
-		t.Fatal("indexer should be stopped after OnTargetDraining")
-	}
-
-	readTx, err := store.BeginReadOnly(context.Background())
-	if err != nil {
-		t.Fatalf("begin read: %v", err)
-	}
-	gotTarget, err := readTx.Targets().Get(context.Background(), "prod")
-	readTx.Rollback()
-	if err != nil {
-		t.Fatalf("Get target after BeforeTargetDeleted: %v", err)
-	}
-	if gotTarget.State() != domain.TargetStateDraining {
-		t.Fatalf("target state = %q, want draining", gotTarget.State())
+		t.Fatal("indexer should be stopped after StopIndexer")
 	}
 
 	got := objectsForTarget(listObjectInventory(t, store), "prod")
 	if len(got) == 0 {
-		t.Fatal("expected indexed inventory to remain after BeforeTargetDeleted (cleanup deferred)")
+		t.Fatal("expected indexed inventory to remain after StopIndexer")
 	}
 	found := false
 	for _, obj := range got {
@@ -333,14 +291,13 @@ func TestBeforeTargetDeleted_StopsIndexerAndLeavesInventory(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Fatalf("expected object %q to remain after deferred cleanup", wantName)
+		t.Fatalf("expected object %q to remain after StopIndexer", wantName)
 	}
 }
 
-// TestInventoryMode_ControllerStartsOnlyLocalTargets verifies external
-// and disabled modes never host an indexer, and flipping to local starts
-// indexing into the store.
-func TestInventoryMode_ControllerStartsOnlyLocalTargets(t *testing.T) {
+// TestEnsureIndexer_IndexesTarget verifies EnsureIndexer starts indexing
+// into the store for a target with resolvable credentials.
+func TestEnsureIndexer_IndexesTarget(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)
 
@@ -359,72 +316,17 @@ func TestInventoryMode_ControllerStartsOnlyLocalTargets(t *testing.T) {
 		BatchInterval: 50 * time.Millisecond,
 	}
 	host := newCompositionHost(runCtx, store, dyn, disc, cfg)
+	local := compositionTarget("local")
+	ensureCompositionIndexer(t, host, local, cfg)
 
-	external := compositionTarget("ext", InventoryModeExternal)
-	disabled := compositionTarget("off", InventoryModeDisabled)
-	local := compositionTarget("local", InventoryModeInProcess)
-
-	lister := &mutableTargetLister{targets: []domain.TargetInfo{external, disabled, local}}
-	controller := NewInProcessIndexController(
-		lister,
-		host,
-		DefaultInProcessIndexPolicy{},
-		slog.New(slog.DiscardHandler),
-		WithReconcileInterval(50*time.Millisecond),
-	)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		controller.Run(runCtx)
-	}()
-	defer func() {
-		cancelRun()
-		<-done
-	}()
-
-	controller.NotifyTargetReady(context.Background(), local)
-	deadline := time.Now().Add(3 * time.Second)
-	for !host.HasIndexer("local") {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for local indexer")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if host.HasIndexer("ext") || host.HasIndexer("off") {
-		t.Fatalf("external/disabled must not run indexers (ext=%v off=%v)", host.HasIndexer("ext"), host.HasIndexer("off"))
+	if !host.HasIndexer("local") {
+		t.Fatal("expected local indexer running")
 	}
 
 	wantLocal := mustNamedObjectName(t, "local", pods, "default", "pod-a", "uid-a")
 	awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objectsForTarget(objs, "local") {
 			if obj.Name() == wantLocal {
-				return true
-			}
-		}
-		return false
-	})
-	if got := objectsForTarget(listObjectInventory(t, store), "ext"); len(got) != 0 {
-		t.Fatalf("external target must not have inventory, got %d", len(got))
-	}
-	if got := objectsForTarget(listObjectInventory(t, store), "off"); len(got) != 0 {
-		t.Fatalf("disabled target must not have inventory, got %d", len(got))
-	}
-
-	flipped := compositionTarget("ext", InventoryModeInProcess)
-	lister.targets = []domain.TargetInfo{flipped, disabled, local}
-	controller.NotifyTargetReady(context.Background(), flipped)
-	deadline = time.Now().Add(3 * time.Second)
-	for !host.HasIndexer("ext") {
-		if time.Now().After(deadline) {
-			t.Fatal("timed out waiting for flipped external→local indexer")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	wantExt := mustNamedObjectName(t, "ext", pods, "default", "pod-a", "uid-a")
-	awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
-		for _, obj := range objectsForTarget(objs, "ext") {
-			if obj.Name() == wantExt {
 				return true
 			}
 		}
@@ -612,11 +514,10 @@ func TestStartupList_DoesNotDeleteDBOnlyRows(t *testing.T) {
 	})
 }
 
-// TestServeStyleComposition_ControllerIndexesRegisteredTarget mirrors
-// serve wiring (lister + host + controller + hooks) and asserts the
-// controller starts indexing after AfterTargetRegistered, writing
+// TestServeStyleComposition_EnsureIndexerIndexesTarget mirrors serve
+// wiring (host + EnsureIndexer) and asserts indexing writes
 // ObjectResourceName-shaped rows.
-func TestServeStyleComposition_ControllerIndexesRegisteredTarget(t *testing.T) {
+func TestServeStyleComposition_EnsureIndexerIndexesTarget(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)
 
@@ -636,7 +537,7 @@ func TestServeStyleComposition_ControllerIndexesRegisteredTarget(t *testing.T) {
 	}
 	host := newCompositionHost(runCtx, store, dyn, disc, cfg)
 
-	target := compositionTarget("serve-smoke", "")
+	target := compositionTarget("serve-smoke")
 	tx, err := store.Begin(context.Background())
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -648,29 +549,7 @@ func TestServeStyleComposition_ControllerIndexesRegisteredTarget(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	controller := NewInProcessIndexController(
-		storeTargetListerForTest{store: store},
-		host,
-		DefaultInProcessIndexPolicy{},
-		slog.New(slog.DiscardHandler),
-		WithReconcileInterval(50*time.Millisecond),
-	)
-	hooks := application.NewTargetOutputHookService(
-		store,
-		application.WithTargetRuntimeHooks(controller),
-	)
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		controller.Run(runCtx)
-	}()
-	defer func() {
-		cancelRun()
-		<-done
-	}()
-
-	hooks.AfterTargetRegistered(context.Background(), target)
+	ensureCompositionIndexer(t, host, target, cfg)
 
 	want := mustNamedObjectName(t, "serve-smoke", pods, "default", "web", "uid-node-standin")
 	objs := awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
@@ -687,6 +566,6 @@ func TestServeStyleComposition_ControllerIndexesRegisteredTarget(t *testing.T) {
 		}
 	}
 	if !host.HasIndexer("serve-smoke") {
-		t.Fatal("expected controller to start indexer after AfterTargetRegistered")
+		t.Fatal("expected EnsureIndexer to start indexer")
 	}
 }
