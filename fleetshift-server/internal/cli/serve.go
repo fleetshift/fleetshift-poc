@@ -208,8 +208,8 @@ func runServe(ctx context.Context, f *serveFlags) error {
 	// --- kubernetes indexing runtime ---
 	//
 	// Built before Kind/GCP agents so they can call EnsureIndexer /
-	// StopIndexer. Orchestration still receives NoOpTargetOutputHooks;
-	// indexing is not started from target lifecycle hooks.
+	// StopIndexer. Indexing starts from producers and one-shot startup
+	// replay, not from orchestration target registration.
 	var kubeIndexing *kubernetesInProcessIndexing
 	var kubeIndexCtx context.Context
 	var kubeIndexCancel context.CancelFunc
@@ -292,7 +292,6 @@ func runServe(ctx context.Context, f *serveFlags) error {
 		store, router, domain.StrategyFactory{Store: store}, reg,
 		domain.WithFulfillmentObserver(observability.NewFulfillmentObserver(logger)),
 		domain.WithVault(vault),
-		domain.WithTargetOutputHooks(domain.NoOpTargetOutputHooks{}),
 	)
 	orchWf, err := reg.RegisterOrchestration(orchSpec)
 	if err != nil {

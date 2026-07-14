@@ -254,9 +254,6 @@ func (listFailTargets) Create(context.Context, domain.TargetInfo) error { panic(
 func (listFailTargets) CreateOrUpdate(context.Context, domain.TargetInfo) error {
 	panic("CreateOrUpdate unused")
 }
-func (listFailTargets) TransitionState(context.Context, domain.TargetID, domain.TargetState, domain.TargetState) error {
-	panic("TransitionState unused")
-}
 func (listFailTargets) Get(context.Context, domain.TargetID) (domain.TargetInfo, error) {
 	panic("Get unused")
 }

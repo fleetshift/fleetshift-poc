@@ -62,7 +62,6 @@ func TestPlacementTargets_FiltersNonReadyTargets(t *testing.T) {
 	pool := []domain.TargetInfo{
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "a", Name: "n1", State: domain.TargetStateReady}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "b", Name: "n2", State: domain.TargetStateInitializing}),
-		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "c", Name: "n3", State: domain.TargetStateDraining}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "d", Name: "n4", State: domain.TargetStateTerminated}),
 		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "e", Name: "n5", State: domain.TargetStateDiscovered}),
 	}

@@ -472,31 +472,6 @@ func (r *stubRegistry) SignalDeleteCleanupComplete(_ context.Context, _ domain.F
 }
 
 // ---------------------------------------------------------------------------
-// Target output hook fakes
-// ---------------------------------------------------------------------------
-
-// recordingTargetOutputHooks records every [domain.TargetInfo] passed to
-// [domain.TargetOutputHooks]'s methods, in call order.
-type recordingTargetOutputHooks struct {
-	mu          sync.Mutex
-	ready       []domain.TargetInfo
-	terminating []domain.TargetInfo
-}
-
-func (l *recordingTargetOutputHooks) AfterTargetRegistered(_ context.Context, target domain.TargetInfo) {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.ready = append(l.ready, target)
-}
-
-func (l *recordingTargetOutputHooks) BeforeTargetDeleted(_ context.Context, target domain.TargetInfo) error {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	l.terminating = append(l.terminating, target)
-	return nil
-}
-
-// ---------------------------------------------------------------------------
 // Delivery agent fakes
 // ---------------------------------------------------------------------------
 
@@ -2944,52 +2919,10 @@ func TestOrchestration_DeletedFulfillment_StopsCleanly(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Target output hook tests
+// Delete-pipeline delivery-output cleanup
 // ---------------------------------------------------------------------------
 
-func TestOrchestration_DeliveryOutputs_SendsReadyNotificationAfterCommit(t *testing.T) {
-	store, vault := setupStore(t)
-	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
-		Generation:        1,
-		ManifestStrategy:  domain.ManifestStrategySpec{Type: domain.ManifestStrategyInline, Manifests: []domain.Manifest{{Raw: json.RawMessage(`{"name":"new-instance"}`)}}},
-		PlacementStrategy: domain.PlacementStrategySpec{Type: domain.PlacementStrategyStatic, Targets: []domain.TargetID{"provisioner"}},
-		State:             domain.FulfillmentStateCreating,
-	})
-	seedTargets(t, store, domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{ID: "provisioner", Name: "provisioner", Type: "test"}))
-
-	events := make(chan domain.FulfillmentEvent, 16)
-	targetOutputHooks := &recordingTargetOutputHooks{}
-	wf := newTestWorkflow(store, &outputProducingDelivery{
-		events: events,
-		targets: []domain.ProvisionedTarget{{
-			ID: "vm-new-instance", Type: "vm", Name: "new-instance",
-			Properties: map[string]string{"config_ref": "targets/vm-new-instance/config"},
-		}},
-		secrets: []domain.ProducedSecret{{
-			Ref: "targets/vm-new-instance/config", Value: []byte("fake-config-data"),
-		}},
-	}, events, func(wf *domain.OrchestrationWorkflowSpec) {
-		wf.Vault = vault
-		wf.TargetOutputHooks = targetOutputHooks
-	})
-
-	rec := &simpleRecord{ctx: testContext(t), events: events}
-	if _, err := wf.Run(rec, domain.FulfillmentID("deployments/d1")); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-
-	if len(targetOutputHooks.ready) != 1 {
-		t.Fatalf("expected 1 ready notification, got %d", len(targetOutputHooks.ready))
-	}
-	if targetOutputHooks.ready[0].ID() != "vm-new-instance" {
-		t.Errorf("ready target ID = %q, want vm-new-instance", targetOutputHooks.ready[0].ID())
-	}
-	if len(targetOutputHooks.terminating) != 0 {
-		t.Errorf("expected 0 terminating notifications, got %d", len(targetOutputHooks.terminating))
-	}
-}
-
-func TestOrchestration_DeletePipeline_DeletesDeliveryOwnedOutputsWithoutPreDeleteHooks(t *testing.T) {
+func TestOrchestration_DeletePipeline_DeletesDeliveryOwnedOutputs(t *testing.T) {
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,
@@ -3024,23 +2957,13 @@ func TestOrchestration_DeletePipeline_DeletesDeliveryOwnedOutputsWithoutPreDelet
 	}
 
 	events := make(chan domain.FulfillmentEvent, 16)
-	targetOutputHooks := &recordingTargetOutputHooks{}
 	wf := newTestWorkflow(store, noopDelivery{events: events}, events, func(wf *domain.OrchestrationWorkflowSpec) {
 		wf.Vault = vault
-		wf.TargetOutputHooks = targetOutputHooks
 	})
 
 	rec := &simpleRecord{ctx: ctx, events: events}
 	if _, err := wf.Run(rec, domain.FulfillmentID("deployments/d1")); err != nil {
 		t.Fatalf("Run: %v", err)
-	}
-
-	// Delete cleanup must not invoke target-output pre-delete hooks.
-	if len(targetOutputHooks.terminating) != 0 {
-		t.Fatalf("expected 0 terminating notifications, got %d", len(targetOutputHooks.terminating))
-	}
-	if len(targetOutputHooks.ready) != 0 {
-		t.Errorf("expected 0 ready notifications, got %d", len(targetOutputHooks.ready))
 	}
 
 	readTx, err := store.BeginReadOnly(ctx)
@@ -3056,7 +2979,7 @@ func TestOrchestration_DeletePipeline_DeletesDeliveryOwnedOutputsWithoutPreDelet
 	}
 }
 
-func TestOrchestration_DeletePipeline_DeletesTargetWithoutTargetOutputHooks(t *testing.T) {
+func TestOrchestration_DeletePipeline_DeletesDeliveryOwnedTarget(t *testing.T) {
 	store, vault := setupStore(t)
 	seedFulfillmentAndDeployment(t, store, "deployments/d1", domain.FulfillmentSnapshot{
 		Generation:        2,

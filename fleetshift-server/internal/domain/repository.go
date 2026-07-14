@@ -11,16 +11,6 @@ import (
 type TargetRepository interface {
 	Create(ctx context.Context, target TargetInfo) error
 	CreateOrUpdate(ctx context.Context, target TargetInfo) error
-	// TransitionState compare-and-swaps id's lifecycle state to to when the
-	// stored state equals from, without rewriting other columns. It is
-	// idempotent when the target is already in to (returns nil). Missing
-	// targets return [ErrNotFound]. A target in any other state returns
-	// [ErrIllegalStateTransition].
-	//
-	// When from is [TargetStateReady], an empty stored state is treated
-	// as ready so the transition matches the readiness convention used
-	// elsewhere.
-	TransitionState(ctx context.Context, id TargetID, from, to TargetState) error
 	Get(ctx context.Context, id TargetID) (TargetInfo, error)
 	List(ctx context.Context) ([]TargetInfo, error)
 	Delete(ctx context.Context, id TargetID) error

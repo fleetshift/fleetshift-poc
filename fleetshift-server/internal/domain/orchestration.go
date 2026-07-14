@@ -165,11 +165,6 @@ type OrchestrationWorkflowSpec struct {
 	Vault           Vault
 	Now             func() time.Time
 
-	// TargetOutputHooks handles post-registration hooks for
-	// delivery-produced target outputs. Defaults to
-	// [NoOpTargetOutputHooks].
-	TargetOutputHooks TargetOutputHooks
-
 	// AckRetryInterval is how long the dispatch-and-await loop waits
 	// for an acknowledgement signal before redispatching unacked
 	// deliveries. Zero defaults to 30 s.
@@ -190,12 +185,6 @@ type OrchestrationWorkflowOption func(*OrchestrationWorkflowSpec)
 // orchestration workflow.
 func WithFulfillmentObserver(o FulfillmentObserver) OrchestrationWorkflowOption {
 	return func(s *OrchestrationWorkflowSpec) { s.Observer = o }
-}
-
-// WithTargetOutputHooks sets the [TargetOutputHooks] for the
-// orchestration workflow.
-func WithTargetOutputHooks(h TargetOutputHooks) OrchestrationWorkflowOption {
-	return func(s *OrchestrationWorkflowSpec) { s.TargetOutputHooks = h }
 }
 
 // WithAttestation sets the [AttestationAssembler] for provenance.
@@ -230,12 +219,11 @@ func NewOrchestrationWorkflowSpec(
 	opts ...OrchestrationWorkflowOption,
 ) *OrchestrationWorkflowSpec {
 	s := &OrchestrationWorkflowSpec{
-		Store:             store,
-		Delivery:          delivery,
-		Strategies:        strategies,
-		CleanupSignaler:   signaler,
-		Observer:          NoOpFulfillmentObserver{},
-		TargetOutputHooks: NoOpTargetOutputHooks{},
+		Store:           store,
+		Delivery:        delivery,
+		Strategies:      strategies,
+		CleanupSignaler: signaler,
+		Observer:        NoOpFulfillmentObserver{},
 	}
 	for _, o := range opts {
 		o(s)
@@ -726,7 +714,6 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 
 		// TODO: revisit the "TargetRegistrar" thing – should we make that upsert instead? remove that?
 		now := s.now()
-		registered := make([]TargetInfo, 0, len(in.Result.ProvisionedTargets))
 		for _, pt := range in.Result.ProvisionedTargets {
 			props, _ := json.Marshal(pt.Properties)
 			invID := InventoryItemID("target:" + string(pt.ID))
@@ -756,16 +743,11 @@ func (s *OrchestrationWorkflowSpec) ProcessDeliveryOutputs() Activity[DeliveryOu
 				probe.Error(err)
 				return struct{}{}, fmt.Errorf("upsert target %q: %w", pt.ID, err)
 			}
-			registered = append(registered, target)
 		}
 		probe.TargetsRegistered(len(in.Result.ProvisionedTargets))
 		if err := tx.Commit(); err != nil {
 			probe.Error(err)
 			return struct{}{}, err
-		}
-
-		for _, target := range registered {
-			s.targetOutputHooks().AfterTargetRegistered(ctx, target)
 		}
 		return struct{}{}, nil
 	})
@@ -814,13 +796,6 @@ func (s *OrchestrationWorkflowSpec) CheckGeneration() Activity[FulfillmentID, Ge
 
 func (s *OrchestrationWorkflowSpec) observer() FulfillmentObserver {
 	return s.Observer
-}
-
-func (s *OrchestrationWorkflowSpec) targetOutputHooks() TargetOutputHooks {
-	if s.TargetOutputHooks != nil {
-		return s.TargetOutputHooks
-	}
-	return NoOpTargetOutputHooks{}
 }
 
 // Run is the deterministic workflow body. Each execution does a single

@@ -87,34 +87,6 @@ func (r *TargetRepo) CreateOrUpdate(ctx context.Context, t domain.TargetInfo) er
 	return nil
 }
 
-func (r *TargetRepo) TransitionState(ctx context.Context, id domain.TargetID, from, to domain.TargetState) error {
-	res, err := r.DB.ExecContext(ctx,
-		`UPDATE targets SET state = ?
-		 WHERE id = ?
-		   AND (state = ? OR (? = 'ready' AND state = ''))`,
-		string(to), string(id), string(from), string(from),
-	)
-	if err != nil {
-		return fmt.Errorf("transition target %q state: %w", id, err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("transition target %q state: rows affected: %w", id, err)
-	}
-	if n == 1 {
-		return nil
-	}
-
-	got, err := r.Get(ctx, id)
-	if err != nil {
-		return err
-	}
-	if got.State() == to {
-		return nil
-	}
-	return fmt.Errorf("target %q state %q: %w", id, got.State(), domain.ErrIllegalStateTransition)
-}
-
 func (r *TargetRepo) Get(ctx context.Context, id domain.TargetID) (domain.TargetInfo, error) {
 	row := r.DB.QueryRowContext(ctx,
 		`SELECT id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types FROM targets WHERE id = ?`,

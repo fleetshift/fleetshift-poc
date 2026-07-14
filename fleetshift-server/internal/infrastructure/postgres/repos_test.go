@@ -41,43 +41,6 @@ func TestTargetRepo(t *testing.T) {
 	})
 }
 
-func TestTargetRepo_TransitionState_EmptyStateTreatedAsReady(t *testing.T) {
-	t.Parallel()
-	store := newStore(t)
-	ctx := context.Background()
-
-	// Bypass Create's empty→ready normalization to exercise the compare-and-swap
-	// readiness convention for legacy/empty stored state.
-	_, err := store.DB.ExecContext(ctx,
-		`INSERT INTO targets (id, type, name, state, labels, properties, inventory_item_id, accepted_manifest_types)
-		 VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-		"t-empty", "kubernetes", "empty-state", "", `{}`, `{}`, "target:t-empty", `[]`,
-	)
-	if err != nil {
-		t.Fatalf("raw insert: %v", err)
-	}
-
-	tx, err := store.Begin(ctx)
-	if err != nil {
-		t.Fatalf("Begin: %v", err)
-	}
-	defer tx.Rollback()
-
-	if err := tx.Targets().TransitionState(ctx, "t-empty", domain.TargetStateReady, domain.TargetStateDraining); err != nil {
-		t.Fatalf("TransitionState from empty state: %v", err)
-	}
-	got, err := tx.Targets().Get(ctx, "t-empty")
-	if err != nil {
-		t.Fatalf("Get: %v", err)
-	}
-	if got.State() != domain.TargetStateDraining {
-		t.Fatalf("State = %q, want draining", got.State())
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("Commit: %v", err)
-	}
-}
-
 func TestFulfillmentRepo(t *testing.T) {
 	t.Parallel()
 	fulfillmentrepotest.Run(t, func(t *testing.T) domain.FulfillmentRepository {
