@@ -408,7 +408,7 @@ func TestIndexerDelegate_DoneClosesOnlyAfterWriterFlush(t *testing.T) {
 func TestKubernetesInProcessIndexHost_StopAllCancelsAllBeforeWait(t *testing.T) {
 	unblockSlow := make(chan struct{})
 	var slowStarted atomic.Bool
-	var discoveryCalls atomic.Int32
+	var discoveryClients atomic.Int32
 
 	host := NewKubernetesInProcessIndexHost(
 		context.Background(),
@@ -416,15 +416,16 @@ func TestKubernetesInProcessIndexHost_StopAllCancelsAllBeforeWait(t *testing.T) 
 		&recordingReporter{},
 		slog.New(slog.DiscardHandler),
 		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://example"}, nil
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return newFakeDynamicClient(podsGVR(), crdGVR), nil
 		}),
 		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			n := discoveryCalls.Add(1)
+			n := discoveryClients.Add(1)
 			if n == 1 {
-				return &blockingDiscovery{
+				// First target (slow): readiness succeeds, then RunContinuous blocks.
+				return &readyThenBlockDiscovery{
 					fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 						GroupVersion: "v1",
 						APIResources: []metav1.APIResource{
@@ -476,16 +477,16 @@ func TestKubernetesInProcessIndexHost_StopAllCancelsAllBeforeWait(t *testing.T) 
 
 	// Fast indexer must finish within the shared deadline because it was
 	// canceled immediately (not after the slow wait consumed the budget).
-	if host.Running("fast") {
+	if host.HasIndexer("fast") {
 		t.Fatal("fast indexer should have stopped under the shared deadline")
 	}
-	if !host.Running("slow") {
+	if !host.HasIndexer("slow") {
 		t.Fatal("slow indexer should remain tracked after timeout")
 	}
 
 	close(unblockSlow)
 	deadline = time.After(2 * time.Second)
-	for host.Running("slow") {
+	for host.HasIndexer("slow") {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for slow indexer cleanup")
@@ -683,7 +684,7 @@ type shutdownFlushMarker struct{}
 
 func TestKubernetesInProcessIndexHost_StartDuringStopAllTimeout(t *testing.T) {
 	unblock := make(chan struct{})
-	host, blocked := newHostWithBlockingDiscovery(t, unblock)
+	host, blocked := newHostWithReadyThenBlockDiscovery(t, unblock)
 	target := readyKubeTarget("overlap", nil)
 
 	if err := host.StartIndexer(context.Background(), target); err != nil {
@@ -696,7 +697,7 @@ func TestKubernetesInProcessIndexHost_StartDuringStopAllTimeout(t *testing.T) {
 	if err := host.StopAllIndexers(stopCtx); err == nil {
 		t.Fatal("expected StopAllIndexers timeout")
 	}
-	if !host.Running("overlap") {
+	if !host.HasIndexer("overlap") {
 		t.Fatal("expected indexer still tracked after timeout")
 	}
 
@@ -705,13 +706,13 @@ func TestKubernetesInProcessIndexHost_StartDuringStopAllTimeout(t *testing.T) {
 	if err := host.StartIndexer(context.Background(), target); err != nil {
 		t.Fatalf("StartIndexer during timeout cleanup: %v", err)
 	}
-	if !host.Running("overlap") {
+	if !host.HasIndexer("overlap") {
 		t.Fatal("expected same indexer still tracked")
 	}
 
 	close(unblock)
 	deadline := time.After(2 * time.Second)
-	for host.Running("overlap") {
+	for host.HasIndexer("overlap") {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for background cleanup")
@@ -723,10 +724,10 @@ func TestKubernetesInProcessIndexHost_StartDuringStopAllTimeout(t *testing.T) {
 	if err := host.StartIndexer(context.Background(), target); err != nil {
 		t.Fatalf("StartIndexer after cleanup: %v", err)
 	}
-	if !host.Running("overlap") {
+	if !host.HasIndexer("overlap") {
 		t.Fatal("expected indexer running after restart")
 	}
-	if err := host.StopIndexer(context.Background(), target); err != nil {
+	if err := host.StopIndexer(context.Background(), target.ID()); err != nil {
 		t.Fatalf("StopIndexer: %v", err)
 	}
 }
@@ -738,7 +739,7 @@ func TestKubernetesInProcessIndexHost_ConcurrentStopIndexerAndStopAll(t *testing
 		&recordingReporter{},
 		slog.New(slog.DiscardHandler),
 		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://example"}, nil
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return newFakeDynamicClient(podsGVR(), crdGVR), nil
@@ -770,11 +771,11 @@ func TestKubernetesInProcessIndexHost_ConcurrentStopIndexerAndStopAll(t *testing
 	wg.Add(3)
 	go func() {
 		defer wg.Done()
-		errCh <- host.StopIndexer(context.Background(), t1)
+		errCh <- host.StopIndexer(context.Background(), t1.ID())
 	}()
 	go func() {
 		defer wg.Done()
-		errCh <- host.StopIndexer(context.Background(), t2)
+		errCh <- host.StopIndexer(context.Background(), t2.ID())
 	}()
 	go func() {
 		defer wg.Done()
@@ -787,7 +788,7 @@ func TestKubernetesInProcessIndexHost_ConcurrentStopIndexerAndStopAll(t *testing
 			t.Fatalf("concurrent stop: %v", err)
 		}
 	}
-	if host.Running("a") || host.Running("b") {
+	if host.HasIndexer("a") || host.HasIndexer("b") {
 		t.Fatal("expected all indexers stopped")
 	}
 }
@@ -836,7 +837,7 @@ func TestControllerShutdown_NoReporterCallsAfterRunReturns(t *testing.T) {
 		reporter,
 		slog.New(slog.DiscardHandler),
 		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://example"}, nil
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return dyn, nil
@@ -876,7 +877,7 @@ func TestControllerShutdown_NoReporterCallsAfterRunReturns(t *testing.T) {
 	}()
 
 	deadline := time.After(2 * time.Second)
-	for !host.Running("stack") {
+	for !host.HasIndexer("stack") {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for indexer start")
@@ -896,7 +897,7 @@ func TestControllerShutdown_NoReporterCallsAfterRunReturns(t *testing.T) {
 	if late.Load() != 0 {
 		t.Fatalf("reporter called %d times after controller.Run returned", late.Load())
 	}
-	if host.Running("stack") {
+	if host.HasIndexer("stack") {
 		t.Fatal("expected indexer stopped when Run returned")
 	}
 }

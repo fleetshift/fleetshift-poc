@@ -204,7 +204,7 @@ func newCompositionHost(
 		reporter,
 		slog.New(slog.DiscardHandler),
 		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://composition.example"}, nil
+			return &rest.Config{Host: "https://composition.example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return dyn, nil

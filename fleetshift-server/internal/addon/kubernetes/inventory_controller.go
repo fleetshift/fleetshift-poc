@@ -53,15 +53,15 @@ type InProcessIndexRuntime interface {
 	// StartIndexer starts an in-process indexer for target. It is
 	// idempotent by target ID and must not delete inventory.
 	StartIndexer(ctx context.Context, target domain.TargetInfo) error
-	// StopIndexer stops the in-process indexer for target. It is
+	// StopIndexer stops the in-process indexer for targetID. It is
 	// idempotent and must not delete inventory.
-	StopIndexer(ctx context.Context, target domain.TargetInfo) error
-	// StopAllIndexers stops every running in-process indexer. It is safe
-	// during server shutdown and must not perform inventory cleanup.
+	StopIndexer(ctx context.Context, targetID domain.TargetID) error
+	// StopAllIndexers stops every tracked in-process indexer and must not
+	// perform inventory cleanup.
 	StopAllIndexers(ctx context.Context) error
-	// HasIndexer reports whether an in-process indexer is currently tracked
-	// for id. Controllers use this to detect unexpected runner exit
-	// without treating every reconcile as a start.
+	// HasIndexer reports whether an indexer entry is currently tracked for
+	// id (starting or ready). Controllers use this to detect unexpected
+	// runner exit without treating every reconcile as a start.
 	HasIndexer(id domain.TargetID) bool
 }
 
@@ -447,5 +447,5 @@ func (c *InProcessIndexController) reconcile(ctx context.Context) {
 func (c *InProcessIndexController) stopIndexerBounded(ctx context.Context, target domain.TargetInfo) error {
 	stopCtx, cancel := context.WithTimeout(ctx, c.stopTimeout)
 	defer cancel()
-	return c.runtime.StopIndexer(stopCtx, target)
+	return c.runtime.StopIndexer(stopCtx, target.ID())
 }

@@ -420,7 +420,7 @@ func Test_StopIndexerLeavesInventory(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	if err := f.host.StopIndexer(ctx, f.target); err != nil {
+	if err := f.host.StopIndexer(ctx, f.target.ID()); err != nil {
 		t.Fatalf("StopIndexer: %v", err)
 	}
 	if f.host.HasIndexer(f.targetID) {
@@ -872,7 +872,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	}
 
 	t.Cleanup(func() {
-		_ = host.StopIndexer(context.Background(), target)
+		_ = host.StopIndexer(context.Background(), target.ID())
 		_ = fixture.adminDynClient.Resource(nsGVR).Delete(context.Background(), ns, metav1.DeleteOptions{})
 	})
 

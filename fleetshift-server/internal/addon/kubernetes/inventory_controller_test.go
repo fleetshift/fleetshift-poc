@@ -96,17 +96,17 @@ func (r *fakeIndexRuntime) StartIndexer(_ context.Context, target domain.TargetI
 	return nil
 }
 
-func (r *fakeIndexRuntime) StopIndexer(ctx context.Context, target domain.TargetInfo) error {
+func (r *fakeIndexRuntime) StopIndexer(ctx context.Context, targetID domain.TargetID) error {
 	r.mu.Lock()
 	hook := r.stopHook
 	r.mu.Unlock()
 	if hook != nil {
-		hook(target.ID())
+		hook(targetID)
 	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.calls = append(r.calls, runtimeCall{op: "stop", target: target.ID()})
+	r.calls = append(r.calls, runtimeCall{op: "stop", target: targetID})
 	if dl, ok := ctx.Deadline(); ok {
 		r.lastStopTimeout = time.Until(dl)
 	} else {
@@ -115,7 +115,7 @@ func (r *fakeIndexRuntime) StopIndexer(ctx context.Context, target domain.Target
 	if r.stopErr != nil {
 		return r.stopErr
 	}
-	delete(r.running, target.ID())
+	delete(r.running, targetID)
 	select {
 	case r.stoppedCh <- struct{}{}:
 	default:
@@ -735,17 +735,17 @@ func TestKubernetesInProcessIndexHost_StartStopIdempotent(t *testing.T) {
 	if err := host.StartIndexer(context.Background(), target); err != nil {
 		t.Fatalf("idempotent StartIndexer: %v", err)
 	}
-	if !host.Running("host-1") {
+	if !host.HasIndexer("host-1") {
 		t.Fatal("expected host-1 running")
 	}
 
-	if err := host.StopIndexer(context.Background(), target); err != nil {
+	if err := host.StopIndexer(context.Background(), target.ID()); err != nil {
 		t.Fatalf("StopIndexer: %v", err)
 	}
-	if err := host.StopIndexer(context.Background(), target); err != nil {
+	if err := host.StopIndexer(context.Background(), target.ID()); err != nil {
 		t.Fatalf("idempotent StopIndexer: %v", err)
 	}
-	if host.Running("host-1") {
+	if host.HasIndexer("host-1") {
 		t.Fatal("expected host-1 stopped")
 	}
 
@@ -1132,14 +1132,14 @@ func TestKubernetesInProcessIndexHost_StartIndexerClientErrors(t *testing.T) {
 	})
 }
 
-// blockingDiscovery hangs in ServerPreferredResources until unblock is closed,
-// so the in-process indexer goroutine does not close done until then.
+// blockingDiscovery hangs in ServerPreferredResources until unblock is closed.
 type blockingDiscovery struct {
 	*fakeDiscoveryWithPreferred
 	unblock <-chan struct{}
 	onBlock func()
 }
 
+// ServerPreferredResources blocks until unblock is closed, then delegates.
 func (d *blockingDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
 	if d.onBlock != nil {
 		d.onBlock()
@@ -1148,7 +1148,31 @@ func (d *blockingDiscovery) ServerPreferredResources() ([]*metav1.APIResourceLis
 	return d.fakeDiscoveryWithPreferred.ServerPreferredResources()
 }
 
-func newHostWithBlockingDiscovery(t *testing.T, unblock <-chan struct{}) (*KubernetesInProcessIndexHost, *atomic.Bool) {
+// readyThenBlockDiscovery succeeds once for EnsureIndexer readiness, then
+// blocks on later ServerPreferredResources calls until unblock is closed.
+type readyThenBlockDiscovery struct {
+	*fakeDiscoveryWithPreferred
+	unblock <-chan struct{}
+	onBlock func()
+	calls   atomic.Int32
+}
+
+// ServerPreferredResources returns immediately on the first call, then blocks.
+func (d *readyThenBlockDiscovery) ServerPreferredResources() ([]*metav1.APIResourceList, error) {
+	if d.calls.Add(1) == 1 {
+		return d.fakeDiscoveryWithPreferred.ServerPreferredResources()
+	}
+	if d.onBlock != nil {
+		d.onBlock()
+	}
+	<-d.unblock
+	return d.fakeDiscoveryWithPreferred.ServerPreferredResources()
+}
+
+// newHostWithReadyThenBlockDiscovery returns a host whose discovery succeeds
+// once (EnsureIndexer readiness), then blocks on later discovery calls, plus
+// a flag set when the blocking call begins.
+func newHostWithReadyThenBlockDiscovery(t *testing.T, unblock <-chan struct{}) (*KubernetesInProcessIndexHost, *atomic.Bool) {
 	t.Helper()
 	var blocked atomic.Bool
 	host := NewKubernetesInProcessIndexHost(
@@ -1157,13 +1181,13 @@ func newHostWithBlockingDiscovery(t *testing.T, unblock <-chan struct{}) (*Kuber
 		&recordingReporter{},
 		slog.New(slog.DiscardHandler),
 		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
-			return &rest.Config{Host: "https://example"}, nil
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return newFakeDynamicClient(podsGVR()), nil
 		}),
 		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
-			return &blockingDiscovery{
+			return &readyThenBlockDiscovery{
 				fakeDiscoveryWithPreferred: newFakeDiscovery([]*metav1.APIResourceList{{
 					GroupVersion: "v1",
 					APIResources: []metav1.APIResource{
@@ -1181,6 +1205,7 @@ func newHostWithBlockingDiscovery(t *testing.T, unblock <-chan struct{}) (*Kuber
 	return host, &blocked
 }
 
+// awaitDiscoveryBlocked waits until the blocking discovery path has been entered.
 func awaitDiscoveryBlocked(t *testing.T, blocked *atomic.Bool) {
 	t.Helper()
 	deadline := time.After(2 * time.Second)
@@ -1195,30 +1220,30 @@ func awaitDiscoveryBlocked(t *testing.T, blocked *atomic.Bool) {
 
 func TestKubernetesInProcessIndexHost_StopIndexerTimeout(t *testing.T) {
 	unblock := make(chan struct{})
-	host, blocked := newHostWithBlockingDiscovery(t, unblock)
+	host, blocked := newHostWithReadyThenBlockDiscovery(t, unblock)
 	target := readyKubeTarget("host-timeout", nil)
 
 	if err := host.StartIndexer(context.Background(), target); err != nil {
 		t.Fatalf("StartIndexer: %v", err)
 	}
 	awaitDiscoveryBlocked(t, blocked)
-	if !host.Running("host-timeout") {
-		t.Fatal("expected indexer tracked while blocked in discovery")
+	if !host.HasIndexer("host-timeout") {
+		t.Fatal("expected indexer tracked while blocked after readiness")
 	}
 
 	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	err := host.StopIndexer(stopCtx, target)
+	err := host.StopIndexer(stopCtx, target.ID())
 	if err == nil {
 		t.Fatal("expected stop timeout error")
 	}
-	if !host.Running("host-timeout") {
+	if !host.HasIndexer("host-timeout") {
 		t.Fatal("expected indexer left tracked after stop timeout")
 	}
 
 	close(unblock)
 	deadline := time.After(2 * time.Second)
-	for host.Running("host-timeout") {
+	for host.HasIndexer("host-timeout") {
 		select {
 		case <-deadline:
 			t.Fatal("timed out waiting for background stop cleanup")
@@ -1259,14 +1284,14 @@ func TestKubernetesInProcessIndexHost_StopAllIndexersWithRunningAndTimeout(t *te
 		if err := host.StopAllIndexers(context.Background()); err != nil {
 			t.Fatalf("StopAllIndexers: %v", err)
 		}
-		if host.Running("host-all") {
+		if host.HasIndexer("host-all") {
 			t.Fatal("expected host-all stopped")
 		}
 	})
 
 	t.Run("timeout leaves tracked until done", func(t *testing.T) {
 		unblock := make(chan struct{})
-		host, blocked := newHostWithBlockingDiscovery(t, unblock)
+		host, blocked := newHostWithReadyThenBlockDiscovery(t, unblock)
 		target := readyKubeTarget("host-all-timeout", nil)
 		if err := host.StartIndexer(context.Background(), target); err != nil {
 			t.Fatalf("StartIndexer: %v", err)
@@ -1279,13 +1304,13 @@ func TestKubernetesInProcessIndexHost_StopAllIndexersWithRunningAndTimeout(t *te
 		if err == nil {
 			t.Fatal("expected StopAllIndexers timeout error")
 		}
-		if !host.Running("host-all-timeout") {
+		if !host.HasIndexer("host-all-timeout") {
 			t.Fatal("expected indexer left tracked after StopAllIndexers timeout")
 		}
 
 		close(unblock)
 		deadline := time.After(2 * time.Second)
-		for host.Running("host-all-timeout") {
+		for host.HasIndexer("host-all-timeout") {
 			select {
 			case <-deadline:
 				t.Fatal("timed out waiting for background StopAllIndexers cleanup")
@@ -1508,21 +1533,44 @@ func (f desiredFuncPolicy) Desired(target domain.TargetInfo) (TargetIndexDecisio
 }
 
 func TestKubernetesInProcessIndexHost_DefaultFactoriesAndHostContextDeadline(t *testing.T) {
-	hostCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	hostCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	host := NewKubernetesInProcessIndexHost(hostCtx, nil, &recordingReporter{}, nil)
-	target := readyKubeTarget("default-factories", map[string]string{
-		PropAPIServer:           "https://127.0.0.1:1",
-		PropServiceAccountToken: "token",
-	})
+	host := NewKubernetesInProcessIndexHost(
+		hostCtx,
+		nil,
+		&recordingReporter{},
+		nil,
+		WithInProcessIndexHostRESTConfigFactory(func(context.Context, domain.TargetInfo) (*rest.Config, error) {
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
+		}),
+		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
+			return newFakeDynamicClient(podsGVR(), crdGVR), nil
+		}),
+		WithInProcessIndexHostDiscoveryClientFactory(func(*rest.Config) (discovery.DiscoveryInterface, error) {
+			return newFakeDiscovery([]*metav1.APIResourceList{{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				},
+			}}), nil
+		}),
+		WithInProcessIndexHostIndexConfig(func(domain.TargetInfo) IndexConfig {
+			return IndexConfig{BatchInterval: time.Hour}
+		}),
+	)
+	target := readyKubeTarget("default-factories", nil)
 	if err := host.StartIndexer(context.Background(), target); err != nil {
-		t.Fatalf("StartIndexer with default factories: %v", err)
+		t.Fatalf("StartIndexer: %v", err)
 	}
+	if !host.HasIndexer("default-factories") {
+		t.Fatal("expected indexer running")
+	}
+	cancel()
 	deadline := time.After(2 * time.Second)
-	for host.Running("default-factories") {
+	for host.HasIndexer("default-factories") {
 		select {
 		case <-deadline:
-			t.Fatal("timed out waiting for host context deadline to stop indexer")
+			t.Fatal("timed out waiting for host context cancel to stop indexer")
 		case <-time.After(10 * time.Millisecond):
 		}
 	}
@@ -1544,7 +1592,7 @@ func TestKubernetesInProcessIndexHost_ConcurrentStartIndexerIdempotent(t *testin
 				close(firstEntered)
 				<-releaseFirst
 			}
-			return &rest.Config{Host: "https://example"}, nil
+			return &rest.Config{Host: "https://example", BearerToken: "test-token"}, nil
 		}),
 		WithInProcessIndexHostDynamicClientFactory(func(*rest.Config) (dynamic.Interface, error) {
 			return newFakeDynamicClient(podsGVR(), crdGVR), nil
@@ -1576,10 +1624,10 @@ func TestKubernetesInProcessIndexHost_ConcurrentStartIndexerIdempotent(t *testin
 			t.Fatalf("StartIndexer: %v", err)
 		}
 	}
-	if !host.Running("race-1") {
+	if !host.HasIndexer("race-1") {
 		t.Fatal("expected race-1 running")
 	}
-	if err := host.StopIndexer(context.Background(), target); err != nil {
+	if err := host.StopIndexer(context.Background(), target.ID()); err != nil {
 		t.Fatalf("StopIndexer: %v", err)
 	}
 }
