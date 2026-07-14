@@ -181,14 +181,14 @@ func TestDelete_MapsToApplyDeltaDeletesWithObjectResourceName(t *testing.T) {
 		deltas := mock.getDeltas()
 		var found bool
 		for _, d := range deltas {
-			for _, ref := range d.delta.Deletes {
-				if ref.ResourceType == ObjectResourceType && ref.Name == wantName {
+			for _, del := range d.delta.Deletes {
+				if del.Name == wantName && del.IsDelete {
 					found = true
 				}
 			}
 		}
 		if !found {
-			t.Fatalf("expected delete ref %s in ApplyDelta.Deletes, not found in %+v", wantName, deltas)
+			t.Fatalf("expected IsDelete for %s in ApplyDelta.Deletes, not found in %+v", wantName, deltas)
 		}
 	})
 }
@@ -1491,7 +1491,11 @@ func TestWriter_NoopEdgeSinkKeepsInventoryWritesSuccessful(t *testing.T) {
 	})
 }
 
-func TestResync_EmptySnapshotPrunesCollection(t *testing.T) {
+// TestResync_EmptySnapshotDeletesReportedUIDs verifies a later empty
+// LIST emits IsDelete only for UIDs acknowledged in this generation's
+// ReportedUIDs (same-process omission reconciliation — not a DB
+// collection wipe of unknown rows).
+func TestResync_EmptySnapshotDeletesReportedUIDs(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		mock := &recordingReporter{}
 		w := newTestWriter(mock, nil, nil, 10*time.Second)
@@ -1524,23 +1528,26 @@ func TestResync_EmptySnapshotPrunesCollection(t *testing.T) {
 
 		deltas := mock.getDeltas()
 		if len(deltas) != 2 {
-			t.Fatalf("expected prune ApplyDelta after seed resync, got %d deltas", len(deltas))
+			t.Fatalf("expected ReportedUIDs-diff ApplyDelta after seed resync, got %d deltas", len(deltas))
 		}
-		prune := deltas[1]
-		if len(prune.delta.Upserts) != 0 {
-			t.Fatalf("empty LIST prune should have no upserts, got %d", len(prune.delta.Upserts))
+		diff := deltas[1]
+		if len(diff.delta.Upserts) != 0 {
+			t.Fatalf("empty LIST omission deletes should have no upserts, got %d", len(diff.delta.Upserts))
 		}
-		if len(prune.delta.Deletes) != 2 {
-			t.Fatalf("empty LIST prune deletes = %d, want 2", len(prune.delta.Deletes))
+		if len(diff.delta.Deletes) != 2 {
+			t.Fatalf("empty LIST omission deletes = %d, want 2", len(diff.delta.Deletes))
 		}
 		want1 := mustObjectName(t, "target-1", "uid-1", testGVR)
 		want2 := mustObjectName(t, "target-1", "uid-2", testGVR)
-		got := make(map[domain.ResourceName]bool, len(prune.delta.Deletes))
-		for _, ref := range prune.delta.Deletes {
-			got[ref.Name] = true
+		got := make(map[domain.ResourceName]bool, len(diff.delta.Deletes))
+		for _, del := range diff.delta.Deletes {
+			if !del.IsDelete {
+				t.Fatalf("resync delete must set IsDelete, got %+v", del)
+			}
+			got[del.Name] = true
 		}
 		if !got[want1] || !got[want2] {
-			t.Fatalf("expected deletes for prior UIDs, got %+v", prune.delta.Deletes)
+			t.Fatalf("expected deletes for prior UIDs, got %+v", diff.delta.Deletes)
 		}
 	})
 }
@@ -1567,14 +1574,14 @@ func TestFlush_UpsertAndDeleteDifferentUIDsSameBatch(t *testing.T) {
 					sawAdd = true
 				}
 			}
-			for _, ref := range d.delta.Deletes {
-				if ref.Name == wantDel {
+			for _, del := range d.delta.Deletes {
+				if del.Name == wantDel && del.IsDelete {
 					sawDel = true
 				}
 			}
 		}
 		if !sawAdd || !sawDel {
-			t.Fatalf("expected same-batch upsert+delete, sawAdd=%v sawDel=%v", sawAdd, sawDel)
+			t.Fatalf("expected same-batch upsert+IsDelete, sawAdd=%v sawDel=%v", sawAdd, sawDel)
 		}
 	})
 }
@@ -1971,18 +1978,18 @@ func TestResync_UsesReportedUIDsNotUnackedNodes(t *testing.T) {
 
 		deltas := mock.getDeltas()
 		if len(deltas) < 2 {
-			t.Fatalf("ApplyDelta calls = %d, want >= 2 (seed + prune)", len(deltas))
+			t.Fatalf("ApplyDelta calls = %d, want >= 2 (seed + ReportedUIDs diff)", len(deltas))
 		}
-		prune := deltas[len(deltas)-1].delta
-		if len(prune.Deletes) != 1 {
-			t.Fatalf("prune deletes = %d, want 1 (uid-ack only)", len(prune.Deletes))
+		diff := deltas[len(deltas)-1].delta
+		if len(diff.Deletes) != 1 {
+			t.Fatalf("ReportedUIDs-diff deletes = %d, want 1 (uid-ack only)", len(diff.Deletes))
 		}
 		wantAck := mustObjectName(t, "target-1", "uid-ack", testGVR)
-		if prune.Deletes[0].Name != wantAck {
-			t.Fatalf("prune deleted %v, want %v", prune.Deletes[0], wantAck)
+		if diff.Deletes[0].Name != wantAck || !diff.Deletes[0].IsDelete {
+			t.Fatalf("ReportedUIDs-diff deleted %+v, want IsDelete for %v", diff.Deletes[0], wantAck)
 		}
 		wantUnacked := mustObjectName(t, "target-1", "uid-unacked", testGVR)
-		for _, d := range prune.Deletes {
+		for _, d := range diff.Deletes {
 			if d.Name == wantUnacked {
 				t.Fatal("unacked uid must not be deleted by ReportedUIDs resync")
 			}

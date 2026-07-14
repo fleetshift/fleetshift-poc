@@ -353,31 +353,13 @@ type InventoryDelta struct {
 	ReceivedAt time.Time
 }
 
-// InventoryResourceRef identifies an inventory-owned extension
-// resource by the same natural key shape [InventoryReplacement] and
-// [InventoryDelta] use, for
-// [ExtensionResourceRepository.DeleteInventoryResources].
-type InventoryResourceRef struct {
-	ResourceType ResourceType
-	Name         ResourceName
-}
-
-// InventoryCollectionRef identifies one exact inventory collection for
-// one resource type, for
-// [ExtensionResourceRepository.PruneInventoryCollection]. Collection is
-// a full collection path (e.g. "targets/prod/resourceTypes/widgets/objects"),
-// not a prefix.
-type InventoryCollectionRef struct {
-	ResourceType ResourceType
-	Collection   CollectionName
-}
-
 // InventorySubtreeRef identifies every inventory resource of one
-// resource type whose collection lies below a parent resource-name
-// subtree, for
-// [ExtensionResourceRepository.DeleteInventorySubtree]. Parent is a
-// parsed [ResourceName] such as "targets/prod", not a raw string
-// prefix.
+// resource type whose name lies below a parent resource-name subtree.
+// Parent is a parsed [ResourceName] such as "clusters/prod", not a raw
+// string prefix. Application-layer target inventory cleanup uses this
+// scope to issue [InventoryReplacement.IsDelete] entries through
+// ReplaceInventory; there is no dedicated repository subtree-delete
+// method.
 type InventorySubtreeRef struct {
 	ResourceType ResourceType
 	Parent       ResourceName

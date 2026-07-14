@@ -494,10 +494,12 @@ func TestRemoveGVR_LeavesPersistedCollection(t *testing.T) {
 	}
 }
 
-// TestResyncPrune_RemovesAbsentObjectsFromStore verifies LIST/resync
-// prune deletes store rows for objects absent from the snapshot without
-// requiring a watch DELETE event.
-func TestResyncPrune_RemovesAbsentObjectsFromStore(t *testing.T) {
+// TestResync_RemovesAbsentReportedUIDsFromStore verifies a same-process
+// LIST/resync deletes store rows for UIDs previously acknowledged in
+// ReportedUIDs but absent from the LIST, without requiring a watch
+// DELETE event. This is process-generation omission reconciliation, not
+// durable DB collection wipe of unknown rows.
+func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 	store := &sqlite.Store{DB: sqlite.OpenTestDB(t)}
 	seedObjectType(t, store)
 
@@ -545,7 +547,7 @@ func TestResyncPrune_RemovesAbsentObjectsFromStore(t *testing.T) {
 	var foundKeep bool
 	for _, obj := range objs {
 		if obj.Name() == wantDrop {
-			t.Fatalf("pruned object still present: %s", obj.Name())
+			t.Fatalf("omitted ReportedUID still present: %s", obj.Name())
 		}
 		if obj.Name() == wantKeep {
 			foundKeep = true
@@ -553,7 +555,7 @@ func TestResyncPrune_RemovesAbsentObjectsFromStore(t *testing.T) {
 		}
 	}
 	if !foundKeep {
-		t.Fatal("sibling object must survive resync prune")
+		t.Fatal("sibling object must survive ReportedUIDs-diff resync")
 	}
 }
 

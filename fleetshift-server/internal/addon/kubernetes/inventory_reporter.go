@@ -39,13 +39,15 @@ type InventoryObjectReport struct {
 
 // InventoryDeltaReport is one incremental flush of object upserts and
 // deletes. Upserts are complete latest-state replacements (not
-// field-level deltas). An empty report is a no-op: the reporter must
-// not turn idle flushes into InventoryReportService heartbeats.
-// DirectInventoryReporter maps both slices into one backend
-// ReplaceBatch whose delete entries set IsDelete.
+// field-level deltas). Deletes are exact-name whole-resource deletes
+// carried as [InventoryObjectReport] with IsDelete true (same DTO as
+// upserts; no separate resource-ref type). An empty report is a no-op:
+// the reporter must not turn idle flushes into InventoryReportService
+// heartbeats. DirectInventoryReporter maps both slices into one
+// backend ReplaceBatch.
 type InventoryDeltaReport struct {
 	Upserts []InventoryObjectReport
-	Deletes []domain.InventoryResourceRef
+	Deletes []InventoryObjectReport
 }
 
 // InventoryReportBackend is the application call surface the direct
@@ -75,16 +77,18 @@ func NewDirectInventoryReporter(backend InventoryReportBackend) *DirectInventory
 
 // ApplyDelta writes upserts and deletes through one mixed
 // ReplaceBatch. An empty delta returns nil without calling the backend
-// -- idle empty flushes are not heartbeats.
+// -- idle empty flushes are not heartbeats. Delete entries are forced
+// to IsDelete true so a mis-tagged writer entry cannot become an
+// accidental upsert.
 func (r *DirectInventoryReporter) ApplyDelta(ctx context.Context, delta InventoryDeltaReport) error {
 	if len(delta.Upserts) == 0 && len(delta.Deletes) == 0 {
 		return nil
 	}
 	reports := make([]InventoryObjectReport, 0, len(delta.Upserts)+len(delta.Deletes))
 	reports = append(reports, delta.Upserts...)
-	for _, ref := range delta.Deletes {
+	for _, del := range delta.Deletes {
 		reports = append(reports, InventoryObjectReport{
-			Name:     ref.Name,
+			Name:     del.Name,
 			IsDelete: true,
 		})
 	}

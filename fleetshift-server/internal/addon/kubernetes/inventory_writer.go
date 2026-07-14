@@ -425,10 +425,10 @@ func (w *Writer) flush(
 		}
 	}
 
-	var deletedRefs []domain.InventoryResourceRef
+	var deleteReports []InventoryObjectReport
 	deletedUIDs := make(map[string]schema.GroupVersionResource)
 	for uid, gvr := range deletes {
-		ref, err := w.resourceRef(gvr, uid)
+		report, err := w.deleteReport(gvr, uid)
 		if err != nil {
 			w.logger.Warn("skipping delete; resource name construction failed",
 				"uid", uid,
@@ -436,11 +436,11 @@ func (w *Writer) flush(
 				"error", err)
 			continue
 		}
-		deletedRefs = append(deletedRefs, ref)
+		deleteReports = append(deleteReports, report)
 		deletedUIDs[uid] = gvr
 	}
 
-	if len(reports) == 0 && len(deletedRefs) == 0 {
+	if len(reports) == 0 && len(deleteReports) == 0 {
 		return nil
 	}
 
@@ -455,7 +455,7 @@ func (w *Writer) flush(
 
 	delta := InventoryDeltaReport{
 		Upserts: reports,
-		Deletes: deletedRefs,
+		Deletes: deleteReports,
 	}
 	if err := w.applyDeltaWithRetry(ctx, delta); err != nil {
 		w.restoreUncommittedNodes(upsertedUIDs, prevNodes, prevEdgeFuncs, hadPrevNode, hadPrevEdgeFn)
@@ -604,14 +604,14 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 	}
 
 	st := w.gvrStates[rs.GVR]
-	var deletes []domain.InventoryResourceRef
+	var deletes []InventoryObjectReport
 	var staleUIDs []string
 	if st != nil {
 		for uid := range st.ReportedUIDs {
 			if _, exists := resyncUIDs[uid]; exists {
 				continue
 			}
-			ref, err := w.resourceRef(rs.GVR, uid)
+			report, err := w.deleteReport(rs.GVR, uid)
 			if err != nil {
 				w.logger.Warn("skipping resync delete; resource name construction failed",
 					"uid", uid,
@@ -619,7 +619,7 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 					"error", err)
 				continue
 			}
-			deletes = append(deletes, ref)
+			deletes = append(deletes, report)
 			staleUIDs = append(staleUIDs, uid)
 		}
 	}
@@ -710,18 +710,20 @@ func (w *Writer) schemaEntry(gvr schema.GroupVersionResource) SchemaEntry {
 	return entry
 }
 
-func (w *Writer) resourceRef(gvr schema.GroupVersionResource, uid string) (domain.InventoryResourceRef, error) {
+// deleteReport builds an exact-name IsDelete [InventoryObjectReport]
+// for one previously reported UID.
+func (w *Writer) deleteReport(gvr schema.GroupVersionResource, uid string) (InventoryObjectReport, error) {
 	name, err := ObjectResourceName(KubernetesObjectIdentity{
 		TargetID: domain.TargetID(w.targetID),
 		GVR:      gvr,
 		UID:      uid,
 	})
 	if err != nil {
-		return domain.InventoryResourceRef{}, err
+		return InventoryObjectReport{}, err
 	}
-	return domain.InventoryResourceRef{
-		ResourceType: ObjectResourceType,
-		Name:         name,
+	return InventoryObjectReport{
+		Name:     name,
+		IsDelete: true,
 	}, nil
 }
 

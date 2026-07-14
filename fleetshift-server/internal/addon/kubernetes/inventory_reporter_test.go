@@ -57,9 +57,9 @@ func TestDirectInventoryReporter_ApplyDelta_MapsUpsertsAndDeletes(t *testing.T) 
 			Observation: &obs,
 			ObservedAt:  now,
 		}},
-		Deletes: []domain.InventoryResourceRef{{
-			ResourceType: kubernetes.ObjectResourceType,
-			Name:         delName,
+		Deletes: []kubernetes.InventoryObjectReport{{
+			Name:     delName,
+			IsDelete: true,
 		}},
 	})
 	if err != nil {
@@ -112,12 +112,14 @@ func TestDirectInventoryReporter_ApplyDelta_UpsertsOnly(t *testing.T) {
 func TestDirectInventoryReporter_ApplyDelta_DeletesOnly(t *testing.T) {
 	fake := &recordingInventoryReportBackend{}
 	reporter := kubernetes.NewDirectInventoryReporter(fake)
-	refs := []domain.InventoryResourceRef{{
-		ResourceType: kubernetes.ObjectResourceType,
-		Name:         "clusters/prod/apiResources/core~v1~pods/objects/uid-x",
-	}}
+	delName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-x")
 
-	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{Deletes: refs})
+	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
+		Deletes: []kubernetes.InventoryObjectReport{{
+			Name:     delName,
+			IsDelete: true,
+		}},
+	})
 	if err != nil {
 		t.Fatalf("ApplyDelta: %v", err)
 	}
@@ -125,8 +127,27 @@ func TestDirectInventoryReporter_ApplyDelta_DeletesOnly(t *testing.T) {
 		t.Fatalf("ReplaceBatch calls = %d, want 1", len(fake.replaceBatchCalls))
 	}
 	got := fake.replaceBatchCalls[0].reports
-	if len(got) != 1 || got[0].Name != refs[0].Name || !got[0].IsDelete {
-		t.Fatalf("ReplaceBatch reports = %#v, want IsDelete for %q", got, refs[0].Name)
+	if len(got) != 1 || got[0].Name != delName || !got[0].IsDelete {
+		t.Fatalf("ReplaceBatch reports = %#v, want IsDelete for %q", got, delName)
+	}
+}
+
+func TestDirectInventoryReporter_ApplyDelta_ForcesIsDeleteOnDeletes(t *testing.T) {
+	// Writer should set IsDelete, but the reporter must still force it
+	// so a mis-tagged delete entry cannot become an upsert.
+	fake := &recordingInventoryReportBackend{}
+	reporter := kubernetes.NewDirectInventoryReporter(fake)
+	delName := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid-x")
+
+	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
+		Deletes: []kubernetes.InventoryObjectReport{{Name: delName}},
+	})
+	if err != nil {
+		t.Fatalf("ApplyDelta: %v", err)
+	}
+	got := fake.replaceBatchCalls[0].reports
+	if len(got) != 1 || !got[0].IsDelete {
+		t.Fatalf("ReplaceBatch reports = %#v, want forced IsDelete=true", got)
 	}
 }
 
@@ -137,9 +158,9 @@ func TestDirectInventoryReporter_ApplyDelta_PropagatesReplaceBatchError(t *testi
 
 	err := reporter.ApplyDelta(context.Background(), kubernetes.InventoryDeltaReport{
 		Upserts: []kubernetes.InventoryObjectReport{{Name: "clusters/prod/apiResources/core~v1~pods/objects/uid-1"}},
-		Deletes: []domain.InventoryResourceRef{{
-			ResourceType: kubernetes.ObjectResourceType,
-			Name:         "clusters/prod/apiResources/core~v1~pods/objects/uid-2",
+		Deletes: []kubernetes.InventoryObjectReport{{
+			Name:     "clusters/prod/apiResources/core~v1~pods/objects/uid-2",
+			IsDelete: true,
 		}},
 	})
 	if !errors.Is(err, wantErr) {
@@ -149,7 +170,8 @@ func TestDirectInventoryReporter_ApplyDelta_PropagatesReplaceBatchError(t *testi
 
 func TestInventoryReporter_DTOsHaveNoEdgeFields(t *testing.T) {
 	// Inventory reporter DTOs must not carry edge fields; edge output
-	// is isolated behind EdgeSink.
+	// is isolated behind EdgeSink. InventoryDeltaReport.Deletes is
+	// object reports with IsDelete, not topology edges.
 	for _, typ := range []any{
 		kubernetes.InventoryDeltaReport{},
 		kubernetes.InventoryObjectReport{},
@@ -159,7 +181,6 @@ func TestInventoryReporter_DTOsHaveNoEdgeFields(t *testing.T) {
 			name := rt.Field(i).Name
 			switch name {
 			case "Adds", "Deletes", "Edges", "EdgeAdds", "EdgeDeletes", "EdgeDelta":
-				// InventoryDeltaReport.Deletes is resource refs, not edges.
 				if rt == reflect.TypeOf(kubernetes.InventoryDeltaReport{}) && name == "Deletes" {
 					continue
 				}

@@ -197,7 +197,11 @@ func TestListAndResync_SkipsDisallowedNamespaces(t *testing.T) {
 	}
 }
 
-func TestListAndResync_PrunesStaleIndexWithoutEventDelete(t *testing.T) {
+// TestListAndResync_DropsStaleLocalIndexWithoutEventDelete verifies LIST
+// clears disappeared UIDs from the in-memory resourceIndex only. Persist
+// deletes for those absences are the writer's ReportedUIDs-diff job via
+// ResyncEvent, not per-UID EventDelete from the informer.
+func TestListAndResync_DropsStaleLocalIndexWithoutEventDelete(t *testing.T) {
 	gvr := podsGVR()
 	dyn := newFakeDynamicClient(gvr)
 	eventCh := make(chan ResourceEvent, 10)
@@ -210,8 +214,6 @@ func TestListAndResync_PrunesStaleIndexWithoutEventDelete(t *testing.T) {
 		t.Fatalf("listAndResync: %v", err)
 	}
 
-	// Stale absence is owned by ResyncEvent → mixed ApplyDelta, not
-	// per-UID EventDelete (which would duplicate writer reconciliation).
 	select {
 	case ev := <-eventCh:
 		t.Fatalf("unexpected event on empty LIST: op=%v uid=%s", ev.Op, ev.Resource.GetUID())
