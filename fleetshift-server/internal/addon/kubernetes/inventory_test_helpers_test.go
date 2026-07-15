@@ -78,9 +78,17 @@ func ensureReadyTarget(t *testing.T, host *KubernetesInProcessIndexHost, target 
 	if apiServer == "" {
 		apiServer = "https://example"
 	}
+	rawCluster := props[PropClusterResourceName]
+	if rawCluster == "" {
+		t.Fatalf("target %q missing %s", target.ID(), PropClusterResourceName)
+	}
+	clusterResourceName, err := ParseClusterResourceName(rawCluster)
+	if err != nil {
+		t.Fatalf("target %q %s: %v", target.ID(), PropClusterResourceName, err)
+	}
 	input, err := NewIndexRuntimeInput(
 		target.ID(),
-		testClusterResourceName(string(target.ID())),
+		clusterResourceName,
 		apiServer,
 		props[PropCACert],
 		[]byte(cred),

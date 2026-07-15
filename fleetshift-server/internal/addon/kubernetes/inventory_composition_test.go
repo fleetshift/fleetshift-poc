@@ -164,6 +164,7 @@ func compositionTarget(id domain.TargetID) domain.TargetInfo {
 			PropAPIServer:           "https://composition.example",
 			PropCACert:              "unused",
 			PropServiceAccountToken: "unused",
+			PropClusterResourceName: string(testClusterResourceName(string(id))),
 		},
 	})
 }
@@ -219,9 +220,17 @@ func newCompositionHost(
 func ensureCompositionIndexer(t *testing.T, host *KubernetesInProcessIndexHost, target domain.TargetInfo, cfg IndexConfig) {
 	t.Helper()
 	props := target.Properties()
+	rawCluster := props[PropClusterResourceName]
+	if rawCluster == "" {
+		t.Fatalf("target %q missing %s", target.ID(), PropClusterResourceName)
+	}
+	clusterResourceName, err := ParseClusterResourceName(rawCluster)
+	if err != nil {
+		t.Fatalf("target %q %s: %v", target.ID(), PropClusterResourceName, err)
+	}
 	input, err := NewIndexRuntimeInput(
 		target.ID(),
-		testClusterResourceName(string(target.ID())),
+		clusterResourceName,
 		props[PropAPIServer],
 		props[PropCACert],
 		[]byte(props[PropServiceAccountToken]),
