@@ -1481,24 +1481,24 @@ func (r *ExtensionResourceRepo) hardDeleteExtensionResourcesByPredicate(ctx cont
 }
 
 // deleteInventoryReplacements hard-deletes every IsDelete replacement
-// by full resource type (service_name + type_name) and name. Missing
-// rows are success; CandidateUID is never consulted.
+// by the same natural key upserts use (service_name, collection_name,
+// resource_id). type_name is not part of the match. Missing rows are
+// success; CandidateUID is never consulted.
 func (r *ExtensionResourceRepo) deleteInventoryReplacements(ctx context.Context, deletes []domain.InventoryReplacement) error {
 	if len(deletes) == 0 {
 		return nil
 	}
 	placeholders := make([]string, len(deletes))
-	args := make([]any, 0, len(deletes)*4)
+	args := make([]any, 0, len(deletes)*3)
 	for i, rep := range deletes {
-		placeholders[i] = "(?, ?, ?, ?)"
+		placeholders[i] = "(?, ?, ?)"
 		args = append(args,
 			string(rep.ResourceType.ServiceName()),
-			rep.ResourceType.TypeName(),
 			string(rep.Name.Collection()),
 			string(rep.Name.ID()),
 		)
 	}
-	whereSQL := fmt.Sprintf("(service_name, type_name, collection_name, resource_id) IN (%s)", strings.Join(placeholders, ", "))
+	whereSQL := fmt.Sprintf("(service_name, collection_name, resource_id) IN (%s)", strings.Join(placeholders, ", "))
 	return r.hardDeleteExtensionResourcesByPredicate(ctx, whereSQL, args)
 }
 

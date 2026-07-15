@@ -1474,29 +1474,28 @@ deleted_orphan_claims AS (
 SELECT (SELECT count(*) FROM deleted_extension_resource)`
 
 // deleteInventoryReplacements hard-deletes every IsDelete replacement
-// by full resource type (service_name + type_name) and name. Missing
-// rows are success; CandidateUID is never consulted.
+// by the same natural key upserts use (service_name, collection_name,
+// resource_id). type_name is not part of the match. Missing rows are
+// success; CandidateUID is never consulted.
 func (r *ExtensionResourceRepo) deleteInventoryReplacements(ctx context.Context, deletes []domain.InventoryReplacement) error {
 	if len(deletes) == 0 {
 		return nil
 	}
 	n := len(deletes)
 	serviceNames := make([]string, n)
-	typeNames := make([]string, n)
 	collectionNames := make([]string, n)
 	resourceIDs := make([]string, n)
 	for i, rep := range deletes {
 		serviceNames[i] = string(rep.ResourceType.ServiceName())
-		typeNames[i] = rep.ResourceType.TypeName()
 		collectionNames[i] = string(rep.Name.Collection())
 		resourceIDs[i] = string(rep.Name.ID())
 	}
 	targetEr := `SELECT er.uid
 		FROM extension_resources er
-		JOIN (SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[], $4::text[]) AS t(service_name, type_name, collection_name, resource_id)) t
-		  ON er.service_name = t.service_name AND er.type_name = t.type_name AND er.collection_name = t.collection_name AND er.resource_id = t.resource_id`
+		JOIN (SELECT * FROM UNNEST($1::text[], $2::text[], $3::text[]) AS t(service_name, collection_name, resource_id)) t
+		  ON er.service_name = t.service_name AND er.collection_name = t.collection_name AND er.resource_id = t.resource_id`
 	query := fmt.Sprintf(inventoryDeleteWithAliasCleanupSQLTemplate, targetEr)
-	_, err := r.DB.ExecContext(ctx, query, serviceNames, typeNames, collectionNames, resourceIDs)
+	_, err := r.DB.ExecContext(ctx, query, serviceNames, collectionNames, resourceIDs)
 	if err != nil {
 		return fmt.Errorf("delete inventory replacements: %w", err)
 	}

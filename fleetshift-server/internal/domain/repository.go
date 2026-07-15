@@ -128,11 +128,12 @@ type ExtensionResourceRepository interface {
 	// replacements are stored as a pending, unreconciled payload -- see
 	// [InventoryReplacement.Aliases]'s doc -- so this never fails or
 	// reports a conflict on account of Aliases. Deletes hard-delete the
-	// matching extension_resources row (full resource type including
-	// type_name, never alias-resolved), treat a missing row as success,
-	// and run the same cascade / orphaned alias-claim cleanup as
-	// [Delete]. The whole mixed slice is applied together: callers that
-	// wrap this call in a transaction get one atomic commit or
+	// matching extension_resources row by the same natural key as
+	// non-delete replacements (service_name + Name; type_name is not
+	// part of the match, never alias-resolved), treat a missing row as
+	// success, and run the same cascade / orphaned alias-claim cleanup
+	// as [Delete]. The whole mixed slice is applied together: callers
+	// that wrap this call in a transaction get one atomic commit or
 	// rollback. Validation errors from
 	// [ValidateInventoryReplacements] fail before any write.
 	ReplaceInventory(ctx context.Context, replacements []InventoryReplacement) error
@@ -165,8 +166,9 @@ type ExtensionResourceRepository interface {
 // InventoryReplacement is a command DTO -- not a domain object --
 // describing either the complete latest inventory state for a single
 // extension resource, or an exact-name whole-resource delete, identified
-// by its natural key (ResourceType, Name) rather than an
-// [ExtensionResourceUID] resolved ahead of time by the caller. See
+// by its natural key (service_name + Name; type_name on ResourceType is
+// stored on create but not used to match an existing row) rather than
+// an [ExtensionResourceUID] resolved ahead of time by the caller. See
 // [ExtensionResourceRepository.ReplaceInventory].
 //
 // When IsDelete is false, the fields below describe the complete latest
@@ -224,15 +226,17 @@ type ExtensionResourceRepository interface {
 // row today; see [ExtensionResourceRepository.ListObservations]'s doc.
 //
 // When IsDelete is true, this command hard-deletes the matching
-// extension_resources row by exact ResourceType (including type_name)
-// and Name. Deletes never resolve through aliases, never allocate or
-// consume CandidateUID, and never create a missing row: a missing
-// match is an idempotent success. Payload fields other than
-// ResourceType and Name must be empty -- see
-// [ValidateInventoryReplacements]. Inventory-only type policy (has
-// inventory metadata, no management metadata) is enforced at the
-// application layer when type metadata is available there, not by the
-// repository.
+// extension_resources row by the same natural key as non-delete
+// replacements: (service_name, Name). type_name on ResourceType is
+// required by validation but is not part of the match -- identity is
+// the full resource name within a service, as with upserts. Deletes
+// never resolve through aliases, never allocate or consume
+// CandidateUID, and never create a missing row: a missing match is an
+// idempotent success. Payload fields other than ResourceType and Name
+// must be empty -- see [ValidateInventoryReplacements]. Inventory-only
+// type policy (has inventory metadata, no management metadata) is
+// enforced at the application layer when type metadata is available
+// there, not by the repository.
 type InventoryReplacement struct {
 	ResourceType ResourceType
 	Name         ResourceName
@@ -349,9 +353,10 @@ type InventoryDelta struct {
 //   - every entry must set ResourceType and Name;
 //   - IsDelete entries must not set Aliases, Labels, Observation,
 //     Conditions, ObservedAt, ReceivedAt, or CandidateUID;
-//   - the same natural key (ResourceType + Name) must not appear more
-//     than once as a delete, more than once as a replacement, or as
-//     both a delete and a replacement in the same batch.
+//   - the same natural key (service_name + Name, via
+//     [ResourceType.FullName]) must not appear more than once as a
+//     delete, more than once as a replacement, or as both a delete and
+//     a replacement in the same batch.
 //
 // Both [ExtensionResourceRepository.ReplaceInventory] implementations
 // call this for the full slice before partitioning deletes from

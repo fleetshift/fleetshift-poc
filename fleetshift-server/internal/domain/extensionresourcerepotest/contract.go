@@ -3486,7 +3486,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 			}
 		})
 
-		t.Run("MatchesFullResourceType", func(t *testing.T) {
+		// MatchesNaturalKeyLikeUpsert proves IsDelete resolves the
+		// same way as non-delete ReplaceInventory: by
+		// (service_name, collection_name, resource_id). type_name is
+		// metadata on the row, not part of the match, so a delete that
+		// asserts a different type under the same service/name still
+		// hard-deletes the existing row.
+		t.Run("MatchesNaturalKeyLikeUpsert", func(t *testing.T) {
 			tx := factory(t)
 			defer tx.Rollback()
 			repo := tx.ExtensionResources()
@@ -3503,16 +3509,13 @@ func runInventoryTests(t *testing.T, factory Factory) {
 				t.Fatalf("seed ReplaceInventory: %v", err)
 			}
 
-			// Wrong type_name under the same service/name must not
-			// delete the Node row -- deletes match the full resource
-			// type, not only the physical service/name key.
 			if err := repo.ReplaceInventory(ctx, []domain.InventoryReplacement{{
 				ResourceType: "inv.fleetshift.io/Pod", Name: name, IsDelete: true,
 			}}); err != nil {
-				t.Fatalf("ReplaceInventory IsDelete wrong type: %v", err)
+				t.Fatalf("ReplaceInventory IsDelete differing type_name: %v", err)
 			}
-			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); err != nil {
-				t.Fatalf("Get after wrong-type delete: %v (Node row must remain)", err)
+			if _, err := repo.Get(ctx, domain.NewFullResourceName("inv.fleetshift.io", name)); !errors.Is(err, domain.ErrNotFound) {
+				t.Fatalf("Get after differing-type delete: got %v, want ErrNotFound", err)
 			}
 		})
 	})
