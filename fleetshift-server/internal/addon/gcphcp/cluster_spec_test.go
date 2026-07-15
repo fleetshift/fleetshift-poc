@@ -45,6 +45,33 @@ func TestParseClusterSpec_NilManifest(t *testing.T) {
 	}
 }
 
+func TestParseClusterSpec_InvalidResourceName(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceName domain.ResourceName
+	}{
+		{name: "empty", resourceName: ""},
+		{name: "wrong collection", resourceName: "nodes/c1"},
+		{name: "nested", resourceName: "orgs/o1/clusters/c1"},
+		{name: "malformed trailing slash", resourceName: "clusters/"},
+		{name: "invalid cluster id", resourceName: "clusters/Bad_Name"},
+		{name: "cluster id too long", resourceName: "clusters/this-name-is-way-too-long"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mrs := &domain.ManagedResourceSpecManifest{
+				Name: tt.resourceName,
+				UID:  domain.NewExtensionResourceUID(),
+				Spec: json.RawMessage(fullSpecJSON()),
+			}
+			_, err := gcphcp.ParseClusterSpec(mrs)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("error = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
+}
+
 func TestParseClusterSpec_ValidSpec(t *testing.T) {
 	tests := []struct {
 		name           string

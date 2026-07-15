@@ -250,10 +250,6 @@ func (a *Agent) Deliver(
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to parse cluster spec: %v", err))
 		return nil
 	}
-	if err := ValidateClusterName(spec.clusterName()); err != nil {
-		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("invalid cluster name: %v", err))
-		return nil
-	}
 
 	if !a.acceptGeneration(spec.clusterName(), generation) {
 		a.observer.Info("rejecting stale delivery", "cluster", spec.clusterName(), "generation", generation)

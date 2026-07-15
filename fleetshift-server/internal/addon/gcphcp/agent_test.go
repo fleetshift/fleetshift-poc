@@ -281,8 +281,8 @@ func TestAgent_Deliver_UsesSpecNameNotManifestID(t *testing.T) {
 
 	select {
 	case result := <-reporter.done:
-		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "invalid cluster name") {
-			t.Fatalf("should have used spec name, not ManifestID; got: %s", result.Message)
+		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "failed to parse cluster spec") {
+			t.Fatalf("should have used envelope resource name; got: %s", result.Message)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout")

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
@@ -60,6 +61,14 @@ func ParseClusterSpec(mrs *domain.ManagedResourceSpecManifest) (ClusterSpec, err
 	if mrs == nil {
 		return ClusterSpec{}, fmt.Errorf("%w: managed resource spec is required", domain.ErrInvalidArgument)
 	}
+	resourceName, err := kubernetes.ParseClusterResourceName(string(mrs.Name))
+	if err != nil {
+		return ClusterSpec{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
+	}
+	if err := ValidateClusterName(string(resourceName.ID())); err != nil {
+		return ClusterSpec{}, err
+	}
+
 	var raw clusterSpecJSON
 	dec := json.NewDecoder(bytes.NewReader(mrs.Spec))
 	dec.DisallowUnknownFields()
@@ -68,7 +77,7 @@ func ParseClusterSpec(mrs *domain.ManagedResourceSpecManifest) (ClusterSpec, err
 	}
 
 	spec := ClusterSpec{
-		ResourceName:   mrs.Name,
+		ResourceName:   resourceName,
 		EndpointAccess: raw.EndpointAccess,
 		ReleaseVersion: raw.ReleaseVersion,
 		ChannelGroup:   raw.ChannelGroup,
