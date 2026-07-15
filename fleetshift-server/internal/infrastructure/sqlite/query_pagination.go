@@ -103,7 +103,7 @@ func resolveQueryOrder(orderBy string) (querySupportedOrder, error) {
 // keysetPredicateSQL builds the row-wise "(cols...) > (?N, ...)"
 // predicate for order, appending the cursor values from tok onto args.
 // Returns the SQL fragment and the extended args slice. Placeholders
-// are numbered (?N) to match [querysql.QuestionParams] and stay
+// are numbered (?N) to match [questionParams] and stay
 // consistent with filter binds that may reuse a single index.
 func keysetPredicateSQL(order querySupportedOrder, tok queryPageToken, args []any) (string, []any) {
 	placeholders := make([]string, len(order.CursorColumns))

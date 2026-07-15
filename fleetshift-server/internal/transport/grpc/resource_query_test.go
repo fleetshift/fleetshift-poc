@@ -189,7 +189,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 	env := setupResourceQuery(t)
 	resp, err := env.client.QueryResources(context.Background(), &pb.QueryResourcesRequest{
 		Scope:    "-",
-		Filter:   `resource_type == "kind.fleetshift.io/Cluster"`,
+		Filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
 		PageSize: 10,
 	})
 	if err != nil {
@@ -200,7 +200,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 	}
 	r := resp.Resources[0]
 	if r.ResourceType != "kind.fleetshift.io/Cluster" {
-		t.Errorf("resource_type = %q", r.ResourceType)
+		t.Errorf("resourceType = %q", r.ResourceType)
 	}
 	if r.Resource == nil {
 		t.Fatal("resource body is nil")
@@ -221,7 +221,7 @@ func TestResourceQuery_HappyPathGRPC(t *testing.T) {
 func TestResourceQuery_HappyPathHTTP(t *testing.T) {
 	env := setupResourceQuery(t)
 	req := httptest.NewRequest(http.MethodGet,
-		"/apis/fleetshift.io/v1/-:queryResources?filter=resource_type%20%3D%3D%20%22kind.fleetshift.io%2FCluster%22&page_size=10",
+		"/apis/fleetshift.io/v1/-:queryResources?filter=resourceType%20%3D%3D%20%22kind.fleetshift.io%2FCluster%22&page_size=10",
 		nil)
 	rr := httptest.NewRecorder()
 	env.httpMux.ServeHTTP(rr, req)

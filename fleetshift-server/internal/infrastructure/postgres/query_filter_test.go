@@ -1,21 +1,19 @@
-// This file tests queryFieldResolver -- this package's
-// [querysql.FieldResolver] implementation, i.e. the actual
-// FleetShift/Postgres row shape a filter's field paths resolve to
-// (column names, JSONB extraction, label/condition map keys, safe
-// numeric/boolean casts, GIN containment rewrites, and schema-backed
-// path validation). It is an internal (package postgres) test file,
-// rather than package postgres_test like this package's other tests,
-// purely so it can construct queryFieldResolver directly without a
-// database -- see querysql's package doc for why this split exists.
-// End-to-end coverage against a real Postgres/SQLite database lives
-// in queryrepotest.
+// This file tests queryFieldResolver SQL generation only: column
+// names, JSONB extraction, GIN containment rewrites, cel_ts_* usage,
+// COLLATE "C", and SchemaProvider-backed path validation. Cross-backend
+// CEL filter meaning lives in queryrepotest.SemanticFilterMatrix —
+// do not restate those outcomes here. Package postgres (not
+// postgres_test) so queryFieldResolver can be constructed without a
+// database.
 package postgres
 
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"google.golang.org/protobuf/reflect/protoreflect"
 	"google.golang.org/protobuf/types/known/timestamppb"
@@ -63,12 +61,12 @@ func compileWithResolverErr(t *testing.T, c querysql.Compiler, filter string) er
 
 func compile(t *testing.T, filter string) querysql.SQLPredicate {
 	t.Helper()
-	return compileWithResolver(t, querysql.Compiler{Fields: queryFieldResolver{}}, filter)
+	return compileWithResolver(t, querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}}, filter)
 }
 
 func compileErr(t *testing.T, filter string) error {
 	t.Helper()
-	return compileWithResolverErr(t, querysql.Compiler{Fields: queryFieldResolver{}}, filter)
+	return compileWithResolverErr(t, querysql.Compiler{Fields: queryFieldResolver{}, Params: dollarParams{}}, filter)
 }
 
 func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
@@ -86,21 +84,21 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 			wantSQL:  []string{"er.service_name =", "er.collection_name =", "er.resource_id ="},
 		},
 		{
-			name:     "resource_type equality special-cases to constituent columns",
-			filter:   `resource_type == "kind.fleetshift.io/Cluster"`,
+			name:     "resourceType equality special-cases to constituent columns",
+			filter:   `resourceType == "kind.fleetshift.io/Cluster"`,
 			wantArgs: []any{"kind.fleetshift.io", "Cluster"},
 			wantSQL:  []string{"er.service_name =", "er.type_name ="},
 			denySQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
-			name:     "resource_type inequality keeps concatenated expression",
-			filter:   `resource_type != "kind.fleetshift.io/Cluster"`,
+			name:     "resourceType inequality keeps concatenated expression",
+			filter:   `resourceType != "kind.fleetshift.io/Cluster"`,
 			wantArgs: []any{"kind.fleetshift.io/Cluster"},
 			wantSQL:  []string{"er.service_name || '/' || er.type_name"},
 		},
 		{
-			name:     "resource_type in special-cases to constituent-column tuples",
-			filter:   `resource_type in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
+			name:     "resourceType in special-cases to constituent-column tuples",
+			filter:   `resourceType in ["kind.fleetshift.io/Cluster", "kubernetes.fleetshift.io/Node"]`,
 			wantArgs: []any{"kind.fleetshift.io", "Cluster", "kubernetes.fleetshift.io", "Node"},
 			wantSQL:  []string{"(er.service_name, er.type_name) IN", "($1, $2)", "($3, $4)"},
 			denySQL:  []string{"er.service_name || '/' || er.type_name"},
@@ -113,20 +111,20 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 		},
 		{
 			name:     "and",
-			filter:   `resource_type == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
+			filter:   `resourceType == "kind.fleetshift.io/Cluster" && name == "//kind.fleetshift.io/clusters/managed"`,
 			wantArgs: []any{"kind.fleetshift.io", "Cluster", "kind.fleetshift.io", "clusters", "managed"},
 		},
 		{
 			name:     "name startsWith uses concatenated expression",
 			filter:   `name.startsWith("//kind.fleetshift.io/")`,
 			wantArgs: []any{`//kind.fleetshift.io/%`},
-			wantSQL:  []string{"'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id LIKE", `ESCAPE '\'`},
+			wantSQL:  []string{`COLLATE "C" LIKE`, "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id", `ESCAPE '\'`},
 		},
 		{
-			name:     "resource_type startsWith uses concatenated expression",
-			filter:   `resource_type.startsWith("kind.fleetshift.io/")`,
+			name:     "resourceType startsWith uses concatenated expression",
+			filter:   `resourceType.startsWith("kind.fleetshift.io/")`,
 			wantArgs: []any{`kind.fleetshift.io/%`},
-			wantSQL:  []string{"er.service_name || '/' || er.type_name LIKE", `ESCAPE '\'`},
+			wantSQL:  []string{`COLLATE "C" LIKE`, "er.service_name || '/' || er.type_name", `ESCAPE '\'`},
 		},
 	}
 	for _, tt := range tests {
@@ -151,8 +149,8 @@ func TestQueryFieldResolver_EnvelopeFields(t *testing.T) {
 				}
 			}
 			if strings.Contains(pred.SQL, "er.service_name || '/' || er.type_name") &&
-				strings.Contains(tt.filter, "resource_type ==") {
-				t.Errorf("SQL = %q, resource_type equality must not use the concatenated expression", pred.SQL)
+				strings.Contains(tt.filter, "resourceType ==") {
+				t.Errorf("SQL = %q, resourceType equality must not use the concatenated expression", pred.SQL)
 			}
 		})
 	}
@@ -195,8 +193,8 @@ func TestQueryFieldResolver_ResourceLabelsContainment(t *testing.T) {
 
 func TestQueryFieldResolver_ResourceLabelsInequalityKeepsExtraction(t *testing.T) {
 	pred := compile(t, `resource.labels["team"] != "platform"`)
-	if !strings.Contains(pred.SQL, "er.labels ->>") {
-		t.Errorf("SQL = %q, want ->> extraction for !=", pred.SQL)
+	if !strings.Contains(pred.SQL, "er.labels ->") {
+		t.Errorf("SQL = %q, want -> extraction for !=", pred.SQL)
 	}
 	if strings.Contains(pred.SQL, "@>") {
 		t.Errorf("SQL = %q, != must not use containment rewrite", pred.SQL)
@@ -214,8 +212,8 @@ func TestQueryFieldResolver_ResourceLabelsStartsWithUsesExtraction(t *testing.T)
 	if pred.Args[1] != `plat%` {
 		t.Errorf("Args[1] = %v, want \"plat%%\"", pred.Args[1])
 	}
-	if !strings.Contains(pred.SQL, "er.labels ->>") {
-		t.Errorf("SQL = %q, want ->> extraction for startsWith", pred.SQL)
+	if !strings.Contains(pred.SQL, "er.labels ->") {
+		t.Errorf("SQL = %q, want -> extraction for startsWith", pred.SQL)
 	}
 	if !strings.Contains(pred.SQL, "LIKE") || !strings.Contains(pred.SQL, `ESCAPE '\'`) {
 		t.Errorf("SQL = %q, want LIKE ... ESCAPE", pred.SQL)
@@ -226,20 +224,50 @@ func TestQueryFieldResolver_ResourceLabelsStartsWithUsesExtraction(t *testing.T)
 }
 
 func TestQueryFieldResolver_LocalLabelsContainment(t *testing.T) {
-	pred := compile(t, `resource.local_labels["node-role"] == "worker"`)
+	pred := compile(t, `resource.localLabels["node-role"] == "worker"`)
 	if !strings.Contains(pred.SQL, "inv.labels @> jsonb_build_object(") {
 		t.Errorf("SQL = %q, want GIN-friendly containment rewrite", pred.SQL)
 	}
 }
 
 func TestQueryFieldResolver_LocalUpdateTimeAndIndexUpdateTime(t *testing.T) {
-	pred := compile(t, `resource.local_update_time == "2026-06-01T12:00:00Z"`)
-	if !strings.Contains(pred.SQL, "inv.observed_at") {
-		t.Errorf("SQL = %q, want inv.observed_at", pred.SQL)
+	// Direct string ops compare against ProtoJSON rendering.
+	pred := compile(t, `resource.localUpdateTime == "2026-06-01T12:00:00Z"`)
+	if !strings.Contains(pred.SQL, "cel_ts_protojson_tstz(inv.observed_at)") {
+		t.Errorf("SQL = %q, want ProtoJSON string compare on observed_at", pred.SQL)
 	}
-	pred = compile(t, `resource.index_update_time == "2026-06-01T12:00:00Z"`)
+	pred = compile(t, `timestamp(resource.localUpdateTime) == timestamp("2026-06-01T12:00:00Z")`)
+	if !strings.Contains(pred.SQL, "inv.observed_at") || !strings.Contains(pred.SQL, "::timestamptz") {
+		t.Errorf("SQL = %q, want native TIMESTAMPTZ compare on observed_at", pred.SQL)
+	}
+	if strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, native timestamp() must not wrap with cel_ts_norm", pred.SQL)
+	}
+	pred = compile(t, `timestamp(resource.indexUpdateTime) == timestamp("2026-06-01T12:00:00Z")`)
 	if !strings.Contains(pred.SQL, "inv.updated_at") {
 		t.Errorf("SQL = %q, want inv.updated_at", pred.SQL)
+	}
+	// Sub-microsecond literal equality is constant-false for a present column.
+	pred = compile(t, `timestamp(resource.localUpdateTime) == timestamp("2026-06-01T12:00:00.123456789Z")`)
+	if !strings.Contains(pred.SQL, "CASE WHEN inv.observed_at IS NULL THEN NULL ELSE FALSE END") {
+		t.Errorf("SQL = %q, want present-false for sub-microsecond equality", pred.SQL)
+	}
+}
+
+func TestQueryFieldResolver_TimestampOnLabelString(t *testing.T) {
+	pred := compile(t, `timestamp(resource.labels["seenAt"]) == timestamp("2026-06-01T12:00:00Z")`)
+	if !strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, want cel_ts_norm over label text", pred.SQL)
+	}
+	if strings.Contains(pred.SQL, "FALSE") || strings.Contains(pred.SQL, "false") {
+		t.Errorf("SQL = %q, timestamp(label) must not fold to false", pred.SQL)
+	}
+}
+
+func TestQueryFieldResolver_StringOrderingUsesCollateC(t *testing.T) {
+	pred := compile(t, `resource.pauseReason < "zzz"`)
+	if !strings.Contains(pred.SQL, `COLLATE "C"`) {
+		t.Errorf("SQL = %q, want COLLATE \"C\" for string ordering", pred.SQL)
 	}
 }
 
@@ -260,33 +288,118 @@ func TestQueryFieldResolver_InventoryConditionsContainment(t *testing.T) {
 	if pred.Args[2] != "True" {
 		t.Errorf("Args[2] = %v, want \"True\"", pred.Args[2])
 	}
+
+	// lastTransitionTime is write-canonical ProtoJSON, so equality can
+	// use the same GIN containment rewrite as other condition strings.
+	pred = compile(t, `resource.conditions["Ready"].lastTransitionTime == "2026-06-01T12:00:00.500Z"`)
+	if !strings.Contains(pred.SQL, "inv.conditions @> jsonb_build_object(") {
+		t.Errorf("SQL = %q, want GIN-friendly containment rewrite", pred.SQL)
+	}
+	if strings.Contains(pred.SQL, "cel_ts_protojson(") {
+		t.Errorf("SQL = %q, lastTransitionTime must not wrap with cel_ts_protojson", pred.SQL)
+	}
+	if len(pred.Args) != 3 {
+		t.Fatalf("Args = %v, want 3 (condition type + subfield + value)", pred.Args)
+	}
+	if pred.Args[2] != "2026-06-01T12:00:00.500Z" {
+		t.Errorf("Args[2] = %v, want ProtoJSON lastTransitionTime literal", pred.Args[2])
+	}
+
+	// Non-canonical ProtoJSON spelling must not be rewritten: CEL string
+	// equality is exact against the response spelling (.500Z in storage).
+	pred = compile(t, `resource.conditions["Ready"].lastTransitionTime == "2026-06-01T12:00:00.5Z"`)
+	if !argsContain(pred.Args, "2026-06-01T12:00:00.5Z") {
+		t.Errorf("Args = %v, want exact .5Z literal (not normalized)", pred.Args)
+	}
+	if argsContain(pred.Args, "2026-06-01T12:00:00.500Z") {
+		t.Errorf("Args = %v, must not rewrite .5Z to .500Z for direct string ==", pred.Args)
+	}
+}
+
+func TestQueryFieldResolver_TimestampOnConditionLastTransitionTime(t *testing.T) {
+	norm500 := formatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 500_000_000, time.UTC))
+	normNoon := formatTimestampNorm(time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC))
+
+	// Equality: fixed-width norm sibling + GIN containment (no cel_ts_norm).
+	pred := compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2026-06-01T12:00:00.500Z")`)
+	if !strings.Contains(pred.SQL, "inv.conditions @> jsonb_build_object(") {
+		t.Errorf("SQL = %q, want GIN-friendly containment rewrite", pred.SQL)
+	}
+	if !argsContain(pred.Args, conditionLastTransitionTimeNormJSONKey) {
+		t.Errorf("Args = %v, want norm JSON key", pred.Args)
+	}
+	if !argsContain(pred.Args, norm500) {
+		t.Errorf("Args = %v, want fixed-width norm literal %q", pred.Args, norm500)
+	}
+	if strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, timestamp() equality must not use cel_ts_norm", pred.SQL)
+	}
+
+	pred = compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) == timestamp("2026-06-01T08:00:00-04:00")`)
+	if !argsContain(pred.Args, normNoon) {
+		t.Errorf("Args = %v, want Z-normalized fixed-width %q", pred.Args, normNoon)
+	}
+
+	pred = compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) != timestamp("2026-06-01T12:00:00Z")`)
+	if strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, != must not use cel_ts_norm", pred.SQL)
+	}
+	if strings.Contains(pred.SQL, "@>") {
+		t.Errorf("SQL = %q, != must not use containment", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, conditionLastTransitionTimeNormJSONKey) {
+		t.Errorf("SQL = %q, want extract of norm sibling", pred.SQL)
+	}
+
+	pred = compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) in [timestamp("2026-06-01T12:00:00Z")]`)
+	if strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, IN must not use cel_ts_norm", pred.SQL)
+	}
+	if !argsContain(pred.Args, normNoon) {
+		t.Errorf("Args = %v, want fixed-width norm", pred.Args)
+	}
+
+	// Ordered timestamp() compares the stored norm text directly.
+	pred = compile(t, `timestamp(resource.conditions["Ready"].lastTransitionTime) < timestamp("2026-06-01T13:00:00Z")`)
+	if strings.Contains(pred.SQL, "cel_ts_norm") {
+		t.Errorf("SQL = %q, ordered timestamp() must not use cel_ts_norm", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, conditionLastTransitionTimeNormJSONKey) {
+		t.Errorf("SQL = %q, want norm sibling extract", pred.SQL)
+	}
+	if !strings.Contains(pred.SQL, `COLLATE "C"`) {
+		t.Errorf("SQL = %q, want COLLATE \"C\" for ordered norm compare", pred.SQL)
+	}
 }
 
 func TestQueryFieldResolver_SpecGuardedByResourceType(t *testing.T) {
-	pred := compile(t, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws"`)
-	if !strings.Contains(pred.SQL, "ri.spec -> 'provider'") && !strings.Contains(pred.SQL, "ri.spec ->> 'provider'") {
-		t.Errorf("SQL = %q, want a ri.spec ->> 'provider' extraction", pred.SQL)
+	pred := compile(t, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws"`)
+	if !strings.Contains(pred.SQL, "ri.spec") || !strings.Contains(pred.SQL, "->") {
+		t.Errorf("SQL = %q, want a ri.spec -> extraction", pred.SQL)
+	}
+	if !argsContain(pred.Args, "provider") {
+		t.Errorf("Args = %v, want bound JSON key \"provider\"", pred.Args)
 	}
 }
 
 func TestQueryFieldResolver_SpecWithoutGuardCompiles(t *testing.T) {
 	pred := compile(t, `resource.spec.provider == "aws"`)
 	if !strings.Contains(pred.SQL, "ri.spec") {
-		t.Errorf("SQL = %q, want a ri.spec extraction without a resource_type guard", pred.SQL)
+		t.Errorf("SQL = %q, want a ri.spec extraction without a resourceType guard", pred.SQL)
 	}
 }
 
 func TestQueryFieldResolver_ObservationWithoutGuardCompiles(t *testing.T) {
 	pred := compile(t, `resource.observation.capacity.cpu > 4`)
 	if !strings.Contains(pred.SQL, "inv.observation") {
-		t.Errorf("SQL = %q, want an inv.observation extraction without a resource_type guard", pred.SQL)
+		t.Errorf("SQL = %q, want an inv.observation extraction without a resourceType guard", pred.SQL)
 	}
 }
 
 func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
-	// Each branch carries its own resource_type == in the SQL; a
+	// Each branch carries its own resourceType == in the SQL; a
 	// root-level guard is not required to compile type-shaped paths.
-	pred := compile(t, `(resource_type == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws") || (resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4)`)
+	pred := compile(t, `(resourceType == "kind.fleetshift.io/Cluster" && resource.spec.provider == "aws") || (resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4)`)
 	if !strings.Contains(pred.SQL, " OR ") {
 		t.Errorf("SQL = %q, want an OR of the two typed branches", pred.SQL)
 	}
@@ -299,17 +412,18 @@ func TestQueryFieldResolver_OrOfTypedSpecBranchesCompiles(t *testing.T) {
 }
 
 func TestQueryFieldResolver_ObservationGuardedByResourceType(t *testing.T) {
-	pred := compile(t, `resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`)
+	pred := compile(t, `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`)
 	if !strings.Contains(pred.SQL, "::numeric") {
 		t.Errorf("SQL = %q, want a numeric cast for the int literal comparison", pred.SQL)
 	}
-	// resource_type equality binds service+type; observation comparison binds 4.
-	if len(pred.Args) != 3 || pred.Args[2] != int64(4) {
-		t.Errorf("Args = %v, want [<service>, <type>, 4]", pred.Args)
+	// resourceType equality binds service+type; path segments capacity/cpu
+	// are bound; observation comparison binds 4.
+	if !argsContain(pred.Args, "capacity") || !argsContain(pred.Args, "cpu") || !argsContain(pred.Args, int64(4)) {
+		t.Errorf("Args = %v, want capacity, cpu, and 4", pred.Args)
 	}
 }
 
-func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testing.T) {
+func TestQueryFieldResolver_NumericJSONPreservesJSONTypes(t *testing.T) {
 	for _, tt := range []struct {
 		name    string
 		filter  string
@@ -317,39 +431,42 @@ func TestQueryFieldResolver_NumericJSONCastIsGuardedAgainstInvalidInput(t *testi
 	}{
 		{
 			name:    "observation numeric comparison",
-			filter:  `resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`,
-			sqlType: "numeric",
+			filter:  `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.capacity.cpu > 4`,
+			sqlType: "number",
 		},
 		{
 			name:    "spec numeric comparison",
-			filter:  `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.count > 4`,
-			sqlType: "numeric",
-		},
-		{
-			name:    "observation boolean comparison",
-			filter:  `resource_type == "kubernetes.fleetshift.io/Node" && resource.observation.healthy == true`,
-			sqlType: "boolean",
-		},
-		{
-			name:    "labels have no type guard at all, but share their column across every type",
-			filter:  `resource.labels["priority"] > 4`,
-			sqlType: "numeric",
+			filter:  `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.count > 4`,
+			sqlType: "number",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			pred := compile(t, tt.filter)
-			wantGuard := "pg_input_is_valid("
-			if !strings.Contains(pred.SQL, wantGuard) {
-				t.Errorf("SQL = %q, want a pg_input_is_valid(...) guard before the cast", pred.SQL)
+			if !strings.Contains(pred.SQL, "jsonb_typeof(") {
+				t.Errorf("SQL = %q, want jsonb_typeof guard (no string↔number coercion)", pred.SQL)
+			}
+			if strings.Contains(pred.SQL, "pg_input_is_valid") {
+				t.Errorf("SQL = %q, must not coerce via pg_input_is_valid", pred.SQL)
 			}
 			if !strings.Contains(pred.SQL, "'"+tt.sqlType+"'") {
-				t.Errorf("SQL = %q, want pg_input_is_valid's type argument to be %q", pred.SQL, tt.sqlType)
-			}
-			if !strings.Contains(pred.SQL, "CASE WHEN pg_input_is_valid") {
-				t.Errorf("SQL = %q, want the ::%s cast wrapped in a CASE WHEN pg_input_is_valid(...) guard", pred.SQL, tt.sqlType)
+				t.Errorf("SQL = %q, want jsonb_typeof %q", pred.SQL, tt.sqlType)
 			}
 		})
 	}
+
+	t.Run("observation boolean equality uses typed jsonb", func(t *testing.T) {
+		pred := compile(t, `resourceType == "kubernetes.fleetshift.io/Node" && resource.observation.healthy == true`)
+		if !strings.Contains(pred.SQL, "to_jsonb(") {
+			t.Errorf("SQL = %q, want to_jsonb typed equality", pred.SQL)
+		}
+	})
+
+	t.Run("labels reject ordered cross-type comparison", func(t *testing.T) {
+		err := compileErr(t, `resource.labels["priority"] > 4`)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("err = %v, want ErrInvalidArgument", err)
+		}
+	})
 }
 
 func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T) {
@@ -361,16 +478,40 @@ func TestQueryFieldResolver_SpecValidatedAgainstSchemaWhenAvailable(t *testing.T
 			SpecDescriptor: (&timestamppb.Timestamp{}).ProtoReflect().Descriptor(),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
-	pred := compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.seconds == 5`)
-	if !strings.Contains(pred.SQL, "ri.spec ->> 'seconds'") {
-		t.Errorf("SQL = %q, want a ri.spec ->> 'seconds' extraction", pred.SQL)
+	// Spec itself is a google.protobuf.Timestamp (ProtoJSON string):
+	// nested protobuf fields like seconds must be rejected.
+	err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.seconds == 5`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("CompileFilter traversing Timestamp.seconds: err = %v, want ErrInvalidArgument", err)
 	}
 
-	err := compileWithResolverErr(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.bogus_field == 5`)
+	err = compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.bogus_field == 5`)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Errorf("CompileFilter with an unknown field: err = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestQueryFieldResolver_TimestampFieldIsTerminalInSchema(t *testing.T) {
+	desc := specWithTimestampField(t)
+	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
+	schemas := staticQuerySchemas{
+		rt: {ResourceType: rt, APIVersion: "v1", SpecDescriptor: desc},
+	}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
+
+	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when == "2026-06-01T12:00:00Z"`)
+	if !strings.Contains(pred.SQL, "ri.spec") {
+		t.Errorf("SQL = %q, want resource.spec.when extraction", pred.SQL)
+	}
+	if !argsContain(pred.Args, "when") {
+		t.Errorf("Args = %v, want bound JSON key \"when\"", pred.Args)
+	}
+
+	err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.when.seconds == 5`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("traversing Timestamp.seconds: err = %v, want ErrInvalidArgument", err)
 	}
 }
 
@@ -381,6 +522,7 @@ syntax = "proto3";
 package querysql.test;
 message TestSpec {
   string api_server_port = 1;
+  string display_name = 2 [json_name = "title"];
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -391,7 +533,25 @@ message TestSpec {
 	return desc.Message
 }
 
-func TestQueryFieldResolver_SpecUsesJSONNameNotProtoNameForExtraction(t *testing.T) {
+func specWithTimestampField(t *testing.T) protoreflect.MessageDescriptor {
+	t.Helper()
+	const src = `
+syntax = "proto3";
+package querysql.test;
+import "google/protobuf/timestamp.proto";
+message SpecWithWhen {
+  google.protobuf.Timestamp when = 1;
+}
+`
+	desc, err := dynamicapi.CompileInline(context.Background(),
+		map[string]string{"spec_when.proto": src}, "spec_when.proto", "querysql.test.SpecWithWhen")
+	if err != nil {
+		t.Fatalf("CompileInline: %v", err)
+	}
+	return desc.Message
+}
+
+func TestQueryFieldResolver_SpecJSONNameOnlyNoProtoAlias(t *testing.T) {
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {
@@ -400,37 +560,61 @@ func TestQueryFieldResolver_SpecUsesJSONNameNotProtoNameForExtraction(t *testing
 			SpecDescriptor: specTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
-	for _, tt := range []struct {
-		name   string
-		filter string
-	}{
-		{"proto (snake_case) name", `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == "6443"`},
-		{"JSON (camelCase) name", `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.apiServerPort == "6443"`},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			pred := compileWithResolver(t, c, tt.filter)
-			if !strings.Contains(pred.SQL, "ri.spec ->> 'apiServerPort'") {
-				t.Errorf("SQL = %q, want extraction keyed on the JSON name 'apiServerPort', not the proto name", pred.SQL)
+	t.Run("JSON camelCase accepted", func(t *testing.T) {
+		for _, filter := range []string{
+			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.apiServerPort == "6443"`,
+			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec["apiServerPort"] == "6443"`,
+		} {
+			pred := compileWithResolver(t, c, filter)
+			if !argsContain(pred.Args, "apiServerPort") {
+				t.Errorf("filter %q: Args = %v, want bound key apiServerPort", filter, pred.Args)
 			}
-			if strings.Contains(pred.SQL, "'api_server_port'") {
-				t.Errorf("SQL = %q, must not key JSON extraction on the proto (underscore) name", pred.SQL)
+			if argsContain(pred.Args, "api_server_port") {
+				t.Errorf("filter %q: Args = %v, must not bind proto name", filter, pred.Args)
 			}
-		})
-	}
+		}
+	})
+
+	t.Run("proto snake_case rejected", func(t *testing.T) {
+		for _, filter := range []string{
+			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == "6443"`,
+			`resourceType == "kind.fleetshift.io/Cluster" && resource.spec["api_server_port"] == "6443"`,
+		} {
+			err := compileWithResolverErr(t, c, filter)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Errorf("filter %q: err = %v, want ErrInvalidArgument", filter, err)
+			}
+		}
+	})
+
+	t.Run("custom json_name accepted; proto name rejected", func(t *testing.T) {
+		pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.title == "x"`)
+		if !argsContain(pred.Args, "title") {
+			t.Errorf("Args = %v, want bound custom json_name \"title\"", pred.Args)
+		}
+		err := compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.display_name == "x"`)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("display_name: err = %v, want ErrInvalidArgument", err)
+		}
+		err = compileWithResolverErr(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.displayName == "x"`)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Errorf("displayName: err = %v, want ErrInvalidArgument", err)
+		}
+	})
 }
 
-// nestedSpecTestDescriptor has a singular nested message (valid to
-// traverse), a repeated message field, and a string-to-message map.
-// The compiler has no list/map traversal semantics, so continuing
-// through the latter two must fail closed even though both are
-// MessageKind (maps expose a synthetic map-entry message).
+// nestedSpecTestDescriptor has a singular nested message, a repeated
+// message field, and a string-to-message map. Repeated traversal fails
+// closed; string-keyed map traversal resumes JSON-name validation on
+// the map value message.
 func nestedSpecTestDescriptor(t *testing.T) protoreflect.MessageDescriptor {
 	t.Helper()
 	const src = `
 syntax = "proto3";
 package querysql.test;
+import "google/protobuf/struct.proto";
 message NestedSpec {
   message Item {
     string name = 1;
@@ -441,6 +625,8 @@ message NestedSpec {
   Nested nested = 1;
   repeated Item items = 2;
   map<string, Item> labels = 3;
+  map<int32, Item> by_id = 4;
+  google.protobuf.Struct metadata = 5;
 }
 `
 	desc, err := dynamicapi.CompileInline(context.Background(),
@@ -451,7 +637,7 @@ message NestedSpec {
 	return desc.Message
 }
 
-func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.T) {
+func TestQueryFieldResolver_SpecMapTraversalAndRepeatedRejection(t *testing.T) {
 	const rt = domain.ResourceType("kind.fleetshift.io/Cluster")
 	schemas := staticQuerySchemas{
 		rt: {
@@ -460,22 +646,38 @@ func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.
 			SpecDescriptor: nestedSpecTestDescriptor(t),
 		},
 	}
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}}
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: schemas}, Params: dollarParams{}}
 
-	pred := compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
-	if !strings.Contains(pred.SQL, "ri.spec -> 'nested' ->> 'value'") {
-		t.Errorf("SQL = %q, want singular message traversal to remain valid", pred.SQL)
+	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.nested.value == "x"`)
+	if !argsContain(pred.Args, "nested") || !argsContain(pred.Args, "value") {
+		t.Errorf("Args = %v, want nested and value keys", pred.Args)
 	}
 
-	// Terminal selection of a repeated/map field is still allowed;
-	// only continuing through them is rejected.
-	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.items == "x"`)
-	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels == "x"`)
+	// Terminal selection of a repeated/map field is still allowed.
+	compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.items == "x"`)
+	compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels == "x"`)
+
+	// String-keyed map: exact key, then resume message JSON names.
+	for _, filter := range []string{
+		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].name == "x"`,
+		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels.team.name == "x"`,
+	} {
+		pred := compileWithResolver(t, c, filter)
+		if !argsContain(pred.Args, "labels") || !argsContain(pred.Args, "team") || !argsContain(pred.Args, "name") {
+			t.Errorf("filter %q: Args = %v, want labels/team/name", filter, pred.Args)
+		}
+	}
+
+	// Struct field: remaining segments are exact literal keys.
+	pred = compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.metadata["node-role"] == "worker"`)
+	if !argsContain(pred.Args, "metadata") || !argsContain(pred.Args, "node-role") {
+		t.Errorf("Args = %v, want metadata and exact Struct key", pred.Args)
+	}
 
 	for _, filter := range []string{
-		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.items.name == "x"`,
-		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels.name == "x"`,
-		`resource_type == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].name == "x"`,
+		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.items.name == "x"`,
+		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.byId["1"].name == "x"`, // non-string map key
+		`resourceType == "kind.fleetshift.io/Cluster" && resource.spec.labels["team"].bogus == "x"`,
 	} {
 		err := compileWithResolverErr(t, c, filter)
 		if !errors.Is(err, domain.ErrInvalidArgument) {
@@ -484,13 +686,56 @@ func TestQueryFieldResolver_SpecRejectsTraversalThroughRepeatedOrMap(t *testing.
 	}
 }
 
-func TestQueryFieldResolver_SpecPermissiveWhenSchemaAbsent(t *testing.T) {
-	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}}
-	compileWithResolver(t, c, `resource_type == "kind.fleetshift.io/Cluster" && resource.spec.anything_goes == 5`)
+func TestQueryFieldResolver_SpecPermissiveExactKeysWhenSchemaAbsent(t *testing.T) {
+	c := querysql.Compiler{Fields: queryFieldResolver{SchemaProvider: staticQuerySchemas{}}, Params: dollarParams{}}
+	pred := compileWithResolver(t, c, `resourceType == "kind.fleetshift.io/Cluster" && resource.spec.api_server_port == 5`)
+	if !argsContain(pred.Args, "api_server_port") {
+		t.Errorf("Args = %v, want exact open-map key preserved (no camelCase rewrite)", pred.Args)
+	}
+	if argsContain(pred.Args, "apiServerPort") {
+		t.Errorf("Args = %v, must not normalize absent-schema keys", pred.Args)
+	}
+
+	// Arbitrary exact keys (hyphen, dot, quote) bind safely.
+	for _, key := range []string{`node-role`, `a.b`, `has"quote`, `has\slash`} {
+		filter := fmt.Sprintf(`resource.spec["%s"] == "x"`, strings.ReplaceAll(strings.ReplaceAll(key, `\`, `\\`), `"`, `\"`))
+		pred := compileWithResolver(t, c, filter)
+		if !argsContain(pred.Args, key) {
+			t.Errorf("filter %q: Args = %v, want exact key %q", filter, pred.Args, key)
+		}
+	}
+}
+
+func TestQueryFieldResolver_LabelSelectIndexEquivalence(t *testing.T) {
+	for _, filter := range []string{
+		`resource.labels.node_role == "worker"`,
+		`resource.labels["node_role"] == "worker"`,
+	} {
+		pred := compile(t, filter)
+		if !argsContain(pred.Args, "node_role") {
+			t.Errorf("filter %q: Args = %v, want exact key node_role", filter, pred.Args)
+		}
+	}
+	pred := compile(t, `resource.labels.nodeRole == "worker"`)
+	if !argsContain(pred.Args, "nodeRole") {
+		t.Errorf("Args = %v, want distinct key nodeRole", pred.Args)
+	}
+	if argsContain(pred.Args, "node_role") {
+		t.Errorf("Args = %v, nodeRole must not alias node_role", pred.Args)
+	}
+}
+
+func argsContain(args []any, want any) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestQueryFieldResolver_SpecOnOneSideOfOrCompiles(t *testing.T) {
-	pred := compile(t, `(resource_type == "kind.fleetshift.io/Cluster") || resource.spec.provider == "aws"`)
+	pred := compile(t, `(resourceType == "kind.fleetshift.io/Cluster") || resource.spec.provider == "aws"`)
 	if !strings.Contains(pred.SQL, " OR ") {
 		t.Errorf("SQL = %q, want OR", pred.SQL)
 	}
@@ -516,11 +761,10 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 		filter string
 		column string
 	}{
-		{`resource.intent_version == 1`, "erm.current_version"},
-		{`resource.state == "active"`, "f.state"},
+		{`resource.intentVersion == "1"`, "erm.current_version"},
 		{`resource.state == "ACTIVE"`, "f.state"},
-		{`resource.pause_reason == "manual"`, "f.pause_reason"},
-		{`resource.generation == 3`, "f.generation"},
+		{`resource.pauseReason == "manual"`, "f.pause_reason"},
+		{`resource.generation == "3"`, "f.generation"},
 	} {
 		pred := compile(t, tt.filter)
 		if !strings.Contains(pred.SQL, tt.column) {
@@ -528,8 +772,43 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 		}
 	}
 
-	// API enum spelling must bind the domain storage value.
-	pred := compile(t, `resource.state == "ACTIVE"`)
+	// Int literals against ProtoJSON int64 string fields are heterogeneous
+	// equality (always false), not column comparisons.
+	for _, filter := range []string{
+		`resource.intentVersion == 1`,
+		`resource.generation == 3`,
+		`resource.pauseReason == 1`,
+		`resource.state == 1`,
+		`resource.uid == true`,
+	} {
+		pred := compile(t, filter)
+		if pred.SQL != "FALSE" && !strings.Contains(pred.SQL, "FALSE") {
+			// SQLite uses 0; postgres uses FALSE.
+			if pred.SQL != "0" && !strings.Contains(pred.SQL, "0") {
+				t.Errorf("filter %q: SQL = %q, want heterogeneous-equality false", filter, pred.SQL)
+			}
+		}
+	}
+
+	pred := compile(t, `resource.pauseReason != 1`)
+	if !strings.Contains(pred.SQL, "IS NOT NULL") {
+		t.Errorf("SQL = %q, want present-only check for incompatible !=", pred.SQL)
+	}
+	err := compileErr(t, `resource.pauseReason > 1`)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Errorf("ordered cross-type: err = %v, want ErrInvalidArgument", err)
+	}
+	pred = compile(t, `resource.pauseReason in [1]`)
+	if pred.SQL != "FALSE" && !strings.Contains(pred.SQL, "FALSE") {
+		t.Errorf("SQL = %q, want false for incompatible membership", pred.SQL)
+	}
+
+	// Snake_case message rejection and heterogeneous match outcomes are
+	// covered by queryrepotest.SemanticFilterMatrix. Below: SQL-shape
+	// only (literal binding / LIKE over the API enum projection).
+
+	// Storage spelling is not an alias for the API enum name.
+	pred = compile(t, `resource.state == "active"`)
 	found := false
 	for _, a := range pred.Args {
 		if a == "active" {
@@ -538,22 +817,34 @@ func TestQueryFieldResolver_ManagedFields(t *testing.T) {
 		}
 	}
 	if !found {
-		t.Errorf("args = %#v, want to include normalized \"active\"", pred.Args)
+		t.Errorf("args = %#v, want literal \"active\" (no case folding)", pred.Args)
 	}
 
-	pred = compile(t, `resource.state.startsWith("CRE")`)
-	if !strings.Contains(pred.SQL, "f.state LIKE") || !strings.Contains(pred.SQL, `ESCAPE '\'`) {
-		t.Errorf("SQL = %q, want f.state LIKE ... ESCAPE", pred.SQL)
-	}
+	pred = compile(t, `resource.state == "ACTIVE"`)
 	found = false
 	for _, a := range pred.Args {
-		if a == "cre%" {
+		if a == "ACTIVE" {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("args = %#v, want to include normalized \"cre%%\"", pred.Args)
+		t.Errorf("args = %#v, want API enum spelling \"ACTIVE\"", pred.Args)
+	}
+
+	pred = compile(t, `resource.state.startsWith("CRE")`)
+	if !strings.Contains(pred.SQL, "LIKE") || !strings.Contains(pred.SQL, `ESCAPE '\'`) {
+		t.Errorf("SQL = %q, want LIKE ... ESCAPE over API enum projection", pred.SQL)
+	}
+	found = false
+	for _, a := range pred.Args {
+		if a == "CRE%" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("args = %#v, want prefix \"CRE%%\" (no case folding)", pred.Args)
 	}
 }
 

@@ -2,7 +2,6 @@ package sqlite
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
@@ -15,9 +14,10 @@ import (
 // compiler owns CEL AST lowering and knows nothing about any of this
 // -- see querysql's package doc for why the split lands here.
 //
-// Public CEL fields match the QueryResources response shape: envelope
-// name, envelope resource_type, and fields under resource. Top-level
-// identity components and platform-only body fields are rejected.
+// Public CEL fields match the QueryResources ProtoJSON response
+// shape: envelope name, envelope resourceType, and fields under
+// resource by their canonical JSON names. Top-level identity
+// components and platform-only body fields are rejected.
 //
 // SQLite differences from the Postgres resolver (postgres/query_filter.go):
 //
@@ -31,7 +31,7 @@ import (
 type queryFieldResolver struct {
 	// SchemaProvider, if set, lets resource.spec.* and
 	// resource.observation.* paths be validated against a real
-	// protobuf descriptor when the filter's top-level resource_type
+	// protobuf descriptor when the filter's top-level resourceType
 	// guard resolves to a type with one registered. See
 	// [domain.QuerySchemaProvider]'s doc for the absence-of-schema
 	// fallback behavior when this is nil or has nothing registered for
@@ -43,20 +43,13 @@ var _ querysql.FieldResolver = queryFieldResolver{}
 
 // conditionSubfields are the resource.conditions["Type"].* fields
 // supported in filters; all are text-valued so no cast handling is
-// needed for them.
+// needed for them. Subfield names match the ProtoJSON spelling.
 var conditionSubfields = map[string]bool{
 	"status":             true,
 	"reason":             true,
 	"message":            true,
 	"lastTransitionTime": true,
 }
-
-// identifierPattern is the character set CEL's own lexer already
-// restricts field-path segments to. jsonFieldChain re-checks it
-// before inlining a segment into SQL text as defense in depth, in
-// case a future refactor ever starts gathering path segments some
-// other way.
-var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 // Resolve implements [querysql.FieldResolver].
 func (r queryFieldResolver) Resolve(path querysql.FieldPath, want querysql.TypeHint, ctx querysql.ResolveContext) (querysql.SQLExpr, error) {
@@ -65,7 +58,7 @@ func (r queryFieldResolver) Resolve(path querysql.FieldPath, want querysql.TypeH
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: empty field path", domain.ErrInvalidArgument)
 	}
 	if len(segs) == 1 {
-		return r.resolveEnvelopeField(segs[0])
+		return r.resolveEnvelopeField(segs[0], want)
 	}
 	if segs[0] != "resource" {
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field expression", domain.ErrInvalidArgument)
@@ -73,24 +66,32 @@ func (r queryFieldResolver) Resolve(path querysql.FieldPath, want querysql.TypeH
 	return r.resolveResourceField(segs[1:], want, ctx)
 }
 
-func (r queryFieldResolver) resolveEnvelopeField(name string) (querysql.SQLExpr, error) {
+func (r queryFieldResolver) resolveEnvelopeField(name string, want querysql.TypeHint) (querysql.SQLExpr, error) {
 	switch name {
 	case "name":
+		sql := "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id"
+		if want == querysql.TypeHintTimestamp {
+			return knownTimestamp(sql), nil
+		}
 		// Canonical full name. Equality / IN against well-formed
 		// "//service/collection/id" literals special-case to
 		// constituent-column predicates so the default-order index
 		// can seek; other comparisons fall back to the expression.
 		return querysql.SQLExpr{
-			SQL:     "'//' || er.service_name || '/' || er.collection_name || '/' || er.resource_id",
+			SQL:     sql,
 			Compare: compareFullNameEquality,
 			In:      inFullName,
 		}, nil
-	case "resource_type":
+	case "resourceType":
+		sql := "er.service_name || '/' || er.type_name"
+		if want == querysql.TypeHintTimestamp {
+			return knownTimestamp(sql), nil
+		}
 		// Equality / IN against well-formed "service/Type" literals
 		// special-case to service_name/type_name predicates so
 		// idx_extension_resources_type_query_order can participate.
 		return querysql.SQLExpr{
-			SQL:     "er.service_name || '/' || er.type_name",
+			SQL:     sql,
 			Compare: compareResourceTypeEquality,
 			In:      inResourceType,
 		}, nil
@@ -100,7 +101,8 @@ func (r queryFieldResolver) resolveEnvelopeField(name string) (querysql.SQLExpr,
 }
 
 // resolveResourceField maps the segments following `resource` to a
-// SQL expression against the er/erm/ri/f/inv aliases.
+// SQL expression against the er/erm/ri/f/inv aliases. Field names
+// match the canonical ProtoJSON response spelling only.
 func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.TypeHint, ctx querysql.ResolveContext) (querysql.SQLExpr, error) {
 	if len(segs) == 0 {
 		return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource\"", domain.ErrInvalidArgument)
@@ -113,39 +115,31 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			// Body-level relative resource name
 			// (collection_name/resource_id), distinct from the
 			// envelope's full name.
-			return querysql.SQLExpr{SQL: "er.collection_name || '/' || er.resource_id"}, nil
+			return stringOrTimestamp(want, "er.collection_name || '/' || er.resource_id"), nil
 		}
 	case "uid":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "er.uid"}, nil
+			return stringOrTimestamp(want, "er.uid"), nil
 		}
 	case "labels":
 		if len(rest) == 1 {
-			return labelField("er.labels", rest[0], ctx.Bind, want), nil
+			return labelField("er.labels", rest[0], want, ctx.Bind), nil
 		}
-	case "intent_version":
+	case "intentVersion":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "erm.current_version"}, nil
+			return stringOrTimestamp(want, "CAST(erm.current_version AS TEXT)"), nil
 		}
 	case "state":
 		if len(rest) == 0 {
-			// Domain value is case-insensitive / stored lowercase;
-			// fold filter literals so API enum spellings ("ACTIVE")
-			// match for == / != / in / startsWith.
-			return querysql.SQLExpr{
-				SQL:        "f.state",
-				Compare:    querysql.LowercaseStringCompare("f.state"),
-				In:         querysql.LowercaseStringIn("f.state"),
-				StartsWith: querysql.LowercaseStringStartsWith("f.state"),
-			}, nil
+			return stringOrTimestamp(want, apiStateSQL), nil
 		}
-	case "pause_reason":
+	case "pauseReason":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "f.pause_reason"}, nil
+			return stringOrTimestamp(want, "f.pause_reason"), nil
 		}
 	case "generation":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "f.generation"}, nil
+			return stringOrTimestamp(want, "CAST(f.generation AS TEXT)"), nil
 		}
 	case "spec":
 		if len(rest) > 0 {
@@ -153,22 +147,34 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}
-			return jsonTextField("ri.spec", names, want)
+			return jsonTextField("ri.spec", names, want, ctx.Bind), nil
 		}
-	case "local_labels":
+	case "localLabels":
 		if len(rest) == 1 {
-			return labelField("inv.labels", rest[0], ctx.Bind, want), nil
+			return labelField("inv.labels", rest[0], want, ctx.Bind), nil
 		}
 	case "conditions":
 		if len(rest) == 2 && conditionSubfields[rest[1]] {
 			key := rest[0]
 			subfield := rest[1]
 			keyPlaceholder := ctx.Bind(key)
-			// SQLite's ->> only accepts a string literal RHS, so
-			// dynamic keys use json_extract. Quote the key so values
-			// like "Ready" and hyphenated names stay one path segment.
+			// Subfield is whitelist-validated; key is bound. Quote the
+			// key so hyphenated / $-prefixed names stay literal.
 			extract := jsonExtractKeySubfield("inv.conditions", keyPlaceholder, subfield)
-			return castByHint(extract, want), nil
+			if want == querysql.TypeHintTimestamp {
+				if subfield != "lastTransitionTime" {
+					// Non-timestamp subfields error at conversion time
+					// per row when non-RFC3339.
+					path := fmt.Sprintf(`%s || '.%s'`, jsonQuotedPathExpr(keyPlaceholder), subfield)
+					return dynamicTimestamp("inv.conditions", path), nil
+				}
+				// timestamp() reads the fixed-width storage sibling.
+				normExtract := jsonExtractKeySubfield(
+					"inv.conditions", keyPlaceholder, conditionLastTransitionTimeNormJSONKey,
+				)
+				return canonicalTimestampText(normExtract), nil
+			}
+			return knownStringField(extract), nil
 		}
 	case "observation":
 		if len(rest) > 0 {
@@ -176,48 +182,76 @@ func (r queryFieldResolver) resolveResourceField(segs []string, want querysql.Ty
 			if err != nil {
 				return querysql.SQLExpr{}, err
 			}
-			return jsonTextField("inv.observation", names, want)
+			return jsonTextField("inv.observation", names, want, ctx.Bind), nil
 		}
-	case "local_update_time":
+	case "localUpdateTime":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "inv.observed_at"}, nil
+			if want == querysql.TypeHintTimestamp {
+				return knownTimestamp("inv.observed_at"), nil
+			}
+			return knownTimestampString("inv.observed_at"), nil
 		}
-	case "index_update_time":
+	case "indexUpdateTime":
 		if len(rest) == 0 {
-			return querysql.SQLExpr{SQL: "inv.updated_at"}, nil
+			if want == querysql.TypeHintTimestamp {
+				return knownTimestamp("inv.updated_at"), nil
+			}
+			return knownTimestampString("inv.updated_at"), nil
 		}
 	}
 	return querysql.SQLExpr{}, fmt.Errorf("filter: %w: unsupported field \"resource.%s\"", domain.ErrInvalidArgument, strings.Join(segs, "."))
 }
 
+// apiStateSQL projects fulfillments.state (lowercase storage) to the
+// ProtoJSON enum name exposed on the query result.
+const apiStateSQL = `(CASE f.state WHEN 'creating' THEN 'CREATING' WHEN 'active' THEN 'ACTIVE' WHEN 'deleting' THEN 'DELETING' WHEN 'failed' THEN 'FAILED' ELSE f.state END)`
+
+func stringOrTimestamp(want querysql.TypeHint, textSQL string) querysql.SQLExpr {
+	if want == querysql.TypeHintTimestamp {
+		return knownTimestamp(textSQL)
+	}
+	return knownStringField(textSQL)
+}
+
 // labelField handles the common json_extract(<column>, '$."<key>")
 // shape shared by resource.labels[...] and
-// resource.local_labels[...]. key comes from the filter text (a
-// CEL map-index string literal), so it is bound as a SQL parameter
-// via bind rather than inlined. Unlike Postgres, there is no GIN
-// containment rewrite -- equality stays on the extract path.
-func labelField(column, key string, bind func(any) string, want querysql.TypeHint) querysql.SQLExpr {
+// resource.localLabels[...]. Labels are known string map values.
+// key comes from the filter text, so it is bound as a SQL parameter.
+// timestamp() conversion uses cel_ts_norm over the extracted text.
+func labelField(column, key string, want querysql.TypeHint, bind func(any) string) querysql.SQLExpr {
 	keyPlaceholder := bind(key)
-	return castByHint(jsonExtractKey(column, keyPlaceholder), want)
+	extract := jsonExtractKey(column, keyPlaceholder)
+	if want == querysql.TypeHintTimestamp {
+		return knownTimestamp(extract)
+	}
+	return knownStringField(extract)
 }
 
 // jsonExtractKey builds json_extract(column, '$."<bound-key>") with
-// the key quoted so hyphenated labels (e.g. node-role) are not parsed
-// as JSON-path arithmetic. The key placeholder is a bound parameter;
+// the key quoted so hyphenated / $-prefixed labels are literal object
+// keys, not JSONPath. The key placeholder is a bound parameter;
 // embedded quotes/backslashes are escaped inside SQL.
 func jsonExtractKey(column, keyPlaceholder string) string {
-	return fmt.Sprintf(
-		`json_extract(%s, '$."' || replace(replace(%s, '\', '\\'), '"', '\"') || '"')`,
-		column, keyPlaceholder,
-	)
+	return fmt.Sprintf("json_extract(%s, %s)", column, jsonQuotedPathExpr(keyPlaceholder))
 }
 
 // jsonExtractKeySubfield is jsonExtractKey plus a whitelist-validated
 // identifier subfield (e.g. conditions["Ready"].status).
 func jsonExtractKeySubfield(column, keyPlaceholder, subfield string) string {
 	return fmt.Sprintf(
-		`json_extract(%s, '$."' || replace(replace(%s, '\', '\\'), '"', '\"') || '".%s')`,
-		column, keyPlaceholder, subfield,
+		`json_extract(%s, %s || '.%s')`,
+		column, jsonQuotedPathExpr(keyPlaceholder), subfield,
+	)
+}
+
+// jsonQuotedPathExpr builds a SQL expression that evaluates to the
+// JSON path `$."<key>"` with key taken from a bound parameter,
+// escaping quotes/backslashes so the key is always a literal object
+// member name (including keys that begin with `$`).
+func jsonQuotedPathExpr(keyPlaceholder string) string {
+	return fmt.Sprintf(
+		`'$."' || replace(replace(%s, '\', '\\'), '"', '\"') || '"'`,
+		keyPlaceholder,
 	)
 }
 
@@ -307,89 +341,44 @@ func inFullName(values []any, bind func(any) string) (string, bool, error) {
 	return fmt.Sprintf("(er.service_name, er.collection_name, er.resource_id) IN (%s)", strings.Join(tuples, ", ")), true, nil
 }
 
-// jsonTextField builds a chained ->/->> extraction from column
-// through names -- the parsed dotted-path field names from a
-// resource.spec.foo.bar/resource.observation.foo.bar selector -- and
-// casts the result per want (see castByHint).
-// SQLite 3.38+ supports the Postgres-compatible -> / ->> operators
-// for literal path segments (modernc.org/sqlite ships 3.51.x).
-func jsonTextField(column string, names []string, want querysql.TypeHint) (querysql.SQLExpr, error) {
-	for _, n := range names {
-		if !identifierPattern.MatchString(n) {
-			return querysql.SQLExpr{}, fmt.Errorf("filter: %w: invalid field name %q", domain.ErrInvalidArgument, n)
-		}
+// jsonTextField extracts a JSON path with literal object keys (quoted
+// json_extract path segments). Bound keys beginning with `$` stay
+// literal member names. Comparisons use DynamicJSON so incompatible
+// present types follow CEL equality (string "5" != 5 → true).
+// timestamp() conversion uses DynamicTimestamp over the same path.
+func jsonTextField(column string, names []string, want querysql.TypeHint, bind func(any) string) querysql.SQLExpr {
+	path := jsonQuotedPathChain(names, bind)
+	if want == querysql.TypeHintTimestamp {
+		return dynamicTimestamp(column, path)
 	}
+	return dynamicJSON(column, path)
+}
+
+// jsonQuotedPathChain builds `$."a"."b"` as a SQL expression over
+// bound key parameters.
+func jsonQuotedPathChain(names []string, bind func(any) string) string {
 	var sb strings.Builder
-	sb.WriteString(column)
-	for i, n := range names {
-		op := "->"
-		if i == len(names)-1 {
-			op = "->>"
-		}
-		fmt.Fprintf(&sb, " %s '%s'", op, n)
+	sb.WriteString("'$'")
+	for _, n := range names {
+		ph := bind(n)
+		fmt.Fprintf(&sb, ` || '."' || replace(replace(%s, '\', '\\'), '"', '\"') || '"'`, ph)
 	}
-	return castByHint(sb.String(), want), nil
+	return sb.String()
 }
 
-// castByHint wraps a JSON-text-extracted SQL expression in a cast
-// matching want, so e.g. a numeric comparison compares numerically
-// rather than lexically. TypeHintString and TypeHintUnknown need no
-// cast: ->> / json_extract already yield text (or NULL).
-func castByHint(expr string, want querysql.TypeHint) querysql.SQLExpr {
-	switch want {
-	case querysql.TypeHintBool:
-		return querysql.SQLExpr{SQL: safeJSONBoolCast(expr)}
-	case querysql.TypeHintNumber:
-		return querysql.SQLExpr{SQL: safeJSONNumberCast(expr)}
-	default:
-		return querysql.SQLExpr{SQL: expr}
-	}
-}
-
-// safeJSONNumberCast casts a JSON-extracted SQL expression to REAL,
-// guarded so a row whose value at this JSON path isn't actually
-// numeric evaluates to SQL NULL (i.e. doesn't match) instead of
-// SQLite's permissive CAST(... AS REAL) which turns garbage into 0
-// and would incorrectly satisfy comparisons like > 4.
-//
-// SQLite's ->> returns INTEGER/REAL for JSON numbers (unlike Postgres
-// jsonb ->> which always yields text), so the integer/real typeof
-// branches cover the common case. Numeric-looking TEXT (e.g. a JSON
-// string "8") is accepted to match Postgres's pg_input_is_valid
-// behavior; anything with non-numeric characters becomes NULL.
-//
-// This guard is required even for fields gated by a
-// resource_type == "..." conjunct (see hasResourceTypeGuard in
-// querysql): SQLite gives no evaluation-order guarantee for a plain
-// WHERE-clause AND, so it remains free to evaluate this cast against
-// rows the guard conjunct would otherwise exclude.
-//
-// CASE is used rather than a boolean AND because SQLite does
-// guarantee CASE only evaluates the selected branch.
+// safeJSONNumberCast is retained for unit tests that exercise the
+// historic extract-then-cast shape against a plain column.
 func safeJSONNumberCast(expr string) string {
-	// TEXT values are accepted only when they are themselves a JSON
-	// integer/real literal (json_valid + json_type). That rejects
-	// prefix-cast traps like "1e", "1.2.3", and "1-2" that a GLOB of
-	// numeric characters would still allow through CAST(... AS REAL),
-	// matching Postgres's pg_input_is_valid('numeric') intent more
-	// closely than a character-class check.
-	//
-	// expr may contain numbered bind placeholders (?N). Repeating it
-	// is safe because QuestionParams emits reusable ?N indexes, not
-	// bare positional "?".
 	return fmt.Sprintf(
-		`(CASE WHEN typeof(%s) IN ('integer', 'real') THEN %s WHEN typeof(%s) = 'text' AND json_valid(%s) AND json_type(%s) IN ('integer', 'real') THEN CAST((%s) AS REAL) END)`,
-		expr, expr, expr, expr, expr, expr,
+		`(CASE WHEN typeof(%s) IN ('integer', 'real') THEN %s END)`,
+		expr, expr,
 	)
 }
 
-// safeJSONBoolCast maps JSON booleans to INTEGER 1/0 for comparison
-// against bound Go bools. SQLite's ->> returns INTEGER 0/1 for JSON
-// true/false; TEXT "true"/"false" (e.g. a JSON string) is also
-// accepted. Non-boolean values become NULL so they don't match.
+// safeJSONBoolCast is retained for unit tests.
 func safeJSONBoolCast(expr string) string {
 	return fmt.Sprintf(
-		`(CASE WHEN typeof(%s) = 'integer' AND (%s) IN (0, 1) THEN (%s) WHEN typeof(%s) = 'text' AND lower(%s) IN ('true', 'false') THEN CASE WHEN lower(%s) = 'true' THEN 1 ELSE 0 END END)`,
-		expr, expr, expr, expr, expr, expr,
+		`(CASE WHEN typeof(%s) = 'integer' AND (%s) IN (0, 1) THEN (%s) END)`,
+		expr, expr, expr,
 	)
 }

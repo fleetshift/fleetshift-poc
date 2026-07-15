@@ -34,7 +34,7 @@ func runHardeningTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed injection-payload label: %v", err)
 		}
 
-		filter := fmt.Sprintf("resource.local_labels[\"node-role\"] == %q", payload)
+		filter := fmt.Sprintf("resource.localLabels[\"node-role\"] == %q", payload)
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1 (the payload should match as ordinary data)", len(results))
@@ -58,7 +58,7 @@ func runHardeningTests(t *testing.T, factory Factory) {
 		// a filter smuggle a raw string like this into the dotted
 		// path position at all -- confirm that attempting to do so is
 		// rejected as invalid CEL rather than silently accepted.
-		filter := fmt.Sprintf(`resource_type == %q && resource.spec."provider); DROP TABLE resource_intents; --" == "aws"`, string(fx.ManagedType))
+		filter := fmt.Sprintf(`resourceType == %q && resource.spec."provider); DROP TABLE resource_intents; --" == "aws"`, string(fx.ManagedType))
 		err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Errorf("err = %v, want ErrInvalidArgument", err)

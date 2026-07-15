@@ -33,28 +33,35 @@ type QueryResourcesRequest struct {
 	// the repository's [QuerySchemaProvider] is set; with a nil
 	// provider there is no activation scope.
 	//
-	// Supported CEL fields are envelope name, envelope resource_type,
-	// and fields under resource (labels, managed fields, observed-state
-	// fields such as local_labels/conditions/observation/
-	// local_update_time/index_update_time, and guarded
-	// spec/observation). Top-level identity components
-	// (service_name, collection_name, resource_id, and similar) are
-	// not filter fields; use name / resource_type instead. Other
-	// resource.* paths are rejected as unsupported.
+	// Supported CEL fields are envelope name, envelope resourceType,
+	// and fields under resource by their canonical ProtoJSON names
+	// (labels, intentVersion, pauseReason, localLabels, conditions,
+	// observation, localUpdateTime, indexUpdateTime, generation,
+	// state, and guarded spec/observation paths). Top-level identity
+	// components (service_name, collection_name, resource_id, and
+	// similar) are not filter fields; use name / resourceType instead.
+	// Other resource.* paths are rejected as unsupported. Map keys are
+	// exact and case-sensitive; message fields have no proto-name
+	// aliases.
 	//
-	// String filter matching follows the field's domain case
-	// semantics: case-sensitive when the value is normally treated
-	// that way (e.g. names, labels), and case-folded when the domain
-	// normalizes or constrains the value to a case-insensitive form.
-	// resource.state is one such field today — storage is lowercase
-	// while Get/List may expose uppercase API enum spellings
-	// ("ACTIVE") — so == / != / in / startsWith lowercase string
-	// literals to match. Other fields with the same domain rule
-	// should get the same treatment.
+	// Filter matching is case-sensitive over the ProtoJSON response
+	// spelling (names, labels, resource.state enum names such as
+	// "ACTIVE"). ProtoJSON int64 fields (intentVersion, generation)
+	// compare as decimal strings. JSON extracts preserve JSON value
+	// types — a JSON string never matches a numeric/boolean literal,
+	// and incompatible != is true for present values (missing paths
+	// remain non-matches). Known string fields follow the same
+	// heterogeneous equality rules. Timestamp fields are ProtoJSON
+	// strings: direct comparison uses the canonical ProtoJSON
+	// spelling, while chronological / instant comparisons use
+	// timestamp() on both sides (for example
+	// timestamp(resource.localUpdateTime) <
+	// timestamp("2026-06-01T12:00:00Z")). timestamp() may be applied
+	// to any string-valued path.
 	//
 	// When a [QuerySchemaProvider] is configured, results are limited
 	// to types it lists (see [ResolveQueryResourceTypeScope]). Named
-	// top-level resource_type == / in constraints must refer to
+	// top-level resourceType == / in constraints must refer to
 	// activated types or the call fails with [ErrInvalidArgument].
 	Filter string
 
@@ -92,7 +99,7 @@ type QueryResourceResult struct {
 	// It is implementation metadata for callers that find the
 	// discriminator convenient; it is not part of the public
 	// QueryResources response shape, and CEL filters must not select
-	// on it. Prefer resource_type for type selection. The current
+	// on it. Prefer resourceType for type selection. The current
 	// implementation always sets Kind to [QueryResourceKindExtension].
 	Kind QueryResourceKind
 

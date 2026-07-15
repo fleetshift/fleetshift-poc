@@ -10,13 +10,13 @@ import (
 )
 
 // ResourceTypeConstraints reports whether filter contains a top-level
-// &&-reachable `resource_type == "..."` or `resource_type in [...]`
+// &&-reachable `resourceType == "..."` or `resourceType in [...]`
 // conjunct, and the union of string literals those conjuncts name.
 //
 // Constrained is false when the filter is empty or has no such
-// conjunct (including resource_type comparisons nested only under
+// conjunct (including resourceType comparisons nested only under
 // `||`). Types may be empty when Constrained is true (e.g.
-// `resource_type in []`). Invalid CEL returns [ErrInvalidArgument].
+// `resourceType in []`). Invalid CEL returns [ErrInvalidArgument].
 //
 // [ResolveQueryResourceTypeScope] uses this to reject inactive named
 // types when a [QuerySchemaProvider] is present. Repository
@@ -51,7 +51,7 @@ func queryFilterCELEnv() (*cel.Env, error) {
 		queryFilterCELEnvVal, queryFilterCELEnvErr = cel.NewEnv(
 			cel.EagerlyValidateDeclarations(true),
 			cel.Variable("name", cel.StringType),
-			cel.Variable("resource_type", cel.StringType),
+			cel.Variable("resourceType", cel.StringType),
 			cel.Variable("resource", cel.DynType),
 		)
 	})
@@ -146,7 +146,7 @@ func resourceTypeInListConstraint(e ast.Expr, seen map[ResourceType]struct{}, ou
 }
 
 func isResourceTypeIdent(e ast.Expr) bool {
-	return e.Kind() == ast.IdentKind && e.AsIdent() == "resource_type"
+	return e.Kind() == ast.IdentKind && e.AsIdent() == "resourceType"
 }
 
 func stringLiteral(e ast.Expr) (string, bool) {

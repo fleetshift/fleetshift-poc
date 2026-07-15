@@ -31,14 +31,23 @@ type QueryResourcesRequest struct {
 	// wildcard per AIP-159). Future increments may accept concrete
 	// collection scopes without reshaping this field.
 	Scope string `protobuf:"bytes,1,opt,name=scope,proto3" json:"scope,omitempty"`
-	// Optional CEL filter evaluated against the query envelope and
-	// resource body fields supported by the query repository. Empty
-	// matches all resources in scope.
+	// Optional CEL filter evaluated against the canonical ProtoJSON-shaped
+	// query envelope and resource body. Empty matches all resources in scope.
 	//
-	// This is CEL (the repository's documented subset), not AIP-160
-	// list-filter syntax. AIP-160 itself points to CEL for that use case;
-	// FleetShift uses CEL as the deterministic filter language for
-	// QueryResources.
+	// This is a strict subset of CEL (the repository's documented subset),
+	// not AIP-160 list-filter syntax. Message fields use their canonical
+	// JSON names only (normally lowerCamelCase, or an explicit json_name).
+	// Map and Struct keys are exact and case-sensitive. Filter input is
+	// never case-normalized and has no proto-name/JSON-name aliases.
+	// Copy field names from the JSON response; use brackets when an exact
+	// map key is not a legal CEL selector.
+	//
+	// Example: resourceType == "kind.fleetshift.io/Cluster" &&
+	// resource.spec.apiServerPort == "6443" &&
+	// resource.labels["node-role.kubernetes.io/worker"] == ""
+	//
+	// Note: order_by (below) is a separate non-CEL convention and may
+	// still use resource_type,name spelling.
 	Filter string `protobuf:"bytes,2,opt,name=filter,proto3" json:"filter,omitempty"`
 	// The maximum number of resources to return. The service may return
 	// fewer than this value. If unspecified, the server applies its

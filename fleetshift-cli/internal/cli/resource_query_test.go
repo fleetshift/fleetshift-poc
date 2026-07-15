@@ -80,7 +80,7 @@ func TestResourceQuery_Table(t *testing.T) {
 	out := runCLI(t,
 		"--server", addr, "--output", "table",
 		"resource", "query",
-		"--filter", `resource_type == "kind.fleetshift.io/Cluster"`,
+		"--filter", `resourceType == "kind.fleetshift.io/Cluster"`,
 		"--page-size", "10",
 		"--order-by", "resource_type,name",
 	)
@@ -102,7 +102,7 @@ func TestResourceQuery_Table(t *testing.T) {
 	if fake.last.GetScope() != "-" {
 		t.Errorf("scope = %q, want -", fake.last.GetScope())
 	}
-	if fake.last.GetFilter() != `resource_type == "kind.fleetshift.io/Cluster"` {
+	if fake.last.GetFilter() != `resourceType == "kind.fleetshift.io/Cluster"` {
 		t.Errorf("filter = %q", fake.last.GetFilter())
 	}
 	if fake.last.GetPageSize() != 10 {

@@ -16,8 +16,8 @@ type QueryResourceTypeScope struct {
 
 	// Empty is true when the caller should return an empty page
 	// without querying: the provider is present but lists no types,
-	// or the filter names an empty resource_type set (e.g.
-	// `resource_type in []`). Callers must still compile the filter
+	// or the filter names an empty resourceType set (e.g.
+	// `resourceType in []`). Callers must still compile the filter
 	// for validation before honoring Empty.
 	Empty bool
 }
@@ -29,7 +29,7 @@ type QueryResourceTypeScope struct {
 // inactive-type rejection (contract tests and structural-only
 // compiles). A non-nil provider scopes results to activated types from
 // [QuerySchemaProvider.ListResourceQuerySchemas]. When the filter names
-// top-level resource_type == / in constraints, the IN list is those
+// top-level resourceType == / in constraints, the IN list is those
 // named types (sorted) after validating each is activated — not the
 // full activated set — so unrelated activations do not invalidate page
 // tokens. An empty activated set with no named types yields Empty;
@@ -70,7 +70,7 @@ func ResolveQueryResourceTypeScope(
 				return QueryResourceTypeScope{Empty: true}, nil
 			}
 			return QueryResourceTypeScope{}, fmt.Errorf(
-				"%w: resource_type %q is not an activated extension resource type",
+				"%w: resourceType %q is not an activated extension resource type",
 				ErrInvalidArgument, named[0])
 		}
 		return QueryResourceTypeScope{Empty: true}, nil
@@ -83,7 +83,7 @@ func ResolveQueryResourceTypeScope(
 		for _, rt := range named {
 			if _, ok := activatedSet[rt]; !ok {
 				return QueryResourceTypeScope{}, fmt.Errorf(
-					"%w: resource_type %q is not an activated extension resource type",
+					"%w: resourceType %q is not an activated extension resource type",
 					ErrInvalidArgument, rt)
 			}
 		}

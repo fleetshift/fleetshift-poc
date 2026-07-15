@@ -16,7 +16,7 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, fmt.Sprintf("resource_type == %q", string(fx.ManagedType)))
+		results := queryAll(t, tx, fmt.Sprintf("resourceType == %q", string(fx.ManagedType)))
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
 		}
@@ -68,7 +68,7 @@ func runEnvelopeFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		filter := fmt.Sprintf("resource_type != %q", string(fx.ManagedType))
+		filter := fmt.Sprintf("resourceType != %q", string(fx.ManagedType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1 (inventory-only node)", len(results))
@@ -135,7 +135,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.spec.provider == "aws"`, string(fx.ManagedType))
+		filter := fmt.Sprintf(`resourceType == %q && resource.spec.provider == "aws"`, string(fx.ManagedType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -149,7 +149,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		results := queryAll(t, tx, `resource.local_labels["node-role"] == "worker"`)
+		results := queryAll(t, tx, `resource.localLabels["node-role"] == "worker"`)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
 		}
@@ -175,7 +175,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
+		filter := fmt.Sprintf(`resourceType == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -184,7 +184,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Errorf("result Name = %q, want the inventory-only node", results[0].Name)
 		}
 
-		filter = fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 100`, string(fx.InventoryType))
+		filter = fmt.Sprintf(`resourceType == %q && resource.observation.capacity.cpu > 100`, string(fx.InventoryType))
 		results = queryAll(t, tx, filter)
 		if len(results) != 0 {
 			t.Fatalf("len(results) = %d, want 0 for an unmet numeric threshold", len(results))
@@ -216,7 +216,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed conflicting-type inventory: %v", err)
 		}
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
+		filter := fmt.Sprintf(`resourceType == %q && resource.observation.capacity.cpu > 4`, string(fx.InventoryType))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -244,7 +244,7 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 			t.Fatalf("seed boolean observation: %v", err)
 		}
 
-		filter := fmt.Sprintf(`resource_type == %q && resource.observation.healthy == true`, string(rt))
+		filter := fmt.Sprintf(`resourceType == %q && resource.observation.healthy == true`, string(rt))
 		results := queryAll(t, tx, filter)
 		if len(results) != 1 {
 			t.Fatalf("len(results) = %d, want 1", len(results))
@@ -254,28 +254,28 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("StateFilterLowercasesLiterals", func(t *testing.T) {
+	t.Run("StateFilterMatchesAPIEnumSpelling", func(t *testing.T) {
 		// fulfillments.state is stored lowercase ("creating"); Get/List
-		// expose proto enum names ("CREATING"). Compiling resource.state
-		// comparisons lowercases the literal so both spellings match.
+		// and QueryResources expose the ProtoJSON enum name
+		// ("CREATING"). Filters match the response spelling only.
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
 		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
-		for _, filter := range []string{
-			`resource.state == "creating"`,
-			`resource.state == "CREATING"`,
-		} {
-			results := queryAll(t, tx, filter)
-			if len(results) != 1 {
-				t.Fatalf("filter %q: len(results) = %d, want 1", filter, len(results))
-			}
-			if results[0].Name != wantName {
-				t.Errorf("filter %q: Name = %q, want %q", filter, results[0].Name, wantName)
-			}
+		results := queryAll(t, tx, `resource.state == "CREATING"`)
+		if len(results) != 1 {
+			t.Fatalf(`resource.state == "CREATING": len(results) = %d, want 1`, len(results))
+		}
+		if results[0].Name != wantName {
+			t.Errorf("Name = %q, want %q", results[0].Name, wantName)
 		}
 
-		results := queryAll(t, tx, `resource.state == "ACTIVE"`)
+		results = queryAll(t, tx, `resource.state == "creating"`)
+		if len(results) != 0 {
+			t.Fatalf(`resource.state == "creating": len(results) = %d, want 0 (storage spelling is not an alias)`, len(results))
+		}
+
+		results = queryAll(t, tx, `resource.state == "ACTIVE"`)
 		if len(results) != 0 {
 			t.Fatalf(`resource.state == "ACTIVE": len(results) = %d, want 0 (fixture is creating)`, len(results))
 		}
@@ -300,11 +300,8 @@ func runResourceFieldFilterTests(t *testing.T, factory Factory) {
 }
 
 // runCaseSensitivityFilterTests locks the cross-backend case contract:
-// filter matching follows each field's domain case semantics —
-// case-sensitive for ordinary identity strings (name), case-folded
-// for domain-normalized values such as resource.state (== /
-// startsWith). SQLite's default LIKE is ASCII-case-insensitive, so
-// these cases catch a backend that forgot case_sensitive_like.
+// filter matching is case-sensitive over the ProtoJSON response
+// spelling for identity strings, labels, and resource.state.
 func runCaseSensitivityFilterTests(t *testing.T, factory Factory) {
 	t.Run("NameEqualityIsCaseSensitive", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
@@ -368,46 +365,46 @@ func runCaseSensitivityFilterTests(t *testing.T, factory Factory) {
 		}
 	})
 
-	t.Run("StateEqualityFoldsCase", func(t *testing.T) {
+	t.Run("StateEqualityIsCaseSensitive", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
 		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
-		for _, filter := range []string{
-			`resource.state == "creating"`,
-			`resource.state == "CREATING"`,
-		} {
-			results := queryAll(t, tx, filter)
-			if len(results) != 1 {
-				t.Fatalf("filter %q: len(results) = %d, want 1", filter, len(results))
-			}
-			if results[0].Name != wantName {
-				t.Errorf("filter %q: Name = %q, want %q", filter, results[0].Name, wantName)
-			}
+		results := queryAll(t, tx, `resource.state == "CREATING"`)
+		if len(results) != 1 {
+			t.Fatalf(`== "CREATING": len(results) = %d, want 1`, len(results))
+		}
+		if results[0].Name != wantName {
+			t.Errorf("Name = %q, want %q", results[0].Name, wantName)
+		}
+
+		results = queryAll(t, tx, `resource.state == "creating"`)
+		if len(results) != 0 {
+			t.Fatalf(`== "creating": len(results) = %d, want 0`, len(results))
 		}
 	})
 
-	t.Run("StateStartsWithFoldsCase", func(t *testing.T) {
+	t.Run("StateStartsWithIsCaseSensitive", func(t *testing.T) {
 		tx, fx := newFixtureTx(t, factory)
 		defer tx.Rollback()
 
 		wantName := extensionEnvelopeName(fx.ManagedType, fx.ManagedName)
-		for _, filter := range []string{
-			`resource.state.startsWith("cre")`,
-			`resource.state.startsWith("CRE")`,
-		} {
-			results := queryAll(t, tx, filter)
-			if len(results) != 1 {
-				t.Fatalf("filter %q: len(results) = %d, want 1", filter, len(results))
-			}
-			if results[0].Name != wantName {
-				t.Errorf("filter %q: Name = %q, want %q", filter, results[0].Name, wantName)
-			}
+		results := queryAll(t, tx, `resource.state.startsWith("CRE")`)
+		if len(results) != 1 {
+			t.Fatalf(`startsWith("CRE"): len(results) = %d, want 1`, len(results))
+		}
+		if results[0].Name != wantName {
+			t.Errorf("Name = %q, want %q", results[0].Name, wantName)
 		}
 
-		results := queryAll(t, tx, `resource.state.startsWith("ACT")`)
+		results = queryAll(t, tx, `resource.state.startsWith("cre")`)
 		if len(results) != 0 {
-			t.Fatalf(`resource.state.startsWith("ACT"): len(results) = %d, want 0`, len(results))
+			t.Fatalf(`startsWith("cre"): len(results) = %d, want 0`, len(results))
+		}
+
+		results = queryAll(t, tx, `resource.state.startsWith("ACT")`)
+		if len(results) != 0 {
+			t.Fatalf(`startsWith("ACT"): len(results) = %d, want 0`, len(results))
 		}
 	})
 }
@@ -450,7 +447,7 @@ func runInvalidFilterTests(t *testing.T, factory Factory) {
 		for _, filter := range []string{
 			`resource.inventory.labels["node-role"] == "worker"`,
 			`resource.inventory.conditions["Ready"].status == "True"`,
-			`resource_type == "kubernetes.fleetshift.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
+			`resourceType == "kubernetes.fleetshift.io/Node" && resource.inventory.observation.capacity.cpu > 4`,
 		} {
 			err := queryErr(t, tx, domain.QueryResourcesRequest{Filter: filter})
 			if !errors.Is(err, domain.ErrInvalidArgument) {

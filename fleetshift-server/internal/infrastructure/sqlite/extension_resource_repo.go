@@ -781,11 +781,26 @@ func extensionResourceViewFromColumns(
 // Postgres sibling's identical type one-for-one, including field
 // names, so the two backends' stored JSON shapes agree even though
 // nothing forces that beyond convention.
+//
+// LastTransitionTime is ProtoJSON so direct CEL string filters match
+// the QueryResources response. LastTransitionTimeNorm is the
+// fixed-width UTC sibling for timestamp() filters only.
 type ConditionJSON struct {
-	Status             domain.ConditionStatus `json:"status"`
-	Reason             string                 `json:"reason"`
-	Message            string                 `json:"message"`
-	LastTransitionTime time.Time              `json:"lastTransitionTime"`
+	Status                 domain.ConditionStatus `json:"status"`
+	Reason                 string                 `json:"reason"`
+	Message                string                 `json:"message"`
+	LastTransitionTime     protoJSONTimestamp     `json:"lastTransitionTime"`
+	LastTransitionTimeNorm string                 `json:"_lastTransitionTimeNorm"`
+}
+
+func newConditionJSON(status domain.ConditionStatus, reason, message string, t time.Time) ConditionJSON {
+	return ConditionJSON{
+		Status:                 status,
+		Reason:                 reason,
+		Message:                message,
+		LastTransitionTime:     protoJSONTimestamp(t),
+		LastTransitionTimeNorm: formatTimestampNorm(t),
+	}
 }
 
 // conditionsToJSON marshals conds into the JSON object -- keyed by
@@ -795,12 +810,7 @@ type ConditionJSON struct {
 func conditionsToJSON(conds []domain.Condition) ([]byte, error) {
 	byType := make(map[string]ConditionJSON, len(conds))
 	for _, c := range conds {
-		byType[string(c.Type())] = ConditionJSON{
-			Status:             c.Status(),
-			Reason:             c.Reason(),
-			Message:            c.Message(),
-			LastTransitionTime: c.LastTransitionTime(),
-		}
+		byType[string(c.Type())] = newConditionJSON(c.Status(), c.Reason(), c.Message(), c.LastTransitionTime())
 	}
 	return json.Marshal(byType)
 }
@@ -813,12 +823,7 @@ func conditionsToJSON(conds []domain.Condition) ([]byte, error) {
 func conditionSnapshotsToJSON(conds []domain.ConditionSnapshot) ([]byte, error) {
 	byType := make(map[string]ConditionJSON, len(conds))
 	for _, c := range conds {
-		byType[string(c.Type)] = ConditionJSON{
-			Status:             c.Status,
-			Reason:             c.Reason,
-			Message:            c.Message,
-			LastTransitionTime: c.LastTransitionTime,
-		}
+		byType[string(c.Type)] = newConditionJSON(c.Status, c.Reason, c.Message, c.LastTransitionTime)
 	}
 	return json.Marshal(byType)
 }
@@ -839,7 +844,7 @@ func unmarshalConditionSnapshots(data []byte) ([]domain.ConditionSnapshot, error
 			Status:             c.Status,
 			Reason:             c.Reason,
 			Message:            c.Message,
-			LastTransitionTime: c.LastTransitionTime.UTC(),
+			LastTransitionTime: c.LastTransitionTime.Time(),
 		})
 	}
 	sort.Slice(snaps, func(i, j int) bool { return snaps[i].Type < snaps[j].Type })
@@ -1253,9 +1258,9 @@ func (r *ExtensionResourceRepo) ApplyInventoryDeltas(ctx context.Context, deltas
 				delete(conditions, string(t))
 			}
 			for _, c := range d.UpsertConditions {
-				conditions[string(c.Type())] = ConditionJSON{
-					Status: c.Status(), Reason: c.Reason(), Message: c.Message(), LastTransitionTime: c.LastTransitionTime(),
-				}
+				conditions[string(c.Type())] = newConditionJSON(
+					c.Status(), c.Reason(), c.Message(), c.LastTransitionTime(),
+				)
 			}
 			conditionsJSON, err = json.Marshal(conditions)
 			if err != nil {

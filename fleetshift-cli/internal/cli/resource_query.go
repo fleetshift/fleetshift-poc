@@ -37,7 +37,7 @@ matches all resources in scope.
 Examples:
   # All kind clusters in us-east-1 that are active
   fleetctl resource query \
-    --filter 'resource_type == "kind.fleetshift.io/Cluster" && resource.spec.region == "us-east-1" && resource.state == "ACTIVE"'
+    --filter 'resourceType == "kind.fleetshift.io/Cluster" && resource.spec.region == "us-east-1" && resource.state == "ACTIVE"'
 
   # Resources whose envelope name starts with a service prefix
   fleetctl resource query \

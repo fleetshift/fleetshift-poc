@@ -3,6 +3,7 @@ package querysql
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/cel-go/common/ast"
 	"github.com/google/cel-go/common/operators"
@@ -20,7 +21,7 @@ var comparisonOperators = map[string]struct {
 	op  ComparisonOperator
 }{
 	operators.Equals:        {"=", OpEqual},
-	operators.NotEquals:     {"!=", OpNotEqual},
+	operators.NotEquals:     {"<>", OpNotEqual},
 	operators.Less:          {"<", OpLess},
 	operators.LessEquals:    {"<=", OpLessEqual},
 	operators.Greater:       {">", OpGreater},
@@ -46,11 +47,25 @@ func flipComparison(sql string, op ComparisonOperator) (string, ComparisonOperat
 // expression per the minimum supported subset documented in the
 // package doc -- into a SQL boolean expression. st.guard carries
 // whether (and against which type) the overall filter has a
-// top-level `resource_type == "..."` conjunct (see
+// top-level `resourceType == "..."` conjunct (see
 // hasResourceTypeGuard), which resolvers may use for optional
 // schema-backed path validation.
 func compileBool(e ast.Expr, st *state) (string, error) {
 	switch e.Kind() {
+	case ast.LiteralKind:
+		v, err := literalValue(e)
+		if err != nil {
+			return "", err
+		}
+		b, ok := v.(bool)
+		if !ok {
+			return "", unsupportedExprf("boolean")
+		}
+		// Dialect-neutral TRUE/FALSE; SQLite accepts both spellings.
+		if b {
+			return "TRUE", nil
+		}
+		return "FALSE", nil
 	case ast.CallKind:
 		c := e.AsCall()
 		switch c.FunctionName() {
@@ -126,17 +141,27 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 
 	var path FieldPath
 	var lit any
+	var fieldIsTS, litIsTS bool
 	switch {
 	case left.isField && right.isLit:
 		path, lit = left.path, right.lit
+		fieldIsTS, litIsTS = left.isTimestamp, right.isTimestamp
 	case right.isField && left.isLit:
 		path, lit = right.path, left.lit
+		fieldIsTS, litIsTS = right.isTimestamp, left.isTimestamp
 		cmp.sql, cmp.op = flipComparison(cmp.sql, cmp.op)
 	default:
 		return "", fmt.Errorf("filter: %w: comparisons must be between a field and a literal", domain.ErrInvalidArgument)
 	}
+	if fieldIsTS != litIsTS {
+		return "", fmt.Errorf("filter: %w: timestamp() must be applied to both sides of a comparison", domain.ErrInvalidArgument)
+	}
 
-	expr, err := st.resolve(path, typeHintOf(lit))
+	hint := typeHintOf(lit)
+	if fieldIsTS {
+		hint = TypeHintTimestamp
+	}
+	expr, err := st.resolve(path, hint)
 	if err != nil {
 		return "", err
 	}
@@ -152,10 +177,11 @@ func compileComparison(fn string, args []ast.Expr, st *state) (string, error) {
 	return fmt.Sprintf("%s %s %s", expr.SQL, cmp.sql, st.b.bind(lit)), nil
 }
 
-// compileIn handles `field in [literal, ...]`. An empty list compiles
-// to a constant-false predicate rather than an empty SQL "IN ()",
-// which Postgres rejects -- but the field is still resolved (see
-// below) rather than short-circuited away entirely. Like
+// compileIn handles `field in [literal, ...]` and
+// `timestamp(field) in [timestamp("..."), ...]`. An empty list
+// compiles to a constant-false predicate rather than an empty SQL
+// "IN ()", which Postgres rejects -- but the field is still resolved
+// (see below) rather than short-circuited away entirely. Like
 // compileComparison, the first list element's Go type becomes the
 // field's [TypeHint]; every subsequent element must match that hint
 // (heterogeneous lists are rejected as ErrInvalidArgument). An empty
@@ -165,13 +191,14 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 	if len(args) != 2 {
 		return "", unsupportedExprf("in")
 	}
-	path, ok, err := fieldPathFromExpr(args[0])
+	left, err := classifyOperand(args[0])
 	if err != nil {
 		return "", err
 	}
-	if !ok {
-		return "", fmt.Errorf("filter: %w: unsupported field expression", domain.ErrInvalidArgument)
+	if !left.isField {
+		return "", fmt.Errorf("filter: %w: \"in\" left side must be a field", domain.ErrInvalidArgument)
 	}
+	path := left.path
 	if args[1].Kind() != ast.ListKind {
 		return "", fmt.Errorf("filter: %w: \"in\" requires a list literal", domain.ErrInvalidArgument)
 	}
@@ -180,15 +207,21 @@ func compileIn(args []ast.Expr, st *state) (string, error) {
 	values := make([]any, len(elems))
 	hint := TypeHintUnknown
 	for i, el := range elems {
-		if el.Kind() != ast.LiteralKind {
-			return "", fmt.Errorf("filter: %w: \"in\" list elements must be literals", domain.ErrInvalidArgument)
-		}
-		v, err := literalValue(el)
+		op, err := classifyOperand(el)
 		if err != nil {
 			return "", err
 		}
-		values[i] = v
-		elHint := typeHintOf(v)
+		if !op.isLit {
+			return "", fmt.Errorf("filter: %w: \"in\" list elements must be literals", domain.ErrInvalidArgument)
+		}
+		if op.isTimestamp != left.isTimestamp {
+			return "", fmt.Errorf("filter: %w: timestamp() must be applied consistently in membership tests", domain.ErrInvalidArgument)
+		}
+		values[i] = op.lit
+		elHint := typeHintOf(op.lit)
+		if left.isTimestamp {
+			elHint = TypeHintTimestamp
+		}
 		if i == 0 {
 			hint = elHint
 			continue
@@ -301,27 +334,28 @@ func typeHintOf(lit any) TypeHint {
 		return TypeHintNumber
 	case string:
 		return TypeHintString
+	case time.Time:
+		return TypeHintTimestamp
 	default:
 		return TypeHintUnknown
 	}
 }
 
 // operand is the classification of one side of a comparison/in: an
-// operand is either a resolvable field path or a literal value, never
-// both and never neither on success (see classifyOperand).
+// operand is either a resolvable field path, a literal value, or a
+// timestamp() conversion of either, never both field and lit on
+// success (see classifyOperand).
 type operand struct {
-	path    FieldPath
-	isField bool
-	lit     any
-	isLit   bool
+	path        FieldPath
+	isField     bool
+	lit         any
+	isLit       bool
+	isTimestamp bool
 }
 
-// classifyOperand determines whether e is a literal or a resolvable
-// field path reference. Any expression shape that is neither (e.g.
-// arithmetic, another comparison, or a call that isn't the index
-// operator) is rejected here as an unsupported field expression,
-// matching what a FieldResolver would eventually reject anyway, but
-// without depending on one being configured.
+// classifyOperand determines whether e is a literal, a resolvable
+// field path, or a supported timestamp() conversion. Any other
+// expression shape is rejected as an unsupported field expression.
 func classifyOperand(e ast.Expr) (operand, error) {
 	if e.Kind() == ast.LiteralKind {
 		v, err := literalValue(e)
@@ -329,6 +363,12 @@ func classifyOperand(e ast.Expr) (operand, error) {
 			return operand{}, err
 		}
 		return operand{lit: v, isLit: true}, nil
+	}
+	if e.Kind() == ast.CallKind {
+		c := e.AsCall()
+		if c.FunctionName() == "timestamp" && !c.IsMemberFunction() {
+			return classifyTimestampCall(c)
+		}
 	}
 	path, ok, err := fieldPathFromExpr(e)
 	if err != nil {
@@ -338,6 +378,40 @@ func classifyOperand(e ast.Expr) (operand, error) {
 		return operand{}, fmt.Errorf("filter: %w: unsupported field expression", domain.ErrInvalidArgument)
 	}
 	return operand{path: path, isField: true}, nil
+}
+
+// classifyTimestampCall handles timestamp(<field>) and
+// timestamp("<RFC3339>") — the only conversion forms supported in
+// the QueryResources CEL subset.
+func classifyTimestampCall(c ast.CallExpr) (operand, error) {
+	args := c.Args()
+	if len(args) != 1 {
+		return operand{}, fmt.Errorf("filter: %w: timestamp() requires a single argument", domain.ErrInvalidArgument)
+	}
+	arg := args[0]
+	if arg.Kind() == ast.LiteralKind {
+		s, ok := arg.AsLiteral().Value().(string)
+		if !ok {
+			return operand{}, fmt.Errorf("filter: %w: timestamp() literal must be an RFC 3339 string", domain.ErrInvalidArgument)
+		}
+		t, err := ParseCELTimestamp(s)
+		if err != nil {
+			return operand{}, fmt.Errorf("filter: %w: invalid timestamp literal: %v", domain.ErrInvalidArgument, err)
+		}
+		return operand{
+			lit:         t,
+			isLit:       true,
+			isTimestamp: true,
+		}, nil
+	}
+	path, ok, err := fieldPathFromExpr(arg)
+	if err != nil {
+		return operand{}, err
+	}
+	if !ok {
+		return operand{}, fmt.Errorf("filter: %w: timestamp() argument must be a field or RFC 3339 string literal", domain.ErrInvalidArgument)
+	}
+	return operand{path: path, isField: true, isTimestamp: true}, nil
 }
 
 // literalValue extracts e's literal value as one of the primitive Go
@@ -404,8 +478,8 @@ func fieldPathFromExpr(e ast.Expr) (FieldPath, bool, error) {
 	}
 }
 
-// hasResourceTypeGuard returns the resource_type literal from a
-// top-level `resource_type == "..."` conjunct -- i.e. reachable by
+// hasResourceTypeGuard returns the resourceType literal from a
+// top-level `resourceType == "..."` conjunct -- i.e. reachable by
 // descending only through `&&`. Resolvers may use this for optional
 // schema-backed validation of type-shaped paths; it is not required
 // to compile resource.spec.*/resource.observation.*. A guard inside
@@ -450,7 +524,7 @@ func resourceTypeEquality(e ast.Expr) (*domain.ResourceType, bool) {
 	}
 	isResourceType := func(x ast.Expr) bool {
 		path, ok, err := fieldPathFromExpr(x)
-		return err == nil && ok && len(path.Segments) == 1 && path.Segments[0] == "resource_type"
+		return err == nil && ok && len(path.Segments) == 1 && path.Segments[0] == "resourceType"
 	}
 	stringLiteral := func(x ast.Expr) (string, bool) {
 		if x.Kind() != ast.LiteralKind {
