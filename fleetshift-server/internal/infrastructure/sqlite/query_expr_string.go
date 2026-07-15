@@ -47,9 +47,12 @@ func knownStringIn(column string) func([]any, func(any) string) (string, bool, e
 		for _, v := range values {
 			s, ok := v.(string)
 			if !ok {
-				return "0", true, nil
+				continue
 			}
 			placeholders = append(placeholders, bind(s))
+		}
+		if len(placeholders) == 0 {
+			return "0", true, nil
 		}
 		return fmt.Sprintf("%s IN (%s)", column, strings.Join(placeholders, ", ")), true, nil
 	}
