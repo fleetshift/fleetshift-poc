@@ -214,6 +214,7 @@ const GcpHcpPlugin = new FleetshiftPlugin({
       card: { $codeRef: "GcpHcpOnboardingCard.default" },
       form: { $codeRef: "GcpHcpConnectionForm.default" },
       overviewCta: "Integrate your first addon",
+      category: "fleetshift.cluster-provider",
     }),
     createSearchResultRenderer({
       id: "gcphcp-cluster-renderer",
@@ -493,8 +494,110 @@ const VirtualizationPlugin = new FleetshiftPlugin({
   },
 });
 
-const SecurityPlugin = new FleetshiftPlugin({
+const AddonDemoPlugin = new FleetshiftPlugin({
   extensions: [
+    // --- Cluster providers ---
+    createClusterProvider({
+      id: "eks",
+      label: "Amazon EKS",
+      description:
+        "Create a managed Kubernetes cluster on Amazon Elastic Kubernetes Service.",
+      keywords: ["eks", "aws", "amazon", "elastic kubernetes"],
+      to: { search: "?create=eks" },
+      icon: { $codeRef: "EksProvider.EksIcon" },
+      card: { $codeRef: "EksProvider.EksProviderCard" },
+      wizard: { $codeRef: "EksProvider.EksWizard" },
+      searchIcon: { $codeRef: "EksIcon.default" },
+    }),
+    createClusterProvider({
+      id: "aks",
+      label: "Azure AKS",
+      description:
+        "Create a managed Kubernetes cluster on Azure Kubernetes Service.",
+      keywords: ["aks", "azure", "microsoft"],
+      to: { search: "?create=aks" },
+      icon: { $codeRef: "AksProvider.AksIcon" },
+      card: { $codeRef: "AksProvider.AksProviderCard" },
+      wizard: { $codeRef: "AksProvider.AksWizard" },
+      searchIcon: { $codeRef: "AksIcon.default" },
+    }),
+    createClusterProvider({
+      id: "rosa",
+      label: "ROSA",
+      description:
+        "Create a Red Hat OpenShift Service on AWS (ROSA) managed cluster.",
+      keywords: ["rosa", "openshift", "red hat", "aws"],
+      to: { search: "?create=rosa" },
+      icon: { $codeRef: "RosaProvider.RosaIcon" },
+      card: { $codeRef: "RosaProvider.RosaProviderCard" },
+      wizard: { $codeRef: "RosaProvider.RosaWizard" },
+      searchIcon: { $codeRef: "RosaIcon.default" },
+    }),
+    createClusterProvider({
+      id: "vsphere",
+      label: "vSphere",
+      description:
+        "Create an OpenShift cluster on VMware vSphere infrastructure.",
+      keywords: ["vsphere", "vmware", "on-premise", "datacenter"],
+      to: { search: "?create=vsphere" },
+      icon: { $codeRef: "VsphereProvider.VsphereIcon" },
+      card: { $codeRef: "VsphereProvider.VsphereProviderCard" },
+      wizard: { $codeRef: "VsphereProvider.VsphereWizard" },
+      searchIcon: { $codeRef: "VsphereIcon.default" },
+    }),
+
+    // --- Provider onboarding ---
+    createOnboardingAction({
+      id: "eks-connect",
+      label: "Amazon EKS",
+      description: "Link your AWS account to import and manage EKS clusters.",
+      icon: { $codeRef: "EksIcon.default" },
+      card: { $codeRef: "EksOnboarding.EksOnboardingCard" },
+      form: { $codeRef: "EksOnboarding.EksOnboardingForm" },
+      category: "fleetshift.cluster-provider",
+    }),
+    createOnboardingAction({
+      id: "aks-connect",
+      label: "Azure AKS",
+      description:
+        "Link your Azure subscription to import and manage AKS clusters.",
+      icon: { $codeRef: "AksIcon.default" },
+      card: { $codeRef: "AksOnboarding.AksOnboardingCard" },
+      form: { $codeRef: "AksOnboarding.AksOnboardingForm" },
+      category: "fleetshift.cluster-provider",
+    }),
+    createOnboardingAction({
+      id: "rosa-connect",
+      label: "ROSA",
+      description:
+        "Link your Red Hat OpenShift on AWS account to manage ROSA clusters.",
+      icon: { $codeRef: "RosaIcon.default" },
+      card: { $codeRef: "RosaOnboarding.RosaOnboardingCard" },
+      form: { $codeRef: "RosaOnboarding.RosaOnboardingForm" },
+      category: "fleetshift.cluster-provider",
+    }),
+    createOnboardingAction({
+      id: "vsphere-connect",
+      label: "vSphere",
+      description:
+        "Link your VMware vSphere environment to deploy and manage clusters.",
+      icon: { $codeRef: "VsphereIcon.default" },
+      card: { $codeRef: "VsphereOnboarding.VsphereOnboardingCard" },
+      form: { $codeRef: "VsphereOnboarding.VsphereOnboardingForm" },
+      category: "fleetshift.cluster-provider",
+    }),
+    createOnboardingAction({
+      id: "kind-connect",
+      label: "Kind",
+      description:
+        "Configure a local Kind cluster for development and testing.",
+      icon: { $codeRef: "KindOnboardingIcon.default" },
+      card: { $codeRef: "KindOnboarding.KindOnboardingCard" },
+      form: { $codeRef: "KindOnboarding.KindOnboardingForm" },
+      category: "fleetshift.cluster-provider",
+    }),
+
+    // --- Module pages ---
     createModule({
       id: "security",
       label: "Security",
@@ -509,25 +612,9 @@ const SecurityPlugin = new FleetshiftPlugin({
         "policy",
         "admission",
         "scan",
+        "cve",
       ],
     }),
-  ],
-  sharedModules,
-  entryScriptFilename: "plugins/security/security-plugin.[contenthash].js",
-  pluginManifestFilename: "plugins/security/security-plugin-manifest.json",
-  moduleFederationSettings: mfOverride,
-  pluginMetadata: {
-    name: "security-plugin",
-    version: "1.0.0",
-    exposedModules: {
-      SecurityPage: p("./src/plugins/security-plugin/SecurityPage.tsx"),
-      SecurityIcon: p("./src/plugins/security-plugin/SecurityIcon.tsx"),
-    },
-  },
-});
-
-const ObservabilityPlugin = new FleetshiftPlugin({
-  extensions: [
     createModule({
       id: "observability",
       label: "Observability",
@@ -544,22 +631,127 @@ const ObservabilityPlugin = new FleetshiftPlugin({
         "alerting",
       ],
     }),
+    createModule({
+      id: "compliance",
+      label: "Compliance",
+      component: { $codeRef: "CompliancePage.default" },
+      icon: { $codeRef: "ComplianceIcon.default" },
+      description:
+        "Track regulatory compliance and audit readiness across your fleet.",
+      keywords: ["compliance", "audit", "regulation", "policy", "governance"],
+    }),
+
+    // --- Module onboarding ---
+    createOnboardingAction({
+      id: "security-enable",
+      label: "Security",
+      description:
+        "Scan images, enforce admission policies, and monitor compliance.",
+      icon: { $codeRef: "SecurityIcon.default" },
+      card: { $codeRef: "SecurityOnboardingCard.SecurityOnboardingCard" },
+      form: { $codeRef: "SecurityOnboardingForm.default" },
+      category: "fleetshift.module",
+    }),
+    createOnboardingAction({
+      id: "observability-enable",
+      label: "Observability",
+      description: "Unified metrics, logs, and traces across your fleet.",
+      icon: { $codeRef: "ObservabilityIcon.default" },
+      card: {
+        $codeRef: "ObservabilityOnboardingCard.ObservabilityOnboardingCard",
+      },
+      form: { $codeRef: "ObservabilityOnboardingForm.default" },
+      category: "fleetshift.module",
+    }),
+    createOnboardingAction({
+      id: "compliance-enable",
+      label: "Compliance",
+      description: "Track regulatory compliance and audit readiness.",
+      icon: { $codeRef: "ComplianceIcon.default" },
+      card: { $codeRef: "ComplianceOnboardingCard.ComplianceOnboardingCard" },
+      form: { $codeRef: "ComplianceOnboardingForm.default" },
+      category: "fleetshift.module",
+    }),
   ],
   sharedModules,
-  entryScriptFilename:
-    "plugins/observability/observability-plugin.[contenthash].js",
-  pluginManifestFilename:
-    "plugins/observability/observability-plugin-manifest.json",
+  entryScriptFilename: "plugins/addon-demo/addon-demo-plugin.[contenthash].js",
+  pluginManifestFilename: "plugins/addon-demo/addon-demo-plugin-manifest.json",
   moduleFederationSettings: mfOverride,
   pluginMetadata: {
-    name: "observability-plugin",
+    name: "addon-demo-plugin",
     version: "1.0.0",
     exposedModules: {
-      ObservabilityPage: p(
-        "./src/plugins/observability-plugin/ObservabilityPage.tsx",
+      // Provider cards + wizards
+      EksProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/EksProvider.tsx",
       ),
+      AksProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/AksProvider.tsx",
+      ),
+      RosaProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/RosaProvider.tsx",
+      ),
+      VsphereProvider: p(
+        "./src/plugins/addon-demo-plugin/providers/VsphereProvider.tsx",
+      ),
+      // Provider icons
+      EksIcon: p("./src/plugins/addon-demo-plugin/icons/EksIcon.tsx"),
+      AksIcon: p("./src/plugins/addon-demo-plugin/icons/AksIcon.tsx"),
+      RosaIcon: p("./src/plugins/addon-demo-plugin/icons/RosaIcon.tsx"),
+      VsphereIcon: p("./src/plugins/addon-demo-plugin/icons/VsphereIcon.tsx"),
+      // Provider onboarding
+      EksOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/EksOnboarding.tsx",
+      ),
+      AksOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/AksOnboarding.tsx",
+      ),
+      RosaOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/RosaOnboarding.tsx",
+      ),
+      VsphereOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/VsphereOnboarding.tsx",
+      ),
+      KindOnboarding: p(
+        "./src/plugins/addon-demo-plugin/providers/KindOnboarding.tsx",
+      ),
+      KindOnboardingIcon: p("./src/plugins/kind-plugin/KindIcon.tsx"),
+      // Module pages
+      SecurityPage: p(
+        "./src/plugins/addon-demo-plugin/security/SecurityPage.tsx",
+      ),
+      ObservabilityPage: p(
+        "./src/plugins/addon-demo-plugin/observability/ObservabilityPage.tsx",
+      ),
+      CompliancePage: p(
+        "./src/plugins/addon-demo-plugin/compliance/CompliancePage.tsx",
+      ),
+      // Module icons
+      SecurityIcon: p("./src/plugins/addon-demo-plugin/icons/SecurityIcon.tsx"),
       ObservabilityIcon: p(
-        "./src/plugins/observability-plugin/ObservabilityIcon.tsx",
+        "./src/plugins/addon-demo-plugin/icons/ObservabilityIcon.tsx",
+      ),
+      ComplianceIcon: p(
+        "./src/plugins/addon-demo-plugin/icons/ComplianceIcon.tsx",
+      ),
+      // Module onboarding
+      SecurityOnboardingCard: p(
+        "./src/plugins/addon-demo-plugin/onboarding/SecurityOnboardingCard.tsx",
+      ),
+      ObservabilityOnboardingCard: p(
+        "./src/plugins/addon-demo-plugin/onboarding/ObservabilityOnboardingCard.tsx",
+      ),
+      ComplianceOnboardingCard: p(
+        "./src/plugins/addon-demo-plugin/onboarding/ComplianceOnboardingCard.tsx",
+      ),
+      SecurityOnboardingForm: p(
+        "./src/plugins/addon-demo-plugin/onboarding/SecurityOnboardingForm.tsx",
+      ),
+      ObservabilityOnboardingForm: p(
+        "./src/plugins/addon-demo-plugin/onboarding/ObservabilityOnboardingForm.tsx",
+      ),
+      ComplianceOnboardingForm: p(
+        "./src/plugins/addon-demo-plugin/onboarding/ComplianceOnboardingForm.tsx",
       ),
     },
   },
@@ -576,8 +768,7 @@ const pluginConfigs = [
   { plugin: SetupPlugin, key: "setup" },
   { plugin: ConfigurationPlugin, key: "configuration" },
   { plugin: VirtualizationPlugin, key: "virtualization" },
-  { plugin: SecurityPlugin, key: "security" },
-  { plugin: ObservabilityPlugin, key: "observability" },
+  { plugin: AddonDemoPlugin, key: "addon-demo" },
   { plugin: SettingsPlugin, key: "settings" },
 ] as const;
 

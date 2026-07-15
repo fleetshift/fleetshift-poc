@@ -71,5 +71,11 @@ export default {
         "selector-class-pattern": pluginPattern("ome-settings-", "ome-settings-nav-order, ome-settings-nav-order__item"),
       },
     },
+    {
+      files: ["packages/mock-ui-plugins/src/plugins/addon-demo-plugin/**/*.{scss,css}"],
+      rules: {
+        "selector-class-pattern": pluginPattern("ome-addon-", "ome-addon-security, ome-addon-security__severity-badges"),
+      },
+    },
   ],
 };

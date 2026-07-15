@@ -41,12 +41,23 @@ const SETUP_STEPS = [
   },
 ];
 
+const CATEGORY_LABELS: Record<string, string> = {
+  "fleetshift.cluster-provider": "Configure a cluster provider",
+};
+
+const CATEGORY_CTA: Record<string, string> = {
+  "fleetshift.cluster-provider": "Configure a provider",
+};
+
+const HIDDEN_CATEGORIES = new Set(["fleetshift.module"]);
+
 type OnboardingActionExtension = Extension<
   "fleetshift.onboarding-action",
   {
     id: string;
     label: string;
     overviewCta?: string;
+    category?: string;
   }
 >;
 
@@ -111,16 +122,52 @@ export default function SetupChecklist() {
       completed: !!progress[step.id],
     }));
 
-    const actionItems = extensions.map((ext) => ({
-      id: ext.properties.id,
-      label: ext.properties.label,
-      completed: !!progress[ext.properties.id],
-      scope: "settings-plugin",
-      module: "ExtensionsPage",
-      search: `?action=${ext.properties.id}`,
-      ctaText:
-        ext.properties.overviewCta ?? `Configure ${ext.properties.label}`,
-    }));
+    const grouped = new Map<string, OnboardingActionExtension[]>();
+    const ungrouped: OnboardingActionExtension[] = [];
+
+    for (const ext of extensions) {
+      const cat = ext.properties.category;
+      if (cat) {
+        const list = grouped.get(cat);
+        if (list) {
+          list.push(ext);
+        } else {
+          grouped.set(cat, [ext]);
+        }
+      } else {
+        ungrouped.push(ext);
+      }
+    }
+
+    const actionItems: ChecklistItem[] = [];
+
+    for (const [category, exts] of grouped) {
+      if (HIDDEN_CATEGORIES.has(category)) continue;
+
+      const anyComplete = exts.some((e) => !!progress[e.properties.id]);
+      actionItems.push({
+        id: `category:${category}`,
+        label: CATEGORY_LABELS[category] ?? category,
+        completed: anyComplete,
+        scope: "settings-plugin",
+        module: "ExtensionsPage",
+        search: `?category=${category}`,
+        ctaText: CATEGORY_CTA[category] ?? `Configure`,
+      });
+    }
+
+    for (const ext of ungrouped) {
+      actionItems.push({
+        id: ext.properties.id,
+        label: ext.properties.label,
+        completed: !!progress[ext.properties.id],
+        scope: "settings-plugin",
+        module: "ExtensionsPage",
+        search: `?action=${ext.properties.id}`,
+        ctaText:
+          ext.properties.overviewCta ?? `Configure ${ext.properties.label}`,
+      });
+    }
 
     return [...setupItems, ...actionItems];
   }, [progress, extensions]);

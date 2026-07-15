@@ -63,6 +63,7 @@ export type OnboardingActionExtras = {
   card: EncodedCodeRef;
   form: EncodedCodeRef;
   overviewCta?: string;
+  category?: FleetshiftExtensionType;
 };
 
 export type ModuleGroupProperties = BaseExtensionProperties & ModuleGroupExtras;
