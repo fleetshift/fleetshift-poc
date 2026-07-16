@@ -136,19 +136,18 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 			a.observer.Error("recovery: failed to unwrap managed resource spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec, err := ParseClusterSpec(mrs.Spec)
+		spec, err := ParseClusterSpec(mrs)
 		if err != nil {
 			a.observer.Error("recovery: failed to parse cluster spec", "delivery", ad.Delivery.ID(), "error", err)
 			continue
 		}
-		spec.Name = string(mrs.Name.ID())
 
-		if spec.Name == "" {
+		if spec.clusterName() == "" {
 			a.observer.Error("recovery: empty cluster name", "delivery", ad.Delivery.ID())
 			continue
 		}
 
-		if !a.acceptGeneration(spec.Name, ad.Delivery.Generation()) {
+		if !a.acceptGeneration(spec.clusterName(), ad.Delivery.Generation()) {
 			continue
 		}
 
@@ -159,7 +158,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 
 		a.observer.Info("recovering active delivery",
 			"delivery", ad.Delivery.ID(),
-			"cluster", spec.Name,
+			"cluster", spec.clusterName(),
 			"state", ad.Delivery.State(),
 			"generation", ad.Delivery.Generation(),
 		)
@@ -167,7 +166,7 @@ func (a *Agent) RecoverActiveDeliveries(ctx context.Context, targetIDs []domain.
 		targetCfg := TargetConfigFromProperties(ad.Target.Properties())
 		progress := newDeliveryProgress(a.reporter, ad.Delivery.ID(), ad.Delivery.Generation())
 
-		lock := a.clusterLock(spec.Name)
+		lock := a.clusterLock(spec.clusterName())
 		lock.Lock()
 		if ad.Delivery.Operation() == domain.DeliveryOperationRemove {
 			go func() {
@@ -246,20 +245,15 @@ func (a *Agent) Deliver(
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to unwrap managed resource spec: %v", err))
 		return nil
 	}
-	spec, err := ParseClusterSpec(mrs.Spec)
+	spec, err := ParseClusterSpec(mrs)
 	if err != nil {
 		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("failed to parse cluster spec: %v", err))
 		return nil
 	}
-	spec.Name = string(mrs.Name.ID())
-	if err := ValidateClusterName(spec.Name); err != nil {
-		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("invalid cluster name: %v", err))
-		return nil
-	}
 
-	if !a.acceptGeneration(spec.Name, generation) {
-		a.observer.Info("rejecting stale delivery", "cluster", spec.Name, "generation", generation)
-		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("stale generation %d for cluster %s", generation, spec.Name))
+	if !a.acceptGeneration(spec.clusterName(), generation) {
+		a.observer.Info("rejecting stale delivery", "cluster", spec.clusterName(), "generation", generation)
+		a.failDelivery(ctx, progress, domain.DeliveryStateFailed, fmt.Sprintf("stale generation %d for cluster %s", generation, spec.clusterName()))
 		return nil
 	}
 
@@ -273,7 +267,7 @@ func (a *Agent) Deliver(
 	targetCfg := TargetConfigFromProperties(target.Properties())
 
 	// Launch async provisioning with per-cluster serialization
-	lock := a.clusterLock(spec.Name)
+	lock := a.clusterLock(spec.clusterName())
 	lock.Lock()
 	asyncCtx := context.WithoutCancel(ctx)
 	go func() {
@@ -314,21 +308,21 @@ func (a *Agent) deliverAsync(
 
 	output, err := a.reconciler.Ensure(runCtx, spec, target, callerToken, progress)
 	if err != nil {
-		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
+		a.observer.Error("reconcile failed", "error", err, "cluster", spec.clusterName())
 		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
-			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.Name)
+			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.clusterName())
 		}
 		return
 	}
 	output.TrustBundles = a.TrustBundles()
 
 	if err := a.ensureIndexerReady(ctx, output, progress.Generation()); err != nil {
-		a.observer.Error("ensure indexer failed", "error", err, "cluster", spec.Name)
+		a.observer.Error("ensure indexer failed", "error", err, "cluster", spec.clusterName())
 		if reportErr := progress.Complete(ctx, domain.DeliveryResult{
 			State:   domain.DeliveryStateFailed,
-			Message: fmt.Sprintf("ensure indexer for %s: %v", spec.Name, err),
+			Message: fmt.Sprintf("ensure indexer for %s: %v", spec.clusterName(), err),
 		}); reportErr != nil {
-			a.observer.Error("failed to report indexer failure", "error", reportErr, "cluster", spec.Name)
+			a.observer.Error("failed to report indexer failure", "error", reportErr, "cluster", spec.clusterName())
 		}
 		return
 	}
@@ -340,9 +334,9 @@ func (a *Agent) deliverAsync(
 		ProducedSecrets:    output.Secrets(),
 	}
 
-	a.observer.Info("cluster provisioned successfully", "cluster", spec.Name, "target_id", output.TargetID)
+	a.observer.Info("cluster provisioned successfully", "cluster", spec.clusterName(), "target_id", output.TargetID)
 	if reportErr := progress.Complete(ctx, result); reportErr != nil {
-		a.observer.Error("failed to report delivery result", "error", reportErr, "cluster", spec.Name)
+		a.observer.Error("failed to report delivery result", "error", reportErr, "cluster", spec.clusterName())
 	}
 }
 
@@ -359,23 +353,23 @@ func (a *Agent) deleteAsync(
 	runCtx, cancel := newReconcileContext(ctx)
 	defer cancel()
 
-	a.observer.Info("deleting cluster", "cluster", spec.Name)
-	a.stopIndexer(ctx, GuestTargetID(spec.Name))
+	a.observer.Info("deleting cluster", "cluster", spec.clusterName())
+	a.stopIndexer(ctx, GuestTargetID(spec.clusterName()))
 	if err := a.reconciler.Delete(runCtx, spec, target, callerToken, progress); err != nil {
-		a.observer.Error("reconcile failed", "error", err, "cluster", spec.Name)
+		a.observer.Error("reconcile failed", "error", err, "cluster", spec.clusterName())
 		if reportErr := progress.Complete(ctx, deliveryResultForReconcileError(err)); reportErr != nil {
-			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.Name)
+			a.observer.Error("failed to report reconcile failure", "error", reportErr, "cluster", spec.clusterName())
 		}
 		return
 	}
 
 	a.clusterMu.Lock()
-	delete(a.clusterGen, spec.Name)
+	delete(a.clusterGen, spec.clusterName())
 	a.clusterMu.Unlock()
 
-	a.observer.Info("cluster deleted successfully", "cluster", spec.Name)
+	a.observer.Info("cluster deleted successfully", "cluster", spec.clusterName())
 	if reportErr := progress.Complete(ctx, domain.DeliveryResult{State: domain.DeliveryStateDelivered}); reportErr != nil {
-		a.observer.Error("failed to report removal result", "error", reportErr, "cluster", spec.Name)
+		a.observer.Error("failed to report removal result", "error", reportErr, "cluster", spec.clusterName())
 	}
 }
 
@@ -419,43 +413,42 @@ func (a *Agent) Remove(
 			a.observer.Error("failed to unwrap managed resource spec for removal", "error", err)
 			return fmt.Errorf("failed to unwrap managed resource spec: %w", err)
 		}
-		spec, err := ParseClusterSpec(mrs.Spec)
+		spec, err := ParseClusterSpec(mrs)
 		if err != nil {
 			a.observer.Error("failed to parse cluster spec for removal", "error", err)
 			return fmt.Errorf("failed to parse cluster spec: %w", err)
 		}
-		spec.Name = string(mrs.Name.ID())
 
-		if !a.acceptGeneration(spec.Name, generation) {
-			a.observer.Info("rejecting stale removal", "cluster", spec.Name, "generation", generation)
+		if !a.acceptGeneration(spec.clusterName(), generation) {
+			a.observer.Info("rejecting stale removal", "cluster", spec.clusterName(), "generation", generation)
 			continue
 		}
 
-		lock := a.clusterLock(spec.Name)
+		lock := a.clusterLock(spec.clusterName())
 		lock.Lock()
 
 		// Delete the cluster
-		a.observer.Info("deleting cluster", "cluster", spec.Name)
-		a.stopIndexer(ctx, GuestTargetID(spec.Name))
+		a.observer.Info("deleting cluster", "cluster", spec.clusterName())
+		a.stopIndexer(ctx, GuestTargetID(spec.clusterName()))
 		if err := a.reconciler.Delete(ctx, spec, targetCfg, string(auth.Token), progress); err != nil {
 			lock.Unlock()
-			a.observer.Error("failed to delete cluster", "error", err, "cluster", spec.Name)
+			a.observer.Error("failed to delete cluster", "error", err, "cluster", spec.clusterName())
 			if IsAuthExpiredError(err) || containsInvalidGrant(err) {
 				a.failDelivery(ctx, progress, domain.DeliveryStateAuthFailed,
-					fmt.Sprintf("auth expired deleting cluster %s: %v", spec.Name, err))
+					fmt.Sprintf("auth expired deleting cluster %s: %v", spec.clusterName(), err))
 			} else {
 				a.failDelivery(ctx, progress, domain.DeliveryStateFailed,
-					fmt.Sprintf("failed to delete cluster %s: %v", spec.Name, err))
+					fmt.Sprintf("failed to delete cluster %s: %v", spec.clusterName(), err))
 			}
 			return nil
 		}
 
 		a.clusterMu.Lock()
-		delete(a.clusterGen, spec.Name)
+		delete(a.clusterGen, spec.clusterName())
 		a.clusterMu.Unlock()
 
 		lock.Unlock()
-		a.observer.Info("cluster deleted successfully", "cluster", spec.Name)
+		a.observer.Info("cluster deleted successfully", "cluster", spec.clusterName())
 	}
 
 	asyncCtx := context.WithoutCancel(ctx)
@@ -503,23 +496,24 @@ func parseTrustBundleManifest(m domain.Manifest) (domain.TrustBundleEntry, error
 }
 
 // ensureIndexerReady calls EnsureIndexer when an IndexingRuntime is
-// configured. Missing credential or API server is a permanent error.
+// configured. Invalid indexing input is a permanent error.
 // Nil runtime is a no-op.
 func (a *Agent) ensureIndexerReady(ctx context.Context, out *ClusterOutput, generation domain.Generation) error {
 	if a.indexingRuntime == nil || out == nil {
 		return nil
 	}
-	if len(out.SAToken) == 0 || out.APIServer == "" {
-		return fmt.Errorf("%w: missing indexing credential or api server for %s", domain.ErrInvalidArgument, out.TargetID)
-	}
-	input := kubernetes.IndexRuntimeInput{
-		TargetID:    out.TargetID,
-		APIServer:   out.APIServer,
-		CACert:      string(out.CACert),
-		Credential:  out.SAToken,
-		SecretRef:   out.SATokenRef,
-		Generation:  generation,
-		IndexConfig: kubernetes.DefaultIndexConfig(),
+	input, err := kubernetes.NewIndexRuntimeInput(
+		out.TargetID,
+		out.ClusterResourceName,
+		out.APIServer,
+		string(out.CACert),
+		out.SAToken,
+		out.SATokenRef,
+		generation,
+		kubernetes.DefaultIndexConfig(),
+	)
+	if err != nil {
+		return fmt.Errorf("%w: for %s", err, out.TargetID)
 	}
 	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.LocalEnsureRetryDeadline, func(attemptCtx context.Context) error {
 		return a.indexingRuntime.EnsureIndexer(attemptCtx, input)

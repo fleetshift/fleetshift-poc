@@ -19,10 +19,10 @@ const KubernetesTargetType domain.TargetType = "kubernetes"
 // produces: connection info for the provisioned cluster and,
 // optionally, a platform ServiceAccount token for attested delivery.
 type ClusterOutput struct {
-	TargetID  domain.TargetID
-	Name      string
-	APIServer string // e.g. "https://127.0.0.1:PORT"
-	CACert    []byte // PEM-encoded cluster CA certificate
+	TargetID            domain.TargetID
+	ClusterResourceName domain.ResourceName // managed cluster, e.g. clusters/c1
+	APIServer           string              // e.g. "https://127.0.0.1:PORT"
+	CACert              []byte              // PEM-encoded cluster CA certificate
 
 	// SATokenRef and SAToken are set when platform SA bootstrapping
 	// succeeds. SATokenRef is a vault key; SAToken is the raw bearer
@@ -42,7 +42,8 @@ type ClusterOutput struct {
 // secret rather than embedding the raw credential.
 func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	props := map[string]string{
-		kubernetes.PropAPIServer: o.APIServer,
+		kubernetes.PropAPIServer:           o.APIServer,
+		kubernetes.PropClusterResourceName: string(o.ClusterResourceName),
 	}
 	if len(o.CACert) > 0 {
 		props[kubernetes.PropCACert] = string(o.CACert)
@@ -58,7 +59,7 @@ func (o *ClusterOutput) Target() domain.ProvisionedTarget {
 	return domain.ProvisionedTarget{
 		ID:                    o.TargetID,
 		Type:                  KubernetesTargetType,
-		Name:                  o.Name,
+		Name:                  string(o.ClusterResourceName.ID()),
 		Properties:            props,
 		AcceptedManifestTypes: []domain.ManifestType{kubernetes.ManifestManifestType},
 	}

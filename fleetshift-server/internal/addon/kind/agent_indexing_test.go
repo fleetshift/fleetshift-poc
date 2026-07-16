@@ -101,6 +101,9 @@ func TestAgent_Deliver_EnsureIndexerBeforeDelivered(t *testing.T) {
 	if got.TargetID != "k8s-idx-cluster" {
 		t.Fatalf("Ensure TargetID = %q, want k8s-idx-cluster", got.TargetID)
 	}
+	if got.ClusterResourceName != "clusters/idx-cluster" {
+		t.Fatalf("Ensure ClusterResourceName = %q, want clusters/idx-cluster", got.ClusterResourceName)
+	}
 	if got.Generation != 7 {
 		t.Fatalf("Ensure Generation = %d, want 7", got.Generation)
 	}

@@ -66,7 +66,7 @@ func ReplayPersistedIndexers(
 		}
 		input, ok, err := indexRuntimeInputFromTarget(ctx, vault, target)
 		if err != nil {
-			logger.Warn("startup replay skipped target; credential resolve failed",
+			logger.Warn("startup replay skipped target",
 				"target", string(target.ID()),
 				"error", err,
 			)
@@ -124,6 +124,13 @@ func indexRuntimeInputFromTarget(
 		return IndexRuntimeInput{}, false, nil
 	}
 
+	// Permanent target-property errors before credential retries so
+	// vault-backed targets with bad cluster names fail fast.
+	clusterResourceName, err := clusterResourceNameFromTarget(target)
+	if err != nil {
+		return IndexRuntimeInput{}, false, err
+	}
+
 	var lastErr error
 	var token []byte
 	var secretRef domain.SecretRef
@@ -145,15 +152,35 @@ func indexRuntimeInputFromTarget(
 		return IndexRuntimeInput{}, false, nil
 	}
 
-	return IndexRuntimeInput{
-		TargetID:    target.ID(),
-		APIServer:   apiServer,
-		CACert:      props[PropCACert],
-		Credential:  token,
-		SecretRef:   secretRef,
-		Generation:  StartupReplayGeneration,
-		IndexConfig: DefaultIndexConfig(),
-	}, true, nil
+	input, err := NewIndexRuntimeInput(
+		target.ID(),
+		clusterResourceName,
+		apiServer,
+		props[PropCACert],
+		token,
+		secretRef,
+		StartupReplayGeneration,
+		DefaultIndexConfig(),
+	)
+	if err != nil {
+		return IndexRuntimeInput{}, false, err
+	}
+	return input, true, nil
+}
+
+// clusterResourceNameFromTarget reads [PropClusterResourceName] from the
+// persisted kubernetes target. Missing or malformed values are permanent
+// errors so startup replay does not invent a parent segment.
+func clusterResourceNameFromTarget(target domain.TargetInfo) (domain.ResourceName, error) {
+	raw := target.Properties()[PropClusterResourceName]
+	if raw == "" {
+		return "", fmt.Errorf("%w: target %q missing %s property", domain.ErrInvalidArgument, target.ID(), PropClusterResourceName)
+	}
+	name, err := ParseClusterResourceName(raw)
+	if err != nil {
+		return "", fmt.Errorf("target %q %s: %w", target.ID(), PropClusterResourceName, err)
+	}
+	return name, nil
 }
 
 // resolveIndexingCredential returns bearer token bytes and optional vault

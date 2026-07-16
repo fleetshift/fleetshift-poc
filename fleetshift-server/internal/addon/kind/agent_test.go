@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/kind/pkg/log"
 
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kind"
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/testutil"
 )
@@ -585,6 +586,9 @@ func TestAgent_Deliver_ProducesTargetOutputs(t *testing.T) {
 	apiServer, ok := pt.Properties["api_server"]
 	if !ok || apiServer == "" {
 		t.Fatal("target Properties missing api_server")
+	}
+	if pt.Properties[kubernetes.PropClusterResourceName] != "clusters/dev-cluster" {
+		t.Fatalf("cluster_resource_name = %q, want clusters/dev-cluster", pt.Properties[kubernetes.PropClusterResourceName])
 	}
 }
 

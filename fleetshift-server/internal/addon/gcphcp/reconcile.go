@@ -178,7 +178,7 @@ func (r *Reconciler) Ensure(
 
 		snapshotClusterID := clusterID
 		if snapshotClusterID == "" {
-			resolvedID, err := clsClient.ResolveClusterID(snapshotCtx, spec.Name)
+			resolvedID, err := clsClient.ResolveClusterID(snapshotCtx, spec.clusterName())
 			switch {
 			case err == nil:
 				snapshotClusterID = resolvedID
@@ -189,14 +189,14 @@ func (r *Reconciler) Ensure(
 		if snapshotClusterID == "" {
 			return
 		}
-		if err := emitFailureStatusSnapshot(snapshotCtx, clsClient, snapshotClusterID, spec.Name, progress); err != nil {
+		if err := emitFailureStatusSnapshot(snapshotCtx, clsClient, snapshotClusterID, spec.clusterName(), progress); err != nil {
 			progress.Info(snapshotCtx, fmt.Sprintf("Unable to emit failure snapshot: %v", err))
 		}
 	}()
 
 	progress.Info(ctx, "Reconciling cluster via CLS API")
 
-	clusterID, err = clsClient.ResolveClusterID(ctx, spec.Name)
+	clusterID, err = clsClient.ResolveClusterID(ctx, spec.clusterName())
 	switch {
 	case err == nil:
 		observedCluster, err := clsClient.GetCluster(ctx, clusterID)
@@ -210,7 +210,7 @@ func (r *Reconciler) Ensure(
 		}
 
 		if _, err := clsClient.UpdateCluster(ctx, clusterID, updateSpec); err != nil {
-			return nil, fmt.Errorf("update cluster %s: %w", spec.Name, err)
+			return nil, fmt.Errorf("update cluster %s: %w", spec.clusterName(), err)
 		}
 
 		progress.Info(ctx, fmt.Sprintf("Cluster updated with ID: %s", clusterID))
@@ -354,7 +354,7 @@ func (r *Reconciler) Ensure(
 		return nil, fmt.Errorf("resolve cluster ID: %w", err)
 	}
 
-	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, progress); err != nil {
+	if err := reconcileNodepoolsFn(ctx, clsClient, clusterID, spec.clusterName(), spec.Nodepools, progress); err != nil {
 		return nil, err
 	}
 
@@ -367,7 +367,7 @@ func (r *Reconciler) Ensure(
 
 	emitClusterReadyTransition(ctx, progress)
 
-	guestTargetID := GuestTargetID(spec.Name)
+	guestTargetID := GuestTargetID(spec.clusterName())
 	guestEndpoint, bootstrapResult, err := completeGuestRegistrationFn(
 		ctx,
 		clsClient,
@@ -382,7 +382,7 @@ func (r *Reconciler) Ensure(
 
 	progress.Info(ctx, "Waiting for desired nodepools to become healthy")
 
-	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.Name, spec.Nodepools, progress); err != nil {
+	if err := pollDesiredNodepoolsHealthyFn(ctx, clsClient, clusterID, spec.clusterName(), spec.Nodepools, progress); err != nil {
 		return nil, fmt.Errorf("wait for desired nodepools healthy: %w", err)
 	}
 
@@ -391,12 +391,12 @@ func (r *Reconciler) Ensure(
 	// Build ClusterOutput. The agent attaches trust bundles from its
 	// current addon input state before registering the emitted target.
 	output := &ClusterOutput{
-		TargetID:   guestTargetID,
-		Name:       spec.Name,
-		APIServer:  guestEndpoint,
-		CACert:     bootstrapResult.CACert,
-		SATokenRef: bootstrapResult.SATokenRef,
-		SAToken:    bootstrapResult.SAToken,
+		TargetID:            guestTargetID,
+		ClusterResourceName: spec.ResourceName,
+		APIServer:           guestEndpoint,
+		CACert:              bootstrapResult.CACert,
+		SATokenRef:          bootstrapResult.SATokenRef,
+		SAToken:             bootstrapResult.SAToken,
 	}
 
 	progress.Info(ctx, "Cluster provisioning complete")
@@ -421,7 +421,7 @@ func (r *Reconciler) Delete(
 	progress.Info(ctx, "Resolving cluster ID")
 
 	// Resolve cluster ID by name
-	clusterID, deletedCluster, err := deleteClusterIfPresent(ctx, clsClient, spec.Name, progress)
+	clusterID, deletedCluster, err := deleteClusterIfPresent(ctx, clsClient, spec.clusterName(), progress)
 	if err != nil {
 		return err
 	}
@@ -545,7 +545,7 @@ func BuildCLSClusterSpec(
 	clusterSpec["channelGroup"] = spec.ChannelGroup
 
 	return map[string]any{
-		"name":              spec.Name,
+		"name":              spec.clusterName(),
 		"target_project_id": target.GCPProject,
 		"spec":              clusterSpec,
 	}, nil

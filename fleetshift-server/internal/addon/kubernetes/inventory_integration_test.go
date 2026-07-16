@@ -155,7 +155,7 @@ func Test_ClusterBootstrap(t *testing.T) {
 			continue
 		}
 		foundNode = true
-		assertObjectIdentity(t, obj, f.targetID)
+		assertObjectIdentity(t, obj, f.clusterResourceName)
 		extracted := parseExtracted(t, inv)
 		if _, ok := extracted["kubeletVersion"]; !ok {
 			t.Error("node missing extracted.kubeletVersion")
@@ -184,7 +184,7 @@ func Test_DeployWorkload(t *testing.T) {
 
 	f.deliver(t, "nginx-e2e-deploy", nginxDeployment("nginx-e2e", f.namespace, 1))
 
-	objs := f.awaitRunningPod(t, "nginx-e2e-")
+	objs := f.awaitRunningWorkload(t, "nginx-e2e", "nginx-e2e-")
 	if findByKindNamePrefix(objs, "Pod", "nginx-e2e-") == nil {
 		t.Fatal("missing Pod inventory")
 	}
@@ -432,9 +432,9 @@ func Test_StopIndexerLeavesInventory(t *testing.T) {
 	}
 
 	remaining := 0
+	prefix := string(f.clusterResourceName) + "/"
 	for _, obj := range listInventory(t, f.store) {
-		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["fleetshift.target.id"] == string(f.targetID) {
+		if strings.HasPrefix(string(obj.Name()), prefix) {
 			remaining++
 		}
 	}
@@ -555,7 +555,7 @@ func Test_EnrichedFields(t *testing.T) {
 	f := setupE2E(t)
 
 	f.deliver(t, "enriched-deploy", nginxDeployment("e2e-enriched", f.namespace, 1))
-	objs := f.awaitRunningPod(t, "e2e-enriched-")
+	objs := f.awaitRunningWorkload(t, "e2e-enriched", "e2e-enriched-")
 
 	for _, obj := range objs {
 		inv := obj.Inventory()
@@ -636,7 +636,7 @@ func Test_LabelIndexing(t *testing.T) {
 		}
 		if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], "e2e-labels-") {
 			foundPod = true
-			assertObjectIdentity(t, obj, f.targetID)
+			assertObjectIdentity(t, obj, f.clusterResourceName)
 			if inv.Labels()["k8s.name"] == "" {
 				t.Fatal("pod missing k8s.name identity label")
 			}
@@ -716,14 +716,21 @@ func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 
 	cfg := kubeaddon.DefaultIndexConfig()
 	cfg.BatchInterval = 200 * time.Millisecond
-	if err := host.EnsureIndexer(context.Background(), kubeaddon.IndexRuntimeInput{
-		TargetID:    target.ID(),
-		APIServer:   fixture.apiServer,
-		CACert:      fixture.caCert,
-		Credential:  []byte(fixture.saToken),
-		Generation:  1,
-		IndexConfig: cfg,
-	}); err != nil {
+	clusterResourceName := domain.ResourceName("clusters/ensure-e2e")
+	input, err := kubeaddon.NewIndexRuntimeInput(
+		target.ID(),
+		clusterResourceName,
+		fixture.apiServer,
+		fixture.caCert,
+		[]byte(fixture.saToken),
+		"",
+		1,
+		cfg,
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
+	}
+	if err := host.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
 	}
 	t.Cleanup(func() {
@@ -733,7 +740,7 @@ func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 	objs := awaitInventoryMatch(t, store, func(objs []*domain.ExtensionResource) bool {
 		for _, obj := range objs {
 			inv := obj.Inventory()
-			if inv != nil && inv.Labels()["k8s.kind"] == "Node" && inv.Labels()["fleetshift.target.id"] == string(targetID) {
+			if inv != nil && inv.Labels()["k8s.kind"] == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
 				return true
 			}
 		}
@@ -743,9 +750,9 @@ func Test_EnsureIndexerIndexesTarget(t *testing.T) {
 	var found bool
 	for _, obj := range objs {
 		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["k8s.kind"] == "Node" && inv.Labels()["fleetshift.target.id"] == string(targetID) {
+		if inv != nil && inv.Labels()["k8s.kind"] == "Node" && strings.HasPrefix(string(obj.Name()), string(clusterResourceName)+"/") {
 			found = true
-			assertObjectIdentity(t, obj, targetID)
+			assertObjectIdentity(t, obj, clusterResourceName)
 		}
 	}
 	if !found {
@@ -780,13 +787,14 @@ type clusterFixture struct {
 }
 
 type e2eFixture struct {
-	store     domain.Store
-	host      *kubeaddon.KubernetesInProcessIndexHost
-	dynClient dynamic.Interface
-	namespace string
-	target    domain.TargetInfo
-	targetID  domain.TargetID
-	auth      domain.DeliveryAuth
+	store               domain.Store
+	host                *kubeaddon.KubernetesInProcessIndexHost
+	dynClient           dynamic.Interface
+	namespace           string
+	target              domain.TargetInfo
+	targetID            domain.TargetID
+	clusterResourceName domain.ResourceName
+	auth                domain.DeliveryAuth
 }
 
 type setupOption func(*setupConfig)
@@ -858,14 +866,21 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 
 	indexCfg := kubeaddon.DefaultIndexConfig()
 	indexCfg.BatchInterval = 200 * time.Millisecond
-	if err := host.EnsureIndexer(ctx, kubeaddon.IndexRuntimeInput{
-		TargetID:    target.ID(),
-		APIServer:   fixture.apiServer,
-		CACert:      fixture.caCert,
-		Credential:  []byte(fixture.saToken),
-		Generation:  1,
-		IndexConfig: indexCfg,
-	}); err != nil {
+	clusterResourceName := domain.ResourceName("clusters/e2e")
+	input, err := kubeaddon.NewIndexRuntimeInput(
+		target.ID(),
+		clusterResourceName,
+		fixture.apiServer,
+		fixture.caCert,
+		[]byte(fixture.saToken),
+		"",
+		1,
+		indexCfg,
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
+	}
+	if err := host.EnsureIndexer(ctx, input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
 	}
 
@@ -881,7 +896,7 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 		},
 	}
 	nsGVR := schema.GroupVersionResource{Version: "v1", Resource: "namespaces"}
-	_, err := fixture.adminDynClient.Resource(nsGVR).Create(ctx, nsObj, metav1.CreateOptions{})
+	_, err = fixture.adminDynClient.Resource(nsGVR).Create(ctx, nsObj, metav1.CreateOptions{})
 	if err != nil {
 		t.Fatalf("create namespace %s: %v", ns, err)
 	}
@@ -892,13 +907,14 @@ func setupE2E(t *testing.T, opts ...setupOption) *e2eFixture {
 	})
 
 	f := &e2eFixture{
-		store:     store,
-		host:      host,
-		dynClient: fixture.adminDynClient,
-		namespace: ns,
-		target:    target,
-		targetID:  targetID,
-		auth:      domain.DeliveryAuth{Token: domain.RawToken(fixture.saToken)},
+		store:               store,
+		host:                host,
+		dynClient:           fixture.adminDynClient,
+		namespace:           ns,
+		target:              target,
+		targetID:            targetID,
+		clusterResourceName: clusterResourceName,
+		auth:                domain.DeliveryAuth{Token: domain.RawToken(fixture.saToken)},
 	}
 
 	if !setup.skipBootstrap {
@@ -1058,7 +1074,7 @@ type objectSpec struct {
 	Name string
 }
 
-func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, targetID domain.TargetID) {
+func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, clusterResourceName domain.ResourceName) {
 	t.Helper()
 	inv := obj.Inventory()
 	if inv == nil {
@@ -1071,12 +1087,12 @@ func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, targetID 
 		Resource: labels["k8s.resource"],
 	}
 	want, err := kubeaddon.ObjectResourceName(kubeaddon.KubernetesObjectIdentity{
-		TargetID:  targetID,
-		GVR:       gvr,
-		Kind:      labels["k8s.kind"],
-		Namespace: labels["k8s.namespace"],
-		Name:      labels["k8s.name"],
-		UID:       labels["k8s.uid"],
+		ClusterResourceName: clusterResourceName,
+		GVR:                 gvr,
+		Kind:                labels["k8s.kind"],
+		Namespace:           labels["k8s.namespace"],
+		Name:                labels["k8s.name"],
+		UID:                 labels["k8s.uid"],
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)
@@ -1086,9 +1102,6 @@ func assertObjectIdentity(t *testing.T, obj *domain.ExtensionResource, targetID 
 	}
 	if obj.Name().Collection() != want.Collection() {
 		t.Fatalf("collection = %q, want %q", obj.Name().Collection(), want.Collection())
-	}
-	if labels["fleetshift.target.id"] != string(targetID) {
-		t.Fatalf("fleetshift.target.id = %q, want %q", labels["fleetshift.target.id"], targetID)
 	}
 }
 
@@ -1120,7 +1133,7 @@ func (f *e2eFixture) awaitObjects(t *testing.T, specs ...objectSpec) []*domain.E
 				continue
 			}
 			if inv.Labels()["k8s.kind"] == spec.Kind && inv.Labels()["k8s.name"] == spec.Name {
-				assertObjectIdentity(t, obj, f.targetID)
+				assertObjectIdentity(t, obj, f.clusterResourceName)
 			}
 		}
 	}
@@ -1130,6 +1143,34 @@ func (f *e2eFixture) awaitObjects(t *testing.T, specs ...objectSpec) []*domain.E
 func (f *e2eFixture) awaitRunningPod(t *testing.T, namePrefix string) []*domain.ExtensionResource {
 	t.Helper()
 	return awaitInventoryMatch(t, f.store, func(objs []*domain.ExtensionResource) bool {
+		for _, obj := range objs {
+			inv := obj.Inventory()
+			if inv == nil {
+				continue
+			}
+			if inv.Labels()["k8s.kind"] == "Pod" && strings.HasPrefix(inv.Labels()["k8s.name"], namePrefix) {
+				extracted := parseExtracted(t, inv)
+				if phase, _ := extracted["phase"].(string); phase == "Running" {
+					return true
+				}
+			}
+		}
+		return false
+	}, 90*time.Second)
+}
+
+// awaitRunningWorkload waits until Deployment, ReplicaSet, and a Running
+// Pod are all present. A Running Pod alone can race ahead of RS/Deploy
+// indexing on slower CI.
+func (f *e2eFixture) awaitRunningWorkload(t *testing.T, deployName, namePrefix string) []*domain.ExtensionResource {
+	t.Helper()
+	return awaitInventoryMatch(t, f.store, func(objs []*domain.ExtensionResource) bool {
+		if findByKindName(objs, "Deployment", deployName) == nil {
+			return false
+		}
+		if findByKindNamePrefix(objs, "ReplicaSet", namePrefix) == nil {
+			return false
+		}
 		for _, obj := range objs {
 			inv := obj.Inventory()
 			if inv == nil {

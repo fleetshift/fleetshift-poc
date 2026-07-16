@@ -13,7 +13,7 @@ import (
 
 func TestNewIndexerDelegate_Defaults(t *testing.T) {
 	ic := newIndexerDelegate(
-		"target-1",
+		"clusters/target-1",
 		nil,
 		nil,
 		&recordingReporter{},
@@ -27,8 +27,8 @@ func TestNewIndexerDelegate_Defaults(t *testing.T) {
 	if _, ok := ic.edgeSink.(NoopEdgeSink); !ok {
 		t.Fatalf("nil edgeSink should default to NoopEdgeSink, got %T", ic.edgeSink)
 	}
-	if ic.targetID != "target-1" {
-		t.Fatalf("targetID = %q, want target-1", ic.targetID)
+	if ic.clusterResourceName != "clusters/target-1" {
+		t.Fatalf("clusterResourceName = %q, want clusters/target-1", ic.clusterResourceName)
 	}
 	if ic.done == nil {
 		t.Fatal("done channel must be created")
@@ -38,7 +38,7 @@ func TestNewIndexerDelegate_Defaults(t *testing.T) {
 func TestNewIndexerDelegate_PreservesExplicitBatchIntervalAndEdgeSink(t *testing.T) {
 	edges := &recordingEdgeSink{}
 	ic := newIndexerDelegate(
-		"target-1",
+		"clusters/target-1",
 		nil,
 		nil,
 		&recordingReporter{},
@@ -72,7 +72,7 @@ func TestIndexerDelegate_Start_ReportsCollectionAndShutdownDoesNotDelete(t *test
 		reporter := &recordingReporter{}
 		edges := &recordingEdgeSink{}
 		ic := newIndexerDelegate(
-			"target-1",
+			"clusters/target-1",
 			dyn,
 			disc,
 			reporter,
@@ -139,7 +139,7 @@ func TestIndexerDelegate_Start_AllowListExcludesOtherGVRs(t *testing.T) {
 		dyn := newFakeDynamicClient(pods, svcs, crdGVR)
 		reporter := &recordingReporter{}
 		ic := newIndexerDelegate(
-			"target-1",
+			"clusters/target-1",
 			dyn,
 			disc,
 			reporter,

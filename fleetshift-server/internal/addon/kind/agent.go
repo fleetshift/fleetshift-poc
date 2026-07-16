@@ -462,7 +462,7 @@ func (a *Agent) deliverAsync(ctx context.Context, provider ClusterProvider, spec
 
 	for _, out := range outputs {
 		if err := a.ensureIndexerReady(ctx, out, generation); err != nil {
-			a.failDelivery(ctx, deliveryID, generation, "ensure indexer for %q: %v", out.Name, err)
+			a.failDelivery(ctx, deliveryID, generation, "ensure indexer for %q: %v", out.ClusterResourceName.ID(), err)
 			return
 		}
 	}
@@ -734,11 +734,11 @@ func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec Clust
 	platformID := string(spec.resourceID())
 	targetID := domain.TargetID("k8s-" + platformID)
 	out := ClusterOutput{
-		TargetID:     targetID,
-		Name:         platformID,
-		APIServer:    apiServer,
-		CACert:       caCert,
-		TrustBundles: a.TrustBundles(),
+		TargetID:            targetID,
+		ClusterResourceName: spec.ResourceName,
+		APIServer:           apiServer,
+		CACert:              caCert,
+		TrustBundles:        a.TrustBundles(),
 	}
 
 	_ = a.reporter.ReportEvent(ctx, deliveryID, generation, domain.DeliveryEvent{
@@ -767,23 +767,24 @@ func (a *Agent) ensureCluster(ctx context.Context, _ ClusterProvider, spec Clust
 }
 
 // ensureIndexerReady calls EnsureIndexer when an IndexingRuntime is
-// configured. Missing credential or API server is a permanent error.
+// configured. Invalid indexing input is a permanent error.
 // Nil runtime is a no-op (unit tests without indexing).
 func (a *Agent) ensureIndexerReady(ctx context.Context, out ClusterOutput, generation domain.Generation) error {
 	if a.indexingRuntime == nil {
 		return nil
 	}
-	if len(out.SAToken) == 0 || out.APIServer == "" {
-		return fmt.Errorf("%w: missing indexing credential or api server for %s", domain.ErrInvalidArgument, out.TargetID)
-	}
-	input := kubernetes.IndexRuntimeInput{
-		TargetID:    out.TargetID,
-		APIServer:   out.APIServer,
-		CACert:      string(out.CACert),
-		Credential:  out.SAToken,
-		SecretRef:   out.SATokenRef,
-		Generation:  generation,
-		IndexConfig: kubernetes.DefaultIndexConfig(),
+	input, err := kubernetes.NewIndexRuntimeInput(
+		out.TargetID,
+		out.ClusterResourceName,
+		out.APIServer,
+		string(out.CACert),
+		out.SAToken,
+		out.SATokenRef,
+		generation,
+		kubernetes.DefaultIndexConfig(),
+	)
+	if err != nil {
+		return fmt.Errorf("%w: for %s", err, out.TargetID)
 	}
 	return kubernetes.RetryLocalEnvelope(ctx, kubernetes.LocalEnsureRetryDeadline, func(attemptCtx context.Context) error {
 		return a.indexingRuntime.EnsureIndexer(attemptCtx, input)

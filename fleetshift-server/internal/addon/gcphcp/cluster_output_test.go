@@ -11,12 +11,12 @@ import (
 
 func TestClusterOutput_Target(t *testing.T) {
 	output := gcphcp.ClusterOutput{
-		TargetID:   "target-123",
-		Name:       "test-cluster",
-		APIServer:  "https://1.2.3.4:6443",
-		CACert:     []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
-		SATokenRef: "vault/secret/test-token",
-		SAToken:    []byte("sa-token-value"),
+		TargetID:            "target-123",
+		ClusterResourceName: "clusters/test-cluster",
+		APIServer:           "https://1.2.3.4:6443",
+		CACert:              []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
+		SATokenRef:          "vault/secret/test-token",
+		SAToken:             []byte("sa-token-value"),
 		TrustBundles: []domain.TrustBundleEntry{
 			{
 				IssuerURL:                "https://issuer.example.com",
@@ -45,6 +45,9 @@ func TestClusterOutput_Target(t *testing.T) {
 
 	if target.Properties["api_server"] != "https://1.2.3.4:6443" {
 		t.Errorf("expected api_server=https://1.2.3.4:6443, got %s", target.Properties["api_server"])
+	}
+	if target.Properties[kubernetes.PropClusterResourceName] != "clusters/test-cluster" {
+		t.Errorf("expected cluster_resource_name=clusters/test-cluster, got %s", target.Properties[kubernetes.PropClusterResourceName])
 	}
 	if target.Properties["ca_cert"] != "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----" {
 		t.Errorf("unexpected ca_cert: %s", target.Properties["ca_cert"])
@@ -80,11 +83,11 @@ func TestClusterOutput_Target(t *testing.T) {
 
 func TestClusterOutput_Secrets(t *testing.T) {
 	output := gcphcp.ClusterOutput{
-		TargetID:   "target-123",
-		Name:       "test-cluster",
-		APIServer:  "https://1.2.3.4:6443",
-		SATokenRef: "vault/secret/test-token",
-		SAToken:    []byte("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."),
+		TargetID:            "target-123",
+		ClusterResourceName: "clusters/test-cluster",
+		APIServer:           "https://1.2.3.4:6443",
+		SATokenRef:          "vault/secret/test-token",
+		SAToken:             []byte("eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9..."),
 	}
 
 	secrets := output.Secrets()
@@ -103,10 +106,10 @@ func TestClusterOutput_Secrets(t *testing.T) {
 
 func TestClusterOutput_NoSA(t *testing.T) {
 	output := gcphcp.ClusterOutput{
-		TargetID:  "target-123",
-		Name:      "test-cluster",
-		APIServer: "https://1.2.3.4:6443",
-		CACert:    []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
+		TargetID:            "target-123",
+		ClusterResourceName: "clusters/test-cluster",
+		APIServer:           "https://1.2.3.4:6443",
+		CACert:              []byte("-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"),
 		// No SATokenRef or SAToken
 	}
 

@@ -126,7 +126,7 @@ func TestDirectInventoryReportBackend_RoundTrip(t *testing.T) {
 
 	podsGVR := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 	pod1, err := kubernetesaddon.ObjectResourceName(kubernetesaddon.KubernetesObjectIdentity{
-		TargetID: "prod", GVR: podsGVR, Namespace: "default", Name: "web-1", UID: "uid-pod-1",
+		ClusterResourceName: "clusters/prod", GVR: podsGVR, Namespace: "default", Name: "web-1", UID: "uid-pod-1",
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)

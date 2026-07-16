@@ -71,11 +71,11 @@ func ackResync(ack chan<- error, err error) {
 // delivered to an [EdgeSink] (typically [NoopEdgeSink]); they never
 // flow through the inventory reporter.
 type Writer struct {
-	targetID      string
-	reporter      InventoryReporter
-	edgeSink      EdgeSink
-	gvrStates     map[schema.GroupVersionResource]*gvrState
-	pendingResync map[schema.GroupVersionResource]*pendingResync
+	clusterResourceName domain.ResourceName
+	reporter            InventoryReporter
+	edgeSink            EdgeSink
+	gvrStates           map[schema.GroupVersionResource]*gvrState
+	pendingResync       map[schema.GroupVersionResource]*pendingResync
 	// closedGens records the highest generation closed per GVR so late
 	// events for a closed generation cannot re-open it.
 	closedGens    map[schema.GroupVersionResource]uint64
@@ -95,7 +95,7 @@ type Writer struct {
 
 	// extractObserved, when non-nil, replaces [ExtractObservedResource]
 	// for flush/resync. Tests use this to simulate extract failures.
-	extractObserved func(*unstructured.Unstructured, SchemaEntry, string) (InventoryObjectReport, inventoryNode, error)
+	extractObserved func(*unstructured.Unstructured, SchemaEntry, domain.ResourceName) (InventoryObjectReport, inventoryNode, error)
 
 	// stopCh requests a shutdown flush under a caller-provided context.
 	// Buffered so Stop does not block if Run has already exited.
@@ -108,8 +108,10 @@ const defaultWriterShutdownFlushTimeout = 5 * time.Second
 
 // NewWriter creates a Writer that batches events over batchInterval and
 // reports them via reporter. If edgeSink is nil, [NoopEdgeSink] is used.
+// clusterResourceName is the managed cluster (clusters/{id}) used for
+// object resource-name parents and edge-delta keys.
 func NewWriter(
-	targetID string,
+	clusterResourceName domain.ResourceName,
 	reporter InventoryReporter,
 	edgeSink EdgeSink,
 	schemaEntries map[schema.GroupVersionResource]SchemaEntry,
@@ -123,22 +125,22 @@ func NewWriter(
 		logger = slog.Default()
 	}
 	return &Writer{
-		targetID:      targetID,
-		reporter:      reporter,
-		edgeSink:      edgeSink,
-		schema:        schemaEntries,
-		eventCh:       make(chan ResourceEvent, 256),
-		resyncCh:      make(chan ResyncEvent, 16),
-		removeCh:      make(chan RemoveGVREvent, 16),
-		batchInterval: batchInterval,
-		currentNodes:  make(map[string]inventoryNode),
-		edgeFuncs:     make(map[string]func(NodeStore) []Edge),
-		previousEdges: make(map[edgeKey]Edge),
-		gvrStates:     make(map[schema.GroupVersionResource]*gvrState),
-		pendingResync: make(map[schema.GroupVersionResource]*pendingResync),
-		closedGens:    make(map[schema.GroupVersionResource]uint64),
-		logger:        logger,
-		stopCh:        make(chan context.Context, 1),
+		clusterResourceName: clusterResourceName,
+		reporter:            reporter,
+		edgeSink:            edgeSink,
+		schema:              schemaEntries,
+		eventCh:             make(chan ResourceEvent, 256),
+		resyncCh:            make(chan ResyncEvent, 16),
+		removeCh:            make(chan RemoveGVREvent, 16),
+		batchInterval:       batchInterval,
+		currentNodes:        make(map[string]inventoryNode),
+		edgeFuncs:           make(map[string]func(NodeStore) []Edge),
+		previousEdges:       make(map[edgeKey]Edge),
+		gvrStates:           make(map[schema.GroupVersionResource]*gvrState),
+		pendingResync:       make(map[schema.GroupVersionResource]*pendingResync),
+		closedGens:          make(map[schema.GroupVersionResource]uint64),
+		logger:              logger,
+		stopCh:              make(chan context.Context, 1),
 	}
 }
 
@@ -436,7 +438,7 @@ func (w *Writer) flush(
 
 		gvr := upsertGVR[uid]
 		entry := w.schemaEntry(gvr)
-		report, node, err := ExtractObservedResource(r, entry, w.targetID)
+		report, node, err := w.observeResource(r, entry)
 		if err != nil {
 			w.logger.Warn("skipping upsert; extraction failed",
 				"uid", uid,
@@ -538,7 +540,7 @@ func (w *Writer) flushEdges(ctx context.Context) error {
 	}
 	edgeAdds, edgeDels, newEdges := w.diffEdges()
 	if len(edgeAdds) > 0 || len(edgeDels) > 0 {
-		if err := w.edgeSink.ApplyEdgeDelta(ctx, domain.TargetID(w.targetID), EdgeDelta{
+		if err := w.edgeSink.ApplyEdgeDelta(ctx, w.clusterResourceName, EdgeDelta{
 			Adds:    edgeAdds,
 			Deletes: edgeDels,
 		}); err != nil {
@@ -766,9 +768,9 @@ func (w *Writer) sendResync(ctx context.Context, rs ResyncEvent) {
 // when set (tests) and [ExtractObservedResource] otherwise.
 func (w *Writer) observeResource(r *unstructured.Unstructured, entry SchemaEntry) (InventoryObjectReport, inventoryNode, error) {
 	if w.extractObserved != nil {
-		return w.extractObserved(r, entry, w.targetID)
+		return w.extractObserved(r, entry, w.clusterResourceName)
 	}
-	return ExtractObservedResource(r, entry, w.targetID)
+	return ExtractObservedResource(r, entry, w.clusterResourceName)
 }
 
 // applyResyncSuccess commits in-memory membership and ReportedUIDs for a
@@ -838,9 +840,9 @@ func (w *Writer) schemaEntry(gvr schema.GroupVersionResource) SchemaEntry {
 // for one previously reported UID.
 func (w *Writer) deleteReport(gvr schema.GroupVersionResource, uid string) (InventoryObjectReport, error) {
 	name, err := ObjectResourceName(KubernetesObjectIdentity{
-		TargetID: domain.TargetID(w.targetID),
-		GVR:      gvr,
-		UID:      uid,
+		ClusterResourceName: w.clusterResourceName,
+		GVR:                 gvr,
+		UID:                 uid,
 	})
 	if err != nil {
 		return InventoryObjectReport{}, err

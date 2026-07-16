@@ -163,6 +163,9 @@ func TestAgent_Deliver_EnsureIndexerBeforeDelivered(t *testing.T) {
 	if got.TargetID != GuestTargetID("test-cls") {
 		t.Fatalf("Ensure TargetID = %q, want %q", got.TargetID, GuestTargetID("test-cls"))
 	}
+	if got.ClusterResourceName != "clusters/test-cls" {
+		t.Fatalf("Ensure ClusterResourceName = %q, want clusters/test-cls", got.ClusterResourceName)
+	}
 	if got.Generation != 3 {
 		t.Fatalf("Ensure Generation = %d, want 3", got.Generation)
 	}

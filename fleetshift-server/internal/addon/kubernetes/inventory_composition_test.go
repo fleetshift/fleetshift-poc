@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -102,11 +103,11 @@ func listObjectInventory(t *testing.T, store domain.Store) []*domain.ExtensionRe
 	return objs
 }
 
-func objectsForTarget(objs []*domain.ExtensionResource, targetID domain.TargetID) []*domain.ExtensionResource {
+func objectsForCluster(objs []*domain.ExtensionResource, clusterID string) []*domain.ExtensionResource {
+	prefix := "clusters/" + clusterID + "/"
 	var out []*domain.ExtensionResource
 	for _, obj := range objs {
-		inv := obj.Inventory()
-		if inv != nil && inv.Labels()["fleetshift.target.id"] == string(targetID) {
+		if strings.HasPrefix(string(obj.Name()), prefix) {
 			out = append(out, obj)
 		}
 	}
@@ -128,10 +129,14 @@ func awaitStoreObjects(t *testing.T, store domain.Store, timeout time.Duration, 
 	}
 }
 
-func mustNamedObjectName(t *testing.T, targetID domain.TargetID, gvr schema.GroupVersionResource, namespace, name, uid string) domain.ResourceName {
+func mustNamedObjectName(t *testing.T, clusterID string, gvr schema.GroupVersionResource, namespace, name, uid string) domain.ResourceName {
 	t.Helper()
 	rn, err := ObjectResourceName(KubernetesObjectIdentity{
-		TargetID: targetID, GVR: gvr, Namespace: namespace, Name: name, UID: uid,
+		ClusterResourceName: testClusterResourceName(clusterID),
+		GVR:                 gvr,
+		Namespace:           namespace,
+		Name:                name,
+		UID:                 uid,
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)
@@ -159,6 +164,7 @@ func compositionTarget(id domain.TargetID) domain.TargetInfo {
 			PropAPIServer:           "https://composition.example",
 			PropCACert:              "unused",
 			PropServiceAccountToken: "unused",
+			PropClusterResourceName: string(testClusterResourceName(string(id))),
 		},
 	})
 }
@@ -214,13 +220,26 @@ func newCompositionHost(
 func ensureCompositionIndexer(t *testing.T, host *KubernetesInProcessIndexHost, target domain.TargetInfo, cfg IndexConfig) {
 	t.Helper()
 	props := target.Properties()
-	input := IndexRuntimeInput{
-		TargetID:    target.ID(),
-		APIServer:   props[PropAPIServer],
-		CACert:      props[PropCACert],
-		Credential:  []byte(props[PropServiceAccountToken]),
-		Generation:  1,
-		IndexConfig: cfg,
+	rawCluster := props[PropClusterResourceName]
+	if rawCluster == "" {
+		t.Fatalf("target %q missing %s", target.ID(), PropClusterResourceName)
+	}
+	clusterResourceName, err := ParseClusterResourceName(rawCluster)
+	if err != nil {
+		t.Fatalf("target %q %s: %v", target.ID(), PropClusterResourceName, err)
+	}
+	input, err := NewIndexRuntimeInput(
+		target.ID(),
+		clusterResourceName,
+		props[PropAPIServer],
+		props[PropCACert],
+		[]byte(props[PropServiceAccountToken]),
+		"",
+		1,
+		cfg,
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := host.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -264,7 +283,7 @@ func TestStopIndexer_LeavesInventory(t *testing.T) {
 	ensureCompositionIndexer(t, host, target, cfg)
 	wantName := mustNamedObjectName(t, "prod", pods, "default", "web", "uid-web")
 	awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
-		for _, obj := range objectsForTarget(objs, "prod") {
+		for _, obj := range objectsForCluster(objs, "prod") {
 			if obj.Name() == wantName {
 				return true
 			}
@@ -279,7 +298,7 @@ func TestStopIndexer_LeavesInventory(t *testing.T) {
 		t.Fatal("indexer should be stopped after StopIndexer")
 	}
 
-	got := objectsForTarget(listObjectInventory(t, store), "prod")
+	got := objectsForCluster(listObjectInventory(t, store), "prod")
 	if len(got) == 0 {
 		t.Fatal("expected indexed inventory to remain after StopIndexer")
 	}
@@ -325,7 +344,7 @@ func TestEnsureIndexer_IndexesTarget(t *testing.T) {
 
 	wantLocal := mustNamedObjectName(t, "local", pods, "default", "pod-a", "uid-a")
 	awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
-		for _, obj := range objectsForTarget(objs, "local") {
+		for _, obj := range objectsForCluster(objs, "local") {
 			if obj.Name() == wantLocal {
 				return true
 			}
@@ -348,7 +367,7 @@ func TestRemoveGVR_LeavesPersistedCollection(t *testing.T) {
 		pods: {GVR: pods, Kind: "Pod"},
 		cms:  {GVR: cms, Kind: "ConfigMap"},
 	}}
-	w := NewWriter("prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
+	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -410,7 +429,7 @@ func TestResync_RemovesAbsentReportedUIDsFromStore(t *testing.T) {
 	schema := IndexSchema{Entries: map[schema.GroupVersionResource]SchemaEntry{
 		pods: {GVR: pods, Kind: "Pod"},
 	}}
-	w := NewWriter("prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
+	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -491,7 +510,7 @@ func TestStartupList_DoesNotDeleteDBOnlyRows(t *testing.T) {
 		t.Fatalf("seed stale row: %v", err)
 	}
 
-	w := NewWriter("prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
+	w := NewWriter("clusters/prod", reporter, NoopEdgeSink{}, schema.Entries, time.Hour, slog.New(slog.DiscardHandler))
 	runCtx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	go w.Run(runCtx)
@@ -553,14 +572,14 @@ func TestServeStyleComposition_EnsureIndexerIndexesTarget(t *testing.T) {
 
 	want := mustNamedObjectName(t, "serve-smoke", pods, "default", "web", "uid-node-standin")
 	objs := awaitStoreObjects(t, store, 5*time.Second, func(objs []*domain.ExtensionResource) bool {
-		for _, obj := range objectsForTarget(objs, "serve-smoke") {
+		for _, obj := range objectsForCluster(objs, "serve-smoke") {
 			if obj.Name() == want {
 				return true
 			}
 		}
 		return false
 	})
-	for _, obj := range objectsForTarget(objs, "serve-smoke") {
+	for _, obj := range objectsForCluster(objs, "serve-smoke") {
 		if obj.Name() == want {
 			assertResourceName(t, obj, want)
 		}

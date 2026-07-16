@@ -25,8 +25,9 @@ const ObjectResourceType domain.ResourceType = domain.ResourceType(AddonID) + "/
 // Resource-name path collection IDs for Kubernetes object inventory.
 // Together they form:
 //
-//	{TargetCollectionID}/{targetID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}
+//	{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}
 //
+// where clusterResourceID is [KubernetesObjectIdentity.ClusterResourceName].ID().
 // ObjectCollectionID is also the schema CollectionID in [InventorySchema].
 const (
 	TargetCollectionID      domain.CollectionID = "clusters"
@@ -38,13 +39,16 @@ const (
 // watched Kubernetes object's [domain.ResourceName], query labels, and
 // observation payload. All three are derived from the same identity
 // so they never disagree about which object they describe.
+//
+// ClusterResourceName is the managed cluster resource (e.g.
+// "clusters/c1") whose ID becomes the object-name parent segment.
 type KubernetesObjectIdentity struct {
-	TargetID  domain.TargetID
-	GVR       schema.GroupVersionResource
-	Kind      string
-	Namespace string
-	Name      string
-	UID       string
+	ClusterResourceName domain.ResourceName
+	GVR                 schema.GroupVersionResource
+	Kind                string
+	Namespace           string
+	Name                string
+	UID                 string
 }
 
 // objectScope reports "namespaced" or "cluster" for namespace. Scope
@@ -77,10 +81,10 @@ func GVRKey(gvr schema.GroupVersionResource) string {
 }
 
 // encodeResourceNameSegment makes s safe to use as one dynamic segment
-// of a [domain.ResourceName]. [domain.TargetID] values are only
-// validated non-empty, not restricted from containing "/", so a target
-// ID such as "prod/us-east-1" would otherwise silently insert an extra
-// path segment and shift everything after it. url.PathEscape is
+// of a [domain.ResourceName]. Dynamic values such as cluster resource
+// IDs are not restricted from containing "/", so a value like
+// "prod/us-east-1" would otherwise silently insert an extra path
+// segment and shift everything after it. url.PathEscape is
 // deterministic and collision-free, and leaves "~" -- the [GVRKey]
 // separator -- untouched.
 func encodeResourceNameSegment(s string) string {
@@ -89,64 +93,102 @@ func encodeResourceNameSegment(s string) string {
 
 // ObjectResourceName returns the canonical Kubernetes object resource
 // name:
-// "{TargetCollectionID}/{targetID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}".
-// Every dynamic segment is path-encoded before being joined, and the
-// result is built with [domain.ParseResourceName] rather than cast
-// from a raw string, so a malformed identity (e.g. an empty UID) fails
-// here instead of producing an invalid name downstream. Scoping by
-// target and GVR gives same-process resync a natural collection
-// boundary; keying the leaf by UID rather than namespace/name means
-// deleting and recreating an object under the same namespace/name is
-// correctly treated as a new incarnation rather than an overwrite.
+// "{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}/{uid}".
+// clusterResourceID is taken from [KubernetesObjectIdentity.ClusterResourceName].ID()
+// so object parents match the managed cluster resource (e.g. clusters/c1). Every dynamic
+// segment is path-encoded before being joined, and the result is built
+// with [domain.ParseResourceName] rather than cast from a raw string, so
+// a malformed identity (e.g. an empty UID) fails here instead of
+// producing an invalid name downstream. Scoping by cluster and GVR
+// gives same-process resync a natural collection boundary; keying the
+// leaf by UID rather than namespace/name means deleting and recreating
+// an object under the same namespace/name is correctly treated as a new
+// incarnation rather than an overwrite.
 func ObjectResourceName(id KubernetesObjectIdentity) (domain.ResourceName, error) {
+	if err := requireClusterResourceName(id.ClusterResourceName); err != nil {
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, gvr %q, uid %q): %w",
+			id.ClusterResourceName, GVRKey(id.GVR), id.UID, err)
+	}
+	clusterID := encodeResourceNameSegment(string(id.ClusterResourceName.ID()))
 	name, err := domain.ParseResourceName(
-		string(TargetCollectionID) + "/" + encodeResourceNameSegment(string(id.TargetID)) +
+		string(TargetCollectionID) + "/" + clusterID +
 			"/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(GVRKey(id.GVR)) +
 			"/" + string(ObjectCollectionID) + "/" + encodeResourceNameSegment(id.UID),
 	)
 	if err != nil {
-		return "", fmt.Errorf("kubernetes object resource name (target %q, gvr %q, uid %q): %w", id.TargetID, GVRKey(id.GVR), id.UID, err)
+		return "", fmt.Errorf("kubernetes object resource name (cluster %q, gvr %q, uid %q): %w",
+			id.ClusterResourceName, GVRKey(id.GVR), id.UID, err)
 	}
 	return name, nil
 }
 
 // ObjectCollectionName returns the exact inventory collection for
-// targetID + gvr:
-// "{TargetCollectionID}/{target}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}".
+// clusterResourceName + gvr:
+// "{TargetCollectionID}/{clusterResourceID}/{APIResourceCollectionID}/{gvrKey}/{ObjectCollectionID}".
 // This matches [ObjectResourceName]'s parent collection.
-func ObjectCollectionName(targetID domain.TargetID, gvr schema.GroupVersionResource) (domain.CollectionName, error) {
+func ObjectCollectionName(clusterResourceName domain.ResourceName, gvr schema.GroupVersionResource) (domain.CollectionName, error) {
+	if err := requireClusterResourceName(clusterResourceName); err != nil {
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q, gvr %q): %w", clusterResourceName, GVRKey(gvr), err)
+	}
+	clusterID := encodeResourceNameSegment(string(clusterResourceName.ID()))
 	name, err := domain.ParseCollectionName(
-		string(TargetCollectionID) + "/" + encodeResourceNameSegment(string(targetID)) +
+		string(TargetCollectionID) + "/" + clusterID +
 			"/" + string(APIResourceCollectionID) + "/" + encodeResourceNameSegment(GVRKey(gvr)) +
 			"/" + string(ObjectCollectionID),
 	)
 	if err != nil {
-		return "", fmt.Errorf("kubernetes object collection name (target %q, gvr %q): %w", targetID, GVRKey(gvr), err)
+		return "", fmt.Errorf("kubernetes object collection name (cluster %q, gvr %q): %w", clusterResourceName, GVRKey(gvr), err)
 	}
 	return name, nil
 }
 
+// ParseClusterResourceName parses an untrusted string into a flat
+// managed-cluster resource name (clusters/{id}). Use this at string
+// boundaries (e.g. target properties). Callers that already hold a
+// [domain.ResourceName] should use [requireClusterResourceName] instead
+// of casting to string and re-parsing.
+func ParseClusterResourceName(s string) (domain.ResourceName, error) {
+	name, err := domain.ParseResourceName(s)
+	if err != nil {
+		return "", fmt.Errorf("cluster resource name: %w", err)
+	}
+	if err := requireClusterResourceName(name); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+// requireClusterResourceName checks the kubernetes-specific constraint that
+// name is under [TargetCollectionID] (flat clusters/{id}). It trusts
+// structural resource-name validity to whoever produced the typed value
+// ([domain.ParseResourceName] / [ParseClusterResourceName]).
+func requireClusterResourceName(name domain.ResourceName) error {
+	if name.Collection() != domain.CollectionName(TargetCollectionID) {
+		return fmt.Errorf("%w: cluster resource name %q must be under %q", domain.ErrInvalidArgument, name, TargetCollectionID)
+	}
+	return nil
+}
+
 // ObjectLabels returns the initial set of Kubernetes identity labels
-// for id: target, GVR, kind, scope, namespace, name, and UID, for
-// filtering and grouping. Values are stored unencoded --
-// unlike [ObjectResourceName]'s path segments, labels are not part of
-// a resource-name path, so there is nothing to escape. k8s.namespace
-// is omitted entirely for cluster-scoped objects rather than set to
-// "", so its mere presence signals namespace scope. Kubernetes'
-// user-defined object labels are deliberately not copied here: they
-// are high-cardinality and uncontrolled, and belong in the observation
-// payload instead of the shared label index.
+// for id: GVR, kind, scope, namespace, name, and UID, for filtering and
+// grouping. Values are stored unencoded -- unlike [ObjectResourceName]'s
+// path segments, labels are not part of a resource-name path, so there
+// is nothing to escape. k8s.namespace is omitted entirely for
+// cluster-scoped objects rather than set to "", so its mere presence
+// signals namespace scope. Kubernetes' user-defined object labels are
+// deliberately not copied here: they are high-cardinality and
+// uncontrolled, and belong in the observation payload instead of the
+// shared label index.
 func ObjectLabels(id KubernetesObjectIdentity) map[string]string {
 	labels := map[string]string{
-		"fleetshift.target.id": string(id.TargetID),
-		"k8s.gvr":              GVRKey(id.GVR),
-		"k8s.group":            id.GVR.Group,
-		"k8s.version":          id.GVR.Version,
-		"k8s.resource":         id.GVR.Resource,
-		"k8s.kind":             id.Kind,
-		"k8s.scope":            objectScope(id.Namespace),
-		"k8s.name":             id.Name,
-		"k8s.uid":              id.UID,
+		"k8s.gvr":      GVRKey(id.GVR),
+		"k8s.group":    id.GVR.Group,
+		"k8s.version":  id.GVR.Version,
+		"k8s.resource": id.GVR.Resource,
+		"k8s.kind":     id.Kind,
+		"k8s.scope":    objectScope(id.Namespace),
+		"k8s.name":     id.Name,
+		"k8s.uid":      id.UID,
 	}
 	if id.Namespace != "" {
 		labels["k8s.namespace"] = id.Namespace

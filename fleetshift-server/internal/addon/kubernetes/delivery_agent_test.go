@@ -148,12 +148,20 @@ func TestAgent_Deliver_SucceedsWhenIndexerEnsureFails(t *testing.T) {
 			"service_account_token": "token",
 		},
 	})
-	err := host.EnsureIndexer(ctx, kubernetes.IndexRuntimeInput{
-		TargetID:   target.ID(),
-		APIServer:  "https://127.0.0.1:6443",
-		Credential: []byte("token"),
-		Generation: 1,
-	})
+	input, err := kubernetes.NewIndexRuntimeInput(
+		target.ID(),
+		domain.ResourceName("clusters/test"),
+		"https://127.0.0.1:6443",
+		"",
+		[]byte("token"),
+		"",
+		1,
+		kubernetes.IndexConfig{},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
+	}
+	err = host.EnsureIndexer(ctx, input)
 	if err == nil {
 		t.Fatal("expected EnsureIndexer to fail when clients are down")
 	}

@@ -49,6 +49,9 @@ func readyKubeTarget(id string, props map[string]string) domain.TargetInfo {
 			PropServiceAccountToken: "token",
 		}
 	}
+	if props[PropClusterResourceName] == "" {
+		props[PropClusterResourceName] = string(testClusterResourceName(id))
+	}
 	return domain.NewTargetInfo(
 		domain.TargetID(id),
 		TargetType,
@@ -71,16 +74,30 @@ func ensureReadyTarget(t *testing.T, host *KubernetesInProcessIndexHost, target 
 	if cfg.BatchInterval == 0 {
 		cfg.BatchInterval = time.Hour
 	}
-	input := IndexRuntimeInput{
-		TargetID:    target.ID(),
-		APIServer:   props[PropAPIServer],
-		CACert:      props[PropCACert],
-		Credential:  []byte(cred),
-		Generation:  1,
-		IndexConfig: cfg,
+	apiServer := props[PropAPIServer]
+	if apiServer == "" {
+		apiServer = "https://example"
 	}
-	if input.APIServer == "" {
-		input.APIServer = "https://example"
+	rawCluster := props[PropClusterResourceName]
+	if rawCluster == "" {
+		t.Fatalf("target %q missing %s", target.ID(), PropClusterResourceName)
+	}
+	clusterResourceName, err := ParseClusterResourceName(rawCluster)
+	if err != nil {
+		t.Fatalf("target %q %s: %v", target.ID(), PropClusterResourceName, err)
+	}
+	input, err := NewIndexRuntimeInput(
+		target.ID(),
+		clusterResourceName,
+		apiServer,
+		props[PropCACert],
+		[]byte(cred),
+		"",
+		1,
+		cfg,
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := host.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)

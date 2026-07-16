@@ -7,6 +7,8 @@ import (
 
 	"k8s.io/client-go/discovery"
 	"k8s.io/client-go/dynamic"
+
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
 // IndexConfig holds configuration for the indexer delegate.
@@ -18,25 +20,26 @@ type IndexConfig struct {
 	BatchInterval   time.Duration
 }
 
-// indexerDelegate holds indexing-specific state for one target. It
-// manages the informer-to-writer pipeline that watches Kubernetes
+// indexerDelegate holds indexing-specific state for one managed cluster.
+// It manages the informer-to-writer pipeline that watches Kubernetes
 // resources and reports inventory through an [InventoryReporter].
 type indexerDelegate struct {
-	targetID   string
-	dynClient  dynamic.Interface
-	discClient discovery.DiscoveryInterface
-	reporter   InventoryReporter
-	edgeSink   EdgeSink
-	cfg        IndexConfig
-	logger     *slog.Logger
-	done       chan struct{}
+	clusterResourceName domain.ResourceName
+	dynClient           dynamic.Interface
+	discClient          discovery.DiscoveryInterface
+	reporter            InventoryReporter
+	edgeSink            EdgeSink
+	cfg                 IndexConfig
+	logger              *slog.Logger
+	done                chan struct{}
 }
 
 // newIndexerDelegate creates an indexerDelegate. A zero batchInterval
 // in cfg defaults to 5 seconds. If edgeSink is nil, [NoopEdgeSink] is
-// used.
+// used. clusterResourceName is the managed cluster (clusters/{id}) used
+// for object resource-name parents and edge-delta keys.
 func newIndexerDelegate(
-	targetID string,
+	clusterResourceName domain.ResourceName,
 	dynClient dynamic.Interface,
 	discClient discovery.DiscoveryInterface,
 	reporter InventoryReporter,
@@ -51,14 +54,14 @@ func newIndexerDelegate(
 		edgeSink = NoopEdgeSink{}
 	}
 	return &indexerDelegate{
-		targetID:   targetID,
-		dynClient:  dynClient,
-		discClient: discClient,
-		reporter:   reporter,
-		edgeSink:   edgeSink,
-		cfg:        cfg,
-		logger:     logger,
-		done:       make(chan struct{}),
+		clusterResourceName: clusterResourceName,
+		dynClient:           dynClient,
+		discClient:          discClient,
+		reporter:            reporter,
+		edgeSink:            edgeSink,
+		cfg:                 cfg,
+		logger:              logger,
+		done:                make(chan struct{}),
 	}
 }
 
@@ -85,7 +88,7 @@ func (ic *indexerDelegate) start(ctx context.Context) {
 		}
 	}
 
-	w := NewWriter(ic.targetID, ic.reporter, ic.edgeSink, schemaMap, ic.cfg.BatchInterval, ic.logger)
+	w := NewWriter(ic.clusterResourceName, ic.reporter, ic.edgeSink, schemaMap, ic.cfg.BatchInterval, ic.logger)
 
 	mgr := NewInformerManager(
 		ic.dynClient,

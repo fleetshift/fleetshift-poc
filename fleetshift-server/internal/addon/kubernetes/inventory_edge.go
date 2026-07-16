@@ -35,11 +35,11 @@ type EdgeDelta struct {
 	Deletes []Edge
 }
 
-// EdgeSink receives computed topology edge deltas. The first main
-// integration wires [NoopEdgeSink]; inventory reporting never carries
-// edge fields.
+// EdgeSink receives computed topology edge deltas keyed by managed
+// cluster resource name (e.g. clusters/c1). The first main integration
+// wires [NoopEdgeSink]; inventory reporting never carries edge fields.
 type EdgeSink interface {
-	ApplyEdgeDelta(ctx context.Context, targetID domain.TargetID, delta EdgeDelta) error
+	ApplyEdgeDelta(ctx context.Context, clusterResourceName domain.ResourceName, delta EdgeDelta) error
 }
 
 // NoopEdgeSink discards edge deltas. It cannot fail: edge persistence
@@ -47,7 +47,7 @@ type EdgeSink interface {
 type NoopEdgeSink struct{}
 
 // ApplyEdgeDelta implements [EdgeSink] as a no-op.
-func (NoopEdgeSink) ApplyEdgeDelta(context.Context, domain.TargetID, EdgeDelta) error {
+func (NoopEdgeSink) ApplyEdgeDelta(context.Context, domain.ResourceName, EdgeDelta) error {
 	return nil
 }
 

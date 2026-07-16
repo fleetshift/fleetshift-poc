@@ -17,6 +17,42 @@ import (
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
+func TestParseClusterResourceName(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		got, err := kubernetes.ParseClusterResourceName("clusters/c1")
+		if err != nil {
+			t.Fatalf("ParseClusterResourceName: %v", err)
+		}
+		if got != "clusters/c1" {
+			t.Fatalf("got %q, want clusters/c1", got)
+		}
+	})
+	t.Run("empty", func(t *testing.T) {
+		_, err := kubernetes.ParseClusterResourceName("")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("wrong collection", func(t *testing.T) {
+		_, err := kubernetes.ParseClusterResourceName("nodes/n1")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("nested rejected", func(t *testing.T) {
+		_, err := kubernetes.ParseClusterResourceName("orgs/o1/clusters/c1")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("malformed", func(t *testing.T) {
+		_, err := kubernetes.ParseClusterResourceName("clusters/")
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+}
+
 func TestGVRKey(t *testing.T) {
 	tests := []struct {
 		name string
@@ -39,9 +75,9 @@ func TestGVRKey(t *testing.T) {
 func TestObjectResourceName(t *testing.T) {
 	t.Run("BasicShape", func(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod",
-			GVR:      schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
-			UID:      "0d12-uid",
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			UID:                 "0d12-uid",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
@@ -54,9 +90,9 @@ func TestObjectResourceName(t *testing.T) {
 
 	t.Run("CoreGroupUsesCoreKey", func(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod",
-			GVR:      schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			UID:      "8a91-uid",
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			UID:                 "8a91-uid",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
@@ -67,42 +103,41 @@ func TestObjectResourceName(t *testing.T) {
 		}
 	})
 
-	t.Run("SlashBearingTargetIDIsEncoded", func(t *testing.T) {
+	t.Run("SlashBearingUIDIsEncoded", func(t *testing.T) {
 		name, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod/us-east-1",
-			GVR:      schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			UID:      "uid-1",
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			UID:                 "uid/with/slash",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		// If the target ID's "/" were not encoded, this would parse as
-		// "clusters/prod/us-east-1/..." -- three collection segments
-		// deep instead of a single target segment -- silently
-		// shifting every segment after it.
-		want := domain.ResourceName("clusters/prod%2Fus-east-1/apiResources/core~v1~pods/objects/uid-1")
+		// If the UID's "/" were not encoded, this would parse as extra
+		// path segments and silently shift every segment after it.
+		want := domain.ResourceName("clusters/prod/apiResources/core~v1~pods/objects/uid%2Fwith%2Fslash")
 		if name != want {
 			t.Fatalf("ObjectResourceName = %q, want %q", name, want)
 		}
-		if name.ID() != "uid-1" {
-			t.Fatalf("ID() = %q, want %q", name.ID(), "uid-1")
+		if name.ID() != "uid%2Fwith%2Fslash" {
+			t.Fatalf("ID() = %q, want %q", name.ID(), "uid%2Fwith%2Fslash")
 		}
 	})
 
 	t.Run("RejectsEmptyUID", func(t *testing.T) {
 		_, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod",
-			GVR:      schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Fatalf("ObjectResourceName error = %v, want ErrInvalidArgument", err)
 		}
 	})
 
-	t.Run("RejectsEmptyTargetID", func(t *testing.T) {
+	t.Run("RejectsEmptyClusterResourceName", func(t *testing.T) {
 		_, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			GVR: schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
-			UID: "uid-1",
+			ClusterResourceName: "",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "pods"},
+			UID:                 "uid-1",
 		})
 		if !errors.Is(err, domain.ErrInvalidArgument) {
 			t.Fatalf("ObjectResourceName error = %v, want ErrInvalidArgument", err)
@@ -112,7 +147,7 @@ func TestObjectResourceName(t *testing.T) {
 
 func TestObjectCollectionName(t *testing.T) {
 	t.Run("BasicShape", func(t *testing.T) {
-		got, err := kubernetes.ObjectCollectionName("prod", schema.GroupVersionResource{
+		got, err := kubernetes.ObjectCollectionName("clusters/prod", schema.GroupVersionResource{
 			Group: "apps", Version: "v1", Resource: "deployments",
 		})
 		if err != nil {
@@ -127,12 +162,12 @@ func TestObjectCollectionName(t *testing.T) {
 	t.Run("MatchesObjectResourceNameCollection", func(t *testing.T) {
 		gvr := schema.GroupVersionResource{Version: "v1", Resource: "pods"}
 		objName, err := kubernetes.ObjectResourceName(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod", GVR: gvr, UID: "uid-1",
+			ClusterResourceName: "clusters/prod", GVR: gvr, UID: "uid-1",
 		})
 		if err != nil {
 			t.Fatalf("ObjectResourceName: %v", err)
 		}
-		collection, err := kubernetes.ObjectCollectionName("prod", gvr)
+		collection, err := kubernetes.ObjectCollectionName("clusters/prod", gvr)
 		if err != nil {
 			t.Fatalf("ObjectCollectionName: %v", err)
 		}
@@ -142,20 +177,16 @@ func TestObjectCollectionName(t *testing.T) {
 		}
 	})
 
-	t.Run("SlashBearingTargetIDIsEncoded", func(t *testing.T) {
-		got, err := kubernetes.ObjectCollectionName("prod/us-east-1", schema.GroupVersionResource{
+	t.Run("RejectsNonFlatClusterResourceName", func(t *testing.T) {
+		_, err := kubernetes.ObjectCollectionName("clusters/prod/us-east-1", schema.GroupVersionResource{
 			Version: "v1", Resource: "pods",
 		})
-		if err != nil {
-			t.Fatalf("ObjectCollectionName: %v", err)
-		}
-		want := domain.CollectionName("clusters/prod%2Fus-east-1/apiResources/core~v1~pods/objects")
-		if got != want {
-			t.Fatalf("ObjectCollectionName = %q, want %q", got, want)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("ObjectCollectionName error = %v, want ErrInvalidArgument", err)
 		}
 	})
 
-	t.Run("RejectsEmptyTargetID", func(t *testing.T) {
+	t.Run("RejectsEmptyClusterResourceName", func(t *testing.T) {
 		_, err := kubernetes.ObjectCollectionName("", schema.GroupVersionResource{
 			Version: "v1", Resource: "pods",
 		})
@@ -184,24 +215,23 @@ func TestResourceNameCollectionIDs(t *testing.T) {
 func TestObjectLabels(t *testing.T) {
 	t.Run("Namespaced", func(t *testing.T) {
 		got := kubernetes.ObjectLabels(kubernetes.KubernetesObjectIdentity{
-			TargetID:  "prod",
-			GVR:       schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 			Kind:      "Deployment",
 			Namespace: "default",
 			Name:      "nginx",
 			UID:       "0d12-uid",
 		})
 		want := map[string]string{
-			"fleetshift.target.id": "prod",
-			"k8s.gvr":              "apps~v1~deployments",
-			"k8s.group":            "apps",
-			"k8s.version":          "v1",
-			"k8s.resource":         "deployments",
-			"k8s.kind":             "Deployment",
-			"k8s.scope":            "namespaced",
-			"k8s.namespace":        "default",
-			"k8s.name":             "nginx",
-			"k8s.uid":              "0d12-uid",
+			"k8s.gvr":       "apps~v1~deployments",
+			"k8s.group":     "apps",
+			"k8s.version":   "v1",
+			"k8s.resource":  "deployments",
+			"k8s.kind":      "Deployment",
+			"k8s.scope":     "namespaced",
+			"k8s.namespace": "default",
+			"k8s.name":      "nginx",
+			"k8s.uid":       "0d12-uid",
 		}
 		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("ObjectLabels = %#v, want %#v", got, want)
@@ -210,8 +240,8 @@ func TestObjectLabels(t *testing.T) {
 
 	t.Run("ClusterScopedOmitsNamespaceAndUsesCoreGroup", func(t *testing.T) {
 		got := kubernetes.ObjectLabels(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod",
-			GVR:      schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 			Kind:     "Node",
 			Name:     "node-1",
 			UID:      "node-uid",
@@ -254,8 +284,8 @@ func TestObjectObservation(t *testing.T) {
 		return obj
 	}
 	id := kubernetes.KubernetesObjectIdentity{
-		TargetID:  "prod",
-		GVR:       schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
+		ClusterResourceName: "clusters/prod",
+		GVR:                 schema.GroupVersionResource{Group: "apps", Version: "v1", Resource: "deployments"},
 		Kind:      "Deployment",
 		Namespace: "default",
 		Name:      "nginx",
@@ -381,8 +411,8 @@ func TestObjectObservation(t *testing.T) {
 		obj.SetUID(types.UID("node-uid"))
 
 		raw := kubernetes.ObjectObservation(kubernetes.KubernetesObjectIdentity{
-			TargetID: "prod",
-			GVR:      schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
+			ClusterResourceName: "clusters/prod",
+			GVR:                 schema.GroupVersionResource{Group: "", Version: "v1", Resource: "nodes"},
 			Kind:     "Node",
 			Name:     "node-1",
 			UID:      "node-uid",

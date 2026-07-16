@@ -2,6 +2,7 @@ package kubernetes
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"testing"
 
@@ -78,6 +79,131 @@ func TestReplayPersistedIndexers_SkipsMissingCredentials(t *testing.T) {
 	if host.HasIndexer("replay-skip") {
 		t.Fatal("expected target without credentials to be skipped")
 	}
+}
+
+func TestReplayPersistedIndexers_SkipsMissingClusterResourceName(t *testing.T) {
+	host := testIndexingRuntime(t)
+	// Construct directly: readyKubeTarget defaults PropClusterResourceName.
+	target := domain.NewTargetInfo(
+		"replay-no-cluster",
+		TargetType,
+		"Test Cluster",
+		domain.TargetStateReady,
+		nil,
+		map[string]string{
+			PropAPIServer:           "https://example",
+			PropServiceAccountToken: "tok",
+		},
+		nil,
+	)
+	ReplayPersistedIndexers(
+		context.Background(),
+		staticTargetLister{targets: []domain.TargetInfo{target}},
+		nil,
+		host,
+		slog.New(slog.DiscardHandler),
+	)
+	if host.HasIndexer("replay-no-cluster") {
+		t.Fatal("expected target missing cluster_resource_name to be skipped")
+	}
+}
+
+func TestIndexRuntimeInputFromTarget_ValidatesClusterNameBeforeVault(t *testing.T) {
+	vault := &countingVault{}
+	target := domain.NewTargetInfo(
+		"replay-no-cluster-vault",
+		TargetType,
+		"Test Cluster",
+		domain.TargetStateReady,
+		nil,
+		map[string]string{
+			PropAPIServer:              "https://example",
+			PropServiceAccountTokenRef: "targets/replay-no-cluster-vault/sa-token",
+		},
+		nil,
+	)
+	_, ok, err := indexRuntimeInputFromTarget(context.Background(), vault, target)
+	if ok {
+		t.Fatal("expected ok=false for missing cluster_resource_name")
+	}
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("error = %v, want ErrInvalidArgument", err)
+	}
+	if vault.gets != 0 {
+		t.Fatalf("vault.Get calls = %d, want 0 before permanent config error", vault.gets)
+	}
+}
+
+// countingVault records Get calls for ordering assertions.
+type countingVault struct {
+	gets int
+}
+
+func (v *countingVault) Get(context.Context, domain.SecretRef) ([]byte, error) {
+	v.gets++
+	return nil, domain.ErrNotFound
+}
+
+func (v *countingVault) Put(context.Context, domain.SecretRef, []byte) error { return nil }
+
+func (v *countingVault) Delete(context.Context, domain.SecretRef) error { return nil }
+
+func TestReplayPersistedIndexers_SkipsMalformedClusterResourceName(t *testing.T) {
+	host := testIndexingRuntime(t)
+	target := domain.NewTargetInfo(
+		"replay-bad-cluster",
+		TargetType,
+		"Test Cluster",
+		domain.TargetStateReady,
+		nil,
+		map[string]string{
+			PropAPIServer:           "https://example",
+			PropServiceAccountToken: "tok",
+			PropClusterResourceName: "nodes/n1",
+		},
+		nil,
+	)
+	ReplayPersistedIndexers(
+		context.Background(),
+		staticTargetLister{targets: []domain.TargetInfo{target}},
+		nil,
+		host,
+		slog.New(slog.DiscardHandler),
+	)
+	if host.HasIndexer("replay-bad-cluster") {
+		t.Fatal("expected target with non-clusters resource name to be skipped")
+	}
+}
+
+func TestClusterResourceNameFromTarget(t *testing.T) {
+	t.Run("valid", func(t *testing.T) {
+		target := readyKubeTarget("c1", map[string]string{
+			PropClusterResourceName: "clusters/c1",
+		})
+		got, err := clusterResourceNameFromTarget(target)
+		if err != nil {
+			t.Fatalf("clusterResourceNameFromTarget: %v", err)
+		}
+		if got != "clusters/c1" {
+			t.Fatalf("got %q, want clusters/c1", got)
+		}
+	})
+	t.Run("missing", func(t *testing.T) {
+		target := domain.NewTargetInfo("c1", TargetType, "t", domain.TargetStateReady, nil, map[string]string{}, nil)
+		_, err := clusterResourceNameFromTarget(target)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
+	t.Run("malformed", func(t *testing.T) {
+		target := domain.NewTargetInfo("c1", TargetType, "t", domain.TargetStateReady, nil, map[string]string{
+			PropClusterResourceName: "not-a-resource-name",
+		}, nil)
+		_, err := clusterResourceNameFromTarget(target)
+		if !errors.Is(err, domain.ErrInvalidArgument) {
+			t.Fatalf("error = %v, want ErrInvalidArgument", err)
+		}
+	})
 }
 
 func TestReplayPersistedIndexers_SkipsNonKubernetesTargets(t *testing.T) {

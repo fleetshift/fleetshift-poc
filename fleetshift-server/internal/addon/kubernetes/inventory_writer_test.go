@@ -56,7 +56,7 @@ type recordingEdgeSink struct {
 	deltas []EdgeDelta
 }
 
-func (s *recordingEdgeSink) ApplyEdgeDelta(_ context.Context, _ domain.TargetID, delta EdgeDelta) error {
+func (s *recordingEdgeSink) ApplyEdgeDelta(_ context.Context, _ domain.ResourceName, delta EdgeDelta) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.deltas = append(s.deltas, delta)
@@ -96,12 +96,12 @@ func makeResource(uid, name, rv string) *unstructured.Unstructured {
 	}
 }
 
-func mustObjectName(t *testing.T, targetID, uid string, gvr schema.GroupVersionResource) domain.ResourceName {
+func mustObjectName(t *testing.T, clusterID, uid string, gvr schema.GroupVersionResource) domain.ResourceName {
 	t.Helper()
 	name, err := ObjectResourceName(KubernetesObjectIdentity{
-		TargetID: domain.TargetID(targetID),
-		GVR:      gvr,
-		UID:      uid,
+		ClusterResourceName: testClusterResourceName(clusterID),
+		GVR:                 gvr,
+		UID:                 uid,
 	})
 	if err != nil {
 		t.Fatalf("ObjectResourceName: %v", err)
@@ -123,7 +123,7 @@ func newTestWriter(reporter InventoryReporter, edgeSink EdgeSink, schema map[sch
 	if schema == nil {
 		schema = testSchema
 	}
-	return NewWriter("target-1", reporter, edgeSink, schema, batchInterval, discardLogger)
+	return NewWriter("clusters/target-1", reporter, edgeSink, schema, batchInterval, discardLogger)
 }
 
 // advanceAndWait advances fake time inside a synctest bubble, then waits until
@@ -1596,7 +1596,7 @@ func TestWriter_NoopEdgeSinkSkipsEdgeDiff(t *testing.T) {
 // check: with edgeFuncs that would produce edges, flushEdges on
 // NoopEdgeSink returns without advancing previousEdges.
 func TestWriter_flushEdges_NoopSkipsDiffEvenWithEdgeFuncs(t *testing.T) {
-	w := NewWriter("target-1", &recordingReporter{}, NoopEdgeSink{}, nil, time.Hour, discardLogger)
+	w := NewWriter("clusters/target-1", &recordingReporter{}, NoopEdgeSink{}, nil, time.Hour, discardLogger)
 	w.currentNodes["uid-a"] = inventoryNode{UID: "uid-a", Kind: "Pod", Name: "a"}
 	w.currentNodes["uid-b"] = inventoryNode{UID: "uid-b", Kind: "ReplicaSet", Name: "b"}
 	w.edgeFuncs["uid-a"] = func(NodeStore) []Edge {
@@ -1809,7 +1809,7 @@ func TestFlush_SkipsExtractionFailureWithoutDroppingSibling(t *testing.T) {
 func TestFlush_NilReporterIsNoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// Join Run before reading currentNodes to avoid a data race with flush.
-		w := NewWriter("target-1", nil, nil, testSchema, 100*time.Millisecond, discardLogger)
+		w := NewWriter("clusters/target-1", nil, nil, testSchema, 100*time.Millisecond, discardLogger)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
@@ -1914,7 +1914,7 @@ func TestInformerReconcile_RemoveGVR_DoesNotPersistDeletes(t *testing.T) {
 }
 
 func TestNewWriter_NilEdgeSinkAndLoggerDefaults(t *testing.T) {
-	w := NewWriter("target-1", &recordingReporter{}, nil, testSchema, time.Second, nil)
+	w := NewWriter("clusters/target-1", &recordingReporter{}, nil, testSchema, time.Second, nil)
 	if _, ok := w.edgeSink.(NoopEdgeSink); !ok {
 		t.Fatalf("nil edgeSink default = %T, want NoopEdgeSink", w.edgeSink)
 	}
@@ -1965,7 +1965,7 @@ type failingEdgeSink struct {
 	err error
 }
 
-func (s *failingEdgeSink) ApplyEdgeDelta(context.Context, domain.TargetID, EdgeDelta) error {
+func (s *failingEdgeSink) ApplyEdgeDelta(context.Context, domain.ResourceName, EdgeDelta) error {
 	return s.err
 }
 
@@ -1982,7 +1982,7 @@ func (s *toggleEdgeSink) setFail(v bool) {
 	s.fail = v
 }
 
-func (s *toggleEdgeSink) ApplyEdgeDelta(_ context.Context, _ domain.TargetID, delta EdgeDelta) error {
+func (s *toggleEdgeSink) ApplyEdgeDelta(_ context.Context, _ domain.ResourceName, delta EdgeDelta) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.fail {
@@ -2193,11 +2193,11 @@ func TestResync_ListedExtractFailureDoesNotDelete(t *testing.T) {
 		w := newTestWriter(mock, nil, nil, 100*time.Millisecond)
 
 		var failKeep atomic.Bool
-		w.extractObserved = func(r *unstructured.Unstructured, entry SchemaEntry, targetID string) (InventoryObjectReport, inventoryNode, error) {
+		w.extractObserved = func(r *unstructured.Unstructured, entry SchemaEntry, clusterResourceName domain.ResourceName) (InventoryObjectReport, inventoryNode, error) {
 			if failKeep.Load() && string(r.GetUID()) == "uid-keep" {
 				return InventoryObjectReport{}, inventoryNode{}, errors.New("forced extract failure")
 			}
-			return ExtractObservedResource(r, entry, targetID)
+			return ExtractObservedResource(r, entry, clusterResourceName)
 		}
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -2266,7 +2266,7 @@ func TestResync_ListedExtractFailureDoesNotDelete(t *testing.T) {
 func TestRemoveGVR_NilReporterIsNoop(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		// Drive RemoveGVR through Run, then join before reading currentNodes.
-		w := NewWriter("target-1", nil, nil, testSchema, 50*time.Millisecond, discardLogger)
+		w := NewWriter("clusters/target-1", nil, nil, testSchema, 50*time.Millisecond, discardLogger)
 		ctx, cancel := context.WithCancel(context.Background())
 		done := make(chan struct{})
 		go func() {
@@ -2863,7 +2863,7 @@ func TestGenericInformer_Run_WatchBlockedUntilWriterRetainedRetryAcks(t *testing
 		schema := map[schema.GroupVersionResource]SchemaEntry{
 			gvr: {GVR: gvr, Kind: "Pod"},
 		}
-		w := NewWriter("target-1", reporter, NoopEdgeSink{}, schema, 100*time.Millisecond, discardLogger)
+		w := NewWriter("clusters/target-1", reporter, NoopEdgeSink{}, schema, 100*time.Millisecond, discardLogger)
 
 		inf := NewInformerGeneration(dyn, gvr, 1, w.EventCh(), w.ResyncCh(), nil, slog.Default())
 

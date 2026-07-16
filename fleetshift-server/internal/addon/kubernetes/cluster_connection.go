@@ -23,6 +23,11 @@ const (
 	// PropServiceAccountTokenRef is a vault [domain.SecretRef] for the
 	// bearer token when PropServiceAccountToken is unset.
 	PropServiceAccountTokenRef = "service_account_token_ref"
+	// PropClusterResourceName is the managed cluster [domain.ResourceName]
+	// (e.g. "clusters/c1") whose ID is the object inventory parent segment.
+	// Distinct from the kubernetes target ID when that target is prefixed
+	// (e.g. "k8s-c1").
+	PropClusterResourceName = "cluster_resource_name"
 )
 
 // defaultDeliveryClientTimeout bounds short-lived delivery apply/delete RPCs.

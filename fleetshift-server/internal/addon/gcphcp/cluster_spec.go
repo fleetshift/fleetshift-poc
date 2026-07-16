@@ -6,21 +6,33 @@ import (
 	"fmt"
 	"regexp"
 
+	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/addon/kubernetes"
 	"github.com/fleetshift/fleetshift-poc/fleetshift-server/internal/domain"
 )
 
-// ClusterSpec defines the declarative specification for a GCP HCP cluster.
-// Name is derived from the managed resource ID and set by the addon.
-type ClusterSpec struct {
-	Name           string         `json:"name"`
+// clusterSpecJSON is the inner managed-resource spec wire shape
+// ([GCPHCPClusterSpec]). Cluster identity is not part of this payload.
+type clusterSpecJSON struct {
 	EndpointAccess string         `json:"endpointAccess"`
 	ReleaseVersion string         `json:"releaseVersion"`
 	ChannelGroup   string         `json:"channelGroup"`
 	Nodepools      []NodepoolSpec `json:"nodepools"`
 }
 
+// ClusterSpec is the parsed cluster specification used by the agent and
+// reconciler. ResourceName is bound from the managed resource envelope
+// (e.g. clusters/c1), not from the inner JSON payload.
+type ClusterSpec struct {
+	ResourceName   domain.ResourceName
+	EndpointAccess string
+	ReleaseVersion string
+	ChannelGroup   string
+	Nodepools      []NodepoolSpec
+}
+
 // NodepoolSpec defines the specification for a GCP HCP cluster nodepool.
-// All fields are required.
+// All fields are required. JSON tags are used only while decoding the
+// inner wire spec into [clusterSpecJSON].
 type NodepoolSpec struct {
 	ID             string `json:"id"`
 	Replicas       int    `json:"replicas"`
@@ -38,13 +50,38 @@ func NodepoolName(clusterName, poolID string) string {
 	return clusterName + "-" + poolID
 }
 
-// ParseClusterSpec unmarshals and validates a ClusterSpec from JSON.
-func ParseClusterSpec(raw json.RawMessage) (ClusterSpec, error) {
-	var spec ClusterSpec
-	dec := json.NewDecoder(bytes.NewReader(raw))
+// clusterName returns the guest-target cluster name (resource ID).
+func (s ClusterSpec) clusterName() string {
+	return string(s.ResourceName.ID())
+}
+
+// ParseClusterSpec unmarshals the inner cluster JSON from mrs and binds
+// identity from mrs.Name (e.g. clusters/c1).
+func ParseClusterSpec(mrs *domain.ManagedResourceSpecManifest) (ClusterSpec, error) {
+	if mrs == nil {
+		return ClusterSpec{}, fmt.Errorf("%w: managed resource spec is required", domain.ErrInvalidArgument)
+	}
+	resourceName, err := kubernetes.ParseClusterResourceName(string(mrs.Name))
+	if err != nil {
+		return ClusterSpec{}, fmt.Errorf("%w: %v", domain.ErrInvalidArgument, err)
+	}
+	if err := ValidateClusterName(string(resourceName.ID())); err != nil {
+		return ClusterSpec{}, err
+	}
+
+	var raw clusterSpecJSON
+	dec := json.NewDecoder(bytes.NewReader(mrs.Spec))
 	dec.DisallowUnknownFields()
-	if err := dec.Decode(&spec); err != nil {
+	if err := dec.Decode(&raw); err != nil {
 		return ClusterSpec{}, fmt.Errorf("failed to unmarshal cluster spec: %w", err)
+	}
+
+	spec := ClusterSpec{
+		ResourceName:   resourceName,
+		EndpointAccess: raw.EndpointAccess,
+		ReleaseVersion: raw.ReleaseVersion,
+		ChannelGroup:   raw.ChannelGroup,
+		Nodepools:      raw.Nodepools,
 	}
 
 	if err := validateClusterSpec(&spec); err != nil {

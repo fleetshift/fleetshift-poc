@@ -238,7 +238,7 @@ func TestCommonEdgesDetailedChain(t *testing.T) {
 
 func TestNoopEdgeSink_ApplyEdgeDeltaIsNoop(t *testing.T) {
 	var sink EdgeSink = NoopEdgeSink{}
-	err := sink.ApplyEdgeDelta(context.Background(), "prod", EdgeDelta{
+	err := sink.ApplyEdgeDelta(context.Background(), "clusters/prod", EdgeDelta{
 		Adds: []Edge{{
 			EdgeType:   EdgeOwnedBy,
 			SourceUID:  "pod-1",
@@ -259,7 +259,7 @@ func TestNoopEdgeSink_ApplyEdgeDeltaIsNoop(t *testing.T) {
 
 func TestNoopEdgeSink_EmptyDeltaIsNoop(t *testing.T) {
 	var sink NoopEdgeSink
-	if err := sink.ApplyEdgeDelta(context.Background(), "prod", EdgeDelta{}); err != nil {
+	if err := sink.ApplyEdgeDelta(context.Background(), "clusters/prod", EdgeDelta{}); err != nil {
 		t.Fatalf("NoopEdgeSink.ApplyEdgeDelta(empty): %v", err)
 	}
 }

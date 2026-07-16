@@ -95,7 +95,7 @@ func BuildCLSClusterUpdateSpec(spec ClusterSpec, observed map[string]any) (map[s
 	clonedSpec["channelGroup"] = spec.ChannelGroup
 
 	return map[string]any{
-		"name":              spec.Name,
+		"name":              spec.clusterName(),
 		"target_project_id": targetProjectID,
 		"spec":              clonedSpec,
 	}, nil
@@ -191,12 +191,12 @@ func cleanupCreateResources(
 	var cleanupErr error
 
 	if createdInfra {
-		if err := infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
+		if err := infra.DestroyInfra(ctx, spec.clusterName(), target.GCPProject, target.Region, hypershiftEnv); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("destroy infra: %w", err))
 		}
 	}
 	if createdIAM {
-		if err := infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
+		if err := infra.DestroyIAM(ctx, spec.clusterName(), target.GCPProject, hypershiftEnv); err != nil {
 			cleanupErr = errors.Join(cleanupErr, fmt.Errorf("destroy IAM: %w", err))
 		}
 	}
@@ -236,11 +236,11 @@ func cleanupDeleteResources(
 	progress *deliveryProgress,
 ) error {
 	progress.Info(ctx, "Destroying infrastructure")
-	if err := infra.DestroyInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv); err != nil {
+	if err := infra.DestroyInfra(ctx, spec.clusterName(), target.GCPProject, target.Region, hypershiftEnv); err != nil {
 		return fmt.Errorf("destroy infra: %w", err)
 	}
 	progress.Info(ctx, "Destroying IAM resources")
-	if err := infra.DestroyIAM(ctx, spec.Name, target.GCPProject, hypershiftEnv); err != nil {
+	if err := infra.DestroyIAM(ctx, spec.clusterName(), target.GCPProject, hypershiftEnv); err != nil {
 		return fmt.Errorf(
 			"cluster deletion succeeded and infrastructure cleanup completed, but IAM cleanup failed: %w",
 			err,
@@ -259,7 +259,7 @@ func ensureIAMWithRecovery(
 	progress *deliveryProgress,
 ) (map[string]any, error) {
 	return retryUnconfirmedPrereqCreate(ctx, progress, "IAM resource creation", func() (map[string]any, error) {
-		return infra.CreateIAM(ctx, spec.Name, target.GCPProject, jwksPath, hypershiftEnv)
+		return infra.CreateIAM(ctx, spec.clusterName(), target.GCPProject, jwksPath, hypershiftEnv)
 	})
 }
 
@@ -272,7 +272,7 @@ func ensureInfraWithRecovery(
 	progress *deliveryProgress,
 ) (map[string]any, error) {
 	return retryUnconfirmedPrereqCreate(ctx, progress, "infrastructure creation", func() (map[string]any, error) {
-		return infra.CreateInfra(ctx, spec.Name, target.GCPProject, target.Region, hypershiftEnv)
+		return infra.CreateInfra(ctx, spec.clusterName(), target.GCPProject, target.Region, hypershiftEnv)
 	})
 }
 
@@ -336,7 +336,7 @@ func recoverFromUnconfirmedCreate(
 	createErr error,
 	progress *deliveryProgress,
 ) (string, error) {
-	clusterID, adopted, probeErr := resolveClusterAfterUnconfirmedCreate(ctx, client, spec.Name, progress)
+	clusterID, adopted, probeErr := resolveClusterAfterUnconfirmedCreate(ctx, client, spec.clusterName(), progress)
 	switch {
 	case probeErr != nil:
 		return "", errors.Join(createErr, probeErr)

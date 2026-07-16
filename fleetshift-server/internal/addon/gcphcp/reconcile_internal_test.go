@@ -396,7 +396,7 @@ func TestCleanupCreateResources_DestroysCreatedInfraAndIAM(t *testing.T) {
 	err := cleanupCreateResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		true,
@@ -441,7 +441,7 @@ func TestCleanupDeleteResources_DestroysInfraAndIAM(t *testing.T) {
 	err := cleanupDeleteResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		noopProgress(),
@@ -462,7 +462,7 @@ func TestCleanupDeleteResources_ReturnsIAMFailureWithDeleteSuccessContext(t *tes
 	err := cleanupDeleteResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		noopProgress(),
@@ -488,7 +488,7 @@ func TestCleanupDeleteResources_ReturnsInfraFailureWithoutRetry(t *testing.T) {
 	err := cleanupDeleteResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		noopProgress(),
@@ -581,7 +581,7 @@ func TestEnsureIAMWithRecovery_RetriesUnconfirmedFailure(t *testing.T) {
 	iamConfig, err := ensureIAMWithRecovery(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
@@ -618,7 +618,7 @@ func TestEnsureInfraWithRecovery_ReturnsErrorAfterUnconfirmedRetries(t *testing.
 	infraConfig, err := ensureInfraWithRecovery(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		noopProgress(),
@@ -674,7 +674,7 @@ func TestRecoverFromUnconfirmedCreate_AdoptsClusterWhenItAppears(t *testing.T) {
 		context.Background(),
 		client,
 		infra,
-		ClusterSpec{Name: "test-cluster", EndpointAccess: "Private"},
+		ClusterSpec{ResourceName: "clusters/test-cluster", EndpointAccess: "Private"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
@@ -732,7 +732,7 @@ func TestRecoverFromUnconfirmedCreate_ReturnsErrorWithoutCleanupWhenReensureFail
 		context.Background(),
 		client,
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
@@ -772,7 +772,7 @@ func TestRecoverFromUnconfirmedCreate_CleansUpAfterTimeout(t *testing.T) {
 		context.Background(),
 		client,
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
@@ -809,7 +809,7 @@ func TestRecoverFromUnconfirmedCreate_SkipsCleanupWhenProbeFails(t *testing.T) {
 		context.Background(),
 		client,
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		"/tmp/jwks.json",
 		[]string{"EXAMPLE=1"},
@@ -1134,7 +1134,7 @@ func TestReconcilerReconcile_CleansHypershiftWorkspaceBeforeNodepoolReconcile(t 
 	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "PublicAndPrivate",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",
@@ -1234,7 +1234,7 @@ func TestReconcilerReconcile_UsesLocalSTSForwarderForCreatePrereqs(t *testing.T)
 	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "PublicAndPrivate",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",
@@ -1345,7 +1345,7 @@ func TestReconcilerReconcile_CreateClusterCleanupUsesLocalSTSForwarder(t *testin
 	_, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "PublicAndPrivate",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",
@@ -1483,7 +1483,7 @@ func TestReconcilerDelete_WaitsForPSCCleanupBeforeBuildingHypershiftWorkspace(t 
 
 	err := reconciler.Delete(
 		context.Background(),
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{
 			GCPProject:        "test-project",
 			Region:            "us-central1",
@@ -1569,7 +1569,7 @@ func TestReconcilerDelete_UsesNonceForHypershiftEnvAndWorkforceTokenForPSCCleanu
 
 	err := reconciler.Delete(
 		context.Background(),
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{
 			GCPProject:        "test-project",
 			Region:            "us-central1",
@@ -1643,7 +1643,7 @@ func TestReconcilerDelete_UsesLocalSTSForwarderForHypershiftCleanup(t *testing.T
 
 	err := reconciler.Delete(
 		context.Background(),
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{
 			GCPProject:        "test-project",
 			Region:            "us-central1",
@@ -1727,7 +1727,7 @@ func TestReconcilerDelete_ContinuesCleanupAfterLongPSCCleanupWait(t *testing.T) 
 	start := time.Now()
 	err := reconciler.Delete(
 		context.Background(),
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{
 			GCPProject:        "test-project",
 			Region:            "us-central1",
@@ -1860,7 +1860,7 @@ func TestReconcilerReconcile_UpdatePathSkipsCreateInfra(t *testing.T) {
 	output, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "Private",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "fast",
@@ -1949,7 +1949,7 @@ func TestReconcilerReconcile_AuthExpiredReturnsAuthExpiredError(t *testing.T) {
 	_, err := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "PublicAndPrivate",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",
@@ -1991,7 +1991,7 @@ func TestReconcilerReconcile_AuthExpiredReturnsAuthExpiredError(t *testing.T) {
 
 func TestBuildCLSClusterUpdateSpec_MalformedObservedCluster(t *testing.T) {
 	spec := ClusterSpec{
-		Name:           "test-cluster",
+		ResourceName:   "clusters/test-cluster",
 		EndpointAccess: "Private",
 		ReleaseVersion: "4.22.0",
 		ChannelGroup:   "stable",
@@ -2137,7 +2137,7 @@ func TestCleanupCreateResources_IAMOnlyNoInfra(t *testing.T) {
 	err := cleanupCreateResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		false,
@@ -2157,7 +2157,7 @@ func TestCleanupCreateResources_InfraOnlyNoIAM(t *testing.T) {
 	err := cleanupCreateResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		true,
@@ -2179,7 +2179,7 @@ func TestCleanupCreateResources_DestroyIAMErrorJoined(t *testing.T) {
 	err := cleanupCreateResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		true,
@@ -2199,7 +2199,7 @@ func TestCleanupCreateResources_NeitherCreatedReturnsNil(t *testing.T) {
 	err := cleanupCreateResources(
 		context.Background(),
 		infra,
-		ClusterSpec{Name: "test-cluster"},
+		ClusterSpec{ResourceName: "clusters/test-cluster"},
 		TargetConfig{GCPProject: "project-123", Region: "us-central1"},
 		[]string{"EXAMPLE=1"},
 		false,
@@ -2312,7 +2312,7 @@ func TestReconcilerReconcile_FailureSnapshotEmittedOnError(t *testing.T) {
 	_, reconcileErr := reconciler.Ensure(
 		context.Background(),
 		ClusterSpec{
-			Name:           "test-cluster",
+			ResourceName:   "clusters/test-cluster",
 			EndpointAccess: "PublicAndPrivate",
 			ReleaseVersion: "4.22.0",
 			ChannelGroup:   "stable",

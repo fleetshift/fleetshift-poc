@@ -8,7 +8,7 @@ import (
 
 func TestBuildCLSClusterSpec(t *testing.T) {
 	spec := gcphcp.ClusterSpec{
-		Name:           "test-cluster",
+		ResourceName:   "clusters/test-cluster",
 		EndpointAccess: "PublicAndPrivate",
 		ReleaseVersion: "4.16.1",
 		ChannelGroup:   "stable",
@@ -166,7 +166,7 @@ func TestBuildCLSClusterUpdateSpec(t *testing.T) {
 	}
 
 	updated, err := gcphcp.BuildCLSClusterUpdateSpec(gcphcp.ClusterSpec{
-		Name:           "test-cluster",
+		ResourceName:   "clusters/test-cluster",
 		EndpointAccess: "Private",
 		ReleaseVersion: "4.16.1",
 		ChannelGroup:   "stable",

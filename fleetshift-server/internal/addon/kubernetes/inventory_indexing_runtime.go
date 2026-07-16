@@ -44,10 +44,16 @@ type IndexingRuntime interface {
 }
 
 // IndexRuntimeInput carries connection and index configuration for one
-// EnsureIndexer call. Credential must not be logged or persisted by callers.
+// EnsureIndexer call. Construct only via [NewIndexRuntimeInput]; zero values
+// and struct literals are not a supported API. Credential must not be logged
+// or persisted by callers.
 type IndexRuntimeInput struct {
 	// TargetID identifies the Kubernetes target being indexed.
 	TargetID domain.TargetID
+	// ClusterResourceName is the managed cluster resource (e.g.
+	// "clusters/c1"). Its ID is the object resource-name parent segment so
+	// inventory nests under the cluster identity.
+	ClusterResourceName domain.ResourceName
 	// APIServer is the Kubernetes API server URL.
 	APIServer string
 	// CACert is the optional PEM-encoded cluster CA certificate.
@@ -61,6 +67,44 @@ type IndexRuntimeInput struct {
 	Generation domain.Generation
 	// IndexConfig is the effective watch/filter configuration for this start.
 	IndexConfig IndexConfig
+}
+
+// NewIndexRuntimeInput constructs a valid [IndexRuntimeInput]. Permanently
+// unusable combinations return [domain.ErrInvalidArgument]. Prefer this over
+// building a struct literal and checking fields later.
+// caCert and secretRef may be empty (no custom CA; no unexpected-exit restart).
+func NewIndexRuntimeInput(
+	targetID domain.TargetID,
+	clusterResourceName domain.ResourceName,
+	apiServer string,
+	caCert string,
+	credential []byte,
+	secretRef domain.SecretRef,
+	generation domain.Generation,
+	indexConfig IndexConfig,
+) (IndexRuntimeInput, error) {
+	if targetID == "" {
+		return IndexRuntimeInput{}, fmt.Errorf("%w: target id is required", domain.ErrInvalidArgument)
+	}
+	if err := requireClusterResourceName(clusterResourceName); err != nil {
+		return IndexRuntimeInput{}, err
+	}
+	if apiServer == "" {
+		return IndexRuntimeInput{}, fmt.Errorf("%w: api server is required", domain.ErrInvalidArgument)
+	}
+	if len(credential) == 0 {
+		return IndexRuntimeInput{}, fmt.Errorf("%w: indexing credential is required", domain.ErrInvalidArgument)
+	}
+	return IndexRuntimeInput{
+		TargetID:            targetID,
+		ClusterResourceName: clusterResourceName,
+		APIServer:           apiServer,
+		CACert:              caCert,
+		Credential:          credential,
+		SecretRef:           secretRef,
+		Generation:          generation,
+		IndexConfig:         indexConfig,
+	}, nil
 }
 
 // ErrStaleIndexerGeneration is returned when EnsureIndexer receives a
@@ -102,10 +146,11 @@ type managedIndexer struct {
 	generation  domain.Generation
 	fingerprint string
 
-	apiServer   string
-	caCert      string
-	secretRef   domain.SecretRef
-	indexConfig IndexConfig
+	apiServer           string
+	caCert              string
+	secretRef           domain.SecretRef
+	clusterResourceName domain.ResourceName
+	indexConfig         IndexConfig
 
 	ready           bool
 	starting        bool
@@ -158,9 +203,6 @@ var _ IndexingRuntime = (*KubernetesInProcessIndexHost)(nil)
 // Discovery RPCs are not forcibly aborted by ctx; cancellation is observed
 // between steps and by concurrent StopIndexer.
 func (h *KubernetesInProcessIndexHost) EnsureIndexer(ctx context.Context, input IndexRuntimeInput) error {
-	if err := validateIndexRuntimeInput(input); err != nil {
-		return err
-	}
 	fingerprint := indexRuntimeFingerprint(input)
 	id := input.TargetID
 
@@ -211,15 +253,16 @@ func (h *KubernetesInProcessIndexHost) EnsureIndexer(ctx context.Context, input 
 
 		readinessCtx, readinessCancel := context.WithCancel(ctx)
 		entry = &managedIndexer{
-			generation:      input.Generation,
-			fingerprint:     fingerprint,
-			apiServer:       input.APIServer,
-			caCert:          input.CACert,
-			secretRef:       input.SecretRef,
-			indexConfig:     input.IndexConfig,
-			starting:        true,
-			readyWait:       make(chan struct{}),
-			readinessCancel: readinessCancel,
+			generation:          input.Generation,
+			fingerprint:         fingerprint,
+			apiServer:           input.APIServer,
+			caCert:              input.CACert,
+			secretRef:           input.SecretRef,
+			clusterResourceName: input.ClusterResourceName,
+			indexConfig:         input.IndexConfig,
+			starting:            true,
+			readyWait:           make(chan struct{}),
+			readinessCancel:     readinessCancel,
 		}
 		h.entries[id] = entry
 		h.mu.Unlock()
@@ -293,7 +336,7 @@ func (h *KubernetesInProcessIndexHost) startReady(
 	}
 
 	ic := newIndexerDelegate(
-		string(id),
+		input.ClusterResourceName,
 		dynClient,
 		discClient,
 		h.reporter,
@@ -346,6 +389,7 @@ func (h *KubernetesInProcessIndexHost) onIndexerExit(id domain.TargetID, entry *
 	secretRef := entry.secretRef
 	apiServer := entry.apiServer
 	caCert := entry.caCert
+	clusterResourceName := entry.clusterResourceName
 	indexConfig := entry.indexConfig
 	generation := entry.generation
 
@@ -403,16 +447,21 @@ func (h *KubernetesInProcessIndexHost) onIndexerExit(id domain.TargetID, entry *
 		return
 	}
 
-	err = h.EnsureIndexer(h.ctx, IndexRuntimeInput{
-		TargetID:    id,
-		APIServer:   apiServer,
-		CACert:      caCert,
-		Credential:  token,
-		SecretRef:   secretRef,
-		Generation:  generation,
-		IndexConfig: indexConfig,
-	})
+	input, err := NewIndexRuntimeInput(
+		id,
+		clusterResourceName,
+		apiServer,
+		caCert,
+		token,
+		secretRef,
+		generation,
+		indexConfig,
+	)
 	if err != nil {
+		logger.Warn("indexer restart skipped; invalid restart input", "error", err)
+		return
+	}
+	if err := h.EnsureIndexer(h.ctx, input); err != nil {
 		logger.Warn("indexer restart failed", "error", err)
 		return
 	}
@@ -673,20 +722,6 @@ func (h *KubernetesInProcessIndexHost) lockTarget(id domain.TargetID) *sync.Mute
 	return m
 }
 
-// validateIndexRuntimeInput rejects permanently invalid EnsureIndexer inputs.
-func validateIndexRuntimeInput(input IndexRuntimeInput) error {
-	if input.TargetID == "" {
-		return fmt.Errorf("%w: target id is required", domain.ErrInvalidArgument)
-	}
-	if input.APIServer == "" {
-		return fmt.Errorf("%w: api server is required", domain.ErrInvalidArgument)
-	}
-	if len(input.Credential) == 0 {
-		return fmt.Errorf("%w: indexing credential is required", domain.ErrInvalidArgument)
-	}
-	return nil
-}
-
 // restConfigFromIndexInput builds a client-go REST config from EnsureIndexer
 // input. Timeout stays unset so long-lived watches are not killed.
 func restConfigFromIndexInput(input IndexRuntimeInput) *rest.Config {
@@ -708,8 +743,9 @@ func indexRuntimeFingerprint(input IndexRuntimeInput) string {
 	if input.SecretRef != "" {
 		credID = string(input.SecretRef) + "|" + credID
 	}
-	return fmt.Sprintf("%s|%s|%s|%s|%s",
+	return fmt.Sprintf("%s|%s|%s|%s|%s|%s",
 		input.TargetID,
+		input.ClusterResourceName,
 		input.APIServer,
 		input.CACert,
 		credID,

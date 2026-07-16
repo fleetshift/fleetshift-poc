@@ -25,17 +25,24 @@ import (
 // optional size-capped annotations, and [SchemaEntry.ComputeExtra]
 // land in observation.extracted. Kubernetes object labels stay on the
 // inventory node (for selector matching), not on the report.
-func ExtractObservedResource(r *unstructured.Unstructured, entry SchemaEntry, targetID string) (InventoryObjectReport, inventoryNode, error) {
+//
+// clusterResourceName is the managed cluster (clusters/{id}) used for
+// the object resource-name parent.
+func ExtractObservedResource(
+	r *unstructured.Unstructured,
+	entry SchemaEntry,
+	clusterResourceName domain.ResourceName,
+) (InventoryObjectReport, inventoryNode, error) {
 	uid := string(r.GetUID())
 	observedAt := time.Now()
 
 	id := KubernetesObjectIdentity{
-		TargetID:  domain.TargetID(targetID),
-		GVR:       entry.GVR,
-		Kind:      r.GetKind(),
-		Namespace: r.GetNamespace(),
-		Name:      r.GetName(),
-		UID:       uid,
+		ClusterResourceName: clusterResourceName,
+		GVR:                 entry.GVR,
+		Kind:                r.GetKind(),
+		Namespace:           r.GetNamespace(),
+		Name:                r.GetName(),
+		UID:                 uid,
 	}
 
 	name, err := ObjectResourceName(id)

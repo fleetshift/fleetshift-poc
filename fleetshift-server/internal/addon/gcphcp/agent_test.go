@@ -281,11 +281,71 @@ func TestAgent_Deliver_UsesSpecNameNotManifestID(t *testing.T) {
 
 	select {
 	case result := <-reporter.done:
-		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "invalid cluster name") {
-			t.Fatalf("should have used spec name, not ManifestID; got: %s", result.Message)
+		if result.State == domain.DeliveryStateFailed && strings.Contains(result.Message, "failed to parse cluster spec") {
+			t.Fatalf("should have used envelope resource name; got: %s", result.Message)
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timeout")
+	}
+}
+
+// invalidEnvelopeResourceName is a well-formed resource name under the wrong
+// collection (nodes, not clusters). ParseClusterSpec must reject it so
+// Deliver/Remove do not treat the ID as a cluster name.
+const invalidEnvelopeResourceName = "nodes/c1"
+
+func TestAgent_Deliver_RejectsInvalidResourceName(t *testing.T) {
+	reporter := newRecordingReporter()
+	agent := newTestAgent(reporter)
+
+	manifest := managedResourceNamedClusterManifest(t, invalidEnvelopeResourceName, validClusterSpecJSON(t))
+
+	err := agent.Deliver(
+		context.Background(),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
+		domain.DeliveryID("d-bad-name"),
+		[]domain.Manifest{manifest},
+		domain.DeliveryAuth{Token: "token"},
+		nil,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("Deliver() error = %v, want nil (failure reported via result)", err)
+	}
+
+	select {
+	case result := <-reporter.done:
+		if result.State != domain.DeliveryStateFailed {
+			t.Fatalf("state = %s, want %s", result.State, domain.DeliveryStateFailed)
+		}
+		if !strings.Contains(result.Message, "failed to parse cluster spec") {
+			t.Fatalf("message = %q, want parse failure", result.Message)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for delivery result")
+	}
+}
+
+func TestAgent_Remove_RejectsInvalidResourceName(t *testing.T) {
+	reporter := newRecordingReporter()
+	agent := newTestAgent(reporter)
+
+	manifest := managedResourceNamedClusterManifest(t, invalidEnvelopeResourceName, validClusterSpecJSON(t))
+
+	err := agent.Remove(
+		context.Background(),
+		domain.TargetInfoFromSnapshot(domain.TargetInfoSnapshot{}),
+		domain.DeliveryID("remove-bad-name"),
+		[]domain.Manifest{manifest},
+		domain.DeliveryAuth{Token: "token"},
+		nil,
+		1,
+	)
+	if err == nil {
+		t.Fatal("Remove() error = nil, want parse failure")
+	}
+	if !strings.Contains(err.Error(), "failed to parse cluster spec") {
+		t.Fatalf("error = %v, want parse failure", err)
 	}
 }
 
@@ -429,8 +489,13 @@ func validClusterSpecJSON(t *testing.T) json.RawMessage {
 
 func managedResourceClusterManifest(t *testing.T, clusterName string, specJSON json.RawMessage) domain.Manifest {
 	t.Helper()
+	return managedResourceNamedClusterManifest(t, "clusters/"+clusterName, specJSON)
+}
+
+func managedResourceNamedClusterManifest(t *testing.T, resourceName string, specJSON json.RawMessage) domain.Manifest {
+	t.Helper()
 	raw, err := domain.WrapManagedResourceSpec(
-		domain.ResourceName("clusters/"+clusterName),
+		domain.ResourceName(resourceName),
 		domain.NewExtensionResourceUID(),
 		specJSON,
 	)

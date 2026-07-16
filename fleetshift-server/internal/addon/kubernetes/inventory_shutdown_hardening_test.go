@@ -337,7 +337,7 @@ func TestIndexerDelegate_DoneClosesOnlyAfterWriterFlush(t *testing.T) {
 		}
 
 		ic := newIndexerDelegate(
-			"target-1",
+			"clusters/target-1",
 			dyn,
 			disc,
 			mock,

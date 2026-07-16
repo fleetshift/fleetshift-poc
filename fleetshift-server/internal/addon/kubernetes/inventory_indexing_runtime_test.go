@@ -59,17 +59,27 @@ func testIndexingRuntime(t *testing.T, clients ...IndexerClients) *KubernetesInP
 	)
 }
 
+// testClusterResourceName returns a clusters/{id} name for test target IDs.
+func testClusterResourceName(targetID string) domain.ResourceName {
+	return domain.ResourceName("clusters/" + targetID)
+}
+
 // testIndexInput returns a minimal valid [IndexRuntimeInput] for tests.
 func testIndexInput(id string, gen domain.Generation, cred string) IndexRuntimeInput {
-	return IndexRuntimeInput{
-		TargetID:   domain.TargetID(id),
-		APIServer:  "https://example",
-		Credential: []byte(cred),
-		Generation: gen,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	in, err := NewIndexRuntimeInput(
+		domain.TargetID(id),
+		testClusterResourceName(id),
+		"https://example",
+		"",
+		[]byte(cred),
+		"",
+		gen,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		panic(err)
 	}
+	return in
 }
 
 // TestIndexingRuntime_EnsureIndexerReadinessAndIdempotent verifies ready
@@ -190,16 +200,18 @@ func TestIndexingRuntime_AllowListEmptyFailFast(t *testing.T) {
 	}
 }
 
-// TestIndexingRuntime_EmptyCredentialFailFast rejects EnsureIndexer input
-// with an empty indexing credential.
-func TestIndexingRuntime_EmptyCredentialFailFast(t *testing.T) {
-	h := testIndexingRuntime(t)
-	err := h.EnsureIndexer(context.Background(), IndexRuntimeInput{
-		TargetID:   "pm-cred",
-		APIServer:  "https://example",
-		Credential: nil,
-		Generation: 1,
-	})
+// TestNewIndexRuntimeInput_EmptyCredential rejects an empty indexing credential.
+func TestNewIndexRuntimeInput_EmptyCredential(t *testing.T) {
+	_, err := NewIndexRuntimeInput(
+		"pm-cred",
+		testClusterResourceName("pm-cred"),
+		"https://example",
+		"",
+		nil,
+		"",
+		1,
+		IndexConfig{},
+	)
 	if !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("error = %v, want ErrInvalidArgument", err)
 	}
@@ -238,15 +250,18 @@ func TestIndexingRuntime_StopAllSuppressesRestart(t *testing.T) {
 		slog.New(slog.DiscardHandler),
 	)
 
-	input := IndexRuntimeInput{
-		TargetID:   "pm-stopall",
-		APIServer:  "https://example",
-		Credential: []byte("vault-token"),
-		SecretRef:  "targets/pm-stopall/token",
-		Generation: 1,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	input, err := NewIndexRuntimeInput(
+		"pm-stopall",
+		testClusterResourceName("pm-stopall"),
+		"https://example",
+		"",
+		[]byte("vault-token"),
+		"targets/pm-stopall/token",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -299,15 +314,18 @@ func TestIndexingRuntime_IntentionalStopNoRestart(t *testing.T) {
 		slog.New(slog.DiscardHandler),
 	)
 
-	input := IndexRuntimeInput{
-		TargetID:   "pm-stop",
-		APIServer:  "https://example",
-		Credential: []byte("vault-token"),
-		SecretRef:  "targets/pm-stop/token",
-		Generation: 1,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	input, err := NewIndexRuntimeInput(
+		"pm-stop",
+		testClusterResourceName("pm-stop"),
+		"https://example",
+		"",
+		[]byte("vault-token"),
+		"targets/pm-stop/token",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -430,15 +448,18 @@ func TestIndexingRuntime_UnexpectedExitRestartsFromVault(t *testing.T) {
 		slog.New(slog.DiscardHandler),
 	)
 
-	input := IndexRuntimeInput{
-		TargetID:   "pm-restart",
-		APIServer:  "https://example",
-		Credential: []byte("handoff-token"),
-		SecretRef:  "targets/pm-restart/token",
-		Generation: 3,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	input, err := NewIndexRuntimeInput(
+		"pm-restart",
+		testClusterResourceName("pm-restart"),
+		"https://example",
+		"",
+		[]byte("handoff-token"),
+		"targets/pm-restart/token",
+		3,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -498,15 +519,18 @@ func TestIndexingRuntime_UnexpectedExitSkipsRestartWhenVaultMissing(t *testing.T
 		slog.New(slog.DiscardHandler),
 	)
 
-	input := IndexRuntimeInput{
-		TargetID:   "pm-novault",
-		APIServer:  "https://example",
-		Credential: []byte("handoff-token"),
-		SecretRef:  "targets/pm-novault/missing",
-		Generation: 1,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	input, err := NewIndexRuntimeInput(
+		"pm-novault",
+		testClusterResourceName("pm-novault"),
+		"https://example",
+		"",
+		[]byte("handoff-token"),
+		"targets/pm-novault/missing",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -546,15 +570,18 @@ func TestIndexingRuntime_UnexpectedExitRestartBudgetExhausted(t *testing.T) {
 		slog.New(slog.DiscardHandler),
 	)
 
-	input := IndexRuntimeInput{
-		TargetID:   "pm-budget",
-		APIServer:  "https://example",
-		Credential: []byte("handoff-token"),
-		SecretRef:  "targets/pm-budget/token",
-		Generation: 1,
-		IndexConfig: IndexConfig{
-			BatchInterval: time.Hour,
-		},
+	input, err := NewIndexRuntimeInput(
+		"pm-budget",
+		testClusterResourceName("pm-budget"),
+		"https://example",
+		"",
+		[]byte("handoff-token"),
+		"targets/pm-budget/token",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
 	}
 	if err := h.EnsureIndexer(context.Background(), input); err != nil {
 		t.Fatalf("EnsureIndexer: %v", err)
@@ -673,20 +700,109 @@ func TestResolveSecret(t *testing.T) {
 	})
 }
 
-// TestValidateIndexRuntimeInput_MissingFields covers permanent validation errors.
-func TestValidateIndexRuntimeInput_MissingFields(t *testing.T) {
-	h := testIndexingRuntime(t)
-	if err := h.EnsureIndexer(context.Background(), IndexRuntimeInput{
-		APIServer:  "https://example",
-		Credential: []byte("tok"),
-	}); !errors.Is(err, domain.ErrInvalidArgument) {
+// TestNewIndexRuntimeInput_MissingFields covers permanent construction errors.
+func TestNewIndexRuntimeInput_MissingFields(t *testing.T) {
+	emptyCfg := IndexConfig{}
+	if _, err := NewIndexRuntimeInput(
+		"",
+		testClusterResourceName("x"),
+		"https://example",
+		"",
+		[]byte("tok"),
+		"",
+		0,
+		emptyCfg,
+	); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("missing target id: %v", err)
 	}
-	if err := h.EnsureIndexer(context.Background(), IndexRuntimeInput{
-		TargetID:   "x",
-		Credential: []byte("tok"),
-	}); !errors.Is(err, domain.ErrInvalidArgument) {
+	if _, err := NewIndexRuntimeInput(
+		"x",
+		testClusterResourceName("x"),
+		"",
+		"",
+		[]byte("tok"),
+		"",
+		0,
+		emptyCfg,
+	); !errors.Is(err, domain.ErrInvalidArgument) {
 		t.Fatalf("missing api server: %v", err)
+	}
+	if _, err := NewIndexRuntimeInput(
+		"x",
+		"",
+		"https://example",
+		"",
+		[]byte("tok"),
+		"",
+		0,
+		emptyCfg,
+	); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("missing cluster resource name: %v", err)
+	}
+	if _, err := NewIndexRuntimeInput(
+		"x",
+		"nodes/n1",
+		"https://example",
+		"",
+		[]byte("tok"),
+		"",
+		0,
+		emptyCfg,
+	); !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("wrong collection: %v", err)
+	}
+}
+
+// TestIndexingRuntime_FingerprintReplaceOnClusterResourceName stop-and-replaces
+// when only the managed cluster parent changes at the same generation.
+func TestIndexingRuntime_FingerprintReplaceOnClusterResourceName(t *testing.T) {
+	var discClients atomic.Int32
+	h := testIndexingRuntime(t, fakeIndexerClients{
+		discovery: func(*rest.Config) (discovery.DiscoveryInterface, error) {
+			discClients.Add(1)
+			return newFakeDiscovery([]*metav1.APIResourceList{{
+				GroupVersion: "v1",
+				APIResources: []metav1.APIResource{
+					{Name: "pods", Verbs: metav1.Verbs{"get", "list", "watch"}},
+				},
+			}}), nil
+		},
+	})
+
+	first, err := NewIndexRuntimeInput(
+		"pm-cluster-fp",
+		testClusterResourceName("a"),
+		"https://example",
+		"",
+		[]byte("tok"),
+		"",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
+	}
+	second, err := NewIndexRuntimeInput(
+		"pm-cluster-fp",
+		testClusterResourceName("b"),
+		"https://example",
+		"",
+		[]byte("tok"),
+		"",
+		1,
+		IndexConfig{BatchInterval: time.Hour},
+	)
+	if err != nil {
+		t.Fatalf("NewIndexRuntimeInput: %v", err)
+	}
+	if err := h.EnsureIndexer(context.Background(), first); err != nil {
+		t.Fatalf("EnsureIndexer: %v", err)
+	}
+	if err := h.EnsureIndexer(context.Background(), second); err != nil {
+		t.Fatalf("cluster fingerprint replace: %v", err)
+	}
+	if discClients.Load() < 2 {
+		t.Fatalf("discovery clients = %d, want >= 2 after cluster name replace", discClients.Load())
 	}
 }
 

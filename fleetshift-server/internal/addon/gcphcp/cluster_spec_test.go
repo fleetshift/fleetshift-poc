@@ -12,6 +12,15 @@ import (
 
 func boolPtr(b bool) *bool { return &b }
 
+func testManagedSpec(t *testing.T, id string, rawJSON string) *domain.ManagedResourceSpecManifest {
+	t.Helper()
+	return &domain.ManagedResourceSpecManifest{
+		Name: domain.ResourceName("clusters/" + id),
+		UID:  domain.NewExtensionResourceUID(),
+		Spec: json.RawMessage(rawJSON),
+	}
+}
+
 func fullSpecJSON() string {
 	return `{
 		"endpointAccess": "PublicAndPrivate",
@@ -27,6 +36,40 @@ func fullSpecJSON() string {
 			"upgradeType": "Replace"
 		}]
 	}`
+}
+
+func TestParseClusterSpec_NilManifest(t *testing.T) {
+	_, err := gcphcp.ParseClusterSpec(nil)
+	if !errors.Is(err, domain.ErrInvalidArgument) {
+		t.Fatalf("error = %v, want ErrInvalidArgument", err)
+	}
+}
+
+func TestParseClusterSpec_InvalidResourceName(t *testing.T) {
+	tests := []struct {
+		name         string
+		resourceName domain.ResourceName
+	}{
+		{name: "empty", resourceName: ""},
+		{name: "wrong collection", resourceName: "nodes/c1"},
+		{name: "nested", resourceName: "orgs/o1/clusters/c1"},
+		{name: "malformed trailing slash", resourceName: "clusters/"},
+		{name: "invalid cluster id", resourceName: "clusters/Bad_Name"},
+		{name: "cluster id too long", resourceName: "clusters/this-name-is-way-too-long"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mrs := &domain.ManagedResourceSpecManifest{
+				Name: tt.resourceName,
+				UID:  domain.NewExtensionResourceUID(),
+				Spec: json.RawMessage(fullSpecJSON()),
+			}
+			_, err := gcphcp.ParseClusterSpec(mrs)
+			if !errors.Is(err, domain.ErrInvalidArgument) {
+				t.Fatalf("error = %v, want ErrInvalidArgument", err)
+			}
+		})
+	}
 }
 
 func TestParseClusterSpec_ValidSpec(t *testing.T) {
@@ -89,13 +132,13 @@ func TestParseClusterSpec_ValidSpec(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			spec, err := gcphcp.ParseClusterSpec(json.RawMessage(tt.rawJSON))
+			spec, err := gcphcp.ParseClusterSpec(testManagedSpec(t, "demo", tt.rawJSON))
 			if err != nil {
 				t.Fatalf("ParseClusterSpec failed: %v", err)
 			}
 
-			if spec.Name != "" {
-				t.Errorf("Name = %q, want empty", spec.Name)
+			if spec.ResourceName != "clusters/demo" {
+				t.Errorf("ResourceName = %q, want clusters/demo", spec.ResourceName)
 			}
 			if spec.EndpointAccess != tt.endpointAccess {
 				t.Errorf("EndpointAccess = %q, want %q", spec.EndpointAccess, tt.endpointAccess)
@@ -232,7 +275,7 @@ func TestParseClusterSpec_MissingRequiredFields(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := gcphcp.ParseClusterSpec(json.RawMessage(tt.rawJSON))
+			_, err := gcphcp.ParseClusterSpec(testManagedSpec(t, "demo", tt.rawJSON))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -324,7 +367,7 @@ func TestParseClusterSpec_MissingNodepoolFields(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rawJSON := base + tt.nodepool + `]}`
-			_, err := gcphcp.ParseClusterSpec(json.RawMessage(rawJSON))
+			_, err := gcphcp.ParseClusterSpec(testManagedSpec(t, "demo", rawJSON))
 			if err == nil {
 				t.Fatal("expected error")
 			}
@@ -349,7 +392,7 @@ func TestParseClusterSpec_MultipleNodepools(t *testing.T) {
 		]
 	}`)
 
-	spec, err := gcphcp.ParseClusterSpec(raw)
+	spec, err := gcphcp.ParseClusterSpec(testManagedSpec(t, "demo", string(raw)))
 	if err != nil {
 		t.Fatalf("ParseClusterSpec failed: %v", err)
 	}
@@ -397,7 +440,7 @@ func TestParseClusterSpec_DuplicateNodepoolID(t *testing.T) {
 		]
 	}`)
 
-	_, err := gcphcp.ParseClusterSpec(raw)
+	_, err := gcphcp.ParseClusterSpec(testManagedSpec(t, "demo", string(raw)))
 	if err == nil {
 		t.Fatal("expected error for duplicate nodepool id, got nil")
 	}

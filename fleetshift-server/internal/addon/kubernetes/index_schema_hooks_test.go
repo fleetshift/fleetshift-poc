@@ -1116,15 +1116,15 @@ func TestServiceEdges_ThroughExtraction(t *testing.T) {
 		},
 	}}
 
-	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], "t1")
+	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"))
 	if err != nil {
 		t.Fatalf("extract service: %v", err)
 	}
-	_, podNode1, err := ExtractObservedResource(matchingPod, schemaEntries[podGVR], "t1")
+	_, podNode1, err := ExtractObservedResource(matchingPod, schemaEntries[podGVR], testClusterResourceName("t1"))
 	if err != nil {
 		t.Fatalf("extract matching pod: %v", err)
 	}
-	_, podNode2, err := ExtractObservedResource(nonMatchingPod, schemaEntries[podGVR], "t1")
+	_, podNode2, err := ExtractObservedResource(nonMatchingPod, schemaEntries[podGVR], testClusterResourceName("t1"))
 	if err != nil {
 		t.Fatalf("extract non-matching pod: %v", err)
 	}
@@ -1181,11 +1181,11 @@ func TestServiceEdges_ThroughExtraction_NoMatch(t *testing.T) {
 		},
 	}}
 
-	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], "t1")
+	_, svcNode, err := ExtractObservedResource(svc, schemaEntries[svcGVR], testClusterResourceName("t1"))
 	if err != nil {
 		t.Fatalf("extract service: %v", err)
 	}
-	_, podNode, err := ExtractObservedResource(pod, schemaEntries[podGVR], "t1")
+	_, podNode, err := ExtractObservedResource(pod, schemaEntries[podGVR], testClusterResourceName("t1"))
 	if err != nil {
 		t.Fatalf("extract pod: %v", err)
 	}
@@ -1321,7 +1321,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				},
 			},
 		}}
-		report, node, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], "t1")
+		report, node, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"))
 		if err != nil {
 			t.Fatalf("extract pod: %v", err)
 		}
@@ -1354,7 +1354,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				"nodeInfo": map[string]any{"kubeletVersion": "v1.29.0"},
 			},
 		}}
-		report, _, err := ExtractObservedResource(nodeObj, indexSchema.Entries[nodeGVR()], "t1")
+		report, _, err := ExtractObservedResource(nodeObj, indexSchema.Entries[nodeGVR()], testClusterResourceName("t1"))
 		if err != nil {
 			t.Fatalf("extract node: %v", err)
 		}
@@ -1383,11 +1383,11 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 				"labels":            map[string]any{"app": "web"},
 			},
 		}}
-		_, svcNode, err := ExtractObservedResource(svc, indexSchema.Entries[serviceGVR()], "t1")
+		_, svcNode, err := ExtractObservedResource(svc, indexSchema.Entries[serviceGVR()], testClusterResourceName("t1"))
 		if err != nil {
 			t.Fatalf("extract service: %v", err)
 		}
-		_, podNode, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], "t1")
+		_, podNode, err := ExtractObservedResource(pod, indexSchema.Entries[podGVR()], testClusterResourceName("t1"))
 		if err != nil {
 			t.Fatalf("extract pod: %v", err)
 		}
@@ -1411,7 +1411,7 @@ func TestDefaultKubernetesSchema_HooksThroughExtraction(t *testing.T) {
 			"data": map[string]any{"password": "c2VjcmV0"},
 		}}
 		gvr := schema.GroupVersionResource{Group: "", Version: "v1", Resource: "secrets"}
-		report, _, err := ExtractObservedResource(secret, indexSchema.Entries[gvr], "t1")
+		report, _, err := ExtractObservedResource(secret, indexSchema.Entries[gvr], testClusterResourceName("t1"))
 		if err != nil {
 			t.Fatalf("extract secret: %v", err)
 		}
